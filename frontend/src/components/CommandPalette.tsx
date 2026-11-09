@@ -62,7 +62,9 @@ export type AppPage =
   | 'import'
   // Contracts and suppliers (MGT-12, WP-808): nav pages of the module inventory (E-105).
   | 'contracts'
-  | 'suppliers';
+  | 'suppliers'
+  // Client administration (UI-14, WP-855).
+  | 'clients';
 
 export const pageToPath: Record<AppPage, string> = {
   dashboard: '/dashboard',
@@ -111,6 +113,7 @@ export const pageToPath: Record<AppPage, string> = {
   import: '/imports',
   contracts: '/contracts',
   suppliers: '/suppliers',
+  clients: '/clients',
 };
 
 interface CommandPaletteProps {

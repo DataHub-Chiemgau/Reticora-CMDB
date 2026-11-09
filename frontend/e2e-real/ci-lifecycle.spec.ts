@@ -52,7 +52,8 @@ import {
  *  L06  history and audit trail of the edit with the actor .... WP-171 (CI-06, AUD-03), WP-133 (AUD-05), WP-134 (AUD-07), WP-132 (AUD-04), WP-488 (AUD-03 change sets)
  *  L07  audit viewer UI shows the entry; chain verifies ....... WP-171 (CI-06), WP-133 (AUD-05), WP-132 (AUD-04), WP-191/WP-192 (UI-01..10 audit viewer)
  *  L08  relationship in the UI (double click), neighbours, impact WP-128 (REL-02), WP-127 (REL-01), WP-176 (IMP-01), WP-177 (IMP-02), WP-201 (TST-03)
- *  L09  list filter, full-text search, command palette ........ WP-032 (SRC-01), WP-165 (API-02), WP-191/WP-192 (UI-01..10 palette), WP-201 (TST-03)
+ *  L08b relationship target by management IP, host name shown  WP-859 (SRC-02, UI-15)
+ *  L09  list filter, full-text search, command palette ........WP-032 (SRC-01), WP-165 (API-02), WP-191/WP-192 (UI-01..10 palette), WP-201 (TST-03)
  *  L10  export job in the UI, download contains the CI ........ WP-189 (EXP-01), WP-035 (EXP-01), WP-201 (TST-03)
  *  L10b CSV export button of the CMDB list (export job) ....... WP-189 (EXP-01), WP-191/WP-192 (UI-01..10 CI list), WP-201 (TST-03), WP-468 (API-05)
  *  L11  delete and restore: status, traversal, search, history  WP-170 (CI-05, LCY-01), WP-169 (API-05, CI-05), WP-031 (CI-05), WP-171 (AUD-03), WP-133 (AUD-05)
@@ -100,6 +101,7 @@ interface CI {
   model?: string;
   serial_number?: string;
   management_ip?: string;
+  hostname?: string;
   firmware_version?: string;
   attributes?: Record<string, unknown>;
   deleted_at?: string;
@@ -1142,6 +1144,61 @@ test.describe('CI lifecycle: create, edit, history, audit, relations, search, ex
     await expect(affected.getByRole('listitem')).toHaveText(
       new RegExp(`^• ${escapeRe(app.name)} \\(\\S[^()]*\\)$`),
     );
+  });
+
+  test('L08b a relationship target of the same name as another CI is found by its management IP and told apart by host name and IP', async () => {
+    const page = w.page;
+    const octet = () => Math.floor(Math.random() * 250) + 1;
+    const net = `10.${octet()}.${octet()}`;
+    const name = `lc-ip-target-${w.s}`;
+    const source = await newCI({ name: `lc-ip-source-${w.s}` });
+    const target = await newCI({
+      name,
+      hostname: `lc-sw-a-${w.s}`,
+      management_ip: `${net}.17`,
+    });
+    const twin = await newCI({
+      name,
+      hostname: `lc-sw-b-${w.s}`,
+      management_ip: `${net}.18`,
+    });
+    // SRC-02 (WP-859): search= of the CI list matches host name and management IP.
+    const byHost = await ok<List<CI>>('GET', `/cis?search=${encodeURIComponent(`LC-SW-A-${w.s}`)}`);
+    expect(
+      rows(byHost).map((c) => c.id),
+      'the host name finds the target',
+    ).toEqual([target.id]);
+    const byNet = await ok<List<CI>>('GET', `/cis?search=${encodeURIComponent(`${net}.`)}`);
+    expect(
+      rows(byNet)
+        .map((c) => c.id)
+        .sort(),
+      'the IP prefix finds both CIs of the network',
+    ).toEqual([target.id, twin.id].sort());
+
+    await page.goto(`/cmdb/${source.id}`);
+    await expect(page.getByRole('heading', { name: source.name, exact: true })).toBeVisible();
+    await page.getByRole('button', { name: /Beziehung hinzufügen/ }).click();
+    const dialog = page.getByRole('dialog');
+    await dialog.getByLabel('Richtung').selectOption({ label: 'Dieses CI → Ziel' });
+    await dialog.getByLabel('Beziehungstyp').selectOption('depends_on');
+    // UI-15: the target is searched by its IP; the option shows host name and IP.
+    await dialog.getByRole('combobox', { name: 'Gegenstelle' }).fill(`${net}.17`);
+    const option = dialog.getByRole('option', { name: new RegExp(escapeRe(`${net}.17`)) });
+    await expect(option).toHaveCount(1);
+    await expect(option).toContainText(name);
+    await expect(option).toContainText(`lc-sw-a-${w.s} · ${net}.17`);
+    await option.click();
+    await dialog.getByRole('button', { name: 'Anlegen' }).click();
+    await expect(dialog, 'the dialog closes after the create').toBeHidden({ timeout: 10_000 });
+
+    const rels = await ok<
+      List<{ id: string; source_ci_id: string; target_ci_id: string; rel_type: string }>
+    >('GET', `/cis/${source.id}/relationships`);
+    const targets = rows(rels)
+      .filter((r) => r.source_ci_id === source.id && r.rel_type === 'depends_on')
+      .map((r) => r.target_ci_id);
+    expect(targets, 'the edge goes to the CI of the IP, not to its namesake').toEqual([target.id]);
   });
 
   test('L09 the CI is found through the list filter, the full-text search and the command palette', async () => {

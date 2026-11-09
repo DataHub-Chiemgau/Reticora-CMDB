@@ -283,7 +283,7 @@ test.describe('locations and racks (LOC-*, RCK-*)', () => {
     await page.getByRole('button', { name: 'Standort anlegen' }).click();
     let dialog = page.getByRole('dialog');
     await dialog.getByLabel('Name', { exact: true }).fill(n.site);
-    await dialog.getByLabel('Mandant').selectOption({ label: w.client.name });
+    await dialog.getByLabel('Kunde').selectOption({ label: w.client.name });
     let created = waitForApi(page, '/locations', 'POST');
     await dialog.getByRole('button', { name: 'Anlegen' }).click();
     let res = await created;
@@ -440,7 +440,7 @@ test.describe('locations and racks (LOC-*, RCK-*)', () => {
     await page.getByRole('button', { name: 'Standort anlegen' }).click();
     const dialog = page.getByRole('dialog');
     await dialog.getByLabel('Name', { exact: true }).fill(h.site.name);
-    await dialog.getByLabel('Mandant').selectOption({ label: w.client.name });
+    await dialog.getByLabel('Kunde').selectOption({ label: w.client.name });
     const created = waitForApi(page, '/locations', 'POST');
     await dialog.getByRole('button', { name: 'Anlegen' }).click();
     const res = await created;

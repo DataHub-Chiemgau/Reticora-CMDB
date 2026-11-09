@@ -257,6 +257,8 @@ export const ciTypeApi = {
       include_inactive?: boolean;
       category?: string;
       search?: string;
+      /** client_id leaves out the types hidden for the client (WP-858). */
+      client_id?: string;
       limit?: number;
       offset?: number;
     } = {},
@@ -268,7 +270,14 @@ export const ciTypeApi = {
    * has_more holds, F-362), so a selection offers all active types, not only
    * the first page (MET-51, WP-804).
    */
-  listAll(params: { include_inactive?: boolean; category?: string; search?: string } = {}) {
+  listAll(
+    params: {
+      include_inactive?: boolean;
+      category?: string;
+      search?: string;
+      client_id?: string;
+    } = {},
+  ) {
     return fetchAllPages<CIType>('/ci-types', params);
   },
   templates(): Promise<{ data: CIType[] }> {
@@ -983,7 +992,18 @@ export const LOCATION_CHILD_KINDS: Record<LocationKind, LocationKind[]> = {
   bin: [],
 };
 
-/** clientApi lists the clients a site can belong to. */
+/** A client (customer) of the organization (LOC-02). */
+export type Client = components['schemas']['Client'];
+/** The body of POST /clients (WP-855). */
+export type ClientCreateRequest = components['schemas']['CreateClientRequest'];
+/** The body of PATCH /clients/{id} (WP-855). */
+export type ClientUpdateRequest = components['schemas']['UpdateClientRequest'];
+
+/**
+ * clientApi reads and writes the clients (customers) of the organization:
+ * reading needs location:read, creating, changing and deleting user:manage
+ * (WP-855).
+ */
 export const clientApi = {
   /** One page of 200 clients; `offset` reads the following pages (F-340). */
   list({ offset = 0 }: { offset?: number } = {}) {
@@ -992,9 +1012,45 @@ export const clientApi = {
     );
   },
   get(id: string) {
-    return fetchAPI<components['schemas']['Client']>(`/clients/${encodeURIComponent(id)}`);
+    return fetchAPI<Client>(`/clients/${encodeURIComponent(id)}`);
+  },
+  /** create adds a client; a taken name or slug is 409 naming the field. */
+  create(data: ClientCreateRequest) {
+    return fetchAPI<Client>('/clients', { method: 'POST', body: JSON.stringify(data) });
+  },
+  /** update changes the sent fields of a client (PATCH). */
+  update(id: string, data: ClientUpdateRequest) {
+    return fetchAPI<Client>(`/clients/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+  /** remove deletes a client; the server deletes its sites with it. */
+  remove(id: string) {
+    return fetchAPI<void>(`/clients/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+  /** hiddenCITypes reads the CI types the client hides (WP-858, location:read). */
+  hiddenCITypes(id: string) {
+    return fetchAPI<HiddenCITypes>(`/clients/${encodeURIComponent(id)}/hidden-ci-types`);
+  },
+  /**
+   * setHiddenCITypes replaces the CI types the client hides (WP-858,
+   * user:manage); an unknown type is 422 on ci_type_ids.
+   */
+  setHiddenCITypes(id: string, ciTypeIds: string[]) {
+    return fetchAPI<HiddenCITypes>(`/clients/${encodeURIComponent(id)}/hidden-ci-types`, {
+      method: 'PUT',
+      body: JSON.stringify({ ci_type_ids: ciTypeIds } satisfies HiddenCITypes),
+    });
   },
 };
+
+/**
+ * HiddenCITypes are the CI types a client hides (MET-05, WP-858): the type
+ * lists for the client leave them out and a CI of the client cannot be
+ * created with one; they stay active, existing CIs stay.
+ */
+export type HiddenCITypes = components['schemas']['HiddenCITypes'];
 
 export const locationApi = {
   list(

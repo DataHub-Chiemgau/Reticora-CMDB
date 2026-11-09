@@ -333,8 +333,10 @@ func TestClientOnlyUserSeesOnlyAssignedClient(t *testing.T) {
 		}
 		scope := middleware.TenantScopeFor(&principal)
 		var ids []string
+		// The fixture's clients, without the default client of
+		// trg_organization_default_client (WP-854).
 		err := database.WithTenant(ctx, pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
-			rows, err := tx.Query(ctx, `SELECT id::text FROM client ORDER BY id`)
+			rows, err := tx.Query(ctx, `SELECT id::text FROM client WHERE slug <> 'default' ORDER BY id`)
 			if err != nil {
 				return err
 			}

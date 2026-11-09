@@ -355,10 +355,16 @@ test.describe('scope control lists of a client-restricted user (WP-556, WP-191)'
     l.b1 = await ci(`liste-b1-${s}`, l.clientB.id);
     l.c1 = await ci(`liste-c1-${s}`, l.clientC.id);
 
-    // Positive control: the organization-wide administrator reads all three clients.
-    const adminClients = await adminOk<ListOf<Named>>('GET', '/clients?limit=200');
+    // Positive control: the organization-wide administrator reads all three clients
+    // and the default client the signup created (slug default, WP-854).
+    const adminClients = await adminOk<ListOf<Named & { slug?: string }>>(
+      'GET',
+      '/clients?limit=200',
+    );
+    const defaults = (adminClients.data ?? []).filter((c) => c.slug === 'default');
+    expect(defaults, 'the signup creates exactly one default client').toHaveLength(1);
     expect((adminClients.data ?? []).map((c) => c.id).sort()).toEqual(
-      [l.clientA.id, l.clientB.id, l.clientC.id].sort(),
+      [defaults[0].id, l.clientA.id, l.clientB.id, l.clientC.id].sort(),
     );
 
     // The user: viewer in the scope of client A (scopedUser) and of client B.

@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next';
 import { entitlementApi } from '../api/client';
 import type { Entitlement } from '../api/client';
 import { useAuthStore } from '../auth/authStore';
+import { entitlementReadOptions } from '../hooks/useEntitlements';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -50,6 +51,8 @@ export function EntitlementExpiryBanner() {
     queryFn: async () => (await entitlementApi.list({ limit: 200 })).data ?? [],
     enabled: isAuthenticated,
     staleTime: 60_000,
+    // Without entitlement:read (403) the banner stays empty and does not ask again.
+    ...entitlementReadOptions,
   });
 
   const expiring = expiringFeatures(query.data ?? [], Date.now());

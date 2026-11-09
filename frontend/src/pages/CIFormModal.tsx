@@ -22,6 +22,7 @@ import { Input } from '../components/ui/Input';
 import { Modal } from '../components/ui/Modal';
 import { Select } from '../components/ui/Select';
 import { evaluateField, type FieldError } from '../lib/fieldmeta';
+import { useScopeStore } from '../stores/scope';
 
 interface CIFormModalProps {
   open: boolean;
@@ -111,7 +112,14 @@ function CICreateModal({ open, onOpenChange, onSuccess }: CIFormModalProps) {
   // and the organization's own, MET-04), read again at every opening so a type
   // created at runtime is offered without a reload or release; all pages
   // (WP-804). The tiles carry the type id, which POST /cis expects (CI-03).
-  const ciTypes = useAllCITypes({}, { enabled: open, staleTime: 0 });
+  // The types the chosen client hides are left out (client_id, WP-858); a
+  // location of a client that hides the chosen type is refused at the
+  // location (GuidedCreate).
+  const clientId = useScopeStore((s) => s.clientId);
+  const ciTypes = useAllCITypes(clientId ? { client_id: clientId } : {}, {
+    enabled: open,
+    staleTime: 0,
+  });
   const types = useMemo<CreateType[]>(
     () =>
       (ciTypes.data ?? []).map((ty) => ({

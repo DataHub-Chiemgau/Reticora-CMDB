@@ -33,6 +33,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/clients/{id}", h.GetClient)
 	r.Patch("/api/v1/clients/{id}", h.UpdateClient)
 	r.Delete("/api/v1/clients/{id}", h.DeleteClient)
+	r.Get("/api/v1/clients/{id}/hidden-ci-types", h.GetHiddenCITypes)
+	r.Put("/api/v1/clients/{id}/hidden-ci-types", h.SetHiddenCITypes)
 
 	r.Get("/api/v1/sites", h.ListSites)
 	r.Post("/api/v1/sites", h.CreateSite)
@@ -277,6 +279,60 @@ func (h *Handler) DeleteClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// HiddenCITypes is the list of the CI types a client hides (MET-05,
+// WP-858): the type lists for the client leave them out and a person cannot
+// create a CI of the client with one of them or change one to it. The types
+// stay active; existing CIs, discovery and ingest are not affected.
+type HiddenCITypes struct {
+	CITypeIDs []string `json:"ci_type_ids"`
+}
+
+// GetHiddenCITypes handles GET /api/v1/clients/{id}/hidden-ci-types.
+func (h *Handler) GetHiddenCITypes(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := orgOrUnauthorized(w, r)
+	if !ok {
+		return
+	}
+	ids, err := h.repo.HiddenCITypes(r.Context(), orgID, chi.URLParam(r, "id"))
+	if err != nil {
+		writeWriteError(w, err, "client not found")
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, HiddenCITypes{CITypeIDs: ids})
+}
+
+// SetHiddenCITypes handles PUT /api/v1/clients/{id}/hidden-ci-types: the
+// list replaces the client's hidden CI types (audit entry
+// client.hidden_ci_types_changed). An id that is no UUID is 400, an unknown
+// type 422 on ci_type_ids.
+func (h *Handler) SetHiddenCITypes(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := orgOrUnauthorized(w, r)
+	if !ok {
+		return
+	}
+	var req HiddenCITypes
+	if err := api.ReadJSON(r, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	if req.CITypeIDs == nil {
+		writeFieldError(w, &api.FieldError{Field: "ci_type_ids", Message: "is required"})
+		return
+	}
+	for _, id := range req.CITypeIDs {
+		if !api.IsUUID(id) {
+			writeFieldError(w, &api.FieldError{Field: "ci_type_ids", Message: "must hold IDs (UUID) of CI types"})
+			return
+		}
+	}
+	ids, err := h.repo.SetHiddenCITypes(r.Context(), orgID, chi.URLParam(r, "id"), req.CITypeIDs)
+	if err != nil {
+		writeWriteError(w, err, "client not found")
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, HiddenCITypes{CITypeIDs: ids})
 }
 
 // --- Sites ---

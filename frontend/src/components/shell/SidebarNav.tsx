@@ -1,5 +1,5 @@
-import { ChevronDown } from 'lucide-react';
-import { useEffect, useId, useMemo } from 'react';
+import { ChevronDown, Lock } from 'lucide-react';
+import { useContext, useEffect, useId, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { NavLink, useLocation } from 'react-router-dom';
 import { pageToPath } from '../CommandPalette';
@@ -7,11 +7,14 @@ import type { AppPage } from '../CommandPalette';
 import { cn } from '../ui/utils';
 import { Tooltip } from '../ui/Tooltip';
 import { useShellStore } from '../../stores/shell';
-import { NAV_GROUPS } from './navigation';
+import { NAV_GROUPS, NavLockContext, lockedHint } from './navigation';
 import type { NavGroupDef } from './navigation';
 
 interface SidebarNavProps {
-  /** Pages the tenant, the release and the user's rights admit. */
+  /**
+   * Pages the tenant, the release and the user's rights admit. The pages
+   * the plan alone excludes come locked from NavLockContext (WP-857).
+   */
   visiblePages: ReadonlySet<AppPage>;
   /** Open-item counts to show beside a page (e.g. open reviews). */
   counts?: Partial<Record<AppPage, number>>;
@@ -22,7 +25,7 @@ interface SidebarNavProps {
 }
 
 /** pageOfPath is the page whose route the location is on, if any. */
-function pageOfPath(pathname: string): AppPage | undefined {
+export function pageOfPath(pathname: string): AppPage | undefined {
   let best: { page: AppPage; length: number } | undefined;
   for (const [page, path] of Object.entries(pageToPath) as [AppPage, string][]) {
     const matches = pathname === path || (path !== '/' && pathname.startsWith(`${path}/`));
@@ -52,6 +55,7 @@ function Group({
 }) {
   const { t } = useTranslation();
   const listId = useId();
+  const lock = useContext(NavLockContext);
   const stored = useShellStore((state) => state.groups[group.id]);
   const setGroup = useShellStore((state) => state.setGroup);
   const hasHeading = Boolean(group.labelKey);
@@ -88,19 +92,29 @@ function Group({
       <ul id={listId} hidden={!open} className="mt-0.5 space-y-0.5">
         {pages.map(({ page, icon: Icon }) => {
           const label = t(`nav.${page}`);
-          const count = counts?.[page];
+          // A locked page (WP-857) leads to its hint page; the lock, the
+          // description and aria-disabled say that the plan excludes it.
+          const locked = lock.pages.has(page);
+          const hint = locked ? lockedHint(t, lock.plan) : undefined;
+          const hintId = `${listId}-${page}-locked`;
+          const count = locked ? undefined : counts?.[page];
           const link = (
             <NavLink
               to={pageToPath[page]}
               onClick={onNavigate}
               aria-label={collapsed ? label : undefined}
+              aria-disabled={locked ? 'true' : undefined}
+              aria-describedby={locked ? hintId : undefined}
+              data-locked={locked ? 'true' : undefined}
               className={({ isActive }) =>
                 cn(
                   'group relative flex h-8 items-center rounded-lg text-sm font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-accent',
                   collapsed ? 'mx-auto w-10 justify-center' : 'gap-2.5 px-2.5',
                   isActive || page === active
                     ? 'bg-panel text-fg shadow-sm ring-1 ring-line'
-                    : 'text-fg-muted hover:bg-fg/[0.05] hover:text-fg',
+                    : locked
+                      ? 'text-fg-subtle hover:bg-fg/[0.05]'
+                      : 'text-fg-muted hover:bg-fg/[0.05] hover:text-fg',
                 )
               }
             >
@@ -112,6 +126,19 @@ function Group({
                 )}
               />
               {collapsed ? null : <span className="min-w-0 flex-1 truncate">{label}</span>}
+              {locked ? (
+                collapsed ? (
+                  <Lock
+                    aria-hidden="true"
+                    className="absolute bottom-1 right-1 h-2.5 w-2.5 text-fg-subtle"
+                  />
+                ) : (
+                  <Lock
+                    aria-hidden="true"
+                    className="ml-auto h-3.5 w-3.5 shrink-0 text-fg-subtle"
+                  />
+                )
+              ) : null}
               {count && count > 0 ? (
                 collapsed ? (
                   <span
@@ -129,9 +156,19 @@ function Group({
           );
           return (
             <li key={page}>
-              <Tooltip label={label} side="right" disabled={!collapsed}>
+              <Tooltip
+                label={locked ? (collapsed ? `${label}: ${hint}` : hint) : label}
+                side="right"
+                disabled={!collapsed && !locked}
+              >
                 {link}
               </Tooltip>
+              {/* The description of a locked link, outside its name. */}
+              {locked ? (
+                <span id={hintId} hidden>
+                  {hint}
+                </span>
+              ) : null}
             </li>
           );
         })}
@@ -142,7 +179,8 @@ function Group({
 
 /**
  * SidebarNav is the primary navigation: grouped pages with icons, the
- * current page marked (aria-current), open counts, and an icon rail mode.
+ * current page marked (aria-current), open counts, locked pages of the plan
+ * (WP-857) and an icon rail mode.
  */
 export function SidebarNav({
   visiblePages,
@@ -153,14 +191,17 @@ export function SidebarNav({
   const { t } = useTranslation();
   const { pathname } = useLocation();
   const active = pageOfPath(pathname);
+  const lock = useContext(NavLockContext);
 
   const groups = useMemo(
     () =>
       NAV_GROUPS.map((group) => ({
         group,
-        pages: group.items.filter((item) => visiblePages.has(item.page)),
+        pages: group.items.filter(
+          (item) => visiblePages.has(item.page) || lock.pages.has(item.page),
+        ),
       })).filter((entry) => entry.pages.length > 0),
-    [visiblePages],
+    [visiblePages, lock.pages],
   );
 
   return (

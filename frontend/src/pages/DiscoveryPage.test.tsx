@@ -101,6 +101,8 @@ interface Options {
   session?: unknown;
   /** clients answers GET /clients. */
   clients?: unknown[];
+  /** credentialList answers GET /credentials, read at every request (WP-856). */
+  credentialList?: unknown[];
 }
 
 interface Call {
@@ -118,6 +120,7 @@ function stubDiscovery({
   write = () => json(scope),
   session,
   clients = [],
+  credentialList = credentials,
 }: Options = {}) {
   const calls: Call[] = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -134,7 +137,7 @@ function stubDiscovery({
     if (url.includes('/collectors')) return json(paginated(collectors));
     if (url.includes('/sites')) return json(paginated(sites));
     if (url.includes('/vrfs')) return json(paginated(vrfs));
-    if (url.includes('/credentials')) return json(paginated(credentials));
+    if (url.includes('/credentials')) return json(paginated(credentialList));
     return problem(404, { detail: `unexpected request: ${url}` });
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -163,7 +166,7 @@ describe('DiscoveryPage scopes (DIS-09)', () => {
     const form = within(dialog);
     // The hints of E-67 (no credential selected) and E-84 (cron time zone).
     expect(
-      form.getByText('Ohne Auswahl gelten die Credentials des Clients und der Organisation.'),
+      form.getByText('Ohne Auswahl gelten die Credentials des Kunden und der Organisation.'),
     ).toBeInTheDocument();
     expect(form.getByText(/Cron in der Zeitzone der Organisation/)).toBeInTheDocument();
 
@@ -688,5 +691,62 @@ describe('DiscoveryPage enrollment code (COL-04, F-425)', () => {
     fireEvent.click(generate);
     expect(await screen.findByText(/--code ABCD-EFGH/)).toBeInTheDocument();
     expect(writes(calls, 'POST').map((c) => c.body)).toEqual([{ label: 'collector' }]);
+  });
+});
+
+describe('DiscoveryPage credentials (UI-14, WP-856)', () => {
+  it('offers a credential created in the credentials section in the scope form at once', async () => {
+    const list = [...credentials];
+    const created = {
+      id: 'cred-new',
+      organization_id: 'org-1',
+      name: 'SNMP Neu',
+      kind: 'snmp_v2c',
+      key_version: 1,
+      created_at: '2026-11-09T08:00:00Z',
+      updated_at: '2026-11-09T08:00:00Z',
+    };
+    const calls = stubDiscovery({
+      permissions: [...manage, 'credential:read', 'credential:manage'],
+      credentialList: list,
+      write: (url, method) => {
+        if (method === 'POST' && url.endsWith('/credentials')) {
+          list.push(created);
+          return json(created, 201);
+        }
+        return json(scope);
+      },
+    });
+    renderWithProviders(<DiscoveryPage />, { route: '/discovery' });
+
+    const section = within(
+      (await screen.findByRole('heading', { name: 'Zugangsdaten' })).closest('section')!,
+    );
+    expect(await section.findByText('SNMP Org')).toBeInTheDocument();
+    fireEvent.click(section.getByRole('button', { name: 'Zugangsdaten anlegen' }));
+    const form = within(await screen.findByRole('dialog', { name: 'Zugangsdaten anlegen' }));
+    fireEvent.change(form.getByLabelText('Name'), { target: { value: 'SNMP Neu' } });
+    fireEvent.change(form.getByLabelText('Community'), { target: { value: 'geheim' } });
+    fireEvent.click(form.getByRole('button', { name: 'Speichern' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(writes(calls, 'POST')[0]!.body).toEqual({
+      name: 'SNMP Neu',
+      kind: 'snmp_v2c',
+      secret: { community: 'geheim' },
+    });
+    expect(await section.findByText('SNMP Neu')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Scope anlegen' }));
+    const scopeForm = within(await screen.findByRole('dialog'));
+    expect(await scopeForm.findByLabelText(/SNMP Neu/)).toBeInTheDocument();
+    expect(screen.queryByText('geheim')).toBeNull();
+  });
+
+  it('shows no credentials section without credential:read', async () => {
+    stubDiscovery();
+    renderWithProviders(<DiscoveryPage />, { route: '/discovery' });
+
+    expect(await screen.findByText('10.0.0.0/24')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Zugangsdaten' })).toBeNull();
   });
 });

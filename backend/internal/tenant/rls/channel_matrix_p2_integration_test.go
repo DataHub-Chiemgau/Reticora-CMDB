@@ -84,6 +84,10 @@ type p2Scenario struct {
 	datevOwn     map[string][2]string
 	exportWorker *export.JobWorker
 	blobs        blob.Store
+	// hiddenTypes: a CI type of organization A hidden for client 1 (not
+	// for client 2) and one of organization B hidden for its client
+	// (WP-858).
+	hiddenTypes [2]string
 }
 
 // p2Prefix starts every name of the P2 scenario.
@@ -250,6 +254,15 @@ func newP2Scenario(t *testing.T, m *channelMatrix, blobs blob.Store) *p2Scenario
 	// through publisher, event consumer and notifier to the inboxes of the
 	// recipients.
 	s.notes = s.notifications(t, m)
+
+	// CI types hidden per client (WP-858): a type of organization A hidden
+	// for client 1, one of organization B hidden for its client.
+	for i, side := range []int{0, 2} {
+		s.hiddenTypes[i] = m.create(t, s.owners[side], "/api/v1/ci-types",
+			map[string]any{"key": p2Prefix + "_hidden_" + fmt.Sprint(i), "name": p2Prefix + " hidden " + fmt.Sprint(i)})
+		m.exec(t, `INSERT INTO client_ci_type_hidden (organization_id, client_id, ci_type_id) VALUES ($1, $2, $3)`,
+			s.orgs[side], s.clients[side], s.hiddenTypes[i])
+	}
 
 	// Tickets and documents reach the index through its rebuild
 	// (search.reindex, WP-786), as after an upgrade.
@@ -887,6 +900,80 @@ func (m *channelMatrix) p2Rows(rows map[string]matrixRow) {
 			list(p, "/api/v1/search?limit=100&type=document&q="+p2Prefix, s.documents[:]...))
 		return out
 	}}
+
+	// client-hidden-ci-types (MET-05, WP-858): the hidden types of a client
+	// are read and replaced where the client is visible (client scope; the
+	// site and team scope do not restrict clients), else 404 like an
+	// unknown client. The type list leaves out the types hidden for
+	// client_id; without it a client-scoped principal misses the types every
+	// client of its scope hides (the client principal: client 1 hides the
+	// type of A; multi: client 2 does not), an org-wide one sees all.
+	clientSeen := [3]seen{m.allA, m.allA.without("client"), m.onlyB}
+	hiddenOf := [3][]string{{s.hiddenTypes[0]}, {}, {s.hiddenTypes[1]}}
+	rows["client-hidden-ci-types"] = matrixRow{
+		read: func(p *channelPrincipal) []matrixProbe {
+			var out []matrixProbe
+			for i := range 3 {
+				pr := get("/api/v1/clients/"+s.clients[i]+"/hidden-ci-types", clientSeen[i].status(p, http.StatusOK))
+				if clientSeen[i][p.kind] {
+					ids, _ := json.Marshal(hiddenOf[i])
+					pr.show = []string{`"ci_type_ids":` + string(ids)}
+				}
+				out = append(out, pr)
+			}
+			out = append(out, get("/api/v1/clients/"+unknownID+"/hidden-ci-types", http.StatusNotFound))
+			// own is the hidden type of p's organization, foreign the other
+			// one, which p never sees. A client of another organization (or
+			// outside the scope) hides nothing for p.
+			own, foreign := s.hiddenTypes[0], s.hiddenTypes[1]
+			ownClient := f.Client1
+			if p.org != f.OrgA {
+				own, foreign, ownClient = foreign, own, m.clientB
+			}
+			types := func(name, query string, shown bool) matrixProbe {
+				pr := get("/api/v1/ci-types?limit=200"+query, http.StatusOK)
+				pr.name, pr.hide = name, []string{foreign}
+				if shown {
+					pr.show = []string{own}
+				} else {
+					pr.hide = append(pr.hide, own)
+				}
+				return pr
+			}
+			out = append(out,
+				types("types for the hiding client", "&client_id="+ownClient, false),
+				// Client 2 hides nothing; client 1 hides nothing for B.
+				types("types for client 2", "&client_id="+f.Client2, true),
+				types("types for client 1", "&client_id="+f.Client1, p.org != f.OrgA),
+				// Without client_id the scope decides: the client
+				// principal's only client hides the type of A; multi has
+				// client 2, the others are not restricted in clients.
+				types("types of the scope", "", p.kind != "client"),
+				// The whole catalog lists hidden types too.
+				types("whole catalog", "&include_inactive=true&client_id="+ownClient, true))
+			return append(out, get("/api/v1/ci-types?client_id=not-a-uuid", http.StatusBadRequest))
+		},
+		write: func(t *testing.T, p *channelPrincipal) []matrixProbe {
+			var out []matrixProbe
+			for i := range 3 {
+				// The stored list again: the state stays for the next
+				// principal.
+				out = append(out, matrixProbe{name: fmt.Sprintf("hidden types of the client of side %d", i+1), method: http.MethodPut,
+					path: "/api/v1/clients/" + s.clients[i] + "/hidden-ci-types", body: map[string]any{"ci_type_ids": hiddenOf[i]},
+					want:  clientSeen[i].status(p, http.StatusOK),
+					after: m.count(len(hiddenOf[i]) == 1, `SELECT count(*) FROM client_ci_type_hidden WHERE client_id = $1`, s.clients[i])})
+			}
+			// A type of the other organization is no type of the client's
+			// organization: 422 where the client is visible.
+			want := clientSeen[0].status(p, http.StatusUnprocessableEntity)
+			out = append(out, matrixProbe{name: "type of organization B for client 1", method: http.MethodPut,
+				path: "/api/v1/clients/" + f.Client1 + "/hidden-ci-types", body: map[string]any{"ci_type_ids": []string{s.hiddenTypes[1]}},
+				want: want, after: m.count(false, `SELECT count(*) FROM client_ci_type_hidden WHERE client_id = $1 AND ci_type_id = $2`,
+					f.Client1, s.hiddenTypes[1])})
+			return append(out, matrixProbe{method: http.MethodPut, path: "/api/v1/clients/" + unknownID + "/hidden-ci-types",
+				body: map[string]any{"ci_type_ids": []string{}}, want: http.StatusNotFound})
+		},
+	}
 
 	// The DATEV export (WP-310): every principal exports the assets of its
 	// scope; the export job of another principal is its creator's only.

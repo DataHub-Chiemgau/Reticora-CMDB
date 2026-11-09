@@ -1,6 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
-import { entitlementApi, moduleApi } from '../api/client';
+import { useMemo } from 'react';
+import { ApiError, entitlementApi, moduleApi } from '../api/client';
+import { useEffectivePermissions } from '../api/hooks';
 import { useAuthStore } from '../auth/authStore';
+import { navPageStates } from '../components/shell/navigation';
+import type { NavPageState } from '../components/shell/navigation';
+import type { AppPage } from '../components/CommandPalette';
 
 /**
  * Map of feature_key -> enabled for the current tenant. When the tenant has no
@@ -8,6 +13,23 @@ import { useAuthStore } from '../auth/authStore';
  * a reliable statement about availability, not just overrides.
  */
 export type EntitlementMap = Record<string, boolean>;
+
+/**
+ * entitlementReadOptions are the query options of the shell's plan, module
+ * and expiry reads. A
+ * user without entitlement:read (e.g. the client-scoped role
+ * client_technician) gets 403 on both: retrying does not change that, and
+ * every part that mounts later (a page reading useEntitlements) must not
+ * send the refused read again. Such a refetch put the query back to
+ * "pending" and the gate of SignedInShell unmounted the page it had just
+ * shown, endlessly (e2e-real CS01/TP05, WP-857).
+ */
+export const entitlementReadOptions = {
+  retry: (failureCount: number, error: unknown) =>
+    !(error instanceof ApiError && (error.status === 401 || error.status === 403)) &&
+    failureCount < 1,
+  retryOnMount: false,
+} as const;
 
 /**
  * useEntitlements resolves which product modules are enabled for the current
@@ -22,16 +44,23 @@ export function useEntitlements() {
     queryFn: async () => {
       const res = await entitlementApi.list({ limit: 200 });
       const map: EntitlementMap = {};
+      let plan: string | undefined;
       for (const e of res.data ?? []) {
         map[e.feature_key] = e.enabled;
+        // Every row carries the plan of the organization; cmdb_core is
+        // always there and wins over the others (WP-857).
+        if (e.plan && (!plan || e.feature_key === 'cmdb_core')) {
+          plan = e.plan;
+        }
       }
-      return map;
+      return { map, plan };
     },
     enabled: isAuthenticated,
     staleTime: 60_000,
+    ...entitlementReadOptions,
   });
 
-  const map = query.data;
+  const map = query.data?.map;
   const isEnabled = (feature: string | undefined): boolean => {
     // While loading or when the feature has no gate, default to visible so the
     // core navigation (dashboard, cmdb) never flickers away.
@@ -40,7 +69,24 @@ export function useEntitlements() {
     return map[feature] ?? false;
   };
 
-  return { entitlements: map, isEnabled, isLoading: query.isLoading };
+  return {
+    entitlements: map,
+    plan: query.data?.plan,
+    isEnabled,
+    // Only the first read: once it has settled (data or error), a later
+    // read never counts as loading again, so a gated page that is shown
+    // is not swapped for the loading state. Without the plan (an error,
+    // e.g. 403 without entitlement:read) every page counts as entitled:
+    // the server stays the one that refuses.
+    isLoading: query.isLoading && query.errorUpdateCount === 0,
+  };
+}
+
+type ModuleList = Awaited<ReturnType<typeof moduleApi.list>>['data'];
+
+/** isPageServed: no switched-off module lists the page (unknown until loaded: served). */
+function isPageServed(modules: ModuleList | undefined, page: string): boolean {
+  return !modules || !modules.some((m) => !m.enabled && m.nav.includes(page));
 }
 
 /**
@@ -55,14 +101,14 @@ export function useModules() {
     queryFn: async () => (await moduleApi.list()).data ?? [],
     enabled: isAuthenticated,
     staleTime: 5 * 60_000,
+    ...entitlementReadOptions,
   });
 
   const modules = query.data;
   const isModuleEnabled = (key: string): boolean =>
     // Unknown until loaded: hide nothing so the navigation does not flicker.
     !modules || (modules.find((m) => m.key === key)?.enabled ?? true);
-  const isPageEnabled = (page: string): boolean =>
-    !modules || !modules.some((m) => !m.enabled && m.nav.includes(page));
+  const isPageEnabled = (page: string): boolean => isPageServed(modules, page);
 
   return { modules, isModuleEnabled, isPageEnabled, isLoading: query.isLoading };
 }
@@ -124,6 +170,8 @@ export const navFeatureFor: Record<string, string | undefined> = {
   locations: undefined,
   inventory: 'stock',
   'saved-views': undefined,
+  // The client administration (WP-855) is core like the location tree.
+  clients: undefined,
 };
 
 /**
@@ -135,6 +183,8 @@ export const navFeatureFor: Record<string, string | undefined> = {
  */
 export const navPermissionFor: Record<string, string | undefined> = {
   'ci-types': 'citype:manage',
+  // The client list reads with location:read; writing needs user:manage (WP-855).
+  clients: 'location:read',
 };
 
 /**
@@ -145,4 +195,36 @@ export const navPermissionFor: Record<string, string | undefined> = {
  */
 export function hasPermission(permissions: readonly string[] | undefined, key: string): boolean {
   return permissions?.includes(key) ?? false;
+}
+
+/**
+ * useNavAccess applies the one visibility rule of the navigation (WP-857,
+ * navPageState) to every page: the sidebar, the command palette, the
+ * dashboard's quick access and the hint page of a locked route all read
+ * it. A page of a switched-off release module or without the user's right
+ * is hidden; a page whose only obstacle is the plan is locked. The rights
+ * fail closed while they load (like useHasPermission). Call it only from
+ * signed-in parts: it reads /entitlements, /modules and /me/permissions.
+ */
+export function useNavAccess() {
+  const { entitlements, plan, isLoading } = useEntitlements();
+  const { modules } = useModules();
+  const permissions = useEffectivePermissions().data?.permissions;
+  const states = useMemo(
+    () =>
+      navPageStates({
+        isEntitled: (page) => {
+          const feature = navFeatureFor[page];
+          return !feature || !entitlements || (entitlements[feature] ?? false);
+        },
+        isPageEnabled: (page) => isPageServed(modules, page),
+        isPermitted: (page) => {
+          const required = navPermissionFor[page];
+          return !required || hasPermission(permissions, required);
+        },
+      }),
+    [entitlements, modules, permissions],
+  );
+  const stateOf = (page: AppPage): NavPageState => states.get(page) ?? 'hidden';
+  return { states, stateOf, plan, isLoading };
 }

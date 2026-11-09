@@ -26,10 +26,13 @@ import {
 import {
   LOCATION_CHILD_KINDS,
   type LocationKind,
+  type Client,
   type LocationTreeNode as TreeNode,
   type LocationUpdateRequest,
 } from '../api/cmdb';
 import { ApiError } from '../api/client';
+import { useHasPermission } from '../api/hooks';
+import { ClientFormDialog } from './ClientsPage';
 import { Badge } from '../components/ui/Badge';
 import { Button, IconButton } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -126,6 +129,12 @@ export function LocationTreePage() {
     client_id: '',
   });
   const clients = useClients(showCreate && !parent);
+  // The site dialog offers a new client to holders of user:manage (WP-855);
+  // the client created there is selected and listed even before the list is
+  // read again.
+  const mayManageClients = useHasPermission('user:manage') === true;
+  const [creatingClient, setCreatingClient] = useState(false);
+  const [createdClient, setCreatedClient] = useState<Client | undefined>();
 
   const [editing, setEditing] = useState<TreeNode | undefined>();
   const [editDraft, setEditDraft] = useState({ name: '', parent_id: '' });
@@ -134,6 +143,7 @@ export function LocationTreePage() {
   const openCreate = (parentNode?: TreeNode) => {
     setParent(parentNode);
     create.reset();
+    setCreatingClient(false);
     setDraft({
       name: '',
       kind: parentNode ? (LOCATION_CHILD_KINDS[parentNode.kind][0] ?? 'site') : 'site',
@@ -164,7 +174,13 @@ export function LocationTreePage() {
   const generalError =
     create.error && Object.keys(violations).length === 0 ? problemText(create.error) : undefined;
   const childKinds = parent ? LOCATION_CHILD_KINDS[parent.kind] : [];
-  const clientOptions = (clients.data?.data ?? []).map((c) => ({ value: c.id, label: c.name }));
+  const listedClients = clients.data?.data ?? [];
+  const clientOptions = [
+    ...listedClients,
+    ...(createdClient && !listedClients.some((c) => c.id === createdClient.id)
+      ? [createdClient]
+      : []),
+  ].map((c) => ({ value: c.id, label: c.name }));
 
   // A site is a root: it can be renamed, not moved.
   const canMove = editing !== undefined && editing.kind !== 'site';
@@ -296,14 +312,28 @@ export function LocationTreePage() {
               onChange={(e) => setDraft({ ...draft, kind: e.target.value as LocationKind })}
             />
           ) : (
-            <Select
-              label={t('locations.client', 'Mandant')}
-              options={[{ value: '', label: '—' }, ...clientOptions]}
-              value={draft.client_id}
-              required
-              error={violations.client_id}
-              onChange={(e) => setDraft({ ...draft, client_id: e.target.value })}
-            />
+            <div className="flex items-end gap-2">
+              <div className="min-w-0 flex-1">
+                <Select
+                  label={t('locations.client')}
+                  options={[{ value: '', label: '—' }, ...clientOptions]}
+                  value={draft.client_id}
+                  required
+                  error={violations.client_id}
+                  onChange={(e) => setDraft({ ...draft, client_id: e.target.value })}
+                />
+              </div>
+              {mayManageClients ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  icon={<Plus />}
+                  onClick={() => setCreatingClient(true)}
+                >
+                  {t('clients.createFromSite')}
+                </Button>
+              ) : null}
+            </div>
           )}
           {generalError ? (
             <p role="alert" className="text-sm text-danger">
@@ -319,6 +349,17 @@ export function LocationTreePage() {
             </Button>
           </div>
         </form>
+        {/* Outside the form: a submit of the client dialog must not bubble
+            (through the React tree) into the site form. */}
+        {creatingClient ? (
+          <ClientFormDialog
+            onClose={() => setCreatingClient(false)}
+            onSaved={(client) => {
+              setCreatedClient(client);
+              setDraft((d) => ({ ...d, client_id: client.id }));
+            }}
+          />
+        ) : null}
       </Modal>
 
       <Modal

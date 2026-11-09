@@ -124,6 +124,12 @@ func TestCompileSQLRelationshipPredicates(t *testing.T) {
 	if !strings.Contains(where, "WITH RECURSIVE up (id, depth) AS") || !strings.Contains(where, "up.depth < 5") {
 		t.Fatalf("expected upstream recursive predicate bounded to depth 5, got %s", where)
 	}
+	// The step probes the edges per row of the work table: a LATERAL
+	// subquery the planner cannot flatten (OFFSET 0; load run 42619469662,
+	// TestRelationshipWalkStarBudget).
+	if !strings.Contains(where, "CROSS JOIN LATERAL (SELECT r.source_ci_id AS far FROM ci_relationship r WHERE r.target_ci_id = up.id OFFSET 0)") {
+		t.Fatalf("expected the step of the walk as a LATERAL subquery with OFFSET 0, got %s", where)
+	}
 }
 
 // TestCompileSQLRelationshipPredicatesReadTheProjection pins the SQL of

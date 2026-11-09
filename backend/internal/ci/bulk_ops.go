@@ -347,7 +347,7 @@ func (s *Service) bulkApply(ctx context.Context, op *bulkOp, id string) BulkItem
 	case BulkSetFields:
 		return s.bulkSetFields(ctx, op, id, p.fields)
 	case BulkSetLocation:
-		item, err := s.Update(ctx, op.orgID, id, op.manual(UpdateRequest{LocationID: p.locationID}))
+		item, err := s.bulkUpdate(ctx, op, id, UpdateRequest{LocationID: p.locationID})
 		switch {
 		case err != nil:
 			return bulkFailed(id, err)
@@ -356,7 +356,7 @@ func (s *Service) bulkApply(ctx context.Context, op *bulkOp, id string) BulkItem
 		}
 		return bulkOK(id)
 	case BulkSetOwner:
-		item, err := s.Update(ctx, op.orgID, id, op.manual(UpdateRequest{OwnerUserID: p.ownerUserID, OwnerTeamID: p.ownerTeamID}))
+		item, err := s.bulkUpdate(ctx, op, id, UpdateRequest{OwnerUserID: p.ownerUserID, OwnerTeamID: p.ownerTeamID})
 		switch {
 		case err != nil:
 			return bulkFailed(id, err)
@@ -371,7 +371,7 @@ func (s *Service) bulkApply(ctx context.Context, op *bulkOp, id string) BulkItem
 		return s.bulkArchive(ctx, op, id)
 	}
 	status := op.req.Status
-	item, err := s.Update(ctx, op.orgID, id, op.manual(UpdateRequest{Status: &status}))
+	item, err := s.bulkUpdate(ctx, op, id, UpdateRequest{Status: &status})
 	switch {
 	case err != nil:
 		return bulkFailed(id, err)
@@ -391,26 +391,50 @@ func (s *Service) bulkSetFields(ctx context.Context, op *bulkOp, id string, raw 
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return bulkFailed(id, paramsError("fields", "is no change of CI fields"))
 	}
-	if len(req.Attributes) > 0 {
-		defs, err := s.instanceFields(ctx, op.orgID, id)
-		if err != nil {
-			return bulkFailed(id, err)
-		}
-		var violations []Violation
-		for i := range defs {
-			if _, sent := req.Attributes[defs[i].Name]; sent {
-				violations = append(violations, Violation{Field: "attributes." + defs[i].Name,
-					Detail: "is an instance attribute of the CI; it changes through /cis/{id}/instance-attributes"})
+	// The check of the instance attributes reads in the transaction of
+	// the write (bulkUpdate).
+	err := s.bulkTx(ctx, op.orgID, func(ctx context.Context) error {
+		if len(req.Attributes) > 0 {
+			defs, err := s.instanceFields(ctx, op.orgID, id)
+			if err != nil {
+				return err
+			}
+			var violations []Violation
+			for i := range defs {
+				if _, sent := req.Attributes[defs[i].Name]; sent {
+					violations = append(violations, Violation{Field: "attributes." + defs[i].Name,
+						Detail: "is an instance attribute of the CI; it changes through /cis/{id}/instance-attributes"})
+				}
+			}
+			if len(violations) > 0 {
+				return &ValidationError{Violations: violations}
 			}
 		}
-		if len(violations) > 0 {
-			return bulkFailed(id, &ValidationError{Violations: violations})
-		}
-	}
-	if _, err := s.Update(ctx, op.orgID, id, op.manual(req)); err != nil {
+		_, err := s.Update(ctx, op.orgID, id, op.manual(req))
+		return err
+	})
+	if err != nil {
 		return bulkFailed(id, err)
 	}
 	return bulkOK(id)
+}
+
+// bulkUpdate writes req to one id as a manual change of the run in one
+// transaction (bulkTx): the reads of Service.Update (the CI, its
+// overrides, the field definitions of its type and its instance fields)
+// join the write instead of opening a transaction each. Load run
+// 42619469662: six transactions and 27 statements per CI, 500 ids in 40 to
+// 60 s on 4 vCPU (NFR-02: 30 s); now two transactions (the write and the
+// search index after its commit) and 18 to 19 statements
+// (TestBulkStatementBudget).
+func (s *Service) bulkUpdate(ctx context.Context, op *bulkOp, id string, req UpdateRequest) (*Item, error) { //nolint:gocritic // a request value like Service.Update takes
+	var item *Item
+	err := s.bulkTx(ctx, op.orgID, func(ctx context.Context) error {
+		var err error
+		item, err = s.Update(ctx, op.orgID, id, op.manual(req))
+		return err
+	})
+	return item, err
 }
 
 // readForTags reads the CI of one id for its tags and checks the action

@@ -701,6 +701,8 @@ var domainRecordedRoutes = map[string]string{
 	"POST /api/v1/metamodel/import":                          "metamodel.PGRepository.CreateImportDraft (metamodel_draft.created, item_added)",
 	"POST /api/v1/metamodel/drafts/{id}/publish":             "metamodel.PGRepository.Publish (metamodel.published with the entries of its elements)",
 	// Locations and rack placement (DOD-01).
+	// CI types hidden per client (WP-858): client.hidden_ci_types_changed.
+	"PUT /api/v1/clients/{id}/hidden-ci-types": "tenantapi.PGRepository.SetHiddenCITypes",
 	"POST /api/v1/locations":                   "locations.PGRepository",
 	"DELETE /api/v1/locations/{id}":            "locations.PGRepository",
 	"POST /api/v1/mounts":                      "rack placement",

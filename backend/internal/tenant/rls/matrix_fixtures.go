@@ -102,6 +102,10 @@ var Channels = []Channel{
 	{Name: "label-lookup", Read: "GET /api/v1/labels/lookup?code=… (inventory number, barcode, URN)"},
 	{Name: "search-p2", Read: "GET /api/v1/search?q=<inventory number>"},
 	{Name: "datev-export", Read: "POST /api/v1/exports {format: datev} (file of the own export), GET /api/v1/exports/{id}"},
+	// MET-05 (WP-858): the CI types hidden per client and the type list
+	// filtered by them.
+	{Name: "client-hidden-ci-types", Read: "GET /api/v1/clients/{id}/hidden-ci-types, GET /api/v1/ci-types (with and without client_id)",
+		Write: "PUT /api/v1/clients/{id}/hidden-ci-types"},
 }
 
 // ScopeKinds are the principal scopes of the matrix (TEN-04): the whole

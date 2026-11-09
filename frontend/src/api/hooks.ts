@@ -61,6 +61,7 @@ import type {
   UpdateBusinessCalendarRequest,
   DiscoveryScopeInput,
   DiscoveryScopePatch,
+  CredentialInput,
   CICreateRequest,
   CIListParams,
   CIUpdateRequest,
@@ -303,6 +304,26 @@ export function useCredentials(enabled = true) {
     enabled,
     retry: false,
   });
+}
+
+/**
+ * Creating and deleting a credential (credential:manage, UI-14). Both
+ * invalidate the credential list, so the choice of the scope form is current
+ * at once.
+ */
+export function useCredentialMutations() {
+  const queryClient = useQueryClient();
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['credentials'] });
+  return {
+    create: useMutation({
+      mutationFn: (input: CredentialInput) => credentialApi.create(input),
+      onSuccess: invalidate,
+    }),
+    remove: useMutation({
+      mutationFn: (id: string) => credentialApi.remove(id),
+      onSuccess: invalidate,
+    }),
+  };
 }
 
 /** The VRFs of the organization, the default first (TEN-10). */

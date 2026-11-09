@@ -47,6 +47,8 @@ import {
   type AttributeSetCreate,
   type AttributeSetPatch,
   type CITemplateRef,
+  type ClientCreateRequest,
+  type ClientUpdateRequest,
   type CITypeCreateRequest,
   type CITypeUpdateRequest,
   type FormLayoutCreate,
@@ -97,7 +99,12 @@ export function useCITypes(
  * selection; useCITypes stays the paged list of the type administration.
  */
 export function useAllCITypes(
-  params: { include_inactive?: boolean; category?: string; search?: string } = {},
+  params: {
+    include_inactive?: boolean;
+    category?: string;
+    search?: string;
+    client_id?: string;
+  } = {},
   options: QueryControl = {},
 ) {
   return useQuery({
@@ -1026,6 +1033,63 @@ export function useDeleteLocation() {
 
 export function useClients(enabled = true) {
   return useQuery({ queryKey: ['clients'], queryFn: () => clientApi.list(), enabled });
+}
+
+/** One page of 200 clients from `offset` on, for the client administration (WP-855). */
+export function useClientPage(offset = 0) {
+  return useQuery({
+    queryKey: ['clients', 'page', offset],
+    queryFn: () => clientApi.list({ offset }),
+  });
+}
+
+/**
+ * invalidateClients reads again every list of clients: the selects
+ * (['clients', …]) and the scope switcher, the scope banner and the client
+ * choices of other pages (['scope', …]).
+ */
+function invalidateClients(qc: QueryClient) {
+  return Promise.all([
+    qc.invalidateQueries({ queryKey: ['clients'] }),
+    qc.invalidateQueries({ queryKey: ['scope'] }),
+  ]);
+}
+
+/** useCreateClient adds a client (POST /clients, WP-855). */
+export function useCreateClient() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: ClientCreateRequest) => clientApi.create(data),
+    onSuccess: () => invalidateClients(qc),
+  });
+}
+
+/** useUpdateClient changes name or slug of a client (PATCH /clients/{id}, WP-855). */
+export function useUpdateClient() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: ClientUpdateRequest }) =>
+      clientApi.update(id, data),
+    onSuccess: () => invalidateClients(qc),
+  });
+}
+
+/**
+ * useDeleteClient deletes a client (DELETE /clients/{id}, WP-855). The
+ * server deletes the client's sites with it, so the location tree and the
+ * site lists are read again as well.
+ */
+export function useDeleteClient() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => clientApi.remove(id),
+    onSuccess: () =>
+      Promise.all([
+        invalidateClients(qc),
+        qc.invalidateQueries({ queryKey: ['locations'] }),
+        qc.invalidateQueries({ queryKey: ['sites'] }),
+      ]),
+  });
 }
 
 // Inventory movements + items

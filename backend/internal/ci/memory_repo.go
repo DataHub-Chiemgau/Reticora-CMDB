@@ -65,6 +65,7 @@ func (r *MemoryRepository) List(ctx context.Context, orgID string, filter *Filte
 			continue
 		}
 		if filter.Search != "" && !containsIgnoreCase(item.Name, filter.Search) &&
+			!containsIgnoreCase(item.Hostname, filter.Search) &&
 			!containsIgnoreCase(item.SerialNumber, filter.Search) &&
 			!containsIgnoreCase(item.ManagementIP, filter.Search) {
 			continue

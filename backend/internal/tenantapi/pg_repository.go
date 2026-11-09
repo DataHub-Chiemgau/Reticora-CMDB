@@ -3,7 +3,10 @@ package tenantapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -161,16 +164,7 @@ func (r *PGRepository) UpdateOrganization(ctx context.Context, orgID string, req
 // (AI-02), attributed to the acting principal. fields names every column the
 // request wrote: the entry replaces the route's own audit entry (AUD-07).
 func recordAIOptInChange(ctx context.Context, tx pgx.Tx, orgID string, oldValue, newValue bool, fields []string) error {
-	actorID, actorType := "", "system"
-	if p, ok := identity.PrincipalFromContext(ctx); ok {
-		actorType = "user"
-		if p.Type == identity.PrincipalTypeAPIKey {
-			actorType = "api_key"
-		}
-		if audit.IsUUID(p.Subject) {
-			actorID = p.Subject
-		}
-	}
+	actorID, actorType := auditActor(ctx)
 	if _, err := audit.NewPGRecorder().Record(ctx, tx, audit.Entry{
 		OrganizationID: orgID,
 		ActorID:        actorID,
@@ -183,6 +177,21 @@ func recordAIOptInChange(ctx context.Context, tx pgx.Tx, orgID string, oldValue,
 		return fmt.Errorf("audit ai opt-in change: %w", err)
 	}
 	return nil
+}
+
+// auditActor names the acting principal of a domain audit entry.
+func auditActor(ctx context.Context) (actorID, actorType string) {
+	actorType = "system"
+	if p, ok := identity.PrincipalFromContext(ctx); ok {
+		actorType = "user"
+		if p.Type == identity.PrincipalTypeAPIKey {
+			actorType = "api_key"
+		}
+		if audit.IsUUID(p.Subject) {
+			actorID = p.Subject
+		}
+	}
+	return actorID, actorType
 }
 
 func scanClient(s scanner) (*Client, error) {
@@ -319,6 +328,106 @@ func (r *PGRepository) UpdateClient(ctx context.Context, orgID, id string, req U
 		return fieldDBError(err)
 	})
 	return c, err
+}
+
+// hiddenCITypesTx reads the CI types client clientID hides (WP-858) and
+// whether the client is visible, in one statement.
+func hiddenCITypesTx(ctx context.Context, tx pgx.Tx, clientID string) ([]string, error) {
+	var ids []string
+	err := tx.QueryRow(ctx, `SELECT COALESCE(array_agg(h.ci_type_id::text ORDER BY h.ci_type_id::text)
+			FILTER (WHERE h.ci_type_id IS NOT NULL), '{}')
+		FROM client c LEFT JOIN client_ci_type_hidden h ON h.client_id = c.id AND h.organization_id = c.organization_id
+		WHERE c.id = $1 GROUP BY c.id`, clientID).Scan(&ids)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read hidden ci types: %w", err)
+	}
+	return ids, nil
+}
+
+// HiddenCITypes returns the CI types the client hides (MET-05, WP-858).
+func (r *PGRepository) HiddenCITypes(ctx context.Context, orgID, clientID string) ([]string, error) {
+	if !api.IsUUID(clientID) {
+		return nil, fmt.Errorf("not found")
+	}
+	var ids []string
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		ids, err = hiddenCITypesTx(ctx, tx, clientID)
+		return err
+	})
+	return ids, err
+}
+
+// SetHiddenCITypes replaces the CI types the client hides (MET-05, WP-858)
+// and records the audit entry client.hidden_ci_types_changed with the old
+// and the new list in the same transaction (AUD-07), also when the list
+// stays. A type must be a system type or one of the organization; the
+// row level security of ci_type shows exactly those.
+func (r *PGRepository) SetHiddenCITypes(ctx context.Context, orgID, clientID string, typeIDs []string) ([]string, error) {
+	if !api.IsUUID(clientID) {
+		return nil, fmt.Errorf("not found")
+	}
+	ids := slices.Clone(typeIDs)
+	slices.Sort(ids)
+	ids = slices.Compact(ids)
+	var after []string
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		// The client row is locked, so concurrent replacements of its
+		// list run one after the other.
+		var locked string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM client WHERE id = $1 FOR UPDATE`, clientID).Scan(&locked); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("not found")
+			}
+			return fmt.Errorf("lock client: %w", err)
+		}
+		before, err := hiddenCITypesTx(ctx, tx, clientID)
+		if err != nil {
+			return err
+		}
+		var unknown int
+		if err = tx.QueryRow(ctx, `SELECT count(*) FROM unnest($1::uuid[]) AS l(id)
+			WHERE NOT EXISTS (SELECT 1 FROM ci_type t WHERE t.id = l.id AND (t.organization_id IS NULL OR t.organization_id = $2))`,
+			ids, orgID).Scan(&unknown); err != nil {
+			return fmt.Errorf("check ci types: %w", err)
+		}
+		if unknown > 0 {
+			return &api.FieldError{Field: "ci_type_ids", Message: "unknown CI type", Status: http.StatusUnprocessableEntity}
+		}
+		if _, err = tx.Exec(ctx, `DELETE FROM client_ci_type_hidden WHERE client_id = $1 AND ci_type_id <> ALL ($2::uuid[])`,
+			clientID, ids); err != nil {
+			return fmt.Errorf("delete hidden ci types: %w", err)
+		}
+		actorID, actorType := auditActor(ctx)
+		if _, err = tx.Exec(ctx, `INSERT INTO client_ci_type_hidden (organization_id, client_id, ci_type_id, created_by)
+			SELECT $1, $2, l.id, $4 FROM unnest($3::uuid[]) AS l(id) ON CONFLICT DO NOTHING`,
+			orgID, clientID, ids, nullable(&actorID)); err != nil {
+			return fmt.Errorf("insert hidden ci types: %w", err)
+		}
+		after = ids
+		if after == nil {
+			after = []string{}
+		}
+		if _, err = audit.NewPGRecorder().Record(ctx, tx, audit.Entry{
+			OrganizationID: orgID,
+			ActorID:        actorID,
+			ActorType:      actorType,
+			Action:         "client.hidden_ci_types_changed",
+			ResourceType:   "clients",
+			ResourceID:     clientID,
+			Changes:        map[string]any{"ci_type_ids": map[string]any{"old": before, "new": after}},
+		}); err != nil {
+			return fmt.Errorf("audit hidden ci types: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return after, nil
 }
 
 func (r *PGRepository) DeleteClient(ctx context.Context, orgID, id string) error {

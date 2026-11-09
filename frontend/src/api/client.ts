@@ -56,6 +56,8 @@ export interface CI {
   model?: string;
   serial_number?: string;
   management_ip?: string;
+  /** Host name of the CI; the picker shows it with the management IP (WP-859). */
+  hostname?: string;
   firmware_version?: string;
   attributes: Record<string, unknown>;
   /**
@@ -623,6 +625,9 @@ export function isTypeInactive(error: unknown): boolean {
  */
 export const SCOPED_LISTS: Record<string, readonly ('client_id' | 'site_id')[]> = {
   '/cis': ['client_id', 'site_id'],
+  // The types hidden for the chosen client are left out (WP-858);
+  // include_inactive=true lists the whole catalog.
+  '/ci-types': ['client_id'],
   '/export/cis': ['client_id'],
   '/topology': ['client_id', 'site_id'],
   '/assets': ['client_id'],
@@ -2724,9 +2729,40 @@ export interface Credential {
   updated_at: string;
 }
 
+/** The kinds of a credential (CreateCredentialRequest.kind in api/openapi.yaml). */
+export type CredentialKind =
+  | 'snmp_v2c'
+  | 'snmp_v3'
+  | 'ssh_password'
+  | 'ssh_key'
+  | 'redfish'
+  | 'ipmi'
+  | 'wmi'
+  | 'api_token'
+  | 'nut'
+  | 'nas';
+
+/**
+ * A new credential. The secret is write-only: the server encrypts it and no
+ * response returns it (SEC-01, COL-02). Without client_id it is
+ * organization-wide.
+ */
+export interface CredentialInput {
+  name: string;
+  kind: CredentialKind;
+  client_id?: string;
+  secret: Record<string, string>;
+}
+
 export const credentialApi = {
   list(params: ListParams = {}): Promise<PaginatedResponse<Credential>> {
     return fetchAPI(`/credentials${buildQuery(params)}`);
+  },
+  create(input: CredentialInput): Promise<Credential> {
+    return fetchAPI('/credentials', { method: 'POST', body: JSON.stringify(input) });
+  },
+  remove(id: string): Promise<void> {
+    return fetchAPI(`/credentials/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
   rotateKeys(): Promise<{ key_version: number; rotated: number }> {
     return fetchAPI('/credentials/rotate-keys', { method: 'POST' });

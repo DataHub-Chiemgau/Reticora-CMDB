@@ -157,6 +157,59 @@ describe('ObjectPicker', () => {
     expect(listbox.textContent).not.toContain(CI_ID);
   });
 
+  // WP-859: search= of GET /cis also matches host name and management IP;
+  // the option shows both, so targets of the same name can be told apart.
+  it('shows host name and management IP of CI hits of the same name', async () => {
+    const calls = stubApi({
+      '/cis': () =>
+        json(
+          page([
+            {
+              id: CI_ID,
+              name: 'Core-Switch',
+              hostname: 'sw-core-01',
+              management_ip: '10.85.9.17',
+              ci_type_id: 't1',
+              status: 'active',
+            },
+            {
+              id: 'c1000000-0000-4000-8000-000000000002',
+              name: 'Core-Switch',
+              management_ip: '10.85.9.18',
+              ci_type_id: 't1',
+              status: 'active',
+            },
+            {
+              id: 'c1000000-0000-4000-8000-000000000003',
+              name: 'Core-Switch',
+              ci_type_id: 't1',
+              status: 'active',
+            },
+          ]),
+        ),
+    });
+    const changes: PickedObject[][] = [];
+    renderWithProviders(<ObjectHost kinds={['ci']} onChange={(next) => changes.push(next)} />);
+
+    const input = screen.getByRole('combobox', { name: 'Objekt' });
+    type(input, '10.85.9');
+    const listbox = await screen.findByRole('listbox', { name: 'Objekt' });
+    expect(calls.filter((c) => c.path === '/cis')[0]!.params.get('search')).toBe('10.85.9');
+
+    const options = within(listbox).getAllByRole('option');
+    expect(options).toHaveLength(3);
+    expect(options[0]).toHaveTextContent('Core-Switch');
+    expect(options[0]).toHaveTextContent('sw-core-01 · 10.85.9.17');
+    expect(options[1]).toHaveTextContent('10.85.9.18');
+    expect(options[1]).not.toHaveTextContent('·');
+    expect(options[2]!.textContent).toBe('CICore-Switch');
+
+    fireEvent.click(options[1]!);
+    expect(changes[changes.length - 1]).toEqual([
+      { kind: 'ci', id: 'c1000000-0000-4000-8000-000000000002', name: 'Core-Switch' },
+    ]);
+  });
+
   it('searches assets and consumables in the client scope', async () => {
     useScopeStore.setState({ clientId: 'client-1', siteId: 'site-1' });
     const calls = stubApi({

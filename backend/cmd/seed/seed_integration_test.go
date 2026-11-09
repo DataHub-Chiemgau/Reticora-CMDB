@@ -84,10 +84,12 @@ func counts(t *testing.T, f *scopetest.Fixture, orgID string) map[string]int {
 
 // seedCounts is what counts finds in an organization seeded with objects
 // CIs and metrics samples and without the volumes of NFR-01: the SIM-01
-// data set, scaled.
+// data set, scaled. The organization holds the two seeded clients and the
+// default client of trigger trg_organization_default_client (slug default,
+// WP-854), as it holds the default VRF beside the seeded one.
 func seedCounts(objects, metrics int) map[string]int {
 	return map[string]int{
-		"client": 2, "rack": 2, "ci": objects, "ci_location": objects, "ci_site": objects, "ci_room": objects,
+		"client": 3, "rack": 2, "ci": objects, "ci_location": objects, "ci_site": objects, "ci_room": objects,
 		"ci_document": objects, "ci_attribute": objects, "attribute_definition": 1, "rack_mount": 40, "network_interface": objects,
 		"ip_address": objects, "lldp": objects - 4 + 1, "ci_relationship": 2*(objects-4) + 1,
 		"metric_sample": metrics, "collector": 1, "discovery_scope": 2, "review_item": 3, "webhook": 1,

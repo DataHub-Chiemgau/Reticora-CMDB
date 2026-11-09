@@ -51,7 +51,8 @@
     "rules": "Regelkatalog",
     "import": "Import",
     "contracts": "Verträge",
-    "suppliers": "Lieferanten"
+    "suppliers": "Lieferanten",
+    "clients": "Kunden"
   },
   "common": {
     "save": "Speichern",
@@ -175,6 +176,40 @@
       "infrastructure": "Infrastruktur",
       "attention": "Braucht Aufmerksamkeit",
       "operations": "Betrieb und Bestand"
+    }
+  },
+  "discoverability": {
+    "lockedInPlan": "Nicht im Paket {{plan}} enthalten",
+    "lockedNoPlan": "Nicht in Ihrem Paket enthalten",
+    "plans": {
+      "essential": "Essential",
+      "standard": "Standard",
+      "pro": "Pro",
+      "enterprise": "Enterprise"
+    },
+    "locked": {
+      "title": "„{{name}}“ gehört nicht zu Ihrem Paket",
+      "description": "Die Funktion ist in Reticora vorhanden, aber im Paket Ihrer Organisation nicht freigeschaltet. Wenden Sie sich an die Administration Ihrer Organisation, wenn Sie sie nutzen möchten.",
+      "back": "Zum Dashboard"
+    },
+    "quickAccess": {
+      "title": "Schnellzugriff",
+      "general": "Allgemein"
+    },
+    "setup": {
+      "title": "Einrichtung",
+      "progress": "{{done}} von {{total}} Schritten erledigt",
+      "hide": "Liste ausblenden",
+      "toggle": "Einrichtungsliste",
+      "done": "Erledigt",
+      "open": "Offen",
+      "steps": {
+        "client": "Kunde anlegen",
+        "site": "Standort anlegen",
+        "credential": "Zugangsdaten anlegen",
+        "collector": "Collector registrieren",
+        "cis": "Erste CIs erfassen"
+      }
     }
   },
   "toast": {
@@ -423,6 +458,7 @@
     "typesLoading": "Typen werden geladen …",
     "typesLoadFailed": "Die CI-Typen konnten nicht geladen werden.",
     "typeInactive": "Dieser Typ wurde inzwischen deaktiviert. Bitte wählen Sie einen anderen Typ.",
+    "typeHiddenForClient": "Der gewählte CI-Typ ist für den Kunden dieses Standorts ausgeblendet. Wählen Sie einen anderen Standort oder Typ.",
     "tiles": {
       "subtypes": "Untertypen von {{name}} anzeigen",
       "subtypesOf": "Untertypen von {{name}}"
@@ -572,9 +608,9 @@
         "pluginsRequired": "Wählen Sie mindestens ein Plugin.",
         "targetRequired": "Geben Sie ein Ziel an.",
         "credentials": "Credentials",
-        "credentialsHint": "Ohne Auswahl gelten die Credentials des Clients und der Organisation.",
+        "credentialsHint": "Ohne Auswahl gelten die Credentials des Kunden und der Organisation.",
         "credentialsNone": "Keine passenden Credentials vorhanden.",
-        "credentialsUnavailable": "Die Credentials konnten nicht geladen werden (Recht credential:read fehlt?). Ohne Auswahl gelten die Credentials des Clients und der Organisation."
+        "credentialsUnavailable": "Die Credentials konnten nicht geladen werden (Recht credential:read fehlt?). Ohne Auswahl gelten die Credentials des Kunden und der Organisation."
       },
       "plugin": {
         "sweep": "Ping-Sweep",
@@ -616,7 +652,69 @@
       "failed": "Der Vorschlag konnte nicht bearbeitet werden: {{reason}}"
     },
     "empty": "Noch kein Collector verbunden",
-    "emptyHint": "Verbinden Sie einen Collector im Kundennetz. Seine Subnetze erscheinen hier als Vorschläge, die Sie bestätigen."
+    "emptyHint": "Verbinden Sie einen Collector im Kundennetz. Seine Subnetze erscheinen hier als Vorschläge, die Sie bestätigen.",
+    "credentials": {
+      "title": "Zugangsdaten",
+      "intro": "Zugangsdaten, mit denen die Collector Geräte abfragen (SNMP, SSH, Redfish, IPMI, WMI, NUT, NAS, API). Geheimnisse werden verschlüsselt gespeichert und nie wieder angezeigt; zum Ändern löschen und neu anlegen.",
+      "listLabel": "Liste der Zugangsdaten",
+      "add": "Zugangsdaten anlegen",
+      "none": "Noch keine Zugangsdaten angelegt.",
+      "loadFailed": "Die Zugangsdaten konnten nicht geladen werden.",
+      "organizationWide": "Alle Kunden (organisationsweit)",
+      "allClients": "Alle Kunden (organisationsweit)",
+      "deleteNamed": "Zugangsdaten {{name}} löschen",
+      "columns": {
+        "name": "Name",
+        "kind": "Art",
+        "client": "Kunde",
+        "createdAt": "Angelegt"
+      },
+      "kinds": {
+        "snmp_v2c": "SNMP v2c",
+        "snmp_v3": "SNMP v3",
+        "ssh_password": "SSH (Passwort)",
+        "ssh_key": "SSH (Schlüssel)",
+        "redfish": "Redfish",
+        "ipmi": "IPMI",
+        "wmi": "WMI",
+        "api_token": "API-Token",
+        "nut": "NUT (USV)",
+        "nas": "NAS"
+      },
+      "fields": {
+        "community": "Community",
+        "username": "Benutzer",
+        "password": "Passwort",
+        "auth_protocol": "Auth-Protokoll",
+        "auth_password": "Auth-Passwort",
+        "priv_protocol": "Privacy-Protokoll",
+        "priv_password": "Privacy-Passwort",
+        "private_key": "Privater Schlüssel (Datei)",
+        "passphrase": "Passphrase des Schlüssels",
+        "token": "Token"
+      },
+      "form": {
+        "title": "Zugangsdaten anlegen",
+        "secretLegend": "Geheimnis",
+        "secretHint": "Die Eingaben werden verschlüsselt gespeichert und nie wieder angezeigt.",
+        "keyHint": "Die Schlüsseldatei (PEM/OpenSSH) wird gelesen, aber nicht angezeigt.",
+        "optional": "{{field}} (optional)",
+        "nameRequired": "Geben Sie einen Namen an.",
+        "fieldRequired": "{{field}} ist erforderlich.",
+        "reenter": "Die Geheimnisse wurden aus dem Formular entfernt; geben Sie sie erneut ein."
+      },
+      "confirmDelete": {
+        "title": "Zugangsdaten löschen?",
+        "text": "Die Zugangsdaten {{name}} werden gelöscht; die Collector können sie danach nicht mehr verwenden.",
+        "confirm": "Endgültig löschen"
+      },
+      "errors": {
+        "forbidden": "Dafür fehlt Ihnen das Recht (credential:manage) oder der Kunde liegt außerhalb Ihres Bereichs.",
+        "notFound": "Die Zugangsdaten gibt es nicht mehr.",
+        "reason": "Grund: {{detail}}",
+        "deleteFailed": "Die Zugangsdaten {{name}} konnten nicht gelöscht werden. {{reason}}"
+      }
+    }
   },
   "webhook": {
     "title": "Webhooks",
@@ -1560,15 +1658,15 @@
     "resolutionDue": "Lösung fällig",
     "ticket": "Ticket",
     "status": "Status",
-    "client": "Client",
-    "noClient": "Kein Client (Organisation)",
+    "client": "Kunde",
+    "noClient": "Kein Kunde (Organisation)",
     "calendarField": "Business-Kalender",
-    "calendarChain": "Kalenderkette (Client-, Org-Standard)",
+    "calendarChain": "Kalenderkette (Kunden-, Org-Standard)",
     "businessHours": "Geschäftszeiten anwenden",
     "elapsedTime": "Laufzeit (rund um die Uhr)",
     "calendar": {
       "title": "Business-Kalender",
-      "hint": "Wochenzeiten und Feiertage, nach denen SLA-Fristen in Geschäftszeit gezählt werden. Leere Zeitzone wird aus Client bzw. Organisation abgeleitet.",
+      "hint": "Wochenzeiten und Feiertage, nach denen SLA-Fristen in Geschäftszeit gezählt werden. Leere Zeitzone wird aus Kunde bzw. Organisation abgeleitet.",
       "loading": "Business-Kalender werden geladen",
       "errorTitle": "Business-Kalender konnten nicht geladen werden",
       "emptyTitle": "Keine Business-Kalender vorhanden",
@@ -1581,12 +1679,12 @@
       "deleteConfirm": "Kalender „{{name}}“ löschen? Richtlinien, die ihn nennen, folgen danach der Kalenderkette.",
       "more": "Weitere laden",
       "name": "Name",
-      "client": "Client",
-      "organizationWide": "Organisation (alle Clients)",
-      "clientFixed": "Der Client eines Kalenders lässt sich nicht ändern; legen Sie für einen anderen Client einen neuen Kalender an.",
+      "client": "Kunde",
+      "organizationWide": "Organisation (alle Kunden)",
+      "clientFixed": "Der Kunde eines Kalenders lässt sich nicht ändern; legen Sie für einen anderen Kunden einen neuen Kalender an.",
       "timezone": "Zeitzone",
       "timezonePlaceholder": "z. B. Europe/Berlin",
-      "timezoneHint": "IANA-Name; leer = abgeleitet aus Client bzw. Organisation.",
+      "timezoneHint": "IANA-Name; leer = abgeleitet aus Kunde bzw. Organisation.",
       "timezoneDerived": "abgeleitet",
       "weeklyHours": "Wochenzeiten",
       "windowStart": "{{day}}, Zeitfenster {{n}}: Beginn",
@@ -1599,7 +1697,7 @@
       "holidayName": "Feiertag {{n}}: Name",
       "removeHoliday": "Feiertag {{n}} entfernen",
       "addHoliday": "Feiertag hinzufügen",
-      "isDefault": "Standardkalender (für Organisation bzw. Client)",
+      "isDefault": "Standardkalender (für Organisation bzw. Kunde)",
       "default": "Standard",
       "weekdays": {
         "mon": "Montag",
@@ -1620,8 +1718,8 @@
         "sun": "So"
       },
       "errors": {
-        "secondDefault": "Für diese Organisation bzw. diesen Client gibt es bereits einen Standardkalender.",
-        "forbidden": "Keine Berechtigung: Organisationsweite Kalender kann nur ein Nutzer ohne Client-Beschränkung pflegen."
+        "secondDefault": "Für diese Organisation bzw. diesen Kunden gibt es bereits einen Standardkalender.",
+        "forbidden": "Keine Berechtigung: Organisationsweite Kalender kann nur ein Nutzer ohne Kundenbeschränkung pflegen."
       }
     }
   },
@@ -2150,8 +2248,8 @@
     "emptyHint": "Lege eine Bestellung an, um Beschaffung und Genehmigung zu verfolgen.",
     "filterStatus": "Status filtern",
     "editTitle": "Bestellung bearbeiten",
-    "client": "Mandant",
-    "orgWide": "Ohne Mandant (organisationsweit)",
+    "client": "Kunde",
+    "orgWide": "Ohne Kunde (organisationsweit)",
     "noSupplier": "Kein Lieferant",
     "targetBin": "Ziel-Fach",
     "actions": {
@@ -2701,7 +2799,7 @@
     "createRoot": "Standort anlegen",
     "empty": "Noch keine Standorte. Legen Sie zuerst einen Standort an.",
     "nodeNotFound": "Der verlinkte Knoten ist nicht vorhanden oder für Sie nicht sichtbar.",
-    "client": "Mandant",
+    "client": "Kunde",
     "deleteFailed": "Löschen nicht möglich",
     "title": "Standorte & Lager",
     "kinds": {
@@ -2788,7 +2886,7 @@
       "discovery_source": "Discovery-Quelle",
       "health": "Zustand",
       "ci_type": "CI-Typ",
-      "client_id": "Mandant (ID)",
+      "client_id": "Kunde (ID)",
       "site_id": "Standort (ID)",
       "location_id": "Ort (ID)",
       "is_manual": "Manuell gepflegt",
@@ -4170,6 +4268,60 @@
       "reason": "Die Aktion ist fehlgeschlagen: {{detail}}"
     }
   },
+  "clients": {
+    "title": "Kunden",
+    "subtitle": "Die Kunden der Organisation. Standorte, CIs und Assets werden einem Kunden zugeordnet.",
+    "readOnly": "Sie können die Kunden lesen; Anlegen, Ändern und Löschen erfordern das Recht user:manage.",
+    "create": "Kunde anlegen",
+    "createTitle": "Kunde anlegen",
+    "createFromSite": "Neuer Kunde",
+    "editTitle": "„{{name}}“ bearbeiten",
+    "editLabel": "Bearbeiten: {{name}}",
+    "deleteLabel": "Löschen: {{name}}",
+    "deleteTitle": "Kunde „{{name}}“ löschen?",
+    "deleteConfirm": "Der Kunde wird endgültig gelöscht, seine Standorte mit ihm. Verweisen noch andere Objekte auf den Kunden, lehnt der Server das Löschen ab.",
+    "empty": "Noch keine Kunden. Legen Sie einen Kunden an, bevor Sie Standorte anlegen.",
+    "loadError": "Die Kunden können nicht geladen werden.",
+    "slugHint": "Eindeutiges Kürzel innerhalb der Organisation; wird aus dem Namen vorgeschlagen.",
+    "fields": {
+      "name": "Name",
+      "slug": "Kürzel"
+    },
+    "errors": {
+      "nameRequired": "Geben Sie einen Namen an.",
+      "slugRequired": "Geben Sie ein Kürzel an.",
+      "nameTaken": "Einen Kunden mit diesem Namen gibt es schon.",
+      "slugTaken": "Dieses Kürzel ist bereits vergeben.",
+      "conflict": "Ein Kunde mit diesen Angaben existiert bereits.",
+      "inUse": "Der Kunde wird noch verwendet von: {{kinds}}",
+      "deleteNotFound": "Der Kunde wurde nicht gelöscht: Es gibt ihn nicht mehr, oder es verweisen noch Objekte auf ihn.",
+      "forbidden": "Ihnen fehlt das Recht user:manage.",
+      "forbiddenRead": "Keine Berechtigung, die Kunden zu lesen.",
+      "notFound": "Den Kunden gibt es nicht mehr.",
+      "reason": "Die Aktion ist fehlgeschlagen: {{detail}}"
+    }
+  },
+  "clientHiddenTypes": {
+    "title": "Ausgeblendete CI-Typen",
+    "open": "Ausgeblendete CI-Typen: {{name}}",
+    "dialogTitle": "Ausgeblendete CI-Typen – {{name}}",
+    "intro": "Ausgeblendete CI-Typen werden für diesen Kunden bei der Neuanlage von CIs nicht angeboten und können für seine CIs nicht gewählt werden. Sie bleiben aktiv: Bestehende CIs behalten ihren Typ, Discovery und andere Kunden sind nicht betroffen.",
+    "readOnly": "Ändern erfordert das Recht user:manage.",
+    "close": "Schließen",
+    "filter": "Typen filtern",
+    "listLabel": "CI-Typen",
+    "count": "{{count}} ausgeblendet",
+    "inactive": "deaktiviert",
+    "system": "System",
+    "empty": "Keine CI-Typen gefunden.",
+    "loadError": "Die CI-Typen des Kunden können nicht geladen werden.",
+    "errors": {
+      "unknownType": "Ein gewählter CI-Typ existiert nicht mehr. Laden Sie die Liste neu.",
+      "forbidden": "Ihnen fehlt das Recht user:manage.",
+      "notFound": "Den Kunden gibt es nicht mehr.",
+      "reason": "Speichern fehlgeschlagen: {{detail}}"
+    }
+  },
   "ruleCatalog": {
     "title": "Regelkatalog",
     "subtitle": "Validierungen und Bedingungen je Typ, Attribut-Set oder Template-Version",
@@ -4464,13 +4616,13 @@
     "orgWide": "Organisationsweit",
     "none": "Keine Angabe",
     "currencyHint": "Leer bedeutet die Währung der Organisation.",
-    "clientFixed": "Der Client lässt sich nach dem Anlegen nicht mehr ändern.",
-    "supplierHint": "Angeboten werden organisationsweite Lieferanten und die des gewählten Clients.",
+    "clientFixed": "Der Kunde lässt sich nach dem Anlegen nicht mehr ändern.",
+    "supplierHint": "Angeboten werden organisationsweite Lieferanten und die des gewählten Kunden.",
     "fields": {
       "number": "Nummer",
       "kind": "Art",
       "supplier": "Lieferant",
-      "client": "Client",
+      "client": "Kunde",
       "term": "Laufzeit",
       "startDate": "Beginn",
       "endDate": "Ende",
@@ -4548,11 +4700,11 @@
     "search": "Lieferanten suchen",
     "orgWide": "Organisationsweit",
     "noContact": "Keine Kontaktperson",
-    "clientFixed": "Der Client lässt sich nach dem Anlegen nicht mehr ändern.",
+    "clientFixed": "Der Kunde lässt sich nach dem Anlegen nicht mehr ändern.",
     "fields": {
       "name": "Name",
       "externalRef": "Externe Referenz",
-      "client": "Client",
+      "client": "Kunde",
       "contact": "Kontaktperson",
       "notes": "Notizen"
     },

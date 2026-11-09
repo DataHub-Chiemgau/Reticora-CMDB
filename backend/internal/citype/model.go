@@ -263,6 +263,10 @@ type FilterParams struct {
 	IncludeInactive bool
 	Category        string
 	Search          string
+	// ClientID leaves out the types hidden for this client (MET-05,
+	// WP-858); without it a client-scoped principal gets no type hidden for
+	// every client of its scope. Ignored with IncludeInactive.
+	ClientID string
 }
 
 // Languages of a LocalizedText (MET-01).

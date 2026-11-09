@@ -51,7 +51,8 @@
     "rules": "Rule catalog",
     "import": "Import",
     "contracts": "Contracts",
-    "suppliers": "Suppliers"
+    "suppliers": "Suppliers",
+    "clients": "Customers"
   },
   "common": {
     "save": "Save",
@@ -177,6 +178,40 @@
       "operations": "Operations and stock"
     }
   },
+  "discoverability": {
+    "lockedInPlan": "Not included in the {{plan}} plan",
+    "lockedNoPlan": "Not included in your plan",
+    "plans": {
+      "essential": "Essential",
+      "standard": "Standard",
+      "pro": "Pro",
+      "enterprise": "Enterprise"
+    },
+    "locked": {
+      "title": "“{{name}}” is not part of your plan",
+      "description": "The function exists in Reticora but is not enabled in your organization's plan. Contact your organization's administrators if you want to use it.",
+      "back": "Go to dashboard"
+    },
+    "quickAccess": {
+      "title": "Quick access",
+      "general": "General"
+    },
+    "setup": {
+      "title": "Setup",
+      "progress": "{{done}} of {{total}} steps done",
+      "hide": "Hide list",
+      "toggle": "Setup checklist",
+      "done": "Done",
+      "open": "Open",
+      "steps": {
+        "client": "Create a customer",
+        "site": "Create a site",
+        "credential": "Create credentials",
+        "collector": "Register a collector",
+        "cis": "Capture the first CIs"
+      }
+    }
+  },
   "toast": {
     "undo": "Undo",
     "dismiss": "Dismiss notification",
@@ -186,7 +221,7 @@
   },
   "tenant": {
     "organization": "Organization",
-    "client": "Client",
+    "client": "Customer",
     "site": "Site",
     "switchTenant": "Switch Tenant"
   },
@@ -215,7 +250,7 @@
     "exportJob": {
       "progress": "{{format}} export: {{status}}",
       "done": "{{format}} export downloaded ({{rows}} rows)",
-      "filtersIgnored": "Search and site are not applied to the export; it contains all CIs with the selected status, type and client.",
+      "filtersIgnored": "Search and site are not applied to the export; it contains all CIs with the selected status, type and customer.",
       "forbidden": "Export not allowed: you lack the permission or your plan does not include exports.",
       "unavailable": "Export is currently unavailable. Please try again later.",
       "failed": "The export failed. Please try again.",
@@ -423,6 +458,7 @@
     "typesLoading": "Loading types …",
     "typesLoadFailed": "The CI types could not be loaded.",
     "typeInactive": "This type has been deactivated in the meantime. Please choose another type.",
+    "typeHiddenForClient": "The chosen CI type is hidden for the client of this location. Choose another location or type.",
     "tiles": {
       "subtypes": "Show subtypes of {{name}}",
       "subtypesOf": "Subtypes of {{name}}"
@@ -502,9 +538,9 @@
       "once": "This code is shown only once and expires. Run in the customer network:",
       "expires": "Valid until",
       "after": "Then restart the collector and confirm the suggested scopes on this page.",
-      "client": "Client",
-      "clientChoose": "Choose a client",
-      "clientHint": "Your access covers several clients: choose the client the collector is bound to.",
+      "client": "Customer",
+      "clientChoose": "Choose a customer",
+      "clientHint": "Your access covers several customers: choose the customer the collector is bound to.",
       "failed": "The enrollment code was not created: {{detail}}"
     },
     "collectorStatus": {
@@ -572,9 +608,9 @@
         "pluginsRequired": "Select at least one plugin.",
         "targetRequired": "Enter a target.",
         "credentials": "Credentials",
-        "credentialsHint": "Without a selection the credentials of the client and of the organization apply.",
+        "credentialsHint": "Without a selection the credentials of the customer and of the organization apply.",
         "credentialsNone": "No matching credentials.",
-        "credentialsUnavailable": "The credentials could not be loaded (missing credential:read?). Without a selection the credentials of the client and of the organization apply."
+        "credentialsUnavailable": "The credentials could not be loaded (missing credential:read?). Without a selection the credentials of the customer and of the organization apply."
       },
       "plugin": {
         "sweep": "Ping sweep",
@@ -616,7 +652,69 @@
       "failed": "The suggestion could not be resolved: {{reason}}"
     },
     "empty": "No collector connected yet",
-    "emptyHint": "Connect a collector in the customer network. Its subnets appear here as suggestions for you to confirm."
+    "emptyHint": "Connect a collector in the customer network. Its subnets appear here as suggestions for you to confirm.",
+    "credentials": {
+      "title": "Credentials",
+      "intro": "Credentials the collectors use to query devices (SNMP, SSH, Redfish, IPMI, WMI, NUT, NAS, API). Secrets are stored encrypted and never shown again; to change one, delete it and create it anew.",
+      "listLabel": "List of credentials",
+      "add": "Add credentials",
+      "none": "No credentials yet.",
+      "loadFailed": "The credentials could not be loaded.",
+      "organizationWide": "All customers (organization-wide)",
+      "allClients": "All customers (organization-wide)",
+      "deleteNamed": "Delete credentials {{name}}",
+      "columns": {
+        "name": "Name",
+        "kind": "Kind",
+        "client": "Customer",
+        "createdAt": "Created"
+      },
+      "kinds": {
+        "snmp_v2c": "SNMP v2c",
+        "snmp_v3": "SNMP v3",
+        "ssh_password": "SSH (password)",
+        "ssh_key": "SSH (key)",
+        "redfish": "Redfish",
+        "ipmi": "IPMI",
+        "wmi": "WMI",
+        "api_token": "API token",
+        "nut": "NUT (UPS)",
+        "nas": "NAS"
+      },
+      "fields": {
+        "community": "Community",
+        "username": "User",
+        "password": "Password",
+        "auth_protocol": "Auth protocol",
+        "auth_password": "Auth password",
+        "priv_protocol": "Privacy protocol",
+        "priv_password": "Privacy password",
+        "private_key": "Private key (file)",
+        "passphrase": "Key passphrase",
+        "token": "Token"
+      },
+      "form": {
+        "title": "Add credentials",
+        "secretLegend": "Secret",
+        "secretHint": "The entries are stored encrypted and never shown again.",
+        "keyHint": "The key file (PEM/OpenSSH) is read but not shown.",
+        "optional": "{{field}} (optional)",
+        "nameRequired": "Enter a name.",
+        "fieldRequired": "{{field}} is required.",
+        "reenter": "The secrets were removed from the form; enter them again."
+      },
+      "confirmDelete": {
+        "title": "Delete credentials?",
+        "text": "The credentials {{name}} are deleted; the collectors can no longer use them.",
+        "confirm": "Delete permanently"
+      },
+      "errors": {
+        "forbidden": "You lack the right for this (credential:manage) or the customer is outside your scope.",
+        "notFound": "These credentials no longer exist.",
+        "reason": "Reason: {{detail}}",
+        "deleteFailed": "The credentials {{name}} could not be deleted. {{reason}}"
+      }
+    }
   },
   "webhook": {
     "title": "Webhooks",
@@ -1356,10 +1454,10 @@
     "scope": "Scope",
     "scopeType": "Scope type",
     "scopeTarget": "Scope target",
-    "chooseTarget": "Choose a client or site",
+    "chooseTarget": "Choose a customer or site",
     "scopeTypes": {
       "org": "Organization",
-      "client": "Client",
+      "client": "Customer",
       "site": "Site"
     },
     "expires": "Valid until",
@@ -1380,8 +1478,8 @@
       "emailInvalid": "Please enter a single email address without a name.",
       "emailPending": "This address already has a pending invitation. Renew it in the list.",
       "roleInvalid": "This role does not exist in the organization. Choose a standard role.",
-      "scopeTypeMismatch": "The role does not fit the scope type: client roles are granted for a client, site roles for a site.",
-      "scopeInvalid": "Choose an existing client or site.",
+      "scopeTypeMismatch": "The role does not fit the scope type: customer roles are granted for a customer, site roles for a site.",
+      "scopeInvalid": "Choose an existing customer or site.",
       "scopeRequired": "Please choose the scope target.",
       "forbidden": "You are not allowed to issue this invitation.",
       "ceiling": "You can only grant roles whose permissions you hold yourself in the chosen scope.",
@@ -1560,15 +1658,15 @@
     "resolutionDue": "Resolution due",
     "ticket": "Ticket",
     "status": "Status",
-    "client": "Client",
-    "noClient": "No client (organization)",
+    "client": "Customer",
+    "noClient": "No customer (organization)",
     "calendarField": "Business calendar",
-    "calendarChain": "Calendar chain (client, org default)",
+    "calendarChain": "Calendar chain (customer, org default)",
     "businessHours": "Apply business hours",
     "elapsedTime": "Elapsed time (around the clock)",
     "calendar": {
       "title": "Business calendars",
-      "hint": "Weekly hours and holidays by which SLA deadlines count in business time. An empty time zone is derived from the client or the organization.",
+      "hint": "Weekly hours and holidays by which SLA deadlines count in business time. An empty time zone is derived from the customer or the organization.",
       "loading": "Loading business calendars",
       "errorTitle": "Business calendars could not be loaded",
       "emptyTitle": "No business calendars available",
@@ -1581,12 +1679,12 @@
       "deleteConfirm": "Delete calendar “{{name}}”? Policies naming it then follow the calendar chain.",
       "more": "Load more",
       "name": "Name",
-      "client": "Client",
-      "organizationWide": "Organization (all clients)",
-      "clientFixed": "The client of a calendar cannot be changed; create a new calendar for another client.",
+      "client": "Customer",
+      "organizationWide": "Organization (all customers)",
+      "clientFixed": "The customer of a calendar cannot be changed; create a new calendar for another customer.",
       "timezone": "Time zone",
       "timezonePlaceholder": "e.g. Europe/Berlin",
-      "timezoneHint": "IANA name; empty = derived from the client or the organization.",
+      "timezoneHint": "IANA name; empty = derived from the customer or the organization.",
       "timezoneDerived": "derived",
       "weeklyHours": "Weekly hours",
       "windowStart": "{{day}}, window {{n}}: start",
@@ -1599,7 +1697,7 @@
       "holidayName": "Holiday {{n}}: name",
       "removeHoliday": "Remove holiday {{n}}",
       "addHoliday": "Add holiday",
-      "isDefault": "Default calendar (of the organization or client)",
+      "isDefault": "Default calendar (of the organization or customer)",
       "default": "Default",
       "weekdays": {
         "mon": "Monday",
@@ -1620,8 +1718,8 @@
         "sun": "Sun"
       },
       "errors": {
-        "secondDefault": "This organization or client already has a default calendar.",
-        "forbidden": "Not permitted: only a user without client restriction can maintain organization-wide calendars."
+        "secondDefault": "This organization or customer already has a default calendar.",
+        "forbidden": "Not permitted: only a user without customer restriction can maintain organization-wide calendars."
       }
     }
   },
@@ -2150,8 +2248,8 @@
     "emptyHint": "Create an order to follow procurement and approval.",
     "filterStatus": "Filter by status",
     "editTitle": "Edit order",
-    "client": "Client",
-    "orgWide": "No client (organization-wide)",
+    "client": "Customer",
+    "orgWide": "No customer (organization-wide)",
     "noSupplier": "No supplier",
     "targetBin": "Target bin",
     "actions": {
@@ -2402,7 +2500,7 @@
     "unique": "Unique",
     "uniqueScope": "Unique per",
     "uniqueScopeOrg": "Organization",
-    "uniqueScopeClient": "Client",
+    "uniqueScopeClient": "Customer",
     "deactivate": "Deactivate",
     "addField": "Add field",
     "logical": "logical",
@@ -2450,7 +2548,7 @@
     "editFlagsHint": "Saving changes the index settings of the field; an index job builds the index in the background.",
     "flagSearchable": "searchable",
     "flagUnique": "unique",
-    "flagUniqueClient": "unique per client",
+    "flagUniqueClient": "unique per customer",
     "flagErrors": {
       "duplicates": "Uniqueness not enabled: CIs already share a value. Resolve the duplicates first. Reason: {{detail}}",
       "forbidden": "You are not allowed to manage attributes.",
@@ -2664,18 +2762,18 @@
     "affected": "Affected CIs",
     "spof": "SPOF",
     "spofList": "Single points of failure of the services:",
-    "clients": "Clients",
+    "clients": "Customers",
     "title": "Impact analysis",
     "compute": "Compute blast radius",
     "heuristic": "Network heuristic",
     "heuristicList": "Possibly affected:",
-    "heuristicHint": "Reached only over an undirected network connection (connected_to); whether the failure hits these CIs is not certain. They do not count towards the affected CIs, clients and sites.",
+    "heuristicHint": "Reached only over an undirected network connection (connected_to); whether the failure hits these CIs is not certain. They do not count towards the affected CIs, customers and sites.",
     "heuristicMarker": "Network heuristic",
     "noneAffected": "No CIs are certainly affected.",
     "services": "Services",
     "servicesHeuristic": "+{{count}} over the network heuristic",
     "servicesList": "Affected services:",
-    "clientsList": "Affected clients:",
+    "clientsList": "Affected customers:",
     "sitesList": "Affected sites:",
     "spofBadge": "SPOF",
     "spofFor": "for {{services}}",
@@ -2701,7 +2799,7 @@
     "createRoot": "Create site",
     "empty": "No locations yet. Create a site first.",
     "nodeNotFound": "The linked node does not exist or is not visible to you.",
-    "client": "Client",
+    "client": "Customer",
     "deleteFailed": "Cannot delete",
     "title": "Sites & Warehouses",
     "kinds": {
@@ -2788,7 +2886,7 @@
       "discovery_source": "Discovery source",
       "health": "Health",
       "ci_type": "CI type",
-      "client_id": "Client (ID)",
+      "client_id": "Customer (ID)",
       "site_id": "Site (ID)",
       "location_id": "Location (ID)",
       "is_manual": "Maintained manually",
@@ -3093,11 +3191,11 @@
   "scope": {
     "label": "Scope",
     "organization": "Organization",
-    "client": "Client",
+    "client": "Customer",
     "site": "Site",
-    "allClients": "All clients",
+    "allClients": "All customers",
     "allSites": "All sites",
-    "moreClients": "Load more clients",
+    "moreClients": "Load more customers",
     "moreSites": "Load more sites",
     "outsideCI": "This CI lies outside the selected scope ({{scope}}).",
     "switchToObject": "Switch scope",
@@ -4170,6 +4268,60 @@
       "reason": "The action failed: {{detail}}"
     }
   },
+  "clients": {
+    "title": "Customers",
+    "subtitle": "The customers of the organization. Sites, CIs and assets belong to a customer.",
+    "readOnly": "You can read the customers; creating, changing and deleting require the permission user:manage.",
+    "create": "Add customer",
+    "createTitle": "Add customer",
+    "createFromSite": "New customer",
+    "editTitle": "Edit \"{{name}}\"",
+    "editLabel": "Edit: {{name}}",
+    "deleteLabel": "Delete: {{name}}",
+    "deleteTitle": "Delete customer \"{{name}}\"?",
+    "deleteConfirm": "The customer is deleted permanently, together with its sites. While other objects still refer to the customer, the server refuses the deletion.",
+    "empty": "No customers yet. Add a customer before you add sites.",
+    "loadError": "The customers cannot be loaded.",
+    "slugHint": "Unique short name within the organization; suggested from the name.",
+    "fields": {
+      "name": "Name",
+      "slug": "Short name"
+    },
+    "errors": {
+      "nameRequired": "Enter a name.",
+      "slugRequired": "Enter a short name.",
+      "nameTaken": "A customer with this name already exists.",
+      "slugTaken": "This short name is already taken.",
+      "conflict": "A customer with these details already exists.",
+      "inUse": "The customer is still used by: {{kinds}}",
+      "deleteNotFound": "The customer was not deleted: it no longer exists, or objects still refer to it.",
+      "forbidden": "You lack the permission user:manage.",
+      "forbiddenRead": "No permission to read the customers.",
+      "notFound": "The customer no longer exists.",
+      "reason": "The action failed: {{detail}}"
+    }
+  },
+  "clientHiddenTypes": {
+    "title": "Hidden CI types",
+    "open": "Hidden CI types: {{name}}",
+    "dialogTitle": "Hidden CI types – {{name}}",
+    "intro": "Hidden CI types are not offered for this client when CIs are created and cannot be chosen for its CIs. They stay active: existing CIs keep their type, discovery and other clients are not affected.",
+    "readOnly": "Changing requires the permission user:manage.",
+    "close": "Close",
+    "filter": "Filter types",
+    "listLabel": "CI types",
+    "count": "{{count}} hidden",
+    "inactive": "deactivated",
+    "system": "System",
+    "empty": "No CI types found.",
+    "loadError": "The CI types of the client cannot be loaded.",
+    "errors": {
+      "unknownType": "A chosen CI type no longer exists. Reload the list.",
+      "forbidden": "You lack the permission user:manage.",
+      "notFound": "The client no longer exists.",
+      "reason": "Saving failed: {{detail}}"
+    }
+  },
   "ruleCatalog": {
     "title": "Rule catalog",
     "subtitle": "Validations and conditions per type, attribute set or template version",
@@ -4464,13 +4616,13 @@
     "orgWide": "Organization-wide",
     "none": "Not set",
     "currencyHint": "Empty means the currency of the organization.",
-    "clientFixed": "The client cannot be changed after creation.",
-    "supplierHint": "Offered are organization-wide suppliers and those of the chosen client.",
+    "clientFixed": "The customer cannot be changed after creation.",
+    "supplierHint": "Offered are organization-wide suppliers and those of the chosen customer.",
     "fields": {
       "number": "Number",
       "kind": "Kind",
       "supplier": "Supplier",
-      "client": "Client",
+      "client": "Customer",
       "term": "Term",
       "startDate": "Start",
       "endDate": "End",
@@ -4548,11 +4700,11 @@
     "search": "Search suppliers",
     "orgWide": "Organization-wide",
     "noContact": "No contact person",
-    "clientFixed": "The client cannot be changed after creation.",
+    "clientFixed": "The customer cannot be changed after creation.",
     "fields": {
       "name": "Name",
       "externalRef": "External reference",
-      "client": "Client",
+      "client": "Customer",
       "contact": "Contact person",
       "notes": "Notes"
     },

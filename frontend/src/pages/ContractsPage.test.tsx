@@ -408,7 +408,7 @@ describe('ContractsPage list', () => {
       expect(within(supplierSelect).getByRole('option', { name: 'Wartungs GmbH' })).toBeTruthy(),
     );
     expect(within(supplierSelect).queryByRole('option', { name: 'Client AG' })).toBeNull();
-    fireEvent.change(await within(dialog).findByLabelText('Client'), {
+    fireEvent.change(await within(dialog).findByLabelText('Kunde'), {
       target: { value: 'cl-1' },
     });
     expect(within(supplierSelect).getByRole('option', { name: 'Client AG' })).toBeTruthy();

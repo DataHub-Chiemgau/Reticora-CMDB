@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000281_document_orphaned_scope
+Stand: Migration 000283_client_ci_type_hidden
 
 ## Prüfung
 
@@ -1255,6 +1255,36 @@ String-Elemente) nach `ci_tag`, entfernt `attributes.tags` und die Feldwerte
 offene `override_conflict`-Reviews zu `tags`, entfernt `tags` aus offenen
 Merge-Snapshots und normalisiert `saved_view.filter_spec.tags` von CI-Sichten.
 
+Standardkunde (UI-15, TEN-01, WP-854, Migration 000282): Jede Organisation
+erhält beim Anlegen einen Kunden (`client`) mit `slug` `default` und dem
+Namen der Organisation über den Trigger `trg_organization_default_client`
+(AFTER INSERT auf `organization`, Funktion `organization_default_client`,
+fester `search_path`; setzt `app.org_id` wie `organization_default_tags` und
+erweitert den Client- und Site-Scope über `app_scope_widen`, ON CONFLICT DO
+NOTHING). Der Backfill gibt jeder Organisation ohne Kunden diesen Kunden,
+auch `00000000-0000-0000-0000-000000000001` („Reticora Demo“);
+Organisationen mit Kunden erhalten keinen weiteren. `client` behält ENABLE +
+FORCE RLS und `client_isolation`. Die Down-Migration entfernt Trigger und
+Funktion; die angelegten Kunden bleiben.
+
+Ausgeblendete CI-Typen je Kunde (MET-05, WP-858, Migration 000283):
+`client_ci_type_hidden` (`organization_id`, `client_id`, `ci_type_id`,
+`created_at`, `created_by`) mit dem Primärschlüssel (`organization_id`,
+`client_id`, `ci_type_id`), `client_ci_type_hidden_client_id_fkey`
+(`client_id`, `organization_id`) → `client` ON DELETE CASCADE,
+`ci_type_id` → `ci_type` ON DELETE CASCADE und dem Index
+`idx_client_ci_type_hidden_type` (`ci_type_id`). Der Trigger
+`client_ci_type_hidden_type` (BEFORE INSERT OR UPDATE OF `ci_type_id`,
+`organization_id`, fester `search_path`) lässt nur einen Systemtyp oder einen
+Typ derselben Organisation zu (23503). ENABLE + FORCE RLS mit
+`client_ci_type_hidden_isolation` (Organisation und `app.client_scope`;
+`client_id` ist NOT NULL, USING gleich WITH CHECK) und TRUNCATE-Schutz. Ein
+ausgeblendeter Typ bleibt aktiv: `GET /api/v1/ci-types` lässt ihn für
+`client_id` (oder für einen Principal, dessen Kunden ihn alle ausblenden)
+weg, die Neuanlage durch eine Person und der manuelle Typwechsel für CIs des
+Kunden antworten 422; bestehende CIs, Discovery und Ingest bleiben
+unberührt. Die Down-Migration entfernt Tabelle und Funktion.
+
 Lieferanten (MGT-12, API-06, WP-736, E-41, Migration 000223): `supplier` hält
 die Stammdaten eines Lieferanten der Organisation oder eines Clients
 (`client_id` NULL ist org-weit): `name` (Firmenname, keine PII,
@@ -1968,6 +1998,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `ci_type` | ja | ja | ci_type_isolation_delete (DELETE), ci_type_isolation_insert (INSERT), ci_type_isolation_select (SELECT), ci_type_isolation_update (UPDATE) |
 | `ci_type_attribute_set` | ja | ja | ci_type_attribute_set_isolation_delete (DELETE), ci_type_attribute_set_isolation_insert (INSERT), ci_type_attribute_set_isolation_select (SELECT), ci_type_attribute_set_isolation_update (UPDATE) |
 | `client` | ja | ja | client_isolation (ALL) |
+| `client_ci_type_hidden` | ja | ja | client_ci_type_hidden_isolation (ALL) |
 | `collector` | ja | ja | collector_isolation (ALL), collector_scoped_delete (DELETE), collector_scoped_update (UPDATE) |
 | `collector_ca` | ja | ja | collector_ca_operator (ALL) |
 | `collector_certificate` | ja | ja | collector_certificate_isolation (ALL), collector_certificate_system_select (SELECT) |

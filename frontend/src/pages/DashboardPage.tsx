@@ -19,7 +19,11 @@ import { MetricCard } from '../components/ui/MetricCard';
 import { PageHeader } from '../components/ui/PageHeader';
 import { ErrorState } from '../components/ui/ErrorState';
 import { Select } from '../components/ui/Select';
-import { useEntitlements, useModules } from '../hooks/useEntitlements';
+import { useAuthStore } from '../auth/authStore';
+import { SetupChecklist, setupUserKey } from '../components/dashboard/SetupChecklist';
+import { pageToPath } from '../components/CommandPalette';
+import { NAV_GROUPS } from '../components/shell/navigation';
+import { useEntitlements, useModules, useNavAccess } from '../hooks/useEntitlements';
 import { useEscalatedReviewCount } from '../hooks/useReviews';
 import { DASHBOARD_ROLES, useDashboardStore } from '../stores/dashboard';
 import type { DashboardRole, DashboardWidget } from '../stores/dashboard';
@@ -307,6 +311,60 @@ function SetupBanner() {
   );
 }
 
+/**
+ * QuickAccess leads to the functions the user can reach (WP-857): the pages
+ * of NAV_GROUPS that the navigation shows, by the same rule (navPageState),
+ * grouped like the navigation. Locked and hidden pages are not offered.
+ */
+function QuickAccess() {
+  const { t } = useTranslation();
+  const { stateOf } = useNavAccess();
+  const groups = NAV_GROUPS.map((group) => ({
+    group,
+    items: group.items.filter(({ page }) => page !== 'dashboard' && stateOf(page) === 'visible'),
+  })).filter((entry) => entry.items.length > 0);
+  if (groups.length === 0) {
+    return null;
+  }
+  return (
+    <section aria-labelledby="dashboard-quick-access">
+      <h2 id="dashboard-quick-access" className="mb-3 text-sm font-semibold text-fg">
+        {t('discoverability.quickAccess.title')}
+      </h2>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {groups.map(({ group, items }) => {
+          const headingId = `dashboard-quick-access-${group.id}`;
+          return (
+            <div
+              key={group.id}
+              role="group"
+              aria-labelledby={headingId}
+              className="rounded-xl border border-line bg-panel p-4"
+            >
+              <h3 id={headingId} className="mb-2 text-xs font-medium text-fg-subtle">
+                {group.labelKey ? t(group.labelKey) : t('discoverability.quickAccess.general')}
+              </h3>
+              <ul className="space-y-0.5">
+                {items.map(({ page, icon: Icon }) => (
+                  <li key={page}>
+                    <Link
+                      to={pageToPath[page]}
+                      className="flex items-center gap-2 rounded-md px-1.5 py-1 text-sm text-fg-muted transition-colors hover:bg-fg/[0.05] hover:text-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+                    >
+                      <Icon aria-hidden="true" className="h-4 w-4 shrink-0 text-fg-subtle" />
+                      <span className="truncate">{t(`nav.${page}`)}</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 const widgetRenderers: Record<DashboardWidget, () => React.JSX.Element | null> = {
   ciSummary: CISummaryWidget,
   collectors: CollectorsWidget,
@@ -339,6 +397,9 @@ export function DashboardPage() {
   const { isModuleEnabled } = useModules();
   const { isEnabled } = useEntitlements();
   const canReadReviews = useHasPermission('discovery:read');
+  const setupUser = setupUserKey(useAuthStore((state) => state.user?.sub));
+  const setupHidden = useDashboardStore((state) => state.setupHiddenFor.includes(setupUser));
+  const setSetupHidden = useDashboardStore((state) => state.setSetupHidden);
   const widgets = allWidgets.filter((widget) => {
     const module = widgetModule[widget];
     return (
@@ -369,6 +430,10 @@ export function DashboardPage() {
       />
 
       <SetupBanner />
+
+      <SetupChecklist />
+
+      <QuickAccess />
 
       {sections.map((section) => {
         const shown = section.widgets.filter(
@@ -415,6 +480,16 @@ export function DashboardPage() {
               </Button>
             );
           })}
+          {/* The setup checklist is hidden per user (WP-857). */}
+          <Button
+            variant={setupHidden ? 'ghost' : 'secondary'}
+            size="sm"
+            aria-pressed={!setupHidden}
+            icon={setupHidden ? <Plus /> : <Check />}
+            onClick={() => setSetupHidden(setupUser, !setupHidden)}
+          >
+            {t('discoverability.setup.toggle')}
+          </Button>
         </div>
       </section>
     </div>

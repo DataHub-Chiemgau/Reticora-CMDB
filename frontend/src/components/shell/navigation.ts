@@ -3,6 +3,7 @@ import {
   Archive,
   Armchair,
   Bookmark,
+  Building,
   Boxes,
   Bot,
   ClipboardCheck,
@@ -47,6 +48,8 @@ import {
   Wrench,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import type { TFunction } from 'i18next';
+import { createContext } from 'react';
 import type { AppPage } from '../CommandPalette';
 
 export interface NavItemDef {
@@ -68,8 +71,9 @@ export interface NavGroupDef {
  * the modules: find and understand infrastructure, keep its data right,
  * run operations, manage physical goods, prove compliance, administer.
  * Every page of the router appears exactly once (navigation.test.ts).
- * Pages the tenant's plan, the release or the user's rights exclude are
- * filtered out by App, and a group without a visible page disappears.
+ * Pages the release or the user's rights exclude are filtered out by App,
+ * pages the tenant's plan excludes are shown locked (navPageState), and a
+ * group without a shown page disappears.
  */
 export const NAV_GROUPS: NavGroupDef[] = [
   {
@@ -170,6 +174,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
     defaultOpen: false,
     items: [
       { page: 'users', icon: Users },
+      { page: 'clients', icon: Building },
       { page: 'permissions', icon: UserCheck },
       { page: 'ci-types', icon: Shapes },
       { page: 'rules', icon: ListTodo },
@@ -181,3 +186,68 @@ export const NAV_GROUPS: NavGroupDef[] = [
     ],
   },
 ];
+
+/**
+ * NavPageState is what the navigation does with a page (WP-857): show it,
+ * show it locked (the plan lacks its feature) or leave it out.
+ */
+export type NavPageState = 'visible' | 'locked' | 'hidden';
+
+/** The three gates of a page, each a predicate on the page. */
+export interface NavAccess {
+  /** The tenant's plan includes the page's feature (navFeatureFor). */
+  isEntitled: (page: AppPage) => boolean;
+  /** The release serves the page's module (WP-214). */
+  isPageEnabled: (page: AppPage) => boolean;
+  /** The user holds the page's permission (navPermissionFor). */
+  isPermitted: (page: AppPage) => boolean;
+}
+
+/**
+ * navPageState is the one visibility rule of the navigation, the command
+ * palette and the dashboard's quick access (WP-857). A switched-off release
+ * module (P3, P4, add-ons) and a missing right hide the page: neither is
+ * something the organization could book. A page that fails only on the
+ * plan is locked: shown with a lock and a hint page instead of 403 errors.
+ */
+export function navPageState(page: AppPage, access: NavAccess): NavPageState {
+  if (!access.isPageEnabled(page) || !access.isPermitted(page)) {
+    return 'hidden';
+  }
+  return access.isEntitled(page) ? 'visible' : 'locked';
+}
+
+/** navPageStates applies navPageState to every page of NAV_GROUPS. */
+export function navPageStates(access: NavAccess): Map<AppPage, NavPageState> {
+  const states = new globalThis.Map<AppPage, NavPageState>();
+  for (const group of NAV_GROUPS) {
+    for (const { page } of group.items) {
+      states.set(page, navPageState(page, access));
+    }
+  }
+  return states;
+}
+
+/**
+ * NavLock tells the sidebar which pages are locked and the organization's
+ * plan (from /entitlements) for the hint beside the lock.
+ */
+export interface NavLock {
+  pages: ReadonlySet<AppPage>;
+  plan?: string;
+}
+
+/** NavLockContext carries the locked pages from the signed-in shell to the sidebar. */
+export const NavLockContext = createContext<NavLock>({ pages: new Set() });
+
+const PLANS = ['essential', 'standard', 'pro', 'enterprise'];
+
+/**
+ * lockedHint is the sentence beside a locked page: "Nicht im Paket
+ * Essential enthalten", without a known plan "Nicht in Ihrem Paket enthalten".
+ */
+export function lockedHint(t: TFunction, plan?: string): string {
+  return plan && PLANS.includes(plan)
+    ? t('discoverability.lockedInPlan', { plan: t(`discoverability.plans.${plan}`) })
+    : t('discoverability.lockedNoPlan');
+}

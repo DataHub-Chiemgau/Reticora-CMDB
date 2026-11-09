@@ -192,31 +192,11 @@ func (f *FilterSpec) compile(entityKind string, cat *catalog, args []any, startA
 		// at most MaxRelationshipDepth hops away (SRC-04). The walk runs
 		// under RLS and only passes through visible, not deleted CIs.
 		p := next()
-		add(fmt.Sprintf(`ci.id IN (
-			WITH RECURSIVE up (id, depth) AS (
-				SELECT r.source_ci_id, 1 FROM ci_relationship r
-				JOIN ci n ON n.id = r.source_ci_id AND n.deleted_at IS NULL
-				WHERE r.target_ci_id = %s::uuid
-				UNION
-				SELECT r.source_ci_id, up.depth + 1 FROM ci_relationship r
-				JOIN up ON r.target_ci_id = up.id
-				JOIN ci n ON n.id = r.source_ci_id AND n.deleted_at IS NULL
-				WHERE up.depth < %d
-			) SELECT id FROM up)`, p, MaxRelationshipDepth), f.UpstreamOf)
+		add(relationshipWalk("up", "target_ci_id", "source_ci_id", p), f.UpstreamOf)
 	}
 	if f.DownstreamOf != "" && table == "ci" {
 		p := next()
-		add(fmt.Sprintf(`ci.id IN (
-			WITH RECURSIVE down (id, depth) AS (
-				SELECT r.target_ci_id, 1 FROM ci_relationship r
-				JOIN ci n ON n.id = r.target_ci_id AND n.deleted_at IS NULL
-				WHERE r.source_ci_id = %s::uuid
-				UNION
-				SELECT r.target_ci_id, down.depth + 1 FROM ci_relationship r
-				JOIN down ON r.source_ci_id = down.id
-				JOIN ci n ON n.id = r.target_ci_id AND n.deleted_at IS NULL
-				WHERE down.depth < %d
-			) SELECT id FROM down)`, p, MaxRelationshipDepth), f.DownstreamOf)
+		add(relationshipWalk("down", "source_ci_id", "target_ci_id", p), f.DownstreamOf)
 	}
 	if f.ReconciliationConflict && table == "ci" {
 		add(`EXISTS (SELECT 1 FROM ci_field_value fv WHERE fv.ci_id = ci.id
@@ -326,6 +306,35 @@ func (f *FilterSpec) validate(entityKind string, cat *catalog) error {
 		return &api.FieldError{Field: "where" + astErr.Path, Message: astErr.Message, Status: http.StatusUnprocessableEntity}
 	}
 	return err
+}
+
+// relationshipWalk is the clause of upstream_of (near target_ci_id, far
+// source_ci_id) and downstream_of (near source_ci_id, far target_ci_id):
+// the CIs reached from the CI of param over at most MaxRelationshipDepth
+// edges, only through visible, not deleted CIs.
+//
+// The step of the walk is a LATERAL subquery with OFFSET 0 per row of the
+// work table: it probes the edges of that CI through idx_ci_rel_org_target
+// or idx_ci_rel_org_source. Flattened into a join (load run 42619469662,
+// relation_search), the planner took the row level security filters of
+// ci and ci_relationship for highly selective (one row per level) and an
+// edge probe by CI for 5,000 rows (the seed has four targets, switch and
+// PDU of two organizations), so it nested the work table inside a scan of
+// every CI of the organization with its edges: from the core switch with
+// 5,000 sources 100 million join rows, 13.8 s per count and the page of
+// the same query past the 60 s of the request (TestRelationshipWalkStarBudget).
+func relationshipWalk(walk, near, far, param string) string {
+	return fmt.Sprintf(`ci.id IN (
+			WITH RECURSIVE %[1]s (id, depth) AS (
+				SELECT r.%[3]s, 1 FROM ci_relationship r
+				JOIN ci n ON n.id = r.%[3]s AND n.deleted_at IS NULL
+				WHERE r.%[2]s = %[4]s::uuid
+				UNION
+				SELECT n.id, %[1]s.depth + 1 FROM %[1]s
+				CROSS JOIN LATERAL (SELECT r.%[3]s AS far FROM ci_relationship r WHERE r.%[2]s = %[1]s.id OFFSET 0) e
+				JOIN ci n ON n.id = e.far AND n.deleted_at IS NULL
+				WHERE %[1]s.depth < %[5]d
+			) SELECT id FROM %[1]s)`, walk, near, far, param, MaxRelationshipDepth)
 }
 
 // MaxRelationshipDepth bounds upstream_of and downstream_of (SRC-04).

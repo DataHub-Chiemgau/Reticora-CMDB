@@ -111,6 +111,11 @@ type Item struct {
 	// resolved without it; a type of another organization is refused on
 	// every path by the trigger ci_type_organization (migration 000153).
 	ChosenType bool `json:"-"`
+	// ClientTypeChoice marks a create by a person through ci.Service (POST
+	// /cis, the import): with ChosenType a type hidden for the CI's client
+	// (client_ci_type_hidden, WP-858) is refused. The review of discovery
+	// does not set it, the hiding does not bind discovery.
+	ClientTypeChoice bool `json:"-"`
 	// Overridden are the fields under a manual override with the value the
 	// sources reported last for each, nil before the first report: the
 	// projected _overrides and _observed as read with the CI (REC-12).

@@ -652,6 +652,7 @@ func (s *Service) create(ctx context.Context, item *Item) error {
 		return err
 	}
 	item.ChosenType = true
+	item.ClientTypeChoice = true
 	// A creation with templates is validated against the schema composed
 	// with them, atomically with the assignment (WP-710).
 	var templates *[]citype.CITemplate

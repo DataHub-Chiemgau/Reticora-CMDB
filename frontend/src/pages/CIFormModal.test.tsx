@@ -32,6 +32,10 @@
  *   the resolved form GET /ci-types/{id}/form; editing stays one step.
  *   The cases of the type select moved to the tiles.
  *
+ * - MET-05 (WP-858): the create dialog asks for the types of the chosen
+ *   client (client_id); a type the client of the location hides (422 on
+ *   ci_type_id) is shown at the location.
+ *
  * Retest:
  *   cd frontend && npx vitest run src/pages/CIFormModal.test.tsx
  */
@@ -45,6 +49,7 @@ import i18n from '../i18n';
 import type { CI } from '../api/client';
 import type { FieldDefinition } from '../lib/fieldmeta';
 import { renderWithProviders } from '../test/utils';
+import { useScopeStore } from '../stores/scope';
 import { CIFormModal } from './CIFormModal';
 
 const SYSTEM_TYPE_ID = '11111111-1111-4111-8111-111111111111';
@@ -995,5 +1000,52 @@ describe('CIFormModal owner (CI-07, WP-805)', () => {
     const group = screen.getByRole('group', { name: 'Verantwortlich' });
     expect(await within(group).findByText('unknown user')).toBeInTheDocument();
     expect(screen.getByText('Bitte korrigieren Sie die markierten Felder.')).toBeInTheDocument();
+  });
+});
+
+describe('CIFormModal and the CI types hidden per client (MET-05, WP-858)', () => {
+  const CLIENT_ID = '33333333-3333-4333-8333-333333333333';
+
+  afterEach(() => {
+    useScopeStore.getState().reset();
+  });
+
+  it('asks for the types of the chosen client', async () => {
+    useScopeStore.getState().setClient(CLIENT_ID);
+    const { requests } = stubBackend();
+    renderWithProviders(<CIFormModal open onOpenChange={() => {}} />);
+
+    expect(await typeTile('Server (physisch)')).toBeInTheDocument();
+    const typeRequests = requests.filter((r) => r.startsWith('GET /ci-types?'));
+    expect(typeRequests.length).toBeGreaterThan(0);
+    for (const request of typeRequests) expect(request).toContain(`client_id=${CLIENT_ID}`);
+  });
+
+  it('asks for all types without a chosen client', async () => {
+    const { requests } = stubBackend();
+    renderWithProviders(<CIFormModal open onOpenChange={() => {}} />);
+
+    expect(await typeTile('Server (physisch)')).toBeInTheDocument();
+    expect(requests.filter((r) => r.startsWith('GET /ci-types?')).join(' ')).not.toContain(
+      'client_id',
+    );
+  });
+
+  it('shows a type the client of the location hides at the location', async () => {
+    stubBackend({
+      post: () =>
+        violations({ field: 'ci_type_id', detail: 'the CI type is hidden for the client' }),
+    });
+    renderWithProviders(<CIFormModal open onOpenChange={() => {}} />);
+
+    fireEvent.change(await chooseTile('Server (physisch)'), { target: { value: 'srv-01' } });
+    fireEvent.click(createButton());
+
+    expect(
+      await screen.findByText(
+        'Der gewählte CI-Typ ist für den Kunden dieses Standorts ausgeblendet. Wählen Sie einen anderen Standort oder Typ.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('alert')).not.toHaveTextContent('ci_type_id');
   });
 });

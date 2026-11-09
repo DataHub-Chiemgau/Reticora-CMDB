@@ -34,6 +34,10 @@ import { api, invitationToken, signupTenant, stamp, uiLogin, BASE } from './supp
  *     client A, which its list does not contain ........................ DIS-09, TEN-05 (F-107)
  *  D5 deleting asks for a confirmation: cancel keeps the scope, the confirmation deletes it;
  *     GET answers 404 ................................................. DIS-09, DIS-08 (F-267)
+ *  D6 the administrator creates a credential of client A in the credentials section of the
+ *     Discovery page; neither the POST answer nor GET /credentials carries a secret, the
+ *     scope form of collector A offers it at once, and it is deleted after a confirmation
+ *     ................................................................. UI-14 (WP-856)
  *
  * A failing test is a product finding: the assertions encode DIS-09 and DIS-08 in
  * docs/spec/katalog-v3 and the acceptance criteria of WP-496.
@@ -246,7 +250,7 @@ test.describe('Discovery scopes: the scope form sets every field of DIS-09', () 
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
     await expect(
-      dialog.getByText('Ohne Auswahl gelten die Credentials des Clients und der Organisation.'),
+      dialog.getByText('Ohne Auswahl gelten die Credentials des Kunden und der Organisation.'),
     ).toBeVisible();
     await expect(dialog.getByText(/Cron in der Zeitzone der Organisation/)).toBeVisible();
 
@@ -394,5 +398,68 @@ test.describe('Discovery scopes: the scope form sets every field of DIS-09', () 
 
     const gone = await api(w.rq, w.token, 'GET', `/discovery-scopes/${w.scopeId}`);
     expect(gone.status, 'GET after the delete').toBe(404);
+  });
+
+  test('D6 a credential created in the UI is offered in the scope form; no answer carries a secret', async () => {
+    const page = w.page;
+    const name = `snmp-ui-${w.s}`;
+    const secret = `community-ui-${w.s}`;
+    await openDiscovery(page);
+    const section = page
+      .locator('section')
+      .filter({ has: page.getByRole('heading', { name: 'Zugangsdaten', exact: true }) });
+    await section.getByRole('button', { name: 'Zugangsdaten anlegen' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Zugangsdaten anlegen' });
+    await dialog.getByLabel('Name', { exact: true }).fill(name);
+    await dialog.getByLabel('Kunde', { exact: true }).selectOption({ label: w.clientA.name });
+    const community = dialog.getByLabel('Community', { exact: true });
+    await expect(community).toHaveAttribute('type', 'password');
+    await community.fill(secret);
+
+    const created = page.waitForResponse(
+      (r) => new URL(r.url()).pathname === '/api/v1/credentials' && r.request().method() === 'POST',
+    );
+    await dialog.getByRole('button', { name: 'Speichern' }).click();
+    const res = await created;
+    const text = await res.text();
+    expect(res.status(), `POST /credentials: ${text}`).toBe(201);
+    expect(text).not.toContain(secret);
+    expect(Object.keys(JSON.parse(text) as object)).not.toContain('secret');
+    const credId = (JSON.parse(text) as Named).id;
+    await expect(dialog).toBeHidden();
+    await expect(section.getByText(name)).toBeVisible();
+    await expect(page.getByText(secret)).toHaveCount(0);
+
+    const listed = await api<List<Record<string, unknown>>>(
+      w.rq,
+      w.token,
+      'GET',
+      '/credentials?limit=200',
+    );
+    expect(listed.status).toBe(200);
+    expect(JSON.stringify(listed.body)).not.toContain(secret);
+    const entry = (listed.body.data ?? []).find((c) => c.id === credId);
+    expect(entry).toMatchObject({ name, kind: 'snmp_v2c', client_id: w.clientA.id });
+    expect(Object.keys(entry ?? {})).not.toContain('secret');
+
+    // Collector A belongs to client A: its scope form offers the new credential at once.
+    await collectorCard(page).getByRole('button', { name: 'Scope anlegen' }).click();
+    const scopeDialog = page.getByRole('dialog');
+    await expect(scopeDialog.getByLabel(new RegExp(name))).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(scopeDialog).toBeHidden();
+
+    await section.getByRole('button', { name: `Zugangsdaten ${name} löschen` }).click();
+    const removed = page.waitForResponse(
+      (r) =>
+        new URL(r.url()).pathname === `/api/v1/credentials/${credId}` &&
+        r.request().method() === 'DELETE',
+    );
+    await page
+      .getByRole('dialog', { name: 'Zugangsdaten löschen?' })
+      .getByRole('button', { name: 'Endgültig löschen' })
+      .click();
+    expect((await removed).status(), 'DELETE /credentials/{id}').toBe(204);
+    await expect(section.getByText(name)).toHaveCount(0);
   });
 });

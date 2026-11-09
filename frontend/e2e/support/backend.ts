@@ -1,6 +1,6 @@
 import { basename } from 'node:path';
 import { test as base, expect } from '@playwright/test';
-import type { Page, Request, Route } from '@playwright/test';
+import type { Locator, Page, Request, Route } from '@playwright/test';
 import { contract } from './contract';
 
 // Strict mocked backend of the browser flows (TST-03, WP-201; WP-530,
@@ -512,4 +512,16 @@ export async function signIn(page: Page, user: SessionUser = {}) {
       }),
     );
   }, user);
+}
+
+/**
+ * mainNavigation returns the main navigation of the shell (de-DE). Below
+ * 1024 px it lives in a drawer (AppShell) that the button "Navigation
+ * öffnen" opens first; on wide viewports the sidebar is always there.
+ * Escape closes the drawer again.
+ */
+export async function mainNavigation(page: Page): Promise<Locator> {
+  const open = page.getByRole('button', { name: 'Navigation öffnen' });
+  if (await open.isVisible()) await open.click();
+  return page.getByRole('navigation', { name: 'Hauptnavigation' });
 }

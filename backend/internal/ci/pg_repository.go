@@ -406,8 +406,15 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter *FilterPar
 			args = append(args, filter.RoomID)
 			argPos++
 		}
+		// search= matches the name, the host name and the management IP
+		// as a substring (SRC-02, WP-859): the object picker finds a
+		// relationship target by any of them. host() renders the address
+		// without its prefix length. ILIKE is not leakproof, so no index
+		// serves it under row level security; the predicate stays a filter
+		// of the list's plan (idx_ci_list_sort or the planner's choice for
+		// a filtered list), as name ILIKE alone was.
 		if filter.Search != "" {
-			whereParts = append(whereParts, fmt.Sprintf("name ILIKE $%d", argPos))
+			whereParts = append(whereParts, fmt.Sprintf("(name ILIKE $%[1]d OR hostname ILIKE $%[1]d OR host(management_ip) ILIKE $%[1]d)", argPos))
 			args = append(args, "%"+filter.Search+"%")
 			argPos++
 		}
@@ -1767,32 +1774,46 @@ func reviveSighted(before *Item, req *UpdateRequest) error {
 // are read in the writing transaction under the principal's row level
 // security with one statement: a private type of another organization is
 // invisible and, like an unknown ID, "CI type not found"; a deactivated type
-// is refused. Items without ChosenType (discovery, agent) cost no statement.
+// is refused. The same statement refuses a type hidden for the client of a
+// CI a person creates (ClientTypeChoice, WP-858): the client named, else
+// the client of the location. Items without ChosenType (discovery, agent)
+// cost no statement.
 func checkCITypes(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) error {
 	var chosen []string
+	var clients, locations []*string
 	for _, item := range items {
 		if err := checkCITypeID(item.CITypeID); err != nil {
 			return err
 		}
 		if item.ChosenType {
 			chosen = append(chosen, item.CITypeID)
+			var client, location *string
+			if item.ClientTypeChoice {
+				client = uuidOrNil(item.ClientID)
+				location = uuidOrNil(item.LocationID)
+			}
+			clients = append(clients, client)
+			locations = append(locations, location)
 		}
 	}
 	if len(chosen) == 0 {
 		return nil
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT t.is_active
-		FROM unnest($2::uuid[]) WITH ORDINALITY AS l(id, ord)
+		SELECT t.is_active,
+			EXISTS (SELECT 1 FROM client_ci_type_hidden h WHERE h.ci_type_id = l.id
+				AND h.client_id = COALESCE(l.client, (SELECT loc.client_id FROM location loc WHERE loc.id = l.location)))
+		FROM unnest($2::uuid[], $3::uuid[], $4::uuid[]) WITH ORDINALITY AS l(id, client, location, ord)
 		LEFT JOIN ci_type t ON t.id = l.id AND (t.organization_id IS NULL OR t.organization_id = $1)
-		ORDER BY l.ord`, orgID, chosen)
+		ORDER BY l.ord`, orgID, chosen, clients, locations)
 	if err != nil {
 		return fmt.Errorf("read ci types: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var active *bool
-		if err := rows.Scan(&active); err != nil {
+		var hidden bool
+		if err := rows.Scan(&active, &hidden); err != nil {
 			return fmt.Errorf("read ci types: %w", err)
 		}
 		switch {
@@ -1800,12 +1821,26 @@ func checkCITypes(ctx context.Context, tx pgx.Tx, orgID string, items []*Item) e
 			return ciTypeViolation(ciTypeNotFound)
 		case !*active:
 			return ciTypeViolation(ciTypeDeactivated)
+		case hidden:
+			return ciTypeViolation(ciTypeHidden)
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("read ci types: %w", err)
 	}
 	return nil
+}
+
+// ciTypeHidden is the violation of a type the client of the CI hides
+// (client_ci_type_hidden, MET-05, WP-858).
+const ciTypeHidden = "the CI type is hidden for the client"
+
+// uuidOrNil is id when it is a UUID, else nil.
+func uuidOrNil(id string) *string {
+	if !api.IsUUID(id) {
+		return nil
+	}
+	return &id
 }
 
 // parentOfAnotherClient is the violation of a parent outside the CI's client.
@@ -3169,10 +3204,14 @@ func (r *PGRepository) changeTypeRow(ctx context.Context, tx pgx.Tx, orgID, ciID
 	}
 	// The target is read under the principal's row level security: a
 	// private type of another organization is unknown (TEN-09).
+	// A type the CI's client hides (WP-858) is read with it.
 	var required []string
-	var active bool
-	err = tx.QueryRow(ctx, `SELECT COALESCE(key, name), COALESCE(required_fields, '{}'), is_active FROM ci_type
-		WHERE id = $1 AND (organization_id = $2 OR organization_id IS NULL)`, typeID, orgID).Scan(&tc.toKey, &required, &active)
+	var active, hidden bool
+	err = tx.QueryRow(ctx, `SELECT COALESCE(key, name), COALESCE(required_fields, '{}'), is_active,
+			EXISTS (SELECT 1 FROM client_ci_type_hidden h WHERE h.ci_type_id = ci_type.id AND h.client_id = $3)
+		FROM ci_type
+		WHERE id = $1 AND (organization_id = $2 OR organization_id IS NULL)`, typeID, orgID, uuidOrNil(before.ClientID)).
+		Scan(&tc.toKey, &required, &active, &hidden)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrUnknownType
@@ -3200,6 +3239,11 @@ func (r *PGRepository) changeTypeRow(ctx context.Context, tx pgx.Tx, orgID, ciID
 			return nil, ErrTypeInactive
 		}
 		return nil, ciTypeViolation(ciTypeDeactivated)
+	}
+	// A person cannot change a CI to a type its client hides (MET-05,
+	// WP-858); discovery is not bound by the hiding.
+	if hidden && mode != TypeChangeDiscovery {
+		return nil, ciTypeViolation(ciTypeHidden)
 	}
 	// The values the CI carries fall under the unique attributes of the
 	// target type (MET-15, F-431): the check of ci.Service (CheckUnique) in

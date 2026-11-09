@@ -97,6 +97,12 @@ export interface CreateType extends TileType {
   isLogical: boolean;
 }
 
+/**
+ * TYPE_HIDDEN_DETAIL is the violation of POST /cis on ci_type_id for a type
+ * the client of the new CI hides (MET-05, WP-858).
+ */
+export const TYPE_HIDDEN_DETAIL = 'the CI type is hidden for the client';
+
 /** TypeSource is the list of offered types and the state of its request. */
 export interface TypeSource {
   types: readonly CreateType[];
@@ -498,6 +504,9 @@ export function GuidedCreate({
       // Shown through ownerError.
     } else if (field === 'name' || field === 'status' || field === 'location_id') {
       masterFieldErrors[field] ??= detail;
+    } else if (field === 'ci_type_id' && detail.startsWith(TYPE_HIDDEN_DETAIL)) {
+      // The client of the chosen location hides the type (WP-858).
+      masterFieldErrors.location_id ??= t('create.typeHiddenForClient');
     } else if (renderedNames.has(attribute)) {
       fieldErrors[attribute] ??= detail;
     } else if (masterLabels[field]) {
