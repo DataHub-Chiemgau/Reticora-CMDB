@@ -84,8 +84,21 @@
 #   (f) GLO-11: the job traceability sets TRACEABILITY_REQUIRE_COMPLETE with
 #       level P2 and has no continue-on-error;
 #   the result "bestanden" needs every GATE row of the annex PASS; --final
-#   forbids "RC-Lauf ausstehend" and "steht aus" in the checklist. The
-#   fixture self-tests rep01_g2_* run on tests/fixtures/rep01/g2/.
+#   forbids "RC-Lauf ausstehend" and "steht aus" in the checklist;
+#   (g) exceptions: the IDs of docs/acceptance/g2-ausnahmen.csv (format of
+#       g1-ausnahmen.csv: id;art;grund;entscheidung;lieferung, art
+#       erklaerung, luecke or np) have a row in the annex and are not PASS;
+#       the result "bedingt bestanden" (release of the Auftraggeber of
+#       2026-11-09, as E-76 option 2 in G1) needs (1) a section "Freigabe des
+#       Auftraggebers" that quotes the decision and names every ID of kind
+#       erklaerung, (2) every ID that is not PASS an exception of kind
+#       erklaerung or np and none of kind luecke, (3) a deadline ("Frist ...")
+#       in column lieferung of every row of kind erklaerung, (4) every GATE
+#       row of the annex PASS or itself an exception of kind erklaerung; an
+#       open Critical is excluded by (b) in every mode.
+#   The fixture self-tests rep01_g2_* run on tests/fixtures/rep01/g2/
+#   (result bestanden) and tests/fixtures/rep01/g2-conditional/ (result
+#   bedingt bestanden).
 #
 # The traceability rows themselves are checked by
 # backend/internal/traceability (TestTraceabilityFile).
@@ -930,8 +943,10 @@ fi
 # parsed with awk/grep, never passed to eval.
 #
 # Conventions read here (documented in docs/acceptance/g2-gate.md):
-# - Result: the first line "**Ergebnis: offen" or "**Ergebnis: bestanden" of
-#   section "## Ergebnis".
+# - Result: the first line "**Ergebnis: offen", "**Ergebnis: bestanden" or
+#   "**Ergebnis: bedingt bestanden" of section "## Ergebnis".
+# - Exceptions: docs/acceptance/g2-ausnahmen.csv, header
+#   id;art;grund;entscheidung;lieferung as docs/acceptance/g1-ausnahmen.csv.
 # - Finding table of GATE-01: | <ID> | Critical | <Status> | <Nachweis> |,
 #   ID [A-Z]{2,5}(-[A-Z]{2})?-[0-9]{2} or X-[A-Z]+; closed is a status that
 #   starts with geschlossen or behoben, or reads "abgeschaltet (E-03)".
@@ -957,8 +972,9 @@ gate2_check() {
     local root="$1" mode="$2"
     local G="$root/docs/acceptance/g2-gate.md" RV="$root/docs/security/review-phase2.md"
     local T="$root/docs/traceability.csv" CI="$root/.github/workflows/ci.yml"
-    local res g01 annex body findings crit srhc level seq id s n st line step
-    local -A STATUS=() REASON=() ROW=()
+    local X="$root/docs/acceptance/g2-ausnahmen.csv"
+    local res g01 annex body findings crit srhc level seq id s n st line step xs rel xid xart xdl
+    local -A STATUS=() REASON=() ROW=() XART=()
     v() { printf '%s\t%s\n' "$1" "$2"; }
 
     # (a) sections and result.
@@ -970,11 +986,12 @@ gate2_check() {
         grep -qE "^## .*${s}" "$G" || v g2_sections "no section for ${s}"
     done
     [ -n "$(section "$G" '^### N/P und WARN')" ] || v g2_sections "section GATE-02 has no table 'N/P und WARN'"
-    res="$(section "$G" '^## Ergebnis' | grep -m1 -E '^\*\*Ergebnis: ' | sed -E 's/^\*\*Ergebnis: *([[:alpha:]]+).*/\1/')"
+    res="$(section "$G" '^## Ergebnis' | grep -m1 -E '^\*\*Ergebnis: ' |
+        sed -E 's/^\*\*Ergebnis: *(bedingt +bestanden|[[:alpha:]]+).*/\1/I; s/ +/ /g')"
     res="${res,,}"
     case "$res" in
-        offen|bestanden) ;;
-        *) v g2_sections "section Ergebnis has no line '**Ergebnis: offen' or '**Ergebnis: bestanden'" ;;
+        offen|bestanden|"bedingt bestanden") ;;
+        *) v g2_sections "section Ergebnis has no line '**Ergebnis: offen', '**Ergebnis: bestanden' or '**Ergebnis: bedingt bestanden'" ;;
     esac
 
     # (b) GATE-01: no open Critical SR/PT finding in the review of Phase 2.
@@ -1067,6 +1084,73 @@ gate2_check() {
         done
     fi
 
+    # (g) Exceptions (format of g1-ausnahmen.csv): ID <TAB> kind <TAB>
+    # lieferung. Each has a row in the annex and is not PASS.
+    if [ -f "$X" ]; then
+        [ "$(head -n 1 "$X")" = 'id;art;grund;entscheidung;lieferung' ] ||
+            v g2_exceptions "docs/acceptance/g2-ausnahmen.csv has not the header id;art;grund;entscheidung;lieferung"
+        while IFS= read -r line; do
+            [ -n "$line" ] && v g2_exceptions "docs/acceptance/g2-ausnahmen.csv: $line"
+        done < <(tail -n +2 "$X" | awk -F';' '
+            NF != 5 { print "line " NR + 1 ": expected 5 fields"; next }
+            $2 !~ /^(erklaerung|luecke|np)$/ { print "line " NR + 1 ": art \"" $2 "\" must be erklaerung, luecke or np"; next }
+            $3 == "" || $4 == "" || $5 == "" { print "line " NR + 1 ": empty field" }')
+    fi
+    xs="$( { [ -f "$X" ] && tail -n +2 "$X"; } | awk -F';' 'NF == 5 { print $1 "\t" $2 "\t" $5 }')"
+    while IFS=$'\t' read -r xid xart xdl; do
+        [ -n "$xid" ] || continue
+        XART[$xid]="$xart"
+        s="${STATUS[$xid]-}"
+        if [ -z "$s" ]; then
+            v g2_exceptions "$xid ($xart) has no row in the annex"
+        elif [[ "$s" == PASS* ]]; then
+            v g2_exceptions "$xid ($xart) is PASS"
+        fi
+    done <<< "$xs"
+
+    # 'bedingt bestanden' (release of the Auftraggeber) only under (1) to (4).
+    if [ "$res" = "bedingt bestanden" ]; then
+        # (1) The release quotes the decision and names the declared IDs.
+        rel="$(section "$G" '^#+ Freigabe des Auftraggebers')"
+        if [ -z "$rel" ]; then
+            v g2_conditional_release "the checklist has no section 'Freigabe des Auftraggebers'"
+        else
+            grep -q 'Entscheidung des Auftraggebers' <<< "$rel" ||
+                v g2_conditional_release "section 'Freigabe des Auftraggebers' does not quote the decision of the Auftraggeber"
+            while IFS=$'\t' read -r xid xart xdl; do
+                [ "$xart" = erklaerung ] || continue
+                grep -qE "(^|[^A-Z0-9-])${xid}([^0-9]|\$)" <<< "$rel" ||
+                    v g2_conditional_release "section 'Freigabe des Auftraggebers' does not name $xid (erklaerung)"
+            done <<< "$xs"
+        fi
+        # (2) Every ID that is not PASS is an exception of kind erklaerung or
+        # np; no exception is of kind luecke.
+        for id in "${!STATUS[@]}"; do
+            s="${STATUS[$id]}"
+            [[ "$s" == PASS* ]] && continue
+            case "${XART[$id]-}" in
+                erklaerung|np) ;;
+                *) v g2_conditional_ids "$id is '$s' without an exception of kind erklaerung or np" ;;
+            esac
+        done
+        while IFS=$'\t' read -r xid xart xdl; do
+            [ "$xart" = luecke ] && v g2_conditional_ids "$xid is an exception of kind luecke"
+        done <<< "$xs"
+        # (3) Every exception of kind erklaerung names its deadline.
+        while IFS=$'\t' read -r xid xart xdl; do
+            [ "$xart" = erklaerung ] || continue
+            grep -qE 'Frist[[:space:]]+[^[:space:]]' <<< "$xdl" ||
+                v g2_conditional_deadlines "$xid (erklaerung) names no deadline (Frist) in column lieferung: $xdl"
+        done <<< "$xs"
+        # (4) Every GATE row is PASS or itself an exception of kind erklaerung.
+        for id in "${!STATUS[@]}"; do
+            [[ "$id" == GATE-* ]] || continue
+            [[ "${STATUS[$id]}" == PASS* ]] && continue
+            [ "${XART[$id]-}" = erklaerung ] ||
+                v g2_conditional_gate_rows "$id is '${STATUS[$id]}' and no exception of kind erklaerung"
+        done
+    fi
+
     [ "$mode" = final ] || return 0
     srhc="$(awk -F'\t' '$2 ~ /^SR-[0-9]+$/ && ($3 == "critical" || $3 == "high") && $4 == 1 { print $2 }' <<< "$findings" | sort -u | tr '\n' ' ')"
     [ -n "$srhc" ] && v g2_final_review_high "open Critical/High SR findings in docs/security/review-phase2.md: $srhc"
@@ -1077,7 +1161,8 @@ gate2_check() {
 }
 
 G2_RULES=(g2_sections g2_review_critical g2_gate01_table g2_np_reasons g2_reasons g2_gate05 g2_seq g2_glo11
-    g2_result_rows)
+    g2_result_rows g2_exceptions g2_conditional_release g2_conditional_ids g2_conditional_deadlines
+    g2_conditional_gate_rows)
 G2_FINAL_RULES=(g2_final_review_high g2_final_rc_runs)
 describe2() {
     case "$1" in
@@ -1090,6 +1175,11 @@ describe2() {
         g2_seq) echo "G2 (e) SEQ-01 names the steps of Phase 2" ;;
         g2_glo11) echo "G2 (f) GLO-11 the job traceability sets TRACEABILITY_REQUIRE_COMPLETE with level P2 and may not fail" ;;
         g2_result_rows) echo "G2 the result is 'bestanden' only when every GATE row is PASS" ;;
+        g2_exceptions) echo "G2 (g) the IDs of docs/acceptance/g2-ausnahmen.csv have a row in the annex and are not PASS" ;;
+        g2_conditional_release) echo "G2 (g) 'bedingt bestanden' (1): section 'Freigabe des Auftraggebers' quotes the decision and names every ID of kind erklaerung" ;;
+        g2_conditional_ids) echo "G2 (g) 'bedingt bestanden' (2): every ID that is not PASS is an exception of kind erklaerung or np, none of kind luecke" ;;
+        g2_conditional_deadlines) echo "G2 (g) 'bedingt bestanden' (3): every exception of kind erklaerung names its deadline (Frist)" ;;
+        g2_conditional_gate_rows) echo "G2 (g) 'bedingt bestanden' (4): every GATE row is PASS or itself an exception of kind erklaerung" ;;
         g2_final_review_high) echo "G2 --final no SR finding of docs/security/review-phase2.md rated Critical or High is open (F-428)" ;;
         g2_final_rc_runs) echo "G2 --final the runs on the release candidate are documented (no placeholder, no 'steht aus')" ;;
     esac
@@ -1407,19 +1497,20 @@ fi
 # Fixture "g2" is a complete gate G2 (result bestanden, every GATE row PASS,
 # no open Critical or High SR finding). Each case copies it, changes it and
 # runs gate2_check in both modes; WANT as for selftest.
+G2FIX="$FIX/g2"
 selftest2() {
     local name="$1" wn="$2" wf="$3" dir mode want got
     shift 3
     CASES=$((CASES + 1))
     dir="$TMP_ROOT/$CASES"
-    if [ ! -d "$FIX/g2" ]; then
-        fail "rep01_g2_${name}: fixture $FIX/g2 exists"
+    if [ ! -d "$G2FIX" ]; then
+        fail "rep01_g2_${name}: fixture $G2FIX exists"
         return
     fi
-    cp -r "$FIX/g2" "$dir"
+    cp -r "$G2FIX" "$dir"
     if [ $# -gt 0 ]; then
         (cd "$dir" && "$@")
-        if diff -rq "$FIX/g2" "$dir" >/dev/null; then
+        if diff -rq "$G2FIX" "$dir" >/dev/null; then
             fail "rep01_g2_${name}: the change '$*' alters the fixture"
             return
         fi
@@ -1506,6 +1597,41 @@ selftest2 glo11_other_job pass pass append "$W2" '  other:
 # --final: a placeholder or a note 'steht aus' of the runs fails.
 selftest2 rc_runs_placeholder pass g2_final_rc_runs append "$C2" '| outage.yml | RC-Lauf ausstehend | – |'
 selftest2 rc_runs_pending pass g2_final_rc_runs append "$C2" 'Der Lauf auf dem Release-Kandidaten steht aus.'
+# (g) exceptions: an ID of the list that is PASS or without annex row fails;
+# a malformed row fails.
+X2=docs/acceptance/g2-ausnahmen.csv
+g2_exception_file() { printf '%s\n' 'id;art;grund;entscheidung;lieferung' "$1" > "$X2"; }
+selftest2 exception_pass g2_exceptions g2_exceptions \
+    g2_exception_file 'SRC-02;erklaerung;Fixture-Ausnahme einer PASS-ID;Fixture;Frist vor GA'
+selftest2 exception_unknown g2_exceptions g2_exceptions \
+    g2_exception_file 'NFR-07;np;Fixture-Ausnahme ohne Zeile im Anhang;Fixture;keine'
+selftest2 exception_kind g2_exceptions g2_exceptions \
+    g2_exception_file 'MET-20;bestanden;Fixture-Ausnahme mit falscher Art;Fixture;keine'
+selftest2 exception_fields g2_exceptions g2_exceptions g2_exception_file 'MET-20;np;Fixture'
+# Fixture "g2-conditional" is the result "bedingt bestanden": SRC-02 and
+# GATE-02 open as exceptions of kind erklaerung with deadline, MET-20 of
+# kind np, the section "Freigabe des Auftraggebers" names both.
+G2FIX="$FIX/g2-conditional"
+selftest2 conditional pass pass
+selftest2 conditional_no_release g2_conditional_release g2_conditional_release \
+    subst "$C2" 's/^### Freigabe des Auftraggebers$/### Freigabe/'
+selftest2 conditional_release_no_quote g2_conditional_release g2_conditional_release \
+    subst "$C2" 's/Entscheidung des Auftraggebers/Entscheidung/g'
+selftest2 conditional_release_no_id g2_conditional_release g2_conditional_release \
+    subst "$C2" '/^### Freigabe des Auftraggebers/,/^## /{s/SRC-02/SRC-0x/g}'
+selftest2 conditional_id_without_exception g2_conditional_ids g2_conditional_ids drop "$X2" '^SRC-02;'
+selftest2 conditional_luecke g2_conditional_ids g2_conditional_ids subst "$X2" 's/^SRC-02;erklaerung;/SRC-02;luecke;/'
+selftest2 conditional_np_without_exception g2_conditional_ids g2_conditional_ids drop "$X2" '^MET-20;'
+selftest2 conditional_no_deadline g2_conditional_deadlines g2_conditional_deadlines \
+    subst "$X2" 's/^(SRC-02;.*;)Frist [^;]*$/\1Folge-WP/'
+selftest2 conditional_gate_row g2_conditional_gate_rows g2_conditional_gate_rows \
+    subst "$X2" 's/^GATE-02;erklaerung;/GATE-02;np;/'
+selftest2 conditional_critical g2_review_critical g2_review_critical \
+    append "$R2" '| SR-90 | Critical | offen | probe | WP-999 |'
+selftest2 conditional_as_bestanden g2_result_rows g2_result_rows \
+    subst "$C2" 's/^\*\*Ergebnis: bedingt bestanden/**Ergebnis: bestanden/'
+selftest2 conditional_as_offen pass pass subst "$C2" 's/^\*\*Ergebnis: bedingt bestanden/**Ergebnis: offen/'
+G2FIX="$FIX/g2"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

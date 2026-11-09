@@ -1,0 +1,4 @@
+id;art;grund;entscheidung;lieferung
+SRC-02;erklaerung;Offener Fixture-Befund, vom Auftraggeber freigegeben;Fixture-Freigabe vom 2026-01-01;Frist vor GA (Fixture-Folge-WP)
+GATE-02;erklaerung;abgeleitet aus SRC-02 (Fixture);Fixture-Freigabe vom 2026-01-01;Frist vor GA (folgt aus SRC-02)
+MET-20;np;Anforderungstext nicht geliefert, Regel aus E-37 (Fixture);E-37;keine zu G2
