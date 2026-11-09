@@ -202,11 +202,23 @@ func auditProductionEnv(t *testing.T) map[string]string {
 		"RETICORA_MASTER_KEY":       key,
 		"RETICORA_OIDC_ISSUER_URL":  auditFakeOIDC(t),
 		"RETICORA_SESSION_KEY_PATH": testSessionKeyPath(t),
+		// Production with the module documents requires clamd (SEC-09,
+		// WP-853); every worker is off, so the scan never dials it.
+		"RETICORA_CLAMD_ADDR": auditClamdAddr(),
 	}
 	for _, name := range config.WorkerNames {
 		env[config.WorkerEnvKey(name)] = "false"
 	}
 	return env
+}
+
+// auditClamdAddr is TEST_CLAMD_ADDR (the clamd service of the CI job) or
+// the default address; the startup tests only need a valid configuration.
+func auditClamdAddr() string {
+	if addr := os.Getenv("TEST_CLAMD_ADDR"); addr != "" {
+		return addr
+	}
+	return config.DefaultClamdAddr
 }
 
 // auditDerivationRoot returns the sealed derivation root of the test
