@@ -3,6 +3,7 @@ package search_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -126,6 +127,152 @@ func TestRestrictedSearchQueryBudget(t *testing.T) {
 				}
 			}
 			t.Logf("%q (%d hits) %s: %s", text, res.Total, part, describeSearchPlan(nodes))
+		}
+	}
+}
+
+// fullFieldRowReads counts the plan nodes that read search_document_field
+// without the document as index condition (or recheck condition of a
+// bitmap scan): reads of the custom field rows of the whole organization,
+// whose policy looks up the document of every row before the match (@@ is
+// not leakproof).
+func fullFieldRowReads(nodes []searchPlanNode) int {
+	n := 0
+	for _, node := range nodes {
+		cond, _ := node["Index Cond"].(string)
+		recheck, _ := node["Recheck Cond"].(string)
+		if node["Relation Name"] == "search_document_field" && !strings.Contains(cond+recheck, "document_id") {
+			n++
+		}
+	}
+	return n
+}
+
+// TestRestrictedSearchFieldRowBudget covers the cost of the search with
+// restricted field permissions over the custom field rows (WP-308, tags of
+// WP-788; NFR-02) like search_fields of the load test (tests/load/phase2.js:
+// the load tag on 500 CIs): 1,000 CIs with a sensitive field, 300 of them
+// with a tag. The scope statement and the hit statement of the search are
+// explained as reticora_app in the tenant transaction. The custom field rows
+// of the organization are read once per search, by the scope statement,
+// which hands the ids of the matching documents to the hit statement; the
+// hit statement reads the field rows of a candidate at most twice (its
+// readable summary and its readable custom fields). Before, both
+// statements read all custom field rows, and the readable fields and the
+// readable summary of a candidate were evaluated for each reference
+// (score, match, snippet): four reads of its field rows. The tag finds its
+// 300 CIs, the name one, the sensitive serial number none.
+//
+// Retest:
+//
+//	cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/<db>?sslmode=disable \
+//	  go test -count=1 -v -run 'TestRestrictedSearchFieldRowBudget' ./internal/search/
+func TestRestrictedSearchFieldRowBudget(t *testing.T) {
+	f := scopetest.Seed(t, "5b")
+	bg := context.Background()
+	const objects, tagged = 1000, 300
+	server := `(SELECT id FROM ci_type WHERE key = 'server' AND organization_id IS NULL LIMIT 1)`
+	if _, err := f.Admin.Exec(bg, `INSERT INTO ci (organization_id, client_id, ci_type_id, name, status, hostname, serial_number)
+		SELECT $1, (ARRAY[$2::uuid, NULL])[i % 2 + 1], `+server+`, 'rfb-' || lpad(i::text, 5, '0'), 'active',
+			'rfb-host-' || i, 'rfb-serial-' || i
+		FROM generate_series(1, $3::int) AS i`, f.OrgA, f.Client1, objects); err != nil {
+		t.Fatalf("seed CIs: %v", err)
+	}
+	if _, err := f.Admin.Exec(bg, `WITH tg AS (
+			INSERT INTO tag (organization_id, key, display_name) VALUES ($1, 'rfbtag', '{"en": "rfbtag"}'::jsonb) RETURNING id
+		)
+		INSERT INTO ci_tag (organization_id, ci_id, tag_id)
+		SELECT $1, c.id, tg.id FROM tg, (SELECT id FROM ci WHERE organization_id = $1 AND name LIKE 'rfb-%' ORDER BY name LIMIT $2) AS c`,
+		f.OrgA, tagged); err != nil {
+		t.Fatalf("seed tags: %v", err)
+	}
+	if _, err := f.Admin.Exec(bg, `INSERT INTO field_sensitivity (organization_id, object_kind, field_key) VALUES ($1, 'ci', 'core.serial_number')`,
+		f.OrgA); err != nil {
+		t.Fatal(err)
+	}
+	repo := search.NewPGRepository(f.App)
+	if _, err := repo.ReindexTenant(f.OrgCtx(f.OrgA), f.OrgA); err != nil {
+		t.Fatalf("reindex: %v", err)
+	}
+	if _, err := f.Admin.Exec(bg, `ANALYZE ci, search_document, search_document_field`); err != nil {
+		t.Fatal(err)
+	}
+
+	role := f.ID()
+	raw, _ := json.Marshal(frPerms)
+	if _, err := f.Admin.Exec(bg, `INSERT INTO role (id, organization_id, name, permissions) VALUES ($1, $2, 'rfb-reader', $3::jsonb)`,
+		role, f.OrgA, string(raw)); err != nil {
+		t.Fatal(err)
+	}
+	policy, err := permission.NewFieldResolver(nil, nil, permission.NewPGFieldGrants(f.App), nil).
+		PolicyForGrants(bg, f.OrgA, []identity.Grant{{Permissions: frPerms, RoleID: role}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !policy.Restricted(permission.KindCI) {
+		t.Fatal("the sensitive field does not restrict the kind ci")
+	}
+
+	cfg := f.App.Config()
+	log := &sentLog{}
+	cfg.ConnConfig.Tracer = log
+	cfg.MinConns = 0
+	traced, err := pgxpool.NewWithConfig(bg, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(traced.Close)
+	tracedRepo := search.NewPGRepository(traced)
+
+	orgWide := database.OrgWideScope(f.OrgA, f.User)
+	explain := func(stmt sentStatement) []searchPlanNode {
+		t.Helper()
+		var plan []byte
+		if err := database.WithTenant(bg, f.App, &orgWide, func(ctx context.Context, tx pgx.Tx) error {
+			return tx.QueryRow(ctx, "EXPLAIN (ANALYZE, FORMAT JSON) "+stmt.sql, stmt.args...).Scan(&plan)
+		}); err != nil {
+			t.Fatalf("explain %s: %v", stmt.sql, err)
+		}
+		return searchPlanNodes(t, plan)
+	}
+
+	for _, c := range []struct {
+		text string
+		hits int
+	}{{"rfbtag", tagged}, {"rfb-00042", 1}, {"rfb-serial-42", 0}} {
+		text := c.text
+		res, qerr := tracedRepo.Query(f.OrgCtx(f.OrgA), &search.Query{OrganizationID: f.OrgA, Text: text, Limit: 5, Highlight: true, Policy: policy})
+		if qerr != nil {
+			t.Fatalf("query %q: %v", text, qerr)
+		}
+		if res.Total != c.hits || len(res.Data) != min(c.hits, 5) {
+			t.Errorf("%q: %d hits (total %d), want %d", text, len(res.Data), res.Total, c.hits)
+		}
+		full := 0
+		for _, part := range []string{"COALESCE(array_agg(DISTINCT f.field)", "AS read_fields FROM"} {
+			stmt, ok := log.last(part)
+			if !ok {
+				t.Fatalf("%q: no statement with %q", text, part)
+			}
+			nodes := explain(stmt)
+			full += fullFieldRowReads(nodes)
+			if part == "AS read_fields FROM" {
+				loops := 0
+				for _, n := range nodes {
+					if n["Relation Name"] == "search_document_field" {
+						l, _ := n["Actual Loops"].(float64)
+						loops += int(l)
+					}
+				}
+				if limit := 2*c.hits + maxFieldRowLoops; loops > limit {
+					t.Errorf("%q: the hit statement reads search_document_field %d times, at most %d (two per hit): %s",
+						text, loops, limit, describeSearchPlan(nodes))
+				}
+			}
+			t.Logf("%q (%d hits) %s: %s", text, res.Total, part, describeSearchPlan(nodes))
+		}
+		if full != 1 {
+			t.Errorf("%q: the statements of the search read the custom field rows of the organization %d times, want once", text, full)
 		}
 	}
 }

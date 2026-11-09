@@ -1,0 +1,15 @@
+-- Migration 000279: index of the consumable list (NFR-02, ABN-02; finding
+-- of the load run of PR #147).
+--
+-- GET /consumables sorts by name and no index delivered that order: every
+-- page read all consumables of the organization and sorted them, and the
+-- count read the table once more. With idx_consumable_list_name a page
+-- reads its first entries only. client_id is included because
+-- consumable_isolation reads it, so the count of an unfiltered list can be
+-- an index-only scan.
+--
+-- golang-migrate runs a file in one transaction, so CREATE INDEX
+-- CONCURRENTLY is not possible here. IF NOT EXISTS lets an operator build
+-- the index beforehand without a long lock (docs/schema-baseline.md,
+-- "Indizes ohne lange Sperren").
+CREATE INDEX IF NOT EXISTS idx_consumable_list_name ON consumable (organization_id, name) INCLUDE (client_id);

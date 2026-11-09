@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
@@ -126,8 +127,9 @@ func TestAssetQueryBudget(t *testing.T) {
 	if small != large {
 		t.Errorf("asset list: %d statements for 10 rows, %d for 200 (N+1)", small, large)
 	}
-	// begin with the tenant context, count, page, commit.
-	const listBudget = 4
+	// begin with the tenant context, count, sorting off for the page (the
+	// default order without filters), page, commit.
+	const listBudget = 5
 	if large > listBudget {
 		t.Errorf("asset list: %d statements, budget %d", large, listBudget)
 	}
@@ -251,6 +253,8 @@ func TestAssetQueryBudget(t *testing.T) {
 			return imports.FindAssets(ctx, f.OrgA, "serial_number", "  sn-4242")
 		}},
 	}
+	// The default page of 50 assets.
+	defaultPage := &scopetest.QueryBudget{Tables: tables, Indexes: [][]string{{"idx_asset_list_sort"}}, MaxRows: maxRows}
 	orgWide := database.OrgWideScope(f.OrgA, f.User)
 	check := func(state string) {
 		t.Helper()
@@ -270,6 +274,40 @@ func TestAssetQueryBudget(t *testing.T) {
 				return err
 			})
 		}
+
+		// The default list (created_at DESC, finding of the load run of
+		// PR #147): the page reads its assets from idx_asset_list_sort with
+		// the settings the list makes before it (enable_sort off), not the
+		// whole organization sorted.
+		stmts := trace.Run(t, func() error {
+			items, total, err := repo.List(ctx, f.OrgA, &asset.FilterParams{}, api.PaginationParams{Limit: 50})
+			if err == nil && (len(items) != 50 || total != orgAssets) {
+				t.Errorf("%s: default list: %d items of %d, want 50 of %d", state, len(items), total, orgAssets)
+			}
+			return err
+		})
+		var plan []byte
+		if err := database.WithTenant(bg, f.App, &orgWide, func(ctx context.Context, tx pgx.Tx) error {
+			for _, st := range stmts {
+				if strings.Contains(st.SQL, " ORDER BY ") {
+					break
+				}
+				if strings.HasPrefix(st.SQL, "SET LOCAL ") {
+					if _, serr := tx.Exec(ctx, st.SQL); serr != nil {
+						return serr
+					}
+				}
+			}
+			page := scopetest.Statement(t, stmts, " ORDER BY created_at ")
+			return tx.QueryRow(ctx, "EXPLAIN (ANALYZE, FORMAT JSON) "+page.SQL, page.Args...).Scan(&plan)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		reads := scopetest.ReadPlan(t, plan)
+		if problem := reads.Problem(defaultPage); problem != "" {
+			t.Errorf("ABN-02 violated: %s, default page: %s", state, problem)
+		}
+		t.Logf("%s, default page: %s", state, reads.Plan)
 	}
 	check("organization A alone")
 	seed(f.OrgB, []any{nil, nil}, 51, 5050)

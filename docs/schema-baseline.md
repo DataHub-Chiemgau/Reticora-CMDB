@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000275_p2_reference_integrity
+Stand: Migration 000279_consumable_list_name_index
 
 ## Prüfung
 
@@ -70,10 +70,36 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_org_parent ON ci (organization_id
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_attributes_path ON ci USING gin (attributes jsonb_path_ops);
 ```
 
-Ebenso der Index der Standardsortierung der CI-Liste (WP-605, NFR-02):
+Ebenso der Index der Standardsortierung der CI-Liste (WP-605, NFR-02; seit
+Migration 000276 mit `owner_team_id`, das `ci_isolation` seit 000237 liest,
+damit die Zählung ein Index-only-Scan bleibt). Migration 000276 ersetzt den
+Index unter demselben Namen; bei großen Datenbeständen baut der Betrieb ihn
+vorher unter anderem Namen und tauscht die Namen:
 
 ```sql
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_list_sort ON ci (organization_id, created_at DESC, id DESC) INCLUDE (client_id, site_id) WHERE deleted_at IS NULL;
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ci_list_sort_next ON ci (organization_id, created_at DESC, id DESC) INCLUDE (client_id, site_id, owner_team_id) WHERE deleted_at IS NULL;
+BEGIN;
+DROP INDEX idx_ci_list_sort;
+ALTER INDEX idx_ci_list_sort_next RENAME TO idx_ci_list_sort;
+COMMIT;
+```
+
+Ebenso der Index der Standardsortierung der Ticketliste (Migration 000277):
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_ticket_list_sort ON ticket (organization_id, created_at DESC, id DESC);
+```
+
+Ebenso der Index der Standardsortierung der Asset-Liste (Migration 000278):
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_asset_list_sort ON asset (organization_id, created_at DESC, id DESC);
+```
+
+Ebenso der Index der Mengenartikel-Liste (Migration 000279):
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_consumable_list_name ON consumable (organization_id, name) INCLUDE (client_id);
 ```
 
 Ebenso der Index der CI-Liste sortiert nach Name (WP-839, E-17, Migration

@@ -275,15 +275,20 @@ expect_real() {
 }
 
 # oneoff_exited — compose ps lists an exited one-off container of web, so the
-# one-off case does not pass merely because compose ps hides it.
+# one-off case does not pass merely because compose ps hides it. docker
+# compose run can return while the container is still listed as running for
+# a moment; the check waits up to 15 s for the state "exited".
 oneoff_exited() {
-    local ps
-    ps="$(dc ps --all --format json)" || return 1
-    jq -se 'if length == 1 and (.[0] | type) == "array" then .[0] else . end
-        | map(select(.Service == "web" and .State == "exited"
-            and ((.Labels // "") | test("(^|,)com\\.docker\\.compose\\.oneoff=True(,|$)"))))
-        | length == 1' <<<"$ps" >/dev/null \
-        || { echo "no exited one-off container of web in docker compose ps:"; printf '%s\n' "$ps"; return 1; }
+    local ps i
+    for i in $(seq 1 30); do
+        ps="$(dc ps --all --format json)" || return 1
+        jq -se 'if length == 1 and (.[0] | type) == "array" then .[0] else . end
+            | map(select(.Service == "web" and .State == "exited"
+                and ((.Labels // "") | test("(^|,)com\\.docker\\.compose\\.oneoff=True(,|$)"))))
+            | length == 1' <<<"$ps" >/dev/null && return 0
+        sleep 0.5
+    done
+    echo "no exited one-off container of web in docker compose ps after 15 s:"; printf '%s\n' "$ps"; return 1
 }
 
 if docker_available; then

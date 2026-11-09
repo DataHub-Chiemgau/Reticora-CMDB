@@ -244,6 +244,8 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter *FilterPar
 	if err := checkSort(filter); err != nil {
 		return nil, 0, err
 	}
+	// joined: the list runs in the caller's transaction (database.ContextWithTx).
+	joined := database.InTx(ctx)
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		whereParts := []string{"true"}
 		args := make([]any, 0, 5+len(filter.Filters))
@@ -309,38 +311,68 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter *FilterPar
 		if page.Cursor != nil {
 			listArgs = append(listArgs, page.Limit)
 			query = fmt.Sprintf(
-				"SELECT %s FROM asset WHERE %s ORDER BY %s %s, id %s LIMIT $%d",
+				"SELECT %s FROM asset WHERE %s ORDER BY %s %s, asset.id %s LIMIT $%d",
 				assetSelectColumns, listWhere, sortColumn.expr, strings.ToUpper(sortDirection),
 				strings.ToUpper(sortDirection), argPos,
 			)
 		} else {
 			listArgs = append(listArgs, page.Limit, page.Offset)
 			query = fmt.Sprintf(
-				"SELECT %s FROM asset WHERE %s ORDER BY %s %s, id %s LIMIT $%d OFFSET $%d",
+				"SELECT %s FROM asset WHERE %s ORDER BY %s %s, asset.id %s LIMIT $%d OFFSET $%d",
 				assetSelectColumns, listWhere, sortColumn.expr, strings.ToUpper(sortDirection),
 				strings.ToUpper(sortDirection), argPos, argPos+1,
 			)
 		}
-		rows, err := tx.Query(ctx, query, listArgs...)
-		if err != nil {
-			return fmt.Errorf("list assets: %w", err)
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			item, err := scanAsset(rows)
+		readPage := func() error {
+			rows, err := tx.Query(ctx, query, listArgs...)
 			if err != nil {
-				return fmt.Errorf("scan asset: %w", err)
+				return fmt.Errorf("list assets: %w", err)
 			}
-			assets = append(assets, *item)
+			defer rows.Close()
+			for rows.Next() {
+				item, err := scanAsset(rows)
+				if err != nil {
+					return fmt.Errorf("scan asset: %w", err)
+				}
+				assets = append(assets, *item)
+			}
+			if err := rows.Err(); err != nil {
+				return fmt.Errorf("iterate assets: %w", err)
+			}
+			return nil
 		}
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("iterate assets: %w", err)
+		// The page of an unfiltered list in the default order is read from
+		// idx_asset_list_sort in index order (000278), as the CI list reads
+		// idx_ci_list_sort (WP-438): the planner estimates the client, site
+		// and team predicates of asset_tenant_isolation at a fraction of a
+		// percent and expects one visible asset, so the limit saves nothing
+		// in its estimate and it read and sorted the organization (finding
+		// of the load run of PR 147). Filters keep the planner's choice.
+		if len(whereParts) == 1 && sortField == "created_at" {
+			return withoutSort(ctx, tx, joined, readPage)
 		}
-		return nil
+		return readPage()
 	})
 
 	return assets, total, err
+}
+
+// withoutSort runs fn with sorting switched off for the planner (SET
+// LOCAL), as the CI list does (ci.withoutSort). In a joined transaction
+// (restore) it switches it back to the session's value afterwards; in a
+// transaction of its own the setting ends with it. With a failed statement
+// in fn the transaction is aborted and only fn's error counts.
+func withoutSort(ctx context.Context, tx pgx.Tx, restore bool, fn func() error) error {
+	if _, err := tx.Exec(ctx, "SET LOCAL enable_sort = off"); err != nil {
+		return fmt.Errorf("list assets: %w", err)
+	}
+	if err := fn(); err != nil || !restore {
+		return err
+	}
+	if _, err := tx.Exec(ctx, "SET LOCAL enable_sort TO DEFAULT"); err != nil {
+		return fmt.Errorf("list assets: %w", err)
+	}
+	return nil
 }
 
 // GetByID retrieves a single asset by ID within the tenant scope.

@@ -21,7 +21,7 @@ import type { FieldDataType, FieldDefinition } from '../../lib/fieldmeta';
 import { DynamicForm, type DynamicFormSection } from '../form/DynamicForm';
 import { ErrorState } from '../ui/ErrorState';
 import { Select } from '../ui/Select';
-import { SkeletonList } from '../ui/Skeleton';
+import { Skeleton } from '../ui/Skeleton';
 
 export interface LayoutPreviewProps {
   /** The CI type of the form builder. */
@@ -201,7 +201,14 @@ export function LayoutPreview({
           ]}
         />
       </div>
-      <div role="status" className="space-y-1 text-sm text-fg-muted">
+      {/* One live region: the loading state is aria-busy on it, the skeleton
+          below has no role of its own (a second status would make the region
+          ambiguous for assistive technology and for tests). */}
+      <div
+        role="status"
+        aria-busy={query.isLoading || undefined}
+        className="space-y-1 text-sm text-fg-muted"
+      >
         {notes.map((note) => (
           <p key={note}>{note}</p>
         ))}
@@ -214,7 +221,13 @@ export function LayoutPreview({
           onRetry={() => void query.refetch()}
         />
       ) : null}
-      {query.isLoading ? <SkeletonList rows={3} /> : null}
+      {query.isLoading ? (
+        <div className="space-y-2" aria-hidden="true">
+          {[0, 1, 2].map((row) => (
+            <Skeleton key={row} className="h-10 w-full" />
+          ))}
+        </div>
+      ) : null}
       {form ? (
         <form
           aria-label={t('formBuilder.preview.form')}

@@ -174,6 +174,14 @@ const (
 	ticketVisible = `(ticket.related_ci_id IS NULL OR (SELECT ci.id FROM ci WHERE ci.id = ticket.related_ci_id) IS NOT NULL)
 	AND (ticket.related_asset_id IS NULL OR (SELECT asset.id FROM asset WHERE asset.id = ticket.related_asset_id) IS NOT NULL)`
 	commentVisible = "EXISTS (SELECT 1 FROM ticket WHERE ticket.id = ticket_comment.ticket_id AND " + ticketVisible + ")"
+	// ticketVisibleCount is ticketVisible for the count of the whole list:
+	// the same visible CIs and assets, read once per statement (hashed
+	// subplans) instead of one primary key lookup per ticket of the
+	// organization (finding of the load run of PR #147: 30,000 buffers per
+	// count at 10,000 tickets). The page keeps ticketVisible, it checks
+	// only the tickets it reads.
+	ticketVisibleCount = `(ticket.related_ci_id IS NULL OR ticket.related_ci_id IN (SELECT ci.id FROM ci))
+	AND (ticket.related_asset_id IS NULL OR ticket.related_asset_id IN (SELECT asset.id FROM asset))`
 )
 
 // requireVisible fails with ErrNotFound when the written row of table does
@@ -229,6 +237,8 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter *FilterPar
 	items := make([]Ticket, 0)
 	var total int
 
+	// joined: the list runs in the caller's transaction (database.ContextWithTx).
+	joined := database.InTx(ctx)
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		whereParts := []string{"organization_id = $1"}
 		args := []any{orgID}
@@ -272,7 +282,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter *FilterPar
 		}
 
 		whereClause := strings.Join(whereParts, " AND ")
-		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM ticket WHERE "+ticketVisible+" AND "+whereClause, args...).Scan(&total); err != nil {
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM ticket WHERE "+ticketVisibleCount+" AND "+whereClause, args...).Scan(&total); err != nil {
 			return fmt.Errorf("count tickets: %w", err)
 		}
 
@@ -295,38 +305,69 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter *FilterPar
 		if page.Cursor != nil {
 			listArgs = append(listArgs, page.Limit)
 			query = fmt.Sprintf(
-				"SELECT %s FROM ticket WHERE "+ticketVisible+" AND %s ORDER BY %s %s, id %s LIMIT $%d",
+				"SELECT %s FROM ticket WHERE "+ticketVisible+" AND %s ORDER BY %s %s, ticket.id %s LIMIT $%d",
 				ticketSelectColumns, listWhere, sortColumn, strings.ToUpper(sortDirection),
 				strings.ToUpper(sortDirection), argPos,
 			)
 		} else {
 			listArgs = append(listArgs, page.Limit, page.Offset)
 			query = fmt.Sprintf(
-				"SELECT %s FROM ticket WHERE "+ticketVisible+" AND %s ORDER BY %s %s, id %s LIMIT $%d OFFSET $%d",
+				"SELECT %s FROM ticket WHERE "+ticketVisible+" AND %s ORDER BY %s %s, ticket.id %s LIMIT $%d OFFSET $%d",
 				ticketSelectColumns, listWhere, sortColumn, strings.ToUpper(sortDirection),
 				strings.ToUpper(sortDirection), argPos, argPos+1,
 			)
 		}
-		rows, err := tx.Query(ctx, query, listArgs...)
-		if err != nil {
-			return fmt.Errorf("list tickets: %w", err)
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			item, err := scanTicket(rows)
+		readPage := func() error {
+			rows, err := tx.Query(ctx, query, listArgs...)
 			if err != nil {
-				return fmt.Errorf("scan ticket: %w", err)
+				return fmt.Errorf("list tickets: %w", err)
 			}
-			items = append(items, *item)
+			defer rows.Close()
+			for rows.Next() {
+				item, err := scanTicket(rows)
+				if err != nil {
+					return fmt.Errorf("scan ticket: %w", err)
+				}
+				items = append(items, *item)
+			}
+			if err := rows.Err(); err != nil {
+				return fmt.Errorf("iterate tickets: %w", err)
+			}
+			return nil
 		}
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("iterate tickets: %w", err)
+		// The page of an unfiltered list in the default order is read from
+		// idx_ticket_list_sort in index order (000277), as the CI list reads
+		// idx_ci_list_sort (WP-438): the planner estimates the client, site
+		// and team predicates of ticket_tenant_isolation at a fraction of a
+		// percent and expects one visible ticket, so the limit saves nothing
+		// in its estimate and it sorted the organization, checking
+		// ticketVisible for every ticket (finding of the load run of PR
+		// 147). Filters keep the planner's choice.
+		if len(whereParts) == 1 && sortColumn == "created_at" {
+			return withoutSort(ctx, tx, joined, readPage)
 		}
-		return nil
+		return readPage()
 	})
 
 	return items, total, err
+}
+
+// withoutSort runs fn with sorting switched off for the planner (SET
+// LOCAL), as the CI list does (ci.withoutSort). In a joined transaction
+// (restore) it switches it back to the session's value afterwards; in a
+// transaction of its own the setting ends with it. With a failed statement
+// in fn the transaction is aborted and only fn's error counts.
+func withoutSort(ctx context.Context, tx pgx.Tx, restore bool, fn func() error) error {
+	if _, err := tx.Exec(ctx, "SET LOCAL enable_sort = off"); err != nil {
+		return fmt.Errorf("list tickets: %w", err)
+	}
+	if err := fn(); err != nil || !restore {
+		return err
+	}
+	if _, err := tx.Exec(ctx, "SET LOCAL enable_sort TO DEFAULT"); err != nil {
+		return fmt.Errorf("list tickets: %w", err)
+	}
+	return nil
 }
 
 func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Ticket, error) {

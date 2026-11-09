@@ -1,0 +1,15 @@
+-- Migration 000278: index of the default sort of the asset list (NFR-02,
+-- ABN-02; finding of the load run of PR #147).
+--
+-- GET /assets sorts by created_at DESC, id DESC (asset.NormalizeSort), and
+-- no index delivered that order: every page read all assets of the
+-- organization, evaluated the row level policy for each of them and sorted
+-- the wide rows. With idx_asset_list_sort a page reads its first entries
+-- only (an ascending sort reads it backwards), pattern idx_ci_list_sort
+-- (000156).
+--
+-- golang-migrate runs a file in one transaction, so CREATE INDEX
+-- CONCURRENTLY is not possible here. IF NOT EXISTS lets an operator build
+-- the index beforehand without a long lock (docs/schema-baseline.md,
+-- "Indizes ohne lange Sperren").
+CREATE INDEX IF NOT EXISTS idx_asset_list_sort ON asset (organization_id, created_at DESC, id DESC);

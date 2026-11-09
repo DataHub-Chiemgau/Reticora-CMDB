@@ -2,8 +2,10 @@ package savedview_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -230,6 +232,37 @@ func TestSavedViewQueryBudget(t *testing.T) {
 	warranty := &savedview.FilterSpec{EntityKind: "ci", Where: &savedview.Expr{Field: "attributes.warranty_days_left", Op: savedview.OpLte,
 		Value: float64(savedview.WarrantyExpiringDays)}}
 	warrantyBudget := &scopetest.QueryBudget{Tables: []string{"ci"}, Indexes: [][]string{{"idx_ci_warranty_days_left"}}, MaxRows: maxRows}
+	// The samples of servers_without_monitoring: five in the last hour
+	// for every tenth CI of organization A.
+	const monitored = orgCIs / 10
+	if _, err := f.Admin.Exec(bg, `INSERT INTO metric_sample (time, organization_id, ci_id, metric_name, value)
+		SELECT now() - k * interval '5 minutes', c.organization_id, c.id, 'sweep_reachable', 1
+		FROM ci c CROSS JOIN generate_series(1, 5) AS k
+		WHERE c.organization_id = $1 AND substring(c.name FROM 4)::int % 10 = 0`, f.OrgA); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Admin.Exec(bg, `ANALYZE metric_sample`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := f.Admin.Exec(bg, `DELETE FROM metric_sample WHERE organization_id = $1`, f.OrgA); err != nil {
+			t.Errorf("delete samples: %v", err)
+		}
+	})
+	preset, ok := savedview.PresetByKey("servers_without_monitoring")
+	if !ok {
+		t.Fatal("no preset servers_without_monitoring")
+	}
+	monitoring := &savedview.FilterSpec{EntityKind: preset.EntityKind, Sort: preset.Sort}
+	raw, err := json.Marshal(preset.FilterSpec)
+	if err == nil {
+		err = json.Unmarshal(raw, monitoring)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The type tree of server: a few types, read once per query.
+	const maxTypeRows = 200
 	orgWide := database.OrgWideScope(f.OrgA, f.User)
 	check := func(state string) {
 		t.Helper()
@@ -262,6 +295,40 @@ func TestSavedViewQueryBudget(t *testing.T) {
 		name := fmt.Sprintf("attribute filter warranty_days_left <= %d", savedview.WarrantyExpiringDays)
 		scopetest.CheckPlan(t, f.Admin, f.App, &orgWide, state, name+" (count)", scopetest.Statement(t, stmts, "SELECT COUNT(*) FROM ci"), warrantyBudget)
 		scopetest.CheckPlan(t, f.Admin, f.App, &orgWide, state, name+" (page)", scopetest.Statement(t, stmts, " ORDER BY "), warrantyBudget)
+
+		// The preset servers_without_monitoring: every CI is a server
+		// without monitored_by or monitors, every tenth has samples of the
+		// last hour. Count and page walk the type tree once and probe the
+		// samples of each CI by idx_metric_sample_ci (finding of the load
+		// run of PR #147: per CI the type tree again and every sample of
+		// the window).
+		var noMetric []string
+		var noMetricTotal int
+		stmts = trace.Run(t, func() error {
+			var err error
+			noMetric, noMetricTotal, err = query(monitoring, 50)
+			return err
+		})
+		if noMetricTotal != orgCIs-monitored || len(noMetric) != 50 {
+			t.Errorf("%s, servers_without_monitoring: %d rows of %d, want 50 of %d", state, len(noMetric), noMetricTotal, orgCIs-monitored)
+		}
+		for _, part := range []string{"SELECT COUNT(*) FROM ci", " ORDER BY "} {
+			reads := scopetest.ReadPlan(t, scopetest.AnalyzeAsApp(t, f.App, &orgWide, scopetest.Statement(t, stmts, part)))
+			var sampleRows int64
+			for rel, n := range reads.Rows {
+				// The chunks of the hypertable under TimescaleDB.
+				if rel == "metric_sample" || strings.HasPrefix(rel, "_hyper_") {
+					sampleRows += n
+				}
+			}
+			if typeRows := reads.Rows["ci_type"]; typeRows > maxTypeRows {
+				t.Errorf("%s, servers_without_monitoring %q: reads %d rows of ci_type, budget %d: %s", state, part, typeRows, maxTypeRows, reads.Plan)
+			}
+			if sampleRows > monitored {
+				t.Errorf("%s, servers_without_monitoring %q: reads %d samples, budget %d: %s", state, part, sampleRows, monitored, reads.Plan)
+			}
+			t.Logf("%s, servers_without_monitoring %q: %d rows of ci_type, %d samples: %s", state, part, reads.Rows["ci_type"], sampleRows, reads.Plan)
+		}
 	}
 	check("organization A alone")
 	seed(f.OrgB, []any{nil, nil}, 5000, 2500)
