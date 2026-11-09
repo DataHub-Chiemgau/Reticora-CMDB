@@ -3200,6 +3200,33 @@ export interface paths {
     patch: operations['updateClient'];
     trace?: never;
   };
+  '/api/v1/clients/{id}/hidden-ci-types': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * CI types hidden for a client
+     * @description The CI types the client hides (MET-05, WP-858), sorted by id. Requires location:read; a client outside the caller's scope answers 404 (RLS).
+     */
+    get: operations['getClientHiddenCITypes'];
+    /**
+     * Replace the CI types hidden for a client
+     * @description The list replaces the CI types the client hides (MET-05, WP-858). A hidden type stays active (it is not deactivated): the type lists for the client (`GET /api/v1/ci-types?client_id=`) leave it out, and a person cannot create a CI of the client with it (POST /cis, the import) or change a CI of the client to it (422 on `ci_type_id`). Existing CIs of the type stay readable and editable; discovery and ingest are not affected. System types can be hidden. Requires user:manage; writes the audit entry `client.hidden_ci_types_changed` with the old and the new list. An id that is no UUID is 400, a type that is neither a system type nor one of the organization 422 on `ci_type_ids`.
+     */
+    put: operations['setClientHiddenCITypes'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/sites': {
     parameters: {
       query?: never;
@@ -6799,7 +6826,7 @@ export interface paths {
     };
     /**
      * List CI types
-     * @description The organization's types and the system types (MET-01 – MET-03). Deactivated types are left out unless `include_inactive=true` (MET-05).
+     * @description The organization's types and the system types (MET-01 – MET-03). Deactivated types are left out unless `include_inactive=true` (MET-05). Types hidden for a client (WP-858) are left out for `client_id`; without it a client-scoped principal gets no type its clients all hide, an org-wide principal every type. `include_inactive=true` lists the whole catalog, hidden types included.
      */
     get: operations['listCiTypes'];
     put?: never;
@@ -16422,6 +16449,10 @@ export interface components {
         [key: string]: unknown;
       };
     };
+    /** @description The CI types a client hides (table client_ci_type_hidden, MET-05, WP-858): ids of system types or of types of the organization. */
+    HiddenCITypes: {
+      ci_type_ids: string[];
+    };
     UpdateClientRequest: {
       name?: string;
       slug?: string;
@@ -25071,6 +25102,62 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
+    };
+  };
+  getClientHiddenCITypes: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The hidden CI types of the client */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HiddenCITypes'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  setClientHiddenCITypes: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['HiddenCITypes'];
+      };
+    };
+    responses: {
+      /** @description The new hidden CI types of the client */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HiddenCITypes'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   listSites: {
@@ -35735,6 +35822,8 @@ export interface operations {
         offset?: components['parameters']['Offset'];
         /** @description Free-text search term. */
         search?: components['parameters']['Search'];
+        /** @description Leave out the types hidden for this client (MET-05, WP-858); ignored with `include_inactive=true`. No UUID is 400. */
+        client_id?: string;
         /** @description Only types of this category. */
         category?: string;
         /** @description Also list deactivated types (MET-05). */
@@ -35755,6 +35844,7 @@ export interface operations {
           'application/json': components['schemas']['CITypeListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {

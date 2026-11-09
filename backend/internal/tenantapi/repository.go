@@ -23,6 +23,13 @@ type Repository interface {
 	CreateClient(ctx context.Context, c *Client) error
 	UpdateClient(ctx context.Context, orgID, id string, req UpdateClientRequest) (*Client, error)
 	DeleteClient(ctx context.Context, orgID, id string) error
+	// HiddenCITypes returns the ids of the CI types the client hides
+	// (MET-05, WP-858), sorted; an invisible client is "not found".
+	HiddenCITypes(ctx context.Context, orgID, clientID string) ([]string, error)
+	// SetHiddenCITypes replaces the CI types the client hides and returns
+	// the new list; an unknown type is a *api.FieldError on ci_type_ids
+	// (422), an invisible client "not found".
+	SetHiddenCITypes(ctx context.Context, orgID, clientID string, typeIDs []string) ([]string, error)
 
 	// Sites
 	ListSites(ctx context.Context, orgID, clientID string, page api.PaginationParams) ([]Site, int, error)
@@ -51,6 +58,7 @@ type MemoryRepository struct {
 	mu        sync.RWMutex
 	orgs      map[string]*Organization
 	clients   map[string]*Client
+	hidden    map[string][]string
 	sites     map[string]*Site
 	buildings map[string]*Building
 	rooms     map[string]*Room
@@ -200,6 +208,33 @@ func (r *MemoryRepository) roomConflict(buildingID, id, name string) error {
 
 // --- Clients ---
 
+// HiddenCITypes returns the CI types the client hides (WP-858).
+func (r *MemoryRepository) HiddenCITypes(_ context.Context, orgID, clientID string) ([]string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if c, ok := r.clients[clientID]; !ok || c.OrganizationID != orgID {
+		return nil, fmt.Errorf("not found")
+	}
+	return append([]string{}, r.hidden[clientID]...), nil
+}
+
+// SetHiddenCITypes replaces the CI types the client hides (WP-858); the
+// memory store knows no CI types and keeps every id.
+func (r *MemoryRepository) SetHiddenCITypes(_ context.Context, orgID, clientID string, typeIDs []string) ([]string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if c, ok := r.clients[clientID]; !ok || c.OrganizationID != orgID {
+		return nil, fmt.Errorf("not found")
+	}
+	if r.hidden == nil {
+		r.hidden = map[string][]string{}
+	}
+	ids := append([]string{}, typeIDs...)
+	sort.Strings(ids)
+	r.hidden[clientID] = ids
+	return append([]string{}, ids...), nil
+}
+
 func (r *MemoryRepository) ListClients(_ context.Context, orgID string, page api.PaginationParams) ([]Client, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -278,6 +313,7 @@ func (r *MemoryRepository) DeleteClient(_ context.Context, orgID, id string) err
 		return fmt.Errorf("not found")
 	}
 	delete(r.clients, id)
+	delete(r.hidden, id)
 	return nil
 }
 

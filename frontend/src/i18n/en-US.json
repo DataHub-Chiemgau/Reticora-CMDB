@@ -458,6 +458,7 @@
     "typesLoading": "Loading types …",
     "typesLoadFailed": "The CI types could not be loaded.",
     "typeInactive": "This type has been deactivated in the meantime. Please choose another type.",
+    "typeHiddenForClient": "The chosen CI type is hidden for the client of this location. Choose another location or type.",
     "tiles": {
       "subtypes": "Show subtypes of {{name}}",
       "subtypesOf": "Subtypes of {{name}}"
@@ -4298,6 +4299,27 @@
       "forbiddenRead": "No permission to read the customers.",
       "notFound": "The customer no longer exists.",
       "reason": "The action failed: {{detail}}"
+    }
+  },
+  "clientHiddenTypes": {
+    "title": "Hidden CI types",
+    "open": "Hidden CI types: {{name}}",
+    "dialogTitle": "Hidden CI types – {{name}}",
+    "intro": "Hidden CI types are not offered for this client when CIs are created and cannot be chosen for its CIs. They stay active: existing CIs keep their type, discovery and other clients are not affected.",
+    "readOnly": "Changing requires the permission user:manage.",
+    "close": "Close",
+    "filter": "Filter types",
+    "listLabel": "CI types",
+    "count": "{{count}} hidden",
+    "inactive": "deactivated",
+    "system": "System",
+    "empty": "No CI types found.",
+    "loadError": "The CI types of the client cannot be loaded.",
+    "errors": {
+      "unknownType": "A chosen CI type no longer exists. Reload the list.",
+      "forbidden": "You lack the permission user:manage.",
+      "notFound": "The client no longer exists.",
+      "reason": "Saving failed: {{detail}}"
     }
   },
   "ruleCatalog": {

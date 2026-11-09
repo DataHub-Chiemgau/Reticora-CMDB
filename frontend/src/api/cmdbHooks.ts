@@ -99,7 +99,12 @@ export function useCITypes(
  * selection; useCITypes stays the paged list of the type administration.
  */
 export function useAllCITypes(
-  params: { include_inactive?: boolean; category?: string; search?: string } = {},
+  params: {
+    include_inactive?: boolean;
+    category?: string;
+    search?: string;
+    client_id?: string;
+  } = {},
   options: QueryControl = {},
 ) {
   return useQuery({

@@ -115,8 +115,32 @@ func (r *PGRepository) typeAttributeSetIDs(ctx context.Context, orgID string) (m
 	return out, err
 }
 
+// Types hidden per client (MET-05, WP-858): client_ci_type_hidden names the
+// types a client does not offer. The list conditions are part of the
+// statements of List, so the filter costs no statement more.
+const (
+	// hiddenForClientSQL leaves out the types hidden for the client $n.
+	hiddenForClientSQL = `NOT EXISTS (SELECT 1 FROM client_ci_type_hidden h
+		WHERE h.ci_type_id = ci_type.id AND h.client_id = $%d)`
+	// hiddenForScopeSQL leaves out the types hidden for every client of
+	// the principal's client scope: under row level security
+	// client_ci_type_hidden and client hold only the rows of that scope.
+	hiddenForScopeSQL = `ci_type.id NOT IN (SELECT h.ci_type_id FROM client_ci_type_hidden h
+		GROUP BY h.ci_type_id HAVING count(*) = (SELECT count(*) FROM client))`
+)
+
+// clientScoped reports whether the request's principal is limited to some
+// clients (not org-wide).
+func clientScoped(ctx context.Context) bool {
+	scope, ok := database.TenantScopeFromContext(ctx)
+	return ok && !scope.Clients.IsAll()
+}
+
 // List returns CI types visible to the tenant: its own types plus the global
-// system types (organization_id NULL, exposed by the RLS policy).
+// system types (organization_id NULL, exposed by the RLS policy). Without
+// IncludeInactive it leaves out the types hidden for filter.ClientID or,
+// without it, for every client of a client-scoped principal (WP-858);
+// IncludeInactive lists the whole catalog, hidden types included.
 func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterParams, page api.PaginationParams) ([]Type, int, error) {
 	var out []Type
 	var total int
@@ -126,6 +150,14 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 		pos := 1
 		if !filter.IncludeInactive {
 			where = append(where, "is_active")
+			switch {
+			case filter.ClientID != "":
+				where = append(where, fmt.Sprintf(hiddenForClientSQL, pos))
+				args = append(args, filter.ClientID)
+				pos++
+			case clientScoped(ctx):
+				where = append(where, hiddenForScopeSQL)
+			}
 		}
 		if filter.Category != "" {
 			where = append(where, fmt.Sprintf("category = $%d", pos))

@@ -1,11 +1,19 @@
-import { useId, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
-import { Building, Pencil, Plus, Trash2 } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Building, EyeOff, Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { ApiError } from '../api/client';
+import { clientApi, localizedText } from '../api/cmdb';
 import type { Client, ClientUpdateRequest } from '../api/cmdb';
-import { useClientPage, useCreateClient, useDeleteClient, useUpdateClient } from '../api/cmdbHooks';
+import {
+  useAllCITypes,
+  useClientPage,
+  useCreateClient,
+  useDeleteClient,
+  useUpdateClient,
+} from '../api/cmdbHooks';
 import { useHasPermission } from '../api/hooks';
 import { Button, IconButton } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -90,6 +98,7 @@ export function ClientsPage() {
   const clients = useClientPage(offset);
   const [dialog, setDialog] = useState<{ client?: Client } | null>(null);
   const [deleting, setDeleting] = useState<Client | null>(null);
+  const [hiding, setHiding] = useState<Client | null>(null);
 
   const rows = clients.data?.data ?? [];
   const hasMore = clients.data?.has_more === true;
@@ -142,11 +151,9 @@ export function ClientsPage() {
                   <th scope="col" className={thClasses}>
                     {t('clients.fields.slug')}
                   </th>
-                  {mayManage ? (
-                    <th scope="col" className={thClasses}>
-                      <span className="sr-only">{t('common.actions')}</span>
-                    </th>
-                  ) : null}
+                  <th scope="col" className={thClasses}>
+                    <span className="sr-only">{t('common.actions')}</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -158,25 +165,33 @@ export function ClientsPage() {
                     <td className={tdClasses}>
                       <code className="font-mono text-xs">{client.slug}</code>
                     </td>
-                    {mayManage ? (
-                      <td className={tdClasses}>
-                        <span className="flex justify-end gap-1">
-                          <IconButton
-                            size="sm"
-                            icon={<Pencil />}
-                            label={t('clients.editLabel', { name: client.name })}
-                            onClick={() => setDialog({ client })}
-                          />
-                          <IconButton
-                            size="sm"
-                            icon={<Trash2 />}
-                            label={t('clients.deleteLabel', { name: client.name })}
-                            onClick={() => setDeleting(client)}
-                            className="hover:text-danger"
-                          />
-                        </span>
-                      </td>
-                    ) : null}
+                    <td className={tdClasses}>
+                      <span className="flex justify-end gap-1">
+                        <IconButton
+                          size="sm"
+                          icon={<EyeOff />}
+                          label={t('clientHiddenTypes.open', { name: client.name })}
+                          onClick={() => setHiding(client)}
+                        />
+                        {mayManage ? (
+                          <>
+                            <IconButton
+                              size="sm"
+                              icon={<Pencil />}
+                              label={t('clients.editLabel', { name: client.name })}
+                              onClick={() => setDialog({ client })}
+                            />
+                            <IconButton
+                              size="sm"
+                              icon={<Trash2 />}
+                              label={t('clients.deleteLabel', { name: client.name })}
+                              onClick={() => setDeleting(client)}
+                              className="hover:text-danger"
+                            />
+                          </>
+                        ) : null}
+                      </span>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -213,7 +228,199 @@ export function ClientsPage() {
         />
       ) : null}
       <DeleteClientDialog client={deleting} onClose={() => setDeleting(null)} />
+      {hiding ? (
+        <HiddenCITypesDialog
+          key={hiding.id}
+          client={hiding}
+          mayManage={mayManage}
+          onClose={() => setHiding(null)}
+        />
+      ) : null}
     </div>
+  );
+}
+
+/** The message of a refused change of the hidden CI types. */
+function hiddenRefusal(error: unknown, t: TFunction): string {
+  if (error instanceof ApiError) {
+    if (error.status === 403) return t('clientHiddenTypes.errors.forbidden');
+    if (error.status === 404) return t('clientHiddenTypes.errors.notFound');
+    if (error.status === 422) return t('clientHiddenTypes.errors.unknownType');
+    return t('clientHiddenTypes.errors.reason', { detail: error.detail ?? error.message });
+  }
+  return t('clientHiddenTypes.errors.reason', {
+    detail: error instanceof Error ? error.message : String(error),
+  });
+}
+
+/**
+ * HiddenCITypesDialog shows and changes the CI types a client hides (MET-05,
+ * WP-858): a multiple choice over the active types of the catalog
+ * (include_inactive lists the whole catalog, hidden types included) plus
+ * deactivated types the client still hides. A hidden type is not offered
+ * when a CI of the client is created; it stays active, existing CIs keep
+ * it. Without user:manage the choice is read-only. Saving replaces the list
+ * (PUT /clients/{id}/hidden-ci-types) and reads the type lists again.
+ */
+function HiddenCITypesDialog({
+  client,
+  mayManage,
+  onClose,
+}: {
+  client: Client;
+  mayManage: boolean;
+  onClose: () => void;
+}) {
+  const { t, i18n } = useTranslation();
+  const qc = useQueryClient();
+  const listId = useId();
+  const queryKey = ['clients', client.id, 'hidden-ci-types'];
+  const hidden = useQuery({ queryKey, queryFn: () => clientApi.hiddenCITypes(client.id) });
+  const types = useAllCITypes({ include_inactive: true });
+  const [chosen, setChosen] = useState<Set<string> | null>(null);
+  const [filter, setFilter] = useState('');
+  const save = useMutation({
+    mutationFn: (ids: string[]) => clientApi.setHiddenCITypes(client.id, ids),
+    onSuccess: (saved) => {
+      qc.setQueryData(queryKey, saved);
+      void qc.invalidateQueries({ queryKey: ['ci-types'] });
+      onClose();
+    },
+  });
+
+  const selected = chosen ?? new Set(hidden.data?.ci_type_ids ?? []);
+  const stored = useMemo(() => new Set(hidden.data?.ci_type_ids ?? []), [hidden.data]);
+  const options = useMemo(() => {
+    const needle = filter.trim().toLocaleLowerCase(i18n.language);
+    return (types.data ?? [])
+      .filter((ty) => ty.is_active || stored.has(ty.id))
+      .map((ty) => ({
+        id: ty.id,
+        label: localizedText(ty.display_name, i18n.language) || ty.key || ty.name,
+        key: ty.key ?? '',
+        system: ty.is_system,
+        active: ty.is_active,
+      }))
+      .filter(
+        (option) =>
+          !needle ||
+          option.label.toLocaleLowerCase(i18n.language).includes(needle) ||
+          option.key.toLocaleLowerCase(i18n.language).includes(needle),
+      )
+      .sort((a, b) => a.label.localeCompare(b.label, i18n.language));
+  }, [types.data, stored, filter, i18n.language]);
+
+  const toggle = (id: string, on: boolean) => {
+    const next = new Set(selected);
+    if (on) next.add(id);
+    else next.delete(id);
+    setChosen(next);
+  };
+
+  const loading = hidden.isLoading || types.isLoading;
+  const failed = hidden.error ?? types.error;
+
+  return (
+    <Modal
+      open
+      size="lg"
+      onOpenChange={(open) => (open ? undefined : onClose())}
+      title={t('clientHiddenTypes.dialogTitle', { name: client.name })}
+      description={t('clientHiddenTypes.intro')}
+    >
+      <form
+        className="space-y-4"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (mayManage) save.mutate([...selected].sort());
+        }}
+        noValidate
+      >
+        {!mayManage ? (
+          <p className="text-sm text-fg-muted">{t('clientHiddenTypes.readOnly')}</p>
+        ) : null}
+        {loading ? (
+          <SkeletonList rows={4} label={t('app.loading')} />
+        ) : failed ? (
+          <ErrorState
+            title={t('clientHiddenTypes.loadError')}
+            retryLabel={t('common.retry')}
+            onRetry={() => {
+              void hidden.refetch();
+              void types.refetch();
+            }}
+          />
+        ) : (
+          <fieldset className="space-y-3">
+            <legend className="flex w-full items-center justify-between text-sm font-medium text-fg">
+              <span>{t('clientHiddenTypes.title')}</span>
+              <span className="font-normal text-fg-muted">
+                {t('clientHiddenTypes.count', { count: selected.size })}
+              </span>
+            </legend>
+            <Input
+              type="search"
+              icon={<Search />}
+              aria-label={t('clientHiddenTypes.filter')}
+              placeholder={t('clientHiddenTypes.filter')}
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+            />
+            {options.length === 0 ? (
+              <p className="text-sm text-fg-muted">{t('clientHiddenTypes.empty')}</p>
+            ) : (
+              <ul
+                id={listId}
+                aria-label={t('clientHiddenTypes.listLabel')}
+                className="max-h-80 divide-y divide-line overflow-y-auto rounded-lg border border-line"
+              >
+                {options.map((option) => (
+                  <li key={option.id}>
+                    <label className="flex cursor-pointer items-center gap-3 px-3 py-2 text-sm hover:bg-canvas">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4"
+                        checked={selected.has(option.id)}
+                        disabled={!mayManage}
+                        onChange={(e) => toggle(option.id, e.target.checked)}
+                      />
+                      <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+                        {option.label}
+                      </span>
+                      {option.system ? (
+                        <span className="text-xs text-fg-muted">
+                          {t('clientHiddenTypes.system')}
+                        </span>
+                      ) : null}
+                      {!option.active ? (
+                        <span className="text-xs text-fg-muted">
+                          {t('clientHiddenTypes.inactive')}
+                        </span>
+                      ) : null}
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </fieldset>
+        )}
+        {save.error ? (
+          <p role="alert" className="text-sm text-danger">
+            {hiddenRefusal(save.error, t)}
+          </p>
+        ) : null}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            {mayManage ? t('common.cancel') : t('clientHiddenTypes.close')}
+          </Button>
+          {mayManage ? (
+            <Button type="submit" loading={save.isPending} disabled={loading || !!failed}>
+              {t('common.save')}
+            </Button>
+          ) : null}
+        </div>
+      </form>
+    </Modal>
   );
 }
 

@@ -1,4 +1,14 @@
-import { AT, ORG_ID, expect, list, mockBackend, problem, signIn, test } from './support/backend';
+import {
+  AT,
+  CI_TYPES,
+  ORG_ID,
+  expect,
+  list,
+  mockBackend,
+  problem,
+  signIn,
+  test,
+} from './support/backend';
 import type { Page } from '@playwright/test';
 import type { Handler } from './support/backend';
 
@@ -9,6 +19,10 @@ import type { Handler } from './support/backend';
 // name, sees a taken short name (409) at its field, renames and deletes a
 // client and creates the client of a new site from the site dialog; a
 // reader (location:read) sees the list without write actions.
+//
+// MET-05 (WP-858): the administrator hides CI types for a client (PUT
+// /clients/{id}/hidden-ci-types replaces the list); the choice offers the
+// whole catalog (include_inactive=true).
 
 test.use({ locale: 'de-DE' });
 
@@ -222,4 +236,47 @@ test('a reader sees the clients without write actions', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Kunde anlegen' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /^Bearbeiten:/ })).toHaveCount(0);
   await expect(page.getByRole('button', { name: /^Löschen:/ })).toHaveCount(0);
+});
+
+test('an administrator hides CI types for a client (WP-858)', async ({ page }) => {
+  const [server, switchType, ups] = CI_TYPES;
+  let hidden: string[] = [ups!.id];
+  const calls = await mockBackend(page, [
+    permissions(['location:read', 'user:manage']),
+    ...clientStore([client(ACME, 'Acme GmbH', 'acme')]),
+    {
+      path: `/clients/${ACME}/hidden-ci-types`,
+      reply: () => ({ body: { ci_type_ids: hidden } }),
+    },
+    {
+      method: 'PUT',
+      path: `/clients/${ACME}/hidden-ci-types`,
+      reply: (request) => {
+        hidden = (request.postDataJSON() as { ci_type_ids: string[] }).ci_type_ids;
+        return { body: { ci_type_ids: hidden } };
+      },
+    },
+  ]);
+  await signIn(page);
+  await page.goto('/clients');
+
+  await page.getByRole('button', { name: 'Ausgeblendete CI-Typen: Acme GmbH' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Ausgeblendete CI-Typen – Acme GmbH' });
+  await expect(dialog.getByRole('checkbox', { name: /USV/ })).toBeChecked();
+  await expect(dialog.getByRole('checkbox', { name: /Server/ })).not.toBeChecked();
+  await expect(dialog).toContainText('1 ausgeblendet');
+
+  await dialog.getByRole('checkbox', { name: /Server/ }).check();
+  await dialog.getByRole('checkbox', { name: /Switch/ }).check();
+  await dialog.getByRole('checkbox', { name: /USV/ }).uncheck();
+  await dialog.getByRole('button', { name: 'Speichern' }).click();
+  await expect(dialog).toBeHidden();
+
+  const typeReads = calls.filter((c) => c.method === 'GET' && c.path === '/ci-types');
+  expect(typeReads.length).toBeGreaterThan(0);
+  expect(typeReads[0]?.search).toContain('include_inactive=true');
+  const puts = calls.filter((c) => c.method === 'PUT');
+  expect(puts.map((c) => [c.path, c.body])).toEqual([
+    [`/clients/${ACME}/hidden-ci-types`, { ci_type_ids: [server!.id, switchType!.id].sort() }],
+  ]);
 });

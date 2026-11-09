@@ -458,6 +458,7 @@
     "typesLoading": "Typen werden geladen …",
     "typesLoadFailed": "Die CI-Typen konnten nicht geladen werden.",
     "typeInactive": "Dieser Typ wurde inzwischen deaktiviert. Bitte wählen Sie einen anderen Typ.",
+    "typeHiddenForClient": "Der gewählte CI-Typ ist für den Kunden dieses Standorts ausgeblendet. Wählen Sie einen anderen Standort oder Typ.",
     "tiles": {
       "subtypes": "Untertypen von {{name}} anzeigen",
       "subtypesOf": "Untertypen von {{name}}"
@@ -4298,6 +4299,27 @@
       "forbiddenRead": "Keine Berechtigung, die Kunden zu lesen.",
       "notFound": "Den Kunden gibt es nicht mehr.",
       "reason": "Die Aktion ist fehlgeschlagen: {{detail}}"
+    }
+  },
+  "clientHiddenTypes": {
+    "title": "Ausgeblendete CI-Typen",
+    "open": "Ausgeblendete CI-Typen: {{name}}",
+    "dialogTitle": "Ausgeblendete CI-Typen – {{name}}",
+    "intro": "Ausgeblendete CI-Typen werden für diesen Kunden bei der Neuanlage von CIs nicht angeboten und können für seine CIs nicht gewählt werden. Sie bleiben aktiv: Bestehende CIs behalten ihren Typ, Discovery und andere Kunden sind nicht betroffen.",
+    "readOnly": "Ändern erfordert das Recht user:manage.",
+    "close": "Schließen",
+    "filter": "Typen filtern",
+    "listLabel": "CI-Typen",
+    "count": "{{count}} ausgeblendet",
+    "inactive": "deaktiviert",
+    "system": "System",
+    "empty": "Keine CI-Typen gefunden.",
+    "loadError": "Die CI-Typen des Kunden können nicht geladen werden.",
+    "errors": {
+      "unknownType": "Ein gewählter CI-Typ existiert nicht mehr. Laden Sie die Liste neu.",
+      "forbidden": "Ihnen fehlt das Recht user:manage.",
+      "notFound": "Den Kunden gibt es nicht mehr.",
+      "reason": "Speichern fehlgeschlagen: {{detail}}"
     }
   },
   "ruleCatalog": {

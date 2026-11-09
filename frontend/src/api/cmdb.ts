@@ -257,6 +257,8 @@ export const ciTypeApi = {
       include_inactive?: boolean;
       category?: string;
       search?: string;
+      /** client_id leaves out the types hidden for the client (WP-858). */
+      client_id?: string;
       limit?: number;
       offset?: number;
     } = {},
@@ -268,7 +270,14 @@ export const ciTypeApi = {
    * has_more holds, F-362), so a selection offers all active types, not only
    * the first page (MET-51, WP-804).
    */
-  listAll(params: { include_inactive?: boolean; category?: string; search?: string } = {}) {
+  listAll(
+    params: {
+      include_inactive?: boolean;
+      category?: string;
+      search?: string;
+      client_id?: string;
+    } = {},
+  ) {
     return fetchAllPages<CIType>('/ci-types', params);
   },
   templates(): Promise<{ data: CIType[] }> {
@@ -1020,7 +1029,28 @@ export const clientApi = {
   remove(id: string) {
     return fetchAPI<void>(`/clients/${encodeURIComponent(id)}`, { method: 'DELETE' });
   },
+  /** hiddenCITypes reads the CI types the client hides (WP-858, location:read). */
+  hiddenCITypes(id: string) {
+    return fetchAPI<HiddenCITypes>(`/clients/${encodeURIComponent(id)}/hidden-ci-types`);
+  },
+  /**
+   * setHiddenCITypes replaces the CI types the client hides (WP-858,
+   * user:manage); an unknown type is 422 on ci_type_ids.
+   */
+  setHiddenCITypes(id: string, ciTypeIds: string[]) {
+    return fetchAPI<HiddenCITypes>(`/clients/${encodeURIComponent(id)}/hidden-ci-types`, {
+      method: 'PUT',
+      body: JSON.stringify({ ci_type_ids: ciTypeIds } satisfies HiddenCITypes),
+    });
+  },
 };
+
+/**
+ * HiddenCITypes are the CI types a client hides (MET-05, WP-858): the type
+ * lists for the client leave them out and a CI of the client cannot be
+ * created with one; they stay active, existing CIs stay.
+ */
+export type HiddenCITypes = components['schemas']['HiddenCITypes'];
 
 export const locationApi = {
   list(

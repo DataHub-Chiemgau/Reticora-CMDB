@@ -536,6 +536,7 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	"POST /api/v1/assets/{id}/return":                  {"/api/v1/assets/<asset3>/return", `{"expected_holder":"<user2>"}`},
 	"POST /api/v1/assets/{id}/transfer":                {"/api/v1/assets/<asset4>/transfer", `{"expected_holder":"<user>","assigned_user_id":"<user2>"}`},
 	"PATCH /api/v1/org":                                {"", `{}`},
+	"PUT /api/v1/clients/{id}/hidden-ci-types":         {"/api/v1/clients/<id:/api/v1/clients>/hidden-ci-types", `{"ci_type_ids":["<id:/api/v1/ci-types>"]}`}, // WP-858
 	"PUT /api/v1/documents/{id}/content":               {"", `a5 content`},
 	"DELETE /api/v1/ci-fields/global/{name}":           {"/api/v1/ci-fields/global/a5_global", ""},
 	"DELETE /api/v1/ci-types/{id}/fields/{name}":       {"/api/v1/ci-types/<id:/api/v1/ci-types>/fields/a5_field", ""},

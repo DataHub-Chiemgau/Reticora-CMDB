@@ -686,7 +686,8 @@ func tenantOr401(w http.ResponseWriter, r *http.Request) (tenant.TenantInfo, boo
 	return t, true
 }
 
-// List handles GET /api/v1/ci-types
+// List handles GET /api/v1/ci-types; client_id leaves out the types hidden
+// for that client (WP-858).
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantOr401(w, r)
 	if !ok {
@@ -697,6 +698,11 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		IncludeInactive: r.URL.Query().Get("include_inactive") == "true",
 		Category:        r.URL.Query().Get("category"),
 		Search:          r.URL.Query().Get("search"),
+		ClientID:        r.URL.Query().Get("client_id"),
+	}
+	if filter.ClientID != "" && !api.IsUUID(filter.ClientID) {
+		api.WriteFieldError(w, &api.FieldError{Field: "client_id", Message: "must be the ID (UUID) of a client"})
+		return
 	}
 	items, total, err := h.repo.List(r.Context(), t.OrganizationID, filter, page)
 	if err != nil {

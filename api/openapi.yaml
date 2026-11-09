@@ -7392,6 +7392,66 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/clients/{id}/hidden-ci-types:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getClientHiddenCITypes
+      tags: [Clients]
+      summary: CI types hidden for a client
+      description: >-
+        The CI types the client hides (MET-05, WP-858), sorted by id.
+        Requires location:read; a client outside the caller's scope answers
+        404 (RLS).
+      responses:
+        '200':
+          description: The hidden CI types of the client
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HiddenCITypes'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      operationId: setClientHiddenCITypes
+      tags: [Clients]
+      summary: Replace the CI types hidden for a client
+      description: >-
+        The list replaces the CI types the client hides (MET-05, WP-858).
+        A hidden type stays active (it is not deactivated): the type lists
+        for the client (`GET /api/v1/ci-types?client_id=`) leave it out, and
+        a person cannot create a CI of the client with it (POST /cis, the
+        import) or change a CI of the client to it (422 on `ci_type_id`).
+        Existing CIs of the type stay readable and editable; discovery and
+        ingest are not affected. System types can be hidden. Requires
+        user:manage; writes the audit entry
+        `client.hidden_ci_types_changed` with the old and the new list. An
+        id that is no UUID is 400, a type that is neither a system type nor
+        one of the organization 422 on `ci_type_ids`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HiddenCITypes'
+      responses:
+        '200':
+          description: The new hidden CI types of the client
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HiddenCITypes'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
   /api/v1/sites:
     get:
       operationId: listSites
@@ -15840,12 +15900,25 @@ paths:
       description: >-
         The organization's types and the system types (MET-01 – MET-03).
         Deactivated types are left out unless `include_inactive=true`
-        (MET-05).
+        (MET-05). Types hidden for a client (WP-858) are left out for
+        `client_id`; without it a client-scoped principal gets no type its
+        clients all hide, an org-wide principal every type.
+        `include_inactive=true` lists the whole catalog, hidden types
+        included.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - $ref: '#/components/parameters/Search'
+        - name: client_id
+          in: query
+          required: false
+          description: >-
+            Leave out the types hidden for this client (MET-05, WP-858);
+            ignored with `include_inactive=true`. No UUID is 400.
+          schema:
+            type: string
+            format: uuid
         - name: category
           in: query
           required: false
@@ -15866,6 +15939,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CITypeListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           description: Unauthorized
     post:
@@ -33888,6 +33963,18 @@ components:
           type: object
           additionalProperties: true
 
+    HiddenCITypes:
+      type: object
+      description: >-
+        The CI types a client hides (table client_ci_type_hidden, MET-05,
+        WP-858): ids of system types or of types of the organization.
+      required: [ci_type_ids]
+      properties:
+        ci_type_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
     UpdateClientRequest:
       type: object
       properties:

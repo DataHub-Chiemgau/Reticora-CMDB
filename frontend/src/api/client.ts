@@ -625,6 +625,9 @@ export function isTypeInactive(error: unknown): boolean {
  */
 export const SCOPED_LISTS: Record<string, readonly ('client_id' | 'site_id')[]> = {
   '/cis': ['client_id', 'site_id'],
+  // The types hidden for the chosen client are left out (WP-858);
+  // include_inactive=true lists the whole catalog.
+  '/ci-types': ['client_id'],
   '/export/cis': ['client_id'],
   '/topology': ['client_id', 'site_id'],
   '/assets': ['client_id'],

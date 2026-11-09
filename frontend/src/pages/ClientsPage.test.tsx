@@ -4,6 +4,10 @@
  * name), change and delete clients; a taken slug (409) is shown at its
  * field, a refused delete names the dependencies of the problem; without
  * user:manage the page only reads.
+ *
+ * WP-858 (MET-05): the CI types hidden per client — a multiple choice over
+ * the catalog that replaces the list with PUT; read-only without
+ * user:manage.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
@@ -39,14 +43,37 @@ function client(id: string, name: string, slug: string) {
 const acme = client('client-1', 'Acme GmbH', 'acme');
 const globex = client('client-2', 'Globex AG', 'globex');
 
+function ciType(id: string, key: string, de: string, extra: Record<string, unknown> = {}) {
+  return {
+    id,
+    organization_id: '',
+    key,
+    name: key,
+    display_name: { de, en: de },
+    is_system: true,
+    is_active: true,
+    ...extra,
+  };
+}
+
+const TYPES = [
+  ciType('type-server', 'server', 'Server'),
+  ciType('type-printer', 'printer', 'Drucker'),
+  ciType('type-old', 'old_device', 'Altgerät', { is_active: false, is_system: false }),
+  ciType('type-legacy', 'legacy', 'Legacy', { is_active: false, is_system: false }),
+];
+
 function mockApi(
   overrides: {
     permissions?: string[];
     create?: (body: Record<string, unknown>) => Response;
     del?: () => Response;
+    hidden?: string[];
+    setHidden?: (body: Record<string, unknown>) => Response;
   } = {},
 ) {
   const clients = [acme, globex];
+  let hidden = overrides.hidden ?? ['type-printer', 'type-old'];
   return vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://localhost');
     const method = init?.method ?? 'GET';
@@ -65,6 +92,18 @@ function mockApi(
       const created = client('client-9', String(body.name), String(body.slug));
       clients.push(created);
       return json(created, 201);
+    }
+    if (url.pathname.endsWith('/clients/client-1/hidden-ci-types') && method === 'GET') {
+      return json({ ci_type_ids: hidden });
+    }
+    if (url.pathname.endsWith('/clients/client-1/hidden-ci-types') && method === 'PUT') {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      if (overrides.setHidden) return overrides.setHidden(body);
+      hidden = body.ci_type_ids as string[];
+      return json({ ci_type_ids: hidden });
+    }
+    if (url.pathname.endsWith('/ci-types') && method === 'GET') {
+      return json({ data: TYPES, total: TYPES.length, limit: 200, offset: 0, has_more: false });
     }
     if (/\/clients\/[^/]+$/.test(url.pathname) && method === 'PATCH') {
       return json({ ...acme, ...(JSON.parse(String(init?.body)) as Record<string, unknown>) });
@@ -269,6 +308,83 @@ describe('ClientsPage', () => {
     expect(screen.queryByRole('button', { name: 'Kunde anlegen' })).toBeNull();
     expect(screen.queryByRole('button', { name: /^Bearbeiten:/ })).toBeNull();
     expect(screen.queryByRole('button', { name: /^Löschen:/ })).toBeNull();
+  });
+
+  it('shows the hidden CI types of a client and replaces them (WP-858)', async () => {
+    const fetchMock = mockApi();
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(<ClientsPage />);
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Ausgeblendete CI-Typen: Acme GmbH' }),
+    );
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Ausgeblendete CI-Typen – Acme GmbH',
+    });
+    const printer = await within(dialog).findByRole('checkbox', { name: /Drucker/ });
+    const server = within(dialog).getByRole('checkbox', { name: /Server/ });
+    expect(printer).toBeChecked();
+    expect(server).not.toBeChecked();
+    // A deactivated type the client still hides is offered for unhiding,
+    // another deactivated type is not.
+    expect(within(dialog).getByRole('checkbox', { name: /Altgerät/ })).toBeChecked();
+    expect(within(dialog).queryByRole('checkbox', { name: /Legacy/ })).toBeNull();
+    // The whole catalog, hidden types included: no filter by the scope.
+    const typeCall = calls(fetchMock, 'GET', /\/ci-types$/)[0];
+    expect(String(typeCall?.[0])).toContain('include_inactive=true');
+
+    fireEvent.click(server);
+    fireEvent.click(printer);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Speichern' }));
+
+    await waitFor(() =>
+      expect(calls(fetchMock, 'PUT', /\/clients\/client-1\/hidden-ci-types$/)).toHaveLength(1),
+    );
+    expect(bodyOf(calls(fetchMock, 'PUT', /\/clients\/client-1\/hidden-ci-types$/)[0])).toEqual({
+      ci_type_ids: ['type-old', 'type-server'],
+    });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('filters the types by name and explains a refused change', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockApi({
+        setHidden: () =>
+          json({ title: 'Unprocessable Entity', status: 422, field: 'ci_type_ids' }, 422),
+      }),
+    );
+    renderWithProviders(<ClientsPage />);
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Ausgeblendete CI-Typen: Acme GmbH' }),
+    );
+    const dialog = await screen.findByRole('dialog');
+    await within(dialog).findByRole('checkbox', { name: /Drucker/ });
+    fireEvent.change(within(dialog).getByRole('searchbox', { name: 'Typen filtern' }), {
+      target: { value: 'serv' },
+    });
+    expect(within(dialog).queryByRole('checkbox', { name: /Drucker/ })).toBeNull();
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: /Server/ }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Speichern' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      'Ein gewählter CI-Typ existiert nicht mehr.',
+    );
+  });
+
+  it('shows the hidden CI types read-only without user:manage', async () => {
+    const fetchMock = mockApi({ permissions: ['location:read'] });
+    vi.stubGlobal('fetch', fetchMock);
+    renderWithProviders(<ClientsPage />);
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Ausgeblendete CI-Typen: Acme GmbH' }),
+    );
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByRole('checkbox', { name: /Drucker/ })).toBeDisabled();
+    expect(within(dialog).getByText(/Ändern erfordert das Recht user:manage/)).toBeVisible();
+    expect(within(dialog).queryByRole('button', { name: 'Speichern' })).toBeNull();
+    expect(calls(fetchMock, 'PUT', /hidden-ci-types/)).toHaveLength(0);
   });
 
   it('names the page "Kunden" / "Customers" in the navigation', () => {
