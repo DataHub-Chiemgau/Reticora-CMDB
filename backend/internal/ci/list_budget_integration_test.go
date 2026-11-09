@@ -402,9 +402,27 @@ func TestCIListBudget(t *testing.T) {
 	if err = f.Admin.QueryRow(bg, `SELECT pg_get_indexdef($1::regclass)`, listSortIndex).Scan(&def); err != nil {
 		t.Fatal(err)
 	}
-	const wantDef = "ON public.ci USING btree (organization_id, created_at DESC, id DESC) INCLUDE (client_id, site_id) WHERE (deleted_at IS NULL)"
+	const wantDef = "ON public.ci USING btree (organization_id, created_at DESC, id DESC) INCLUDE (client_id, site_id, owner_team_id) WHERE (deleted_at IS NULL)"
 	if !strings.HasSuffix(def, wantDef) {
 		t.Errorf("%s: %s, want ... %s", listSortIndex, def, wantDef)
+	}
+	// Every column the select policies of ci read is a column of the
+	// index (the dependencies of the policy expressions): a policy column
+	// outside it, as owner_team_id from 000237 until 000276, turns the
+	// count into a read of the table (finding of the load run of PR #147).
+	var missing []string
+	if err = f.Admin.QueryRow(bg, `SELECT COALESCE(array_agg(DISTINCT a.attname ORDER BY a.attname), '{}')
+		FROM pg_policy p
+		JOIN pg_depend d ON d.classid = 'pg_policy'::regclass AND d.objid = p.oid
+		 AND d.refclassid = 'pg_class'::regclass AND d.refobjid = 'ci'::regclass AND d.refobjsubid > 0
+		JOIN pg_attribute a ON a.attrelid = d.refobjid AND a.attnum = d.refobjsubid
+		WHERE p.polrelid = 'ci'::regclass AND p.polcmd IN ('r', '*') AND p.polpermissive
+		  AND NOT EXISTS (SELECT 1 FROM pg_index i WHERE i.indexrelid = $1::regclass AND a.attnum = ANY (i.indkey))`,
+		listSortIndex).Scan(&missing); err != nil {
+		t.Fatal(err)
+	}
+	if len(missing) > 0 {
+		t.Errorf("%s lacks the columns %v of the row level policy of ci: the count of the list reads the table", listSortIndex, missing)
 	}
 
 	// Negative case: without the index the check names it. The index is
