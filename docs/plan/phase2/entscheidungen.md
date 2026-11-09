@@ -1,6 +1,6 @@
 # Entscheidungen – Phase 2 (Verwaltung, G2)
 
-Stand: 2026-11-02 (Abgleich mit main `a01e95db` nach dem Korrekturplan; Beschluss des Auftraggebers vom 2026-10-28). Gehört zu [`implementierungsplan.md`](implementierungsplan.md) und setzt [`../entscheidungen.md`](../entscheidungen.md) fort. E-Nummern sind über alle drei Entscheidungsdateien eindeutig. Phase 1 belegt E-01 bis E-36 und E-56 bis E-58 sowie die Aufgaben A-01 bis A-14. Der Korrekturplan belegt E-59 bis E-102 und E-144 ([`../g1-korrektur/entscheidungen.md`](../g1-korrektur/entscheidungen.md), hier mit dem Zusatz „(Korrekturplan)“ zitiert). Diese Datei führt E-37 bis E-55, E-103 bis E-143 und E-145 sowie die Aufgaben A-15 bis A-53. Neue Entscheidungen erhalten die nächste freie Nummer über alle drei Dateien, neue Aufgaben die nächste freie Nummer über die Dateien der Phasen 1 und 2 (Stand dieser Fassung: E-146 und A-54). Jede Entscheidung nennt Status, Festlegung, Frage, Optionen, Empfehlung, Auswirkung, Quelle sowie betroffene IDs und WPs. Seit dem Beschluss vom 2026-10-28 sind alle Entscheidungen dieser Datei entschieden. Die Festlegung ist die verbindliche Regel; Frage, Optionen und Quelle bleiben als Dokumentation.
+Stand: 2026-11-02 (Abgleich mit main `a01e95db` nach dem Korrekturplan; Beschluss des Auftraggebers vom 2026-10-28). Gehört zu [`implementierungsplan.md`](implementierungsplan.md) und setzt [`../entscheidungen.md`](../entscheidungen.md) fort. E-Nummern sind über alle drei Entscheidungsdateien eindeutig. Phase 1 belegt E-01 bis E-36 und E-56 bis E-58 sowie die Aufgaben A-01 bis A-14. Der Korrekturplan belegt E-59 bis E-102 und E-144 ([`../g1-korrektur/entscheidungen.md`](../g1-korrektur/entscheidungen.md), hier mit dem Zusatz „(Korrekturplan)“ zitiert). Diese Datei führt E-37 bis E-55, E-103 bis E-143, E-145 und E-146 sowie die Aufgaben A-15 bis A-53. Neue Entscheidungen erhalten die nächste freie Nummer über alle drei Dateien, neue Aufgaben die nächste freie Nummer über die Dateien der Phasen 1 und 2 (Stand dieser Fassung: E-147 und A-54). Jede Entscheidung nennt Status, Festlegung, Frage, Optionen, Empfehlung, Auswirkung, Quelle sowie betroffene IDs und WPs. Seit dem Beschluss vom 2026-10-28 sind alle Entscheidungen dieser Datei entschieden. Die Festlegung ist die verbindliche Regel; Frage, Optionen und Quelle bleiben als Dokumentation.
 
 **Nachtrag vom 2026-10-19 (Abgleich nach Gate G1):** Gate G1 ist seit 2026-10-15 mit Freigabe des Auftraggebers bestanden (`docs/acceptance/g1-gate.md`). In Phase 1 sind seitdem E-17, E-56, E-57 und E-58 entschieden; E-02 und E-35 bleiben offen, bis die erklärten Lieferungen vorliegen. Jede Entscheidung dieser Datei ist gegen den Code geprüft. Neu gefasst sind vor allem E-38 (Pfadinventar nach dem Bestand, Alias nur für G1-Pfade, Regeln für `x-phase` und `x-feature`), E-40 (Altledger und Übergangsspalte), E-43 (Auflösung über mehrere Rollen), E-44 (Zuordnung der Routen in `gatedRoutes`, Module `disposal`, `desks` und GPS, Limits, Trial), E-48 (keine Ausnahme nach Audit-Status N/P; die Stufe `P2` zählt nur Zeilen aus Phase-2-WPs), E-53 (`duplicate_ip` besteht seit WP-088), E-54 (zwei AST-Arten) und E-55 (Pflichtfelder je Methode). Neu aufgenommen sind E-103 bis E-107 und aus der Konsolidierung der WP-Neufassungen E-108 bis E-143. Die Aufgaben A-12 bis A-19 heißen jetzt A-15 bis A-22, weil Phase 1 A-12 bis A-14 belegt; neu sind A-23 bis A-53. Stand jetzt: 60 Entscheidungen, davon 30 vorläufig entschieden und 30 offen.
 
@@ -73,6 +73,7 @@ Stand: 2026-11-02 (Abgleich mit main `a01e95db` nach dem Korrekturplan; Beschlus
 | [E-142](#e-142) | AST-07: Schreibpfad für den Standortwechsel serieller Assets | entschieden (2026-10-28, Option 1) | WP-274, WP-756, WP-806, WP-809 |
 | [E-143](#e-143) | TKT-01/E-39: Datenquelle der Queue-Ansicht „meine Teams“ | entschieden (2026-10-28, Option 1; angepasst 2026-11-02) | WP-290, WP-769, WP-814 |
 | [E-145](#e-145) | IMP-IO-01/AUT-04: Principal eines Importlaufs mit API-Key – Neuladen statt Snapshot | entschieden: Empfehlung (Auftraggeber, 2026-11-04) | WP-779, WP-775, WP-303 |
+| [E-146](#e-146) | NFR-02/NFR-10: vorläufige Lastschwellen G2 als eigener Budgetsatz nach Lastlauf 42649690603 | entschieden (Auftraggeber, 2026-11-09), vorläufig, Korrektur bei Bedarf | WP-327, WP-822, WP-839, WP-831 |
 
 ### Weiter gültige Entscheidungen aus Phase 1
 
@@ -2092,6 +2093,57 @@ Fehlt ein Pflichtfeld, antwortet die API mit 400 (RFC 7807) und nennt das Feld. 
 **Betroffene IDs:** IMP-IO-01, AUT-04
 
 **Betroffene WPs:** WP-779 (`io-import-apikey`), WP-775 (`io-import-pipeline`), WP-303
+
+## E-146
+
+**Thema:** NFR-02/NFR-10: vorläufige Lastschwellen G2 (eigener Budgetsatz neben den G1-Budgets) nach Lastlauf 42649690603
+
+**Status:** entschieden (Auftraggeber, 2026-11-09); **vorläufig, Korrektur bei Bedarf**
+
+**Festlegung:** Wörtlich: „Senke die Schwellenwerte ab, falls diese noch zu hoch sind. Diese werden bei Bedarf noch korrigiert.“ Umgesetzt als eigener Budgetsatz G2 neben dem unveränderten Satz G1:
+
+- Quelle der p95-Budgets von `tests/load/api.js` und `tests/load/phase2.js` ist `tests/load/budgets.json` mit den Sätzen `G1` (Budgets aus NFR-02, Schwellen des G1-Nachweises) und `G2` (diese Entscheidung). k6 liest den Satz `BUDGET_GATE` (Standard `G2`, `tests/load/lib.js`); `load.yml` übergibt ihn (Eingabe `budget_gate`, Standard `G2`, auch im nächtlichen Lauf) und schreibt ihn als `budget set` in `run-<job>.txt`.
+- `tests/load/evaluate-runs.sh --gate G1|G2` (und `load-evidence.yml`, Eingabe `gate`) bewertet jede p95-Schwelle, die `budgets.json` führt, mit dem Budget des Satzes des Gates, unabhängig von der im Lauf aufgezeichneten Grenze. `--gate G2` prüft damit dieselben Budgets wie k6 in `load.yml`; Archive mit G1-Grenzen bleiben mit `--gate G1` reproduzierbar bewertbar und umgekehrt. `--partial` bewertet mit G2.
+- Regel für den G2-Wert jeder verletzten Latenz- oder Dauerschwelle: höchster p95 aus Lauf 42649690603 und Vorlauf 42619469662 über alle Jobs mit dem Skript (`api`, `nfr01-volume`, `api-large-28000` bzw. `phase2`) plus 25 % Reserve, aufgerundet bis 1 s auf 100 ms, bis 10 s auf 500 ms, darüber auf 5 s. Werte eines Szenarios mit echten Fehlern (Vorlauf `relation_search`: 58,9 s mit EOF-Abbrüchen, behoben durch den LATERAL/OFFSET-0-Fix) zählen nicht.
+- Unverändert (G2 = G1), weil in keinem der beiden Läufe verletzt: `attr_filter` 500 ms, `detail` 300 ms, `rack` 300 ms, `topology` 3.000 ms, `asset_list`, `asset_list_restricted`, `consumable_list`, `ci_tag_filter`, `ast_asset_filter` je 500 ms, `bulk_assets_500_duration` und `bulk_cis_ops_500_duration` je 30 s.
+- Unverändert in beiden Sätzen bleiben alle Fehlerschwellen (`http_req_failed` `rate==0` je Lauf und Szenario, `checks`, `*_jobs_succeeded`) und die Schwellen von `ingest.js` und `writes.js` (NFR-03).
+
+| Metrik (k6) | Skript | G1-Wert (NFR-02) | G2-Wert | gemessen p95 (höchster Wert, Job) | Lauf-ID |
+|---|---|---:|---:|---|---|
+| `http_req_duration{name:list}` | `api.js` | 500 ms | 1.500 ms | 910,31 ms (`api-large-28000`); 557,2 ms in 42649690603 | 42619469662 |
+| `http_req_duration{name:list_sorted}` | `api.js` | 500 ms | 1.500 ms | 922,84 ms (`api-large-28000`); 537,53 ms in 42649690603 | 42619469662 |
+| `http_req_duration{name:list_name_filter}` | `api.js` | 500 ms | 700 ms | 541 ms (`api`) | 42649690603 |
+| `http_req_duration{name:global_search}` | `api.js` | 500 ms | 1.500 ms | 1,12 s (`nfr01-volume`); 1,09 s (`api`) in 42649690603 | 42619469662 |
+| `http_req_duration{name:filter}` | `api.js` | 500 ms | 700 ms | 549,8 ms (`api-large-28000`); 314,12 ms in 42649690603 | 42619469662 |
+| `http_req_duration{name:relationships}` | `api.js` | 500 ms | 800 ms | 585,27 ms (`api`) | 42649690603 |
+| `http_req_duration{name:impact}` | `api.js` | 2.000 ms | 3.000 ms | 2,32 s (`nfr01-volume`); 1,69 s in 42649690603 | 42619469662 |
+| `http_req_duration{name:impact_full}` | `api.js` | 2.000 ms | 3.500 ms | 2,41 s (`nfr01-volume`); 1,63 s in 42649690603 | 42619469662 |
+| `http_req_duration{name:blast_radius}` | `api.js` | 2.000 ms | 3.000 ms | 2,31 s (`nfr01-volume`); 1,67 s in 42649690603 | 42619469662 |
+| `bulk_500_duration` | `api.js` | 30 s | 75 s | 60 s (`api`, k6: `1m0s`); 35,28 s in 42649690603 | 42619469662 |
+| `bulk_fields_500_duration` | `api.js` | 30 s | 65 s | 50,59 s (`api`); 43,02 s in 42619469662 | 42649690603 |
+| `http_req_duration{name:ticket_list}` | `phase2.js` | 500 ms | 1.000 ms | 786,57 ms (`phase2`); 666,97 ms in 42649690603 | 42619469662 |
+| `http_req_duration{name:search_fields}` | `phase2.js` | 500 ms | 1.500 ms | 1,18 s (`phase2`); 1,07 s in 42649690603 | 42619469662 |
+| `http_req_duration{name:view_presets}` | `phase2.js` | 500 ms | 2.500 ms | 1,99 s (`phase2`); 1,39 s in 42649690603 | 42619469662 |
+| `http_req_duration{name:ci_attr_filter}` | `phase2.js` | 500 ms | 700 ms | 508,5 ms (`phase2`); 387,1 ms in 42649690603 | 42619469662 |
+| `http_req_duration{name:relation_search}` | `phase2.js` | 500 ms | 1.500 ms | 866,74 ms (`phase2`; Vorlauf mit echten Fehlern nicht gewertet) | 42649690603 |
+
+**Frage:** Lauf 42649690603 (`load.yml`, `scenarios=all`, 4 vCPU, Commit `6d019370`) ist in `api`, `nfr01-volume`, `api-large-28000` und `phase2` rot, ausschließlich durch p95-Latenz- und Bulk-Dauerschwellen: In allen vier Jobs ist `http_req_failed` 0 % und `checks` 100 %, kein Job scheitert vor dem k6-Schritt. Sollen die NFR-02-Budgets weiter als harte Schwellen des Lastlaufs gelten, oder gelten bis zu einer Korrektur am Code oder am Referenzhost (SR-06) niedrigere Anforderungen?
+
+**Optionen:**
+
+1. G1-Budgets beibehalten; `load.yml` bleibt rot, bis die Latenzen im Code korrigiert sind.
+2. Die G1-Werte in den Skripten überschreiben.
+3. Eigener Budgetsatz G2 aus den Messwerten mit Reserve, Standard für `load.yml`; die G1-Werte bleiben unverändert dokumentiert und mit `--gate G1` bzw. `BUDGET_GATE=G1` auswertbar.
+
+**Empfehlung:** Option 3. Der Lastlauf trennt damit echte Fehler (bleiben rot) von Latenzüberschreitungen, die der Auftraggeber vorläufig hinnimmt, und die Abweichung von NFR-02 bleibt je Metrik nachvollziehbar und umkehrbar.
+
+**Blockiert / Auswirkung:** `load.yml` läuft standardmäßig mit G2; die Bewertung des G2-Nachweises (`docs/acceptance/lasttest-g2.md`, WP-327) misst gegen G2 und nennt den Satz im Bericht. Die Abweichung von NFR-02 ist vorläufig: Jede Korrektur ändert nur `tests/load/budgets.json` (Satz G2) und diese Tabelle. Knapp unter der G1-Schwelle ohne Änderung lag `bulk_cis_ops_500_duration` (p95 25,96 s in 42649690603).
+
+**Quelle:** Lauf 42649690603 (Jobs `api`, `nfr01-volume`, `api-large-28000`, `phase2`), Vorlauf 42619469662 (Commit `fc59cd22`); `tests/load/budgets.json`, `tests/load/lib.js`, `tests/load/api.js`, `tests/load/phase2.js`, `tests/load/evaluate-runs.sh`, `.github/workflows/load.yml`, `.github/workflows/load-evidence.yml`
+
+**Betroffene IDs:** NFR-02, NFR-10, ABN-02
+
+**Betroffene WPs:** WP-327 (`g2-perf`), WP-822, WP-839, WP-831
 
 ## Offene Aufgaben
 

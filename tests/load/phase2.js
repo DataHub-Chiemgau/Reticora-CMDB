@@ -44,7 +44,7 @@
 import http from 'k6/http';
 import { check, fail, sleep } from 'k6';
 import { Counter, Trend } from 'k6/metrics';
-import { BASE_URL, failed, firstID, get, params, post, seedDevice } from './lib.js';
+import { BASE_URL, budget, failed, firstID, get, params, post, seedDevice } from './lib.js';
 
 const DURATION = __ENV.DURATION || '1m';
 const VUS = Number(__ENV.VUS || 3);
@@ -91,16 +91,18 @@ const scenarios = {
 };
 
 // NFR-02 "Listen und Suche" and "indizierte Attributfilter": p95 < 500 ms
-// for every read; each read scenario names its requests like itself.
+// for every read in G1; each read scenario names its requests like itself.
+// The budgets come from tests/load/budgets.json by BUDGET_GATE (lib.js):
+// G2 (default, the provisional budgets of E-146) or G1.
 const READS = Object.keys(scenarios).filter((s) => !s.startsWith('bulk_'));
+const p95 = (metric) => [metric, [`p(95)<${budget(metric)}`]];
 
 export const options = {
   scenarios,
   thresholds: {
-    ...Object.fromEntries(READS.map((name) => [`http_req_duration{name:${name}}`, ['p(95)<500']])),
-    // NFR-02 "Bulk 500 IDs < 30 s".
-    bulk_assets_500_duration: ['p(95)<30000'],
-    bulk_cis_ops_500_duration: ['p(95)<30000'],
+    ...Object.fromEntries(READS.map((name) => p95(`http_req_duration{name:${name}}`))),
+    // NFR-02 "Bulk 500 IDs < 30 s" in G1.
+    ...Object.fromEntries([p95('bulk_assets_500_duration'), p95('bulk_cis_ops_500_duration')]),
     // F-388: every bulk job succeeds (a submetric without samples is not
     // evaluated, so the counters also catch bulk jobs that never ran).
     bulk_assets_jobs_succeeded: [`count==${BULK_JOBS}`],

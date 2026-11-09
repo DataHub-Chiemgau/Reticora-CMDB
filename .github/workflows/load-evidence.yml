@@ -17,8 +17,11 @@
 # them (<job>-ingest.json, NFR-03) are evaluated by the same rule. G1 the
 # five jobs of G1 alone: it re-evaluates the archives of the G1 evidence
 # (runs before WP-822), whose last line names the job set G1. Further jobs
-# of the runs (api-large-*) are evaluated as well. A run without an archive
-# (expired, never archived) fails the download step.
+# of the runs (api-large-*) are evaluated as well. The gate also selects
+# the p95 budgets of api.js and phase2.js (tests/load/budgets.json, E-146):
+# G2 the provisional budgets of the decision of 2026-11-09, G1 those of
+# NFR-02. A run without an archive (expired, never archived) fails the
+# download step.
 name: Load evidence
 
 on:
@@ -34,7 +37,7 @@ on:
         description: "Run ID of the third load.yml run"
         required: true
       gate:
-        description: "Job set of the evidence: G2 (the nine jobs of G2) or G1 (the five jobs of G1, archives before WP-822)"
+        description: "Job set and p95 budgets of the evidence: G2 (the nine jobs of G2, budgets of E-146) or G1 (the five jobs of G1, archives before WP-822, budgets of NFR-02)"
         type: choice
         options:
           - G2

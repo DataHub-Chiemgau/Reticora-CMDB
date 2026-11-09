@@ -5,6 +5,28 @@ import { check, fail } from 'k6';
 
 export const BASE_URL = (__ENV.BASE_URL || 'http://localhost:8080').replace(/\/$/, '');
 
+// The p95 budgets of the latency and duration thresholds of api.js and
+// phase2.js by budget set (tests/load/budgets.json, E-146): BUDGET_GATE G1
+// (the budgets of NFR-02, the G1 evidence) or G2 (default, the provisional
+// budgets of the decision of 2026-11-09). tests/load/evaluate-runs.sh
+// reads the same file, so --gate G2 checks the same budgets.
+const BUDGET_SETS = JSON.parse(open('./budgets.json')).gates;
+export const BUDGET_GATE = __ENV.BUDGET_GATE || 'G2';
+if (!BUDGET_SETS[BUDGET_GATE]) {
+  throw new Error(`BUDGET_GATE=${BUDGET_GATE}: ${Object.keys(BUDGET_SETS).join(' or ')}`);
+}
+
+// budget returns the p95 budget (ms) of a metric in the budget set of the
+// run, e.g. budget('http_req_duration{name:list}'); a metric without a
+// budget ends the run.
+export function budget(metric) {
+  const ms = BUDGET_SETS[BUDGET_GATE][metric];
+  if (typeof ms !== 'number') {
+    throw new Error(`no budget for ${metric} in ${BUDGET_GATE} (tests/load/budgets.json)`);
+  }
+  return ms;
+}
+
 // The API keys of the run by extra.key of params: default is the key of
 // org_admin (API_KEY, cmd/seed -api-key-file), restricted the key of the
 // role user viewer with its field grants (API_KEY_RESTRICTED, cmd/seed

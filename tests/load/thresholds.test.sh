@@ -8,12 +8,18 @@
 #     SCENARIO load, spool and rediscover have http_req_failed rate==0 for
 #     the run and for every scenario of it; api.js also
 #     bulk_jobs_succeeded count==3 and checks{scenario:bulk} rate==1.
-#   - k6 inspect: phase2.js (job phase2, WP-822) has the same rule, the
-#     p95 budget of 500 ms for each of its ten read scenarios (one name tag
-#     per scenario), bulk_assets_500_duration and bulk_cis_ops_500_duration
-#     p95 < 30 s, the counters of the succeeded bulk jobs count==3 with
-#     three iterations and checks rate==1 of the scenarios bulk_assets and
-#     bulk_cis_ops.
+#   - k6 inspect: phase2.js (job phase2, WP-822) has the same rule, a p95
+#     budget for each of its ten read scenarios (one name tag per
+#     scenario) and for bulk_assets_500_duration and
+#     bulk_cis_ops_500_duration, the counters of the succeeded bulk jobs
+#     count==3 with three iterations and checks rate==1 of the scenarios
+#     bulk_assets and bulk_cis_ops.
+#   - The budget sets (E-146): api.js and phase2.js take every p95 budget
+#     from tests/load/budgets.json, the set BUDGET_GATE: G2 by default, G1
+#     (the budgets of NFR-02, read scenarios of phase2.js 500 ms, bulk
+#     30 s) with -e BUDGET_GATE=G1; LATENCY_BUDGETS=lists keeps the three
+#     list budgets, none no budget; an unknown set fails k6 inspect; load.yml
+#     passes BUDGET_GATE (input budget_gate, default G2).
 #   - k6 inspect: writes.js (jobs import, template and computed, WP-823)
 #     with SCENARIO import, template and computed and with PHASE=prepare
 #     has the same rule for its one scenario and checks rate==1; the
@@ -116,12 +122,44 @@ opts="$(inspect tests/load/api.js)"
 expect "api.js: every bulk job succeeds (bulk_jobs_succeeded count==3, checks{scenario:bulk} rate==1)" "$opts" \
 	'(.thresholds.bulk_jobs_succeeded // [] | any(. == "count==3")) and (.thresholds["checks{scenario:bulk}"] // [] | any(. == "rate==1"))
 	and .scenarios.bulk.iterations == 3' '.thresholds'
-opts="$(inspect tests/load/phase2.js)"
-expect "phase2.js: p(95)<500 for each of the ten read scenarios by its name tag" "$opts" \
+# The p95 budgets of the set G2 (default) and G1 (E-146), as budgets.json
+# lists them: {metric: ["p(95)<ms"]}.
+BUDGETS="$(jq -c '.gates | map_values(map_values(["p(95)<\(.)"]))' tests/load/budgets.json)"
+# BUDGETED SET: the duration thresholds of the options are those of the set.
+budgeted() {
+	echo ".thresholds as \$t | ($BUDGETS).$1 as \$b | [\$t | keys[] | select(test(\"duration\"))] as \$d
+		| (\$d | length) > 0 and (\$d | all(. as \$m | \$t[\$m] == \$b[\$m]))"
+}
+for gate in G2 G1; do
+	opts="$(inspect -e BUDGET_GATE="$gate" tests/load/api.js)"
+	expect "api.js BUDGET_GATE=$gate: the 15 p95 budgets of the set $gate (budgets.json)" "$opts" \
+		"$(budgeted "$gate") and ([.thresholds | keys[] | select(test(\"duration\"))] | length) == 15" \
+		'.thresholds | with_entries(select(.key | test("duration")))'
+	opts="$(inspect -e BUDGET_GATE="$gate" tests/load/phase2.js)"
+	expect "phase2.js BUDGET_GATE=$gate: the p95 budgets of the set $gate for the ten reads and the two bulks" "$opts" \
+		"$(budgeted "$gate") and ([.thresholds | keys[] | select(test(\"duration\"))] | length) == 12" \
+		'.thresholds | with_entries(select(.key | test("duration")))'
+done
+opts="$(inspect tests/load/api.js)"
+expect "api.js: G2 is the default budget set" "$opts" "$(budgeted G2)" '.thresholds | with_entries(select(.key | test("duration")))'
+opts="$(inspect -e LATENCY_BUDGETS=lists tests/load/api.js)"
+expect "api.js LATENCY_BUDGETS=lists: list, filter and list_sorted with their G2 budgets" "$opts" \
+	"$(budgeted G2) and ([.thresholds | keys[] | select(test(\"duration\"))] | sort)
+		== [\"http_req_duration{name:filter}\", \"http_req_duration{name:list_sorted}\", \"http_req_duration{name:list}\"]" \
+	'.thresholds | with_entries(select(.key | test("duration")))'
+opts="$(inspect -e LATENCY_BUDGETS=none tests/load/api.js)"
+expect "api.js LATENCY_BUDGETS=none: no budget" "$opts" '[.thresholds | keys[] | select(test("duration"))] == []' '.thresholds'
+if "$K6" inspect -e BUDGET_GATE=G3 tests/load/api.js >/dev/null 2>&1; then
+	bad "api.js BUDGET_GATE=G3: k6 inspect fails"
+else
+	ok "api.js BUDGET_GATE=G3: k6 inspect fails"
+fi
+opts="$(inspect -e BUDGET_GATE=G1 tests/load/phase2.js)"
+expect "phase2.js BUDGET_GATE=G1: p(95)<500 for each of the ten read scenarios by its name tag (NFR-02)" "$opts" \
 	'.thresholds as $t | [.scenarios | keys[] | select(startswith("bulk_") | not)] as $reads | ($reads | length) == 10
 	and ($reads | all(. as $s | $t["http_req_duration{name:\($s)}"] // [] | any(. == "p(95)<500")))' \
 	'{reads: [.scenarios | keys[] | select(startswith("bulk_") | not)], durations: (.thresholds | with_entries(select(.key | test("duration"))))}'
-expect "phase2.js: bulk of 500 ids p(95)<30000, every bulk job succeeds (count==3, checks rate==1)" "$opts" \
+expect "phase2.js BUDGET_GATE=G1: bulk of 500 ids p(95)<30000, every bulk job succeeds (count==3, checks rate==1)" "$opts" \
 	'. as $o | ["bulk_assets", "bulk_cis_ops"] | all(. as $b
 		| ($o.thresholds["\($b)_500_duration"] // [] | any(. == "p(95)<30000"))
 		and ($o.thresholds["\($b)_jobs_succeeded"] // [] | any(. == "count==3"))
@@ -326,6 +364,10 @@ has "load.yml: the failed requests go to the job summary" "$WF" 'tests/load/fail
 has "load.yml: ... and to failed-<job>.txt" "$WF" 'load-results/failed-\$SCENARIO_NAME\.txt'
 has "archive-run.sh keeps failed-<job>.txt" "$(cat tests/load/archive-run.sh)" 'failed-%s\.txt'
 has "load.yml: the prepare job runs this test" "$WF" 'run: \./tests/load/thresholds\.test\.sh'
+# The budget set of the run (E-146): G2 unless the input says G1.
+has "load.yml: the budget set of the run, G2 by default" "$WF" "^      BUDGET_GATE: \\\$\\{\\{ inputs\\.budget_gate \\|\\| 'G2' \\}\\}$"
+has "load.yml: ... passed to every k6 run" "$WF" '-e BUDGET_GATE="\$BUDGET_GATE"'
+has "load.yml: ... and recorded in run-<job>.txt" "$WF" 'echo "budget set: \$BUDGET_GATE"'
 # 4. load.yml: the job phase2 and the release configuration of G2 (WP-822).
 has "load.yml: the job phase2 runs phase2.js" "$WF" '\{"scenario":"phase2","script":"phase2\.js",'
 has "load.yml: every job starts the server with the modules of phase P2" "$WF" '^      MODULES: "P2"$'

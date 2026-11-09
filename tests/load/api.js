@@ -23,6 +23,9 @@
 // 10,000 objects), lists (only list, filter and list_sorted, the job
 // api-large at 28,000 objects) or none (measured values without a budget,
 // api-large at 50,000 objects). The failure thresholds stay in every run.
+// The p95 values of the budgets come from tests/load/budgets.json by
+// BUDGET_GATE (lib.js): G2 (default, the provisional budgets of E-146) or
+// G1 (the budgets of NFR-02 below).
 //
 // No request may fail (F-388): http_req_failed is 0 in the run and in every
 // scenario, every bulk job succeeds (bulk_jobs_succeeded, the checks of
@@ -37,7 +40,7 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { Counter, Trend } from 'k6/metrics';
-import { BASE_URL, failed, firstID, get, params, post } from './lib.js';
+import { BASE_URL, budget, failed, firstID, get, params, post } from './lib.js';
 
 const DURATION = __ENV.DURATION || '1m';
 const VUS = Number(__ENV.VUS || 5);
@@ -90,37 +93,46 @@ const scenarios = {
   bulk_fields: { executor: 'per-vu-iterations', exec: 'bulkFields', vus: 1, iterations: BULK_JOBS, maxDuration: '10m' },
 };
 
-// The p95 budgets of NFR-02 by request name; LATENCY_BUDGETS keeps all of
+// The p95 budgets by request name (NFR-02 in G1: detail and rack 300 ms,
+// topology 3 s, impact, impact_full and blast_radius 2 s, the others
+// 500 ms; G2 in tests/load/budgets.json); LATENCY_BUDGETS keeps all of
 // them, those of the lists (E-17: list, filter and list_sorted hold at
 // 28,000 objects) or none.
 const LIST_BUDGETS = ['list', 'filter', 'list_sorted'];
-const latency = {
-  list: 500,
-  list_name_filter: 500,
-  list_sorted: 500,
-  global_search: 500,
-  attr_filter: 500,
-  relationships: 500,
-  detail: 300,
-  filter: 500,
-  rack: 300,
-  topology: 3000,
-  impact: 2000,
-  impact_full: 2000,
-  blast_radius: 2000,
-};
+const LATENCY_NAMES = [
+  'list',
+  'list_name_filter',
+  'list_sorted',
+  'global_search',
+  'attr_filter',
+  'relationships',
+  'detail',
+  'filter',
+  'rack',
+  'topology',
+  'impact',
+  'impact_full',
+  'blast_radius',
+];
 const latencyThresholds = Object.fromEntries(
-  Object.entries(latency)
-    .filter(([name]) => LATENCY_BUDGETS === 'all' || (LATENCY_BUDGETS === 'lists' && LIST_BUDGETS.includes(name)))
-    .map(([name, ms]) => [`http_req_duration{name:${name}}`, [`p(95)<${ms}`]]),
+  LATENCY_NAMES.filter(
+    (name) => LATENCY_BUDGETS === 'all' || (LATENCY_BUDGETS === 'lists' && LIST_BUDGETS.includes(name)),
+  ).map((name) => {
+    const metric = `http_req_duration{name:${name}}`;
+    return [metric, [`p(95)<${budget(metric)}`]];
+  }),
 );
 
 export const options = {
   scenarios,
   thresholds: {
     ...latencyThresholds,
+    // NFR-02 "Bulk 500 IDs < 30 s" in G1.
     ...(LATENCY_BUDGETS === 'all'
-      ? { bulk_500_duration: ['p(95)<30000'], bulk_fields_500_duration: ['p(95)<30000'] }
+      ? {
+          bulk_500_duration: [`p(95)<${budget('bulk_500_duration')}`],
+          bulk_fields_500_duration: [`p(95)<${budget('bulk_fields_500_duration')}`],
+        }
       : {}),
     // F-388: every bulk job succeeds (a submetric without samples is not
     // evaluated, so the counter also catches bulk jobs that never ran).

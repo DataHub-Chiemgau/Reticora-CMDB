@@ -4,24 +4,40 @@ k6-Szenarien (E-31) für die Budgets aus NFR-02 und NFR-03 bei der Seed-Größe 
 NFR-10 (SIM-01 skaliert auf 10.000 Objekte). Die Schwellen der Skripte sind die
 Budgets: Wird ein Budget verfehlt, schlägt der Lauf fehl.
 
-| Skript | Prüft | Budget (p95) |
-|---|---|---|
-| `api.js` `list` | `GET /cis?limit=50` | < 500 ms |
-| `api.js` `list_name_filter` | Namensfilter der CI-Liste `GET /cis?search=…` (`name ILIKE`; bis WP-437 `search`) | < 500 ms |
-| `api.js` `global_search` | globale Suche der UI (Befehlspalette) `GET /search?q=<Servername>&limit=5` über den nach dem Seed neu aufgebauten Index; der Treffer muss das CI sein | < 500 ms |
-| `api.js` `attr_filter` | Filter auf das durchsuchbare JSONB-Attribut des Seeds `GET /cis?filter[attributes.cost_center]=CC-…` (200 CIs je Wert) | < 500 ms |
-| `api.js` `relationships` | Beziehungen je CI `GET /cis/{id}/relationships` (Detailansicht), 500 CIs aus fünf über die Organisation verteilten Seiten | < 500 ms |
-| `api.js` `filter` | indizierte Filter `filter[status]`, `filter[hostname]` | < 500 ms |
-| `api.js` `detail` | `GET /cis/{id}` | < 300 ms |
-| `api.js` `rack` | `GET /racks/{id}/layout` | < 300 ms |
-| `api.js` `topology` | Topologie des Core-Switches, Tiefe 1 (> 2.000 Knoten) | < 3 s |
-| `api.js` `impact` | Impact des Core-Switches, Tiefe 20 (ganze Organisation), kompakte Antwort der Topologie-Ansicht (`fields=…`, ≤ 250 Byte je betroffenem CI) | < 2 s |
-| `api.js` `impact_full` | derselbe Impact in der vollständigen Antwort (alle Felder und Pfade) | < 2 s |
-| `api.js` `blast_radius` | Blast Radius des Core-Switches mit Service-Impact-Kette `GET /cis/{id}/blast-radius` (WP-297); der Seed hat keine Services, gemessen werden Zeit und Größe der Antwort (`blast_radius_bytes`), die SPOF-Last weist `TestServiceImpactWorstCase` nach | < 2 s |
-| `api.js` `bulk` | Bulk-Statuswechsel von 500 CIs bis Job-Ende | < 30 s |
-| `ingest.js` `load` | `POST /ingest/bulk` mit `RATE` Records/s für `DURATION_S`; Verzögerung Record → sichtbar (Probe-Records während der Last, danach bis alle Records sichtbar sind) | < 30 s |
-| `ingest.js` `spool` | Spool-Flush eines Collectors (COL-05): 10.000 Records als nacheinander gesendete Uploads (`POST /discovery/ingest`, gzip); Abbau-Rate ab Sendeende, Dauer bis alle sichtbar | ≥ 200/s, < 5 min |
-| `ingest.js` `rediscover` | Wiederentdeckung der geseedeten Server (F-118): `RATE` SNMP-artige Records/s mit primärer MAC, Interface-MACs und LLDP-Nachbar über `POST /ingest/bulk`; Verzögerung Record → gesehen (`last_seen_at`), kein neues CI, kein fehlender Record | < 30 s, 0 neue CIs, 0 fehlend |
+**Budgetsätze G1 und G2 (E-146):** Die p95-Budgets von `api.js` und
+`phase2.js` stehen in `tests/load/budgets.json` in zwei Sätzen mit denselben
+Metriken: `G1` sind die Budgets aus NFR-02 (Schwellen des G1-Nachweises,
+unverändert), `G2` die vorläufigen Schwellen nach der Entscheidung des
+Auftraggebers vom 2026-11-09 („Senke die Schwellenwerte ab, falls diese noch
+zu hoch sind. Diese werden bei Bedarf noch korrigiert.“; Herleitung je
+Metrik mit Messwert und Lauf-ID in `docs/plan/phase2/entscheidungen.md`,
+E-146). k6 liest den Satz `BUDGET_GATE` (`-e BUDGET_GATE=G1|G2`, Standard
+`G2`, `lib.js` `budget()`; ein unbekannter Satz oder eine Metrik ohne Budget
+beendet den Lauf). `load.yml` übergibt ihn aus der Eingabe `budget_gate`
+(Standard `G2`, auch nächtlich) und schreibt ihn als `budget set` in
+`run-<job>.txt`; `evaluate-runs.sh --gate G1|G2` bewertet mit demselben
+Satz (Abschnitt „Bewertung über drei Läufe“). Eine Korrektur der
+vorläufigen Werte ändert nur den Satz `G2` und E-146. Fehlerschwellen,
+`ingest.js` und `writes.js` sind in beiden Sätzen gleich.
+
+| Skript | Prüft | Budget G1 (p95, NFR-02) | Budget G2 (p95, E-146) |
+|---|---|---|---|
+| `api.js` `list` | `GET /cis?limit=50` | < 500 ms | < 1.500 ms |
+| `api.js` `list_name_filter` | Namensfilter der CI-Liste `GET /cis?search=…` (`name ILIKE`; bis WP-437 `search`) | < 500 ms | < 700 ms |
+| `api.js` `global_search` | globale Suche der UI (Befehlspalette) `GET /search?q=<Servername>&limit=5` über den nach dem Seed neu aufgebauten Index; der Treffer muss das CI sein | < 500 ms | < 1.500 ms |
+| `api.js` `attr_filter` | Filter auf das durchsuchbare JSONB-Attribut des Seeds `GET /cis?filter[attributes.cost_center]=CC-…` (200 CIs je Wert) | < 500 ms | < 500 ms |
+| `api.js` `relationships` | Beziehungen je CI `GET /cis/{id}/relationships` (Detailansicht), 500 CIs aus fünf über die Organisation verteilten Seiten | < 500 ms | < 800 ms |
+| `api.js` `filter` | indizierte Filter `filter[status]`, `filter[hostname]` | < 500 ms | < 700 ms |
+| `api.js` `detail` | `GET /cis/{id}` | < 300 ms | < 300 ms |
+| `api.js` `rack` | `GET /racks/{id}/layout` | < 300 ms | < 300 ms |
+| `api.js` `topology` | Topologie des Core-Switches, Tiefe 1 (> 2.000 Knoten) | < 3 s | < 3 s |
+| `api.js` `impact` | Impact des Core-Switches, Tiefe 20 (ganze Organisation), kompakte Antwort der Topologie-Ansicht (`fields=…`, ≤ 250 Byte je betroffenem CI) | < 2 s | < 3 s |
+| `api.js` `impact_full` | derselbe Impact in der vollständigen Antwort (alle Felder und Pfade) | < 2 s | < 3,5 s |
+| `api.js` `blast_radius` | Blast Radius des Core-Switches mit Service-Impact-Kette `GET /cis/{id}/blast-radius` (WP-297); der Seed hat keine Services, gemessen werden Zeit und Größe der Antwort (`blast_radius_bytes`), die SPOF-Last weist `TestServiceImpactWorstCase` nach | < 2 s | < 3 s |
+| `api.js` `bulk` | Bulk-Statuswechsel von 500 CIs bis Job-Ende | < 30 s | < 75 s |
+| `ingest.js` `load` | `POST /ingest/bulk` mit `RATE` Records/s für `DURATION_S`; Verzögerung Record → sichtbar (Probe-Records während der Last, danach bis alle Records sichtbar sind) | < 30 s | wie G1 |
+| `ingest.js` `spool` | Spool-Flush eines Collectors (COL-05): 10.000 Records als nacheinander gesendete Uploads (`POST /discovery/ingest`, gzip); Abbau-Rate ab Sendeende, Dauer bis alle sichtbar | ≥ 200/s, < 5 min | wie G1 |
+| `ingest.js` `rediscover` | Wiederentdeckung der geseedeten Server (F-118): `RATE` SNMP-artige Records/s mit primärer MAC, Interface-MACs und LLDP-Nachbar über `POST /ingest/bulk`; Verzögerung Record → gesehen (`last_seen_at`), kein neues CI, kein fehlender Record | < 30 s, 0 neue CIs, 0 fehlend | wie G1 |
 
 `global_search`, `attr_filter` und `relationships` laufen mit je 2 VUs in
 der Mischlast mit (wie `topology` und `impact`); die gleichzeitige Last des
@@ -182,22 +198,22 @@ den zweiten Lauf.
 `phase2.js` misst die Listen, Suche, Filter, Beziehungssuche und
 Bulk-Operationen der Phase 2 gegen den Phase-2-Last-Seed; jede Anfrageart
 ist ein eigenes Szenario mit gleichnamigem Name-Tag und dem Budget aus
-NFR-02 als Schwelle:
+NFR-02 (Satz G1) bzw. E-146 (Satz G2, Standard) als Schwelle:
 
-| Skript | Prüft | Budget (p95) |
-|---|---|---|
-| `phase2.js` `asset_list` | `GET /assets?limit=50` mit `total` (K23) | < 500 ms |
-| `phase2.js` `asset_list_restricted` | dieselbe Liste mit dem Schlüssel des Rollennutzers `viewer` (`API_KEY_RESTRICTED`); Check: keine Zeile enthält `purchase_price` oder `cost_center` (Feldrechte-Grants aus WP-819, Projektion aus WP-271) | < 500 ms |
-| `phase2.js` `ticket_list` | `GET /tickets?limit=50` mit `total` (mit der Sichtbarkeitsprüfung der Tickets) | < 500 ms |
-| `phase2.js` `consumable_list` | `GET /consumables?limit=50` mit `total` | < 500 ms |
-| `phase2.js` `search_fields` | globale Suche `GET /search?q=…&limit=5` über die Felder aus WP-308: Inventarnummer (Stichprobe der Asset-Liste), Management-IP und MAC von `eth0` (zufällige Seed-CIs, `lib.js` `seedDevice`), den Tag `loadphase2` und das Custom-Feld `cost_center`; Check: mindestens ein Treffer | < 500 ms |
-| `phase2.js` `ci_attr_filter` | `GET /cis?limit=50` im Wechsel mit dem Bereich `filter[attributes.cost_center][gte]=CC-…&…[lte]=CC-…` (drei Werte; den Gleichheitsfilter misst `attr_filter` in `api.js`) und mit dem berechneten Attribut `filter[attributes.warranty_days_left][lte]=30` (WP-718) | < 500 ms |
-| `phase2.js` `ci_tag_filter` | `GET /cis?limit=50&filter[tags][in]=loadphase2,archived` (WP-281; 500 CIs mit dem Tag) | < 500 ms |
-| `phase2.js` `ast_asset_filter` | `POST /search/query?limit=50` im Wechsel: Asset-Abfrage mit `where` auf `manufacturer` und `cost_center`, CI-Abfrage mit `where` auf `asset.manufacturer` und dem berechneten Attribut `attributes.warranty_days_left` (WP-309) | < 500 ms |
-| `phase2.js` `view_presets` | `filter_spec` (mit `sort` und `columns`) der Systemviews `warranty_expiring`, `servers_without_monitoring`, `my_devices_ci` und `my_devices_asset` aus `GET /saved-views/presets` über `POST /search/query?limit=50` (WP-307) | < 500 ms |
-| `phase2.js` `relation_search` | `POST /search/query?limit=50` mit `downstream_of` oder `upstream_of` (Tiefe `MaxRelationshipDepth` = 5) am Core-Switch `sw-00001` (Worst Case: `upstream_of` erreicht etwa die Hälfte der CIs) und am Server `srv-04242` | < 500 ms |
-| `phase2.js` `bulk_assets` | `POST /assets/bulk` `action=set_fields` (`notes`) auf 500 Assets bis Job-Ende über `GET /jobs/{id}` (WP-781), `bulk_assets_500_duration` | < 30 s |
-| `phase2.js` `bulk_cis_ops` | `POST /cis/bulk` `action=add_tags` (je Job ein anderer Tag `loadbulk<n>`) auf 500 CIs bis Job-Ende (WP-304), `bulk_cis_ops_500_duration` | < 30 s |
+| Skript | Prüft | Budget G1 (p95, NFR-02) | Budget G2 (p95, E-146) |
+|---|---|---|---|
+| `phase2.js` `asset_list` | `GET /assets?limit=50` mit `total` (K23) | < 500 ms | < 500 ms |
+| `phase2.js` `asset_list_restricted` | dieselbe Liste mit dem Schlüssel des Rollennutzers `viewer` (`API_KEY_RESTRICTED`); Check: keine Zeile enthält `purchase_price` oder `cost_center` (Feldrechte-Grants aus WP-819, Projektion aus WP-271) | < 500 ms | < 500 ms |
+| `phase2.js` `ticket_list` | `GET /tickets?limit=50` mit `total` (mit der Sichtbarkeitsprüfung der Tickets) | < 500 ms | < 1.000 ms |
+| `phase2.js` `consumable_list` | `GET /consumables?limit=50` mit `total` | < 500 ms | < 500 ms |
+| `phase2.js` `search_fields` | globale Suche `GET /search?q=…&limit=5` über die Felder aus WP-308: Inventarnummer (Stichprobe der Asset-Liste), Management-IP und MAC von `eth0` (zufällige Seed-CIs, `lib.js` `seedDevice`), den Tag `loadphase2` und das Custom-Feld `cost_center`; Check: mindestens ein Treffer | < 500 ms | < 1.500 ms |
+| `phase2.js` `ci_attr_filter` | `GET /cis?limit=50` im Wechsel mit dem Bereich `filter[attributes.cost_center][gte]=CC-…&…[lte]=CC-…` (drei Werte; den Gleichheitsfilter misst `attr_filter` in `api.js`) und mit dem berechneten Attribut `filter[attributes.warranty_days_left][lte]=30` (WP-718) | < 500 ms | < 700 ms |
+| `phase2.js` `ci_tag_filter` | `GET /cis?limit=50&filter[tags][in]=loadphase2,archived` (WP-281; 500 CIs mit dem Tag) | < 500 ms | < 500 ms |
+| `phase2.js` `ast_asset_filter` | `POST /search/query?limit=50` im Wechsel: Asset-Abfrage mit `where` auf `manufacturer` und `cost_center`, CI-Abfrage mit `where` auf `asset.manufacturer` und dem berechneten Attribut `attributes.warranty_days_left` (WP-309) | < 500 ms | < 500 ms |
+| `phase2.js` `view_presets` | `filter_spec` (mit `sort` und `columns`) der Systemviews `warranty_expiring`, `servers_without_monitoring`, `my_devices_ci` und `my_devices_asset` aus `GET /saved-views/presets` über `POST /search/query?limit=50` (WP-307) | < 500 ms | < 2.500 ms |
+| `phase2.js` `relation_search` | `POST /search/query?limit=50` mit `downstream_of` oder `upstream_of` (Tiefe `MaxRelationshipDepth` = 5) am Core-Switch `sw-00001` (Worst Case: `upstream_of` erreicht etwa die Hälfte der CIs) und am Server `srv-04242` | < 500 ms | < 1.500 ms |
+| `phase2.js` `bulk_assets` | `POST /assets/bulk` `action=set_fields` (`notes`) auf 500 Assets bis Job-Ende über `GET /jobs/{id}` (WP-781), `bulk_assets_500_duration` | < 30 s | < 30 s |
+| `phase2.js` `bulk_cis_ops` | `POST /cis/bulk` `action=add_tags` (je Job ein anderer Tag `loadbulk<n>`) auf 500 CIs bis Job-Ende (WP-304), `bulk_cis_ops_500_duration` | < 30 s | < 30 s |
 
 Die zehn Lese-Szenarien laufen mit je `VUS` (Standard 3) VUs für
 `DURATION`, die Bulk-Szenarien mit einer VU und drei Jobs nacheinander;
@@ -494,6 +510,15 @@ im Archiv, also `scenarios=all`). `--gate` wählt den Jobsatz (WP-327):
   von G1 als Regression, `api`, `ingest`, `ingest-spool`,
   `ingest-rediscover` und `nfr01-volume`, dazu `phase2` (WP-822) und die
   Schreibjobs `import`, `template` und `computed` (WP-823); neun Jobs.
+- **Budgetsatz:** `--gate` wählt zugleich den Satz von
+  `tests/load/budgets.json` (E-146). Jede p95-Schwelle `p(95)<…` einer dort
+  geführten Metrik wird mit dem Budget des Satzes bewertet, gleich welche
+  Grenze der Lauf aufgezeichnet hat; Läufe mit G1- und G2-Grenzen stehen in
+  einer Zeile. `--gate G2` prüft also dieselben Budgets wie k6 in
+  `load.yml`, und mit `--gate G1` bleiben die NFR-02-Budgets auf jedem
+  Archiv auswertbar. `--partial` bewertet mit G2. Der Bericht nennt den Satz
+  („Latenz- und Dauerbudgets (p95): Satz G2 …“); andere Schwellen
+  (Fehler, Ingest, Zähler) gelten wie aufgezeichnet.
 - **G1**: nur die fünf Jobs von G1. Archive aus der Zeit vor WP-822 haben
   die Jobs der Phase 2 nicht und wären für G2 nicht bewertbar; mit
   `--gate G1` bleibt ihre Bewertung reproduzierbar (E-58), etwa die der
