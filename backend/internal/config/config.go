@@ -719,7 +719,8 @@ const (
 
 // Defaults of the malware scanner (SEC-09, WP-734): the clamd address
 // applies in development only, outside it RETICORA_CLAMD_ADDR is required
-// with the module documents.
+// with the module documents, which the release default G2 includes
+// (WP-853).
 const (
 	DefaultClamdAddr    = "localhost:3310"
 	DefaultClamdTimeout = 60 * time.Second
@@ -779,14 +780,14 @@ func hostPort(addr string) bool {
 }
 
 // documentsEnabled reports whether RETICORA_MODULES switches the module
-// documents on explicitly: "all", the phase value P2 or its key
-// (server.ParseModules). The empty release default G2 (WP-830) switches
-// documents on as well but is not checked here: the deploy manifests that
-// leave RETICORA_MODULES unset keep starting without a clamd; their uploads
-// stay pending_scan (fail-closed) until RETICORA_CLAMD_ADDR answers.
+// documents on, read like server.ParseModules: the empty release default
+// G2 (WP-830), "all", the phase value P2 or the key documents. Since
+// WP-853 (SR-57) the empty default counts as well: a deployment that leaves
+// RETICORA_MODULES unset runs documents and needs clamd, otherwise every
+// upload would stay pending_scan without a hint at the start.
 func (c *Config) documentsEnabled() bool {
 	spec := strings.TrimSpace(c.Modules)
-	if strings.EqualFold(spec, "all") {
+	if spec == "" || strings.EqualFold(spec, "all") {
 		return true
 	}
 	for _, key := range strings.Split(spec, ",") {

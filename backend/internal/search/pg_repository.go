@@ -260,7 +260,9 @@ func attributeMatch(textArg int) string {
 
 // attributeRows reads the ids of the documents whose custom field rows or
 // tag row match the text of parameter textArg (attributeMatch); a document
-// with several matching rows comes more than once.
+// with several matching rows comes more than once. Its field condition is
+// the predicate of idx_search_document_field_match (000280); keep both
+// alike, or the planner reads every field row of the organization.
 func attributeRows(textArg int) string {
 	return fmt.Sprintf(`SELECT f.document_id FROM search_document_field f
 		WHERE (starts_with(f.field, 'attributes.') OR f.field = '%s')
@@ -592,10 +594,11 @@ func restrictedQuery(ctx context.Context, tx pgx.Tx, q *Query, tokens, restricte
 	}
 
 	// The custom field rows that match the text are read once, by the
-	// scope statement (attr): the policy of search_document_field looks
-	// up the document of every custom field row of the organization before
-	// the match (@@ is not leakproof), so each read costs one index probe
-	// per row. The statement returns the ids of their documents with the
+	// scope statement (attr): @@ is not leakproof, so the policy of
+	// search_document_field is checked on every custom field row and tag
+	// row of the organization (idx_search_document_field_match) before the
+	// match; since 000280 it checks the client and site columns of the row
+	// instead of looking up its document. The statement returns the ids of their documents with the
 	// scopes, and the query below matches them by id (attributeAny) instead
 	// of reading the rows again. The candidates of the restricted types
 	// still match by their readable fields there (RBA-07), and the query

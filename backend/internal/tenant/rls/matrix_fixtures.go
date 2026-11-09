@@ -88,6 +88,9 @@ var Channels = []Channel{
 	{Name: "contract", Read: "GET /api/v1/contracts?limit=200, GET /api/v1/contracts/{id}"},
 	{Name: "document", Read: "GET /api/v1/documents?limit=200, GET /api/v1/documents/{id}, GET /api/v1/documents/{id}/content",
 		Write: "POST /api/v1/documents/{id}/links"},
+	// SR-56, SR-63 (WP-852): removing the last link of a document leaves it
+	// visible to org-wide principals only (migration 000281).
+	{Name: "document-link", Write: "DELETE /api/v1/documents/{id}/links/{link_id} (last link), then GET /api/v1/documents/{id}"},
 	{Name: "consumable", Read: "GET /api/v1/consumables?limit=200, GET /api/v1/consumables/{id}, GET /api/v1/consumables/{id}/stock"},
 	{Name: "stock-movement", Read: "GET /api/v1/stock-movements?limit=200",
 		Write: "POST /api/v1/stock-movements (receipt of an article, transfer of an asset)"},
@@ -115,4 +118,7 @@ var ScopeKinds = []string{"org", "client", "site", "team", "multi", "other-org"}
 var ClientMatrixTables = map[string]string{
 	"ci_identity_mac": "identity MACs of ci with the client and site of their CI, kept by the trigger on ci " +
 		"(migration 000161, WP-434); the identity search of discovery reads it under the scope of the principal",
+	"search_document_field": "field rows of the full-text index with the client and site of their search document, " +
+		"kept by the triggers search_field_scope and search_field_scope_propagation (migration 000280); the global " +
+		"search reads them under the scope of the principal",
 }

@@ -62,6 +62,13 @@ Sicherheitswirkung“ (Abschnitt „Befunde der Korrektur G1 (ab F-355)“).
     Spätphasen-Anteil ist ebenfalls zurückgestellt.
   - NFR-02, NFR-03 und NFR-10 verfehlte der Erstlauf des Lasttests (WP-206).
     Der Wiederholungslauf nach der G1-Nachbesserung belegt sie.
+  - Teil 03 (Datenmodell, Standorte, Metamodell) ist seit WP-832 in
+    `docs/audit/befunde.csv` konsolidiert (A-03, A-28). Seine 26
+    Critical/High-Befunde (5 Critical: LOC-10, LOC-11, MET-14, X-SCOPE,
+    X-MANUAL; 21 High) sind auf main geschlossen, DB-05 bis auf seine Anteile
+    der Phasen 3 und 4; jeder steht mit schließendem WP und Tests im Anhang
+    (Abschnitt „Teil 03“). Mit ihnen umfasst die Quelle 251
+    Critical/High-Befunde.
 - **Neue Befunde:** Das Review ergab sieben neue Befunde (SR-01 bis SR-07).
   Die G1-Nachbesserung behebt zwei davon und hinterlässt drei Restrisiken
   (SR-08 bis SR-10). Das Gesamtreview fand zusätzlich einen vorbestehenden
@@ -111,9 +118,11 @@ Sicherheitswirkung“ (Abschnitt „Befunde der Korrektur G1 (ab F-355)“).
   (2026-10-25), für die High innerhalb der Frist (Abschnitt
   „Scanergebnisse“).
 - **Pentest:** Der externe Pentest (WP-210, E-28, B3) ist laut Erklärung des
-  Auftraggebers vom 2026-10-15 erledigt. Bericht, Befunde und Nachtest
-  liegen im Repository nicht vor; Zusammenfassung und Befundliste sind in
-  `docs/security/pentest-g1.md` nachzureichen.
+  Auftraggebers vom 2026-10-15 erledigt. Nach dem Beschluss des
+  Auftraggebers vom 2026-10-28 gilt diese Erklärung als Nachweis für G1 und
+  G2 (E-103). Bericht, Befunde und Nachtest liegen im Repository nicht vor
+  und werden nicht nachgereicht; `docs/security/pentest-g1.md` verweist auf
+  die Erklärung.
 
 **Freigabe des Sicherheitsreviews:** Das Review ist mit der Freigabe des
 Auftraggebers vom 2026-10-15 freigegeben. Unter den Befunden SR-01 bis SR-11
@@ -126,12 +135,12 @@ der Korrektur, Fortschreibung vom 2026-11-01); die Critical-Advisories der
 Entwicklungsabhängigkeiten sind mit WP-654 behoben (Abschnitt
 „Scanergebnisse“). Das
 Ausstiegskriterium „keine offenen High/Critical“ verlangt zusätzlich den
-Pentest-Nachweis (WP-210, B3). Die Erklärung des Auftraggebers vom
-2026-10-15, B3 sei erledigt, ersetzt ihn nach der Übergangsregel von E-76
-(`docs/plan/g1-korrektur/entscheidungen.md`) nicht; nachzureichen sind
-Zusammenfassung und Befundliste in `docs/security/pentest-g1.md` (A-07,
-WP-453). Enthält die Befundliste ein offenes High oder Critical, ist das
-Kriterium nicht erfüllt.
+Pentest-Nachweis (WP-210, B3). Nach E-76
+(`docs/plan/g1-korrektur/entscheidungen.md`) ersetzte die Erklärung des
+Auftraggebers vom 2026-10-15, B3 sei erledigt, diesen Nachweis nicht. Der
+Beschluss des Auftraggebers vom 2026-10-28 löst E-76 in diesem Punkt ab: Die
+Erklärung gilt als Nachweis für G1 und G2 (E-103). Zusammenfassung und
+Befundliste werden nicht nachgereicht (A-07 erledigt, WP-453 entfällt).
 
 Die Referenzumgebung des Lasttests ist anerkannt: Der Auftraggeber hat E-58
 am 2026-10-15 entschieden (Option 1). Den Lasttest belegen der lokale
@@ -139,11 +148,13 @@ Nachweislauf auf Commit `dbbfded` und der grüne `load.yml`-Lauf 38665599979
 auf Commit `918a832`; nach dem Merge wiederholt der nächtliche Lauf ihn auf
 dem Release-Kandidaten. SR-06 bleibt offen, bis vor GA ein dedizierter
 Referenzhost bereitsteht. Der Auftraggeber hat G1 am 2026-10-15 freigegeben.
-Nach E-76 ersetzt seine Erklärung die Nachweise nicht; das Gate-Ergebnis
-lautet „offen“ (`docs/acceptance/g1-gate.md`, WP-451). Nachzureichen sind der
-grüne CI-Lauf auf PR #64 mit dem Merge nach `main` und die Nachweise zu B3
-(Pentest), B4 (v2-Texte) und B6 (Subprozessorenliste, NFR-09), die der
-Auftraggeber für erledigt erklärt hat.
+Das Gate-Ergebnis lautet „offen“ (`docs/acceptance/g1-gate.md`, WP-451).
+Für B3 (Pentest), B4 (v2-Texte) und B6 (Subprozessorenliste, NFR-09) gilt
+nach dem Beschluss des Auftraggebers vom 2026-10-28 seine Erklärung vom
+2026-10-15 als Nachweis für G1 und G2 (E-103); diese Nachweise sind
+gestrichen und werden nicht nachgereicht. Den CI-Lauf auf dem
+Release-Kandidaten führt der Abschnitt „Läufe auf dem Release-Kandidaten“
+(WP-595).
 B5 ist mit E-17 geschlossen; gemessen ist mit 10.000 Objekten
 (`docs/acceptance/g1-gate.md`).
 
@@ -740,11 +751,13 @@ nachgetragen:
 WP-210: Nach E-28 beauftragt der Auftraggeber den Pentest (Aufgabe A-07).
 Bericht und Nachtest werden in `docs/security/pentest-g1.md` zusammengefasst.
 Am 2026-10-15 hat der Auftraggeber den Pentest (B3) für erledigt erklärt.
-Nach der Übergangsregel von E-76 ersetzt die Erklärung den Nachweis nicht;
-GATE-03 und NFR-08 stehen auf „offen“ (`docs/acceptance/g1-gate.md`,
-WP-451). Bericht, Befunde und Nachtest
-liegen im Repository nicht vor; Zusammenfassung und Befundliste sind in
-`docs/security/pentest-g1.md` nachzureichen.
+Nach seinem Beschluss vom 2026-10-28 gilt diese Erklärung als Nachweis für
+G1 und G2 (E-103). GATE-03 (Pentest-Anteil) und NFR-08 stehen ohne PASS
+durch Erklärung auf „offen“ und als Ausnahme der Art `erklaerung` mit
+„entfällt (E-103)“ in `docs/acceptance/g1-ausnahmen.csv`
+(`docs/acceptance/g1-gate.md`, WP-831). Bericht, Befunde und Nachtest liegen
+im Repository nicht vor und werden nicht nachgereicht; für GA verlangt
+SEC-11 einen eigenen Pentest.
 
 Die G1-Nachbesserung ändert den Datenbank-Einstieg der Mandantentransaktionen,
 den Ingest-Pfad (Spuren, Subjects) und die Impact-API. Alle drei liegen im
@@ -981,3 +994,45 @@ Impact.
 | UI-14 | [P2–P4, A] | High | verschoben (E-03) | WP-237 |
 | UI-15 | [P2] | High | verschoben (E-03) | WP-235 |
 | WFL-04 | [P3]; delegierte Inventur [P4]; IGA [A] | High | verschoben (E-03) | WP-231 |
+
+### Teil 03: Datenmodell, Standorte, Metamodell (WP-832)
+
+A-03 (E-04), fortgeführt als A-28: Teil 03 steht seit WP-832 in
+`docs/audit/befunde.csv` (Abschnitt `03`, 53 Zeilen). Diese Tabelle führt
+jeden Critical- und High-Befund aus Teil 03 mit dem Stand auf main
+(1bebad94, 2026-11-09): 5 Critical und 21 High, davon 7 Querschnittsbefunde
+mit ihrer Kennung. Jeder steht mit dem schließenden WP (Commit „WP-nnn:“ auf
+main) und den Tests seiner Traceability-Zeilen; für die [P2]-Anteile
+schließen die genannten Phase-2-WPs. Kein Befund steht ohne Beleg auf
+„geschlossen“. Einen Critical ohne schließendes WP gibt es in Teil 03 nicht,
+daher ist kein neues WP eingeplant. GATE-01 zählt diese Zeilen in der
+Quellentabelle von `docs/acceptance/g1-gate.md`.
+
+| ID | Tag | Severity | Status | WPs | Nachweis |
+|---|---|---|---|---|---|
+| LOC-10 | B/G1 | Critical | geschlossen | WP-026, WP-053, WP-054, WP-473 | Kanonischer Baum `location` mit ltree, Elternmatrix und Zyklenschutz; CI-/Asset-Bezüge auf `location`: `backend/internal/locations/pg_repository_integration_test.go`, `backend/internal/locations/tree_test.go`, `backend/internal/ci/location_integration_test.go`, `backend/internal/history/history_integration_test.go`; Scope-Anteil siehe X-SCOPE |
+| LOC-11 | B/G1 | Critical | geschlossen | WP-055, WP-411, WP-473, WP-474, WP-701 | 409 statt `SET NULL`/Kaskade für alle Abhängigkeitsarten (auch Rack mit Mounts), Umzug mit `location_change`, Audit und Pfadaktualisierung: `backend/internal/locations/move_integration_test.go` (`TestLocationDeleteRefusedWithDependencies`, `TestLocationMoveRecordsChangeAndAudit`), `backend/internal/locations/enrollment_code_delete_integration_test.go`, `frontend/src/pages/LocationTreePage.test.tsx` |
+| MET-14 | P2/G2 | Critical | geschlossen | G1-Anteil: WP-045, WP-056; Rest Phase 2: WP-256, WP-714 | Recht `ci_instance_attribute:manage` statt `ci:write` und Discovery-Schutz der Instanzwerte mit Audit: `backend/internal/server/authz_test.go`, `backend/internal/discovery/instance_field_test.go`; eigene API `cis/{id}/instance-attributes` mit Rechteprüfung und Schutz in der zentralen Schreibentscheidung: `backend/internal/ci/instance_integration_test.go`, `backend/internal/ci/instance_lifecycle_integration_test.go` |
+| X-SCOPE | Querschnitt CH11/CH25, PRI-10 | Critical | geschlossen | WP-023, WP-026, WP-027, WP-029, WP-065, WP-340, WP-391, WP-393 | Client-, Site- und Team-Prädikat in den Policies von `location`, `location_node`, `building`, `room` und `rack`; Site- und Team-Scope im Mandantenkontext (`backend/internal/database/tenant_scope.go`): `backend/internal/tenant/rls/client_policies_integration_test.go`, `backend/internal/tenant/rls/site_policies_integration_test.go`, `backend/internal/tenant/rls/team_scope_integration_test.go`, `backend/internal/tenant/rls/matrix_integration_test.go`, `backend/internal/tenant/rls/located_site_scope_integration_test.go`, `backend/internal/tenant/rls/rack_channel_scope_integration_test.go` |
+| X-MANUAL | Querschnitt CH9/PRI-10, MET-14 | Critical | geschlossen | WP-056, WP-057, WP-058, WP-089, WP-714 | Rang `manual` = 100 in der fail-closed Schreibentscheidung (`backend/internal/override/decide.go`), manuelle Schreibwege erzeugen Overrides, Reviewtyp `override_conflict`, Instanzwerte geschützt: `backend/internal/override/decide_test.go`, `backend/internal/ci/mergepatch_test.go`, `backend/internal/reviews/conflict_test.go`, `backend/internal/discovery/instance_field_test.go`, `backend/internal/ci/instance_lifecycle_integration_test.go` |
+| DB-02 | nicht geliefert | High | geschlossen | WP-006, WP-649 | Vollständige Down-Migrationen, Roundtrip mit Schemavergleich und `docs/schema-baseline.md`: `backend/internal/database/migrations_roundtrip_integration_test.go` (CI-Job `migrations`), `backend/internal/database/migration_000089_prequarantine_upgrade_integration_test.go` |
+| DB-03 | nicht geliefert | High | geschlossen | WP-116, WP-589 | `attribute_definition` als einzige Quelle, generiertes read-only `attribute_schema`: `backend/internal/citype/attrdef_integration_test.go`, `backend/internal/citype/resolver_layers_test.go` |
+| DB-04 | nicht geliefert | High | geschlossen | WP-064, WP-142, WP-352, WP-511 | DDL-Vertrag CH19 und Attribut-DDL-Job mit `idx_attr_<id>` (E-04): `backend/internal/database/role_check_integration_test.go`, `backend/internal/citype/ddl_job_integration_test.go` |
+| DB-05 | nicht geliefert; CH12/PRI-10 | High | G1-Anteil geschlossen, P2-Anteil geschlossen (WP-271, WP-280, WP-737); installierte Software (P4) und Health-Findings (P3) späteren Phasen zugeordnet (E-36) | WP-054, WP-077, WP-078, WP-079, WP-080, WP-081, WP-370, WP-371, WP-480, WP-486, WP-573, WP-574, WP-577, WP-578, WP-271, WP-280, WP-737 | Asset-Hoheit, Rack-Platzierung setzt den Standort, Enthaltensein über `parent_ci_id`, Health, VLAN-Katalog: `backend/internal/ci/location_integration_test.go`, `backend/internal/ci/asset_canonical_integration_test.go`, `backend/internal/rack/mount_location_integration_test.go`, `backend/internal/relationship/projection_integration_test.go`, `backend/internal/ci/health_integration_test.go`, `backend/internal/ipam/vlan_integration_test.go`; Phase 2: `backend/internal/asset/asset_integration_test.go`, `backend/internal/ci/owner_integration_test.go`, `backend/internal/contract/reference_integration_test.go` |
+| LOC-07 | B/G1 | High | geschlossen | WP-053, WP-474 | `BuildTree` behoben, Baum-UI mit Umbenennen und Verschieben: `backend/internal/locations/tree_test.go`, `frontend/src/pages/LocationTreePage.test.tsx` |
+| LOC-08 | P2/G2 | High | geschlossen | WP-026, WP-053, WP-282 | Lagerhierarchie Warehouse → Zone → Shelf → Bin im kanonischen Baum (Elternmatrix): `backend/internal/locations/loc08_integration_test.go`, `frontend/src/pages/LocationTreePage.test.tsx` |
+| MET-01 | B/G1; Teil P2/G2 | High | geschlossen | WP-115; Phase 2: WP-248, WP-263 | `backend/internal/citype/seed_integration_test.go`; Phase 2: `backend/internal/citype/inherit_integration_test.go`, `backend/internal/lifecycle/model_integration_test.go` |
+| MET-03 | B/G1 | High | geschlossen | WP-115 | Logische Seed-Typen: `backend/internal/citype/seed_integration_test.go` |
+| MET-10 | B/G1; Teil P2/G2 | High | geschlossen | WP-116, WP-589; Phase 2: WP-264 | `backend/internal/citype/attrdef_integration_test.go`; Phase 2: `backend/internal/permission/fields_integration_test.go` |
+| MET-11 | B/G1; Teil P2/G2 | High | geschlossen | WP-117, WP-501; Phase 2: WP-254, WP-737 | `backend/internal/fieldmeta/fieldmeta_test.go`, `backend/internal/discovery/typedvalues_integration_test.go`; Phase 2: `backend/internal/ci/reference_integration_test.go`, `backend/internal/contract/reference_integration_test.go` |
+| MET-12 | P2/G2 | High | geschlossen | WP-254, WP-713, WP-737 | Referenzattribute mit Existenz-, Org- und Client-Prüfung: `backend/internal/ci/reference_integration_test.go`, `backend/internal/ci/reference_view_integration_test.go`, `backend/internal/contract/reference_integration_test.go` |
+| MET-15 | B/G1 | High | geschlossen | WP-142, WP-418, WP-511, WP-692, WP-700, WP-702, WP-703 | Searchable-/Unique-Flags, dynamischer Unique-Index, serverseitige Eindeutigkeit auf allen Schreibwegen: `backend/internal/citype/ddl_job_integration_test.go`, `backend/internal/ci/unique_attr_integration_test.go`, `backend/internal/server/unique_attr_write_paths_integration_test.go`, `backend/internal/discovery/ingest_unique_integration_test.go` |
+| MET-16 | B/G1; Teil P2/G2 | High | geschlossen | WP-119, WP-590; Phase 2: WP-252 | `backend/internal/citype/compose_test.go`, `backend/internal/ci/schema_version_integration_test.go`; Phase 2: `backend/internal/citype/compose_integration_test.go` |
+| MET-45 | Phase 1 im Fokus; voller Tag fehlt | High | geschlossen | WP-118, WP-589; Phase 2: WP-715, WP-326 | `api/rules.schema.json` mit gemeinsamen Konformanzfällen: `backend/internal/rules/rules_test.go`; Phase 2: `backend/internal/citype/inherit_test.go` |
+| MET-51 | P2/G2 | High | geschlossen | WP-804, WP-317 | `frontend/src/pages/CIFormModal.test.tsx`, `frontend/src/components/create/GuidedCreate.test.tsx` |
+| MET-54 | B/G1; Teil P2/G2 | High | geschlossen | WP-134; Phase 2: WP-262, WP-722, WP-726 | Metamodell-Export und Audit: `backend/internal/citype/export_audit_integration_test.go`; Phase 2: `backend/internal/citype/export_v2_integration_test.go`, `backend/internal/metamodel/import_roundtrip_integration_test.go`, `backend/internal/citype/export_grants_test.go` |
+| X-IDENTITY | Querschnitt CH29/PRI-10, DB-05 | High | geschlossen | WP-077, WP-086 | Hostname/FQDN führt nie zum Merge, Review statt `ReconcileMatched`; `serial_mismatch` bei abweichender Seriennummer: `backend/internal/discovery/identity_test.go`, `backend/internal/ci/asset_canonical_integration_test.go` |
+| X-TIME | Querschnitt GLO-12/PRI-10 | High | geschlossen | WP-084, WP-055, WP-473 | Quellzeit `observed_at` mit Zukunftsgrenze 5 Minuten (`backend/internal/discovery/reconciliation.go`), Standort-Umzüge mit `location_change`: `backend/internal/override/decide_test.go`, `backend/internal/discovery/observed_at_integration_test.go`, `backend/internal/locations/move_integration_test.go`, `backend/internal/history/history_integration_test.go` |
+| X-RESERVED | Querschnitt GLO-13, MET-10/14/16 | High | geschlossen | WP-091 | Reservierte Namensräume `_overrides`, `_observed`, `_provenance`, `_instance` (`backend/internal/fieldmeta/fieldmeta.go`): `backend/internal/ci/validation_test.go` (`TestReservedNamespaces`) |
+| X-CANONICAL | Querschnitt CH12/CH20/CH27/CH28, PRI-10 | High | geschlossen | WP-054, WP-077, WP-078, WP-079, WP-080, WP-081, WP-127; Phase 2: WP-298 | Kanonische Speicherorte siehe DB-05, LOC-10, LOC-11; `impact_direction` und nur projizierte Strukturbeziehungen: `backend/internal/relationshiptype/seed_integration_test.go`, `backend/internal/relationship/projection_integration_test.go`; Subnetz-Projektion in Topologie und Impact: `backend/internal/topology/projection_integration_test.go` |
+| X-PII | Querschnitt CH16, DB-05/MET-54 | High | geschlossen | WP-134, WP-240, WP-241, WP-242 | Audit der Metamodelländerungen, Surrogate statt Klartext-PII in Audit und Historie, Kontaktdaten über den PII-Vault: `backend/internal/citype/export_audit_integration_test.go`, `backend/internal/pii/pii_integration_test.go`, `backend/internal/pii/surrogate_integration_test.go`, `backend/internal/contact/pii_integration_test.go` |

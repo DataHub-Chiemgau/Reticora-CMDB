@@ -1566,3 +1566,8 @@ UI-14;[P2–P4, A];C;frontend/e2e/a11y.spec.ts;WP-324
 API-06;[P2]/[P3]/[P4]/[A];G2;backend/internal/server/modules_test.go;WP-830
 RBA-05;[P2–P4], [A];G2;backend/internal/server/modules_test.go;WP-830
 ABN-01;[Q];G2;frontend/e2e/metamodel-scenario.spec.ts;WP-330
+SEC-11;[Q];G2;tests/rep01-structure.test.sh;WP-831
+GATE-01;[Q];G2;tests/rep01-structure.test.sh;WP-832
+SEC-11;[Q];G2;docs/security/review-phase2.md;WP-329
+TEN-09;[Q];G2;backend/internal/tenant/rls/document_link_scope_integration_test.go;WP-852
+SEC-09;[P2];G2;backend/internal/config/config_test.go;WP-853

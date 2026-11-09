@@ -81,6 +81,9 @@ var productionEnv = map[string]string{
 	"RETICORA_MASTER_KEY":      "key",
 	"RETICORA_OIDC_ISSUER_URL": "https://id.example/realms/reticora",
 	"RETICORA_NATS_URL":        "nats://nats:4222",
+	// The release default G2 runs the module documents, which needs clamd
+	// outside development (WP-853).
+	"RETICORA_CLAMD_ADDR": "clamd:3310",
 }
 
 func TestValidateDevelopmentDefaults(t *testing.T) {
@@ -128,7 +131,10 @@ func TestValidateProductionComplete(t *testing.T) {
 // TestValidateProductionRequiresNATS covers F-282 (ABN-03): the identity
 // locks of the ingest exist only on the NATS queue path, so production
 // without RETICORA_NATS_URL does not start and names the operating guide;
-// development and staging start without it but warn.
+// development and staging start without it but warn. Since WP-853 the
+// release default runs the module documents, which needs NATS outside
+// development (TestValidateDocumentScanner); the staging case therefore
+// switches the late modules to inventory.
 func TestValidateProductionRequiresNATS(t *testing.T) {
 	clearEnv(t)
 	setAll(t, productionEnv)
@@ -144,6 +150,7 @@ func TestValidateProductionRequiresNATS(t *testing.T) {
 		setAll(t, productionEnv)
 		t.Setenv("RETICORA_NATS_URL", "")
 		t.Setenv("RETICORA_ENVIRONMENT", env)
+		t.Setenv("RETICORA_MODULES", "inventory")
 		cfg := Load()
 		if err := cfg.Validate(false); err != nil {
 			t.Errorf("%s without RETICORA_NATS_URL: %v, want a start with a warning", env, err)
@@ -234,13 +241,15 @@ func TestValidateRejectsInvalidSettings(t *testing.T) {
 }
 
 // TestValidateDocumentScanner covers SEC-09 and OPS-01 (WP-734, E-42):
-// outside development the module documents (by key, P2 or all) needs an
-// explicit RETICORA_CLAMD_ADDR and RETICORA_NATS_URL; without the module,
-// and in development with the default localhost:3310, the start passes.
+// outside development the module documents (by key, P2, all or the empty
+// release default G2, WP-853, SR-57) needs an explicit RETICORA_CLAMD_ADDR
+// and RETICORA_NATS_URL; without the module, and in development with the
+// default localhost:3310, the start passes.
 func TestValidateDocumentScanner(t *testing.T) {
-	for _, modules := range []string{"documents", "P2", "all", "inventory, documents"} {
+	for _, modules := range []string{"", " ", "documents", "P2", "all", "inventory, documents"} {
 		clearEnv(t)
 		setAll(t, productionEnv)
+		t.Setenv("RETICORA_CLAMD_ADDR", "")
 		t.Setenv("RETICORA_MODULES", modules)
 		err := Load().Validate(false)
 		if err == nil || !strings.Contains(err.Error(), "module documents requires RETICORA_CLAMD_ADDR") {
@@ -262,9 +271,19 @@ func TestValidateDocumentScanner(t *testing.T) {
 	}
 	clearEnv(t)
 	setAll(t, productionEnv)
+	t.Setenv("RETICORA_CLAMD_ADDR", "")
 	t.Setenv("RETICORA_MODULES", "inventory")
 	if err := Load().Validate(false); err != nil {
 		t.Fatalf("production without the module documents: %v", err)
+	}
+	// The release default G2 in staging without NATS: the start check
+	// names it as well.
+	clearEnv(t)
+	setAll(t, productionEnv)
+	t.Setenv("RETICORA_ENVIRONMENT", EnvStaging)
+	t.Setenv("RETICORA_NATS_URL", "")
+	if err := Load().Validate(false); err == nil || !strings.Contains(err.Error(), "module documents requires RETICORA_NATS_URL") {
+		t.Fatalf("staging with the release default without NATS: %v", err)
 	}
 	clearEnv(t)
 	t.Setenv("RETICORA_MODULES", "documents")

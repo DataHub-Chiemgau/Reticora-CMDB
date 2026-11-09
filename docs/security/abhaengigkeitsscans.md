@@ -15,6 +15,43 @@ Request und bei jedem Push auf `main`.
 | `govulncheck` (Matrix `backend`, `collector`, `edgecore`) | Go-Abhängigkeiten und Standardbibliothek jedes go.work-Moduls | Schwachstellen, deren betroffenes Symbol vom Code des Moduls erreicht wird | `govulncheck-<modul>` (JSON, auch nur importierte Funde) |
 | `npm-audit` | `frontend/package-lock.json` | High/Critical in Produktionsabhängigkeiten (`--omit=dev`, ausgeliefertes Bundle) | `npm-audit` (Produktion und alle inkl. Entwicklung) |
 | `image-scan` (Matrix `backend`, `collector`, `frontend`, `postgres`) | gebautes Container-Image: OS-Pakete und Anwendungsabhängigkeiten (Trivy) | Critical/High mit verfügbarem Fix (`ignore-unfixed`) | `trivy-<image>` (JSON) |
+| `image-scan-thirdparty` (Matrix `clamd`) | gepinntes Fremdimage des Betriebs, das nicht vertrauenswürdige Eingaben parst: clamd aus WP-735 (`deploy/docker-compose/docker-compose.yml`, `deploy/k8s/base/components/clamav/clamd.yaml`); beide Pins müssen Version und Digest teilen (WP-329) | wie `image-scan` (Trivy 0.75.0 per Digest, `--severity CRITICAL,HIGH --ignore-unfixed`, `--ignorefile security/scan-exceptions.txt`) | `trivy-thirdparty-<image>` (JSON) |
+
+### Abhängigkeiten der Phase 2
+
+Die Phase 2 nimmt diese Abhängigkeiten neu auf; die Jobs erfassen sie ohne
+Änderung, weil sie die go.work-Module bzw. `frontend/package-lock.json` als
+Ganzes prüfen (Stand WP-329):
+
+| Abhängigkeit | Entscheidung, WP | Ausgeliefert | Erfasst durch |
+|---|---|---|---|
+| `github.com/xuri/excelize/v2` v2.11.1 | E-49, WP-301 | ja (Server) | `govulncheck` (`backend`) |
+| `github.com/boombuler/barcode` v1.1.0 | E-52, WP-763 | ja (Server) | `govulncheck` (`backend`) |
+| `github.com/go-pdf/fpdf` v0.9.0 | E-52, WP-763 | ja (Server) | `govulncheck` (`backend`) |
+| `github.com/makiuchi-d/gozxing` v0.1.1 | E-52, WP-763 | nein, nur in `backend/internal/labels/render_test.go` | nicht: `govulncheck` läuft ohne `-test`; geführt wie die nicht ausgelieferten Entwicklungsabhängigkeiten von npm |
+| `@zxing/browser` | E-52, WP-807 | ja (Bundle) | `npm-audit` (Produktion, blockierend) |
+| `@dnd-kit/core`, `@dnd-kit/sortable` | E-54, WP-797 | ja (Bundle) | `npm-audit` (Produktion, blockierend) |
+
+### Fremdimages des Betriebs
+
+Neben den eigenen Release-Images startet der Betrieb Fremdimages. Gescannt
+wird das Image, das nicht vertrauenswürdige Eingaben parst (clamd, SEC-09);
+für die übrigen gilt eine begründete Ausnahme. Offene Maßnahme: SR-60 in
+`docs/security/review-phase2.md` (Pin per Digest und Aufnahme in
+`image-scan-thirdparty`).
+
+| Image | Ort | Scan bzw. Ausnahme |
+|---|---|---|
+| `clamav/clamav:1.5.4@sha256:6d87c712e3391e13c1ba6e05dfb074d4b1ddb5a6834b23bb9da990d2a4ef042a` | `deploy/docker-compose/docker-compose.yml`, `deploy/k8s/base/components/clamav/clamd.yaml`, Dev-Stack `docker-compose.yml` | `image-scan-thirdparty` |
+| `timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731` | Basis von `reticora-postgres`; logischer Backup-CronJob in `deploy/k8s/base/components/backup` | über `image-scan` (`postgres`), dieselbe Referenz (E-96, `timescale_image_refs`) |
+| `nats:2.10-alpine` | Compose (`nats`, `nats-edge`), `deploy/k8s/base/components/nats-edge` | Ausnahme: nur intern erreichbar (Collector-Edge mit mTLS, T10); gleitender Tag ohne Digest, daher nicht reproduzierbar scanbar (SR-60) |
+| `redis:7-alpine` | Compose | Ausnahme: internes Netz, Port nur auf `127.0.0.1` veröffentlicht; gleitender Tag (SR-60) |
+| `pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372` | Compose | Ausnahme: erreichbar nur über `frontend/objects-proxy.conf` (GET auf zwei Buckets, signiert); Aufnahme in `image-scan-thirdparty` vorgesehen (SR-60) |
+| `postgres:16-alpine` | Compose (`keycloak-db`) | Ausnahme: nur von Keycloak erreichbar; gleitender Tag (SR-60) |
+| `quay.io/keycloak/keycloak:24.0` | Compose | Ausnahme befristet bis zur Maßnahme aus SR-60: Identity Provider (T1), Major-Version 24 ohne Herstellerpflege; gleitender Tag |
+| `opensearchproject/opensearch:2.13.0` | Compose, `deploy/k8s/base/components/opensearch` | Ausnahme: optionales Such-Backend, nur intern; ohne Digest (SR-60) |
+| `certbot/certbot:v2.11.0` | Compose (TLS-Zertifikate) | Ausnahme: kurzlebiger Job ohne eingehende Verbindungen; ohne Digest (SR-60) |
+| Images von `docker-compose.yml` (Entwicklung) | Dev-Stack | Ausnahme: nur Entwicklung, nicht ausgeliefert; TimescaleDB, MinIO und clamd tragen dieselben Pins wie der Betrieb |
 
 Die Matrix von `image-scan` deckt jedes Image ab, das `release.yml` baut,
 signiert und veröffentlicht:
@@ -72,7 +109,8 @@ Akzeptierte Funde stehen in `security/scan-exceptions.txt`, je Zeile:
 ### SLA-Prüfung
 
 `scripts/ci/check-scan-exceptions.sh` läuft in `govulncheck`, `npm-audit`,
-`image-scan` und im Job `images` von `release.yml` vor dem jeweiligen Scan.
+`image-scan`, `image-scan-thirdparty` und im Job `images` von `release.yml`
+vor dem jeweiligen Scan.
 Der Job scheitert, sobald eine Nicht-Kommentarzeile
 
 - kein `exp:` hat (Trivy würde den Fund sonst unbefristet unterdrücken),

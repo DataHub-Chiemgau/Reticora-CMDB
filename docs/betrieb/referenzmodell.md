@@ -16,20 +16,21 @@ Alle Anforderungen gelten für alle Modelle, sofern der Katalog sie nicht als
 
 ## Uploads und Malware-Scan (SEC-09, E-42)
 
-Dokumente und Importdateien (Module `documents` und `import`, im
-Standard abgeschaltet) werden vor dem ersten Download mit ClamAV geprüft
-(Jobart `document.scan`, WP-734). Der Dienst `clamd` ist optional wie die
-Module; ohne erreichbaren clamd bleiben neue Versionen `pending_scan`
+Dokumente und Importdateien (Module `documents` und `import`, seit WP-830
+im Release-Standard G2 eingeschaltet) werden vor dem ersten Download mit
+ClamAV geprüft (Jobart `document.scan`, WP-734). Ohne erreichbaren clamd
+bleiben neue Versionen `pending_scan`
 (fail-closed), der Sweep `document.scan_sweep` scannt sie nach, sobald clamd
 wieder antwortet. Außerhalb von `development` startet der Server mit dem
-Modul `documents` nur mit `RETICORA_CLAMD_ADDR` und der Job-Queue
+Modul `documents`, auch beim leeren `RETICORA_MODULES` (Release-Standard,
+WP-853), nur mit `RETICORA_CLAMD_ADDR` und der Job-Queue
 (`RETICORA_NATS_URL`).
 
 | Profil | clamd | Signaturen |
 |---|---|---|
 | Entwicklung (Root-`docker-compose.yml`) | Dienst `clamd`, Port `localhost:3310` (Default von `RETICORA_CLAMD_ADDR` in `development`) | freshclam im Container |
 | Compose-Betriebsstack (`deploy/docker-compose`) | Dienst `clamd` mit Profil `documents` (`COMPOSE_PROFILES=documents` in `.env`); der Server hat `RETICORA_CLAMD_ADDR=clamd:3310`; Port nicht veröffentlicht | freshclam im Container, Volume `clamdata` |
-| Kubernetes (`deploy/k8s`) | Komponente `base/components/clamav` (Deployment und Service `clamd`, setzt `RETICORA_CLAMD_ADDR` am Server), eingebunden im Overlay `prod` | freshclam im Container, PVC `clamd-signatures` |
+| Kubernetes (`deploy/k8s`) | Komponente `base/components/clamav` (Deployment und Service `clamd`, setzt `RETICORA_CLAMD_ADDR` am Server), eingebunden in `base`, geerbt von `staging` und `prod` (WP-853) | freshclam im Container, PVC `clamd-signatures` |
 | Air-Gapped On-Prem | wie Compose bzw. Kubernetes | kein freshclam (`RETICORA_CLAMAV_NO_FRESHCLAMD=true` in `.env` bzw. `CLAMAV_NO_FRESHCLAMD=true` per Overlay); Offline-Signaturbundle |
 
 **Offline-Signaturbundle (Air-Gapped):** Auf einem Rechner mit Internetzugang

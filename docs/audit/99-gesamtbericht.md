@@ -1,10 +1,12 @@
-## Fehlende Teilberichte – Gesamtprüfung unvollständig
+## Teilberichte – Teil 03 konsolidiert (WP-832)
 
-**Noch nachholen:** Teil 03 (Datenmodell/Standorte/Metamodell). Diese Datei fehlt im geprüften Checkout; der Teil muss erstellt beziehungsweise seine bereits vorhandenen Ergebnisse bereitgestellt werden:
+**Konsolidiert am 2026-11-09 (WP-832, A-03/A-28, E-04):** Teil 03 (Datenmodell/Standorte/Metamodell) liegt vor und steht vollständig in `docs/audit/befunde.csv` (Abschnitt `03`):
 
 - `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/03-datenmodell-standorte-metamodell.md`
 
-Vorhanden und jeweils als VOLLSTÄNDIG bezeichnet: Teile 01, 02, 04, 05, 06, 07, **08 und 09**. Das bezeichnet dort abgeschlossene Bearbeitung, nicht Konformität oder erfolgreiche Integrationsnachweise. Der früher als „08 erneut“ nachgereichte Text war tatsächlich Teil 09; dessen 46 IDs bleiben konsolidiert. Der nun vorliegende eigenständige Teil 08 ergänzt 50 IDs zu Frontend/Monitoring/NFR/Tests/Gates/Traceability. Insbesondere Teil 06 deckt nur seinen ausdrücklich gelieferten Umfang mit gemeinsamen Prüfblöcken und überwiegend unbekannten Tags ab. Der fehlende Teil 03 wird weder als PASS noch pauschal als Produkt-FAIL gezählt; seine unbekannte ID-Menge wird nicht erfunden.
+Übernommen sind alle 46 IDs der Ergebnistabelle (`03-datenmodell-standorte-metamodell.md:33–78`) und die sieben Querschnittsbefunde der Gegenprüfung CH8–CH30/PRI-10 mit ihrer Kennung (X-SCOPE, X-MANUAL, X-IDENTITY, X-TIME, X-RESERVED, X-CANONICAL, X-PII; `:160–166`), zusammen 53 Zeilen. Teil 03 hat keine getrennte Evidenzspalte: `evidenz` nennt die Pfade aus „Befund und Evidenz“, `befund_kurz` den Befundtext unverändert. Die Querschnittsbefunde tragen in `tag` „Querschnitt“ mit ihrem CH-/PRI-Bezug und als Status ABWEICHEND (konkreter Gegenbefund); Severity und Aufwand stammen aus ihrer Kennzeile. Severity in Teil 03: **5 Critical** (LOC-10, LOC-11, MET-14, X-SCOPE, X-MANUAL), **21 High** (16 IDs und X-IDENTITY, X-TIME, X-RESERVED, X-CANONICAL, X-PII), 10 Medium, 1 Low, 16 ohne Defekt-Severity. Ohne Anforderungstext bleiben DB-01 (E-04) sowie MET-20, MET-30–34 und MET-40–44 (N/P); für die MET-IDs gilt die Regel aus E-37 (`docs/plan/phase2/entscheidungen.md`). Den Stand jedes Critical- und High-Befunds aus Teil 03 auf main führt der Anhang „Critical/High-Befunde des Audits“ von `docs/security/review-g1.md`. Die Zählungen der folgenden Abschnitte stammen aus der Konsolidierung vom 2026-10-01 ohne Teil 03; mit Teil 03 enthält `befunde.csv` 382 Zeilen, 54 Critical und 197 High.
+
+Vorhanden und jeweils als VOLLSTÄNDIG bezeichnet: Teile 01, 02, 04, 05, 06, 07, **08 und 09**; Teil 03 als „TEILPRÜFUNG ABGESCHLOSSEN“ (zwölf IDs N/P mangels Sollwortlaut). Das bezeichnet dort abgeschlossene Bearbeitung, nicht Konformität oder erfolgreiche Integrationsnachweise. Der früher als „08 erneut“ nachgereichte Text war tatsächlich Teil 09; dessen 46 IDs bleiben konsolidiert. Der nun vorliegende eigenständige Teil 08 ergänzt 50 IDs zu Frontend/Monitoring/NFR/Tests/Gates/Traceability. Insbesondere Teil 06 deckt nur seinen ausdrücklich gelieferten Umfang mit gemeinsamen Prüfblöcken und überwiegend unbekannten Tags ab. Der fehlende Teil 03 wird weder als PASS noch pauschal als Produkt-FAIL gezählt; seine unbekannte ID-Menge wird nicht erfunden.
 
 ## Management-Zusammenfassung
 
@@ -28,7 +30,7 @@ Erst Zusammenfassung und Stand, anschließend die Ergebnistabellen der vorhanden
 |---|---|---|---|
 | 01 | VOLLSTÄNDIG, v2-Lücken | 53 / 53 | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/01-installation-stack.md:30–84,216–222` |
 | 02 | VOLLSTÄNDIG, v2-/Laufzeitlücken | 36 / 36 | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/02-mandanten-auth-entitlements.md:32–69,494–498` |
-| 03 | FEHLT | nicht bestimmbar | Fehlender Pfad oben |
+| 03 | TEILPRÜFUNG ABGESCHLOSSEN, zwölf IDs N/P; konsolidiert mit WP-832 | 46 / 46, dazu 7 Querschnittsbefunde | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/03-datenmodell-standorte-metamodell.md:31–78,158–166` |
 | 04 | VOLLSTÄNDIG, v2-/Laufzeitlücken | 52 / 52 | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/04-ci-netz-rack-beziehungen-impact.md:27–80,261–267` |
 | 05 | VOLLSTÄNDIG, Laufzeit-/Teiltextlücken | 37 / 37 | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/05-collector-discovery-reconciliation.md:30–68,330–332` |
 | 06 | VOLLSTÄNDIG nur für eingeschränkten Auftrag | 16 / 12 | `/home/runner/work/Reticora-CMDB/Reticora-CMDB/docs/audit/06-audit-sicherheit-events.md:16–33,208–210` |
@@ -52,7 +54,7 @@ Die 0/184 sind eine **tagbasierte Vergleichsquote, keine isolierte G1-Pflichtmen
 |---|---:|---:|---:|---:|---:|---:|---:|
 | 01 | 0 | 7 | 11 | 2 | 0 | 0 | 20 |
 | 02 | 0 | 4 | 21 | 1 | 0 | 2 | 28 |
-| 03 | — | — | — | — | — | — | Bericht fehlt |
+| 03 | 0 | 5 | 12 | 1 | 0 | 0 | 18 (Tag „B/G1“ in Teil-03-Schreibweise; nicht in der Gesamtmenge unten) |
 | 04 | 0 | 6 | 24 | 6 | 0 | 1 | 37 |
 | 05 | 0 | 3 | 23 | 3 | 0 | 0 | 29 |
 | 06 | — | — | — | — | — | — | Tags unbestätigt |

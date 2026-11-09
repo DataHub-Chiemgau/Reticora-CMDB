@@ -886,6 +886,77 @@ jobs:
           path: trivy-${{ matrix.image }}.json
           retention-days: 30
 
+  # SEC-11/SEC-09 (WP-329): third-party images of the operation that parse
+  # untrusted input. clamd (WP-735, E-42) scans every document upload; the
+  # job scans the image pinned in the compose stack and the k8s component
+  # with the same Trivy CLI, threshold and exceptions as image-scan and
+  # blocks like it. Both pins must be the same version and digest, so the
+  # scanned image is the deployed one. The other third-party images and
+  # why they are not scanned here: docs/security/abhaengigkeitsscans.md.
+  image-scan-thirdparty:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: clamd
+            compose_service: clamd
+            manifest: deploy/k8s/base/components/clamav/clamd.yaml
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check scan exceptions (SEC-11 SLA)
+        run: ./scripts/ci/check-scan-exceptions.sh
+
+      - name: Resolve the pinned image
+        id: pin
+        env:
+          SERVICE: ${{ matrix.compose_service }}
+          MANIFEST: ${{ matrix.manifest }}
+        run: |
+          compose=$(python3 -c 'import sys, yaml; print(yaml.safe_load(open("deploy/docker-compose/docker-compose.yml"))["services"][sys.argv[1]]["image"])' "$SERVICE")
+          k8s=$(python3 -c 'import sys, yaml; print(" ".join(c["image"] for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind") == "Deployment" for c in d["spec"]["template"]["spec"]["containers"]))' "$MANIFEST")
+          echo "compose: $compose"
+          echo "k8s:     $k8s"
+          if ! [[ "$compose" =~ ^[^[:space:]@]+:[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::$SERVICE in docker-compose.yml is not pinned by version and digest: $compose"
+            exit 1
+          fi
+          if [ "$compose" != "$k8s" ]; then
+            echo "::error::$MANIFEST pins '$k8s', docker-compose.yml '$compose'"
+            exit 1
+          fi
+          echo "ref=$compose" >> "$GITHUB_OUTPUT"
+
+      # Trivy pulls the image from its registry by digest; no local build.
+      - name: Scan image with Trivy
+        env:
+          REF: ${{ steps.pin.outputs.ref }}
+        run: |
+          docker run --rm \
+            -v "$PWD:/work" -w /work \
+            aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa image \
+            --severity CRITICAL,HIGH --ignore-unfixed \
+            --ignorefile security/scan-exceptions.txt \
+            --format json --output "trivy-${{ matrix.image }}.json" \
+            --exit-code 1 \
+            "$REF"
+
+      - name: Summarize findings
+        if: always()
+        run: |
+          if [ -s "trivy-${{ matrix.image }}.json" ]; then
+            jq -r '[.Results[]?.Vulnerabilities[]? | "\(.VulnerabilityID) \(.Severity) \(.PkgName) \(.InstalledVersion) -> \(.FixedVersion)"] | unique | .[]' "trivy-${{ matrix.image }}.json"
+          fi
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-thirdparty-${{ matrix.image }}
+          path: trivy-${{ matrix.image }}.json
+          retention-days: 30
+
   # NFR-09/PRI-11 (WP-105): the Terraform module only accepts EU regions for
   # all data locations (primary, backups, logs, search index). NFR-05
   # (WP-443): a production plan needs a backup replica in another EU region.

@@ -11,8 +11,8 @@ Daten liegen in `docs/acceptance/artefakte/`.
 
 | Teil | Szenario | Tag | Status G1 | Status G2 | Nachweis |
 |---|---|---|---|---|---|
-| (a) | CMDB-Szenario, 34 Schritte, aus V §65 | [Q] | offen | **PASS** durch die Erklärung des Auftraggebers vom 2026-10-15 (E-103, Beschluss vom 2026-10-28; löst E-76 (Korrekturplan) ab, keine Lieferung der v2-Texte) | Erklärung des Auftraggebers vom 2026-10-15 (B4); für G1 als „Nachweis ausstehend“ geführt (E-02, A-02; WP-457), nach E-103 Nachweis für G1 und G2 |
-| (b) | System-Szenario, 20 Schritte, aus V §66 | [Q] | offen | **PASS** durch die Erklärung des Auftraggebers vom 2026-10-15 (E-103, Beschluss vom 2026-10-28; löst E-76 (Korrekturplan) ab, keine Lieferung der v2-Texte) | Erklärung des Auftraggebers vom 2026-10-15 (B4); für G1 als „Nachweis ausstehend“ geführt (E-02, A-02; WP-457), nach E-103 Nachweis für G1 und G2 |
+| (a) | CMDB-Szenario, 34 Schritte, aus V §65 | [Q] | offen | **PASS** durch die Erklärung des Auftraggebers vom 2026-10-15 (E-103, Beschluss vom 2026-10-28; löst E-76 (Korrekturplan) ab, keine Lieferung der v2-Texte) | Erklärung des Auftraggebers vom 2026-10-15 (B4); nach dem Beschluss vom 2026-10-28 Nachweis für G1 und G2 (E-103, E-02). Die Statuszelle G1 bleibt ohne PASS durch Erklärung (`docs/acceptance/g1-gate.md`, Ausnahme der Art `erklaerung` mit „entfällt (E-103)“); WP-457 entfällt |
+| (b) | System-Szenario, 20 Schritte, aus V §66 | [Q] | offen | **PASS** durch die Erklärung des Auftraggebers vom 2026-10-15 (E-103, Beschluss vom 2026-10-28; löst E-76 (Korrekturplan) ab, keine Lieferung der v2-Texte) | Erklärung des Auftraggebers vom 2026-10-15 (B4); nach dem Beschluss vom 2026-10-28 Nachweis für G1 und G2 (E-103, E-02). Die Statuszelle G1 bleibt ohne PASS durch Erklärung (`docs/acceptance/g1-gate.md`, Ausnahme der Art `erklaerung` mit „entfällt (E-103)“); WP-457 entfällt |
 | (c) | Metamodell-Szenario | [P2] | nicht G1 | bestanden im lokalen Lauf (chromium, mobile-chrome, 2026-11-08); Lauf im CI-Job `e2e` in allen sechs Projekten nach dem Merge nachzutragen; siehe [(c) Metamodell-Szenario](#c-metamodell-szenario) | `frontend/e2e/metamodel-scenario.spec.ts` (gemockt) mit `artefakte/abn-01-c-metamodell.json`; Backend-Nachweis je Schritt im Abschnitt (c) |
 | (d) | Onboarding-Szenario | [B] | **PASS** | unverändert eingefrorener Stand von G1 (Prüfsummen in `artefakte/SHA256SUMS`); siehe [(d) Onboarding-Szenario](#d-onboarding-szenario) | `frontend/e2e/onboarding.spec.ts`, Lauf auf der frischen Installation (`docs/acceptance/g1-installation.md`); Schritt 7 seit WP-456 verschärft, bestanden in install-smoke Run 40258372749 (2026-10-26) |
 | (e) | Konflikt-Szenario | [B] | **PASS** | unverändert eingefrorener Stand von G1 (Prüfsummen in `artefakte/SHA256SUMS`); siehe [(e) Konflikt-Szenario](#e-konflikt-szenario) | `frontend/e2e-real/abn-01-konflikt.spec.ts` (Real-Stack, install-smoke Run 40258372749, bestanden) und `frontend/e2e/conflict.spec.ts` (gemockt), beide mit `artefakte/abn-01-e-konflikt.json` |
@@ -20,32 +20,38 @@ Daten liegen in `docs/acceptance/artefakte/`.
 ## (a) und (b): v2-Texte nach E-02
 
 ABN-01 verlangt, dass beide Szenarien „unverändert“ aus V §65–66 übernommen und
-vor G1 eingefroren werden. Die v2-Texte hat der Auftraggeber noch nicht
-geliefert (E-02, offen). Nach der Übergangsregel aus E-02 werden keine
-Schritte erfunden. Sobald die Texte vorliegen, kommen sie unverändert als
-`abn-01-a-cmdb.md` und `abn-01-b-system.md` in dieses Verzeichnis. Jeder
-Schritt wird dann einem Test oder einer manuellen Prüfung zugeordnet. Bis
-dahin bleibt der Punkt ein Gate-Blocker (B4 in `docs/acceptance/g1-gate.md`).
+vor G1 eingefroren werden. Die v2-Texte hat der Auftraggeber nicht
+geliefert. E-02 ist seit 2026-10-28 entschieden: Die Erklärung des
+Auftraggebers vom 2026-10-15 ersetzt die Lieferung und gilt als Nachweis für
+G1 und G2 (E-103). Nach der Regel aus E-02 werden keine Schritte erfunden;
+`abn-01-a-cmdb.md` und `abn-01-b-system.md` gibt es nicht. B4 in
+`docs/acceptance/g1-gate.md` ist durch die Erklärung nachgewiesen.
 
 Nachtrag 2026-10-15: Der Auftraggeber hat B4 am 2026-10-15 für erledigt
 erklärt. Die Texte liegen im Repository weiterhin nicht vor; (a) und (b) sind
-durch diese Erklärung abgenommen, nicht durch einen Test. Nachzureichen sind
-die Texte in `docs/spec/`; danach kommen sie wie oben beschrieben unverändert
-in dieses Verzeichnis, und jeder Schritt wird zugeordnet.
+durch diese Erklärung abgenommen, nicht durch einen Test. Damals sollten die
+Texte in `docs/spec/` folgen; der Beschluss vom 2026-10-28 hat das aufgehoben
+(E-103, Nachtrag vom 2026-11-09).
 
 Nachtrag 2026-10-25 (WP-451, E-76): Die Erklärung des Auftraggebers ersetzt
-den Nachweis nicht. (a) und (b) stehen auf „offen“ mit der Begründung
-„Erklärung des Auftraggebers vom 2026-10-15, Nachweis ausstehend“; ABN-01
-steht in `docs/acceptance/g1-gate.md` auf „offen“ und in
-`docs/acceptance/g1-ausnahmen.csv`, bis die Szenariotexte eingefroren und
-Schritt für Schritt protokolliert sind (WP-457). (d) und (e) bleiben durch
-Tests belegt.
+den Nachweis nicht. (a) und (b) stehen auf „offen“; ABN-01 steht in
+`docs/acceptance/g1-gate.md` auf „offen“ und in
+`docs/acceptance/g1-ausnahmen.csv`. Die Lieferung der Szenariotexte (WP-457)
+hat der Beschluss vom 2026-10-28 gestrichen (Nachtrag vom 2026-11-09). (d)
+und (e) bleiben durch Tests belegt.
 
 Nachtrag 2026-11-08 (WP-330, E-103): Nach dem Beschluss des Auftraggebers
 vom 2026-10-28 gilt die Erklärung vom 2026-10-15 als Nachweis für G1 und G2;
 das löst E-76 (Korrekturplan) in diesem Punkt ab, B4 ist gestrichen. Die
 v2-Texte werden nicht nachgereicht und nicht abgeglichen. Für G2 stehen (a)
 und (b) damit auf PASS; die Gate-Checkliste von G2 führt sie (WP-331).
+
+Nachtrag 2026-11-09 (WP-831, E-103): Auch für G1 ist die Erklärung vom
+2026-10-15 der Nachweis von (a) und (b); nichts wird nachgereicht, WP-457
+entfällt. In der G1-Checkliste bleibt ABN-01 ohne PASS durch Erklärung auf
+„offen“ (Regel `declaration` in `tests/rep01-structure.test.sh`); die Zeile
+in `docs/acceptance/g1-ausnahmen.csv` nennt E-103 und die Lieferung
+„entfällt (E-103)“. Das G1-Ergebnis ändert dieser Nachtrag nicht.
 
 ## (c) Metamodell-Szenario
 
@@ -445,6 +451,6 @@ Den Schutz des Overrides bei gleichzeitiger Discovery belegt
 | Rolle | Name | Datum | Ergebnis |
 |---|---|---|---|
 | Auftragnehmer | – | 2026-10-14 | (d) und (e) bestanden; (a) und (b) N/P (E-02) |
-| Auftraggeber | – | 2026-10-15 | G1 freigegeben; (a) und (b) laut Erklärung erledigt, Texte nachzureichen (E-02) |
+| Auftraggeber | – | 2026-10-15 | G1 freigegeben; (a) und (b) laut Erklärung erledigt (E-02); nach dem Beschluss vom 2026-10-28 ist die Erklärung der Nachweis für G1 und G2, die Texte werden nicht nachgereicht (E-103) |
 | Auftragnehmer (G2) | – | ausstehend | G2: (c) nach dem grünen Lauf im CI-Job `e2e` in allen sechs Projekten; (a) und (b) PASS nach E-103; (d) und (e) unverändert eingefroren |
 | Auftraggeber (G2) | – | ausstehend | G2-Freigabe von ABN-01 |

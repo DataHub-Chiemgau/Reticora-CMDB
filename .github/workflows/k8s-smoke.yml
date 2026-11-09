@@ -124,12 +124,14 @@ jobs:
 
       # The server image of this commit under the name the staging overlay
       # renders (reticora-cmdb/server:staging); a tag other than latest keeps
-      # imagePullPolicy IfNotPresent, so the loaded image is used.
+      # imagePullPolicy IfNotPresent, so the loaded image is used. Third-party
+      # images of the overlay (clamd since WP-853) are pinned by digest and
+      # pulled by the cluster; they are not part of this selection.
       - name: Build and load the server image
         run: |
-          image=$("$KUSTOMIZE" build deploy/k8s/overlays/staging | sed -nE 's/^ *image: *//p' | sort -u)
+          image=$("$KUSTOMIZE" build deploy/k8s/overlays/staging | sed -nE 's/^ *image: *//p' | grep -v '@sha256:' | sort -u)
           if [ "$(wc -l <<<"$image")" -ne 1 ] || [[ ${image##*/} != *:* ]] || [[ $image == *:latest ]]; then
-            echo "::error::the staging overlay must render exactly one image with a tag other than latest, got: $image"
+            echo "::error::the staging overlay must render exactly one image without a digest pin and with a tag other than latest, got: $image"
             exit 1
           fi
           echo "server image: $image"

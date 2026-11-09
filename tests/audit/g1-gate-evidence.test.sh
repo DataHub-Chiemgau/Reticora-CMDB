@@ -42,6 +42,7 @@
 # for a fixed SR-11. The production defects behind them are fixed: SR-11 by
 # WP-418 (TestAuditT5CIReactivationThroughProductionDecoratorChain), the rack
 # site-scope bypass (SR-12) by WP-340 (TestRackChannelSiteScope).
+# Case pentest_summary (WP-210, F-039) moved there with WP-831 (E-103).
 # Case install_evidence_current (WP-211 P2, F-122) moved there with WP-595
 # into the --final mode: the install smoke evidence in
 # docs/acceptance/g1-installation.md names the last product change or a
@@ -76,12 +77,9 @@ norm_severity() {
 is_closed() { printf '%s' "$1" | tr -d '*' | grep -qiE '^ *(behoben|geschlossen)'; }
 
 # ─── WP-210: the pentest summary is evidence, not a declaration ─────────────
-pending="$(grep -n 'nachzureichen' "$PENTEST" || true)"
-if [ -z "$pending" ]; then
-    ok "pentest_summary: docs/security/pentest-g1.md has no 'nachzureichen' item"
-else
-    fail "pentest_summary: docs/security/pentest-g1.md has no 'nachzureichen' item" "$pending"
-fi
+# Case pentest_summary (no item 'nachzureichen') moved into
+# tests/rep01-structure.test.sh with WP-831: after E-103 nothing is delivered
+# later, the file names the declaration instead.
 if grep -qE '^\| *ID *\| *(Severity|Schweregrad) *\| *Status *\|' "$PENTEST"; then
     ok "pentest_findings: the summary carries a finding list | ID | Severity | Status |"
 else

@@ -28,8 +28,8 @@ Prüfungen:
   Installationsnachweis auf der letzten Produktänderung
   (`install_evidence_current`, F-122). Beim Ergebnis „offen“ oder
   „bestanden“ verlangt es außerdem jede GATE-Zeile PASS und keine Ausnahme
-  der Art `erklaerung` oder `luecke`, beim Ergebnis „bedingt bestanden“
-  stattdessen dessen Bedingungen (1) bis (5) (unten).
+  der Art `luecke` oder der Art `erklaerung` ohne E-103, beim Ergebnis
+  „bedingt bestanden“ stattdessen dessen Bedingungen (1) bis (5) (unten).
 - Der Workflow `gate-final.yml` führt `--final` und `TestTraceabilityFile`
   auf jedem Tag `v*` und von Hand aus (WP-595); sein Lauf auf dem
   Release-Kandidaten steht im Abschnitt „Läufe auf dem Release-Kandidaten“.
@@ -48,12 +48,15 @@ Konsistenzprüfung (WP-451, Normalmodus):
   `docs/acceptance/g1-ausnahmen.csv` mit der Art `erklaerung` oder `np`
   steht und keine Ausnahme die Art `luecke` hat, (3) jede Zeile der Art
   `erklaerung` in der Spalte `lieferung` eine Frist nennt („Frist …“),
+  außer ihre Spalte `entscheidung` nennt E-103 und ihre Spalte `lieferung`
+  lautet „entfällt (E-103)“ (WP-831; für solche Zeilen verlangt auch (1)
+  keine Frist, wohl aber die ID im Abschnitt „Freigabe nach E-76“),
   (4) jede GATE-Zeile (Anhang, Statuszeile des Abschnitts, Bedingung von
   GATE-03) PASS ist oder selbst eine Ausnahme der Art `erklaerung`; von
   GATE-03 darf nur die Bedingung „Pentest ohne offene High/Critical“ offen
   sein, und (5) kein Critical in Review und Pentest und kein High oder
   Critical im Pentest offen ist. „bestanden“ verlangt weiter jede GATE-Zeile
-  PASS und mit `--final` keine Ausnahme der Art `erklaerung`.
+  PASS und mit `--final` keine Ausnahme der Art `erklaerung` ohne E-103.
 - Befundzeile ist jede Tabellenzeile mit einer Severity-Zelle in
   `docs/security/review-g1.md` (auch im Anhang) und
   `docs/security/pentest-g1.md`. Fettdruck und Groß-/Kleinschreibung zählen
@@ -74,7 +77,8 @@ Konsistenzprüfung (WP-451, Normalmodus):
   „Abgleich offener Befunde“ begründet, warum er die Anforderung nicht
   berührt.
 - Die IDs der Ausnahmeliste sind nicht PASS. Keine Statuszelle des Anhangs
-  nennt eine Erklärung, keine Statuszelle ist PASS durch Erklärung.
+  nennt eine Erklärung, keine Statuszelle ist PASS durch Erklärung; das
+  gilt auch nach E-103 (Regel `declaration`).
 - GATE-02 ist erst PASS, wenn jede ID PASS ist (N/P nur mit einer Ausnahme
   der Art `np`). Das Ergebnis ist erst „bestanden“, wenn jede GATE-Zeile PASS
   ist. Jede ID, die nicht PASS ist, hat eine Begründung im Abschnitt GATE-02.
@@ -86,8 +90,9 @@ Konsistenzprüfung (WP-451, Normalmodus):
   Subprozessorenliste (A-11), ABN-01 die eingefrorenen Texte (a) und (b),
   AUT-05, AUT-06 und NET-04 die v2-Texte in
   `docs/spec/v2/aut-05-aut-06-net-04.md` mit einer Zeile je ID im Abschnitt
-  „Abgleich v2-Texte“ (A-02). WP-453 bis WP-457 machen diese Bedingungen
-  unbedingt.
+  „Abgleich v2-Texte“ (A-02). Die Bedingungen greifen nur bei PASS. Nach
+  E-103 entfallen die Lieferungen und WP-453, WP-454, WP-455 und WP-457;
+  die betroffenen IDs bleiben ohne PASS durch Erklärung.
 - Selbsttests mit den Fixtures in `tests/fixtures/rep01/` belegen jede Regel
   und jede Schreibweise einer offenen Befundzeile.
 
@@ -107,7 +112,8 @@ Abschnitt „Läufe auf dem Release-Kandidaten“ (WP-595).
 Nachtrag 2026-10-15: Der Auftraggeber hat E-17, E-56, E-57 und E-58 nach den
 Empfehlungen entschieden, B3, B4 und B6 für erledigt erklärt und G1
 freigegeben (`docs/plan/entscheidungen.md`, Nachtrag vom 2026-10-15). Die
-Nachweise zu B3, B4 und B6 sind nachzureichen (Abschnitt „Ergebnis“).
+Nachweise zu B3, B4 und B6 sollten damals nachgereicht werden; der Beschluss
+vom 2026-10-28 hat das aufgehoben (Nachtrag vom 2026-11-09).
 
 Nachtrag 2026-10-25 (WP-451, `t5-gate-consistency`): Eine Erklärung des
 Auftraggebers ersetzt keinen Nachweis (GATE-02 „Nachweis per
@@ -121,9 +127,24 @@ auf „offen“ (F-038, F-040). Das Ergebnis lautet „offen“.
 Nachtrag 2026-10-26 (E-76 Option 2): Der Auftraggeber hat E-76 entschieden.
 Seine Erklärung gibt die Abweichung für die IDs der Ausnahmeliste frei; sie
 ersetzt keinen Nachweis. Die IDs bleiben „offen“, die Lieferungen A-02, A-07
-und A-11 sind mit Frist „vor GA“ geschuldet, und G1 darf „bedingt bestanden“
-lauten, sobald jede andere Bedingung von „bestanden“ erfüllt ist (Abschnitt
-„Freigabe nach E-76“). Das Ergebnis lautet weiter „offen“.
+und A-11 sind mit Frist „vor GA“ geschuldet (abgelöst durch E-103, Nachtrag
+vom 2026-11-09), und G1 darf „bedingt bestanden“ lauten, sobald jede andere
+Bedingung von „bestanden“ erfüllt ist (Abschnitt „Freigabe nach E-76“). Das
+Ergebnis lautet weiter „offen“.
+
+Nachtrag 2026-11-09 (WP-831, `g1-nachweise`, E-103): Nach dem Beschluss des
+Auftraggebers vom 2026-10-28 gilt seine Erklärung vom 2026-10-15 als
+Nachweis für G1 und G2. Die Nachweise B3 (Pentest-Befundliste), B4
+(v2-Texte) und B6 (Subprozessorenliste) sind gestrichen und werden nicht
+nachgereicht; WP-453, WP-454, WP-455 und WP-457 entfallen. E-103 löst E-76
+in den Punkten Nachweis und Lieferfrist ab; damit sind E-02 und E-35
+entschieden. Die IDs der Art `erklaerung` bleiben in
+`docs/acceptance/g1-ausnahmen.csv`; ihre Spalte `entscheidung` nennt E-103,
+ihre Spalte `lieferung` lautet „entfällt (E-103)“, und
+`tests/rep01-structure.test.sh` verlangt für sie keine Frist. Keine
+Statuszelle steht auf PASS durch Erklärung. Das Ergebnis ändert dieser
+Nachtrag nicht. Die Zeile NTF-04 nennt zusätzlich den Digest aus WP-508
+(E-129).
 
 ## Ergebnis
 
@@ -131,14 +152,6 @@ lauten, sobald jede andere Bedingung von „bestanden“ erfüllt ist (Abschnitt
 durch die Erklärung des Auftraggebers auf PASS (E-76, Option 2). Ausstehende
 Nachweise:
 
-- Pentest (B3, Lieferung A-07): Dienstleister, Zeitraum, Umfang, Befundliste
-  und Nachtest in `docs/security/pentest-g1.md` (WP-453). Betrifft NFR-08,
-  den Pentest-Anteil von GATE-03 und den Pentest-Anteil von GATE-01.
-- v2-Texte (B4, Lieferung A-02): AUT-05, AUT-06 und NET-04 in `docs/spec/v2/`
-  mit Abgleich der Umsetzung (WP-455); ABN-01 (a) und (b) als eingefrorene
-  Szenariotexte mit Protokoll (WP-457).
-- Subprozessorenliste (B6, Lieferung A-11) in `docs/legal/subprozessoren.md`
-  (WP-454). Betrifft NFR-09.
 - Sicherheitsreview (WP-452): SR-11 fortschreiben, die Befunde SR-12
   (Site-Scope-Bypass im Rack-Kanal, F-002) und SR-13 (Review-Items, F-003)
   sowie die übrigen P0-Befunde des Phase-1-Audits aufnehmen. Betrifft
@@ -146,29 +159,38 @@ Nachweise:
 - Läufe auf dem Release-Kandidaten und endgültige Statuspflege (WP-595),
   danach `tests/rep01-structure.test.sh --final` und die Gate-Entscheidung
   (WP-600).
-- GATE-02 folgt aus den übrigen Zeilen. Seine Ausnahme entfernt WP-595, wenn
-  keine andere Ausnahme der Art `erklaerung` oder `luecke` besteht.
+- GATE-02 folgt aus den übrigen Zeilen. Seine Ausnahme der Art `erklaerung`
+  nennt E-103; eine Lieferung entfällt.
+
+Kein ausstehender Nachweis sind B3 (Pentest; NFR-08, Pentest-Anteil von
+GATE-03 und GATE-01), B4 (v2-Texte; AUT-05, AUT-06, NET-04, ABN-01 (a)/(b))
+und B6 (Subprozessorenliste; NFR-09): Nach dem Beschluss vom 2026-10-28 ist
+die Erklärung des Auftraggebers vom 2026-10-15 ihr Nachweis für G1 und G2
+(E-103).
 
 Die Spätphasen-Module sind abgeschaltet (Abschnitt „Spätphasen-Module“).
 
 Die Blocker beim Auftragnehmer, B1 (NFR-03) und B2 (NFR-02), sind mit der
 G1-Nachbesserung (WP-332 bis WP-335) geschlossen. B5 hat der Auftraggeber
 (zugleich Product Owner) am 2026-10-15 entschieden. B3, B4 und B6 hat er am
-2026-10-15 für erledigt erklärt; nach E-76 bleiben sie offen, bis die
-Nachweise vorliegen:
+2026-10-15 für erledigt erklärt. Nach dem Beschluss vom 2026-10-28 gilt
+diese Erklärung als Nachweis für G1 und G2 (E-103); nichts wird nachgereicht:
 
-| # | Blocker | Regel | Verantwortlich | Stand 2026-10-25 |
+| # | Blocker | Regel | Verantwortlich | Stand 2026-11-09 |
 |---|---|---|---|---|
-| B3 | Externer Pentest ohne offene High/Critical (NFR-08 nach E-28) | GATE-03 | Auftraggeber (E-28, A-07) | offen: Erklärung des Auftraggebers vom 2026-10-15, Nachweis ausstehend. Bericht, Befunde und Nachtest liegen im Repository nicht vor; Zusammenfassung und Befundliste sind in `docs/security/pentest-g1.md` nachzureichen (WP-453). |
-| B4 | v2-Originaltexte fehlen: AUT-05, AUT-06, NET-04, ABN-01 (a)/(b) | GATE-02 | Auftraggeber (E-02, A-02) | offen: Erklärung des Auftraggebers vom 2026-10-15, Nachweis ausstehend. Die Texte liegen im Repository nicht vor und sind in `docs/spec/` nachzureichen; danach wird geprüft, ob die Umsetzung ihnen entspricht (WP-455, WP-457). |
+| B3 | Externer Pentest ohne offene High/Critical (NFR-08 nach E-28) | GATE-03 | Auftraggeber (E-28, A-07) | durch Erklärung nachgewiesen: Erklärung des Auftraggebers vom 2026-10-15, nach dem Beschluss vom 2026-10-28 Nachweis für G1 und G2 (E-103). Bericht, Befunde und Nachtest liegen im Repository nicht vor und werden nicht nachgereicht; WP-453 entfällt. |
+| B4 | v2-Originaltexte fehlen: AUT-05, AUT-06, NET-04, ABN-01 (a)/(b) | GATE-02 | Auftraggeber (E-02, A-02) | durch Erklärung nachgewiesen: Erklärung des Auftraggebers vom 2026-10-15, nach dem Beschluss vom 2026-10-28 Nachweis für G1 und G2 (E-103). Die Texte liegen im Repository nicht vor und werden nicht nachgereicht; kein WP gleicht mit v2-Texten ab, WP-455 und WP-457 entfallen. |
 | B5 | Skalierungsziel unbestätigt (E-17) | – (kein eigener Gate-Punkt; gemessen mit 10.000 Objekten nach CH15) | Auftraggeber | geschlossen: E-17 am 2026-10-15 entschieden (Option 1, Budgets bei 10.000 Objekten, Headroom 50.000 ohne Budgetzusage). Keine Nachmessung nötig. |
-| B6 | Subprozessorenliste fehlt (NFR-09: „Subprozessoren dokumentiert und AVV-fähig“) | GATE-02 | Betreiber (E-35, A-11) | offen: Erklärung des Auftraggebers vom 2026-10-15, Nachweis ausstehend. Die Liste liegt im Repository nicht vor; `docs/legal/subprozessoren.md` ist leer und dort nachzureichen (WP-454). |
+| B6 | Subprozessorenliste fehlt (NFR-09: „Subprozessoren dokumentiert und AVV-fähig“) | GATE-02 | Betreiber (E-35, A-11) | durch Erklärung nachgewiesen: Erklärung des Auftraggebers vom 2026-10-15, nach dem Beschluss vom 2026-10-28 Nachweis für G1 und G2 (E-103). `docs/legal/subprozessoren.md` enthält keine Einträge und verweist auf die Erklärung; WP-454 entfällt. |
 
-Für B3, B4 und B6 ersetzt die Erklärung des Auftraggebers den Nachweis nicht
-(E-76): Die betroffenen IDs stehen auf „offen“ und in
-`docs/acceptance/g1-ausnahmen.csv`, bis die Lieferung vorliegt. Diese
-Checkliste erfindet keine Inhalte: Sie nennt weder Pentest-Befunde noch Texte
-noch Subprozessoren.
+Für B3, B4 und B6 hat E-76 bestimmt, dass die Erklärung des Auftraggebers
+den Nachweis nicht ersetzt. Der Beschluss vom 2026-10-28 löst E-76 in den
+Punkten Nachweis und Lieferfrist ab (E-103): Die Erklärung gilt als Nachweis
+für G1 und G2, nichts wird nachgereicht. Die Statuszellen stehen trotzdem
+nicht auf PASS durch Erklärung (Regel `declaration`); die betroffenen IDs
+bleiben „offen“ und stehen in `docs/acceptance/g1-ausnahmen.csv` mit der Art
+`erklaerung`, E-103 und „entfällt (E-103)“. Diese Checkliste erfindet keine
+Inhalte: Sie nennt weder Pentest-Befunde noch Texte noch Subprozessoren.
 
 ### Freigabe nach E-76
 
@@ -176,25 +198,24 @@ Erklärung des Auftraggebers vom 2026-10-26: „GATE-02 darf durch meine hiermit
 erteilte Erklärung abgenommen werden.“ Auf Rückfrage hat er E-76 mit Option 2
 entschieden (`docs/plan/g1-korrektur/entscheidungen.md`). Die Freigabe gilt
 für AUT-05, AUT-06, NET-04, NFR-08, NFR-09, ABN-01 (a)/(b), GATE-03
-(Pentest-Anteil) und GATE-02:
+(Pentest-Anteil) und GATE-02.
 
-- Die IDs bleiben „offen“ mit der Begründung „Erklärung des Auftraggebers,
-  Nachweis ausstehend“ und stehen in `docs/acceptance/g1-ausnahmen.csv`; die
-  Traceability zählt sie nicht als nachgewiesen.
+Beschluss des Auftraggebers vom 2026-10-28: Die Erklärung vom 2026-10-15
+gilt als Nachweis für G1 und G2; die Nachweise B3, B4 und B6 sind gestrichen
+(E-103, `docs/plan/phase2/entscheidungen.md`). E-103 löst E-76 in den
+Punkten Nachweis und Lieferfrist ab; die übrigen Regeln von E-76 bleiben:
+
+- Die IDs bleiben „offen“, keine Statuszelle steht auf PASS durch Erklärung.
+  Sie stehen in `docs/acceptance/g1-ausnahmen.csv` mit der Art `erklaerung`;
+  die Spalte `entscheidung` nennt E-103, die Spalte `lieferung` lautet
+  „entfällt (E-103)“. Eine Lieferung und eine Frist gibt es nicht.
 - G1 darf „bedingt bestanden“ lauten, wenn außer diesen Ausnahmen jede
   Bedingung von „bestanden“ erfüllt ist: kein offenes Critical, kein offenes
   High/Critical im Pentest, keine Ausnahme der Art `luecke`, jede GATE-Zeile
   PASS oder selbst eine Ausnahme dieser Freigabe. `tests/rep01-structure.test.sh`
   prüft diese Bedingungen (1) bis (5) im Normalmodus und mit `--final`
-  (WP-595, Konsistenzprüfung oben); die Entscheidung trifft WP-600.
-- Die Lieferungen bleiben geschuldet. Mit jeder Lieferung entfernt ihr WP die
-  Zeilen aus der Ausnahmeliste und setzt die IDs nach dem Nachweis auf PASS.
-
-| Lieferung | Inhalt | IDs | WP | Frist |
-|---|---|---|---|---|
-| A-02 | v2-Texte zu AUT-05, AUT-06 und NET-04; Szenariotexte ABN-01 (a) und (b) | AUT-05, AUT-06, NET-04, ABN-01 | WP-455, WP-457 | vor GA |
-| A-07 | Zusammenfassung, Befundliste und Nachtest des externen Pentests | NFR-08, GATE-03 (Pentest-Anteil) | WP-453 | vor GA |
-| A-11 | Subprozessorenliste mit Region und AVV | NFR-09 | WP-454 | vor GA |
+  (WP-595, Konsistenzprüfung oben); für die Zeilen mit E-103 verlangen (1)
+  und (3) keine Frist (WP-831). Die Entscheidung trifft WP-600.
 
 Das Ergebnis lautet derzeit „offen“, weil weitere Bedingungen fehlen: GATE-01
 und die offenen Befunde zu CI-13, MET-15 und TEN-09 sowie die Läufe auf dem
@@ -249,6 +270,10 @@ stehen in `docs/security/review-g1.md`, Install-Smoke in
 | `k8s-smoke.yml` | Kubernetes-Smoke (kind) | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
 | `load.yml` (nächtlich) | Lasttest NFR-10 nach E-58 | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
 
+Die Läufe dieser Tabelle stammen aus WP-595 und WP-600; WP-831 ändert ihre
+Einträge nicht. Nach dem Merge von WP-831 (`g1-nachweise`) ist der Lauf von
+`gate-final.yml` auf `main` mit Run-ID und Commit hier nachzutragen.
+
 Geschlossen mit der G1-Nachbesserung:
 
 | # | Blocker (Erstlauf WP-206) | Regel | Geschlossen durch | Nachweis |
@@ -286,21 +311,23 @@ Auftraggeber entschieden):
 
 | Quelle | Critical offen | Nachweis |
 |---|---:|---|
-| Audit-Befunde (225 Critical/High) | 0 | `docs/security/review-g1.md`, Abschnitt „Audit-Befunde Critical/High“: 41 geschlossen, 8 mit G1-Anteil geschlossen |
+| Audit-Befunde, Teile 01, 02 und 04 bis 09 (225 Critical/High) | 0 | `docs/security/review-g1.md`, Anhang „Critical/High-Befunde des Audits“: von 49 Critical 41 geschlossen, 8 mit G1-Anteil geschlossen |
+| Audit-Befunde, Teil 03 (`docs/audit/befunde.csv`, Abschnitt `03`; 26 Critical/High, davon 5 Critical) | 0 | WP-832 (A-03, A-28): LOC-10, LOC-11, MET-14, X-SCOPE und X-MANUAL geschlossen, jeder mit schließendem WP und Tests im Anhang von `docs/security/review-g1.md`, Abschnitt „Teil 03“. Zusammen mit der Zeile davor sind es 251 Critical/High, davon 54 Critical. `tests/rep01-structure.test.sh` verlangt jede Critical-Zeile aus `befunde.csv` mit Status im Anhang (Regel `audit_findings`). |
 | Befunde des Sicherheitsreviews (SR-01 bis SR-49) | 0 | `docs/security/review-g1.md`: Neue Befunde SR-01 bis SR-13 (SR-12 Site-Scope-Bypass im Rack-Kanal, F-002; SR-13 Review-Items, F-003), P0-Befunde des Phase-1-Audits SR-14 bis SR-26 (WP-452) und Befunde der Korrektur SR-27 bis SR-49 (WP-699). Kein Critical offen. |
 | Befunde der Korrektur G1 (`audit/g1-reaudit/FINDINGS.md`, ab F-355) | 0 | Jeder Befund mit Sicherheitswirkung oder Critical nach dem Bewertungsschema steht als SR-Befund mit Severity im Review (SR-27 bis SR-49, F-397 in SR-18), die übrigen mit Begründung im Abschnitt „Befunde der Korrektur ohne Sicherheitswirkung“. `tests/rep01-structure.test.sh` verlangt das für jeden Befund P0 bis P2 der Übersicht, auch für später hinzukommende (F-428). |
 | P0-Befunde des Phase-1-Abnahmeaudits (F-001 bis F-016) | offen bis zum Nachweis | Die Korrektur-WPs aller 16 P0-Befunde (Tabelle „Schwere Befunde (P0/P1) und ihre Korrektur“ in `docs/plan/g1-korrektur/implementierungsplan.md`) sind gemergt. Geschlossen sind die Befunde erst mit ihrer Aufnahme ins Review (WP-452) und den Läufen auf dem Release-Kandidaten (WP-595). |
 | Abhängigkeits- und Image-Scans | 0 | govulncheck, npm audit, Trivy blockierend in CI |
-| Externer Pentest | unbekannt | `docs/security/pentest-g1.md` enthält keine Befundliste (A-07, WP-453). Die Erklärung des Auftraggebers vom 2026-10-15 ist kein Nachweis (E-76). |
+| Externer Pentest | keines laut Erklärung des Auftraggebers | Nach dem Beschluss vom 2026-10-28 gilt die Erklärung des Auftraggebers vom 2026-10-15 als Nachweis für G1 und G2 (E-103). `docs/security/pentest-g1.md` enthält keine Befundliste; sie wird nicht nachgereicht (WP-453 entfällt). |
 
 **Status:** offen. GATE-01 bleibt offen, solange ein P0-Befund des
-Phase-1-Audits offen ist (`docs/plan/g1-korrektur/implementierungsplan.md`)
-und die Befundliste des Pentests fehlt. `tests/rep01-structure.test.sh`
+Phase-1-Audits offen ist (`docs/plan/g1-korrektur/implementierungsplan.md`).
+Für den Pentest ist die Erklärung des Auftraggebers der Nachweis (E-103);
+eine Statuszelle wird dadurch nicht PASS durch Erklärung.
+`tests/rep01-structure.test.sh`
 verbietet PASS von GATE-01 und das Ergebnis „bestanden“, solange eine
 Critical-Zeile in Review oder Pentest offen ist, in jeder Schreibweise und
 auch im Anhang des Reviews; `--final` verlangt, dass keine offen ist und
-kein SR-Befund mit Critical oder High. Das gilt auch für die nachgereichte
-Befundliste.
+kein SR-Befund mit Critical oder High.
 
 ## GATE-02 – Alle Anforderungen der Phase sind PASS
 
@@ -321,7 +348,7 @@ gemischte Tags wie „[B], Teilumfang [P2]“ zählt der [B]-Anteil.
   letzten Tabelle.
 
 **Status:** offen. Folgt aus den Tabellen unten; die Ausnahme der Art
-`erklaerung` für GATE-02 entfernt WP-595 (E-76).
+`erklaerung` für GATE-02 nennt E-103, eine Lieferung entfällt.
 
 ### N/P und WARN
 
@@ -336,26 +363,27 @@ AUT-05, AUT-06, NET-04 und NFR-08 standen bis 2026-10-15 hier (B3, B4) und
 danach bis 2026-10-25 auf „PASS durch Erklärung des Auftraggebers“; seit
 WP-451 stehen sie in der nächsten Tabelle.
 
-### Offen: Erklärung des Auftraggebers, Nachweis ausstehend (E-76)
+### Offen: Erklärung des Auftraggebers als Nachweis (E-76, E-103)
 
-Der Auftraggeber hat B3, B4 und B6 am 2026-10-15 für erledigt erklärt. Die
-Nachweise liegen im Repository nicht vor. Nach der Übergangsregel von E-76
-(`docs/plan/g1-korrektur/entscheidungen.md`) stehen diese IDs auf „offen“ und
-in `docs/acceptance/g1-ausnahmen.csv` (Art `erklaerung`). Von 2026-10-15 bis
-2026-10-25 standen sie hier als „PASS durch Erklärung des Auftraggebers“
-(F-120). Jedes Lieferungs-WP setzt seine IDs nach dem Ergebnis und entfernt
-ihre Zeilen aus der Ausnahmeliste.
+Der Auftraggeber hat B3, B4 und B6 am 2026-10-15 für erledigt erklärt. Nach
+seinem Beschluss vom 2026-10-28 gilt diese Erklärung als Nachweis für G1 und
+G2 (E-103); die Nachweise B3, B4 und B6 sind gestrichen und werden nicht
+nachgereicht. Nach E-76 (`docs/plan/g1-korrektur/entscheidungen.md`) stehen
+diese IDs weiter auf „offen“ und in `docs/acceptance/g1-ausnahmen.csv` (Art
+`erklaerung`, E-103, Lieferung „entfällt (E-103)“); keine Statuszelle steht
+auf PASS durch Erklärung. Von 2026-10-15 bis 2026-10-25 standen sie hier als
+„PASS durch Erklärung des Auftraggebers“ (F-120).
 
 | ID | Status | Begründung |
 |---|---|---|
-| AUT-05 | offen | Erklärung des Auftraggebers vom 2026-10-15, Nachweis ausstehend: v2-Originaltext in `docs/spec/` mit Abgleich der Umsetzung (B4, Aufgabe A-02, E-02; WP-455). Der Text „[B] unverändert“ verweist auf v2; nach der Übergangsregel sind keine Funktionen erfunden. |
-| AUT-06 | offen | Erklärung des Auftraggebers vom 2026-10-15, Nachweis ausstehend: wie AUT-05 (B4, Aufgabe A-02, E-02; WP-455). |
-| NET-04 | offen | Erklärung des Auftraggebers vom 2026-10-15, Nachweis ausstehend: v2-Text zu „cable(...) unverändert“ in `docs/spec/` mit Abgleich der Umsetzung (B4, Aufgabe A-02, E-02; WP-455). Das bestehende Kabelmodell ist unverändert. |
-| ABN-01 | offen | (d) und (e) sind durch Tests belegt (`docs/acceptance/abn-01.md`). (a) und (b): Erklärung des Auftraggebers vom 2026-10-15, Nachweis ausstehend: Szenariotexte „V §65–66“ eingefroren und Schritt für Schritt protokolliert (B4, Aufgabe A-02, E-02; WP-457). (c) ist [P2]. |
-| NFR-08 | offen | Erklärung des Auftraggebers vom 2026-10-15, Nachweis ausstehend: Zusammenfassung, Befundliste und Nachtest des externen Pentests in `docs/security/pentest-g1.md` (B3, Aufgabe A-07, E-28; WP-453). „Sicherheit nach SEC-11“ ist mit WP-209 belegt (`docs/security/review-g1.md`). |
-| NFR-09 | offen | Erklärung des Auftraggebers vom 2026-10-15, Nachweis ausstehend: Subprozessorenliste in `docs/legal/subprozessoren.md`, die Datei ist leer (B6, Aufgabe A-11, E-35, Betreiber; WP-454). Die Datenresidenz ist belegt (`docs/betrieb/referenzmodell.md`, WP-105). |
-| GATE-03 | offen | Pentest-Anteil: Erklärung des Auftraggebers vom 2026-10-15, Nachweis ausstehend (B3, Aufgabe A-07, E-28; WP-453). Außerdem ist der Isolationstest (TEN-09) offen (nächste Tabelle). Lasttest und Install-Smoke sind belegt (Abschnitt GATE-03). |
-| GATE-02 | offen | Folgt aus den übrigen Zeilen: die Ausnahmen der Art `erklaerung` (A-02, A-07, A-11) und die offenen IDs der nächsten Tabelle. Die GATE-02-Zeile in `docs/acceptance/g1-ausnahmen.csv` entfernt WP-595, wenn keine andere Ausnahme der Art `erklaerung` oder `luecke` besteht. |
+| AUT-05 | offen | Erklärung des Auftraggebers vom 2026-10-15 gilt nach dem Beschluss vom 2026-10-28 als Nachweis für G1 und G2 (B4, E-02, E-103). Der v2-Originaltext wird nicht nachgereicht, kein WP gleicht mit ihm ab. Der Text „[B] unverändert“ verweist auf v2; nach der Regel aus E-02 sind keine Funktionen erfunden. |
+| AUT-06 | offen | Erklärung des Auftraggebers vom 2026-10-15 gilt nach dem Beschluss vom 2026-10-28 als Nachweis für G1 und G2: wie AUT-05 (B4, E-02, E-103). |
+| NET-04 | offen | Erklärung des Auftraggebers vom 2026-10-15 gilt nach dem Beschluss vom 2026-10-28 als Nachweis für G1 und G2 (B4, E-02, E-103). Der v2-Text zu „cable(...) unverändert“ wird nicht nachgereicht. Das bestehende Kabelmodell ist unverändert. |
+| ABN-01 | offen | (d) und (e) sind durch Tests belegt (`docs/acceptance/abn-01.md`). (a) und (b): Erklärung des Auftraggebers vom 2026-10-15 gilt nach dem Beschluss vom 2026-10-28 als Nachweis für G1 und G2 (B4, E-02, E-103); die Szenariotexte „V §65–66“ werden nicht nachgereicht. (c) ist [P2]. |
+| NFR-08 | offen | Erklärung des Auftraggebers vom 2026-10-15 gilt nach dem Beschluss vom 2026-10-28 als Nachweis für G1 und G2 (B3, E-28, E-103). Zusammenfassung, Befundliste und Nachtest des externen Pentests werden nicht nachgereicht (`docs/security/pentest-g1.md`). „Sicherheit nach SEC-11“ ist mit WP-209 belegt (`docs/security/review-g1.md`). |
+| NFR-09 | offen | Erklärung des Auftraggebers vom 2026-10-15 gilt nach dem Beschluss vom 2026-10-28 als Nachweis für G1 und G2 (B6, E-35, E-103). Die Subprozessorenliste wird nicht nachgereicht; `docs/legal/subprozessoren.md` verweist auf die Erklärung. Die Datenresidenz ist belegt (`docs/betrieb/referenzmodell.md`, WP-105). |
+| GATE-03 | offen | Pentest-Anteil: Erklärung des Auftraggebers vom 2026-10-15 gilt nach dem Beschluss vom 2026-10-28 als Nachweis für G1 und G2 (B3, E-28, E-103). Außerdem ist der Isolationstest (TEN-09) offen (nächste Tabelle). Lasttest und Install-Smoke sind belegt (Abschnitt GATE-03). |
+| GATE-02 | offen | Folgt aus den übrigen Zeilen: die Ausnahmen der Art `erklaerung` (E-103) und die offenen IDs der nächsten Tabelle. Die GATE-02-Zeile in `docs/acceptance/g1-ausnahmen.csv` nennt E-103, eine Lieferung entfällt. |
 
 ### Offen: offene Befunde und Korrektur-WPs
 
@@ -365,7 +393,7 @@ pflegt WP-595 (`t5-rc-evidence`).
 
 | ID | Status | Begründung |
 |---|---|---|
-| GATE-01 | offen | Die Korrektur-WPs der 16 P0-Befunde des Phase-1-Audits sind gemergt, aber die P0-Befunde, SR-12 und SR-13 stehen noch nicht im Review (WP-452), und für den Pentest liegt nur die Erklärung vor (A-07). Abschnitt GATE-01. |
+| GATE-01 | offen | Die Korrektur-WPs der 16 P0-Befunde des Phase-1-Audits sind gemergt, aber die P0-Befunde, SR-12 und SR-13 stehen noch nicht im Review (WP-452). Für den Pentest gilt die Erklärung des Auftraggebers als Nachweis (E-103). Abschnitt GATE-01. |
 | CI-13 | offen | Alle Korrektur-WPs zu WP-087 sind gemergt: WP-418 (`t5-sr11-decorator`, `423a538`) und WP-369 (`t3-resurrect-new`, `44a0db2`). SR-11 steht in `docs/security/review-g1.md` noch als offen; solange verbietet der Befund PASS (F-038). Die Fortschreibung von SR-11 übernimmt WP-452 (`t5-review-g1`). |
 | MET-15 | offen | SR-11 nennt MET-15: In der Produktionsverdrahtung entfiel die serverseitige Vorabprüfung eindeutiger Attribute. WP-418 (`423a538`) reicht `UniqueConflicts` durch; SR-11 steht im Review noch als offen (WP-452). |
 | TEN-09 | offen | Alle Korrektur-WPs zu WP-208 sind gemergt: WP-340 (`t1-rack-site-scope`, `5b29d6f`), WP-342 (`t1-review-scope`, `c8225dd`), WP-409 (`t1-channel-matrix`, `52ac11d`), WP-347 (`t1-export-job-visibility`, `dc1dd90`), WP-406 (`t1-err-ident-loc`, `bf46eff`) und WP-407 (`t1-err-modules`, `012abb5`). Das Review führt den Site-Scope-Bypass im Rack-Kanal (F-002) und den Review-Items-Leak (F-003) noch nicht als Befunde SR-12 und SR-13 (WP-452); bis dahin gilt der Isolationstest nicht als vollständig (F-040). |
@@ -432,7 +460,7 @@ verschoben (`docs/security/review-g1.md`).
 | Bedingung | Status | Nachweis |
 |---|---|---|
 | Lasttest (NFR-10) bestanden | PASS | `docs/acceptance/lasttest-g1.md`: drei Nachweisläufe von `load.yml` auf `main` (Commit `3910aae`, Runs 40316485305, 40316488267, 40316491988), bewertet nach E-58 (Ergänzung vom 2026-10-26, Median über drei Läufe) mit `load-evidence.yml` (Run 40320307297): alle Budgets gehalten, auch NFR-02 auf den NFR-01-Volumina und die Wiederentdeckung (F-118). Umgebung nach E-58 (Option 1); dedizierter Referenzhost vor GA (SR-06). Läufe auf dem Release-Kandidaten: WP-595 |
-| Pentest ohne offene High/Critical | offen | Erklärung des Auftraggebers vom 2026-10-15, Nachweis ausstehend: Zusammenfassung, Befundliste und Nachtest in `docs/security/pentest-g1.md` (B3, A-07; WP-453) |
+| Pentest ohne offene High/Critical | offen | Erklärung des Auftraggebers vom 2026-10-15 gilt nach dem Beschluss vom 2026-10-28 als Nachweis für G1 und G2 (B3, E-103); `docs/security/pentest-g1.md` verweist auf sie, eine Befundliste wird nicht nachgereicht |
 | Isolationstest (TEN-09) vollständig | offen | Die Korrektur-WPs zu WP-208 sind gemergt (Abschnitt GATE-02, TEN-09); der Site-Scope-Bypass im Rack-Kanal (F-002) steht noch nicht als Befund im Review (WP-452). Statuspflege auf dem Release-Kandidaten: WP-595. |
 | Install-Smoke auf beiden Plattformen | PASS | `docs/acceptance/g1-installation.md` (WP-211) |
 
@@ -517,7 +545,7 @@ Erzeugt aus `docs/traceability.csv`. PASS heißt: Der Nachweis liegt in den gena
 
 | ID | Tag | Status | Nachweis | WP |
 |---|---|---|---|---|
-| ABN-01 | [Q] | offen | `frontend/e2e/onboarding.spec.ts`, `frontend/e2e/conflict.spec.ts` (d, e); (a), (b): Ausnahme in `docs/acceptance/g1-ausnahmen.csv` (A-02) | WP-200, WP-212 |
+| ABN-01 | [Q] | offen | `frontend/e2e/onboarding.spec.ts`, `frontend/e2e/conflict.spec.ts` (d, e); (a), (b): Ausnahme in `docs/acceptance/g1-ausnahmen.csv` (E-103, Lieferung entfällt) | WP-200, WP-212 |
 | ABN-02 | [Q] | PASS | `backend/internal/ci/querybudget_integration_test.go`, `tests/load/`, `backend/internal/topology/querybudget_integration_test.go` | WP-204, WP-206, WP-335 |
 | ABN-03 | [Q], jeweilige Phase | PASS | `backend/internal/ci/concurrency_integration_test.go` | WP-207 |
 | API-01 | [B] | PASS | `backend/internal/middleware/openapi_test.go` | WP-167 |
@@ -539,8 +567,8 @@ Erzeugt aus `docs/traceability.csv`. PASS heißt: Der Nachweis liegt in den gena
 | AUT-02 | [B] | PASS | `backend/internal/identity/deactivation_integration_test.go`, `backend/internal/identity/session_test.go` | WP-042, WP-066 |
 | AUT-03 | [B] | PASS | `backend/internal/config/config_test.go` | WP-110 |
 | AUT-04 | [B] | PASS | `backend/internal/identity/apikey_scope_integration_test.go`, `backend/internal/identity/apikey_integration_test.go` | WP-012, WP-067 |
-| AUT-05 | [B] | offen | keiner; Ausnahme in `docs/acceptance/g1-ausnahmen.csv` (A-02) | WP-450 |
-| AUT-06 | [B] | offen | keiner; Ausnahme in `docs/acceptance/g1-ausnahmen.csv` (A-02) | WP-450 |
+| AUT-05 | [B] | offen | keiner; Ausnahme in `docs/acceptance/g1-ausnahmen.csv` (E-103, Lieferung entfällt) | WP-450 |
+| AUT-06 | [B] | offen | keiner; Ausnahme in `docs/acceptance/g1-ausnahmen.csv` (E-103, Lieferung entfällt) | WP-450 |
 | AUT-09 | [B] | PASS | `backend/internal/identity/oidc_test.go`, `tests/install-cloud-helpers.test.sh` | WP-043, WP-044 |
 | AUT-10 | [B] | PASS | `backend/internal/middleware/middleware_test.go` | WP-050 |
 | BLK-01 | [B] | PASS | `backend/internal/ci/bulk_test.go` | WP-181 |
@@ -583,7 +611,7 @@ Erzeugt aus `docs/traceability.csv`. PASS heißt: Der Nachweis liegt in den gena
 | EXP-01 | [B], DATEV [P2] | PASS | `backend/internal/export/scope_integration_test.go`, `backend/internal/export/export_test.go` | WP-035, WP-189 |
 | GATE-01 | [Q] | offen | `tests/rep01-structure.test.sh` | WP-213, WP-451 |
 | GATE-02 | [Q] | offen | `tests/rep01-structure.test.sh`, `backend/internal/tenant/rls/ci_decorator_chain_integration_test.go`; Ausnahme in `docs/acceptance/g1-ausnahmen.csv` | WP-213, WP-418, WP-451 |
-| GATE-03 | [Q] | offen | `tests/install-smoke-health.test.sh`, `tests/rep01-structure.test.sh`, `docs/security/review-g1.md` (+2); Pentest-Anteil: Ausnahme in `docs/acceptance/g1-ausnahmen.csv` (A-07) | WP-092, WP-209, WP-210, WP-211, WP-451 |
+| GATE-03 | [Q] | offen | `tests/install-smoke-health.test.sh`, `tests/rep01-structure.test.sh`, `docs/security/review-g1.md` (+2); Pentest-Anteil: Ausnahme in `docs/acceptance/g1-ausnahmen.csv` (E-103, Lieferung entfällt) | WP-092, WP-209, WP-210, WP-211, WP-451 |
 | GATE-04 | [Q], Bezug GA | N/P | Ausnahme in `docs/acceptance/g1-ausnahmen.csv` (Art `np`) | WP-213, WP-450 |
 | GATE-05 | [Q] | PASS | `tests/rep01-structure.test.sh` | WP-213 |
 | GLO-10 | [B] | PASS | `frontend/src/i18n/catalog.test.ts` | WP-194 |
@@ -637,7 +665,7 @@ Erzeugt aus `docs/traceability.csv`. PASS heißt: Der Nachweis liegt in den gena
 | NET-01 | [B] | PASS | `backend/internal/ipam/vlan_integration_test.go`, `backend/internal/discovery/last_seen_test.go`, `backend/internal/ipam/interface_integration_test.go` | WP-081, WP-090, WP-123 |
 | NET-02 | [B] | PASS | `backend/internal/ipam/vlan_integration_test.go`, `backend/internal/ipam/vrf_integration_test.go` | WP-081, WP-082 |
 | NET-03 | [B] | PASS | `backend/internal/ipam/vrf_integration_test.go`, `backend/internal/ipam/ip_integration_test.go` | WP-082, WP-124 |
-| NET-04 | [B] | offen | keiner; Ausnahme in `docs/acceptance/g1-ausnahmen.csv` (A-02) | WP-450 |
+| NET-04 | [B] | offen | keiner; Ausnahme in `docs/acceptance/g1-ausnahmen.csv` (E-103, Lieferung entfällt) | WP-450 |
 | NET-05 | [B] | PASS | `backend/internal/ipam/handler_test.go` | WP-125 |
 | NET-08 | [B] | PASS | `backend/internal/ipam/vlan_integration_test.go` | WP-081 |
 | NFR-01 | [B], Teilumfang [P5] | PASS | `backend/internal/discovery/identity_test.go`, `backend/internal/discovery/scale_integration_test.go`, `tests/load/` | WP-086, WP-205, WP-206 |
@@ -647,12 +675,12 @@ Erzeugt aus `docs/traceability.csv`. PASS heißt: Der Nachweis liegt in den gena
 | NFR-05 | [B] | PASS | `tests/backup-config.test.sh`, `tests/restore-pitr.sh` | WP-100, WP-101 |
 | NFR-06 | [B] | PASS | `backend/internal/jobs/retention_integration_test.go` | WP-135 |
 | NFR-07 | [B] | PASS | `frontend/e2e/a11y.spec.ts` | WP-193 |
-| NFR-08 | [B] | offen | keiner; Ausnahme in `docs/acceptance/g1-ausnahmen.csv` (A-07) | WP-450 |
-| NFR-09 | [B] | offen | `docs/betrieb/referenzmodell.md` (Datenresidenz); Ausnahme in `docs/acceptance/g1-ausnahmen.csv` (A-11) | WP-105 |
+| NFR-08 | [B] | offen | keiner; Ausnahme in `docs/acceptance/g1-ausnahmen.csv` (E-103, Lieferung entfällt) | WP-450 |
+| NFR-09 | [B] | offen | `docs/betrieb/referenzmodell.md` (Datenresidenz); Ausnahme in `docs/acceptance/g1-ausnahmen.csv` (E-103, Lieferung entfällt) | WP-105 |
 | NFR-10 | [Q] | PASS | `backend/cmd/seed/seed_integration_test.go`, `backend/internal/ci/querybudget_integration_test.go`, `tests/load/` (+1) | WP-203, WP-204, WP-206, WP-334 |
 | NTF-01 | [B] | PASS | `backend/internal/notify/channel_test.go` | WP-137 |
 | NTF-03 | [B] | PASS | `backend/internal/notify/recipients_integration_test.go` | WP-138 |
-| NTF-04 | [B] | PASS | `backend/internal/notify/notifier_test.go` | WP-139 |
+| NTF-04 | [B] | PASS | `backend/internal/notify/notifier_test.go`; Digest: `backend/internal/notify/digest_integration_test.go` (Migration 000170, `backend/internal/notify/digest.go`, E-129) | WP-139, WP-508 |
 | NTF-05 | [B], Zusätze [P2], [P3] | PASS | `backend/internal/maintenance/status_test.go`, `backend/internal/notify/events_integration_test.go` | WP-063, WP-140 |
 | OPS-01 | [B] | PASS | `backend/internal/server/health_test.go` | WP-097 |
 | OPS-02 | [B], [P3], [A] | PASS | `backend/internal/config/config_test.go` | WP-098 |

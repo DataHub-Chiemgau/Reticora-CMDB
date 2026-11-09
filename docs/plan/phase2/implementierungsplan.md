@@ -41,7 +41,7 @@ Gemergt sind WP-001 bis WP-214, WP-240 bis WP-242, die G1-Nachbesserung WP-332 b
 
 - **101 IDs im Umfang** mit WP-Zuordnung sowie 11 N/P-IDs ohne Wortlaut (nur Entscheidung, siehe E-37): alle IDs mit Tag [P2], die P2-Anteile gemischt getaggter IDs ([B]/[Pn]-Kombinationen, [P2–P3], [P2–P4, A]) und der Phase-2-Anteil von MET-45 (Tag im Katalog unvollständig). Dazu kommen die [Q]-IDs, die nach GATE-02 ab Phase 1 für jedes Gate gelten: DOD-01, GLO-11, SEQ-01, GATE-01, GATE-02, GATE-05, TEN-09, OPS-06, INS-01, INS-04, DIS-08, TST-04, SEC-11, ABN-01, ABN-02 und ABN-03. Von ABN-01 liefert Phase 2 Szenario (c); (a) und (b) sind durch die Erklärung des Auftraggebers vom 2026-10-15 nachgewiesen, die nach E-103 auch für G2 gilt; (d) und (e) sind mit `frontend/e2e/onboarding.spec.ts`, `frontend/e2e-real/abn-01-konflikt.spec.ts` und `frontend/e2e/conflict.spec.ts` für G2 erneut nachzuweisen. NFR-10 und GATE-03 gelten nach ihrem Wortlaut nur für G1, GATE-04 erst für GA. TKT-03 [O] ist als optionales WP ohne Gate-Wirkung enthalten (GATE-05, E-47).
 - **Nicht Bestandteil:** [P3]-Anteile (Monitoring, Workflows, Compliance, Wartungsfenster, SMS/Pager, Health, DSGVO-Workflows), [P4]-Anteile (Agent, Mobil/Offline, RFID, Inventur Pro, Ticketing Pro, Reseller, Schlüssel, Desk, Schulung, Disposition), [P5] und Add-ons [A] (IGA, KI). Die nach E-03 verschobenen WPs mit ausschließlich P3/P4/[A]-IDs (WP-219, WP-220, WP-228, WP-230 bis WP-234) bleiben verschoben. Aus G1 kommen nicht in Phase 2: SR-06 (dedizierter Referenzhost für den Lastnachweis, vor GA nach E-58), SR-10 (Obergrenze der MACs und Interfaces je DeviceRecord, Vertragsänderung nach API-01, vor GA), F-316 (asynchroner Audit-Runner, vor GA) und F-212 (Add-on-Zeilen aus 000086, mit der Aktivierung der Add-on-Module). Der Altconsumer `reticora-ingest` und 1.000 Records/s [P5] (`docs/acceptance/lasttest-g1.md`, Abschnitt „Offene Punkte“, Punkt 2) brauchen kein Folge-WP in Phase 2.
-- **234 Arbeitspakete** mit zusammen **357,5 PT**, davon 1 optionales WP ([O]). **G2-Umfang: 233 WPs mit 355,5 PT.** Entfallene WPs stehen mit Grund in der Tabelle der entfallenen WPs; Teile, die Phase 1 oder der Korrekturplan schon umgesetzt haben, sind in den Neufassungen gestrichen und im Feld „Problem“ belegt.
+- **242 Arbeitspakete** mit zusammen **367,5 PT**, davon 1 optionales WP ([O]). **G2-Umfang: 241 WPs mit 365,5 PT.** Entfallene WPs stehen mit Grund in der Tabelle der entfallenen WPs; Teile, die Phase 1 oder der Korrekturplan schon umgesetzt haben, sind in den Neufassungen gestrichen und im Feld „Problem“ belegt.
 - **Nachtrag vom 2026-10-26 (WP-499, F-123):** Meilenstein [M2.11 Lint-Altlast](#m211-lint-altlast-nachtrag-wp-499) mit 17 Arbeitspaketen WP-613 bis WP-629 (14,0 PT) baut die Lint-Altlast hinter `issues.new-from-rev` nach Linter-Kategorie ab (Folge-WP nach WP-001 AK4); sie gehören zu keiner [P2]-ID und ändern die Zahlen oben nicht.
 - **Nummerierung:** WP-Nummern sind über alle drei Pläne eindeutig. Die Traceability-Prüfung liest auf main den Phase-1-Plan und den Korrekturplan (`PlanFiles` in `backend/internal/traceability/traceability.go`, WP-336); WP-243 nimmt diesen Plan als dritten auf. WP-243 bis WP-331 behalten ihre Nummern aus dem Plan vom 2026-10-13. WP-332 bis WP-335 belegt die G1-Nachbesserung im Phase-1-Plan, WP-336 bis WP-612 und WP-630 bis WP-703 der Korrekturplan; WP-613 bis WP-629 sind die Lint-WPs dieses Plans (M2.11). Bei einer Teilung behält der erste Teil Nummer und Schlüssel. Weitere Teile und neue WPs, auch die Folge-WPs aus G1, erhalten Nummern ab WP-704 ohne Suffix, weil Parser und CI genau drei Ziffern erwarten. Das sind `wpPattern` in `backend/internal/traceability/traceability.go` und der Job `traceability` in `.github/workflows/ci.yml`: Er übergibt PR-Titel und -Text als `TRACEABILITY_PR_TITLE` und `TRACEABILITY_PR_BODY`, und `WorkPackagesIn` liest daraus die Nummern. Die Nummern sind deshalb nicht fortlaufend. Entfallene WPs behalten ihre Nummer; sie wird nicht neu vergeben. Die verschobenen Phase-1-WPs mit P2-IDs ersetzt dieser Plan durch eigene WPs (Tabelle unten, E-46); ihre Blöcke im Phase-1-Plan bleiben unverändert und werden nicht mehr als PR-Nummer verwendet.
 - **Reihenfolge** nach SEQ-01, Phase 2: Metamodell (Abschnitt 11) → Verträge, Asset/Lager/Stocktake, Dokumente → Ticketing Essential/Standard → Import, Bulk, Views → G2; „dazu Feldrechte“ (README §17) als eigener Meilenstein direkt nach dem Metamodell, damit alle Modul-DTOs den Feldrechte-Filter von Beginn an einbinden. Alles beginnt nach dem GO von WP-600 (E-59 (Korrekturplan)). Die G1-Folgearbeiten (M2.0b) laufen parallel zum Metamodell und sind vor den WPs gemergt, die ihren Pfad nutzen.
@@ -64,7 +64,7 @@ Gemergt sind WP-001 bis WP-214, WP-240 bis WP-242, die G1-Nachbesserung WP-332 b
 | [M2.7 Beziehungen, Graph und Netz](#m27-beziehungen-graph-und-netz) | Eigene Beziehungstypen und -attribute, Kantenhistorie (REL-06, REL-07, REL-09), Service-Impact und projizierte Netzknoten (IMP-08, IMP-10, IMP-11), IP-Reservierung und Duplikaterkennung (NET-06, NET-09). Läuft parallel zu M2.3 bis M2.6. | WP-294 – WP-300, WP-771 – WP-773 | 10 | 17,0 | REL-06/07/09, IMP-08/10/11, NET-06/09 PASS; Impact-Erweiterungen sind additiv und im Sparse-Fieldset `fields=` verfügbar (E-57); `TestTopologyQueryBudget`, `TestImpactWorstCase` und `TestIngestStatementBudget` grün. |
 | [M2.8 Import, Bulk, Views, Suche, Export, BFF, Historie](#m28-import-bulk-views-suche-export-bff-historie) | Import mit Mapping-Layer (IMP-IO-01), Bulk mit Undo (BLK-02, OVR-03), geteilte Views (VIE-02), Suchfelder und Filter-AST (SRC-02, SRC-03), DATEV (EXP-01), GraphQL-Aggregate (GQL-03), Snapshot und Zustand zum Zeitpunkt T (AUD-08). | WP-301 – WP-312, WP-774 – WP-776, WP-778 – WP-784, WP-786 – WP-795 | 32 | 51,5 | IMP-IO-01, BLK-02, OVR-03, VIE-02, SRC-02, SRC-03, EXP-01 (DATEV), GQL-03, AUD-08 PASS; anlegende Pfade von Import und Bulk nehmen Identitäts- und `max_cis`-Sperre und zählen in der Transaktion neu; neue Listen und Suchfelder halten p95 bei 10.000 Objekten einschließlich `total` (E-17). |
 | [M2.9 Oberflächen Phase 2](#m29-oberflächen-phase-2) | Admin-Oberflächen für das Metamodell, Klick-Builder, Form Builder mit Preview, geführte Anlage, Picker und Alltagsflows, Modul-Oberflächen (Assets, Verträge, Lager, Bestellungen, Inventur, Dokumente, Tickets, Import, Bulk, Views, Beziehungen), Playwright-Abläufe (UI-11, UI-12, UI-14, UI-15, MET-50 bis MET-52, SRC-03, TST-03). | WP-313 – WP-324, WP-797 – WP-803, WP-805 – WP-810, WP-812 – WP-818, WP-846 | 33 | 53,5 | UI-11, UI-12, UI-14 (P2-Anteil), UI-15, MET-50 bis MET-52, TST-03 (P2-Anteil) PASS; axe ohne Befunde auf neuen Seiten; neue Listen mit Client- oder Site-Bezug folgen der Scope-Auswahl (`SCOPED_LISTS` in `frontend/src/api/client.ts`). |
-| [M2.10 Seed, Qualität, Abnahme und Gate G2](#m210-seed-qualität-abnahme-und-gate-g2) | Seed-Erweiterung (SIM-01), TST-01-Pflichtfälle, Performance-Sanity mit `load.yml` (ABN-02, NFR-02), Konkurrenzmatrix und Isolationstest über die Phase-2-Kanäle (ABN-03, TEN-09), internes Sicherheitsreview mit Fortschreibung der offenen SR-Befunde (SEC-11), Abnahmeszenario (c) (ABN-01), Gate G2 (GATE-01/02/05, DOD-01, SEQ-01, GLO-11). | WP-325 – WP-331, WP-819 – WP-830 | 19 | 30,5 | Gate-Checkliste `docs/acceptance/g2-gate.md` vollständig belegt; kein offenes Critical aus Audit (einschließlich Teil 03), Sicherheitsreview Phase 2 und Pentest-Befundliste (E-103); ABN-02 nach dem Protokoll aus E-58 mit `load.yml` bei 10.000 Objekten (E-17), Impact-Budgets aus WP-335 gehalten; P2-Module im G2-Release eingeschaltet und je Organisation über Entitlements freigeschaltet. |
+| [M2.10 Seed, Qualität, Abnahme und Gate G2](#m210-seed-qualität-abnahme-und-gate-g2) | Seed-Erweiterung (SIM-01), TST-01-Pflichtfälle, Performance-Sanity mit `load.yml` (ABN-02, NFR-02), Konkurrenzmatrix und Isolationstest über die Phase-2-Kanäle (ABN-03, TEN-09), internes Sicherheitsreview mit Fortschreibung der offenen SR-Befunde (SEC-11), Abnahmeszenario (c) (ABN-01), Gate G2 (GATE-01/02/05, DOD-01, SEQ-01, GLO-11). | WP-325 – WP-331, WP-819 – WP-830, WP-852 – WP-859 | 27 | 40,5 | Gate-Checkliste `docs/acceptance/g2-gate.md` vollständig belegt; kein offenes Critical aus Audit (einschließlich Teil 03), Sicherheitsreview Phase 2 und Pentest-Befundliste (E-103); ABN-02 nach dem Protokoll aus E-58 mit `load.yml` bei 10.000 Objekten (E-17), Impact-Budgets aus WP-335 gehalten; P2-Module im G2-Release eingeschaltet und je Organisation über Entitlements freigeschaltet. |
 | [M2.11 Lint-Altlast (Nachtrag WP-499)](#m211-lint-altlast-nachtrag-wp-499) | Abbau der Lint-Altlast hinter `issues.new-from-rev` nach Linter-Kategorie (errcheck, ineffassign, gofmt/goimports, unused/staticcheck/unconvert, govet, gocritic), je WP höchstens 15 Dateien (WP-001 AK4, F-123). | WP-613 – WP-629 | 17 | 14,0 | golangci-lint ohne `new-from-rev` meldet für backend, collector und edgecore 0 Befunde; `new-from-rev` entfernt. |
 
 Reihenfolge nach SEQ-01 (`docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:75`) und README §17. Vor allen Meilensteinen steht das GO des Gate-WP WP-600 (`k-gate`) des Korrekturplans (E-59 (Korrekturplan), Option 1); vorher beginnt kein WP dieses Plans.
@@ -92,7 +92,7 @@ flowchart LR
     M27["M2.7 Beziehungen, Graph und Netz<br/>10 WPs · 17,0 PT"]
     M28["M2.8 Import, Bulk, Views, Suche, Export, BFF, Historie<br/>32 WPs · 51,5 PT"]
     M29["M2.9 Oberflächen Phase 2<br/>33 WPs · 53,5 PT"]
-    M210["M2.10 Seed, Qualität, Abnahme und Gate G2<br/>19 WPs · 30,5 PT"]
+    M210["M2.10 Seed, Qualität, Abnahme und Gate G2<br/>27 WPs · 40,5 PT"]
     M20 --> M20b
     M20 --> M21
     M20b --> M28
@@ -14001,8 +14001,16 @@ API-06;[P2]/[P3]/[P4]/[A];C;frontend/src/api/deprecatedPaths.test.ts;WP-846
 | [WP-828](#wp-828--kanal-isolationsmatrix-phase-2-nach-ten-09-p2-kanäle-für-alle-scope-arten) | `g2-channel-matrix` | Kanal-Isolationsmatrix Phase 2 nach TEN-09: P2-Kanäle für alle Scope-Arten | 2,0 | WP-208, WP-271, WP-277, WP-275, WP-269, WP-270, WP-267, WP-283, WP-285, WP-286, WP-287, WP-290, WP-303, WP-305, WP-311, WP-308, WP-310, WP-762, WP-756 |
 | [WP-329](#wp-329--internes-sicherheitsreview-phase-2-owasp-asvs-l2-release-kandidat-g2-threat-model-scans-nachverfolgung-g1) | `g2-security` | Internes Sicherheitsreview Phase 2 (OWASP ASVS L2): Release-Kandidat G2, Threat-Model, Scans, Nachverfolgung G1 | 2,0 | WP-829, WP-326, WP-827, WP-826, WP-830, WP-831, WP-839, WP-704, WP-707, WP-708, WP-712, WP-713, WP-714, WP-718, WP-719, WP-724, WP-727, WP-728, WP-730, WP-732, WP-735, WP-737, WP-740, WP-743, WP-747, WP-749, WP-750, WP-752, WP-754, WP-755, WP-757, WP-759, WP-760, WP-761, WP-763, WP-765, WP-767, WP-768, WP-769, WP-293, WP-770, WP-771, WP-772, WP-773, WP-776, WP-782, WP-788, WP-789, WP-791, WP-792, WP-795, WP-800, WP-802, WP-803, WP-805, WP-807, WP-810, WP-812, WP-813, WP-814, WP-815, WP-816, WP-818, WP-324, WP-209, WP-004, WP-282, WP-832 |
 | [WP-829](#wp-829--sicherheitstests-phase-2-dokument-auslieferung-presign-import-parser-bulk-revert-etiketten-lookup) | `g2-security-tests` | Sicherheitstests Phase 2: Dokument-Auslieferung, Presign, Import-Parser, Bulk-Revert, Etiketten-Lookup | 1,0 | WP-734, WP-301, WP-305, WP-783, WP-784, WP-762, WP-030, WP-781 |
+| [WP-852](#wp-852--sr-56-dokument-bleibt-nach-wegfall-des-letzten-links-gescopt-entlinken-löschen-des-ziels-kanalzeile-document-link) | `g2-doc-link-scope` | SR-56: Dokument bleibt nach Wegfall des letzten Links gescopt (Entlinken, Löschen des Ziels), Kanalzeile document-link | 1,5 | WP-267, WP-851, WP-827, WP-828, WP-329 |
+| [WP-853](#wp-853--sr-57-clamd-im-kubernetes-standard-und-startprüfung-beim-leeren-release-standard-g2) | `g2-clamd-default` | SR-57: clamd im Kubernetes-Standard und Startprüfung beim leeren Release-Standard G2 | 1,0 | WP-735, WP-830, WP-329 |
+| [WP-854](#wp-854--standardkunde-für-jede-organisation-trigger-und-backfill-begriff-kunde-für-client-in-der-oberfläche) | `g2-default-client` | Standardkunde für jede Organisation (Trigger und Backfill), Begriff „Kunde“ für `client` in der Oberfläche | 1,0 | WP-830, WP-821 |
+| [WP-855](#wp-855--kundenverwaltung-in-der-oberfläche-seite-kunden-mit-anlegen-bearbeiten-löschen-und-anlage-aus-dem-standortdialog) | `g2-client-admin` | Kundenverwaltung in der Oberfläche: Seite „Kunden“ mit Anlegen, Bearbeiten, Löschen und Anlage aus dem Standortdialog | 1,5 | WP-854, WP-324 |
+| [WP-856](#wp-856--zugangsdaten-in-der-oberfläche-anlegen-und-löschen-geheimnisse-nur-schreibbar) | `g2-credential-ui` | Zugangsdaten in der Oberfläche anlegen und löschen, Geheimnisse nur schreibbar | 1,0 | WP-854, WP-324 |
+| [WP-857](#wp-857--auffindbarkeit-gesperrte-paketfunktionen-sichtbar-hinweisseite-statt-fehlern-schnellzugriff-und-einrichtungsliste-im-dashboard) | `g2-discoverability` | Auffindbarkeit: gesperrte Paketfunktionen sichtbar, Hinweisseite statt Fehlern, Schnellzugriff und Einrichtungsliste im Dashboard | 1,5 | WP-830, WP-244, WP-324, WP-855, WP-856 |
+| [WP-858](#wp-858--ci-typen-pro-kunde-ausblenden-tabelle-client_ci_type_hidden-api-filter-der-typliste-und-anlagesperre) | `g2-citype-client-hidden` | CI-Typen pro Kunde ausblenden: Tabelle client_ci_type_hidden, API, Filter der Typliste und Anlagesperre | 2,0 | WP-854, WP-855, WP-249, WP-828 |
+| [WP-859](#wp-859--beziehungsziel-per-name-hostname-oder-management-ip-finden-suche-der-ci-liste-und-anzeige-im-picker) | `g2-relation-search-ip` | Beziehungsziel per Name, Hostname oder Management-IP finden: Suche der CI-Liste und Anzeige im Picker | 0,5 | WP-318, WP-788, WP-824 |
 | [WP-330](#wp-330--abnahmeszenario-abn-01-c-metamodell-playwright-ablauf-protokollabschnitt-und-eingefrorene-daten) | `g2-abnahme` | Abnahmeszenario ABN-01 (c) Metamodell: Playwright-Ablauf, Protokollabschnitt und eingefrorene Daten | 1,5 | WP-324, WP-314, WP-306, WP-325, WP-317, WP-212, WP-712, WP-719, WP-830 |
-| [WP-331](#wp-331--g2-gateprüfung-traceability-stufe-p2-blockierend-g2-stufe-der-gate-prüfung-gate-checkliste-und-release-notes) | `g2-gate` | G2-Gateprüfung: Traceability-Stufe P2 blockierend, G2-Stufe der Gate-Prüfung, Gate-Checkliste und Release-Notes | 2,0 | WP-830, WP-831, WP-330, WP-327, WP-328, WP-329, WP-326, WP-243, WP-244, WP-324, WP-312, WP-262, WP-289, WP-292, WP-256, WP-270, WP-288, WP-297, WP-298, WP-299, WP-300, WP-319, WP-323, WP-832, WP-821, WP-828, WP-827, WP-825, WP-826, WP-213, WP-600 |
+| [WP-331](#wp-331--g2-gateprüfung-traceability-stufe-p2-blockierend-g2-stufe-der-gate-prüfung-gate-checkliste-und-release-notes) | `g2-gate` | G2-Gateprüfung: Traceability-Stufe P2 blockierend, G2-Stufe der Gate-Prüfung, Gate-Checkliste und Release-Notes | 2,0 | WP-830, WP-831, WP-330, WP-327, WP-328, WP-329, WP-326, WP-243, WP-244, WP-324, WP-312, WP-262, WP-289, WP-292, WP-256, WP-270, WP-288, WP-297, WP-298, WP-299, WP-300, WP-319, WP-323, WP-832, WP-821, WP-828, WP-827, WP-825, WP-826, WP-852, WP-853, WP-854, WP-855, WP-856, WP-857, WP-858, WP-859, WP-213, WP-600 |
 | [WP-830](#wp-830--release-standard-g2-p2-module-ohne-reticora_modules-freigegeben-p3p4a-bleiben-abgeschaltet) | `g2-release` | Release-Standard G2: P2-Module ohne RETICORA_MODULES freigegeben, P3/P4/[A] bleiben abgeschaltet | 1,0 | WP-214, WP-244, WP-705, WP-706, WP-704, WP-707, WP-708, WP-712, WP-713, WP-714, WP-718, WP-719, WP-724, WP-728, WP-727, WP-730, WP-770, WP-732, WP-735, WP-737, WP-270, WP-740, WP-743, WP-747, WP-749, WP-750, WP-752, WP-755, WP-754, WP-757, WP-759, WP-760, WP-761, WP-763, WP-765, WP-767, WP-769, WP-768, WP-771, WP-772, WP-773, WP-776, WP-782, WP-784, WP-788, WP-789, WP-791, WP-792, WP-795, WP-800, WP-802, WP-803, WP-805, WP-807, WP-810, WP-812, WP-320, WP-813, WP-815, WP-814, WP-816, WP-322, WP-818, WP-282, WP-324, WP-846 |
 
 ### WP-325 – Seed Phase 2 I: Rahmen der Phase-2-Schritte, Metamodell (Vererbung, Sets, Templates, Regeln, Layouts), Nutzer je Rolle, Feldrechte, Lasttest-Schlüssel je Rolle
@@ -14777,6 +14785,441 @@ SEC-11;[Q];G2;backend/internal/document/security_test.go;WP-829
 
 **Nicht Bestandteil:** Nicht Bestandteil: die Behebung gefundener Schwachstellen (Folge-WPs aus WP-329), Cross-Tenant-Referenzen im Import (WP-827), die Feldrechte-Kanalmatrix (WP-730, WP-326), die Grenzen nach E-49 und das Entpackverhältnis (Tests in WP-301), das API-Limit von 5.000 Zeilen (WP-303) sowie Fälle, die schon die Tests von WP-030, WP-268, WP-733 und WP-734 abdecken.
 
+### WP-852 – SR-56: Dokument bleibt nach Wegfall des letzten Links gescopt (Entlinken, Löschen des Ziels), Kanalzeile document-link
+
+**Schlüssel:** `g2-doc-link-scope` · **Meilenstein:** M2.10 Seed, Qualität, Abnahme und Gate G2 · **Epic (Traceability):** G2 · **Aufwand:** 1,5 PT
+
+**Voraussetzungen (gemergt):** WP-267 (`doc-model`), WP-851 (`doc-create-links`), WP-827 (`g2-isolation`), WP-828 (`g2-channel-matrix`), WP-329 (`g2-security`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| TEN-09 | [Q] | PARTIAL | High | Teil (Folge-WP aus WP-329: Dokumente werden durch Entlinken oder Löschen des Ziels nicht org-weit, SR-56; Kanalzeile `document-link`, SR-63) | `docs/audit/02-mandanten-auth-entitlements.md:42` | `docs/spec/katalog-v3/02-mandanten-auth-entitlements.md:25` |
+
+**Problem:** Das Sicherheitsreview Phase 2 (WP-329, `docs/security/review-phase2.md`) führt SR-56 als Critical; es sperrt G2 (GATE-01). Die Policy `document_tenant_isolation` (000064, 000139, 000217) zeigt ein Dokument, wenn es keinen Link hat (`link_count = 0`) oder mindestens einen sichtbaren. E-09 prüft nur die Anlage: `require_linked_row` (Constraint-Trigger auf INSERT) und `require_visible_parent`. Entfernt ein Principal von Client 2 den letzten Link eines Dokuments, das nur mit einem Objekt von Client 2 verknüpft ist (`DELETE /api/v1/documents/{id}/links/{link_id}`, `document.PGRepository.UnlinkDocument`), fällt `link_count` auf 0, und jeder Principal mit `document:read` in jedem Client sieht Metadaten, Versionen und Inhalt. Seit 000275 (WP-827) entfernen die Trigger `delete_target_document_links` die Links eines gelöschten Assets, Tickets, Standorts, einer Inventur, eines Entsorgungsnachweises, einer Lagerbewegung oder eines CIs (Retention), seit 000238 die eines Vertrags; deren Dokumente werden dabei ohne Absicht org-weit. `TestModuleTablesInheritObjectScope` (`backend/internal/tenant/rls/module_object_integration_test.go`, Teil „probe_doc_link_count.sql part A“) hält das als erwartet fest. Die Kanalmatrix hat keine Zeile für das Entlinken (SR-63).
+
+**Akzeptanzkriterien:**
+
+- [ ] Migration `000281_document_orphaned_scope`: Spalte `document.orphaned boolean NOT NULL DEFAULT false`. `count_document_links()` setzt sie, sobald der Zähler durch Entfernen oder Umhängen eines Links auf 0 fällt; ein neuer Link setzt sie nicht zurück. Ein Dokument, das Links hatte, wird damit nie durch den Wegfall seiner Links org-weit, gleich ob ein Principal entlinkt oder ein Ziel gelöscht wird (`delete_target_document_links`, `delete_contract_document_links`). Die Spalte schreiben nur die Zähler-Trigger (Wächter wie `protect_link_counter`, 000139).
+- [ ] `document_tenant_isolation` zeigt ein Dokument ohne Link nur dann allen Principals der Organisation, wenn es nie Links hatte (`link_count = 0 AND NOT orphaned`); ein verwaistes Dokument sehen nur org-weite Principals (ohne Client-, Site- und Team-Einschränkung, E-09, E-11). Org-weite Principals sehen, ändern und verknüpfen es weiter; ein gescopter Principal kann es nicht verknüpfen (`require_visible_parent`, `link_count = 0`). `document_version`, Suche (`hitVisible`), KI-Chunks und Presign folgen über die Policy von `document`.
+- [ ] Backfill: Dokumente ohne Link, deren Links 000275 in `migration_quarantine` verschoben hat oder für die `audit_log` einen Eintrag `document.linked` oder `document.unlinked` führt, werden als verwaist markiert. Die Down-Migration stellt `count_document_links()` und die Policy aus 000139/000217 wieder her und entfernt die Spalte; `TestMigrationsRoundtrip` bleibt grün, `docs/schema-baseline.md` ist nachgeführt.
+- [ ] Das Prädikat `documentVisible` in `backend/internal/document/pg_repository.go` bildet die Regel nach, damit das Repository ohne die Policy exakt bleibt.
+- [ ] Regressionstest als App-Rolle (`backend/internal/tenant/rls/document_link_scope_integration_test.go`, neu, `TestDocumentStaysScopedWithoutLinks`): Ein Principal von Client 2 entfernt den letzten Link eines Dokuments von Client 2; danach sieht Client 1 es nicht (Liste, Detail, Versionen), Client 2 auch nicht, der org-weite Principal schon. Gleiches nach dem Löschen jedes Linkziels aus 000275 und 000238 (CI, Asset, Ticket, Standort, Vertrag; Inventur, Entsorgungsnachweis und Lagerbewegung über den Löschpfad, den ihr Wächter zulässt). Ein nie verknüpftes Dokument eines org-weiten Principals bleibt für alle sichtbar. Der Test ist vor der Migration rot.
+- [ ] `TestModuleTablesInheritObjectScope` prüft im Teil „probe_doc_link_count.sql part A“ das neue Verhalten: Nach dem Entfernen des letzten Links sehen die Principals von Client 1 und Client 2 das Dokument nicht mehr, der org-weite Principal schon.
+- [ ] Kanalmatrix (TEN-09, SR-63): neue Zeile `document-link` in `rls.Channels` (`backend/internal/tenant/rls/matrix_fixtures.go`) und `channel_matrix_p2_integration_test.go`: `DELETE /api/v1/documents/{id}/links/{link_id}` je Scope-Art (eigener Link 204, Link außerhalb des Scopes 404 wie unbekannt) und danach die Sichtbarkeit des verwaisten Dokuments für jeden Principal (404 für alle gescopten, 200 für org-weite).
+- [ ] `docs/security/review-phase2.md`: SR-56 „behoben“ mit Commit; SR-63 vermerkt die Zeile `document-link`; `docs/security/threat-model.md` T33 mit dem Nachweis.
+
+**Dateien (11 Einträge, Migration = 2):**
+
+- backend/migrations/000281_document_orphaned_scope.up.sql (neu)
+- backend/migrations/000281_document_orphaned_scope.down.sql (neu)
+- docs/schema-baseline.md
+- backend/internal/document/pg_repository.go
+- backend/internal/tenant/rls/document_link_scope_integration_test.go (neu)
+- backend/internal/tenant/rls/module_object_integration_test.go
+- backend/internal/tenant/rls/matrix_fixtures.go
+- backend/internal/tenant/rls/channel_matrix_p2_integration_test.go
+- docs/security/review-phase2.md
+- docs/security/threat-model.md
+- docs/traceability.csv
+
+**Migration/RLS:** `000281_document_orphaned_scope` (up/down): Spalte `document.orphaned`, `count_document_links()` setzt sie, Wächtertrigger, Policy `document_tenant_isolation` mit `NOT orphaned` im Zweig ohne Link, Backfill aus `migration_quarantine` (000275) und `audit_log`. ENABLE + FORCE RLS bleiben. Gleiches Muster für `maintenance_window` (`ci_count`) vor dem Freischalten von P3 (Modul `maintenance`).
+
+**Tests:**
+
+- `TestDocumentStaysScopedWithoutLinks` (neu) als App-Rolle gegen PostgreSQL mit beiden Wegen (Entlinken durch einen gescopten Principal, Löschen des Ziels).
+- `TestModuleTablesInheritObjectScope` mit dem umgestellten Teil A.
+- `TestChannelMatrix` mit der Zeile `document-link`; `TestRLSCatalog`, `TestDocumentRepositoryClientScope`, die Link-Tests in `backend/internal/document/` und `TestMigrationsRoundtrip` bleiben grün.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+TEN-09;[Q];G2;backend/internal/tenant/rls/document_link_scope_integration_test.go;WP-852
+```
+
+**Entscheidungsbedarf:** [E-09](../entscheidungen.md#e-09) Schreiben von Zeilen mit `client_id`/`site_id` NULL (entschieden (2026-10-01)); [E-11](../entscheidungen.md#e-11) Semantik des Team-Scopes (entschieden (2026-10-28, Option 1))
+
+**Nicht Bestandteil:** Nicht Bestandteil: Wartungsfenster (`maintenance_window`, Modul P3, in G2 abgeschaltet); eine Freigabe verwaister Dokumente zurück an die Organisation über die API; die übrigen Zeilen aus SR-63 (vor GA).
+
+### WP-853 – SR-57: clamd im Kubernetes-Standard und Startprüfung beim leeren Release-Standard G2
+
+**Schlüssel:** `g2-clamd-default` · **Meilenstein:** M2.10 Seed, Qualität, Abnahme und Gate G2 · **Epic (Traceability):** G2 · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-735 (`doc-scan-ops`), WP-830 (`g2-release`), WP-329 (`g2-security`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| SEC-09 | [P2] | nicht geprüft | – | Teil (Folge-WP aus WP-329: Malware-Scan im Release-Standard G2 betriebsbereit, SR-57) | – | `docs/spec/katalog-v3/06-audit-sicherheit-events.md:40` |
+
+**Problem:** SR-57 (Medium, vor G2 empfohlen): Seit WP-830 ist das Modul `documents` ohne `RETICORA_MODULES` aktiv. `deploy/k8s/base` und das Overlay `staging` enthalten die Komponente `clamav` nicht und setzen `RETICORA_CLAMD_ADDR` nicht; nur `overlays/prod` bindet sie ein, mit dem veralteten Kommentar „the module itself stays off until RETICORA_MODULES enables it“. `Config.documentScanErrors` prüft clamd und NATS nur, wenn `documentsEnabled()` das Modul ausdrücklich nennt (`documents`, `P2`, `all`), nicht beim leeren Release-Standard. Uploads bleiben dann `pending_scan` und enden in `scan_failed` (fail-closed, kein Bypass), ohne Hinweis beim Start.
+
+**Akzeptanzkriterien:**
+
+- [ ] `documentsEnabled()` wertet `RETICORA_MODULES` wie `server.ParseModules`: leer (Release-Standard G2) und `P2` schalten `documents` ein, ebenso `all` und der Schlüssel `documents`. Außerhalb von `development` verlangt die Startprüfung dann `RETICORA_CLAMD_ADDR` und `RETICORA_NATS_URL` (E-42, OPS-01).
+- [ ] Die Komponente `clamav` (`deploy/k8s/base/components/clamav`, Pin `clamav/clamav:1.5.4@sha256:…` wie `deploy/docker-compose/docker-compose.yml`, geprüft im Job `image-scan-thirdparty`) ist in `deploy/k8s/base` eingebunden; `staging` und `prod` erben sie. `overlays/prod` bindet sie nicht mehr selbst ein, ihr Kommentar nennt den Release-Standard.
+- [ ] `TestAuditT5K8sRenderedEnvSatisfiesStartCheck` rendert base, staging und prod mit `RETICORA_CLAMD_ADDR` und besteht die Startprüfung; ein Fixture-Overlay ohne `RETICORA_CLAMD_ADDR` meldet die Startprüfung.
+- [ ] `TestValidateDocumentScanner` prüft den leeren Release-Standard (ohne clamd: Fehler; mit clamd und NATS: gültig) und eine Modulliste ohne `documents` (gültig ohne clamd).
+- [ ] Kommentare in `backend/internal/config/config.go`, `deploy/k8s/base/components/clamav/kustomization.yaml`, `deploy/docker-compose/docker-compose.yml` und `docs/betrieb/referenzmodell.md` nennen den Release-Standard; `docs/security/review-phase2.md` setzt SR-57 auf „behoben“.
+
+**Dateien (11 Einträge, Migration = 2):**
+
+- backend/internal/config/config.go
+- backend/internal/config/config_test.go
+- backend/internal/config/k8s_required_env_test.go
+- deploy/k8s/base/kustomization.yaml
+- deploy/k8s/base/components/clamav/kustomization.yaml
+- deploy/k8s/overlays/prod/kustomization.yaml
+- deploy/docker-compose/docker-compose.yml
+- docs/betrieb/referenzmodell.md
+- docs/security/review-phase2.md
+- docs/security/threat-model.md
+- docs/traceability.csv
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- `TestValidateDocumentScanner` und `TestAuditT5K8sRenderedEnvSatisfiesStartCheck` (CI-Job `k8s-manifests` mit kustomize v5.8.1).
+- Unverändert grün: `image-scan-thirdparty` (gleicher Pin), Install-Smoke-Test (Compose setzt `RETICORA_CLAMD_ADDR` und `RETICORA_NATS_URL`), `tests/k8s/kind-smoke.test.sh`; der Lauf `k8s-smoke` auf kind wendet das Overlay `staging` mit clamd an.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+SEC-09;[P2];G2;backend/internal/config/config_test.go;WP-853
+```
+
+**Entscheidungsbedarf:** [E-42](entscheidungen.md#e-42) SEC-09: Betrieb des Malware-Scans (ClamAV) und Verhalten bei Ausfall (entschieden (2026-10-28, Option 1))
+
+**Nicht Bestandteil:** Nicht Bestandteil: ein clamd-Check in `/readyz`; die Signaturversorgung air-gapped (`docs/betrieb/referenzmodell.md`, WP-735); weitere Ausfallszenarien (WP-735, WP-331).
+
+### WP-854 – Standardkunde für jede Organisation (Trigger und Backfill), Begriff „Kunde“ für `client` in der Oberfläche
+
+**Schlüssel:** `g2-default-client` · **Meilenstein:** M2.10 Seed, Qualität, Abnahme und Gate G2 · **Epic (Traceability):** G2 · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-830 (`g2-release`), WP-821 (`g2-seed-scale`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| UI-15 | [P2] | PARTIAL | High | Teil (Folge-WP aus den Abnahmebefunden des Auftraggebers vom 2026-11-09: Standort anlegen ohne Vorarbeit, weil jede Organisation einen Standardkunden hat; Begriff „Kunde“ statt „Mandant“ für `client`) | `docs/audit/08-frontend-monitoring-nfr-tests.md:50` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:24` |
+
+**Problem:** Abnahmebefund des Auftraggebers vom 2026-11-09. Organisation ist der Mandant (MSP), `client` der Kunde innerhalb der Organisation (TEN-01). Keine Organisation erhält beim Anlegen einen Kunden: nicht der Signup und nicht die Operator-Anlage (gemeinsame Kette `populate` in `backend/internal/signup/pg_repository.go:130–164`; Organisation, erster Nutzer, `org_admin`, Entitlements, Kanäle), nicht die Installer-Organisation „Reticora Demo“ (`backend/migrations/000054_default_organization.up.sql`, `seed_default_organization` in `install-cloud.sh:2863–2869`). Rollen, Standard-VRF und Standard-Tags legen dagegen Trigger auf `organization` an (`000032_standard_role_seeds`, `trg_organization_default_vrf` in 000092, `trg_organization_default_tags` in 000218). Ein Standort verlangt einen Kunden (`backend/internal/locations/model.go:192–194`, `CreateSite` in `backend/internal/tenantapi/handler.go:310–312`); ohne Kunden sind Standorte, Racks, Raumplan, Karte und die Kundenauswahl des Scope-Switchers nicht nutzbar, und die Oberfläche bietet keine Kundenanlage (WP-855). Außerdem heißt `client` in der Oberfläche teils „Mandant“: `orders.client` und `orders.orgWide` (`frontend/src/i18n/de-DE.json:2153–2154`), `locations.client` (`de-DE.json:2704`), `savedviews.fields.client_id` (`de-DE.json:2791`) und der Fallback `t('locations.client', 'Mandant')` in `frontend/src/pages/LocationTreePage.tsx:300`; andere Stellen sagen schon „Kunde“ (`de-DE.json:189`, `505`, `2223`).
+
+**Akzeptanzkriterien:**
+
+- [ ] Migration `000282_default_client`: Funktion und AFTER-INSERT-Trigger `trg_organization_default_client` auf `organization` legen einen Kunden an (Name = Organisationsname, `slug` `default`), nach dem Muster von `trg_organization_default_tags` (000218). Backfill: Jede Organisation ohne Kunden erhält ihn, auch `00000000-0000-0000-0000-000000000001` („Reticora Demo“). Die Down-Migration entfernt Trigger und Funktion; die Kunden aus dem Backfill bleiben (Kommentar im Down). `docs/schema-baseline.md` ist nachgeführt, `TestMigrationsRoundtrip` bleibt grün.
+- [ ] Integrationstest (`backend/internal/signup/default_client_integration_test.go`, neu): Eine Organisation aus dem Signup (`Complete`) und eine aus der Operator-Anlage (`CreateOrganization`) haben genau einen Kunden mit `slug` `default` und dem Organisationsnamen; ein Standort für ihn lässt sich sofort anlegen. Backfill-Fall: Eine Organisation ohne Kunden vor der Migration hat danach genau einen; eine Organisation mit Kunden erhält keinen weiteren.
+- [ ] i18n de/en: `client` heißt in allen Texten „Kunde“ / „Customer“, „Ohne Kunde (organisationsweit)“ / „No customer (organization-wide)“; „Mandant“ bleibt der Organisation vorbehalten (`tenant.switchTenant`, `audit.subtitle`, `export.subtitle`). Der Fallback in `LocationTreePage.tsx` entfällt. `frontend/src/i18n/catalog.test.ts` bleibt grün.
+- [ ] Tests und Seeds, die eine Organisation ohne Kunden annehmen (Zählungen von `client`, Slug-Kollisionen mit `default`, Optionen des Scope-Switchers), sind angepasst; `backend/cmd/seed/seed.go` legt seine Kunden weiter mit eigenem Slug an.
+
+**Dateien (13 Einträge, Migration = 2):**
+
+- backend/migrations/000282_default_client.up.sql (neu)
+- backend/migrations/000282_default_client.down.sql (neu)
+- docs/schema-baseline.md
+- backend/internal/signup/pg_repository.go
+- backend/internal/signup/default_client_integration_test.go (neu)
+- backend/internal/signup/signup_integration_test.go
+- install-cloud.sh
+- frontend/src/i18n/de-DE.json
+- frontend/src/i18n/en-US.json
+- frontend/src/pages/LocationTreePage.tsx
+- frontend/src/pages/LocationTreePage.test.tsx
+- frontend/e2e-real/scope-switcher.spec.ts
+- docs/traceability.csv
+
+**Migration/RLS:** `000282_default_client` (up/down): Funktion und Trigger `trg_organization_default_client` auf `organization`, Backfill. Keine neue Tabelle; `client` behält ENABLE + FORCE RLS und seine Policies. Der Kommentar von `populate` (`backend/internal/signup/pg_repository.go`) und von `seed_default_organization` (`install-cloud.sh`) nennt den Trigger.
+
+**Tests:**
+
+- `default_client_integration_test.go` (neu) als App-Rolle gegen PostgreSQL: Signup, Operator-Anlage, Backfill.
+- Unverändert grün: `TestSignupCreatesOrganizationAtomically`, `TestOperatorCreatesOrganizationAtomically`, `TestRLSCatalog`, `TestMigrationsRoundtrip`, `TestClientPoliciesEnforceClientScope`; Vitest der Standortseite; e2e-real `scope-switcher.spec.ts` und `locations-racks.spec.ts`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+UI-15;[P2];G2;backend/internal/signup/default_client_integration_test.go;WP-854
+```
+
+**Entscheidungsbedarf:** [E-09](../entscheidungen.md#e-09) Schreiben von Zeilen mit `client_id`/`site_id` NULL (entschieden (2026-10-01))
+
+**Nicht Bestandteil:** Nicht Bestandteil: die Kundenverwaltung in der Oberfläche (WP-855); das Umbenennen von „Mandant“ für die Organisation; eine Migration bestehender org-weiter Objekte auf den Standardkunden.
+
+### WP-855 – Kundenverwaltung in der Oberfläche: Seite „Kunden“ mit Anlegen, Bearbeiten, Löschen und Anlage aus dem Standortdialog
+
+**Schlüssel:** `g2-client-admin` · **Meilenstein:** M2.10 Seed, Qualität, Abnahme und Gate G2 · **Epic (Traceability):** G2 · **Aufwand:** 1,5 PT
+
+**Voraussetzungen (gemergt):** WP-854 (`g2-default-client`), WP-324 (`ui-e2e-p2`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| UI-14 | [P2–P4, A] | PARTIAL | High | Teil (Folge-WP aus den Abnahmebefunden des Auftraggebers vom 2026-11-09: Kundenverwaltung in der Oberfläche) | `docs/audit/08-frontend-monitoring-nfr-tests.md:49` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:22` |
+
+**Problem:** Abnahmebefund des Auftraggebers vom 2026-11-09. `/api/v1/clients` hat seit Phase 1 Lesen, Anlegen, Ändern und Löschen (`backend/internal/tenantapi/handler.go:31–35`; Lesen mit `location:read`, Schreiben mit `user:manage`, `backend/internal/server/authz.go:74` und `:190`, `backend/internal/server/testdata/route_permissions.txt`). Das Frontend kennt nur Liste und Detail (`clientApi` in `frontend/src/api/cmdb.ts:986–996`) und hat keine Seite für Kunden. Der Standortdialog verlangt einen Kunden (`frontend/src/pages/LocationTreePage.tsx:299–305`), bietet aber keine Anlage. Löschen eines Kunden mit abhängigen Objekten beantwortet der Server mit einer Abhängigkeitsliste (`backend/internal/locations/enrollment_code_delete_integration_test.go:153`).
+
+**Akzeptanzkriterien:**
+
+- [ ] `clientApi` erhält `create`, `update` und `remove` (`POST`, `PATCH`, `DELETE /api/v1/clients…`) mit Hooks und Invalidierung der Kundenliste und des Scope-Switchers.
+- [ ] Neue Seite „Kunden“ (`frontend/src/pages/ClientsPage.tsx`, Route `/clients`, Seite `clients` in `AppPage`, `pageToPath` und `NAV_GROUPS` in der Gruppe `admin`, `navPermissionFor` mit `location:read`): Liste mit Name und Kürzel, Anlegen (Name, Kürzel/Slug, aus dem Namen vorgeschlagen), Bearbeiten, Löschen mit Bestätigung. Schreibaktionen erscheinen nur mit `user:manage`. Ein Löschen mit abhängigen Objekten zeigt die Abhängigkeiten aus der Fehlerantwort statt eines allgemeinen Fehlers; ein belegter Slug (409) erscheint am Feld.
+- [ ] Standortdialog (`LocationTreePage.tsx`): Neben der Kundenauswahl „Neuen Kunden anlegen“ (nur mit `user:manage`); der neue Kunde ist danach gewählt.
+- [ ] i18n de/en (`clients.*`), axe ohne Befunde auf der neuen Seite (`frontend/e2e/a11y.spec.ts`).
+- [ ] Vitest `ClientsPage.test.tsx` (neu); gemockte E2E-Spec `frontend/e2e/clients.spec.ts` (neu, Vertragsprüfung gegen `api/openapi.yaml`); e2e-real: Kunde anlegen, danach einen Standort für ihn anlegen (`frontend/e2e-real/client-admin.spec.ts`, neu).
+
+**Dateien (16 Einträge, Migration = 0):**
+
+- frontend/src/api/cmdb.ts
+- frontend/src/api/cmdbHooks.ts
+- frontend/src/pages/ClientsPage.tsx (neu)
+- frontend/src/pages/ClientsPage.test.tsx (neu)
+- frontend/src/pages/LocationTreePage.tsx
+- frontend/src/pages/LocationTreePage.test.tsx
+- frontend/src/App.tsx
+- frontend/src/components/CommandPalette.tsx
+- frontend/src/components/shell/navigation.ts
+- frontend/src/hooks/useEntitlements.ts
+- frontend/src/i18n/de-DE.json
+- frontend/src/i18n/en-US.json
+- frontend/e2e/clients.spec.ts (neu)
+- frontend/e2e/a11y.spec.ts
+- frontend/e2e-real/client-admin.spec.ts (neu)
+- docs/traceability.csv
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- Vitest `ClientsPage.test.tsx` (Liste, Anlegen, Bearbeiten, Löschen mit Abhängigkeiten, ohne `user:manage` nur lesend) und `LocationTreePage.test.tsx` (Anlage aus dem Standortdialog).
+- `frontend/src/components/shell/navigation.test.ts` (jede Seite genau einmal) und `frontend/e2e/a11y.spec.ts` grün.
+- Gemockt `frontend/e2e/clients.spec.ts`; e2e-real `client-admin.spec.ts`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+UI-14;[P2–P4, A];G2;frontend/src/pages/ClientsPage.test.tsx;WP-855
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Nicht Bestandteil: Änderungen an `/api/v1/clients`; ausgeblendete CI-Typen je Kunde (WP-858); Kundeneinstellungen (`client.settings`).
+
+### WP-856 – Zugangsdaten in der Oberfläche anlegen und löschen, Geheimnisse nur schreibbar
+
+**Schlüssel:** `g2-credential-ui` · **Meilenstein:** M2.10 Seed, Qualität, Abnahme und Gate G2 · **Epic (Traceability):** G2 · **Aufwand:** 1,0 PT
+
+**Voraussetzungen (gemergt):** WP-854 (`g2-default-client`), WP-324 (`ui-e2e-p2`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| UI-14 | [P2–P4, A] | PARTIAL | High | Teil (Folge-WP aus den Abnahmebefunden des Auftraggebers vom 2026-11-09: Zugangsdaten in der Oberfläche anlegen und löschen) | `docs/audit/08-frontend-monitoring-nfr-tests.md:49` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:22` |
+
+**Problem:** Abnahmebefund des Auftraggebers vom 2026-11-09. Das Backend verwaltet Zugangsdaten (`backend/internal/credential/handler.go:26–34`: `POST`, `GET`, `GET /{id}`, `DELETE /{id}`, `POST /rotate-keys`; Lesen mit `credential:read`, Schreiben mit `credential:manage`, `backend/internal/server/authz.go:100` und `:197`) mit den Arten `snmp_v2c`, `snmp_v3`, `ssh_password`, `ssh_key`, `redfish`, `ipmi`, `wmi`, `api_token`, `nut` und `nas` (`backend/internal/credential/credential.go:21–30`); `CreateRequest` nimmt `name`, `kind`, optional `client_id` und `scope` und das Geheimnis als JSON-Objekt `secret` (`credential.go:83–91`), keine Antwort gibt es entschlüsselt zurück. Das Frontend kann nur auflisten und Schlüssel rotieren (`credentialApi` in `frontend/src/api/client.ts:2727–2734`); der Scope-Dialog der Discovery wählt vorhandene Zugangsdaten (`frontend/src/pages/DiscoveryPage.tsx:483–498`, `630–645`). Ohne Anlage in der Oberfläche lässt sich Discovery mit Zugangsdaten nicht abnehmen.
+
+**Akzeptanzkriterien:**
+
+- [ ] `credentialApi.create` und `credentialApi.remove` mit Hooks; nach Anlage und Löschen ist `useCredentials` invalidiert, sodass die Auswahl im Discovery-Scope sofort aktuell ist.
+- [ ] Abschnitt „Zugangsdaten“ auf der Discovery-Seite (`frontend/src/components/discovery/CredentialsSection.tsx`, neu; erreichbar über die Navigation zu `discovery` und die Command-Palette): Liste mit Name, Art, Kunde und Anlagedatum; Anlegen je Art mit den Pflichtfeldern der Art (SNMP v2c: Community; SNMP v3: Benutzer, Auth- und Privacy-Protokoll und -Passwort; SSH: Benutzer und Passwort bzw. Schlüssel; Redfish, IPMI, WMI, NUT, NAS: Benutzer und Passwort; API-Token: Token), optional Kunde; Löschen mit Bestätigung. Schreibaktionen nur mit `credential:manage`.
+- [ ] Geheimnisfelder sind nur schreibbar (`type="password"`, `autocomplete="off"`), werden nie angezeigt und nach dem Absenden aus dem Formularzustand entfernt. Kein neuer Endpunkt gibt Geheimnisse zurück; die Antworten von `POST` und `GET /api/v1/credentials` enthalten kein Feld `secret`.
+- [ ] i18n de/en (`discovery.credentials.*`), axe ohne Befunde.
+- [ ] Vitest `frontend/src/components/discovery/CredentialsSection.test.tsx` (neu); gemockte E2E-Spec `frontend/e2e/credentials.spec.ts` (neu); e2e-real: Zugangsdaten anlegen, danach im Scope wählbar, die API-Antwort enthält kein Geheimnis (`frontend/e2e-real/discovery-scopes.spec.ts`, neuer Fall).
+
+**Dateien (11 Einträge, Migration = 0):**
+
+- frontend/src/api/client.ts
+- frontend/src/api/hooks.ts
+- frontend/src/components/discovery/CredentialsSection.tsx (neu)
+- frontend/src/components/discovery/CredentialsSection.test.tsx (neu)
+- frontend/src/pages/DiscoveryPage.tsx
+- frontend/src/pages/DiscoveryPage.test.tsx
+- frontend/src/i18n/de-DE.json
+- frontend/src/i18n/en-US.json
+- frontend/e2e/credentials.spec.ts (neu)
+- frontend/e2e-real/discovery-scopes.spec.ts
+- docs/traceability.csv
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- Vitest `CredentialsSection.test.tsx`: Pflichtfelder je Art, Geheimnisfelder nie angezeigt, Löschen mit Bestätigung, ohne `credential:manage` nur lesend; `DiscoveryPage.test.tsx` mit der neuen Zugangsdatenauswahl.
+- Gemockt `frontend/e2e/credentials.spec.ts`; e2e-real `discovery-scopes.spec.ts` mit dem neuen Fall.
+- Unverändert grün: `backend/internal/credential/handler_test.go` und `credential_scope_integration_test.go`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+UI-14;[P2–P4, A];G2;frontend/src/components/discovery/CredentialsSection.test.tsx;WP-856
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Nicht Bestandteil: Bindung von Zugangsdaten an einzelne Geräte (Phase 3); Bearbeiten eines Geheimnisses (Löschen und neu anlegen); Änderungen am Backend `credential`.
+
+### WP-857 – Auffindbarkeit: gesperrte Paketfunktionen sichtbar, Hinweisseite statt Fehlern, Schnellzugriff und Einrichtungsliste im Dashboard
+
+**Schlüssel:** `g2-discoverability` · **Meilenstein:** M2.10 Seed, Qualität, Abnahme und Gate G2 · **Epic (Traceability):** G2 · **Aufwand:** 1,5 PT
+
+**Voraussetzungen (gemergt):** WP-830 (`g2-release`), WP-244 (`p2-entitlements`), WP-324 (`ui-e2e-p2`), WP-855 (`g2-client-admin`), WP-856 (`g2-credential-ui`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| UI-14 | [P2–P4, A] | PARTIAL | High | Teil (Folge-WP aus den Abnahmebefunden des Auftraggebers vom 2026-11-09: Funktionen auffindbar, gesperrte Paketfunktionen sichtbar, Schnellzugriff und Einrichtungsliste) | `docs/audit/08-frontend-monitoring-nfr-tests.md:49` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:22` |
+
+**Problem:** Abnahmebefund des Auftraggebers vom 2026-11-09. `SignedInShell` (`frontend/src/App.tsx:352–382`) zeigt eine Seite nur, wenn Entitlement (`navFeatureFor` in `frontend/src/hooks/useEntitlements.ts:78`), Release-Modul (`useModules().isPageEnabled`) und Recht (`usePermittedPage`) sie erlauben (`App.tsx:372–382`); eine Gruppe ohne sichtbare Seite verschwindet (`frontend/src/components/shell/navigation.ts:66–73`). Fehlt eine Funktion im Paket, verschwindet sie spurlos; ein direkter Aufruf der Route zeigt die Seite mit 403-Fehlern. Das Dashboard (`frontend/src/pages/DashboardPage.tsx`) zeigt nur Kennzahlen-Widgets je Rolle (`frontend/src/stores/dashboard.ts`), keinen Zugang zu den Funktionen und keinen Einstieg für eine neue Organisation.
+
+**Akzeptanzkriterien:**
+
+- [ ] Navigationseinträge, die nur am Entitlement scheitern, erscheinen gesperrt: Schloss-Symbol, `aria-disabled="true"`, Tooltip „Nicht im Paket <Plan> enthalten“ (Plan aus `/entitlements`). Die Route zeigt eine Hinweisseite (`frontend/src/pages/FeatureLockedPage.tsx`, neu) mit Funktion und Plan statt der Seite mit 403-Fehlern. Nicht freigegebene Release-Module (P3, P4, [A]) und fehlende Rechte bleiben ausgeblendet; die Command-Palette bietet gesperrte Seiten nicht an.
+- [ ] Dashboard: Kachel „Schnellzugriff“ mit den für den Nutzer erreichbaren Hauptfunktionen, abgeleitet aus `NAV_GROUPS` und derselben Sichtbarkeitsregel wie die Navigation (eine gemeinsame Funktion statt einer zweiten Liste).
+- [ ] Dashboard: Einrichtungs-Checkliste mit Links (Kunde → `/clients`, Standort → `/locations`, Zugangsdaten → Discovery, Collector → Enrollment, erste CIs → `/cmdb`), der Erledigt-Zustand je Punkt abgeleitet aus vorhandenen Daten (Listen mit `limit=1`); Punkte ohne Recht entfallen. Die Liste ist pro Nutzer ausblendbar (gespeichert wie die Dashboard-Rolle in `frontend/src/stores/dashboard.ts`).
+- [ ] i18n de/en, axe ohne Befunde auf Dashboard und Hinweisseite.
+- [ ] `navigation.test.ts`, `SidebarNav.test.tsx`, `DashboardPage.test.tsx` und die gemockten E2E-Specs (`frontend/e2e/smoke.spec.ts`, `frontend/e2e/palette.spec.ts`) sind angepasst; neuer Fall: Organisation ohne `assets_basic` sieht „Assets“ gesperrt und die Hinweisseite.
+
+**Dateien (17 Einträge, Migration = 0):**
+
+- frontend/src/App.tsx
+- frontend/src/components/shell/navigation.ts
+- frontend/src/components/shell/navigation.test.ts
+- frontend/src/components/shell/SidebarNav.tsx
+- frontend/src/components/shell/SidebarNav.test.tsx
+- frontend/src/components/CommandPalette.tsx
+- frontend/src/hooks/useEntitlements.ts
+- frontend/src/pages/FeatureLockedPage.tsx (neu)
+- frontend/src/pages/DashboardPage.tsx
+- frontend/src/pages/DashboardPage.test.tsx
+- frontend/src/components/dashboard/SetupChecklist.tsx (neu)
+- frontend/src/stores/dashboard.ts
+- frontend/src/i18n/de-DE.json
+- frontend/src/i18n/en-US.json
+- frontend/e2e/smoke.spec.ts
+- frontend/e2e/palette.spec.ts
+- docs/traceability.csv
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- Vitest: `navigation.test.ts` (Sichtbarkeitsregel: gesperrt nur bei fehlendem Entitlement), `SidebarNav.test.tsx` (Schloss, `aria-disabled`, Tooltip), `DashboardPage.test.tsx` (Schnellzugriff, Checkliste, Ausblenden).
+- Gemockt `frontend/e2e/smoke.spec.ts` und `frontend/e2e/palette.spec.ts`; `frontend/e2e/a11y.spec.ts` grün.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+UI-14;[P2–P4, A];G2;frontend/src/components/shell/navigation.test.ts;WP-857
+```
+
+**Entscheidungsbedarf:** [E-44](entscheidungen.md#e-44) ENT-06 (V): Feature-Keys der Phase 2, Paketzuordnung und Zuordnung der Routen (entschieden (2026-10-28, Option 1; ergänzt E-34, angepasst 2026-11-02))
+
+**Nicht Bestandteil:** Nicht Bestandteil: Upgrade- oder Kaufpfad aus der Hinweisseite; Anzeige abgeschalteter Release-Module; serverseitige Speicherung der Dashboard-Einstellungen.
+
+### WP-858 – CI-Typen pro Kunde ausblenden: Tabelle client_ci_type_hidden, API, Filter der Typliste und Anlagesperre
+
+**Schlüssel:** `g2-citype-client-hidden` · **Meilenstein:** M2.10 Seed, Qualität, Abnahme und Gate G2 · **Epic (Traceability):** G2 · **Aufwand:** 2,0 PT
+
+**Voraussetzungen (gemergt):** WP-854 (`g2-default-client`), WP-855 (`g2-client-admin`), WP-249 (`met-deactivate`), WP-828 (`g2-channel-matrix`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| MET-05 | [P2] | ABWEICHEND | Medium | Teil (Folge-WP aus den Abnahmebefunden des Auftraggebers vom 2026-11-09: CI-Typen pro Kunde ausblenden, ohne sie zu deaktivieren) | `docs/audit/03-datenmodell-standorte-metamodell.md:52` | `docs/spec/katalog-v3/03-datenmodell-standorte-metamodell.md:71` |
+
+**Problem:** Abnahmebefund des Auftraggebers vom 2026-11-09. Ein CI-Typ lässt sich nur organisationsweit deaktivieren (`POST /api/v1/ci-types/{id}/deactivate`, `Deactivate` in `backend/internal/citype/handler.go:894`, WP-249); das sperrt die Neuanlage für alle Kunden (`checkCITypes` in `backend/internal/ci/pg_repository.go:1771`, Typwechsel in `changeTypeRow`, `:3159`) und ist für Systemtypen verboten (`ErrTypeReadOnly`). Gefordert ist ein kundenabhängiges Ausblenden, nicht nutzerabhängig und ohne Deaktivierung. `GET /api/v1/ci-types` (`List`, `handler.go:690–710`) kennt keinen Kundenfilter.
+
+**Akzeptanzkriterien:**
+
+- [ ] Migration `000283_client_ci_type_hidden`: Tabelle `client_ci_type_hidden (organization_id, client_id, ci_type_id, created_at, created_by)`, Primärschlüssel (organization_id, client_id, ci_type_id), zusammengesetzte Fremdschlüssel (organization_id, client_id) → `client` mit ON DELETE CASCADE; `ci_type_id` → `ci_type` (Systemtyp oder Typ derselben Organisation, geprüft wie bei `attribute_definition`). ENABLE + FORCE RLS mit Org- und Client-Policy wie der Bestand (`TestRLSCatalog`); `docs/schema-baseline.md`.
+- [ ] `GET` und `PUT /api/v1/clients/{id}/hidden-ci-types` (PUT ersetzt die Liste; Lesen `location:read`, Schreiben `user:manage` über den Ressourcenschlüssel `clients`), Audit-Eintrag `client.hidden_ci_types_changed`, Einträge in `backend/internal/server/testdata/route_permissions.txt`, `api/openapi.yaml` und `frontend/src/api/generated/schema.d.ts`.
+- [ ] `GET /api/v1/ci-types?client_id=` lässt die für diesen Kunden ausgeblendeten Typen weg; ein Principal mit Client-Scope erhält ohne Parameter die Typen nicht, die für alle Kunden seines Scopes ausgeblendet sind; org-weit ohne Parameter alle. Systemtypen sind ausblendbar.
+- [ ] Bestehende CIs eines ausgeblendeten Typs bleiben sichtbar und bearbeitbar. Neuanlage (`POST /api/v1/cis`, Mehrfachanlage, Import-Zeile) und Typwechsel auf einen für den Kunden des CI ausgeblendeten Typ: 422 auf `ci_type_id`. Discovery und Ingest bleiben unberührt (Ausblenden ist keine Deaktivierung).
+- [ ] UI: Abschnitt „Ausgeblendete CI-Typen“ auf der Kundenseite (WP-855) mit Mehrfachauswahl; die Typauswahl im CI-Dialog (`frontend/src/pages/CIFormModal.tsx`) und in der geführten Anlage (`frontend/src/components/create/GuidedCreate.tsx`) filtert nach dem gewählten Kunden.
+- [ ] Tests: Integration (`backend/internal/citype/client_hidden_integration_test.go`, neu: RLS, Filter je Scope-Art, 422 bei Anlage und Typwechsel, bestehende CIs unverändert), Kanalmatrix-Zeile `client-hidden-ci-types` (`backend/internal/tenant/rls/matrix_fixtures.go`, `channel_matrix_p2_integration_test.go`), `route_permissions.txt`, Vitest, gemockte E2E-Spec.
+
+**Dateien (21 Einträge, Migration = 2):**
+
+- backend/migrations/000283_client_ci_type_hidden.up.sql (neu)
+- backend/migrations/000283_client_ci_type_hidden.down.sql (neu)
+- docs/schema-baseline.md
+- backend/internal/tenantapi/handler.go
+- backend/internal/citype/handler.go
+- backend/internal/citype/pg_repository.go
+- backend/internal/citype/client_hidden_integration_test.go (neu)
+- backend/internal/ci/pg_repository.go
+- backend/internal/server/testdata/route_permissions.txt
+- backend/internal/tenant/rls/matrix_fixtures.go
+- backend/internal/tenant/rls/channel_matrix_p2_integration_test.go
+- api/openapi.yaml
+- frontend/src/api/generated/schema.d.ts
+- frontend/src/api/cmdb.ts
+- frontend/src/pages/ClientsPage.tsx
+- frontend/src/pages/ClientsPage.test.tsx
+- frontend/src/pages/CIFormModal.tsx
+- frontend/src/components/create/GuidedCreate.tsx
+- frontend/src/i18n/de-DE.json
+- frontend/e2e/clients.spec.ts
+- docs/traceability.csv
+
+**Migration/RLS:** `000283_client_ci_type_hidden` (up/down): neue Tabelle mit zusammengesetzten Fremdschlüsseln einschließlich `organization_id`, ENABLE + FORCE RLS, Org- und Client-Policy; die Down-Migration entfernt die Tabelle.
+
+**Tests:**
+
+- `client_hidden_integration_test.go` (neu) als App-Rolle gegen PostgreSQL.
+- `TestChannelMatrix` mit der Zeile `client-hidden-ci-types`; `TestRLSCatalog`, `TestMigrationsRoundtrip`, `TestEveryWriteRouteIsAudited` und die Prüfung von `route_permissions.txt` grün.
+- Vitest `ClientsPage.test.tsx` und `CIFormModal.test.tsx`; gemockt `frontend/e2e/clients.spec.ts`.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+MET-05;[P2];G2;backend/internal/citype/client_hidden_integration_test.go;WP-858
+```
+
+**Entscheidungsbedarf:** [E-10](../entscheidungen.md#e-10) Tabellen ohne Org-Spalte und globale Katalogzeilen (entschieden (2026-10-01))
+
+**Nicht Bestandteil:** Nicht Bestandteil: nutzerabhängiges Ausblenden; Ausblenden von Attributen oder Templates je Kunde; Wirkung auf Discovery, Ingest und Reconciliation.
+
+### WP-859 – Beziehungsziel per Name, Hostname oder Management-IP finden: Suche der CI-Liste und Anzeige im Picker
+
+**Schlüssel:** `g2-relation-search-ip` · **Meilenstein:** M2.10 Seed, Qualität, Abnahme und Gate G2 · **Epic (Traceability):** G2 · **Aufwand:** 0,5 PT
+
+**Voraussetzungen (gemergt):** WP-318 (`ui-pickers-flows`), WP-788 (`src-fields-users-tags`), WP-824 (`g2-querybudget`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| SRC-02 | [P2] | PARTIAL | Medium | Teil (Folge-WP aus den Abnahmebefunden des Auftraggebers vom 2026-11-09: `search` der CI-Liste trifft Hostname und Management-IP) | `docs/audit/07-api-suche-jobs-lebenszyklus.md:40` | `docs/spec/katalog-v3/07-api-suche-jobs-lebenszyklus.md:36` |
+| UI-15 | [P2] | PARTIAL | High | Teil (Folge-WP aus den Abnahmebefunden des Auftraggebers vom 2026-11-09: Beziehung anlegen mit Ziel per Hostname oder IP) | `docs/audit/08-frontend-monitoring-nfr-tests.md:50` | `docs/spec/katalog-v3/08-frontend-monitoring-nfr-tests.md:24` |
+
+**Problem:** Abnahmebefund des Auftraggebers vom 2026-11-09. Der `ObjectPicker` (`frontend/src/components/pickers/ObjectPicker.tsx:313–330`) sucht Beziehungsziele über `GET /api/v1/cis?search=`. Das PG-Repository prüft dafür nur `name ILIKE` (`backend/internal/ci/pg_repository.go:409–412`); das Memory-Repository trifft dagegen Name, Seriennummer und Management-IP (`backend/internal/ci/memory_repo.go:67–69`). Ein Ziel lässt sich daher nicht über Hostname oder IP finden. Die globale Suche (`GET /search`) kennt die IP als Feld (`core.management_ip`, 000233, 000271), der Picker nutzt sie bewusst nicht (scoped Typlisten, WP-318).
+
+**Akzeptanzkriterien:**
+
+- [ ] `search` der CI-Liste trifft `name`, `hostname` und `host(management_ip)` als Teilstring (ILIKE, ohne Groß-/Kleinschreibung); Memory-Repository gleich (Name, Hostname, Management-IP; Seriennummer bleibt). Das Query-Budget von `GET /cis` bleibt unverändert (`TestCIQueryBudget`, `TestCIListBudget`), der Plan nutzt weiter die Indizes der Liste.
+- [ ] Der Picker zeigt Hostname und Management-IP als Zusatz zur Option, damit gleichnamige Ziele unterscheidbar sind.
+- [ ] Test im Paket `ci` (`backend/internal/ci/list_search_integration_test.go`, neu): Treffer per Name, Hostname, IP-Präfix und IP-Teilstring; kein Treffer außerhalb des Scopes. Vitest `frontend/src/components/pickers/pickers.test.tsx` mit der Zusatzanzeige. e2e-real: neuer Fall „Beziehung per IP anlegen“ in `frontend/e2e-real/ci-lifecycle.spec.ts` neben L08; eingefrorene Specs (`docs/acceptance/artefakte/SHA256SUMS`) bleiben unverändert.
+
+**Dateien (8 Einträge, Migration = 0):**
+
+- backend/internal/ci/pg_repository.go
+- backend/internal/ci/memory_repo.go
+- backend/internal/ci/list_search_integration_test.go (neu)
+- backend/internal/ci/handler_test.go
+- frontend/src/components/pickers/ObjectPicker.tsx
+- frontend/src/components/pickers/pickers.test.tsx
+- frontend/e2e-real/ci-lifecycle.spec.ts
+- docs/traceability.csv
+
+**Migration/RLS:** keine Migration.
+
+**Tests:**
+
+- `list_search_integration_test.go` (neu) gegen PostgreSQL; `TestCIQueryBudget` und `TestCIListBudget` unverändert grün.
+- Vitest `pickers.test.tsx`; e2e-real `ci-lifecycle.spec.ts` mit dem neuen Fall.
+
+**Traceability (`docs/traceability.csv`):**
+
+```text
+SRC-02;[P2];G2;backend/internal/ci/list_search_integration_test.go;WP-859
+UI-15;[P2];G2;frontend/src/components/pickers/pickers.test.tsx;WP-859
+```
+
+**Entscheidungsbedarf:** keiner
+
+**Nicht Bestandteil:** Nicht Bestandteil: Suche über weitere IPs der Interfaces; Umstellung des Pickers auf `GET /search`; Assets und Mengenartikel im Picker.
+
 ### WP-330 – Abnahmeszenario ABN-01 (c) Metamodell: Playwright-Ablauf, Protokollabschnitt und eingefrorene Daten
 
 **Schlüssel:** `g2-abnahme` · **Meilenstein:** M2.10 Seed, Qualität, Abnahme und Gate G2 · **Epic (Traceability):** G2 · **Aufwand:** 1,5 PT
@@ -14832,7 +15275,7 @@ ABN-01;[Q];G2;frontend/e2e/metamodel-scenario.spec.ts;WP-330
 
 **Schlüssel:** `g2-gate` · **Meilenstein:** M2.10 Seed, Qualität, Abnahme und Gate G2 · **Epic (Traceability):** G2 · **Aufwand:** 2,0 PT
 
-**Voraussetzungen (gemergt):** WP-830 (`g2-release`), WP-831 (`g1-nachweise`), WP-330 (`g2-abnahme`), WP-327 (`g2-perf`), WP-328 (`g2-concurrency`), WP-329 (`g2-security`), WP-326 (`g2-tst01`), WP-243 (`p2-trace`), WP-244 (`p2-entitlements`), WP-324 (`ui-e2e-p2`), WP-312 (`aud-snapshot`), WP-262 (`met-export-all`), WP-289 (`inv-barcode`), WP-292 (`tkt-sla-calendar`), WP-256 (`met-instance`), WP-270 (`ast-contract-expiry`), WP-288 (`inv-standard`), WP-297 (`imp-blast`), WP-298 (`imp-projection`), WP-299 (`net-ip-reservation`), WP-300 (`net-duplicate-ip`), WP-319 (`ui-assets-contracts`), WP-323 (`ui-relationships-graph`), WP-832 (`g1-befunde-teil03`), WP-821 (`g2-seed-scale`), WP-828 (`g2-channel-matrix`), WP-827 (`g2-isolation`), WP-825 (`g2-concurrency-cycles`), WP-826 (`g2-concurrency-writers`), WP-213 (`g1-gate`), WP-600 (`k-gate`)
+**Voraussetzungen (gemergt):** WP-830 (`g2-release`), WP-831 (`g1-nachweise`), WP-330 (`g2-abnahme`), WP-327 (`g2-perf`), WP-328 (`g2-concurrency`), WP-329 (`g2-security`), WP-326 (`g2-tst01`), WP-243 (`p2-trace`), WP-244 (`p2-entitlements`), WP-324 (`ui-e2e-p2`), WP-312 (`aud-snapshot`), WP-262 (`met-export-all`), WP-289 (`inv-barcode`), WP-292 (`tkt-sla-calendar`), WP-256 (`met-instance`), WP-270 (`ast-contract-expiry`), WP-288 (`inv-standard`), WP-297 (`imp-blast`), WP-298 (`imp-projection`), WP-299 (`net-ip-reservation`), WP-300 (`net-duplicate-ip`), WP-319 (`ui-assets-contracts`), WP-323 (`ui-relationships-graph`), WP-832 (`g1-befunde-teil03`), WP-821 (`g2-seed-scale`), WP-828 (`g2-channel-matrix`), WP-827 (`g2-isolation`), WP-825 (`g2-concurrency-cycles`), WP-826 (`g2-concurrency-writers`), WP-852 (`g2-doc-link-scope`), WP-853 (`g2-clamd-default`), WP-854 (`g2-default-client`), WP-855 (`g2-client-admin`), WP-856 (`g2-credential-ui`), WP-857 (`g2-discoverability`), WP-858 (`g2-citype-client-hidden`), WP-859 (`g2-relation-search-ip`), WP-213 (`g1-gate`), WP-600 (`k-gate`)
 
 | ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
 |---|---|---|---|---|---|---|

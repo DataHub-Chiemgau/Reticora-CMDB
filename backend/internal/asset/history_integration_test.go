@@ -366,7 +366,10 @@ func TestAssetValueHistory(t *testing.T) {
 	if !strings.Contains(full, "SN-794-B") || !strings.Contains(full, `"blue"`) {
 		t.Fatalf("unrestricted history lacks the serial number or the color: %s", full)
 	}
-	for _, path := range []string{historyPath, statePath} {
+	// The as-of path of WP-795 is the same handler as its alias state
+	// (security review phase 2, WP-329).
+	asOfPath := "/api/v1/assets/" + a.ID + "/as-of"
+	for _, path := range []string{historyPath, statePath, asOfPath} {
 		body := string(get(policy, path))
 		for _, secret := range []string{"SN-794", `"serial_number"`, `"red"`, `"blue"`} {
 			if strings.Contains(body, secret) {
@@ -375,6 +378,33 @@ func TestAssetValueHistory(t *testing.T) {
 		}
 		if !strings.Contains(body, "Laptop 2") {
 			t.Errorf("GET %s under the restricted policy lacks the readable name: %s", path, body)
+		}
+	}
+
+	// Tombstone (WP-329): the as-of state of a deleted asset carries the
+	// hidden values for an unrestricted reader only; under the restricted
+	// policy the lookup no longer finds the asset, so only the structural
+	// fields remain (fail-closed), never the serial number or the color.
+	gone := &asset.Asset{OrganizationID: f.OrgA, ClientID: f.Client1, AssetTag: "WP794-4", Name: "Gone", Category: "hardware",
+		Status: "in_stock", SerialNumber: "SN-794-GONE", CustomFields: map[string]any{"color": "red"}}
+	if err = repo.Create(ctx, gone); err != nil {
+		t.Fatalf("create gone: %v", err)
+	}
+	if err = repo.Delete(ctx, f.OrgA, gone.ID); err != nil {
+		t.Fatalf("delete gone: %v", err)
+	}
+	gonePath := "/api/v1/assets/" + gone.ID + "/as-of"
+	if tomb := string(get(permission.UnrestrictedPolicy(identity.AllPermissions()), gonePath)); !strings.Contains(tomb, `"deleted":true`) ||
+		!strings.Contains(tomb, "SN-794-GONE") || !strings.Contains(tomb, `"red"`) {
+		t.Errorf("unrestricted tombstone of the deleted asset: %s, want deleted with its last values", tomb)
+	}
+	tomb := string(get(policy, gonePath))
+	if !strings.Contains(tomb, `"deleted":true`) {
+		t.Errorf("restricted tombstone of the deleted asset: %s, want deleted", tomb)
+	}
+	for _, secret := range []string{"SN-794", `"serial_number"`, `"red"`} {
+		if strings.Contains(tomb, secret) {
+			t.Errorf("tombstone under the restricted policy leaks %s: %s", secret, tomb)
 		}
 	}
 

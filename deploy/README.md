@@ -523,7 +523,10 @@ check requires `RETICORA_DATABASE_URL`, `RETICORA_REDIS_URL`,
 (`requiredOutsideDevelopment` in `backend/internal/config/config.go`) and exits
 without one of them. The login also needs the OIDC client, and invitations need
 the accept page: without `RETICORA_INVITATION_ACCEPT_URL`, `POST /invitations`
-and `POST /invitations/{id}/renew` answer 503. The base provides all of them,
+and `POST /invitations/{id}/renew` answer 503. The release default G2
+(`RETICORA_MODULES` unset) runs the module `documents`, so the start check
+also requires `RETICORA_CLAMD_ADDR` and `RETICORA_NATS_URL` (malware scan of
+uploads, SEC-09, WP-853). The base provides all of them,
 `staging` and `prod` inherit them (staging only patches
 `RETICORA_ENVIRONMENT=staging`, replicas and resources and drops the HPA). Every
 reference of these is mandatory (`optional: false`): a missing secret, ConfigMap
@@ -534,6 +537,8 @@ key of a rotation (`RETICORA_MASTER_KEY_PREVIOUS`) is optional.
 |---|---|
 | `RETICORA_DATABASE_URL` | secret `reticora-db-runtime`, key `database-url` (runtime login, see below) |
 | `RETICORA_REDIS_URL` | literal `redis://redis:6379` in `base/deployment.yaml` |
+| `RETICORA_NATS_URL` | literal `nats://nats:4222` in `base/deployment.yaml` |
+| `RETICORA_CLAMD_ADDR` | literal `clamd:3310` from the component `base/components/clamav`, which the base includes (Deployment and Service `clamd`, PVC `clamd-signatures`, 2 Gi; image pinned like `deploy/docker-compose/docker-compose.yml`) |
 | `RETICORA_MASTER_KEY` | secret `reticora-secrets`, key `master-key` |
 | `RETICORA_MASTER_KEY_PREVIOUS` | secret `reticora-secrets`, key `master-key-previous`, optional (`optional: true`; only during a master key rotation) |
 | `RETICORA_OIDC_ISSUER_URL` | ConfigMap `reticora-config`, key `oidc-issuer-url` (Keycloak realm, reachable from the users' browsers) |

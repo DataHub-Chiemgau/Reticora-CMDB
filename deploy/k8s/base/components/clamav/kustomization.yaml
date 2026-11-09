@@ -2,12 +2,11 @@ apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 
 # Malware scan of document uploads (SEC-09, E-42, WP-735): clamd for the job
-# kind document.scan of the module documents. Optional like the module
-# (RETICORA_MODULES); include from an overlay with
-#   components:
-#     - ../../base/components/clamav
-# Outside development the server refuses to start with the module documents
-# but without RETICORA_CLAMD_ADDR (OPS-01); this component sets it. While
+# kind document.scan of the module documents. The release default G2 runs
+# the module (RETICORA_MODULES unset, WP-830), so deploy/k8s/base includes
+# this component and staging and prod inherit it (WP-853, SR-57). Outside
+# development the server refuses to start with the module documents but
+# without RETICORA_CLAMD_ADDR (OPS-01); this component sets it. While
 # clamd is unreachable new versions stay pending_scan (fail-closed) and the
 # sweep rescans them once it answers again.
 resources:

@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000279_consumable_list_name_index
+Stand: Migration 000281_document_orphaned_scope
 
 ## Prüfung
 
@@ -100,6 +100,13 @@ Ebenso der Index der Mengenartikel-Liste (Migration 000279):
 
 ```sql
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_consumable_list_name ON consumable (organization_id, name) INCLUDE (client_id);
+```
+
+Ebenso der Index der Feldzeilen, die die globale Suche abgleicht (Migration
+000280):
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_search_document_field_match ON search_document_field (organization_id, document_id) WHERE starts_with(field, 'attributes.') OR field = 'core.tags';
 ```
 
 Ebenso der Index der CI-Liste sortiert nach Name (WP-839, E-17, Migration
@@ -357,6 +364,17 @@ des gelöschten Ziels in derselben Transaktion (wie
 Ziel zeigen, stehen mit Grund `dropped: link target missing` in
 `migration_quarantine` und werden entfernt.
 
+Seit Migration 000281 (WP-852, SR-56) wird ein Dokument durch den Wegfall
+seiner Links nicht mehr org-weit: `document.orphaned` (boolean, Standard
+`false`) setzt `count_document_links`, sobald `link_count` auf 0 fällt;
+ein neuer Link setzt es nicht zurück, schreiben darf es nur der
+Zähler-Trigger (`document_orphaned_guard`, `protect_link_counter`).
+`document_tenant_isolation` zeigt ein Dokument ohne Link nur dann allen
+Prinzipalen der Organisation, wenn es nie Links hatte
+(`link_count = 0 AND NOT orphaned`); ein verwaistes sehen nur org-weite
+Prinzipale. Backfill aus `migration_quarantine` (000275) und den
+`audit_log`-Einträgen `document.linked`/`document.unlinked`.
+
 ### Dokumentversionen und Speichernutzung (WP-731)
 
 `document_version` (Migration 000220) hält je Upload eine Version
@@ -583,6 +601,20 @@ leakproof Operator, die Liste oben würde wachsen. Die Suche filtert mit
 eingeschränkten Feldrechten über `search_document.search_vector` vor und
 liest die Feldzeilen ihrer Kandidaten über den Primärschlüssel
 `(document_id, field)`.
+
+Seit Migration 000280 tragen die Feldzeilen `client_id` und `site_id` ihres
+Dokuments. Der Trigger `search_field_scope` (BEFORE INSERT/UPDATE der
+Schlüssel- und Scope-Spalten) übernimmt sie aus `search_document`, ein
+Schreiber kann keine anderen setzen; `search_field_scope_propagation` auf
+`search_document` zieht die Feldzeilen nach, wenn sich Mandant oder Standort
+des Dokuments ändern (mit erweitertem Scope, `app_scope_widen`). Die
+Policies entsprechen denen von `search_document` (000067, 000079):
+USING mit NULL-Semantik nach E-09, WITH CHECK ohne NULL für eingeschränkte
+Principals, restriktive `_scoped_update`/`_scoped_delete`. Die frühere
+Prüfung per `EXISTS` auf `search_document` je Feldzeile entfällt (Lastlauf
+42582336513: rund 45.000 Puffer je globaler Suche). Die Attribut- und
+Tag-Zeilen, die die Suche abgleicht, liest sie über den Teilindex
+`idx_search_document_field_match` (Prädikat nur mit leakproof Funktionen).
 
 Inventarnummer, IP und MAC (SRC-02, WP-308, Migration 000233) liegen in
 Normalform in `search_identifier` (MAC zwölf Hex-Ziffern ohne Trenner, IP
@@ -2026,7 +2058,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `saved_view` | ja | ja | saved_view_isolation (ALL) |
 | `scheduler_run` | ja | ja | scheduler_run_operator (ALL) |
 | `search_document` | ja | ja | search_document_scoped_delete (DELETE), search_document_scoped_update (UPDATE), search_document_tenant_isolation (ALL) |
-| `search_document_field` | ja | ja | search_document_field_tenant_isolation (ALL) |
+| `search_document_field` | ja | ja | search_document_field_scoped_delete (DELETE), search_document_field_scoped_update (UPDATE), search_document_field_tenant_isolation (ALL) |
 | `search_identifier` | ja | ja | search_identifier_tenant_isolation (ALL) |
 | `security_finding` | ja | ja | security_finding_isolation (ALL), security_finding_scoped_delete (DELETE), security_finding_scoped_update (UPDATE) |
 | `service_account` | ja | ja | service_account_isolation (ALL) |

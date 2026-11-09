@@ -1,10 +1,13 @@
 # Subprozessoren (NFR-09)
 
-> **Status: offen.** Die Liste kann nur der Betreiber liefern
-> ([E-35](../plan/entscheidungen.md#e-35), Aufgabe A-11, Termin vor
-> WP-105). Bis zur Lieferung enthält diese Datei keine Einträge. Die
-> Tabelle unten ist die verbindliche Struktur. NFR-09 („Subprozessoren
-> dokumentiert und AVV-fähig“) ist erst mit der gefüllten Liste erfüllt.
+> **Status (2026-11-09, WP-831):** Die Liste hat der Betreiber nicht
+> geliefert ([E-35](../plan/entscheidungen.md#e-35), Aufgabe A-11). Nach dem
+> Beschluss des Auftraggebers vom 2026-10-28 gilt seine Erklärung vom
+> 2026-10-15 für NFR-09 („Subprozessoren dokumentiert und AVV-fähig“) als
+> Nachweis für G1 und G2 ([E-103](../plan/phase2/entscheidungen.md#e-103));
+> die Liste wird nicht nachgereicht, A-11 ist erledigt. Diese Datei enthält
+> deshalb keine Einträge und erfindet keine Subprozessoren. Die Tabelle unten
+> bleibt die verbindliche Struktur für spätere Einträge.
 
 ## Anforderungen an jeden Eintrag
 
@@ -20,4 +23,4 @@
 
 | Subprozessor | Leistung | Verarbeitete Daten | Verarbeitungsort (Region) | Rechtsgrundlage / AVV | Seit |
 |---|---|---|---|---|---|
-| – | *vom Betreiber zu liefern (A-11)* | – | – | – | – |
+| – | *keine Einträge; Nachweis für NFR-09 ist die Erklärung des Auftraggebers vom 2026-10-15 (E-103)* | – | – | – | – |
