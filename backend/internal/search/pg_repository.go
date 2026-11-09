@@ -1181,12 +1181,19 @@ func (r *PGRepository) reindexBatch(ctx context.Context, scope *database.TenantS
 			src.entityType, src.title, src.summary, src.url, src.table), orgID, ids); qerr != nil {
 			return qerr
 		}
+		// The stale rows are the field rows of the batch without a fresh
+		// row: NOT IN over fresh is a hashed subplan. The planner estimates
+		// fresh at a few rows, so NOT EXISTS became a nested loop anti join
+		// that scanned fresh (about 5,000 rows of 1,000 CIs) once per field
+		// row, seconds per batch. Neither column of fresh is NULL (the id
+		// of the document, the field key), so NOT IN keeps the result of
+		// NOT EXISTS.
 		if src.fields != "" {
 			if _, qerr = tx.Exec(ctx, `WITH fresh AS (`+src.fields+`), stale AS (
 				DELETE FROM search_document_field s USING search_document d
 				WHERE d.id = s.document_id AND d.organization_id = $1 AND d.entity_type = $3 AND d.entity_id = ANY($2::uuid[])
 				  AND s.organization_id = $1
-				  AND NOT EXISTS (SELECT 1 FROM fresh WHERE fresh.document_id = s.document_id AND fresh.field = s.field)
+				  AND (s.document_id, s.field) NOT IN (SELECT fresh.document_id, fresh.field FROM fresh)
 			)
 			INSERT INTO search_document_field (organization_id, document_id, field, content, source)
 			SELECT $1, fresh.document_id, fresh.field, fresh.content, fresh.source FROM fresh
