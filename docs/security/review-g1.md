@@ -297,7 +297,7 @@ ist nicht gesetzt; `release.yml` läuft nur auf Tags `v*`.
 
 | Punkt | Wert |
 |---|---|
-| Tag | `v1.0.0-rc.<n>`: RC-Lauf ausstehend (WP-595); kein Tag gesetzt |
+| Tag | `v1.0.0-rc.1` auf `9989d9d3` (main), gesetzt am 2026-11-10 mit Freigabe des Auftraggebers |
 | Commit | `536e3ab8` (`536e3ab812b158e124b87c71f776096cb775a7df`) |
 
 | Workflow | Jobs | Lauf | Ergebnis |
@@ -306,7 +306,7 @@ ist nicht gesetzt; `release.yml` läuft nur auf Tags `v*`.
 | `ci.yml` | `npm-audit` | 42712217817 | grün |
 | `ci.yml` | `image-scan` (vier Images) | 42712217817 | grün: backend, collector, frontend, postgres; dazu `image-scan-thirdparty` (clamd) grün |
 | `ci.yml` | `traceability`, `gate` und alle übrigen Jobs (Regression) | 42712217817 | grün, 30 von 30 Jobs (u. a. `backend`, `frontend`, `e2e` in sechs Browserprojekten, `migrations`, `auditdefect`, `cosign-verify`) |
-| `release.yml` | Pre-Release mit SBOMs, Sigstore-Bundles, Image-Signaturen, SBOM-Attestierungen und dem `cosign_real`-Test | RC-Lauf ausstehend (WP-595); kein Lauf, weil kein Tag `v*` gesetzt ist | RC-Lauf ausstehend (WP-595) |
+| `release.yml` | Pre-Release mit SBOMs, Sigstore-Bundles, Image-Signaturen, SBOM-Attestierungen und dem `cosign_real`-Test | Lauf 42780580858 (Versuch 2) auf `v1.0.0-rc.1` | grün; Pre-Release `v1.0.0-rc.1` mit 28 Artefakten, `cosign_real` für amd64 und arm64 grün. Versuch 1 scheiterte nur am Veröffentlichen, weil das Release vorab von Hand angelegt war (Härtung in `release.yml`: Job `release-free`, `--prerelease`) |
 
 ## ASVS Level 2 – Abgleich je Kapitel
 

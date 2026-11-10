@@ -25,7 +25,7 @@ Produktänderung ist `b5bf2342` (PR #150); `536e3ab8` enthält sie. Ein Tag
 
 | Punkt | Wert |
 |---|---|
-| Tag | `v1.0.0-rc.<n>`: RC-Lauf ausstehend (WP-595); kein Tag gesetzt |
+| Tag | `v1.0.0-rc.1` auf `9989d9d3` (main), gesetzt am 2026-11-10 mit Freigabe des Auftraggebers |
 | Commit | `536e3ab8` (`536e3ab812b158e124b87c71f776096cb775a7df`, `main` nach PR #154) |
 | Workflow | `.github/workflows/install-smoke.yml` („Install Smoke Test“), Push auf `main` (auf dem Tag: Push des Tags) |
 | Lauf | [#390, Run 42712217841](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/42712217841); vorher auf `e17954ca` (gleicher Produktstand) Run 42695897334, grün |
@@ -44,7 +44,7 @@ Jobs des Laufs auf dem Release-Kandidaten:
 | `e2e-real-ratchet` | Ratchet über alle sechs Projekte; zulässig sind nur Zeilen der nach E-60 zurückgestellten Befunde | grün |
 | `tls-domain-pebble` | Installation mit Domäne und ACME (Pebble) | grün |
 | `reinstall` | erneute Installation über eine bestehende | grün |
-| `release-mode` | Standardpfad mit den signierten Release-Artefakten des Tags (WP-388, E-69) | RC-Lauf ausstehend (WP-595); übersprungen, weil kein Tag `v*` gesetzt ist |
+| `release-mode` | Standardpfad mit den signierten Release-Artefakten des Tags (WP-388, E-69) | Lauf 42780580723 auf `v1.0.0-rc.1`: grün (Installation aus dem signierten Release, keine Builds) |
 
 Release-Hinweis (F-212, nach E-60 zurückgestellt): Die Datenkorrektur der
 Migration 000086 benennt die Add-on-Zeilen nur um. Installationen eines

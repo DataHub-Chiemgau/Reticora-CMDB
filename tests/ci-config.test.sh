@@ -21,6 +21,10 @@
 #     a negative fixture;
 #   - release_images_documented: docs/README.md and
 #     docs/security/abhaengigkeitsscans.md name every release image (F-294).
+#   - release_publish: release.yml refuses a tag whose GitHub release already
+#     exists before any other job runs, and publishes a pre-release tag
+#     (v1.0.0-rc.1) as a GitHub pre-release, a version tag as a release
+#     (release run 42780580858 on v1.0.0-rc.1); the steps run with a stub gh.
 #
 # Tools: python3 with PyYAML (as tests/rep01-structure.test.sh), GNU date,
 # git.
@@ -385,6 +389,82 @@ if [ -z "$docs" ]; then
     ok "release_images_documented: README and abhaengigkeitsscans.md name every release and scan image, format and SLA check"
 else
     fail "release_images_documented: README and abhaengigkeitsscans.md name every release and scan image, format and SLA check" "$docs"
+fi
+
+# ─── release.yml: existing release, pre-release flag ───────────────────────
+# Run 42780580858: the release v1.0.0-rc.1 had been published in the web UI
+# (which created the tag); the workflow then failed only at its last step
+# ('a release with the same tag name already exists'), and its gh release
+# create would have published the release candidate as a stable release.
+release_publish="$(python3 - "$RELEASE" "$TMP_ROOT/rel-steps" <<'PY'
+import os, sys, yaml
+wf = yaml.safe_load(open(sys.argv[1]))
+jobs = wf["jobs"]
+problems = []
+os.makedirs(sys.argv[2])
+free = jobs.get("release-free")
+if not free:
+    problems.append("no job release-free")
+else:
+    open(os.path.join(sys.argv[2], "free.sh"), "w").write(free["steps"][0]["run"])
+    # Every other job waits for it, directly or through another job.
+    def needs(name):
+        n = jobs[name].get("needs", [])
+        return [n] if isinstance(n, str) else n
+    def reaches(name, seen=()):
+        return any(n == "release-free" or (n not in seen and reaches(n, seen + (n,))) for n in needs(name))
+    for name in jobs:
+        if name != "release-free" and not reaches(name):
+            problems.append(f"job {name} does not wait for release-free")
+pub = [s for s in jobs["binaries"]["steps"] if s.get("name") == "Publish the GitHub release"]
+if not pub:
+    problems.append("binaries: no step 'Publish the GitHub release'")
+else:
+    open(os.path.join(sys.argv[2], "publish.sh"), "w").write(pub[0]["run"])
+print("\n".join(problems))
+PY
+)"
+STUB_GH="$TMP_ROOT/stub-gh"
+mkdir -p "$STUB_GH"
+cat > "$STUB_GH/gh" <<'SH'
+#!/usr/bin/env bash
+printf 'gh %s\n' "$*" >> "$GH_LOG"
+if [ "$1 $2" = "release view" ]; then
+    [ -n "${GH_RELEASE_EXISTS:-}" ] || { echo "release not found" >&2; exit 1; }
+    echo '{"tagName":"x"}'
+fi
+SH
+chmod +x "$STUB_GH/gh"
+# run_rel_step <script> <tag> [release exists] — runs a release.yml step in a
+# directory with dist/a and logs the gh calls to $TMP_ROOT/gh.log.
+run_rel_step() {
+    local work="$TMP_ROOT/rel-work"
+    rm -rf "$work"; mkdir -p "$work/dist"; : > "$work/dist/a"; : > "$TMP_ROOT/gh.log"
+    (cd "$work" && env -i PATH="$STUB_GH:/usr/bin:/bin" GH_LOG="$TMP_ROOT/gh.log" GH_RELEASE_EXISTS="${3:-}" \
+        GITHUB_REF_NAME="$2" GITHUB_REPOSITORY=DataHub-Chiemgau/Reticora-CMDB \
+        bash --noprofile --norc -e "$TMP_ROOT/rel-steps/$1") > "$TMP_ROOT/rel-step.out" 2>&1
+}
+if [ -z "$release_publish" ]; then
+    run_rel_step publish.sh v1.0.0-rc.1 \
+        && grep -qx 'gh release create v1.0.0-rc.1 --verify-tag --generate-notes --prerelease dist/a' "$TMP_ROOT/gh.log" \
+        || release_publish="v1.0.0-rc.1 is not published as a pre-release: $(cat "$TMP_ROOT/gh.log" "$TMP_ROOT/rel-step.out")"
+    run_rel_step publish.sh v1.0.0 \
+        && grep -qx 'gh release create v1.0.0 --verify-tag --generate-notes dist/a' "$TMP_ROOT/gh.log" \
+        || release_publish="$release_publish
+v1.0.0 is not published as a release: $(cat "$TMP_ROOT/gh.log" "$TMP_ROOT/rel-step.out")"
+    run_rel_step free.sh v1.0.0-rc.1 \
+        || release_publish="$release_publish
+release-free refuses a tag without a release: $(cat "$TMP_ROOT/rel-step.out")"
+    if run_rel_step free.sh v1.0.0-rc.1 yes \
+        || ! grep -q '::error::A GitHub release v1.0.0-rc.1 already exists' "$TMP_ROOT/rel-step.out"; then
+        release_publish="$release_publish
+release-free accepts a tag whose release exists: $(cat "$TMP_ROOT/rel-step.out")"
+    fi
+fi
+if [ -z "$release_publish" ]; then
+    ok "release_publish: an existing release stops release.yml before every other job; a pre-release tag becomes a GitHub pre-release"
+else
+    fail "release_publish: an existing release stops release.yml before every other job; a pre-release tag becomes a GitHub pre-release" "$release_publish"
 fi
 
 echo
