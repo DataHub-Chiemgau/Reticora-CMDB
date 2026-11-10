@@ -940,6 +940,7 @@ API-06;[P2]/[P3]/[P4]/[A];G3;backend/internal/server/modules_test.go;WP-870
 | [WP-877](#wp-877--sr-03-rest-ii-zusammengesetzte-fremdschlüssel-für-modul--benachrichtigungs--und-p3-tabellen-liste-leer) | `p3-sr03-fk-2` | SR-03 Rest II: zusammengesetzte Fremdschlüssel für Modul-, Benachrichtigungs- und P3-Tabellen; Liste leer | 2,0 | WP-876 |
 | [WP-878](#wp-878--sr-10-obergrenze-der-identitätsschlüssel-je-devicerecord-im-ingest-vertrag) | `p3-sr10-identity-cap` | SR-10: Obergrenze der Identitätsschlüssel je DeviceRecord im Ingest-Vertrag | 1,0 | WP-331 |
 | [WP-879](#wp-879--sr-50-fremde-verweise-im-body-antworten-422-statt-404-reservierungen-bewegungen-asset-ci-link-dokument--und-ticket-links) | `p3-sr50-foreign-ref-422` | SR-50: fremde Verweise im Body antworten 422 statt 404 (Reservierungen, Bewegungen, Asset-CI-Link, Dokument- und Ticket-Links) | 1,0 | WP-331 |
+| [WP-1178](#wp-1178--e-246-logischer-backup-cronjob-auf-dem-eigenen-postgres-image) | `p3-e246-backup-image` | E-246: logischer Backup-CronJob auf dem eigenen Postgres-Image | 0,5 | WP-873 |
 
 ### WP-871 – SR-58: berechnete CI-Attribute über Asset-Felder erben die strengste Feldregel ihrer Quellen
 
@@ -1374,6 +1375,37 @@ TEN-09;[Q];G3;backend/internal/tenant/rls/foreign_refs_p2_integration_test.go;WP
 **Entscheidungsbedarf:** [E-167](entscheidungen.md#e-167) Zuordnung der offenen G1/G2-Befunde zu Phase 3 (entschieden 2026-11-09, Option 1)
 
 **Nicht Bestandteil:** andere Statuscodes der P2-Pfade; Verweise ohne Fremdschlüssel, die heute schon 422 antworten (z. B. `assignee_id`); Anpassung von Frontend-Meldungen über den generierten Typ hinaus.
+
+### WP-1178 – E-246: logischer Backup-CronJob auf dem eigenen Postgres-Image
+
+**Schlüssel:** `p3-e246-backup-image` · **Meilenstein:** M3.1 Folgearbeiten aus G1/G2 · **Epic (Traceability):** G3 · **Aufwand:** 0,5 PT · **G3-Umfang:** ja
+
+**Voraussetzungen (gemergt):** WP-873 (`p3-sr60-thirdparty-pins`)
+
+| ID | Tag | Audit-Status | Severity | Beitrag | Befundquelle | Anforderungstext |
+|---|---|---|---|---|---|---|
+| – | – | – | – | keine Katalog-ID zugeordnet (Folge-WP nach [E-246](entscheidungen.md#e-246), nachgetragen 2026-11-10) | CI-Lauf 42881796932 (`image-scan-thirdparty`, `timescaledb-backup`) | – |
+
+**Problem:** Der logische Backup-CronJob (`deploy/k8s/base/components/backup/cronjob.yaml`) läuft auf dem rohen Image `timescale/timescaledb:2.31.0-pg16`. Sein Scan in `image-scan-thirdparty` findet 4 Critical- und zahlreiche High-Befunde in den Go-Hilfsprogrammen des Images (Ausnahmen bis 2026-11-17 bzw. 2026-12-10, E-246). Das eigene Image `reticora-cmdb/postgres` baut genau diese Hilfsprogramme mit der gepinnten Toolchain neu (E-96), enthält `pg_dump` derselben Version und wird in `image-scan` ohne Befund gescannt; der pgBackRest-CronJob nutzt es bereits.
+
+**Akzeptanzkriterien:**
+
+- [ ] **AK1** Der Container `backup` des CronJobs nutzt `reticora-cmdb/postgres:latest` (Tag über kustomize wie der pgBackRest-CronJob); Befehl und Umgebung bleiben gleich.
+- [ ] **AK2** Die Matrix von `image-scan-thirdparty` enthält `timescaledb-backup` nicht mehr; `tests/ci-config.test.sh` (`thirdparty_image_pins`, `timescale_image_refs`) bleibt grün, die TimescaleDB-Referenz des CronJobs entfällt aus der Pflichtliste.
+- [ ] **AK3** `security/scan-exceptions-thirdparty.txt` führt nur noch IDs, die ein verbliebenes Fremdimage betrifft; `docs/security/abhaengigkeitsscans.md` nennt den CronJob beim eigenen Image.
+- [ ] **AK4** keycloak-db bleibt auf `postgres:16.15-alpine`; sein Critical-Befund (`gosu`) gehört zu [A-85](entscheidungen.md) (Umstellung auf ein eigenes Image braucht Install- und Upgrade-Tests mit lauffähiger CI).
+
+**Dateien:** deploy/k8s/base/components/backup/cronjob.yaml; .github/workflows/ci.yml; security/scan-exceptions-thirdparty.txt; tests/ci-config.test.sh; docs/security/abhaengigkeitsscans.md; docs/plan/phase3/entscheidungen.md
+
+**Migration/RLS:** keine Migration.
+
+**Tests:** `tests/ci-config.test.sh` (`thirdparty_image_pins`, `timescale_image_refs`); `kustomize build` aller Overlays.
+
+**Traceability (`docs/traceability.csv`):** keine Zeile (WP ohne Katalog-ID).
+
+**Entscheidungsbedarf:** [E-246](entscheidungen.md#e-246) (entschieden 2026-11-10 nach Empfehlung); [A-85](entscheidungen.md) offen
+
+**Nicht Bestandteil:** keycloak-db, MinIO, OpenSearch (A-85).
 
 ## M3.2 Pakete, Add-ons und Kontingente
 
