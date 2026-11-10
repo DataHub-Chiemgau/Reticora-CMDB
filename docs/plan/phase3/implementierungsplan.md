@@ -7821,7 +7821,7 @@ MON-03;[P3];E;backend/internal/probe/metrics_bridge_integration_test.go;WP-976
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-DIS-06;[P3];E;collector/collectorcmd/trap_config_test.go;WP-977
+DIS-06;[P3], Zusatzprotokolle [O];E;collector/collectorcmd/trap_config_test.go;WP-977
 ```
 
 **Entscheidungsbedarf:** keiner
@@ -7885,7 +7885,7 @@ DIS-06;[P3];E;collector/collectorcmd/trap_config_test.go;WP-977
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-DIS-06;[P3];E;collector/plugins/snmp/trap_v3_test.go;WP-978
+DIS-06;[P3], Zusatzprotokolle [O];E;collector/plugins/snmp/trap_v3_test.go;WP-978
 ```
 
 **Entscheidungsbedarf:** keiner
@@ -7982,7 +7982,7 @@ DIS-06;[P3];E;collector/plugins/snmp/trap_v3_test.go;WP-978
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-DIS-06;[P3];E;backend/internal/probe/events_integration_test.go;WP-979
+DIS-06;[P3], Zusatzprotokolle [O];E;backend/internal/probe/events_integration_test.go;WP-979
 ```
 
 **Entscheidungsbedarf:** [E-160](entscheidungen.md#e-160) Pfade und Modulschlüssel der P3-Module (entschieden 2026-11-09, Option 1); [E-162](entscheidungen.md#e-162) Betriebsform der Monitoring-Worker (entschieden 2026-11-09, Option 2); [E-173](entscheidungen.md#e-173) Übertragungsweg Collector → Server für Zustandswechsel und Messwerte (entschieden 2026-11-09, Option 1)
@@ -14808,7 +14808,7 @@ Nach WP-928 trägt `admp_connection.holder_subject_id` einen zusammengesetzten F
 
 ```text
 ADM-06;[P3];E;backend/internal/admp/holder_integration_test.go;WP-1076
-SEC-05;[B];E;backend/internal/admp/holder_integration_test.go;WP-1076
+SEC-05;[B], [P3]-Anteil;E;backend/internal/admp/holder_integration_test.go;WP-1076
 ```
 
 **Entscheidungsbedarf:** [E-243](entscheidungen.md#e-243) Anschlussinhaber aus ADMP als personenbezogene Daten: Vault-Speicherung oder nur flüchtige Anzeige (entschieden 2026-11-09, Option 1; dieses WP setzt die Vault-Speicherung mit Art `person` voraus); Aufgabe A-57 (ADMP-Datenschutz) erledigt (2026-11-09)
@@ -15054,7 +15054,7 @@ Der Entwurf enthielt drei Fehler:
 ```text
 PRB-01;[P3];E;frontend/src/pages/ProbesPage.test.tsx;WP-1079
 PRB-05;[P3];E;frontend/src/pages/ProbesPage.test.tsx;WP-1079
-DIS-06;[P3];E;backend/internal/probe/events_integration_test.go;WP-1079
+DIS-06;[P3], Zusatzprotokolle [O];E;backend/internal/probe/events_integration_test.go;WP-1079
 DIS-08;[Q];E;frontend/src/pages/ProbesPage.test.tsx;WP-1079
 ```
 
@@ -18404,7 +18404,7 @@ CMP-02;[P3];F;backend/internal/compliance/score_integration_test.go;WP-1127
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-SEC-04;[P3];F;backend/internal/compliance/controls_integration_test.go;WP-1128
+SEC-04;[P3], Rechte-Doku AD/Entra [A];F;backend/internal/compliance/controls_integration_test.go;WP-1128
 ```
 
 **Entscheidungsbedarf:** [E-238](entscheidungen.md#e-238) Kontrollkatalog für ISO 27001, NIS2, KRITIS (entschieden 2026-11-09, Option 1); offen beim Auftraggeber: eigene Kataloge wie B3S oder TISAX.
@@ -18470,7 +18470,7 @@ SEC-04;[P3];F;backend/internal/compliance/controls_integration_test.go;WP-1128
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-SEC-04;[P3];F;backend/internal/compliance/report_job_integration_test.go;WP-1129
+SEC-04;[P3], Rechte-Doku AD/Entra [A];F;backend/internal/compliance/report_job_integration_test.go;WP-1129
 ```
 
 **Entscheidungsbedarf:** [E-238](entscheidungen.md#e-238) Kontrollkatalog für ISO 27001, NIS2, KRITIS (entschieden 2026-11-09, Option 1); [E-239](entscheidungen.md#e-239) Erzeugung und Ablage der Reports (SEC-04) (entschieden 2026-11-09, Option 2)
@@ -18850,8 +18850,8 @@ SEC-02;[P3];F;backend/internal/security/finding_filter_integration_test.go;WP-11
 
 ```text
 SEC-03;[P3];F;frontend/src/pages/CompliancePage.test.tsx;WP-1135
-SEC-04;[P3];F;frontend/src/pages/SecurityPage.test.tsx;WP-1135
-SEC-04;[P3];F;frontend/e2e/compliance.spec.ts;WP-1135
+SEC-04;[P3], Rechte-Doku AD/Entra [A];F;frontend/src/pages/SecurityPage.test.tsx;WP-1135
+SEC-04;[P3], Rechte-Doku AD/Entra [A];F;frontend/e2e/compliance.spec.ts;WP-1135
 ```
 
 **Entscheidungsbedarf:** keiner
@@ -19056,7 +19056,7 @@ SEC-03;[P3];F;frontend/src/components/cmdb/CIP3Sections.test.tsx;WP-1137
 
 ```text
 WFL-04;[P3], delegierte Inventur [P4], IGA [A];F;backend/internal/server/e2e_scenarios_integration_test.go;WP-1138
-SEC-04;[P3];F;backend/internal/server/e2e_scenarios_integration_test.go;WP-1138
+SEC-04;[P3], Rechte-Doku AD/Entra [A];F;backend/internal/server/e2e_scenarios_integration_test.go;WP-1138
 ```
 
 **Entscheidungsbedarf:** keiner
@@ -19262,7 +19262,7 @@ Gemeinsamer Ist-Stand für die Blöcke dieses Abschnitts (main 6d019370):
 
 ```text
 NTF-03;[B];F;backend/internal/notify/recipients_integration_test.go;WP-1140
-NTF-02;[P3];F;backend/internal/user/mobile_integration_test.go;WP-1140
+NTF-02;[P3], Provider [V];F;backend/internal/user/mobile_integration_test.go;WP-1140
 ```
 
 **Entscheidungsbedarf:** [E-164](entscheidungen.md#e-164) Mobilnummer für SMS-Empfänger (entschieden 2026-11-09, Option 1)
@@ -19366,7 +19366,7 @@ Weitere Lücken:
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-NTF-02;[P3];F;backend/internal/notify/sms_test.go;WP-1141
+NTF-02;[P3], Provider [V];F;backend/internal/notify/sms_test.go;WP-1141
 TEC-13;[B];F;backend/internal/notify/sms_test.go;WP-1141
 CH24;(S);F;backend/internal/notify/channel_test.go;WP-1141
 ```
@@ -19459,7 +19459,7 @@ CH24;(S);F;backend/internal/notify/channel_test.go;WP-1141
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-NTF-02;[P3];F;backend/internal/notify/pager_test.go;WP-1142
+NTF-02;[P3], Provider [V];F;backend/internal/notify/pager_test.go;WP-1142
 TEC-13;[B];F;backend/internal/notify/pager_test.go;WP-1142
 CH24;(S);F;backend/internal/notify/pager_test.go;WP-1142
 ```
@@ -19534,7 +19534,7 @@ CH24;(S);F;backend/internal/notify/pager_test.go;WP-1142
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-NTF-02;[P3];F;backend/internal/notify/sms_gateway_test.go;WP-1143
+NTF-02;[P3], Provider [V];F;backend/internal/notify/sms_gateway_test.go;WP-1143
 ```
 
 **Entscheidungsbedarf:** [E-163](entscheidungen.md#e-163) Umfang SMS/Pager, Eskalation und Quittungswege (entschieden 2026-11-09, Option 2; Eskalation in M3.18, kanalneutral); Aufgabe A-78 (SMS- und Pager-Provider) erledigt (2026-11-09)
@@ -19635,7 +19635,7 @@ NTF-02;[P3];F;backend/internal/notify/sms_gateway_test.go;WP-1143
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-NTF-02;[P3];F;backend/internal/notify/escalation_policy_integration_test.go;WP-1144
+NTF-02;[P3], Provider [V];F;backend/internal/notify/escalation_policy_integration_test.go;WP-1144
 ```
 
 **Entscheidungsbedarf:** [E-163](entscheidungen.md#e-163) Umfang SMS/Pager, Eskalation und Quittungswege (entschieden 2026-11-09, Option 2; Eskalation in M3.18, kanalneutral); Aufgabe A-67 (Korrelation, Eskalation und Tickets aus Monitoring) erledigt (2026-11-09)
@@ -19751,7 +19751,7 @@ Der Lauf arbeitet org-übergreifend über denselben Pool wie `NewPGDeliveryStore
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-NTF-02;[P3];F;backend/internal/notify/escalation_integration_test.go;WP-1145
+NTF-02;[P3], Provider [V];F;backend/internal/notify/escalation_integration_test.go;WP-1145
 ```
 
 **Entscheidungsbedarf:** [E-163](entscheidungen.md#e-163) Umfang SMS/Pager, Eskalation und Quittungswege (entschieden 2026-11-09, Option 2; Eskalation in M3.18, kanalneutral), eingearbeitet `d-alr-escalation`; Aufgabe A-67 (Korrelation, Eskalation und Tickets aus Monitoring) erledigt (2026-11-09)
@@ -19850,7 +19850,7 @@ NTF-02;[P3];F;backend/internal/notify/escalation_integration_test.go;WP-1145
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-NTF-02;[P3];F;backend/internal/notify/callback_integration_test.go;WP-1146
+NTF-02;[P3], Provider [V];F;backend/internal/notify/callback_integration_test.go;WP-1146
 ```
 
 **Entscheidungsbedarf:** [E-163](entscheidungen.md#e-163) Umfang SMS/Pager, Eskalation und Quittungswege (entschieden 2026-11-09, Option 2; Eskalation in M3.18, kanalneutral); Aufgabe A-78 (SMS- und Pager-Provider) erledigt (2026-11-09)
@@ -20039,7 +20039,7 @@ NTF-05;[B], Zusätze [P2], [P3];F;backend/internal/notify/categories_integration
 
 ```text
 UI-14;[P2–P4, A];F;frontend/src/pages/NotificationAdminPage.test.tsx;WP-1148
-NTF-02;[P3];F;frontend/src/components/NotificationCenter.test.tsx;WP-1148
+NTF-02;[P3], Provider [V];F;frontend/src/components/NotificationCenter.test.tsx;WP-1148
 ```
 
 **Entscheidungsbedarf:** [E-163](entscheidungen.md#e-163) Umfang SMS/Pager, Eskalation und Quittungswege (entschieden 2026-11-09, Option 2; Eskalation in M3.18, kanalneutral); [E-242](entscheidungen.md#e-242) EU-Residenz, Unterauftragsverarbeiter und Self-Hosting für SEC-05 [P3] (entschieden 2026-11-09, Option 1)
@@ -20486,7 +20486,7 @@ TLC-06;[P3];F;backend/internal/tenantapi/purge_integration_test.go;WP-1154
 
 ```text
 TLC-06;[P3];F;backend/internal/tenantapi/purge_external_test.go;WP-1155
-SEC-05;[B];F;backend/internal/tenantapi/purge_external_test.go;WP-1155
+SEC-05;[B], [P3]-Anteil;F;backend/internal/tenantapi/purge_external_test.go;WP-1155
 ```
 
 **Entscheidungsbedarf:** [E-166](entscheidungen.md#e-166) audit_log bei Org-Löschung gegenüber 10 Jahren Aufbewahrung (AUD-09, NFR-06) (entschieden 2026-11-09, Option 1). Aufgabe A-80 (DSGVO-Workflows) erledigt (2026-11-09).
@@ -20662,7 +20662,7 @@ TLC-06;[P3];F;frontend/src/pages/OrgDataPage.test.tsx;WP-1157
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-SEC-05;[B];F;backend/internal/privacy/subject_integration_test.go;WP-1158
+SEC-05;[B], [P3]-Anteil;F;backend/internal/privacy/subject_integration_test.go;WP-1158
 ```
 
 **Entscheidungsbedarf:** [E-165](entscheidungen.md#e-165) Personenbezogene Daten im Vollexport (TLC-05) (entschieden 2026-11-09, Option 1); Auskunft mit entsiegelten Werten, analog zum Vollexport.
@@ -20714,7 +20714,7 @@ SEC-05;[B];F;backend/internal/privacy/subject_integration_test.go;WP-1158
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-SEC-05;[B];F;backend/internal/pii/history_redaction_integration_test.go;WP-1159
+SEC-05;[B], [P3]-Anteil;F;backend/internal/pii/history_redaction_integration_test.go;WP-1159
 ```
 
 **Entscheidungsbedarf:** [E-242](entscheidungen.md#e-242) EU-Residenz, Unterauftragsverarbeiter und Self-Hosting für SEC-05 [P3] (entschieden 2026-11-09, Option 1); Regel aus NFR-09 unverändert auf die P3-Datenorte anwenden, AVV-Anlage im Repository, Self-Hosting und Air-Gapped in der Verantwortung des Betreibers der Instanz. [E-165](entscheidungen.md#e-165) Personenbezogene Daten im Vollexport (TLC-05) (entschieden 2026-11-09, Option 1); die AVV-Anlage beschreibt diese Regel. [E-163](entscheidungen.md#e-163) Umfang SMS/Pager, Eskalation und Quittungswege (entschieden 2026-11-09, Option 2; Eskalation in M3.18, kanalneutral); Kanalumfang der Datenorte. [E-103](../phase2/entscheidungen.md#e-103) Fortgeltung der in G1 durch Erklärung abgenommenen Punkte (B3 Pentest-Befundliste, B4 v2-Texte, B6 Subprozessoren) für G2 (entschieden (2026-10-28, Beschluss des Auftraggebers: Die Erklärung vom 2026-10-15 gilt als Nachweis für G1 und G2; die Nachweise B3, B4 und B6 sind gestrichen; angepasst 2026-11-02)). Aufgabe A-84 (G3 ohne ADMP-API-Dokumentation) erledigt (2026-11-09); bis zur Antwort schließt WP-1159 SEC-05 ohne WP-1076. Aufgabe A-55 (ADMP-API-Doku) offen (nur ADMP-Anteil über WP-1076).
