@@ -518,6 +518,37 @@ discovery license stops only `IsIngest` requests. The phase-2 mapping:
 | import | `/api/v1/imports*`, `/api/v1/import-profiles*` |
 | ticketing_essential | `/api/v1/tickets*`, POST `/api/v1/review-items/{id}/ticket` (reading the review queue stays core) |
 | ticketing_standard | `/api/v1/slas*`, `/api/v1/tickets/{id}/sla`, `/api/v1/business-calendars*` |
+
+The phase-3 mapping (WP-865, E-151, E-160; `TestP3ModulePrefixesAreGated`:
+every prefix of a P3 module except `org_lifecycle` and the provider callback
+has a key):
+
+| Feature | REST (middleware) |
+|---------|-------------------|
+| monitoring | `/api/v1/monitoring*` (probes, probe types, profiles, groups, events, alarms, incidents, alarm settings and playbooks, alert rules, metrics), `/api/v1/collector-groups*`, `/api/v1/cis/{id}/availability`, `/api/v1/credential-bindings*`, `/api/v1/cis/{id}/credentials*`, `/api/v1/maintenance-windows*` |
+| monitoring_network | `/api/v1/monitoring/incidents/{id}/recommendation`, `/api/v1/cis/{id}/configs*`, `/api/v1/subnets/{id}/rpki` (together with ipam) |
+| monitoring_analytics | `/api/v1/monitoring/sla*`, `/api/v1/monitoring/forecasts*` |
+| ipam | `/api/v1/ipam*`, `/api/v1/ipam-sections*`, `/api/v1/asns*`, `/api/v1/asn-ranges*`, `/api/v1/bgp-peerings*`, `/api/v1/nat-translations*`, `/api/v1/nameserver-sets*`, `/api/v1/vlan-domains*`, `/api/v1/cis/{id}/addresses`, `/api/v1/subnets/{id}/scan` (together with monitoring) |
+| credential_vault | `/api/v1/vault-connections*` |
+| admp (add-on) | `/api/v1/admp*`, `/api/v1/cis/{id}/admp-connections`, `/api/v1/network-interfaces/{id}/admp` |
+| notifications_sms_pager | `/api/v1/escalation-policies*`, `/api/v1/notification-escalations*` |
+| workflows | `/api/v1/forms*`, `/api/v1/form-submissions*`, `/api/v1/workflows*`, `/api/v1/workflow-runs*` |
+| compliance_findings | `/api/v1/compliance*`, `/api/v1/security*` |
+
+Core without feature: `/api/v1/org/exports*` and `/api/v1/org/deletion`
+(`coreRoutes`, TLC-05, TLC-06) and the public provider callback
+`/api/v1/notification-callbacks*` (signature of the provider, WP-1146).
+Functions without a path of their own are checked in handlers and workers:
+`entitlement.ProbeTypeFeature` maps every key of the probe type registry
+(`icmp`, `tcp`, `http`, `dns` → monitoring; `snmp_status`, `snmp_if`,
+`snmp_custom`, `redfish`, `bgp`, `ospf`, `isis`, `bfd`, `optical`, `dhcp`,
+`stamp`, `twamp_control`, `gnmi`, `rpki_rtr`, `rpki_roa` →
+monitoring_network; `bng`, `pon`, `tr069`, `usp` → monitoring_access), and
+`entitlement.SubFunctionFeature` the sub-functions (correlation →
+monitoring; recommendation, threshold rules, configuration change detection
+→ monitoring_network; SLA reports, capacity forecasts →
+monitoring_analytics). Standard holds the monitoring core only (decision of
+the client of 2026-11-09).
 | workplace | `/api/v1/desks*`, `/api/v1/desk-bookings*` |
 
 Prefixes without a route yet (`suppliers`, `contracts`, `labels`,

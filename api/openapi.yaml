@@ -22664,7 +22664,7 @@ paths:
 
   /api/v1/monitoring/incidents/{id}/recommendation:
     x-phase: P3
-    x-feature: monitoring
+    x-feature: monitoring_network
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -22910,7 +22910,7 @@ paths:
 
   /api/v1/monitoring/sla/targets:
     x-phase: P3
-    x-feature: monitoring
+    x-feature: monitoring_analytics
     x-status: planned
     get:
       operationId: listAvailabilityTargets
@@ -22958,7 +22958,7 @@ paths:
 
   /api/v1/monitoring/sla/targets/{id}:
     x-phase: P3
-    x-feature: monitoring
+    x-feature: monitoring_analytics
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -23027,7 +23027,7 @@ paths:
 
   /api/v1/monitoring/sla/reports:
     x-phase: P3
-    x-feature: monitoring
+    x-feature: monitoring_analytics
     x-status: planned
     get:
       operationId: listAvailabilityReports
@@ -23053,7 +23053,7 @@ paths:
 
   /api/v1/monitoring/forecasts:
     x-phase: P3
-    x-feature: monitoring
+    x-feature: monitoring_analytics
     x-status: planned
     get:
       operationId: listCapacityForecasts
@@ -23079,7 +23079,7 @@ paths:
 
   /api/v1/monitoring/forecasts/{id}:
     x-phase: P3
-    x-feature: monitoring
+    x-feature: monitoring_analytics
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -23104,6 +23104,7 @@ paths:
 
   /api/v1/collector-groups:
     x-phase: P3
+    x-feature: monitoring
     x-status: planned
     get:
       operationId: listCollectorGroups
@@ -23151,6 +23152,7 @@ paths:
 
   /api/v1/collector-groups/{id}:
     x-phase: P3
+    x-feature: monitoring
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -23219,6 +23221,7 @@ paths:
 
   /api/v1/cis/{id}/availability:
     x-phase: P3
+    x-feature: monitoring
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -23243,6 +23246,7 @@ paths:
 
   /api/v1/cis/{id}/configs:
     x-phase: P3
+    x-feature: monitoring_network
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -23270,6 +23274,7 @@ paths:
 
   /api/v1/credential-bindings:
     x-phase: P3
+    x-feature: monitoring
     x-status: planned
     get:
       operationId: listCredentialBindings
@@ -23317,6 +23322,7 @@ paths:
 
   /api/v1/credential-bindings/{id}:
     x-phase: P3
+    x-feature: monitoring
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -23385,6 +23391,7 @@ paths:
 
   /api/v1/vault-connections:
     x-phase: P3
+    x-feature: credential_vault
     x-status: planned
     get:
       operationId: listVaultConnections
@@ -23432,6 +23439,7 @@ paths:
 
   /api/v1/vault-connections/{id}:
     x-phase: P3
+    x-feature: credential_vault
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -23500,6 +23508,7 @@ paths:
 
   /api/v1/vault-connections/{id}/test:
     x-phase: P3
+    x-feature: credential_vault
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -23528,6 +23537,7 @@ paths:
 
   /api/v1/cis/{id}/credentials:
     x-phase: P3
+    x-feature: monitoring
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -23574,6 +23584,7 @@ paths:
 
   /api/v1/cis/{id}/credentials/effective:
     x-phase: P3
+    x-feature: monitoring
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -23598,6 +23609,7 @@ paths:
 
   /api/v1/ipam/imports:
     x-phase: P3
+    x-feature: ipam
     x-status: planned
     post:
       operationId: createIPAMImport
@@ -23622,6 +23634,7 @@ paths:
 
   /api/v1/ipam/ptr-mismatches:
     x-phase: P3
+    x-feature: ipam
     x-status: planned
     get:
       operationId: listPTRMismatches
@@ -23647,6 +23660,7 @@ paths:
 
   /api/v1/ipam-sections:
     x-phase: P3
+    x-feature: ipam
     x-status: planned
     get:
       operationId: listIPAMSections
@@ -23694,6 +23708,7 @@ paths:
 
   /api/v1/ipam-sections/{id}:
     x-phase: P3
+    x-feature: ipam
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -23762,6 +23777,7 @@ paths:
 
   /api/v1/ipam-sections/{id}/permissions:
     x-phase: P3
+    x-feature: ipam
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -23811,6 +23827,7 @@ paths:
 
   /api/v1/ipam-sections/{id}/permissions/{permission_id}:
     x-phase: P3
+    x-feature: ipam
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -23866,6 +23883,7 @@ paths:
 
   /api/v1/asns:
     x-phase: P3
+    x-feature: ipam
     x-status: planned
     get:
       operationId: listASNs
@@ -23913,6 +23931,7 @@ paths:
 
   /api/v1/asns/{id}:
     x-phase: P3
+    x-feature: ipam
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -23981,6 +24000,7 @@ paths:
 
   /api/v1/asns/{id}/prefixes:
     x-phase: P3
+    x-feature: ipam
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -24008,6 +24028,7 @@ paths:
 
   /api/v1/asns/{id}/rpki:
     x-phase: P3
+    x-feature: ipam
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -24032,6 +24053,7 @@ paths:
 
   /api/v1/asn-ranges:
     x-phase: P3
+    x-feature: ipam
     x-status: planned
     get:
       operationId: listASNRanges
@@ -24079,6 +24101,7 @@ paths:
 
   /api/v1/asn-ranges/{id}:
     x-phase: P3
+    x-feature: ipam
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -24147,6 +24170,7 @@ paths:
 
   /api/v1/asn-ranges/{id}/usage:
     x-phase: P3
+    x-feature: ipam
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -24171,6 +24195,7 @@ paths:
 
   /api/v1/asn-ranges/{id}/allocate:
     x-phase: P3
+    x-feature: ipam
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -24199,6 +24224,7 @@ paths:
 
   /api/v1/bgp-peerings:
     x-phase: P3
+    x-feature: ipam
     x-status: planned
     get:
       operationId: listBGPPeerings
@@ -24246,6 +24272,7 @@ paths:
 
   /api/v1/bgp-peerings/{id}:
     x-phase: P3
+    x-feature: ipam
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -24314,6 +24341,7 @@ paths:
 
   /api/v1/nat-translations:
     x-phase: P3
+    x-feature: ipam
     x-status: planned
     get:
       operationId: listNATTranslations
@@ -24361,6 +24389,7 @@ paths:
 
   /api/v1/nat-translations/{id}:
     x-phase: P3
+    x-feature: ipam
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -24429,6 +24458,7 @@ paths:
 
   /api/v1/nameserver-sets:
     x-phase: P3
+    x-feature: ipam
     x-status: planned
     get:
       operationId: listNameserverSets
@@ -24476,6 +24506,7 @@ paths:
 
   /api/v1/nameserver-sets/{id}:
     x-phase: P3
+    x-feature: ipam
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -24544,6 +24575,7 @@ paths:
 
   /api/v1/vlan-domains:
     x-phase: P3
+    x-feature: ipam
     x-status: planned
     get:
       operationId: listVLANDomains
@@ -24591,6 +24623,7 @@ paths:
 
   /api/v1/vlan-domains/{id}:
     x-phase: P3
+    x-feature: ipam
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -24659,6 +24692,7 @@ paths:
 
   /api/v1/vlan-domains/{id}/vlans:
     x-phase: P3
+    x-feature: ipam
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -24686,6 +24720,7 @@ paths:
 
   /api/v1/cis/{id}/addresses:
     x-phase: P3
+    x-feature: ipam
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -24713,6 +24748,7 @@ paths:
 
   /api/v1/subnets/{id}/scan:
     x-phase: P3
+    x-feature: ipam
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -24737,6 +24773,7 @@ paths:
 
   /api/v1/subnets/{id}/rpki:
     x-phase: P3
+    x-feature: ipam
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -24761,6 +24798,7 @@ paths:
 
   /api/v1/admp/accounts:
     x-phase: P3
+    x-feature: admp
     x-status: planned
     get:
       operationId: listADMPAccounts
@@ -24808,6 +24846,7 @@ paths:
 
   /api/v1/admp/accounts/{id}:
     x-phase: P3
+    x-feature: admp
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -24876,6 +24915,7 @@ paths:
 
   /api/v1/admp/connections:
     x-phase: P3
+    x-feature: admp
     x-status: planned
     get:
       operationId: listADMPConnections
@@ -24901,6 +24941,7 @@ paths:
 
   /api/v1/admp/connections/{id}:
     x-phase: P3
+    x-feature: admp
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -24925,6 +24966,7 @@ paths:
 
   /api/v1/admp/connections/{id}/holder:
     x-phase: P3
+    x-feature: admp
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -24949,6 +24991,7 @@ paths:
 
   /api/v1/cis/{id}/admp-connections:
     x-phase: P3
+    x-feature: admp
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -24976,6 +25019,7 @@ paths:
 
   /api/v1/network-interfaces/{id}/admp:
     x-phase: P3
+    x-feature: admp
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -25000,6 +25044,7 @@ paths:
 
   /api/v1/escalation-policies:
     x-phase: P3
+    x-feature: notifications_sms_pager
     x-status: planned
     get:
       operationId: listEscalationPolicies
@@ -25047,6 +25092,7 @@ paths:
 
   /api/v1/escalation-policies/{id}:
     x-phase: P3
+    x-feature: notifications_sms_pager
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -25115,6 +25161,7 @@ paths:
 
   /api/v1/notification-escalations:
     x-phase: P3
+    x-feature: notifications_sms_pager
     x-status: planned
     get:
       operationId: listNotificationEscalations
@@ -25140,6 +25187,7 @@ paths:
 
   /api/v1/notification-escalations/{id}:
     x-phase: P3
+    x-feature: notifications_sms_pager
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -25164,6 +25212,7 @@ paths:
 
   /api/v1/notification-escalations/{id}/acknowledge:
     x-phase: P3
+    x-feature: notifications_sms_pager
     x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'

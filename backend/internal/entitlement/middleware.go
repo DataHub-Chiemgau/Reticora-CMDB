@@ -145,6 +145,39 @@ var featureRules = []featureRule{
 	{prefix: "/api/v1/cis", suffix: "/dependencies", features: []string{FeatureTopology}},
 	{prefix: "/api/v1/cis", suffix: "/blast-radius", features: []string{FeatureTopology}},
 	{prefix: "/api/v1/cis", suffix: "/metrics", features: []string{FeatureMonitoring}},
+
+	// Phase 3 (WP-865, E-151, E-160, decision of the client of 2026-11-09).
+	// Every prefix and sub-path rule of the P3 modules stands here only;
+	// the domain work packages do not change this table (convention 31).
+	// SLA and forecasts are analytics and precede /api/v1/monitoring; the
+	// recommendation of an incident (ALR-09) is monitoring_network.
+	gate("/api/v1/monitoring/sla", FeatureMonitoringAnalytics),
+	gate("/api/v1/monitoring/forecasts", FeatureMonitoringAnalytics),
+	{prefix: "/api/v1/monitoring/incidents", suffix: "/recommendation", features: []string{FeatureMonitoringNetwork}},
+	gate("/api/v1/collector-groups", FeatureMonitoring),
+	{prefix: "/api/v1/cis", suffix: "/availability", features: []string{FeatureMonitoring}},
+	gate("/api/v1/credential-bindings", FeatureMonitoring),
+	{prefix: "/api/v1/cis", suffix: "/credentials", features: []string{FeatureMonitoring}},
+	gate("/api/v1/vault-connections", FeatureCredentialVault),
+	{prefix: "/api/v1/cis", suffix: "/configs", features: []string{FeatureMonitoringNetwork}},
+	gate("/api/v1/ipam", FeatureIPAM),
+	gate("/api/v1/ipam-sections", FeatureIPAM),
+	gate("/api/v1/asns", FeatureIPAM),
+	gate("/api/v1/asn-ranges", FeatureIPAM),
+	gate("/api/v1/bgp-peerings", FeatureIPAM),
+	gate("/api/v1/nat-translations", FeatureIPAM),
+	gate("/api/v1/nameserver-sets", FeatureIPAM),
+	gate("/api/v1/vlan-domains", FeatureIPAM),
+	{prefix: "/api/v1/cis", suffix: "/addresses", features: []string{FeatureIPAM}},
+	{prefix: "/api/v1/subnets", suffix: "/scan", features: []string{FeatureIPAM, FeatureMonitoring}},
+	{prefix: "/api/v1/subnets", suffix: "/rpki", features: []string{FeatureIPAM, FeatureMonitoringNetwork}},
+	gate("/api/v1/admp", FeatureADMP),
+	{prefix: "/api/v1/cis", suffix: "/admp-connections", features: []string{FeatureADMP}},
+	{prefix: "/api/v1/network-interfaces", suffix: "/admp", features: []string{FeatureADMP}},
+	gate("/api/v1/escalation-policies", FeatureNotificationsSMSPager),
+	gate("/api/v1/notification-escalations", FeatureNotificationsSMSPager),
+	// /api/v1/notification-callbacks (public provider callback, WP-1146)
+	// has no feature rule: the signature of the provider authenticates it.
 	gate("/api/v1/monitoring", FeatureMonitoring),
 	gate("/api/v1/metrics", FeatureMonitoring),
 	gate("/api/v1/forms", FeatureWorkflows),
@@ -162,7 +195,10 @@ var featureRules = []featureRule{
 // alias below /api/v1/discovery follows its successor /api/v1/review-items
 // and GraphQL reviewInbox (F-400). Resolving a scope_suggested item needs
 // the discovery feature in the discovery effect instead.
-var coreRoutes = []string{"/api/v1/discovery/review-items"}
+//
+// The full export and the deletion of an organization (TLC-05, TLC-06,
+// WP-865) are core as well: they need no paid feature.
+var coreRoutes = []string{"/api/v1/discovery/review-items", "/api/v1/org/exports", "/api/v1/org/deletion"}
 
 // ingestRoutes deliver discovery results or start scans; they are the only
 // requests stopped after the discovery license expired (CH21). Reading

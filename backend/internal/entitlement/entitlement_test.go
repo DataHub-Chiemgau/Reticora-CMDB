@@ -695,3 +695,124 @@ func deref(v *int64) any {
 	}
 	return *v
 }
+
+// TestPhase3RouteGates covers WP-865 (PKG-08, ENT-06, E-151, E-160): every
+// prefix and sub-path rule of the P3 modules maps to its feature key; the
+// recommendation of an incident is monitoring_network (decision of the
+// client of 2026-11-09); the provider callback and the organization export
+// and deletion are core.
+func TestPhase3RouteGates(t *testing.T) {
+	for _, c := range []struct {
+		method, path string
+		want         []string
+	}{
+		{http.MethodGet, "/api/v1/monitoring/probes", []string{FeatureMonitoring}},
+		{http.MethodGet, "/api/v1/monitoring/alarms", []string{FeatureMonitoring}},
+		{http.MethodPost, "/api/v1/monitoring/alarms/x1/ack", []string{FeatureMonitoring}},
+		{http.MethodGet, "/api/v1/monitoring/alarm-settings", []string{FeatureMonitoring}},
+		{http.MethodGet, "/api/v1/monitoring/incidents/x1", []string{FeatureMonitoring}},
+		{http.MethodGet, "/api/v1/monitoring/incidents/x1/recommendation", []string{FeatureMonitoringNetwork}},
+		{http.MethodGet, "/api/v1/monitoring/sla", []string{FeatureMonitoringAnalytics}},
+		{http.MethodPost, "/api/v1/monitoring/sla/targets", []string{FeatureMonitoringAnalytics}},
+		{http.MethodGet, "/api/v1/monitoring/forecasts/x1", []string{FeatureMonitoringAnalytics}},
+		{http.MethodGet, "/api/v1/monitoring/metrics", []string{FeatureMonitoring}},
+		{http.MethodGet, "/api/v1/collector-groups/x1", []string{FeatureMonitoring}},
+		{http.MethodGet, "/api/v1/cis/x1/availability", []string{FeatureMonitoring}},
+		{http.MethodPut, "/api/v1/cis/x1/credentials", []string{FeatureMonitoring}},
+		{http.MethodGet, "/api/v1/cis/x1/credentials/effective", []string{FeatureMonitoring}},
+		{http.MethodPost, "/api/v1/credential-bindings", []string{FeatureMonitoring}},
+		{http.MethodPost, "/api/v1/vault-connections", []string{FeatureCredentialVault}},
+		{http.MethodGet, "/api/v1/cis/x1/configs", []string{FeatureMonitoringNetwork}},
+		{http.MethodGet, "/api/v1/ipam-sections", []string{FeatureIPAM}},
+		{http.MethodPost, "/api/v1/ipam/imports", []string{FeatureIPAM}},
+		{http.MethodGet, "/api/v1/asns/x1", []string{FeatureIPAM}},
+		{http.MethodGet, "/api/v1/asn-ranges", []string{FeatureIPAM}},
+		{http.MethodGet, "/api/v1/bgp-peerings", []string{FeatureIPAM}},
+		{http.MethodGet, "/api/v1/nat-translations", []string{FeatureIPAM}},
+		{http.MethodGet, "/api/v1/nameserver-sets", []string{FeatureIPAM}},
+		{http.MethodGet, "/api/v1/vlan-domains", []string{FeatureIPAM}},
+		{http.MethodGet, "/api/v1/cis/x1/addresses", []string{FeatureIPAM}},
+		{http.MethodPost, "/api/v1/subnets/x1/scan", []string{FeatureIPAM, FeatureMonitoring}},
+		{http.MethodGet, "/api/v1/subnets/x1/rpki", []string{FeatureIPAM, FeatureMonitoringNetwork}},
+		{http.MethodGet, "/api/v1/admp/connections/x1", []string{FeatureADMP}},
+		{http.MethodGet, "/api/v1/cis/x1/admp-connections", []string{FeatureADMP}},
+		{http.MethodGet, "/api/v1/network-interfaces/x1/admp", []string{FeatureADMP}},
+		{http.MethodGet, "/api/v1/escalation-policies", []string{FeatureNotificationsSMSPager}},
+		{http.MethodPost, "/api/v1/notification-escalations/x1/acknowledge", []string{FeatureNotificationsSMSPager}},
+		{http.MethodPost, "/api/v1/notification-callbacks/o1/c1", nil},
+		{http.MethodPost, "/api/v1/org/exports", nil},
+		{http.MethodGet, "/api/v1/org/exports/x1/download", nil},
+		{http.MethodPost, "/api/v1/org/deletion", nil},
+		// The core resources of NET-05 stay ungated.
+		{http.MethodGet, "/api/v1/subnets/x1", nil},
+		{http.MethodGet, "/api/v1/cis/x1", nil},
+	} {
+		if got := RequiredFeatures(c.method, c.path); !slices.Equal(got, c.want) {
+			t.Errorf("RequiredFeatures(%s, %q) = %v, want %v", c.method, c.path, got, c.want)
+		}
+	}
+}
+
+// TestProbeTypeFeature covers WP-865 (E-151): every key of the probe type
+// registry maps to its feature key; long forms and unknown types are errors.
+func TestProbeTypeFeature(t *testing.T) {
+	want := map[string]string{}
+	for _, k := range []string{"icmp", "tcp", "http", "dns"} {
+		want[k] = FeatureMonitoring
+	}
+	for _, k := range []string{"snmp_status", "snmp_if", "snmp_custom", "redfish", "bgp", "ospf", "isis", "bfd",
+		"optical", "dhcp", "stamp", "twamp_control", "gnmi", "rpki_rtr", "rpki_roa"} {
+		want[k] = FeatureMonitoringNetwork
+	}
+	for _, k := range []string{"bng", "pon", "tr069", "usp"} {
+		want[k] = FeatureMonitoringAccess
+	}
+	if len(ProbeTypes()) != 23 || len(want) != 23 {
+		t.Fatalf("probe types %v, want the 23 keys of the registry", ProbeTypes())
+	}
+	for _, k := range ProbeTypes() {
+		got, err := ProbeTypeFeature(k)
+		if err != nil || got != want[k] {
+			t.Errorf("ProbeTypeFeature(%q) = %q, %v; want %q", k, got, err, want[k])
+		}
+		if !slices.Contains(FeatureKeys(), got) {
+			t.Errorf("probe type %s maps to the unknown feature key %s", k, got)
+		}
+	}
+	for _, k := range []string{"icmp_ping", "snmp_interfaces", "tcp_connect", "ping", ""} {
+		if f, err := ProbeTypeFeature(k); err == nil {
+			t.Errorf("ProbeTypeFeature(%q) = %q, want an error", k, f)
+		}
+	}
+	// Standard holds only the reachability probes (decision of 2026-11-09).
+	for _, k := range ProbeTypes() {
+		f, _ := ProbeTypeFeature(k)
+		if inStandard := slices.Contains(PlanFeatures(PlanStandard), f); inStandard != slices.Contains([]string{"icmp", "tcp", "http", "dns"}, k) {
+			t.Errorf("probe type %s in standard = %v", k, inStandard)
+		}
+	}
+}
+
+// TestSubFunctionFeature covers WP-865 (E-151, decision of the client of
+// 2026-11-09): correlation is part of every monitoring plan; recommendation,
+// threshold rules and configuration change detection start with pro; SLA
+// reports and capacity forecasts are analytics.
+func TestSubFunctionFeature(t *testing.T) {
+	for sub, want := range map[string]string{
+		SubFunctionCorrelation:      FeatureMonitoring,
+		SubFunctionRecommendation:   FeatureMonitoringNetwork,
+		SubFunctionThresholds:       FeatureMonitoringNetwork,
+		SubFunctionConfigChange:     FeatureMonitoringNetwork,
+		SubFunctionSLAReport:        FeatureMonitoringAnalytics,
+		SubFunctionCapacityForecast: FeatureMonitoringAnalytics,
+	} {
+		if got, err := SubFunctionFeature(sub); err != nil || got != want {
+			t.Errorf("SubFunctionFeature(%q) = %q, %v; want %q", sub, got, err, want)
+		}
+	}
+	for _, sub := range []string{"monitoring_correlation", "monitoring_sla", "unknown"} {
+		if _, err := SubFunctionFeature(sub); err == nil {
+			t.Errorf("SubFunctionFeature(%q): want an error", sub)
+		}
+	}
+}

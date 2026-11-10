@@ -730,3 +730,48 @@ func TestEveryP3PrefixIsDocumented(t *testing.T) {
 		}
 	}
 }
+
+// TestP3ModulePrefixesAreGated covers WP-865 (PKG-08, ENT-05, E-151, E-160):
+// every prefix and sub-path of a P3 module has a feature key in the org
+// gate, except the module org_lifecycle (core, TLC-05, TLC-06) and the
+// public provider callback /api/v1/notification-callbacks (WP-1146).
+func TestP3ModulePrefixesAreGated(t *testing.T) {
+	p3 := 0
+	for _, m := range LateModules {
+		if m.Phase != PhaseP3 || m.Key == "org_lifecycle" {
+			continue
+		}
+		p3++
+		for _, prefix := range m.Prefixes {
+			concrete := strings.ReplaceAll(prefix, "{id}", "x1")
+			for _, path := range []string{concrete, concrete + "/x2"} {
+				for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodDelete} {
+					feature, gated := entitlement.RequiredFeature(method, path)
+					if prefix == "/api/v1/notification-callbacks" {
+						if gated {
+							t.Errorf("%s %s: the provider callback has the feature %s", method, path, feature)
+						}
+						continue
+					}
+					if !gated || feature == "" {
+						t.Errorf("module %s: %s %s has no feature key in the org gate", m.Key, method, path)
+					}
+				}
+			}
+		}
+	}
+	if p3 == 0 {
+		t.Fatal("no P3 module in LateModules")
+	}
+	for path, want := range map[string]string{
+		"/api/v1/cis/x1/credentials":           entitlement.FeatureMonitoring,
+		"/api/v1/cis/x1/credentials/effective": entitlement.FeatureMonitoring,
+		"/api/v1/cis/x1/addresses":             entitlement.FeatureIPAM,
+		"/api/v1/cis/x1/configs":               entitlement.FeatureMonitoringNetwork,
+		"/api/v1/network-interfaces/x1/admp":   entitlement.FeatureADMP,
+	} {
+		if got, _ := entitlement.RequiredFeature(http.MethodGet, path); got != want {
+			t.Errorf("GET %s: %q, want %q", path, got, want)
+		}
+	}
+}

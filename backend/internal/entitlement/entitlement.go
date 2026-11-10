@@ -113,6 +113,77 @@ var Phase3Features = []string{
 	FeatureMonitoringAccess, FeatureMonitoringAnalytics, FeatureComplianceAutomation,
 }
 
+// probeTypeFeatures maps every key of the probe type registry
+// (api/probe-types.json, WP-934, convention 30) to the feature key that
+// unlocks it (E-151, WP-865): the reachability probes are the monitoring
+// core of standard, the network-protocol probes monitoring_network (pro),
+// the access-network probes monitoring_access (enterprise).
+var probeTypeFeatures = map[string]string{
+	"icmp": FeatureMonitoring, "tcp": FeatureMonitoring, "http": FeatureMonitoring, "dns": FeatureMonitoring,
+	"snmp_status": FeatureMonitoringNetwork, "snmp_if": FeatureMonitoringNetwork, "snmp_custom": FeatureMonitoringNetwork,
+	"redfish": FeatureMonitoringNetwork, "bgp": FeatureMonitoringNetwork, "ospf": FeatureMonitoringNetwork,
+	"isis": FeatureMonitoringNetwork, "bfd": FeatureMonitoringNetwork, "optical": FeatureMonitoringNetwork,
+	"dhcp": FeatureMonitoringNetwork, "stamp": FeatureMonitoringNetwork, "twamp_control": FeatureMonitoringNetwork,
+	"gnmi": FeatureMonitoringNetwork, "rpki_rtr": FeatureMonitoringNetwork, "rpki_roa": FeatureMonitoringNetwork,
+	"bng": FeatureMonitoringAccess, "pon": FeatureMonitoringAccess, "tr069": FeatureMonitoringAccess,
+	"usp": FeatureMonitoringAccess,
+}
+
+// ProbeTypes returns the keys of the probe type registry in sorted order.
+func ProbeTypes() []string {
+	keys := make([]string, 0, len(probeTypeFeatures))
+	for k := range probeTypeFeatures {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+// ProbeTypeFeature returns the feature key a probe type needs. A long form
+// (icmp_ping, snmp_interfaces) or an unknown type is an error: only the keys
+// of the registry are probe types.
+func ProbeTypeFeature(probeType string) (string, error) {
+	if f, ok := probeTypeFeatures[probeType]; ok {
+		return f, nil
+	}
+	return "", fmt.Errorf("unknown probe type %q", probeType)
+}
+
+// Sub-functions of the monitoring without a path of their own (WP-865);
+// handlers and workers check them through SubFunctionFeature and Checker.
+const (
+	SubFunctionCorrelation      = "correlation"
+	SubFunctionRecommendation   = "recommendation"
+	SubFunctionThresholds       = "thresholds"
+	SubFunctionConfigChange     = "config_change"
+	SubFunctionSLAReport        = "sla_report"
+	SubFunctionCapacityForecast = "capacity_forecast"
+)
+
+// subFunctionFeatures maps the sub-functions to their feature key (E-151,
+// decision of the client of 2026-11-09): correlation and root cause
+// (ALR-03) are part of every monitoring plan; the recommendation (ALR-09),
+// the threshold rules (ALR-05) and the configuration change detection
+// (ALR-07) are monitoring_network from pro on; SLA reports (ALR-06) and
+// capacity forecasts (ALR-08) monitoring_analytics.
+var subFunctionFeatures = map[string]string{
+	SubFunctionCorrelation:      FeatureMonitoring,
+	SubFunctionRecommendation:   FeatureMonitoringNetwork,
+	SubFunctionThresholds:       FeatureMonitoringNetwork,
+	SubFunctionConfigChange:     FeatureMonitoringNetwork,
+	SubFunctionSLAReport:        FeatureMonitoringAnalytics,
+	SubFunctionCapacityForecast: FeatureMonitoringAnalytics,
+}
+
+// SubFunctionFeature returns the feature key of a monitoring sub-function;
+// an unknown sub-function is an error.
+func SubFunctionFeature(subFunction string) (string, error) {
+	if f, ok := subFunctionFeatures[subFunction]; ok {
+		return f, nil
+	}
+	return "", fmt.Errorf("unknown sub-function %q", subFunction)
+}
+
 // Module feature key of phase 4 (ENT-06); it gates a module already present
 // in the code and stays in its plan (E-34).
 const FeatureEndpointAgent = "endpoint_agent"

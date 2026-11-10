@@ -686,3 +686,69 @@ func TestPhase2RouteGates(t *testing.T) {
 		}
 	}
 }
+
+// TestPhase3RouteGatesAgainstPostgres covers WP-865 (PKG-08, ENT-05, ENT-06,
+// E-151): a standard organization reaches the monitoring core, IPAM and the
+// subnet scan, but not the analytics, the vault, the configuration history,
+// the RPKI state, the escalation chains or the ADMP add-on (403
+// feature-not-entitled); an enterprise organization reaches everything but
+// the add-on admp; the organization export is core for both.
+func TestPhase3RouteGatesAgainstPostgres(t *testing.T) {
+	redisURL := os.Getenv("TEST_REDIS_URL")
+	if redisURL == "" || os.Getenv("TEST_DATABASE_URL") == "" {
+		t.Skip("TEST_DATABASE_URL and TEST_REDIS_URL required; skipping phase-3 route gate test")
+	}
+	f := scopetest.Seed(t, "65")
+	bg := context.Background()
+	client, err := redisx.Connect(bg, redisURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	store := cache.NewRedisStore(client.Unwrap())
+	for _, org := range []string{f.OrgA, f.OrgB} {
+		_ = store.Delete(bg, "entitlements:"+org)
+		t.Cleanup(func() { _ = store.Delete(bg, "entitlements:"+org) })
+	}
+	svc := entitlement.NewService(entitlement.NewPGRepository(f.App), entitlement.Options{Cache: store, Enforce: true})
+	if n, provErr := svc.ProvisionOrganizations(bg, map[string]entitlement.Plan{
+		f.OrgA: entitlement.PlanStandard, f.OrgB: entitlement.PlanEnterprise}); n != 2 || provErr != nil {
+		t.Fatalf("provision: %d, %v", n, provErr)
+	}
+
+	mux := chi.NewRouter()
+	ok := func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }
+	cases := []struct {
+		method, path         string
+		standard, enterprise bool
+	}{
+		{http.MethodGet, "/api/v1/monitoring/probes", true, true},
+		{http.MethodGet, "/api/v1/monitoring/incidents/{id}", true, true},
+		{http.MethodGet, "/api/v1/monitoring/incidents/{id}/recommendation", false, true},
+		{http.MethodGet, "/api/v1/monitoring/sla", false, true},
+		{http.MethodGet, "/api/v1/ipam-sections", true, true},
+		{http.MethodPost, "/api/v1/subnets/{id}/scan", true, true},
+		{http.MethodGet, "/api/v1/subnets/{id}/rpki", false, true},
+		{http.MethodGet, "/api/v1/cis/{id}/configs", false, true},
+		{http.MethodPost, "/api/v1/vault-connections", false, true},
+		{http.MethodGet, "/api/v1/escalation-policies", false, true},
+		{http.MethodGet, "/api/v1/admp/connections", false, false},
+		{http.MethodPost, "/api/v1/org/exports", true, true},
+	}
+	for _, c := range cases {
+		mux.MethodFunc(c.method, c.path, ok)
+	}
+	routes := svc.Middleware(mux)
+	for _, c := range cases {
+		path := strings.ReplaceAll(c.path, "{id}", "x1")
+		for org, want := range map[string]bool{f.OrgA: c.standard, f.OrgB: c.enterprise} {
+			got := call(t, routes, org, c.method, path)
+			switch {
+			case want && got.status != http.StatusNoContent:
+				t.Errorf("org %s %s %s: %+v, want 204", org, c.method, path, got)
+			case !want && (got.status != http.StatusForbidden || got.problem != api.ProblemFeatureNotEntitled):
+				t.Errorf("org %s %s %s: %+v, want 403 feature-not-entitled", org, c.method, path, got)
+			}
+		}
+	}
+}
