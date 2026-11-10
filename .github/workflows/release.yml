@@ -24,8 +24,29 @@ env:
   REGISTRY: ghcr.io/datahub-chiemgau
 
 jobs:
+  # The GitHub release is created by this workflow (binaries, 'Publish the
+  # GitHub release'). A release made beforehand for the tag, e.g. in the web
+  # UI (publishing it there creates the tag and starts this workflow), would
+  # stop the run only at the end, after building, pushing and signing; the
+  # run is refused here before anything is built.
+  release-free:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: No GitHub release exists for the tag yet
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json tagName > /dev/null 2>&1; then
+            echo "::error::A GitHub release $GITHUB_REF_NAME already exists; release.yml creates it itself. Delete that release (keep the tag) and re-run this workflow."
+            exit 1
+          fi
+
   # A release is only published when the outage suite passes (OPS-06).
   outage:
+    needs: release-free
     uses: ./.github/workflows/outage.yml
 
   # Publishes the GitHub release, so it waits for every image to be signed,
@@ -152,7 +173,14 @@ jobs:
       - name: Publish the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes dist/*
+        # A pre-release tag (v1.0.0-rc.1) becomes a GitHub pre-release, so
+        # GitHub's latest release, the installers' default (install.sh), stays
+        # the newest stable one.
+        run: |
+          set -euo pipefail
+          prerelease=()
+          case "$GITHUB_REF_NAME" in *-*) prerelease=(--prerelease) ;; esac
+          gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes "${prerelease[@]}" dist/*
 
   images:
     needs: outage
