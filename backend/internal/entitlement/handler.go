@@ -41,14 +41,33 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
+	plan, changed, err := h.service.OrganizationPlan(r.Context(), t.OrganizationID)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
 
-	api.WriteJSON(w, http.StatusOK, api.ListResponse[Entitlement]{
-		Data:    items,
-		Total:   len(items),
-		Limit:   len(items),
-		Offset:  0,
-		HasMore: false,
+	if items == nil {
+		items = []Entitlement{}
+	}
+	api.WriteJSON(w, http.StatusOK, ListResponse{
+		Data: items, Total: len(items), Limit: len(items), Offset: 0, HasMore: false,
+		Plan: plan, PlanChangedAt: changed,
 	})
+}
+
+// ListResponse is the answer of GET /api/v1/entitlements: the envelope of
+// api.ListResponse (not embedded: its MarshalJSON would drop the plan) with
+// the rows and their origin, and the leading plan of the organization
+// (organization.plan) with the time of its last change (PKG-01, WP-880).
+type ListResponse struct {
+	Data          []Entitlement `json:"data"`
+	Total         int           `json:"total"`
+	Limit         int           `json:"limit"`
+	Offset        int           `json:"offset"`
+	HasMore       bool          `json:"has_more"`
+	Plan          Plan          `json:"plan"`
+	PlanChangedAt *time.Time    `json:"plan_changed_at"`
 }
 
 // GrantRequest is the body of an entitlement change (operator path).

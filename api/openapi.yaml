@@ -32394,12 +32394,20 @@ components:
         (enterprise only) by decision of the client of 2026-11-09. Module key
         of phase 4 endpoint_agent (enterprise) and the add-ons iga, ai and
         admp, which no plan includes.
-      required: [organization_id, feature_key, plan, enabled, limits, source]
+      required: [organization_id, feature_key, plan, enabled, limits, source, origin]
       properties:
         organization_id:
           type: string
         feature_key:
           type: string
+        origin:
+          type: string
+          enum: [plan, addon, manual]
+          description: >-
+            Where the row comes from (PKG-01, WP-880): plan (a feature of the
+            organization's plan), addon (iga, ai, admp) or manual (a single
+            grant of the operator). A plan change replaces only rows of origin
+            plan; the origin of a row stays when it is changed.
         plan:
           $ref: '#/components/schemas/EntitlementPlan'
         enabled:
@@ -32525,12 +32533,21 @@ components:
       allOf:
         - $ref: '#/components/schemas/PaginationEnvelope'
         - type: object
-          required: [data]
+          required: [data, plan, plan_changed_at]
           properties:
             data:
               type: array
               items:
                 $ref: '#/components/schemas/Entitlement'
+            plan:
+              $ref: '#/components/schemas/EntitlementPlan'
+            plan_changed_at:
+              type: [string, "null"]
+              format: date-time
+              description: >-
+                Time of the last plan change (WP-882); null while the plan of
+                the creation applies. plan is the leading plan of the
+                organization (organization.plan, PKG-01, WP-880).
 
     ModuleStatus:
       type: object

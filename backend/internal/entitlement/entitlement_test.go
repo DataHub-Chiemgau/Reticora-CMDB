@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
@@ -815,4 +817,87 @@ func TestSubFunctionFeature(t *testing.T) {
 			t.Errorf("SubFunctionFeature(%q): want an error", sub)
 		}
 	}
+}
+
+// TestEntitlementOriginValidate covers WP-880 (PKG-01): an empty origin is
+// derived (add-on → addon, plan feature → plan, else manual); an add-on with
+// another origin and a non-add-on with origin addon are refused on origin.
+func TestEntitlementOriginValidate(t *testing.T) {
+	for _, c := range []struct {
+		feature string
+		plan    Plan
+		want    string
+	}{
+		{FeatureIGA, PlanEnterprise, OriginAddon},
+		{FeatureMonitoring, PlanPro, OriginPlan},
+		{FeatureEndpointAgent, PlanPro, OriginManual},
+		{FeatureCMDBCore, PlanEssential, OriginPlan},
+	} {
+		e := Entitlement{FeatureKey: c.feature, Plan: c.plan, Enabled: true}
+		if err := e.Validate(); err != nil || e.Origin != c.want {
+			t.Errorf("%s in %s: origin %q, %v; want %q", c.feature, c.plan, e.Origin, err, c.want)
+		}
+	}
+	for name, e := range map[string]Entitlement{
+		"add-on with origin plan":        {FeatureKey: FeatureIGA, Plan: PlanPro, Enabled: true, Origin: OriginPlan},
+		"plan feature with origin addon": {FeatureKey: FeatureMonitoring, Plan: PlanPro, Enabled: true, Origin: OriginAddon},
+		"unknown origin":                 {FeatureKey: FeatureMonitoring, Plan: PlanPro, Enabled: true, Origin: "gift"},
+	} {
+		var verr *ValidationError
+		if err := e.Validate(); !errors.As(err, &verr) || verr.Field != "origin" {
+			t.Errorf("%s: %v, want a ValidationError on origin", name, err)
+		}
+	}
+}
+
+// TestProvisionReportsPlanMismatch covers AK5 of WP-880: the startup check
+// reports an active row of origin plan outside the plan of the organization
+// (warning and gauge) and changes nothing.
+func TestProvisionReportsPlanMismatch(t *testing.T) {
+	repo := NewMemoryRepository()
+	svc := NewService(repo, Options{Enforce: true})
+	ctx := context.Background()
+	const org = "org-mismatch"
+	for _, f := range PlanFeatures(PlanStandard) {
+		if _, err := repo.Upsert(ctx, &Entitlement{OrganizationID: org, FeatureKey: f, Plan: PlanStandard, Enabled: true, Origin: OriginPlan}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A pro feature of origin plan in a standard organization.
+	if _, err := repo.Upsert(ctx, &Entitlement{OrganizationID: org, FeatureKey: FeatureWorkflows, Plan: PlanStandard, Enabled: true, Origin: OriginPlan}); err != nil {
+		t.Fatal(err)
+	}
+	if got := PlanMismatch(PlanStandard, mustList(t, repo, org)); !slices.Equal(got, []string{FeatureWorkflows}) {
+		t.Errorf("PlanMismatch = %v, want [workflows]", got)
+	}
+	if _, err := svc.ProvisionOrganizations(ctx, map[string]Plan{org: PlanStandard}); err != nil {
+		t.Fatal(err)
+	}
+	if got := testutil.ToFloat64(planMismatchOrgs); got != 1 {
+		t.Errorf("gauge reticora_entitlement_plan_mismatch_organizations = %v, want 1", got)
+	}
+	var kept bool
+	for _, e := range mustList(t, repo, org) {
+		kept = kept || (e.FeatureKey == FeatureWorkflows && e.Enabled && e.Origin == OriginPlan)
+	}
+	if !kept {
+		t.Errorf("the startup check changed the deviating row")
+	}
+	// A manual grant outside the plan is no deviation.
+	other := NewMemoryRepository()
+	if _, err := other.Upsert(ctx, &Entitlement{OrganizationID: org, FeatureKey: FeatureWorkflows, Plan: PlanStandard, Enabled: true, Origin: OriginManual}); err != nil {
+		t.Fatal(err)
+	}
+	if got := PlanMismatch(PlanStandard, mustList(t, other, org)); len(got) != 0 {
+		t.Errorf("a manual grant counts as deviation: %v", got)
+	}
+}
+
+func mustList(t *testing.T, repo *MemoryRepository, org string) []Entitlement {
+	t.Helper()
+	items, err := repo.List(context.Background(), org)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return items
 }

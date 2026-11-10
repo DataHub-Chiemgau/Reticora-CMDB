@@ -250,6 +250,32 @@ var QuotaFeature = map[string]string{
 	LimitMaxStorageMB:  FeatureDocuments,
 }
 
+// Origins of an entitlement row (PKG-01, E-155): a feature of the
+// organization's plan, an add-on (CH14) or a single grant of the operator.
+// A plan change (WP-882) replaces only the rows of origin plan.
+const (
+	OriginPlan   = "plan"
+	OriginAddon  = "addon"
+	OriginManual = "manual"
+)
+
+// Origins are the values of entitlement.origin (CHECK
+// entitlement_origin_check, migration 000289).
+var Origins = []string{OriginPlan, OriginAddon, OriginManual}
+
+// DefaultOrigin is the origin of a row without one, the rule of the
+// backfill of migration 000289: an add-on key is addon, a key of the
+// plan's features plan, every other row manual.
+func DefaultOrigin(featureKey string, plan Plan) string {
+	switch {
+	case slices.Contains(Addons, featureKey):
+		return OriginAddon
+	case slices.Contains(PlanFeatures(plan), featureKey):
+		return OriginPlan
+	}
+	return OriginManual
+}
+
 // Sources of an entitlement row (ENT-01).
 var Sources = []string{"manual", "selfsignup", "billing", "reseller"}
 
@@ -309,7 +335,10 @@ type Entitlement struct {
 	Limits     map[string]int64 `json:"limits"`
 	ValidUntil *time.Time       `json:"valid_until,omitempty"`
 	// Source is manual, selfsignup, billing or reseller.
-	Source    string    `json:"source"`
+	Source string `json:"source"`
+	// Origin is plan, addon or manual (PKG-01, WP-880): where the row comes
+	// from, kept when the row is changed.
+	Origin    string    `json:"origin"`
 	UpdatedAt time.Time `json:"updated_at,omitempty"`
 }
 
@@ -386,6 +415,17 @@ func (e *Entitlement) Validate() error {
 	}
 	if !slices.Contains(Sources, e.Source) {
 		return invalid("source", fmt.Errorf("source must be one of %s", strings.Join(Sources, ", ")))
+	}
+	if e.Origin == "" {
+		e.Origin = DefaultOrigin(e.FeatureKey, e.Plan)
+	}
+	switch addon := slices.Contains(Addons, e.FeatureKey); {
+	case !slices.Contains(Origins, e.Origin):
+		return invalid("origin", fmt.Errorf("origin must be one of %s", strings.Join(Origins, ", ")))
+	case addon && e.Origin != OriginAddon:
+		return invalid("origin", fmt.Errorf("the add-on %s has origin addon", e.FeatureKey))
+	case !addon && e.Origin == OriginAddon:
+		return invalid("origin", fmt.Errorf("%s is no add-on and cannot have origin addon", e.FeatureKey))
 	}
 	for k, v := range e.Limits {
 		if !slices.Contains(Quotas, k) {
@@ -576,7 +616,7 @@ func (s *Service) Provision(ctx context.Context, orgID string, plan Plan) ([]str
 	ents := make([]Entitlement, 0, len(features))
 	for _, feature := range features {
 		ent := Entitlement{OrganizationID: orgID, FeatureKey: feature, Plan: plan, Enabled: true,
-			Limits: map[string]int64{}, Source: "manual", UpdatedAt: s.now()}
+			Limits: map[string]int64{}, Source: "manual", Origin: OriginPlan, UpdatedAt: s.now()}
 		if err := ent.Validate(); err != nil {
 			return nil, fmt.Errorf("provision %s for %s: %w", feature, orgID, err)
 		}
@@ -599,20 +639,76 @@ func (s *Service) Provision(ctx context.Context, orgID string, plan Plan) ([]str
 
 // ProvisionOrganizations provisions the missing plan features of every
 // listed organization (id to plan), each in its own tenant context, and
-// returns how many organizations got rows.
+// returns how many organizations got rows. It reports, without changing
+// anything, every organization whose rows of origin plan deviate from
+// organization.plan (PlanMismatch, WP-880): slog.Warn "entitlement plan
+// mismatch" and the gauge reticora_entitlement_plan_mismatch_organizations.
 func (s *Service) ProvisionOrganizations(ctx context.Context, plans map[string]Plan) (int, error) {
-	n := 0
+	n, mismatched := 0, 0
 	for orgID, plan := range plans {
 		scope := database.OrgWideScope(orgID, "")
-		added, err := s.Provision(database.ContextWithTenantScope(ctx, &scope), orgID, plan)
+		orgCtx := database.ContextWithTenantScope(ctx, &scope)
+		added, err := s.Provision(orgCtx, orgID, plan)
 		if err != nil {
 			return n, err
 		}
 		if len(added) > 0 {
 			n++
 		}
+		stored, err := s.repo.List(orgCtx, orgID)
+		if err != nil {
+			return n, err
+		}
+		if keys := PlanMismatch(normalizePlan(plan), stored); len(keys) > 0 {
+			mismatched++
+			slog.WarnContext(ctx, "entitlement plan mismatch", "organization_id", orgID, "plan", string(normalizePlan(plan)), "features", keys)
+		}
 	}
+	planMismatchOrgs.Set(float64(mismatched))
 	return n, nil
+}
+
+// PlanMismatch returns the feature keys of the rows of origin plan that
+// deviate from the plan of the organization: a different plan column, or
+// an active row outside PlanFeatures(plan). Rows of origin addon or manual
+// never deviate.
+func PlanMismatch(plan Plan, stored []Entitlement) []string {
+	features := PlanFeatures(plan)
+	var out []string
+	for i := range stored {
+		ent := &stored[i]
+		origin := ent.Origin
+		if origin == "" {
+			origin = DefaultOrigin(ent.FeatureKey, ent.Plan)
+		}
+		if origin != OriginPlan {
+			continue
+		}
+		if normalizePlan(ent.Plan) != plan || (ent.Enabled && !slices.Contains(features, ent.FeatureKey)) {
+			out = append(out, ent.FeatureKey)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// OrganizationPlan returns the leading plan of the organization
+// (organization.plan) and the time of its last change; a repository
+// without PlanReader takes the plan of the cmdb_core row.
+func (s *Service) OrganizationPlan(ctx context.Context, orgID string) (Plan, *time.Time, error) {
+	if reader, ok := s.repo.(PlanReader); ok {
+		return reader.OrganizationPlan(ctx, orgID)
+	}
+	stored, err := s.load(ctx, orgID)
+	if err != nil {
+		return "", nil, err
+	}
+	for i := range stored {
+		if stored[i].FeatureKey == FeatureCMDBCore && stored[i].Plan != "" {
+			return normalizePlan(stored[i].Plan), nil, nil
+		}
+	}
+	return PlanEssential, nil, nil
 }
 
 // IsEnabled reports whether a feature is available for the organization.
@@ -774,11 +870,15 @@ func (s *Service) effective(orgID string, stored []Entitlement) []Entitlement {
 		ent := stored[i]
 		core = core || ent.FeatureKey == FeatureCMDBCore
 		ent.Enabled = !s.opts.Enforce || ent.status(now) == StatusActive
+		if ent.Origin == "" {
+			// A cached row from before migration 000289.
+			ent.Origin = DefaultOrigin(ent.FeatureKey, ent.Plan)
+		}
 		out = append(out, ent)
 	}
 	if !core {
 		out = append(out, Entitlement{OrganizationID: orgID, FeatureKey: FeatureCMDBCore, Enabled: true,
-			Limits: map[string]int64{}, Source: "manual"})
+			Limits: map[string]int64{}, Source: "manual", Origin: OriginPlan})
 	}
 	return out
 }

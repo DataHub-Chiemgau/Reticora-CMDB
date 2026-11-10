@@ -44,12 +44,13 @@ export function useEntitlements() {
     queryFn: async () => {
       const res = await entitlementApi.list({ limit: 200 });
       const map: EntitlementMap = {};
-      let plan: string | undefined;
+      // The leading plan of the organization (organization.plan, WP-880);
+      // a server before WP-880 answers without it, then the plan of the
+      // cmdb_core row applies (WP-857).
+      let plan: string | undefined = res.plan || undefined;
       for (const e of res.data ?? []) {
         map[e.feature_key] = e.enabled;
-        // Every row carries the plan of the organization; cmdb_core is
-        // always there and wins over the others (WP-857).
-        if (e.plan && (!plan || e.feature_key === 'cmdb_core')) {
+        if (!res.plan && e.plan && (!plan || e.feature_key === 'cmdb_core')) {
           plan = e.plan;
         }
       }

@@ -403,8 +403,8 @@ func (o *orgSeed) organization(ctx context.Context, tx pgx.Tx) error {
 		return err
 	}
 	for _, feature := range entitlement.PlanFeatures(entitlement.PlanPro) {
-		if _, err := tx.Exec(ctx, `INSERT INTO entitlement (organization_id, feature_key, plan, enabled, limits, source)
-			VALUES ($1, $2, 'pro', true, '{}', 'manual') ON CONFLICT (organization_id, feature_key) DO NOTHING`,
+		if _, err := tx.Exec(ctx, `INSERT INTO entitlement (organization_id, feature_key, plan, enabled, limits, source, origin)
+			VALUES ($1, $2, 'pro', true, '{}', 'manual', 'plan') ON CONFLICT (organization_id, feature_key) DO NOTHING`,
 			o.id, feature); err != nil {
 			return err
 		}

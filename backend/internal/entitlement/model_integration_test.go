@@ -2,14 +2,21 @@ package entitlement_test
 
 import (
 	"context"
+	"encoding/json"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"regexp"
 	"slices"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -448,5 +455,143 @@ func TestMigration284MovesEntitlementKeysOfPhase3(t *testing.T) {
 	}
 	if left != 0 {
 		t.Errorf("migration_quarantine keeps %d entries of 000284 after down", left)
+	}
+}
+
+// TestEntitlementOriginBackfill covers WP-880 (PKG-01): the backfill of
+// migration 000289 gives a pro organization with the rows monitoring, iga
+// and endpoint_agent the origins plan, addon and manual, and its VALUES list
+// is PlanFeatures of the four plans.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestEntitlementOriginBackfill(t *testing.T) {
+	f := scopetest.Seed(t, "63")
+	bg := context.Background()
+	up, err := os.ReadFile("../../migrations/000289_entitlement_origin.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	down, err := os.ReadFile("../../migrations/000289_entitlement_origin.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	matrix := map[string][]string{}
+	for _, m := range regexp.MustCompile(`\('(essential|standard|pro|enterprise)', '([a-z_]+)'\)`).FindAllStringSubmatch(string(up), -1) {
+		matrix[m[1]] = append(matrix[m[1]], m[2])
+	}
+	for _, plan := range []entitlement.Plan{entitlement.PlanEssential, entitlement.PlanStandard, entitlement.PlanPro, entitlement.PlanEnterprise} {
+		want := entitlement.PlanFeatures(plan)
+		got := matrix[string(plan)]
+		slices.Sort(want)
+		slices.Sort(got)
+		if !slices.Equal(got, want) {
+			t.Errorf("plan matrix of migration 000289 for %s: %v, want PlanFeatures %v", plan, got, want)
+		}
+	}
+
+	tx, err := f.Admin.Begin(bg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(bg) }()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, execErr := tx.Exec(bg, sql, args...); execErr != nil {
+			t.Fatalf("%.60s: %v", sql, execErr)
+		}
+	}
+	exec(`UPDATE organization SET plan = 'pro' WHERE id = $1`, f.OrgA)
+	for _, key := range []string{"monitoring", "iga", "endpoint_agent"} {
+		exec(`INSERT INTO entitlement (organization_id, feature_key, plan) VALUES ($1, $2, 'pro')`, f.OrgA, key)
+	}
+	exec(string(down))
+	exec(string(up))
+	rows, err := tx.Query(bg, `SELECT feature_key, origin FROM entitlement WHERE organization_id = $1`, f.OrgA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for rows.Next() {
+		var key, origin string
+		if err = rows.Scan(&key, &origin); err != nil {
+			t.Fatal(err)
+		}
+		got[key] = origin
+	}
+	rows.Close()
+	if want := map[string]string{"monitoring": "plan", "iga": "addon", "endpoint_agent": "manual"}; !maps.Equal(got, want) {
+		t.Errorf("origins after the backfill %v, want %v", got, want)
+	}
+}
+
+// TestEntitlementOriginSurvivesUpsert covers AK3 of WP-880: a grant on a row
+// of origin plan keeps its origin; a new row takes the caller's.
+func TestEntitlementOriginSurvivesUpsert(t *testing.T) {
+	f := scopetest.Seed(t, "63")
+	ctx := f.OrgCtx(f.OrgA)
+	repo := entitlement.NewPGRepository(f.App)
+	if _, err := repo.Upsert(ctx, &entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureMonitoring,
+		Plan: entitlement.PlanStandard, Enabled: true, Origin: entitlement.OriginPlan}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := repo.Upsert(ctx, &entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureMonitoring,
+		Plan: entitlement.PlanStandard, Enabled: false, Origin: entitlement.OriginManual})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Origin != entitlement.OriginPlan || stored.Enabled {
+		t.Errorf("after the grant: origin %q enabled %v, want plan and the new enabled false", stored.Origin, stored.Enabled)
+	}
+	added, err := repo.Upsert(ctx, &entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureEndpointAgent,
+		Plan: entitlement.PlanStandard, Enabled: true, Origin: entitlement.OriginManual})
+	if err != nil || added.Origin != entitlement.OriginManual {
+		t.Errorf("new row: origin %q, %v; want manual", added.Origin, err)
+	}
+}
+
+// TestEntitlementListCarriesPlan covers AK4 of WP-880: GET /api/v1/entitlements
+// answers plan and plan_changed_at of the organization and origin per row.
+func TestEntitlementListCarriesPlan(t *testing.T) {
+	f := scopetest.Seed(t, "63")
+	bg := context.Background()
+	if _, err := f.Admin.Exec(bg, `UPDATE organization SET plan = 'standard', plan_changed_at = '2026-11-01T10:00:00Z' WHERE id = $1`, f.OrgA); err != nil {
+		t.Fatal(err)
+	}
+	ctx := f.OrgCtx(f.OrgA)
+	repo := entitlement.NewPGRepository(f.App)
+	svc := entitlement.NewService(repo, entitlement.Options{Enforce: true})
+	if _, err := svc.Provision(ctx, f.OrgA, entitlement.PlanStandard); err != nil {
+		t.Fatal(err)
+	}
+	mux := chi.NewRouter()
+	entitlement.NewHandler(svc).RegisterRoutes(mux)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/entitlements", http.NoBody).
+		WithContext(tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User}))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /entitlements: %d %s", w.Code, w.Body.String())
+	}
+	var body struct {
+		Plan          string     `json:"plan"`
+		PlanChangedAt *time.Time `json:"plan_changed_at"`
+		Data          []struct {
+			FeatureKey string `json:"feature_key"`
+			Origin     string `json:"origin"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Plan != "standard" || body.PlanChangedAt == nil || !body.PlanChangedAt.Equal(time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)) {
+		t.Errorf("plan %q changed %v, want standard at 2026-11-01T10:00:00Z", body.Plan, body.PlanChangedAt)
+	}
+	if len(body.Data) == 0 {
+		t.Fatal("no rows")
+	}
+	for _, row := range body.Data {
+		if row.Origin != entitlement.OriginPlan {
+			t.Errorf("row %s: origin %q, want plan", row.FeatureKey, row.Origin)
+		}
 	}
 }

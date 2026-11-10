@@ -3129,11 +3129,21 @@ export interface Entitlement {
   limits: Record<string, number>;
   valid_until?: string;
   source: 'manual' | 'selfsignup' | 'billing' | 'reseller';
+  /** Where the row comes from (PKG-01, WP-880). */
+  origin: 'plan' | 'addon' | 'manual';
   updated_at: string;
 }
 
+/** GET /entitlements: the rows and the leading plan of the organization. */
+export interface EntitlementListResponse extends PaginatedResponse<Entitlement> {
+  /** organization.plan, the leading plan (WP-880). */
+  plan: string;
+  /** Time of the last plan change; null while the plan of the creation applies. */
+  plan_changed_at: string | null;
+}
+
 export const entitlementApi = {
-  list(params: ListParams = {}): Promise<PaginatedResponse<Entitlement>> {
+  list(params: ListParams = {}): Promise<EntitlementListResponse> {
     return fetchAPI(`/entitlements${buildQuery(params)}`);
   },
 };

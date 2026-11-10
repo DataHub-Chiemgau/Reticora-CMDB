@@ -15297,6 +15297,11 @@ export interface components {
     Entitlement: {
       organization_id: string;
       feature_key: string;
+      /**
+       * @description Where the row comes from (PKG-01, WP-880): plan (a feature of the organization's plan), addon (iga, ai, admp) or manual (a single grant of the operator). A plan change replaces only rows of origin plan; the origin of a row stays when it is changed.
+       * @enum {string}
+       */
+      origin: 'plan' | 'addon' | 'manual';
       plan: components['schemas']['EntitlementPlan'];
       enabled: boolean;
       /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys, and max_storage_mb (MiB, on documents; MGT-01). A quota only gates when it is stored here (E-34). New organizations get the plan default of max_storage_mb stored (E-44: essential 1000, standard 10000, pro 50000; enterprise unlimited, no entry); existing organizations get none. */
@@ -15378,6 +15383,12 @@ export interface components {
     };
     EntitlementListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Entitlement'][];
+      plan: components['schemas']['EntitlementPlan'];
+      /**
+       * Format: date-time
+       * @description Time of the last plan change (WP-882); null while the plan of the creation applies. plan is the leading plan of the organization (organization.plan, PKG-01, WP-880).
+       */
+      plan_changed_at: string | null;
     };
     ModuleStatus: {
       /** @example ticketing */

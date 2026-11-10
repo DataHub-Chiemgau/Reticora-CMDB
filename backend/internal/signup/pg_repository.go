@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/operator"
 )
@@ -153,9 +154,13 @@ func populate(ctx context.Context, tx pgx.Tx, name, slug, email, displayName str
 	}
 	for i := range setup.Entitlements {
 		ent := &setup.Entitlements[i]
-		if _, err := tx.Exec(ctx, `INSERT INTO entitlement (organization_id, feature_key, plan, enabled, limits, valid_until, source)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-			setup.OrganizationID, ent.FeatureKey, string(ent.Plan), ent.Enabled, ent.Limits, ent.ValidUntil, ent.Source); err != nil {
+		origin := ent.Origin
+		if origin == "" {
+			origin = entitlement.DefaultOrigin(ent.FeatureKey, ent.Plan)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO entitlement (organization_id, feature_key, plan, enabled, limits, valid_until, source, origin)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			setup.OrganizationID, ent.FeatureKey, string(ent.Plan), ent.Enabled, ent.Limits, ent.ValidUntil, ent.Source, origin); err != nil {
 			return "", fmt.Errorf("insert entitlement %s: %w", ent.FeatureKey, err)
 		}
 	}

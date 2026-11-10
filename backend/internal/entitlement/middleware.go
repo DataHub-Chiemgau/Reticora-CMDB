@@ -388,9 +388,18 @@ func (s *Service) allow(w http.ResponseWriter, r *http.Request, orgID, feature s
 	return true
 }
 
+// planMismatchOrgs is the number of organizations whose rows of origin plan
+// deviate from organization.plan at the last startup check (WP-880).
+var planMismatchOrgs = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: "reticora",
+	Name:      "entitlement_plan_mismatch_organizations",
+	Help:      "Organizations whose entitlement rows of origin plan deviate from organization.plan (startup check, nothing is corrected).",
+})
+
 // RegisterMetrics registers reticora_ingest_refused_license_expired_total
-// (ENT-07).
+// (ENT-07) and reticora_entitlement_plan_mismatch_organizations (WP-880).
 func RegisterMetrics(reg prometheus.Registerer) {
+	reg.MustRegister(planMismatchOrgs)
 	reg.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{
 		Namespace: "reticora",
 		Name:      "ingest_refused_license_expired_total",

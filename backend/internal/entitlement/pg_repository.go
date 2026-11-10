@@ -27,7 +27,7 @@ func (r *PGRepository) List(ctx context.Context, orgID string) ([]Entitlement, e
 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT organization_id::text, feature_key, plan, enabled, limits, valid_until, source, updated_at
+			SELECT organization_id::text, feature_key, plan, enabled, limits, valid_until, source, origin, updated_at
 			FROM entitlement
 			ORDER BY feature_key
 		`)
@@ -52,6 +52,25 @@ func (r *PGRepository) List(ctx context.Context, orgID string) ([]Entitlement, e
 	return items, nil
 }
 
+// OrganizationPlan reads organization.plan and organization.plan_changed_at
+// in the tenant context of the organization (WP-880).
+func (r *PGRepository) OrganizationPlan(ctx context.Context, orgID string) (Plan, *time.Time, error) {
+	var plan string
+	var changed *time.Time
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT plan, plan_changed_at FROM organization WHERE id = current_setting('app.org_id')::uuid`).
+			Scan(&plan, &changed)
+	})
+	if err != nil {
+		return "", nil, fmt.Errorf("read organization plan: %w", err)
+	}
+	if changed != nil {
+		utc := changed.UTC()
+		changed = &utc
+	}
+	return normalizePlan(Plan(plan)), changed, nil
+}
+
 // Upsert stores an entitlement, replacing an existing row for the same
 // (organization, feature) pair.
 func (r *PGRepository) Upsert(ctx context.Context, in *Entitlement) (Entitlement, error) {
@@ -63,11 +82,16 @@ func (r *PGRepository) Upsert(ctx context.Context, in *Entitlement) (Entitlement
 	if ent.Source == "" {
 		ent.Source = "manual"
 	}
+	if ent.Origin == "" {
+		ent.Origin = DefaultOrigin(ent.FeatureKey, ent.Plan)
+	}
 
+	// The origin of an existing row stays (WP-880): a grant on a row of the
+	// plan does not make it a manual row; a new row takes the caller's.
 	err := database.WithRequestTenant(ctx, r.pool, ent.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		row := tx.QueryRow(ctx, `
-			INSERT INTO entitlement (organization_id, feature_key, plan, enabled, limits, valid_until, source)
-			VALUES (current_setting('app.org_id')::uuid, $1, $2, $3, $4, $5, $6)
+			INSERT INTO entitlement (organization_id, feature_key, plan, enabled, limits, valid_until, source, origin)
+			VALUES (current_setting('app.org_id')::uuid, $1, $2, $3, $4, $5, $6, $7)
 			ON CONFLICT (organization_id, feature_key) DO UPDATE
 			SET plan = EXCLUDED.plan,
 			    enabled = EXCLUDED.enabled,
@@ -75,8 +99,8 @@ func (r *PGRepository) Upsert(ctx context.Context, in *Entitlement) (Entitlement
 			    valid_until = EXCLUDED.valid_until,
 			    source = EXCLUDED.source,
 			    updated_at = now()
-			RETURNING organization_id::text, feature_key, plan, enabled, limits, valid_until, source, updated_at
-		`, ent.FeatureKey, string(ent.Plan), ent.Enabled, ent.Limits, ent.ValidUntil, ent.Source)
+			RETURNING organization_id::text, feature_key, plan, enabled, limits, valid_until, source, origin, updated_at
+		`, ent.FeatureKey, string(ent.Plan), ent.Enabled, ent.Limits, ent.ValidUntil, ent.Source, ent.Origin)
 
 		var err error
 		stored, err = scanEntitlement(row)
@@ -96,20 +120,24 @@ func (r *PGRepository) Upsert(ctx context.Context, in *Entitlement) (Entitlement
 func (r *PGRepository) InsertMissing(ctx context.Context, orgID string, ents []Entitlement) ([]string, error) {
 	var added []string
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		for _, ent := range ents {
+		for i := range ents {
+			ent := ents[i]
 			if ent.Limits == nil {
 				ent.Limits = map[string]int64{}
 			}
 			if ent.Source == "" {
 				ent.Source = "manual"
 			}
+			if ent.Origin == "" {
+				ent.Origin = DefaultOrigin(ent.FeatureKey, ent.Plan)
+			}
 			var feature string
 			err := tx.QueryRow(ctx, `
-				INSERT INTO entitlement (organization_id, feature_key, plan, enabled, limits, valid_until, source)
-				VALUES (current_setting('app.org_id')::uuid, $1, $2, $3, $4, $5, $6)
+				INSERT INTO entitlement (organization_id, feature_key, plan, enabled, limits, valid_until, source, origin)
+				VALUES (current_setting('app.org_id')::uuid, $1, $2, $3, $4, $5, $6, $7)
 				ON CONFLICT (organization_id, feature_key) DO NOTHING
 				RETURNING feature_key
-			`, ent.FeatureKey, string(ent.Plan), ent.Enabled, ent.Limits, ent.ValidUntil, ent.Source).Scan(&feature)
+			`, ent.FeatureKey, string(ent.Plan), ent.Enabled, ent.Limits, ent.ValidUntil, ent.Source, ent.Origin).Scan(&feature)
 			if errors.Is(err, pgx.ErrNoRows) {
 				continue
 			}
@@ -146,6 +174,7 @@ func scanEntitlement(scanner entitlementScanner) (Entitlement, error) {
 		&ent.Limits,
 		&validUntil,
 		&ent.Source,
+		&ent.Origin,
 		&updatedAt,
 	); err != nil {
 		return Entitlement{}, err
