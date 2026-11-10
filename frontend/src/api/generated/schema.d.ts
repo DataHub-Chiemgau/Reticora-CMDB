@@ -14803,7 +14803,7 @@ export interface components {
       data: components['schemas']['RelationshipSuppression'][];
     };
     /**
-     * @description A subscribable event (webhook.ValidEvents, WP-246): the registered event types of api/events.schema.json (EVT-02, NTF-05, EVT-03 [P2], the monitoring types of EVT-03 [P3], WP-867) without `webhook.dead` and `apikey.creator_deactivated`, which notify the org_admins only. Deprecated former names, delivered under their new type: `ci.updated` (now `ci.changed`), `relationship.deleted` (now `relationship.removed`), `lifecycle.transitioned` (now `lifecycle.changed`), `inventory.movement` and `asset.movement` (now `stock.movement`). Deprecated names without an event contract (dispatched directly or never raised): `ci_type.created`, `ci_type.updated`, `ci_type.deactivated`, `ci_attribute.changed`, `composition.created`, `composition.updated`, `composition.deleted`, `override.changed`, `reconciliation.policy_changed`, `discovery.completed`. `webhook.test` and the reserved types of phase 3 (`maintenance.scheduled`, `workflow.*`, `finding.*`) cannot be subscribed to.
+     * @description A subscribable event (webhook.ValidEvents, WP-246): the registered event types of api/events.schema.json (EVT-02, NTF-05, EVT-03 [P2], the types of EVT-03 [P3], WP-867 and WP-868) without `webhook.dead` and `apikey.creator_deactivated`, which notify the org_admins only. Deprecated former names, delivered under their new type: `ci.updated` (now `ci.changed`), `relationship.deleted` (now `relationship.removed`), `lifecycle.transitioned` (now `lifecycle.changed`), `inventory.movement` and `asset.movement` (now `stock.movement`). Deprecated names without an event contract (dispatched directly or never raised): `ci_type.created`, `ci_type.updated`, `ci_type.deactivated`, `ci_attribute.changed`, `composition.created`, `composition.updated`, `composition.deleted`, `override.changed`, `reconciliation.policy_changed`, `discovery.completed`. `webhook.test` cannot be subscribed to. The types of phase 3 (maintenance, workflows, findings, escalation, packages, organization lifecycle; WP-868) are subscribable like the others.
      * @enum {string}
      */
     WebhookEvent:
@@ -14865,6 +14865,25 @@ export interface components {
       | 'monitoring.suspension_changed'
       | 'capacity.forecast_exceeded'
       | 'sla.violated'
+      | 'maintenance.scheduled'
+      | 'maintenance.started'
+      | 'maintenance.ended'
+      | 'workflow.run_started'
+      | 'workflow.run_succeeded'
+      | 'workflow.run_failed'
+      | 'workflow.run_cancelled'
+      | 'workflow.approval_requested'
+      | 'workflow.approval_decided'
+      | 'workflow.webhook'
+      | 'finding.created'
+      | 'finding.changed'
+      | 'finding.resolved'
+      | 'notification.escalated'
+      | 'notification.acknowledged'
+      | 'entitlement.changed'
+      | 'org.export_completed'
+      | 'org.deletion_requested'
+      | 'org.deletion_cancelled'
       | 'ci.updated'
       | 'relationship.deleted'
       | 'lifecycle.transitioned'

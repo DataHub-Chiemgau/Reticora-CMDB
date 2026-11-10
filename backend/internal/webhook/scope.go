@@ -210,6 +210,28 @@ var scopeRules = map[string]scopeRule{
 	"monitoring.suspension_changed": organizational,
 	"capacity.forecast_exceeded":    ciByCIID,
 	"sla.violated":                  payloadScope,
+
+	// Modules of phase 3 (WP-868); packages and the organization lifecycle
+	// concern the whole organization.
+	"maintenance.scheduled":       payloadScope,
+	"maintenance.started":         payloadScope,
+	"maintenance.ended":           payloadScope,
+	"workflow.run_started":        ciObject,
+	"workflow.run_succeeded":      ciObject,
+	"workflow.run_failed":         ciObject,
+	"workflow.run_cancelled":      ciObject,
+	"workflow.approval_requested": payloadScope,
+	"workflow.approval_decided":   payloadScope,
+	"workflow.webhook":            ciObject,
+	"finding.created":             ciObject,
+	"finding.changed":             ciObject,
+	"finding.resolved":            ciObject,
+	"notification.escalated":      payloadScope,
+	"notification.acknowledged":   payloadScope,
+	"entitlement.changed":         organizational,
+	"org.export_completed":        organizational,
+	"org.deletion_requested":      organizational,
+	"org.deletion_cancelled":      organizational,
 }
 
 // eventObjects returns the scope of every object of the event, nil when it

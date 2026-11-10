@@ -1,7 +1,6 @@
 package events
 
 import (
-	"strings"
 	"time"
 )
 
@@ -87,10 +86,37 @@ const (
 	SLAViolated                 = "sla.violated"
 )
 
+// Event types of the modules of phase 3 (EVT-03 [P3], NTF-05 [P3], MGT-04,
+// WFL-02, SEC-02, NTF-02, PKG-02, TLC-05, TLC-06; WP-868, E-161). They
+// replace the reservation of phase 2 (maintenance.scheduled, workflow.*,
+// finding.*).
+const (
+	MaintenanceScheduled      = "maintenance.scheduled"
+	MaintenanceStarted        = "maintenance.started"
+	MaintenanceEnded          = "maintenance.ended"
+	WorkflowRunStarted        = "workflow.run_started"
+	WorkflowRunSucceeded      = "workflow.run_succeeded"
+	WorkflowRunFailed         = "workflow.run_failed"
+	WorkflowRunCancelled      = "workflow.run_cancelled"
+	WorkflowApprovalRequested = "workflow.approval_requested"
+	WorkflowApprovalDecided   = "workflow.approval_decided"
+	WorkflowWebhook           = "workflow.webhook"
+	FindingCreated            = "finding.created"
+	FindingChanged            = "finding.changed"
+	FindingResolved           = "finding.resolved"
+	NotificationEscalated     = "notification.escalated"
+	NotificationAcknowledged  = "notification.acknowledged"
+	EntitlementChanged        = "entitlement.changed"
+	OrgExportCompleted        = "org.export_completed"
+	OrgDeletionRequested      = "org.deletion_requested"
+	OrgDeletionCancelled      = "org.deletion_cancelled"
+)
+
 // Phase3Types are the event types of phase 3 (EVT-03 [P3]); every one has a
 // producer case or a planned producer (TestEveryEVT02TypeHasAProducer).
 var Phase3Types = []string{
 	ProbeStateChanged, AlarmOpened, AlarmAcknowledged, AlarmEscalated, AlarmSeverityChanged, AlarmResolved, IncidentOpened, IncidentUpdated, IncidentResolved, CollectorGroupUnreachable, CollectorGroupReachable, CollectorGroupFailover, CollectorClockSkew, ProbeConfigChanged, CIConfigChanged, MonitoringSuspensionChanged, CapacityForecastExceeded, SLAViolated,
+	MaintenanceScheduled, MaintenanceStarted, MaintenanceEnded, WorkflowRunStarted, WorkflowRunSucceeded, WorkflowRunFailed, WorkflowRunCancelled, WorkflowApprovalRequested, WorkflowApprovalDecided, WorkflowWebhook, FindingCreated, FindingChanged, FindingResolved, NotificationEscalated, NotificationAcknowledged, EntitlementChanged, OrgExportCompleted, OrgDeletionRequested, OrgDeletionCancelled,
 }
 
 // Types lists the event types, in the order of the type enum of
@@ -107,34 +133,14 @@ var Types = []string{
 	ReservationCreated, ReservationReleased, ReservationExpired, ReservationConverted,
 	TicketUpdated, TicketSLABreached, MetamodelPublished, DocumentScanned, ImportCompleted,
 	ProbeStateChanged, AlarmOpened, AlarmAcknowledged, AlarmEscalated, AlarmSeverityChanged, AlarmResolved, IncidentOpened, IncidentUpdated, IncidentResolved, CollectorGroupUnreachable, CollectorGroupReachable, CollectorGroupFailover, CollectorClockSkew, ProbeConfigChanged, CIConfigChanged, MonitoringSuspensionChanged, CapacityForecastExceeded, SLAViolated,
+	MaintenanceScheduled, MaintenanceStarted, MaintenanceEnded, WorkflowRunStarted, WorkflowRunSucceeded, WorkflowRunFailed, WorkflowRunCancelled, WorkflowApprovalRequested, WorkflowApprovalDecided, WorkflowWebhook, FindingCreated, FindingChanged, FindingResolved, NotificationEscalated, NotificationAcknowledged, EntitlementChanged, OrgExportCompleted, OrgDeletionRequested, OrgDeletionCancelled,
 }
 
-// Reserved are the event types of phase 3 (EVT-03 [P3]); a trailing ".*"
-// reserves every type of the prefix. They are no event types yet: IsType,
-// and with it Outbox.Append and AppendMany, refuses them.
-var Reserved = []string{"maintenance.scheduled", "workflow.*", "finding.*"}
-
-// IsType reports whether t is a registered event type.
+// IsType reports whether t is a registered event type. The reservation of
+// phase 3 ended with WP-868: every type of phase 3 is registered.
 func IsType(t string) bool {
-	if IsReserved(t) {
-		return false
-	}
 	for _, known := range Types {
 		if known == t {
-			return true
-		}
-	}
-	return false
-}
-
-// IsReserved reports whether t is a reserved type of phase 3.
-func IsReserved(t string) bool {
-	for _, r := range Reserved {
-		if prefix, ok := strings.CutSuffix(r, "*"); ok {
-			if strings.HasPrefix(t, prefix) {
-				return true
-			}
-		} else if r == t {
 			return true
 		}
 	}
@@ -505,6 +511,91 @@ type SLAViolatedData struct {
 	ActualPercent float64 `json:"actual_percent"`
 }
 
+// MaintenanceWindowData is the data of the maintenance.* types (MGT-04): the
+// window, its scope and its time span.
+type MaintenanceWindowData struct {
+	ID       string `json:"id"`
+	ClientID string `json:"client_id,omitempty"`
+	SiteID   string `json:"site_id,omitempty"`
+	StartsAt string `json:"starts_at"`
+	EndsAt   string `json:"ends_at"`
+}
+
+// WorkflowRunData is the data of the workflow.run_* types (WFL-02): the run,
+// its workflow and the object of its trigger.
+type WorkflowRunData struct {
+	ID         string `json:"id"`
+	WorkflowID string `json:"workflow_id"`
+	CIID       string `json:"ci_id,omitempty"`
+	ClientID   string `json:"client_id,omitempty"`
+	SiteID     string `json:"site_id,omitempty"`
+	Status     string `json:"status"`
+}
+
+// WorkflowApprovalData is the data of the workflow.approval_* types (WFL-02,
+// WFL-04): one approval step of a run.
+type WorkflowApprovalData struct {
+	ID       string `json:"id"`
+	RunID    string `json:"run_id"`
+	StepKey  string `json:"step_key"`
+	Decision string `json:"decision,omitempty"`
+	ClientID string `json:"client_id,omitempty"`
+	SiteID   string `json:"site_id,omitempty"`
+}
+
+// WorkflowWebhookData is the data of workflow.webhook: the send_webhook
+// action of a run (WFL-02); the action adds its fields.
+type WorkflowWebhookData struct {
+	ID         string `json:"id"`
+	WorkflowID string `json:"workflow_id"`
+	CIID       string `json:"ci_id,omitempty"`
+	ClientID   string `json:"client_id,omitempty"`
+	SiteID     string `json:"site_id,omitempty"`
+}
+
+// FindingData is the data of the finding.* types (SEC-02): the finding of a
+// CI with its severity.
+type FindingData struct {
+	ID       string `json:"id"`
+	CIID     string `json:"ci_id,omitempty"`
+	ClientID string `json:"client_id,omitempty"`
+	SiteID   string `json:"site_id,omitempty"`
+	Severity string `json:"severity"`
+}
+
+// NotificationEscalationData is the data of the notification.* types
+// (NTF-02): one step of an escalation chain.
+type NotificationEscalationData struct {
+	ID         string `json:"id"`
+	AlarmID    string `json:"alarm_id,omitempty"`
+	IncidentID string `json:"incident_id,omitempty"`
+	ClientID   string `json:"client_id,omitempty"`
+	SiteID     string `json:"site_id,omitempty"`
+	Step       int    `json:"step"`
+}
+
+// EntitlementChangedData is the data of entitlement.changed (PKG-02): a
+// change of plan, add-on or quota of the organization.
+type EntitlementChangedData struct {
+	ID      string   `json:"id"`
+	Plan    string   `json:"plan"`
+	Changed []string `json:"changed"`
+}
+
+// OrgExportData is the data of org.export_completed (TLC-05): the full
+// export of the organization is ready for download.
+type OrgExportData struct {
+	ID        string `json:"id"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+// OrgDeletionData is the data of the org.deletion_* types (TLC-06): the
+// deletion request of the organization.
+type OrgDeletionData struct {
+	ID          string `json:"id"`
+	EffectiveAt string `json:"effective_at,omitempty"`
+}
+
 // Payloads assigns every phase 2 and phase 3 type the frame of its data.
 var Payloads = map[string]any{
 	CIStatusChanged:             CIStatusChangedData{},
@@ -546,4 +637,23 @@ var Payloads = map[string]any{
 	MonitoringSuspensionChanged: MonitoringSuspensionData{},
 	CapacityForecastExceeded:    CapacityForecastData{},
 	SLAViolated:                 SLAViolatedData{},
+	MaintenanceScheduled:        MaintenanceWindowData{},
+	MaintenanceStarted:          MaintenanceWindowData{},
+	MaintenanceEnded:            MaintenanceWindowData{},
+	WorkflowRunStarted:          WorkflowRunData{},
+	WorkflowRunSucceeded:        WorkflowRunData{},
+	WorkflowRunFailed:           WorkflowRunData{},
+	WorkflowRunCancelled:        WorkflowRunData{},
+	WorkflowApprovalRequested:   WorkflowApprovalData{},
+	WorkflowApprovalDecided:     WorkflowApprovalData{},
+	WorkflowWebhook:             WorkflowWebhookData{},
+	FindingCreated:              FindingData{},
+	FindingChanged:              FindingData{},
+	FindingResolved:             FindingData{},
+	NotificationEscalated:       NotificationEscalationData{},
+	NotificationAcknowledged:    NotificationEscalationData{},
+	EntitlementChanged:          EntitlementChangedData{},
+	OrgExportCompleted:          OrgExportData{},
+	OrgDeletionRequested:        OrgDeletionData{},
+	OrgDeletionCancelled:        OrgDeletionData{},
 }

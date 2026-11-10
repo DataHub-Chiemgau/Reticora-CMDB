@@ -988,9 +988,9 @@ type (both allow further fields).
   fields. Personal fields (`pii.IsPersonalKey`) carry a surrogate reference
   `{"$pii": "<id>"}` (WP-241). The envelope of a phase 2 type always names
   `entity_id` and `entity_seq`.
-- **Reserved (phase 3):** `maintenance.scheduled`, `workflow.*`, `finding.*`
-  (`events.Reserved`). They are no event types: the outbox refuses them and
-  webhooks cannot subscribe to them.
+- **Phase 3:** the reservation of `maintenance.scheduled`, `workflow.*` and
+  `finding.*` ended with WP-868; the types of phase 3 (`events.Phase3Types`)
+  are registered with their frames and listed below.
 
 | Type | `entity_id` | Origin | Producer |
 |---|---|---|---|
@@ -1010,14 +1010,16 @@ type (both allow further fields).
 | `document.scanned` | document | plan addition | WP-734 |
 | `import.completed` | import run | plan addition | WP-775 |
 
-Monitoring types of phase 3 (EVT-03 [P3], ALR-02, PRB-03, ALR-07; WP-867,
-E-161 Option 2): one event per state change, never one per probe result
+Types of phase 3 (EVT-03 [P3]; monitoring of ALR-02, PRB-03 and ALR-07 with
+WP-867, the modules with WP-868; E-161 Option 2): one event per state change, never one per probe result
 (30.5 million results a day would exceed the outbox retention of EVT-01).
 They are registered with their frame (`events.Phase3Types`); until its
 producer is merged a type stands in `plannedProducers` of
 `backend/internal/server/evt02_producers_integration_test.go`, never in
 both lists, and the list is empty before WP-1177. Bound subscriptions read
-them with `monitoring:read`, `ci.config_changed` too (not `ci:read`);
+the monitoring with `monitoring:read`, `ci.config_changed` too (not
+`ci:read`), the module types with the read permission of their route
+(`maintenance:read`, `workflow:read`, `finding:read`, `escalation:manage`);
 `monitoring.suspension_changed` reaches org-wide subscriptions only.
 
 | Type | `entity_id` | Origin | Producer |
@@ -1035,6 +1037,16 @@ them with `monitoring:read`, `ci.config_changed` too (not `ci:read`);
 | `monitoring.suspension_changed` | organization | PKG-06 | WP-942 |
 | `capacity.forecast_exceeded` | forecast | ALR-08 | WP-1060 |
 | `sla.violated` | availability target | ALR-06 | WP-1049 |
+| `maintenance.scheduled` | maintenance window | MGT-04 | WP-1034 |
+| `maintenance.started`, `maintenance.ended` | maintenance window | MGT-04 | WP-1033 |
+| `workflow.run_started`, `workflow.run_succeeded`, `workflow.run_failed`, `workflow.run_cancelled` | workflow run | WFL-02 | WP-1092 |
+| `workflow.approval_requested`, `workflow.approval_decided` | approval | WFL-04 | WP-1098 |
+| `workflow.webhook` | workflow run | WFL-02 | WP-1096 |
+| `finding.created`, `finding.changed`, `finding.resolved` | finding | SEC-02 | WP-1116 |
+| `notification.escalated`, `notification.acknowledged` | notification escalation | NTF-02 | WP-1146 |
+| `entitlement.changed` | organization (org-wide subscriptions only, `entitlement:read`) | PKG-02 | WP-882 |
+| `org.export_completed` | export (org-wide only, `org:export`) | TLC-05 | WP-1151 |
+| `org.deletion_requested`, `org.deletion_cancelled` | deletion request (org-wide only, `org:export`) | TLC-06 | WP-1152 |
 
 **`ci.status_changed`** (WP-707): an update of a CI
 (`ci.PGRepository.Update`, e.g. `PATCH /api/v1/cis/{id}` and the bulk status

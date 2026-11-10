@@ -251,8 +251,8 @@ var deprecatedEvents = []string{
 
 // ValidEvents are the subscribable events, derived from the register
 // (WP-246): events.Types without the unsubscribable types, the former
-// names of legacyNames and deprecatedEvents. webhook.test (TestEvent) and
-// the reserved types of phase 3 are not subscribable.
+// names of legacyNames and deprecatedEvents. webhook.test (TestEvent) is not
+// subscribable.
 var ValidEvents = validEvents()
 
 func validEvents() map[string]bool {

@@ -52,7 +52,7 @@ func TestEnvelopeMatchesSchema(t *testing.T) {
 	}
 	env := Envelope{OrgID: "o-1", Type: CIChanged}
 	if env.Subject() != "events.o-1.ci.changed" || IsType("ci.updated") || !IsType(JobFailed) || !IsType(StockMovement) ||
-		IsType("maintenance.scheduled") {
+		!IsType(MaintenanceScheduled) || IsType("maintenance.window_changed") {
 		t.Error("subject or types")
 	}
 }

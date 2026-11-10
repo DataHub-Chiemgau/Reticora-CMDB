@@ -141,6 +141,26 @@ func TestEventScopeResolution(t *testing.T) {
 		{"capacity.forecast_exceeded", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
 		{"sla.violated", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
 		{"monitoring.suspension_changed", `{"id":"o","feature_key":"monitoring_network"}`, result{objects: shared}},
+		// Modules of phase 3 (WP-868).
+		{"maintenance.scheduled", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"maintenance.started", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"maintenance.ended", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"workflow.run_started", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"workflow.run_succeeded", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"workflow.run_failed", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"workflow.run_cancelled", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"workflow.approval_requested", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"workflow.approval_decided", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"workflow.webhook", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"finding.created", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"finding.changed", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"finding.resolved", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"notification.escalated", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"notification.acknowledged", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"entitlement.changed", `{"id":"o"}`, result{objects: shared}},
+		{"org.export_completed", `{"id":"o"}`, result{objects: shared}},
+		{"org.deletion_requested", `{"id":"o"}`, result{objects: shared}},
+		{"org.deletion_cancelled", `{"id":"o"}`, result{objects: shared}},
 		// Payloads that are no JSON object.
 		{"ci.created", `["` + ci1 + `"]`, unknown},
 		{"ci_type.created", `null`, unknown},
@@ -386,7 +406,8 @@ func TestP2EventsReachBoundSubscriptionsInScope(t *testing.T) {
 	objects := fakeResolver{ci1: {ClientID: "c1"}, ci2: {ClientID: "c2"}, asset1: {ClientID: "c1"}, asset2: {ClientID: "c2"},
 		item1: {ClientID: "c1", SiteID: "s1"}, item2: {ClientID: "c2", SiteID: "s2"}}
 	access := fakeAccess{}
-	for _, p := range []string{"ci:read", "asset:read", "stock:read", "contract:read", "ticket:read", "document:read", "import:run", "reservation:read", "monitoring:read"} {
+	for _, p := range []string{"ci:read", "asset:read", "stock:read", "contract:read", "ticket:read", "document:read", "import:run", "reservation:read", "monitoring:read",
+		"maintenance:read", "workflow:read", "finding:read", "escalation:manage", "entitlement:read", "org:export"} {
 		access["sa-c1|"+p+"|c1"], access["sa-c1|"+p+"|"] = true, true
 	}
 	byClient := func(client string) map[string]map[string]any {
@@ -418,7 +439,8 @@ func TestP2EventsReachBoundSubscriptionsInScope(t *testing.T) {
 		}
 	}
 	organizational := map[string]bool{"metamodel.published": true, "document.scanned": true, "import.completed": true,
-		"monitoring.suspension_changed": true}
+		"monitoring.suspension_changed": true, "entitlement.changed": true, "org.export_completed": true,
+		"org.deletion_requested": true, "org.deletion_cancelled": true}
 	// The monitoring types of phase 3 (WP-867) carry the client of their
 	// object, the CI types also name it as ci_id.
 	withMonitoring := byClient
@@ -476,8 +498,8 @@ func TestMonitoringEventScopes(t *testing.T) {
 		if _, ok := scopeRules[typ]; !ok {
 			t.Errorf("%s has no scope rule", typ)
 		}
-		if got := EventReadPermission(typ); got != "monitoring:read" {
-			t.Errorf("EventReadPermission(%s) = %q, want monitoring:read", typ, got)
+		if EventReadPermission(typ) == "" {
+			t.Errorf("EventReadPermission(%s) is empty", typ)
 		}
 	}
 	for _, c := range []struct {
@@ -498,5 +520,22 @@ func TestMonitoringEventScopes(t *testing.T) {
 	}
 	if got := EventReadPermission(events.CIConfigChanged); got == "ci:read" {
 		t.Error("ci.config_changed must not be readable with ci:read")
+	}
+}
+
+// TestOrganizationEventsReachOrgWideSubscriptionsOnly covers WP-868 (RBA-08):
+// entitlement.changed and org.deletion_requested concern the whole
+// organization; a client-bound subscription does not receive them, an
+// org-wide one of an account with the read permission does.
+func TestOrganizationEventsReachOrgWideSubscriptionsOnly(t *testing.T) {
+	for typ, perm := range map[string]string{events.EntitlementChanged: "entitlement:read", events.OrgDeletionRequested: "org:export"} {
+		access := fakeAccess{"sa|" + perm + "|": true, "sa|" + perm + "|c1": true, "sa|" + perm + "|*": true}
+		got := deliverOnce(t, []Subscription{
+			{Name: "orgwide", Events: []string{typ}, ServiceAccountID: "sa"},
+			{Name: "client1", Events: []string{typ}, ServiceAccountID: "sa", Scope: &Scope{Clients: []string{"c1"}}},
+		}, DispatcherOptions{Access: access, Objects: fakeResolver{}}, nil, typ, map[string]any{"id": "o"})
+		if len(got["orgwide"]) != 1 || len(got["client1"]) != 0 {
+			t.Errorf("%s: delivered %v, want the org-wide subscription only", typ, got)
+		}
 	}
 }

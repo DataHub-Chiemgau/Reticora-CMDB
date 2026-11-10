@@ -162,6 +162,11 @@ func EventReadPermission(event string) string {
 	case events.StockBelowMinimum:
 		// A quantity item, read on the route consumables.
 		return "stock:read"
+	case events.EntitlementChanged:
+		// A change of plan or add-on reads like GET /api/v1/entitlements
+		// (WP-868); entitlement.warning and entitlement.expired notify the
+		// org_admins only and keep no read permission.
+		return "entitlement:read"
 	case events.CIConfigChanged, events.CollectorClockSkew:
 		// The configuration of a device and the clock of a collector are
 		// monitoring data (ALR-07, WP-867), not ci:read or discovery data.
@@ -192,6 +197,18 @@ func EventReadPermission(event string) string {
 	case "import":
 		// The read right of the route imports (WP-301).
 		return "import:run"
+	case "maintenance":
+		return "maintenance:read"
+	case "workflow":
+		return "workflow:read"
+	case "finding":
+		return "finding:read"
+	case "notification":
+		// Escalation chains (NTF-02, WP-868).
+		return "escalation:manage"
+	case "org":
+		// Full export and deletion of the organization (TLC-05, TLC-06).
+		return "org:export"
 	case "probe", "alarm", "incident", "collector_group", "config", "capacity", "sla", "monitoring":
 		// The monitoring of phase 3 reads like GET /api/v1/monitoring/*
 		// (WP-867, E-161).

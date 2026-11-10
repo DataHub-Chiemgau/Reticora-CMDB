@@ -1615,3 +1615,6 @@ EVT-03;[P2–P3];G3;backend/internal/events/types_test.go;WP-867
 NTF-05;[B], Zusätze [P2], [P3];G3;backend/internal/webhook/scope_test.go;WP-867
 MON-04;[P3];G3;backend/internal/webhook/scope_test.go;WP-867
 ALR-02;[P3];G3;backend/internal/events/types_test.go;WP-867
+EVT-03;[P2–P3];G3;backend/internal/events/types_test.go;WP-868
+NTF-05;[B], Zusätze [P2], [P3];G3;backend/internal/webhook/scope_test.go;WP-868
+MGT-04;[P3];G3;backend/internal/events/types_test.go;WP-868

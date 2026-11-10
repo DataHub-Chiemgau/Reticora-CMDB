@@ -74,7 +74,26 @@
         "ci.config_changed",
         "monitoring.suspension_changed",
         "capacity.forecast_exceeded",
-        "sla.violated"
+        "sla.violated",
+        "maintenance.scheduled",
+        "maintenance.started",
+        "maintenance.ended",
+        "workflow.run_started",
+        "workflow.run_succeeded",
+        "workflow.run_failed",
+        "workflow.run_cancelled",
+        "workflow.approval_requested",
+        "workflow.approval_decided",
+        "workflow.webhook",
+        "finding.created",
+        "finding.changed",
+        "finding.resolved",
+        "notification.escalated",
+        "notification.acknowledged",
+        "entitlement.changed",
+        "org.export_completed",
+        "org.deletion_requested",
+        "org.deletion_cancelled"
       ]
     },
     "org_id": {
@@ -808,6 +827,348 @@
         "properties": {
           "data": {
             "$ref": "#/$defs/sla.violated"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "maintenance.scheduled"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/maintenance.scheduled"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "maintenance.started"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/maintenance.started"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "maintenance.ended"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/maintenance.ended"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "workflow.run_started"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/workflow.run_started"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "workflow.run_succeeded"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/workflow.run_succeeded"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "workflow.run_failed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/workflow.run_failed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "workflow.run_cancelled"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/workflow.run_cancelled"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "workflow.approval_requested"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/workflow.approval_requested"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "workflow.approval_decided"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/workflow.approval_decided"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "workflow.webhook"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/workflow.webhook"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "finding.created"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/finding.created"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "finding.changed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/finding.changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "finding.resolved"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/finding.resolved"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "notification.escalated"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/notification.escalated"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "notification.acknowledged"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/notification.acknowledged"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "entitlement.changed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/entitlement.changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "org.export_completed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/org.export_completed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "org.deletion_requested"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/org.deletion_requested"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "org.deletion_cancelled"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/org.deletion_cancelled"
           }
         }
       }
@@ -2884,6 +3245,786 @@
           "period": "2026-11",
           "target_percent": 99.5,
           "actual_percent": 99.5
+        }
+      ]
+    },
+    "maintenance.scheduled": {
+      "description": "Data of maintenance.scheduled. entity_id: the maintenance window. Origin: EVT-03 [P3], MGT-04. Producer: WP-1034. the window, its scope and its time span.",
+      "type": "object",
+      "required": ["id", "starts_at", "ends_at"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The maintenance window."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "starts_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Start of the window."
+        },
+        "ends_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "End of the window."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "starts_at": "2026-12-01T22:00:00Z",
+          "ends_at": "2026-12-01T22:00:00Z"
+        }
+      ]
+    },
+    "maintenance.started": {
+      "description": "Data of maintenance.started. entity_id: the maintenance window. Origin: EVT-03 [P3], MGT-04. Producer: WP-1033. the window, its scope and its time span.",
+      "type": "object",
+      "required": ["id", "starts_at", "ends_at"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The maintenance window."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "starts_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Start of the window."
+        },
+        "ends_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "End of the window."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "starts_at": "2026-12-01T22:00:00Z",
+          "ends_at": "2026-12-01T22:00:00Z"
+        }
+      ]
+    },
+    "maintenance.ended": {
+      "description": "Data of maintenance.ended. entity_id: the maintenance window. Origin: EVT-03 [P3], MGT-04. Producer: WP-1033. the window, its scope and its time span.",
+      "type": "object",
+      "required": ["id", "starts_at", "ends_at"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The maintenance window."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "starts_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Start of the window."
+        },
+        "ends_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "End of the window."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "starts_at": "2026-12-01T22:00:00Z",
+          "ends_at": "2026-12-01T22:00:00Z"
+        }
+      ]
+    },
+    "workflow.run_started": {
+      "description": "Data of workflow.run_started. entity_id: the workflow run. Origin: EVT-03 [P3], WFL-02. Producer: WP-1092. the run, its workflow and the object of its trigger.",
+      "type": "object",
+      "required": ["id", "workflow_id", "status"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The workflow run."
+        },
+        "workflow_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The workflow definition."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object concerns; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["running", "succeeded", "failed", "cancelled"],
+          "description": "Status of the run."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "workflow_id": "55555555-5555-4555-8555-555555555555",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "status": "running"
+        }
+      ]
+    },
+    "workflow.run_succeeded": {
+      "description": "Data of workflow.run_succeeded. entity_id: the workflow run. Origin: EVT-03 [P3], WFL-02. Producer: WP-1092. the run, its workflow and the object of its trigger.",
+      "type": "object",
+      "required": ["id", "workflow_id", "status"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The workflow run."
+        },
+        "workflow_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The workflow definition."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object concerns; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["running", "succeeded", "failed", "cancelled"],
+          "description": "Status of the run."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "workflow_id": "55555555-5555-4555-8555-555555555555",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "status": "running"
+        }
+      ]
+    },
+    "workflow.run_failed": {
+      "description": "Data of workflow.run_failed. entity_id: the workflow run. Origin: EVT-03 [P3], WFL-02. Producer: WP-1092. the run, its workflow and the object of its trigger.",
+      "type": "object",
+      "required": ["id", "workflow_id", "status"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The workflow run."
+        },
+        "workflow_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The workflow definition."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object concerns; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["running", "succeeded", "failed", "cancelled"],
+          "description": "Status of the run."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "workflow_id": "55555555-5555-4555-8555-555555555555",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "status": "running"
+        }
+      ]
+    },
+    "workflow.run_cancelled": {
+      "description": "Data of workflow.run_cancelled. entity_id: the workflow run. Origin: EVT-03 [P3], WFL-02. Producer: WP-1092. the run, its workflow and the object of its trigger.",
+      "type": "object",
+      "required": ["id", "workflow_id", "status"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The workflow run."
+        },
+        "workflow_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The workflow definition."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object concerns; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["running", "succeeded", "failed", "cancelled"],
+          "description": "Status of the run."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "workflow_id": "55555555-5555-4555-8555-555555555555",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "status": "running"
+        }
+      ]
+    },
+    "workflow.approval_requested": {
+      "description": "Data of workflow.approval_requested. entity_id: the approval. Origin: EVT-03 [P3], WFL-04. Producer: WP-1098. one approval step of a run.",
+      "type": "object",
+      "required": ["id", "run_id", "step_key"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The approval."
+        },
+        "run_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The workflow run."
+        },
+        "step_key": {
+          "type": "string",
+          "description": "The step of the workflow definition."
+        },
+        "decision": {
+          "type": "string",
+          "enum": ["approved", "rejected"],
+          "description": "The decision; absent while requested."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "run_id": "55555555-5555-4555-8555-555555555555",
+          "step_key": "approve_handover",
+          "decision": "approved",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444"
+        }
+      ]
+    },
+    "workflow.approval_decided": {
+      "description": "Data of workflow.approval_decided. entity_id: the approval. Origin: EVT-03 [P3], WFL-04. Producer: WP-1098. one approval step of a run.",
+      "type": "object",
+      "required": ["id", "run_id", "step_key"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The approval."
+        },
+        "run_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The workflow run."
+        },
+        "step_key": {
+          "type": "string",
+          "description": "The step of the workflow definition."
+        },
+        "decision": {
+          "type": "string",
+          "enum": ["approved", "rejected"],
+          "description": "The decision; absent while requested."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "run_id": "55555555-5555-4555-8555-555555555555",
+          "step_key": "approve_handover",
+          "decision": "approved",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444"
+        }
+      ]
+    },
+    "workflow.webhook": {
+      "description": "Data of workflow.webhook. entity_id: the workflow run. Origin: EVT-03 [P3], WFL-02. Producer: WP-1096. the send_webhook action of a run (WFL-02); the action adds its fields.",
+      "type": "object",
+      "required": ["id", "workflow_id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The workflow run."
+        },
+        "workflow_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The workflow definition."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object concerns; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "workflow_id": "55555555-5555-4555-8555-555555555555",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444"
+        }
+      ]
+    },
+    "finding.created": {
+      "description": "Data of finding.created. entity_id: the finding. Origin: EVT-03 [P3], SEC-02. Producer: WP-1116. the finding of a CI with its severity.",
+      "type": "object",
+      "required": ["id", "severity"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The finding."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object concerns; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "critical"],
+          "description": "Severity of the finding."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "severity": "low"
+        }
+      ]
+    },
+    "finding.changed": {
+      "description": "Data of finding.changed. entity_id: the finding. Origin: EVT-03 [P3], SEC-02. Producer: WP-1116. the finding of a CI with its severity.",
+      "type": "object",
+      "required": ["id", "severity"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The finding."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object concerns; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "critical"],
+          "description": "Severity of the finding."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "severity": "low"
+        }
+      ]
+    },
+    "finding.resolved": {
+      "description": "Data of finding.resolved. entity_id: the finding. Origin: EVT-03 [P3], SEC-02. Producer: WP-1116. the finding of a CI with its severity.",
+      "type": "object",
+      "required": ["id", "severity"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The finding."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object concerns; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "critical"],
+          "description": "Severity of the finding."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "severity": "low"
+        }
+      ]
+    },
+    "notification.escalated": {
+      "description": "Data of notification.escalated. entity_id: the notification escalation. Origin: EVT-03 [P3], NTF-02. Producer: WP-1146. one step of an escalation chain.",
+      "type": "object",
+      "required": ["id", "step"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The notification escalation."
+        },
+        "alarm_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The alarm that is escalated."
+        },
+        "incident_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident that is escalated."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "step": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The step of the escalation policy."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "alarm_id": "55555555-5555-4555-8555-555555555555",
+          "incident_id": "55555555-5555-4555-8555-555555555555",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "step": 1
+        }
+      ]
+    },
+    "notification.acknowledged": {
+      "description": "Data of notification.acknowledged. entity_id: the notification escalation. Origin: EVT-03 [P3], NTF-02. Producer: WP-1146. one step of an escalation chain.",
+      "type": "object",
+      "required": ["id", "step"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The notification escalation."
+        },
+        "alarm_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The alarm that is escalated."
+        },
+        "incident_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident that is escalated."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "step": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The step of the escalation policy."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "alarm_id": "55555555-5555-4555-8555-555555555555",
+          "incident_id": "55555555-5555-4555-8555-555555555555",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "step": 1
+        }
+      ]
+    },
+    "entitlement.changed": {
+      "description": "Data of entitlement.changed. entity_id: the organization. Origin: EVT-03 [P3], PKG-02. Producer: WP-882. a change of plan, add-on or quota of the organization.",
+      "type": "object",
+      "required": ["id", "plan", "changed"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The organization."
+        },
+        "plan": {
+          "type": "string",
+          "enum": ["essential", "standard", "pro", "enterprise"],
+          "description": "The plan after the change."
+        },
+        "changed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The feature keys and quotas that changed."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "plan": "essential",
+          "changed": ["monitoring_network"]
+        }
+      ]
+    },
+    "org.export_completed": {
+      "description": "Data of org.export_completed. entity_id: the export. Origin: EVT-03 [P3], TLC-05. Producer: WP-1151. the full export of the organization is ready for download.",
+      "type": "object",
+      "required": ["id", "expires_at"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The export."
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "End of the download period (24 h)."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "expires_at": "2026-12-01T22:00:00Z"
+        }
+      ]
+    },
+    "org.deletion_requested": {
+      "description": "Data of org.deletion_requested. entity_id: the deletion request. Origin: EVT-03 [P3], TLC-06. Producer: WP-1152. the deletion request of the organization.",
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The deletion request."
+        },
+        "effective_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the hard delete runs (after the 30-day grace period); absent when cancelled."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "effective_at": "2026-12-01T22:00:00Z"
+        }
+      ]
+    },
+    "org.deletion_cancelled": {
+      "description": "Data of org.deletion_cancelled. entity_id: the deletion request. Origin: EVT-03 [P3], TLC-06. Producer: WP-1152. the deletion request of the organization.",
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The deletion request."
+        },
+        "effective_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the hard delete runs (after the 30-day grace period); absent when cancelled."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "effective_at": "2026-12-01T22:00:00Z"
         }
       ]
     }
