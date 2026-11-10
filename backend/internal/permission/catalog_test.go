@@ -170,3 +170,46 @@ func TestSQLCatalogueEqualsGoCatalogue(t *testing.T) {
 		t.Errorf("SQL catalogue differs from the Go catalogue:\n sql %s\n go  %s", got, want)
 	}
 }
+
+// p3Keys are the action keys of phase 3 (RBA-05, E-161, WP-866) and the
+// module keys finding:* that replace security:*.
+var p3Keys = []string{
+	"finding:read", "finding:write", "alert:acknowledge", "workflow:approve", "admp:read",
+	"escalation:manage", "org:export", "org:delete",
+}
+
+// TestCatalogueHoldsTheP3Keys covers WP-866 (RBA-05, E-161): the Go
+// catalogue and the identity vocabulary hold the phase-3 keys; security:*
+// is gone without an alias; workflow:approve, escalation:manage, org:export
+// and org:delete belong to org_admin only among the standard roles.
+func TestCatalogueHoldsTheP3Keys(t *testing.T) {
+	catalogue := catalogueKeys()
+	identityKeys := map[string]bool{}
+	for _, p := range identity.AllPermissions() {
+		identityKeys[string(p)] = true
+	}
+	for _, k := range p3Keys {
+		if !slices.Contains(catalogue, k) {
+			t.Errorf("phase-3 key %s missing from the catalogue", k)
+		}
+		if !identityKeys[k] {
+			t.Errorf("phase-3 key %s missing from identity.AllPermissions", k)
+		}
+	}
+	for _, k := range []string{"security:read", "security:write"} {
+		if slices.Contains(catalogue, k) || identityKeys[k] {
+			t.Errorf("the replaced key %s is still known", k)
+		}
+	}
+	for _, role := range []string{"engineer", "viewer", "client_technician"} {
+		keys, _ := permission.StandardRolePermissions(role)
+		for _, k := range []string{"workflow:approve", "escalation:manage", "org:export", "org:delete"} {
+			if slices.Contains(keys, k) {
+				t.Errorf("%s holds %s, only org_admin may", role, k)
+			}
+		}
+	}
+	if keys, _ := permission.StandardRolePermissions("org_admin"); !slices.Contains(keys, "workflow:approve") {
+		t.Error("org_admin lacks workflow:approve")
+	}
+}

@@ -2,6 +2,7 @@ package permission_test
 
 import (
 	"context"
+	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -52,6 +53,20 @@ var p2 = []struct {
 	{[]string{"ticket:write", "stocktake:write"}, "✓", "✓", "–", "C"},
 }
 
+// p3 are the phase-3 rows of the matrix (RBA-05, E-161, WP-866): finding:*
+// replaces security:*; alert:acknowledge for engineer and the client
+// technician, admp:read for engineer; the administrative keys stay with
+// org_admin.
+var p3 = []struct {
+	keys                                    []string
+	orgAdmin, engineer, viewer, clientTechn string
+}{
+	{[]string{"finding:read"}, "✓", "✓", "✓", "–"},
+	{[]string{"finding:write", "admp:read"}, "✓", "✓", "–", "–"},
+	{[]string{"alert:acknowledge"}, "✓", "✓", "–", "C"},
+	{[]string{"workflow:approve", "escalation:manage", "org:export", "org:delete"}, "✓", "–", "–", "–"},
+}
+
 // rba06 are the special rights of RBA-06 per standard role (E-106).
 var rba06 = []struct {
 	keys                                    []string
@@ -68,6 +83,7 @@ var retiredKeys = []string{
 	"asset:assign", "ci_type:manage", "credential:decrypt", "credential:write",
 	"permission:write", "role:write", "user:write", "webhook:write",
 	"asset:reserve", "consumable:read", "consumable:write", "inventory:manage",
+	"security:read", "security:write",
 }
 
 // TestStandardRolesMatchTheRoleMatrix covers WP-046 (RBA-02) and WP-245
@@ -142,7 +158,7 @@ func TestStandardRolesMatchTheRoleMatrix(t *testing.T) {
 			keys                                    []string
 			orgAdmin, engineer, viewer, clientTechn string
 		}
-	}{{"RBA-02", rba02}, {"P2 (E-106)", p2}, {"RBA-06 (E-106)", rba06}} {
+	}{{"RBA-02", rba02}, {"P2 (E-106)", p2}, {"P3 (E-161)", p3}, {"RBA-06 (E-106)", rba06}} {
 		for _, row := range table.rows {
 			for _, key := range row.keys {
 				if !slices.Contains(catalogue, key) {
@@ -225,4 +241,88 @@ func TestStandardRolesMatchTheRoleMatrix(t *testing.T) {
 	if !access.Scope.OrgWide() || len(access.Permissions) != len(seeded["viewer"]) {
 		t.Errorf("viewer role grant: %d permissions (org-wide %v), want %d", len(access.Permissions), access.Scope.OrgWide(), len(seeded["viewer"]))
 	}
+}
+
+// TestMigration285TranslatesSecurityToFinding covers WP-866 (RBA-05, E-161):
+// migration 000285 runs down and up inside a rolled-back transaction; a
+// custom role and an API key holding security:write hold finding:write after
+// up and security:write again after down, and the standard roles of an
+// organization created before the migration follow the matrix of E-161.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestMigration285TranslatesSecurityToFinding(t *testing.T) {
+	f := scopetest.Seed(t, "56")
+	bg := context.Background()
+	up, err := os.ReadFile("../../migrations/000285_permissions_p3.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	down, err := os.ReadFile("../../migrations/000285_permissions_p3.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := f.Admin.Begin(bg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(bg) }()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, execErr := tx.Exec(bg, sql, args...); execErr != nil {
+			t.Fatalf("%.60s: %v", sql, execErr)
+		}
+	}
+	exec(string(down))
+	// State before 000285: an organization, a custom role and an API key.
+	org := f.ID()
+	exec(`INSERT INTO organization (id, name, slug, plan) VALUES ($1, 'mig285', 'mig285', 'pro')`, org)
+	exec(`SELECT seed_standard_roles($1)`, org)
+	customRole := f.ID()
+	exec(`INSERT INTO custom_role (id, organization_id, name, permissions) VALUES ($1, $2, 'auditor', '["ci:read", "security:write"]'::jsonb)`, customRole, org)
+	keyID := f.ID()
+	exec(`INSERT INTO api_key (id, organization_id, name, key_hash, key_prefix, created_by, permissions)
+		VALUES ($1, $2, 'mig285', 'hash-mig285', 'mig285', $3, ARRAY['security:read', 'ci:read'])`, keyID, org, f.ID())
+
+	keys := func() (custom, apiKey []string) {
+		t.Helper()
+		if scanErr := tx.QueryRow(bg, `SELECT ARRAY(SELECT jsonb_array_elements_text(permissions) ORDER BY 1) FROM custom_role WHERE id = $1`, customRole).Scan(&custom); scanErr != nil {
+			t.Fatal(scanErr)
+		}
+		if scanErr := tx.QueryRow(bg, `SELECT permissions FROM api_key WHERE id = $1`, keyID).Scan(&apiKey); scanErr != nil {
+			t.Fatal(scanErr)
+		}
+		return custom, apiKey
+	}
+	exec(string(up))
+	custom, apiKey := keys()
+	if !slices.Equal(custom, []string{"ci:read", "finding:write"}) || !slices.Equal(apiKey, []string{"ci:read", "finding:read"}) {
+		t.Errorf("after up: custom role %v, API key %v", custom, apiKey)
+	}
+	roleKeys := func(name string) []string {
+		t.Helper()
+		var out []string
+		if scanErr := tx.QueryRow(bg, `SELECT ARRAY(SELECT DISTINCT k FROM (
+				SELECT rp.permission_key AS k FROM role_permission rp WHERE rp.role_id = ro.id
+				UNION SELECT jsonb_array_elements_text(ro.permissions)) x ORDER BY 1)
+			FROM role ro WHERE ro.organization_id = $1 AND ro.name = $2`, org, name).Scan(&out); scanErr != nil {
+			t.Fatal(scanErr)
+		}
+		return out
+	}
+	for _, role := range permission.StandardRoles {
+		if role.Permissions == nil {
+			continue
+		}
+		want := append([]string(nil), role.Permissions...)
+		sort.Strings(want)
+		if got := roleKeys(role.Name); !slices.Equal(got, want) {
+			t.Errorf("%s after up:\n got  %v\n want %v", role.Name, got, want)
+		}
+	}
+	exec(string(down))
+	custom, apiKey = keys()
+	if !slices.Equal(custom, []string{"ci:read", "security:write"}) || !slices.Equal(apiKey, []string{"ci:read", "security:read"}) {
+		t.Errorf("after down: custom role %v, API key %v", custom, apiKey)
+	}
+	exec(string(up))
 }

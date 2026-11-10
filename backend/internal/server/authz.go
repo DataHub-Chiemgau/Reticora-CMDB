@@ -111,8 +111,20 @@ var readPermissionFor = map[string]identity.Permission{
 	"workflows":               identity.PermWorkflowRead,
 	"workflow-runs":           identity.PermWorkflowRead,
 	"compliance":              identity.PermComplianceRead,
-	"security":                identity.PermSecurityRead,
-	"monitoring":              identity.PermMonitoringRead,
+	"security":                identity.PermFindingRead,
+	// Phase 3 (WP-866, E-160, E-161): IPAM/ASN and ADMP. The writes of ipam
+	// follow the suffix convention (ipam:write); the ADMP accounts get
+	// admp:manage with WP-925.
+	"ipam":                     identity.PermIPAMRead,
+	"ipam-sections":            identity.PermIPAMRead,
+	"asns":                     identity.PermIPAMRead,
+	"asn-ranges":               identity.PermIPAMRead,
+	"bgp-peerings":             identity.PermIPAMRead,
+	"nat-translations":         identity.PermIPAMRead,
+	"admp":                     identity.PermADMPRead,
+	"escalation-policies":      identity.PermEscalationManage,
+	"notification-escalations": identity.PermEscalationManage,
+	"monitoring":               identity.PermMonitoringRead,
 	// Privacy/DSGVO acts on other people's personal data; even the read-side
 	// retention policy requires the manage permission.
 	"privacy": identity.PermUserManage,
@@ -195,8 +207,15 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"modules":        identity.PermEntitlementManage, // no write route: RETICORA_MODULES sets them (WP-214)
 	"webhooks":       identity.PermWebhookManage,
 	"credentials":    identity.PermCredentialManage,
-	"export":         identity.PermExportRun,
-	"search":         identity.PermSearchWrite,
+	// The only write below /admp is the account management of WP-925 with
+	// admp:manage (WP-870); until then no write route exists and writes
+	// need the org_admin key entitlement:manage (fail-closed).
+	"admp": identity.PermEntitlementManage,
+	// Escalation chains are read and written with one key (NTF-02, E-161).
+	"escalation-policies":      identity.PermEscalationManage,
+	"notification-escalations": identity.PermEscalationManage,
+	"export":                   identity.PermExportRun,
+	"search":                   identity.PermSearchWrite,
 	// Audit integrity verification is a read-side operation; the audit trail
 	// itself is append-only and written by the system, not the API.
 	"audit":     identity.PermAuditRead,
@@ -270,6 +289,12 @@ type routeRule struct {
 
 // routeRules are checked in order; the first match wins.
 var routeRules = []routeRule{
+	// Acknowledging alarms, incidents and notification escalations is its
+	// own right (RBA-05, E-161, WP-866).
+	{http.MethodPost, "monitoring/alarms/*/ack", identity.PermAlertAcknowledge},
+	{http.MethodPost, "monitoring/alarms/*/unack", identity.PermAlertAcknowledge},
+	{http.MethodPost, "monitoring/incidents/*/ack", identity.PermAlertAcknowledge},
+	{http.MethodPost, "notification-escalations/*/acknowledge", identity.PermAlertAcknowledge},
 	// Deleting a CI is its own right; ci:write does not delete. Restoring
 	// undoes a deletion and needs the same right (CI-05).
 	{http.MethodDelete, "cis/*", identity.PermCIDelete},

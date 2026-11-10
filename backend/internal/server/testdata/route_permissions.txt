@@ -287,9 +287,9 @@ GET /api/v1/saved-views saved_view:read
 GET /api/v1/saved-views/presets saved_view:read
 GET /api/v1/saved-views/{id} saved_view:read
 GET /api/v1/search search:read
-GET /api/v1/security/findings security:read
-GET /api/v1/security/findings/summary security:read
-GET /api/v1/security/findings/{id} security:read
+GET /api/v1/security/findings finding:read
+GET /api/v1/security/findings/summary finding:read
+GET /api/v1/security/findings/{id} finding:read
 GET /api/v1/service-accounts user:read
 GET /api/v1/service-accounts/{id} user:read
 GET /api/v1/signup/challenge public
@@ -399,7 +399,7 @@ PATCH /api/v1/roles/{id} role:manage
 PATCH /api/v1/rooms/{id} location:write
 PATCH /api/v1/rules/{id} citype:manage
 PATCH /api/v1/saved-views/{id} saved_view:write
-PATCH /api/v1/security/findings/{id} security:write
+PATCH /api/v1/security/findings/{id} finding:write
 PATCH /api/v1/service-accounts/{id} user:manage
 PATCH /api/v1/sites/{id} location:write
 PATCH /api/v1/slas/{id} sla:write
@@ -570,7 +570,7 @@ POST /api/v1/rules citype:manage
 POST /api/v1/saved-views saved_view:write
 POST /api/v1/search/query search:read
 POST /api/v1/search/reindex search:write
-POST /api/v1/security/findings security:write
+POST /api/v1/security/findings finding:write
 POST /api/v1/service-accounts user:manage
 POST /api/v1/signup public
 POST /api/v1/signup/verify public
