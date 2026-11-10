@@ -47,6 +47,19 @@ const (
 // default of an empty RETICORA_MODULES.
 const PhaseP2 = "P2"
 
+// PhaseP3 is the phase value of RETICORA_MODULES that switches on every
+// module with phase P2 or P3 (release G3, WP-863); the empty value stays G2
+// until WP-1166.
+const PhaseP3 = "P3"
+
+// ModuleMonitoring is the monitoring module of phase 3 (E-160); it replaces
+// the module alerting of phase 1.
+const ModuleMonitoring = "monitoring"
+
+// moduleAliases maps former module keys to their successors; ParseModules
+// accepts them, config.Load reports them as a configuration warning.
+var moduleAliases = map[string]string{config.ModuleAliasAlerting: ModuleMonitoring}
+
 // LateModules lists every module with a phase tag from P2 or [A], after
 // API-06 and RBA-05. The P2 resources of E-38 without a module of their
 // own follow E-105: modules_test.go keeps their register.
@@ -85,9 +98,39 @@ var LateModules = []Module{
 	}, Nav: []string{"forms", "workflows"}},
 	{Key: "compliance", Phase: "P3", Prefixes: []string{"/api/v1/compliance"}, Nav: []string{"compliance"}},
 	{Key: "findings", Phase: "P3", Prefixes: []string{"/api/v1/security"}, Nav: []string{"findings"}},
-	// Alerting rules (MON-04); the metrics of MON-02 stay part of G1.
-	{Key: "alerting", Phase: "P3", Prefixes: []string{"/api/v1/monitoring/alerts"},
-		Workers: []string{config.WorkerMonitoring}, Nav: []string{"monitoring"}},
+	// Monitoring of phase 3 (E-160, WP-863): probes, alarms, incidents,
+	// SLA, forecasts and the collector groups (not below /monitoring), the
+	// availability and configuration history of a CI and the credential
+	// bindings and vault connections (CRD-01, CRD-04). The metrics of MON-02
+	// (/api/v1/monitoring/metrics) stay part of G1. Former key: alerting.
+	{Key: ModuleMonitoring, Phase: "P3", Prefixes: []string{
+		"/api/v1/monitoring/alerts", "/api/v1/monitoring/targets", "/api/v1/monitoring/probes",
+		"/api/v1/monitoring/incidents", "/api/v1/monitoring/sla", "/api/v1/monitoring/forecasts",
+		"/api/v1/monitoring/probe-types", "/api/v1/monitoring/profiles", "/api/v1/monitoring/groups",
+		"/api/v1/monitoring/events", "/api/v1/monitoring/alarms", "/api/v1/monitoring/alarm-settings",
+		"/api/v1/monitoring/alarm-playbooks", "/api/v1/collector-groups",
+		"/api/v1/cis/{id}/availability", "/api/v1/cis/{id}/configs",
+		"/api/v1/credential-bindings", "/api/v1/vault-connections", "/api/v1/cis/{id}/credentials",
+	}, Workers: []string{config.WorkerMonitoring}, Nav: []string{"monitoring"}},
+	// IPAM/ASN in the style of phpIPAM (IPM-01 ff., E-160). The base objects
+	// of NET-05 (/api/v1/vrfs, /vlans, /subnets, /ips) stay core.
+	{Key: "ipam", Phase: "P3", Prefixes: []string{
+		"/api/v1/ipam", "/api/v1/ipam-sections", "/api/v1/asns", "/api/v1/asn-ranges", "/api/v1/bgp-peerings",
+		"/api/v1/nat-translations", "/api/v1/nameserver-sets", "/api/v1/vlan-domains",
+		"/api/v1/cis/{id}/addresses", "/api/v1/subnets/{id}/scan", "/api/v1/subnets/{id}/rpki",
+	}, Nav: []string{}},
+	// Read-only ADMP connection (ADM-01 ff., add-on admp).
+	{Key: "admp", Phase: "P3", Prefixes: []string{
+		"/api/v1/admp", "/api/v1/cis/{id}/admp-connections", "/api/v1/network-interfaces/{id}/admp",
+	}, Nav: []string{}},
+	// Escalation chains of SMS and pager (NTF-02); the public provider
+	// callback of WP-1146 belongs to the module as well.
+	{Key: "escalation", Phase: "P3", Prefixes: []string{
+		"/api/v1/escalation-policies", "/api/v1/notification-escalations", "/api/v1/notification-callbacks",
+	}, Nav: []string{}},
+	// Full export and deletion of an organization (TLC-05, TLC-06).
+	{Key: "org_lifecycle", Phase: "P3", Prefixes: []string{"/api/v1/org/exports", "/api/v1/org/deletion"},
+		Nav: []string{}},
 	{Key: "keys", Phase: "P4", Prefixes: []string{"/api/v1/keys"}, Nav: []string{"keys"}},
 	{Key: "trainings", Phase: "P4", Prefixes: []string{"/api/v1/trainings", "/api/v1/training-assignments"},
 		Nav: []string{"trainings"}},
@@ -124,10 +167,11 @@ func NoModules() *ModuleSet {
 // ParseModules reads RETICORA_MODULES: empty is the release default G2
 // (WP-830), every module with phase P2 on and the modules of P3, P4 and the
 // add-ons off, the same as the phase value P2; "all" switches every late
-// module on, otherwise a comma list of module keys and the phase value P2,
-// which switches on every module with phase P2 (WP-706). Only the modules
-// listed are on. Unknown keys fail, so a typo does not silently leave a
-// module off.
+// module on, otherwise a comma list of module keys and the phase values P2,
+// which switches on every module with phase P2 (WP-706), and P3, which
+// switches on every module with phase P2 or P3 (WP-863). Only the modules
+// listed are on. The former key alerting stands for monitoring. Unknown keys
+// fail, so a typo does not silently leave a module off.
 func ParseModules(spec string) (*ModuleSet, error) {
 	spec = strings.TrimSpace(spec)
 	if strings.EqualFold(spec, "all") {
@@ -142,13 +186,16 @@ func ParseModules(spec string) (*ModuleSet, error) {
 		if key == "" {
 			continue
 		}
-		if key == PhaseP2 {
+		if key == PhaseP2 || key == PhaseP3 {
 			for _, m := range LateModules {
-				if m.Phase == PhaseP2 {
+				if m.Phase == PhaseP2 || (key == PhaseP3 && m.Phase == PhaseP3) {
 					s.enabled[m.Key] = true
 				}
 			}
 			continue
+		}
+		if successor, ok := moduleAliases[key]; ok {
+			key = successor
 		}
 		if _, ok := moduleByKey(key); !ok {
 			return nil, fmt.Errorf("RETICORA_MODULES: unknown module %q", key)

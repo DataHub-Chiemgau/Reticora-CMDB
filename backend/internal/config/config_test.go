@@ -246,7 +246,7 @@ func TestValidateRejectsInvalidSettings(t *testing.T) {
 // and RETICORA_NATS_URL; without the module, and in development with the
 // default localhost:3310, the start passes.
 func TestValidateDocumentScanner(t *testing.T) {
-	for _, modules := range []string{"", " ", "documents", "P2", "all", "inventory, documents"} {
+	for _, modules := range []string{"", " ", "documents", "P2", "P3", "all", "inventory, documents"} {
 		clearEnv(t)
 		setAll(t, productionEnv)
 		t.Setenv("RETICORA_CLAMD_ADDR", "")
@@ -773,5 +773,28 @@ func TestPprofAddrSetting(t *testing.T) {
 				t.Fatalf("Validate() = %v, want an error containing %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// TestModuleAliasAlertingIsReported covers WP-863 (E-160): the former module
+// key alerting is accepted (server.ParseModules) and reported as a
+// configuration warning.
+func TestModuleAliasAlertingIsReported(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("RETICORA_MODULES", "P2, alerting")
+	found := false
+	for _, w := range Load().Warnings() {
+		if strings.Contains(w, "module alerting is deprecated: use monitoring") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("warnings %v lack the alias alerting", Load().Warnings())
+	}
+	t.Setenv("RETICORA_MODULES", "monitoring")
+	for _, w := range Load().Warnings() {
+		if strings.Contains(w, "alerting") {
+			t.Errorf("unexpected warning %q", w)
+		}
 	}
 }

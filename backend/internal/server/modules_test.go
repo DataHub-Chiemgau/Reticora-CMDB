@@ -25,7 +25,7 @@ const readmePath = "../../../docs/README.md"
 
 // modulesWithoutPages are the late modules without a navigation page: the
 // GPS history (LOC-09) has no UI of its own (WP-706).
-var modulesWithoutPages = []string{"gps"}
+var modulesWithoutPages = []string{"gps", "ipam", "admp", "escalation", "org_lifecycle"}
 
 // TestG2DefaultEnablesP2ModulesOnly covers API-06 and RBA-05 (WP-830,
 // E-03, SEQ-01): without RETICORA_MODULES the release default G2 switches
@@ -65,8 +65,8 @@ func TestG2DefaultEnablesP2ModulesOnly(t *testing.T) {
 			t.Errorf("module %s is not a P2 module", key)
 		}
 	}
-	for _, key := range []string{"maintenance", "workflows", "compliance", "findings", "alerting", "keys",
-		"trainings", "desks", "gps", "agents", "iga", "ai"} {
+	for _, key := range []string{"maintenance", "workflows", "compliance", "findings", "monitoring", "ipam", "admp",
+		"escalation", "org_lifecycle", "keys", "trainings", "desks", "gps", "agents", "iga", "ai"} {
 		if g2.Enabled(key) {
 			t.Errorf("module %s (P3, P4 or [A]) is on in the G2 default", key)
 		}
@@ -191,8 +191,8 @@ func TestAccessRequestRunsFollowWorkflowsModule(t *testing.T) {
 
 // TestLateRoutesAreMarkedInSpecification covers the parity rule of WP-214:
 // every documented operation of a late module carries x-phase with the
-// module's phase, and no other path does. Each operation of a P2 module
-// carries x-feature (path or operation level) equal to the key of the org
+// module's phase, and no other path does. Each operation of a P2 or P3
+// module (WP-863) carries x-feature (path or operation level) equal to the key of the org
 // gate, entitlement.RequiredFeature; an ungated operation carries none, and
 // any x-feature elsewhere names the key of the org gate as well (WP-706,
 // E-38, E-44).
@@ -225,7 +225,7 @@ func TestLateRoutesAreMarkedInSpecification(t *testing.T) {
 		gate, gated := entitlement.RequiredFeature(op.Method, op.Path)
 		feature, hasFeature := features[op]
 		switch {
-		case late && m.Phase == PhaseP2 && gated && feature != gate:
+		case late && (m.Phase == PhaseP2 || m.Phase == PhaseP3) && gated && feature != gate:
 			t.Errorf("%s (module %s): x-feature %q, the org gate requires %q", op, m.Key, feature, gate)
 		case hasFeature && !gated:
 			t.Errorf("%s: x-feature %q on an operation the org gate does not gate", op, feature)
@@ -503,8 +503,59 @@ func TestPhaseValueSwitchesOnTheP2Modules(t *testing.T) {
 	if !combined.Enabled("gps") || !combined.Enabled("disposal") || combined.Enabled("keys") {
 		t.Errorf("P2,gps enables %v", combined.EnabledKeys())
 	}
-	if _, err = ParseModules("P3"); err == nil {
-		t.Error("the phase value P3 is accepted")
+	if _, err = ParseModules("P4"); err == nil {
+		t.Error("the phase value P4 is accepted")
+	}
+}
+
+// TestPhaseValueP3SwitchesOnTheP2AndP3Modules covers release G3 (WP-863,
+// E-160, E-170): the phase value P3 switches on every module with phase P2
+// or P3 and combines with module keys; the former key alerting stands for
+// monitoring; the P3 prefixes of the register map routes to their module.
+func TestPhaseValueP3SwitchesOnTheP2AndP3Modules(t *testing.T) {
+	g3, err := ParseModules(PhaseP3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range LateModules {
+		if g3.Enabled(m.Key) != (m.Phase == PhaseP2 || m.Phase == PhaseP3) {
+			t.Errorf("G3: module %s (%s) enabled = %v", m.Key, m.Phase, g3.Enabled(m.Key))
+		}
+	}
+	combined, err := ParseModules("P3,keys")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !combined.Enabled("keys") || !combined.Enabled(ModuleMonitoring) || combined.Enabled("gps") {
+		t.Errorf("P3,keys enables %v", combined.EnabledKeys())
+	}
+	alias, err := ParseModules("alerting")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := alias.EnabledKeys(); !slices.Equal(got, []string{ModuleMonitoring}) {
+		t.Errorf("RETICORA_MODULES=alerting enables %v, want [monitoring]", got)
+	}
+	for route, want := range map[string]string{
+		"/api/v1/cis/{id}/addresses":              "ipam",
+		"/api/v1/cis/{id}/configs":                ModuleMonitoring,
+		"/api/v1/cis/{id}/availability":           ModuleMonitoring,
+		"/api/v1/cis/{id}/credentials/effective":  ModuleMonitoring,
+		"/api/v1/network-interfaces/{id}/admp":    "admp",
+		"/api/v1/collector-groups/{id}":           ModuleMonitoring,
+		"/api/v1/monitoring/alerts/{id}":          ModuleMonitoring,
+		"/api/v1/subnets/{id}/scan":               "ipam",
+		"/api/v1/notification-callbacks/{org_id}": "escalation",
+		"/api/v1/org/exports":                     "org_lifecycle",
+	} {
+		if m, ok := ModuleForRoute(route); !ok || m.Key != want {
+			t.Errorf("%s belongs to %q, want %s", route, m.Key, want)
+		}
+	}
+	for _, core := range []string{"/api/v1/cis/{id}", "/api/v1/monitoring/metrics", "/api/v1/subnets/{id}", "/api/v1/org"} {
+		if m, ok := ModuleForRoute(core); ok {
+			t.Errorf("%s belongs to module %s, want core", core, m.Key)
+		}
 	}
 }
 

@@ -225,7 +225,8 @@ type Config struct {
 	// Modules lists the enabled late modules (RETICORA_MODULES, WP-214):
 	// empty is the release default G2 (WP-830), every module with phase P2
 	// on and the modules of P3, P4 and the add-ons [A] off (E-03), like the
-	// phase value P2; "all" switches them all on, a comma list of module
+	// phase value P2; "all" switches them all on, the phase value P3 the
+	// modules of P2 and P3 (release G3, WP-863), a comma list of module
 	// keys only the modules named (server.ParseModules).
 	Modules string
 
@@ -359,6 +360,7 @@ func Load() *Config {
 		cfg.workers[name] = l.boolean(WorkerEnvKey(name), true)
 	}
 	cfg.warnings = l.checkWorkerSwitches(cfg.workers)
+	cfg.warnings = append(cfg.warnings, moduleAliasWarnings(cfg.Modules)...)
 	if cfg.OpsAlertToken != "" && cfg.OpsAlertOrgID == "" {
 		cfg.warnings = append(cfg.warnings, "RETICORA_OPS_ALERT_TOKEN is set without RETICORA_OPS_ALERT_ORG_ID: "+
 			"the Alertmanager bridge answers 404 (E-75)")
@@ -779,9 +781,24 @@ func hostPort(addr string) bool {
 	return err == nil && n >= 1 && n <= 65535
 }
 
+// ModuleAliasAlerting is the former key of the module monitoring
+// (WP-863, E-160); server.ParseModules accepts it, Load reports it.
+const ModuleAliasAlerting = "alerting"
+
+// moduleAliasWarnings reports the former module keys in RETICORA_MODULES.
+func moduleAliasWarnings(spec string) []string {
+	var warnings []string
+	for _, key := range strings.Split(spec, ",") {
+		if strings.TrimSpace(key) == ModuleAliasAlerting {
+			warnings = append(warnings, "RETICORA_MODULES: module alerting is deprecated: use monitoring")
+		}
+	}
+	return warnings
+}
+
 // documentsEnabled reports whether RETICORA_MODULES switches the module
 // documents on, read like server.ParseModules: the empty release default
-// G2 (WP-830), "all", the phase value P2 or the key documents. Since
+// G2 (WP-830), "all", the phase values P2 and P3 or the key documents. Since
 // WP-853 (SR-57) the empty default counts as well: a deployment that leaves
 // RETICORA_MODULES unset runs documents and needs clamd, otherwise every
 // upload would stay pending_scan without a hint at the start.
@@ -792,7 +809,7 @@ func (c *Config) documentsEnabled() bool {
 	}
 	for _, key := range strings.Split(spec, ",") {
 		switch strings.TrimSpace(key) {
-		case "documents", "P2":
+		case "documents", "P2", "P3":
 			return true
 		}
 	}

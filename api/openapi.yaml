@@ -4081,6 +4081,7 @@ paths:
 
   /api/v1/maintenance-windows:
     x-phase: P3
+    x-feature: monitoring
     get:
       operationId: listMaintenanceWindows
       tags: [Maintenance]
@@ -4128,6 +4129,7 @@ paths:
 
   /api/v1/maintenance-windows/{id}:
     x-phase: P3
+    x-feature: monitoring
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -4184,6 +4186,7 @@ paths:
 
   /api/v1/maintenance-windows/{id}/notify:
     x-phase: P3
+    x-feature: monitoring
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -4200,6 +4203,7 @@ paths:
 
   /api/v1/maintenance-windows/{id}/notifications:
     x-phase: P3
+    x-feature: monitoring
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -5040,6 +5044,7 @@ paths:
 
   /api/v1/security/findings:
     x-phase: P3
+    x-feature: compliance_findings
     get:
       operationId: listSecurityFindings
       tags: [Security]
@@ -5093,6 +5098,7 @@ paths:
 
   /api/v1/security/findings/summary:
     x-phase: P3
+    x-feature: compliance_findings
     get:
       operationId: securityFindingsSummary
       tags: [Security]
@@ -5105,6 +5111,7 @@ paths:
 
   /api/v1/security/findings/{id}:
     x-phase: P3
+    x-feature: compliance_findings
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -6470,6 +6477,7 @@ paths:
 
   /api/v1/monitoring/alerts:
     x-phase: P3
+    x-feature: monitoring
     get:
       operationId: listAlerts
       tags: [Monitoring]
@@ -6523,6 +6531,7 @@ paths:
 
   /api/v1/monitoring/alerts/{id}:
     x-phase: P3
+    x-feature: monitoring
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     patch:
@@ -12202,6 +12211,7 @@ paths:
 
   /api/v1/forms:
     x-phase: P3
+    x-feature: workflows
     get:
       operationId: listFormDefinitions
       tags: [Forms]
@@ -12237,6 +12247,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/forms/{id}:
     x-phase: P3
+    x-feature: workflows
     parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
     get:
       operationId: getFormDefinition
@@ -12270,6 +12281,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/forms/{id}/submissions:
     x-phase: P3
+    x-feature: workflows
     parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
     get:
       operationId: listFormSubmissions
@@ -12302,6 +12314,7 @@ paths:
         '422': { description: "ci_id or ticket_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope (all alike, TEN-04).", content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
   /api/v1/form-submissions:
     x-phase: P3
+    x-feature: workflows
     get:
       operationId: listAllFormSubmissions
       tags: [Forms]
@@ -12329,6 +12342,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/form-submissions/{id}:
     x-phase: P3
+    x-feature: workflows
     parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
     get:
       operationId: getFormSubmission
@@ -12340,6 +12354,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/workflows:
     x-phase: P3
+    x-feature: workflows
     get:
       operationId: listWorkflows
       tags: [Workflows]
@@ -12367,6 +12382,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/workflows/{id}:
     x-phase: P3
+    x-feature: workflows
     parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
     get:
       operationId: getWorkflow
@@ -12396,6 +12412,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/workflows/{id}/runs:
     x-phase: P3
+    x-feature: workflows
     parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
     post:
       operationId: triggerWorkflowRun
@@ -12409,6 +12426,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/workflow-runs:
     x-phase: P3
+    x-feature: workflows
     get:
       operationId: listWorkflowRuns
       tags: [Workflows]
@@ -12430,6 +12448,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/workflow-runs/{id}:
     x-phase: P3
+    x-feature: workflows
     parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
     get:
       operationId: getWorkflowRun
@@ -12441,6 +12460,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/workflow-runs/{id}/approval:
     x-phase: P3
+    x-feature: workflows
     parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
     post:
       operationId: approveWorkflowRun
@@ -12454,6 +12474,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/compliance/rules:
     x-phase: P3
+    x-feature: compliance_findings
     get:
       operationId: listComplianceRules
       tags: [Compliance]
@@ -12489,6 +12510,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/compliance/rules/{id}:
     x-phase: P3
+    x-feature: compliance_findings
     parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
     get:
       operationId: getComplianceRule
@@ -12519,6 +12541,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/compliance/evaluations:
     x-phase: P3
+    x-feature: compliance_findings
     post:
       operationId: evaluateCompliance
       tags: [Compliance]
@@ -12531,6 +12554,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/compliance/results:
     x-phase: P3
+    x-feature: compliance_findings
     get:
       operationId: listComplianceResults
       tags: [Compliance]
@@ -12552,6 +12576,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/compliance/score:
     x-phase: P3
+    x-feature: compliance_findings
     get:
       operationId: getComplianceScore
       tags: [Compliance]
@@ -12567,6 +12592,7 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/compliance/report:
     x-phase: P3
+    x-feature: compliance_findings
     get:
       operationId: getSecurityReport
       tags: [Compliance]

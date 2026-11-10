@@ -188,7 +188,9 @@ func TestParityComparisonHandlesPlannedOperations(t *testing.T) {
 // NoModules since WP-830) it is the specification without the paths marked
 // x-phase; with release G2, the default without RETICORA_MODULES
 // (ParseModules(""), WP-830; the same as the phase value P2 of WP-706), the
-// paths without x-phase or with x-phase P2. Operations marked x-status:
+// paths without x-phase or with x-phase P2; with release G3 (the phase value
+// P3, WP-863) the paths without x-phase or with x-phase P2 or P3. Operations
+// marked x-status:
 // planned (E-38, WP-247) are left out in every release and must not be
 // served.
 func TestRoutesAndSpecificationAreInParity(t *testing.T) {
@@ -209,9 +211,13 @@ func TestRoutesAndSpecificationAreInParity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse modules: %v", err)
 	}
+	g3, err := ParseModules(PhaseP3)
+	if err != nil {
+		t.Fatalf("parse modules: %v", err)
+	}
 
 	for profile, auditHandler := range map[string]*audit.Handler{"postgres": {}, "no-db": nil} {
-		for release, modules := range map[string]*ModuleSet{"all modules": AllModules(), "G1": g1, "G2": g2} {
+		for release, modules := range map[string]*ModuleSet{"all modules": AllModules(), "G1": g1, "G2": g2, "G3": g3} {
 			registered := routerOperations(t, testRouterWithModules(t, auditHandler, modules))
 
 			// /metrics is the Prometheus scrape endpoint, not part of the tenant
@@ -229,13 +235,15 @@ func TestRoutesAndSpecificationAreInParity(t *testing.T) {
 			}
 
 			// G1 serves the operations without x-phase, G2 those without
-			// x-phase or with x-phase P2 (WP-706).
+			// x-phase or with x-phase P2 (WP-706), G3 also those with x-phase
+			// P3 (WP-863).
 			expected := documented
 			if release != "all modules" {
 				expected = nil
 				for _, op := range documented {
 					phase, late := phases[op.Path]
-					if !late || (release == "G2" && phase == PhaseP2) {
+					if !late || (release == "G2" && phase == PhaseP2) ||
+						(release == "G3" && (phase == PhaseP2 || phase == PhaseP3)) {
 						expected = append(expected, op)
 					}
 				}
