@@ -339,14 +339,17 @@ jobs:
   # [B]/[Q] ID needs a row or an entry in docs/acceptance/g1-ausnahmen.csv
   # (E-76); [Pn]/[A] completeness is reported. The plans are
   # docs/plan/implementierungsplan.md, the G1 remediation plan
-  # docs/plan/g1-korrektur/implementierungsplan.md (WP-336) and the Phase-2
-  # plan docs/plan/phase2/implementierungsplan.md (WP-243); WP numbers are
-  # unique across all three, and the deferred WP-215 to WP-239 are no work
-  # packages of a PR (E-46). The Phase-2 plan must agree with
-  # docs/plan/phase2/abdeckung.csv in every run; Phase-2 completeness (a row of
+  # docs/plan/g1-korrektur/implementierungsplan.md (WP-336), the Phase-2
+  # plan docs/plan/phase2/implementierungsplan.md (WP-243) and the Phase-3
+  # plan docs/plan/phase3/implementierungsplan.md (WP-860); WP numbers have
+  # three or four digits (E-244) and are unique across all four, and the
+  # deferred WP-215 to WP-239 are no work packages of a PR (E-46). The Phase-2
+  # and Phase-3 plans must agree with docs/plan/phase2/abdeckung.csv and
+  # docs/plan/phase3/abdeckung.csv in every run; their completeness (a row of
   # the abschluss_wp of every ID) is checked in every run.
   # TRACEABILITY_REQUIRE_COMPLETE takes a comma-separated list of levels: P2
-  # blocks on Phase 2, 1 on every [B]/[Pn]/[A] ID (E-30, E-48). Since gate G2
+  # blocks on Phase 2, P3 on Phase 3 (set by WP-1177 at gate G3), 1 on every
+  # [B]/[Pn]/[A] ID (E-30, E-48). Since gate G2
   # (WP-331) this job sets B,Q,P2: every ID of docs/plan/phase2/abdeckung.csv
   # needs a row of its abschluss_wp (Phase-1 rows do not count) and every
   # non-optional WP of the Phase-2 plan all its planned rows

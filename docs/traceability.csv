@@ -1599,3 +1599,5 @@ GATE-05;[Q];G1;tests/rep01-structure.test.sh;WP-600
 SEQ-01;[Q];G1;tests/rep01-structure.test.sh;WP-600
 GLO-11;[Q];G3;backend/internal/traceability/traceability_test.go;WP-860
 DOD-01;[Q];G3;backend/internal/traceability/traceability_test.go;WP-860
+GLO-11;[Q];G3;tests/rep01-structure.test.sh;WP-861
+DOD-01;[Q];G3;tests/rep01-structure.test.sh;WP-861
