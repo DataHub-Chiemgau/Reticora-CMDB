@@ -207,7 +207,7 @@ BEGIN
         SELECT 1 FROM pg_constraint f
          WHERE f.contype = 'f' AND f.confrelid = 'pii_subject'::regclass
            AND (SELECT array_agg(a.attname::text ORDER BY a.attname) FROM pg_attribute a
-                 WHERE a.attrelid = f.confrelid AND a.attnum = ANY (f.confkey)) = ARRAY['surrogate_id', 'organization_id']
+                 WHERE a.attrelid = f.confrelid AND a.attnum = ANY (f.confkey)) = ARRAY['organization_id', 'surrogate_id']
     ) THEN
         ALTER TABLE pii_subject DROP CONSTRAINT pii_subject_surrogate_id_organization_key;
     END IF;

@@ -489,7 +489,7 @@ BEGIN
         SELECT 1 FROM pg_constraint u
          WHERE u.conrelid = 'pii_subject'::regclass AND u.contype IN ('u', 'p')
            AND (SELECT array_agg(a.attname::text ORDER BY a.attname) FROM pg_attribute a
-                 WHERE a.attrelid = u.conrelid AND a.attnum = ANY (u.conkey)) = ARRAY['surrogate_id', 'organization_id']
+                 WHERE a.attrelid = u.conrelid AND a.attnum = ANY (u.conkey)) = ARRAY['organization_id', 'surrogate_id']
     ) THEN
         ALTER TABLE pii_subject ADD CONSTRAINT pii_subject_surrogate_id_organization_key UNIQUE (surrogate_id, organization_id);
     END IF;
