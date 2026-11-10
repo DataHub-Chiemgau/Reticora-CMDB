@@ -343,7 +343,7 @@ func HasPhase2Part(tag string) bool {
 // "[P3–P4]", "[P2–P4, A]", "(V), [B–P4], [A]", "[B], Zusätze [P2], [P3]",
 // "[P2]/[P3]/[P4]/[A]", "[B]; [P3]-Anteil" and "P3/G3". A range counts when
 // it starts at B, P2 or P3 and ends at P3 or later.
-var phase3Tag = regexp.MustCompile(`\[P3[\]–]|\bP3/G|\[(?:B|P2)–P[3-5]`)
+var phase3Tag = regexp.MustCompile(`\[P3[\]–]|\bP3/G|\[(?:B|P2)–P[345]`)
 
 // HasPhase3Part reports whether a tag carries a Phase-3 part; such an ID must
 // be listed in the Phase-3 coverage.
