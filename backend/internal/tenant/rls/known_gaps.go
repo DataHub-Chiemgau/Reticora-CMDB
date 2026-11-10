@@ -359,13 +359,6 @@ type ReferenceWithoutOrganization struct {
 	Reason string
 }
 
-// Reasons of the entries of ReferencesWithoutOrganization.
-const (
-	refG1    = "G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329)"
-	refWP287 = "stock_scan is replaced by the stocktake scans of WP-287 (K19); " +
-		"the successor references with the organization"
-)
-
 // ReferencesWithoutOrganization are the foreign keys between two tenant
 // tables (tables of schema public with an organization_id column) without
 // organization_id, by "table.columns" (WP-838, SR-03). References to tables
@@ -381,61 +374,7 @@ const (
 // composite; the references of desk, key and training are composite since
 // 000177 (WP-639) and are not listed (E-137). Migration 000287 (WP-876,
 // SR-03 rest I) made the 59 references of the core, location, network,
-// rack, role and discovery tables composite; the rest goes with WP-877.
-var ReferencesWithoutOrganization = map[string]ReferenceWithoutOrganization{
-	"ai_conversation.user_id":                        {Constraint: "ai_conversation_user_id_fkey", Target: "app_user", Reason: refG1},
-	"ai_message.conversation_id":                     {Constraint: "ai_message_conversation_id_fkey", Target: "ai_conversation", Reason: refG1},
-	"compliance_result.ci_id":                        {Constraint: "compliance_result_ci_id_fkey", Target: "ci", Reason: refG1},
-	"compliance_result.rule_id":                      {Constraint: "compliance_result_rule_id_fkey", Target: "compliance_rule", Reason: refG1},
-	"document.uploaded_by":                           {Constraint: "document_uploaded_by_fkey", Target: "app_user", Reason: refG1},
-	"document_link.document_id":                      {Constraint: "document_link_document_id_fkey", Target: "document", Reason: refG1},
-	"form_submission.ci_id":                          {Constraint: "form_submission_ci_id_fkey", Target: "ci", Reason: refG1},
-	"form_submission.form_id":                        {Constraint: "form_submission_form_id_fkey", Target: "form_def", Reason: refG1},
-	"form_submission.submitted_by":                   {Constraint: "form_submission_submitted_by_fkey", Target: "app_user", Reason: refG1},
-	"form_submission.ticket_id":                      {Constraint: "form_submission_ticket_id_fkey", Target: "ticket", Reason: refG1},
-	"iga_access_request.connector_id":                {Constraint: "iga_access_request_connector_id_fkey", Target: "iga_connector", Reason: refG1},
-	"iga_access_request.decision_by":                 {Constraint: "iga_access_request_decision_by_fkey", Target: "app_user", Reason: refG1},
-	"iga_access_request.requester_id":                {Constraint: "iga_access_request_requester_id_fkey", Target: "app_user", Reason: refG1},
-	"iga_access_request.subject_user_id":             {Constraint: "iga_access_request_subject_user_id_fkey", Target: "app_user", Reason: refG1},
-	"iga_access_request.workflow_run_id":             {Constraint: "iga_access_request_workflow_run_id_fkey", Target: "workflow_run", Reason: refG1},
-	"iga_access_review_item.connector_id":            {Constraint: "iga_access_review_item_connector_id_fkey", Target: "iga_connector", Reason: refG1},
-	"iga_access_review_item.decision_by":             {Constraint: "iga_access_review_item_decision_by_fkey", Target: "app_user", Reason: refG1},
-	"iga_access_review_item.review_id":               {Constraint: "iga_access_review_item_review_id_fkey", Target: "iga_access_review", Reason: refG1},
-	"iga_access_review_item.user_id":                 {Constraint: "iga_access_review_item_user_id_fkey", Target: "app_user", Reason: refG1},
-	"iga_connector.collector_id":                     {Constraint: "iga_connector_collector_id_fkey", Target: "collector", Reason: refG1},
-	"iga_connector.credential_id":                    {Constraint: "iga_connector_credential_id_fkey", Target: "credential", Reason: refG1},
-	"iga_drift_finding.connector_id":                 {Constraint: "iga_drift_finding_connector_id_fkey", Target: "iga_connector", Reason: refG1},
-	"iga_drift_finding.remediation_task_id":          {Constraint: "iga_drift_finding_remediation_task_id_fkey", Target: "iga_provisioning_task", Reason: refG1},
-	"iga_drift_finding.user_id":                      {Constraint: "iga_drift_finding_user_id_fkey", Target: "app_user", Reason: refG1},
-	"iga_provisioning_task.connector_id":             {Constraint: "iga_provisioning_task_connector_id_fkey", Target: "iga_connector", Reason: refG1},
-	"iga_provisioning_task.user_id":                  {Constraint: "iga_provisioning_task_user_id_fkey", Target: "app_user", Reason: refG1},
-	"internal_order_item.order_id":                   {Constraint: "internal_order_item_order_id_fkey", Target: "internal_order", Reason: refG1},
-	"maintenance_notification.maintenance_window_id": {Constraint: "maintenance_notification_maintenance_window_id_fkey", Target: "maintenance_window", Reason: refG1},
-	"maintenance_window_ci.ci_id":                    {Constraint: "maintenance_window_ci_ci_id_fkey", Target: "ci", Reason: refG1},
-	"maintenance_window_ci.maintenance_window_id":    {Constraint: "maintenance_window_ci_maintenance_window_id_fkey", Target: "maintenance_window", Reason: refG1},
-	"notification_delivery.channel_id":               {Constraint: "notification_delivery_channel_id_fkey", Target: "notification_channel", Reason: refG1},
-	"notification_delivery.recipient_user_id":        {Constraint: "notification_delivery_recipient_user_id_fkey", Target: "app_user", Reason: refG1},
-	"notification_digest_item.channel_id":            {Constraint: "notification_digest_item_channel_id_fkey", Target: "notification_channel", Reason: refG1},
-	"notification_digest_item.delivery_id":           {Constraint: "notification_digest_item_delivery_id_fkey", Target: "notification_delivery", Reason: refG1},
-	"notification_digest_item.recipient_user_id":     {Constraint: "notification_digest_item_recipient_user_id_fkey", Target: "app_user", Reason: refG1},
-	"notification_inbox.user_id":                     {Constraint: "notification_inbox_user_id_fkey", Target: "app_user", Reason: refG1},
-	"notification_preference.user_id":                {Constraint: "notification_preference_user_id_fkey", Target: "app_user", Reason: refG1},
-	"security_finding.ci_id":                         {Constraint: "security_finding_ci_id_fkey", Target: "ci", Reason: refG1},
-	"stock_scan.asset_id":                            {Constraint: "stock_scan_asset_id_fkey", Target: "asset", Reason: refWP287},
-	"stock_scan.ci_id":                               {Constraint: "stock_scan_ci_id_fkey", Target: "ci", Reason: refWP287},
-	"stock_scan.scanned_by":                          {Constraint: "stock_scan_scanned_by_fkey", Target: "app_user", Reason: refWP287},
-	"stock_scan.stocktake_id":                        {Constraint: "stock_scan_stocktake_id_fkey", Target: "stocktake", Reason: refWP287},
-	"stocktake.started_by":                           {Constraint: "stocktake_started_by_fkey", Target: "app_user", Reason: refG1},
-	"ticket.assignee_id":                             {Constraint: "ticket_assignee_id_fkey", Target: "app_user", Reason: refG1},
-	"ticket.reporter_id":                             {Constraint: "ticket_reporter_id_fkey", Target: "app_user", Reason: refG1},
-	"ticket.team_id":                                 {Constraint: "ticket_team_id_fkey", Target: "team", Reason: refG1},
-	"ticket_comment.author_id":                       {Constraint: "ticket_comment_author_id_fkey", Target: "app_user", Reason: refG1},
-	"ticket_comment.ticket_id":                       {Constraint: "ticket_comment_ticket_id_fkey", Target: "ticket", Reason: refG1},
-	"ticket_sla.sla_id":                              {Constraint: "ticket_sla_sla_id_fkey", Target: "sla", Reason: refG1},
-	"ticket_sla.ticket_id":                           {Constraint: "ticket_sla_ticket_id_fkey", Target: "ticket", Reason: refG1},
-	"webhook_dead_letter.delivery_id":                {Constraint: "webhook_dead_letter_delivery_id_fkey", Target: "webhook_delivery", Reason: refG1},
-	"webhook_dead_letter.subscription_id":            {Constraint: "webhook_dead_letter_subscription_id_fkey", Target: "webhook_subscription", Reason: refG1},
-	"webhook_delivery.subscription_id":               {Constraint: "webhook_delivery_subscription_id_fkey", Target: "webhook_subscription", Reason: refG1},
-	"workflow_run.workflow_id":                       {Constraint: "workflow_run_workflow_id_fkey", Target: "workflow_def", Reason: refG1},
-	"workflow_step.run_id":                           {Constraint: "workflow_step_run_id_fkey", Target: "workflow_run", Reason: refG1},
-}
+// rack, role and discovery tables composite, migration 000288 (WP-877,
+// SR-03 rest II) the remaining 55: the list is empty and stays empty, every
+// new reference between tenant tables carries the organization.
+var ReferencesWithoutOrganization = map[string]ReferenceWithoutOrganization{}

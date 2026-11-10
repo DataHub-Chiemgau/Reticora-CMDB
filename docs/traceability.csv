@@ -1626,3 +1626,4 @@ API-06;[P2]/[P3]/[P4]/[A];G3;backend/internal/server/modules_test.go;WP-870
 SEC-11;[Q];G3;tests/ci-config.test.sh;WP-873
 TEN-09;[Q];G3;backend/internal/tenant/rls/channel_matrix_sr63_integration_test.go;WP-875
 TEN-09;[Q];G3;backend/internal/tenant/rls/object_reference_integration_test.go;WP-876
+TEN-09;[Q];G3;backend/internal/tenant/rls/object_reference_integration_test.go;WP-877

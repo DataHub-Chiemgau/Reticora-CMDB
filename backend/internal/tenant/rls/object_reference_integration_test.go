@@ -702,3 +702,223 @@ func seedRest1(t *testing.T, f *scopetest.Fixture) map[string]rest1Probe {
 				VALUES ($2, 'w876-r', md5(random()::text), 'w876', '` + user2 + `', $1)`},
 	}
 }
+
+// rest2References are the 55 references migration 000288 makes composite
+// (WP-877, SR-03 rest II) by "table.column", as rest1References.
+var rest2References = map[string]struct{ constraint, def string }{
+	"ai_conversation.user_id":                        {"ai_conversation_user_id_fkey", "FOREIGN KEY (user_id, organization_id) REFERENCES app_user(id, organization_id) ON DELETE SET NULL (user_id)"},
+	"ai_message.conversation_id":                     {"ai_message_conversation_id_fkey", "FOREIGN KEY (conversation_id, organization_id) REFERENCES ai_conversation(id, organization_id) ON DELETE CASCADE"},
+	"compliance_result.ci_id":                        {"compliance_result_ci_id_fkey", "FOREIGN KEY (ci_id, organization_id) REFERENCES ci(id, organization_id) ON DELETE CASCADE"},
+	"compliance_result.rule_id":                      {"compliance_result_rule_id_fkey", "FOREIGN KEY (rule_id, organization_id) REFERENCES compliance_rule(id, organization_id) ON DELETE CASCADE"},
+	"document.uploaded_by":                           {"document_uploaded_by_fkey", "FOREIGN KEY (uploaded_by, organization_id) REFERENCES app_user(id, organization_id)"},
+	"document_link.document_id":                      {"document_link_document_id_fkey", "FOREIGN KEY (document_id, organization_id) REFERENCES document(id, organization_id) ON DELETE CASCADE"},
+	"form_submission.ci_id":                          {"form_submission_ci_id_fkey", "FOREIGN KEY (ci_id, organization_id) REFERENCES ci(id, organization_id) ON DELETE SET NULL (ci_id)"},
+	"form_submission.form_id":                        {"form_submission_form_id_fkey", "FOREIGN KEY (form_id, organization_id) REFERENCES form_def(id, organization_id) ON DELETE CASCADE"},
+	"form_submission.submitted_by":                   {"form_submission_submitted_by_fkey", "FOREIGN KEY (submitted_by, organization_id) REFERENCES app_user(id, organization_id) ON DELETE SET NULL (submitted_by)"},
+	"form_submission.ticket_id":                      {"form_submission_ticket_id_fkey", "FOREIGN KEY (ticket_id, organization_id) REFERENCES ticket(id, organization_id) ON DELETE SET NULL (ticket_id)"},
+	"iga_access_request.connector_id":                {"iga_access_request_connector_id_fkey", "FOREIGN KEY (connector_id, organization_id) REFERENCES iga_connector(id, organization_id) ON DELETE SET NULL (connector_id)"},
+	"iga_access_request.decision_by":                 {"iga_access_request_decision_by_fkey", "FOREIGN KEY (decision_by, organization_id) REFERENCES app_user(id, organization_id) ON DELETE SET NULL (decision_by)"},
+	"iga_access_request.requester_id":                {"iga_access_request_requester_id_fkey", "FOREIGN KEY (requester_id, organization_id) REFERENCES app_user(id, organization_id) ON DELETE SET NULL (requester_id)"},
+	"iga_access_request.subject_user_id":             {"iga_access_request_subject_user_id_fkey", "FOREIGN KEY (subject_user_id, organization_id) REFERENCES app_user(id, organization_id) ON DELETE CASCADE"},
+	"iga_access_request.workflow_run_id":             {"iga_access_request_workflow_run_id_fkey", "FOREIGN KEY (workflow_run_id, organization_id) REFERENCES workflow_run(id, organization_id) ON DELETE SET NULL (workflow_run_id)"},
+	"iga_access_review_item.connector_id":            {"iga_access_review_item_connector_id_fkey", "FOREIGN KEY (connector_id, organization_id) REFERENCES iga_connector(id, organization_id) ON DELETE SET NULL (connector_id)"},
+	"iga_access_review_item.decision_by":             {"iga_access_review_item_decision_by_fkey", "FOREIGN KEY (decision_by, organization_id) REFERENCES app_user(id, organization_id) ON DELETE SET NULL (decision_by)"},
+	"iga_access_review_item.review_id":               {"iga_access_review_item_review_id_fkey", "FOREIGN KEY (review_id, organization_id) REFERENCES iga_access_review(id, organization_id) ON DELETE CASCADE"},
+	"iga_access_review_item.user_id":                 {"iga_access_review_item_user_id_fkey", "FOREIGN KEY (user_id, organization_id) REFERENCES app_user(id, organization_id) ON DELETE CASCADE"},
+	"iga_connector.collector_id":                     {"iga_connector_collector_id_fkey", "FOREIGN KEY (collector_id, organization_id) REFERENCES collector(id, organization_id) ON DELETE SET NULL (collector_id)"},
+	"iga_connector.credential_id":                    {"iga_connector_credential_id_fkey", "FOREIGN KEY (credential_id, organization_id) REFERENCES credential(id, organization_id) ON DELETE SET NULL (credential_id)"},
+	"iga_drift_finding.connector_id":                 {"iga_drift_finding_connector_id_fkey", "FOREIGN KEY (connector_id, organization_id) REFERENCES iga_connector(id, organization_id) ON DELETE CASCADE"},
+	"iga_drift_finding.remediation_task_id":          {"iga_drift_finding_remediation_task_id_fkey", "FOREIGN KEY (remediation_task_id, organization_id) REFERENCES iga_provisioning_task(id, organization_id) ON DELETE SET NULL (remediation_task_id)"},
+	"iga_drift_finding.user_id":                      {"iga_drift_finding_user_id_fkey", "FOREIGN KEY (user_id, organization_id) REFERENCES app_user(id, organization_id) ON DELETE SET NULL (user_id)"},
+	"iga_provisioning_task.connector_id":             {"iga_provisioning_task_connector_id_fkey", "FOREIGN KEY (connector_id, organization_id) REFERENCES iga_connector(id, organization_id) ON DELETE CASCADE"},
+	"iga_provisioning_task.user_id":                  {"iga_provisioning_task_user_id_fkey", "FOREIGN KEY (user_id, organization_id) REFERENCES app_user(id, organization_id) ON DELETE SET NULL (user_id)"},
+	"internal_order_item.order_id":                   {"internal_order_item_order_id_fkey", "FOREIGN KEY (order_id, organization_id) REFERENCES internal_order(id, organization_id) ON DELETE CASCADE"},
+	"maintenance_notification.maintenance_window_id": {"maintenance_notification_maintenance_window_id_fkey", "FOREIGN KEY (maintenance_window_id, organization_id) REFERENCES maintenance_window(id, organization_id) ON DELETE CASCADE"},
+	"maintenance_window_ci.ci_id":                    {"maintenance_window_ci_ci_id_fkey", "FOREIGN KEY (ci_id, organization_id) REFERENCES ci(id, organization_id) ON DELETE CASCADE"},
+	"maintenance_window_ci.maintenance_window_id":    {"maintenance_window_ci_maintenance_window_id_fkey", "FOREIGN KEY (maintenance_window_id, organization_id) REFERENCES maintenance_window(id, organization_id) ON DELETE CASCADE"},
+	"notification_delivery.channel_id":               {"notification_delivery_channel_id_fkey", "FOREIGN KEY (channel_id, organization_id) REFERENCES notification_channel(id, organization_id) ON DELETE CASCADE"},
+	"notification_delivery.recipient_user_id":        {"notification_delivery_recipient_user_id_fkey", "FOREIGN KEY (recipient_user_id, organization_id) REFERENCES app_user(id, organization_id) ON DELETE CASCADE"},
+	"notification_digest_item.channel_id":            {"notification_digest_item_channel_id_fkey", "FOREIGN KEY (channel_id, organization_id) REFERENCES notification_channel(id, organization_id) ON DELETE CASCADE"},
+	"notification_digest_item.delivery_id":           {"notification_digest_item_delivery_id_fkey", "FOREIGN KEY (delivery_id, organization_id) REFERENCES notification_delivery(id, organization_id) ON DELETE CASCADE"},
+	"notification_digest_item.recipient_user_id":     {"notification_digest_item_recipient_user_id_fkey", "FOREIGN KEY (recipient_user_id, organization_id) REFERENCES app_user(id, organization_id) ON DELETE CASCADE"},
+	"notification_inbox.user_id":                     {"notification_inbox_user_id_fkey", "FOREIGN KEY (user_id, organization_id) REFERENCES app_user(id, organization_id) ON DELETE CASCADE"},
+	"notification_preference.user_id":                {"notification_preference_user_id_fkey", "FOREIGN KEY (user_id, organization_id) REFERENCES app_user(id, organization_id) ON DELETE CASCADE"},
+	"security_finding.ci_id":                         {"security_finding_ci_id_fkey", "FOREIGN KEY (ci_id, organization_id) REFERENCES ci(id, organization_id) ON DELETE CASCADE"},
+	"stock_scan.asset_id":                            {"stock_scan_asset_id_fkey", "FOREIGN KEY (asset_id, organization_id) REFERENCES asset(id, organization_id)"},
+	"stock_scan.ci_id":                               {"stock_scan_ci_id_fkey", "FOREIGN KEY (ci_id, organization_id) REFERENCES ci(id, organization_id)"},
+	"stock_scan.scanned_by":                          {"stock_scan_scanned_by_fkey", "FOREIGN KEY (scanned_by, organization_id) REFERENCES app_user(id, organization_id)"},
+	"stock_scan.stocktake_id":                        {"stock_scan_stocktake_id_fkey", "FOREIGN KEY (stocktake_id, organization_id) REFERENCES stocktake(id, organization_id) ON DELETE CASCADE"},
+	"stocktake.started_by":                           {"stocktake_started_by_fkey", "FOREIGN KEY (started_by, organization_id) REFERENCES app_user(id, organization_id)"},
+	"ticket.assignee_id":                             {"ticket_assignee_id_fkey", "FOREIGN KEY (assignee_id, organization_id) REFERENCES app_user(id, organization_id)"},
+	"ticket.reporter_id":                             {"ticket_reporter_id_fkey", "FOREIGN KEY (reporter_id, organization_id) REFERENCES app_user(id, organization_id)"},
+	"ticket.team_id":                                 {"ticket_team_id_fkey", "FOREIGN KEY (team_id, organization_id) REFERENCES team(id, organization_id)"},
+	"ticket_comment.author_id":                       {"ticket_comment_author_id_fkey", "FOREIGN KEY (author_id, organization_id) REFERENCES app_user(id, organization_id)"},
+	"ticket_comment.ticket_id":                       {"ticket_comment_ticket_id_fkey", "FOREIGN KEY (ticket_id, organization_id) REFERENCES ticket(id, organization_id) ON DELETE CASCADE"},
+	"ticket_sla.sla_id":                              {"ticket_sla_sla_id_fkey", "FOREIGN KEY (sla_id, organization_id) REFERENCES sla(id, organization_id) ON DELETE RESTRICT"},
+	"ticket_sla.ticket_id":                           {"ticket_sla_ticket_id_fkey", "FOREIGN KEY (ticket_id, organization_id) REFERENCES ticket(id, organization_id) ON DELETE CASCADE"},
+	"webhook_dead_letter.delivery_id":                {"webhook_dead_letter_delivery_id_fkey", "FOREIGN KEY (delivery_id, organization_id) REFERENCES webhook_delivery(id, organization_id) ON DELETE CASCADE"},
+	"webhook_dead_letter.subscription_id":            {"webhook_dead_letter_subscription_id_fkey", "FOREIGN KEY (subscription_id, organization_id) REFERENCES webhook_subscription(id, organization_id) ON DELETE CASCADE"},
+	"webhook_delivery.subscription_id":               {"webhook_delivery_subscription_id_fkey", "FOREIGN KEY (subscription_id, organization_id) REFERENCES webhook_subscription(id, organization_id) ON DELETE CASCADE"},
+	"workflow_run.workflow_id":                       {"workflow_run_workflow_id_fkey", "FOREIGN KEY (workflow_id, organization_id) REFERENCES workflow_def(id, organization_id) ON DELETE CASCADE"},
+	"workflow_step.run_id":                           {"workflow_step_run_id_fkey", "FOREIGN KEY (run_id, organization_id) REFERENCES workflow_run(id, organization_id) ON DELETE CASCADE"},
+}
+
+// rest2Keys are the unique keys migration 000288 adds where they were
+// missing.
+var rest2Keys = []string{
+	"ai_conversation", "compliance_rule", "credential", "form_def", "iga_access_review", "iga_connector",
+	"iga_provisioning_task", "maintenance_window", "notification_channel", "notification_delivery", "sla",
+	"webhook_delivery", "webhook_subscription", "workflow_def", "workflow_run",
+}
+
+// TestTenantReferencesRest2 covers WP-877 (SR-03 rest II; TEN-09, E-137,
+// E-167): the 55 remaining references are composite with their former
+// constraint names and ON DELETE actions (pg_get_constraintdef per column),
+// rls.ReferencesWithoutOrganization is empty, and every target holds
+// UNIQUE (id, organization_id). The negative test runs one write per
+// target table as in TestTenantReferencesRest1.
+//
+// Retest:
+//
+//	cd backend && TEST_DATABASE_URL=… go test -count=1 -v -run 'TestTenantReferencesRest2' ./internal/tenant/rls/
+func TestTenantReferencesRest2(t *testing.T) {
+	f := scopetest.Seed(t, "cd")
+	ctx := context.Background()
+	requireMigrated(ctx, t, f.Admin)
+
+	if n := len(rls.ReferencesWithoutOrganization); n != 0 {
+		t.Errorf("rls.ReferencesWithoutOrganization lists %d references, want none (SR-03 fixed with WP-877)", n)
+	}
+	if n := len(rest2References); n != 55 {
+		t.Errorf("rest2References has %d columns, want the 55 of WP-877", n)
+	}
+	for _, column := range slices.Sorted(maps.Keys(rest2References)) {
+		want := rest2References[column]
+		var def string
+		if err := f.Admin.QueryRow(ctx, `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = $1`,
+			want.constraint).Scan(&def); err != nil {
+			t.Errorf("%s: constraint %s: %v", column, want.constraint, err)
+			continue
+		}
+		if def != want.def {
+			t.Errorf("%s: %s is %q, want %q", column, want.constraint, def, want.def)
+		}
+	}
+	for _, table := range rest2Keys {
+		var unique bool
+		if err := f.Admin.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_constraint
+			WHERE conrelid = $1::regclass AND contype IN ('u', 'p') AND pg_get_constraintdef(oid) = 'UNIQUE (id, organization_id)')`,
+			table).Scan(&unique); err != nil {
+			t.Fatal(err)
+		}
+		if !unique {
+			t.Errorf("%s has no UNIQUE (id, organization_id)", table)
+		}
+	}
+
+	probes := seedRest2(t, f)
+	scope := database.OrgWideScope(f.OrgA, f.User)
+	for _, name := range slices.Sorted(maps.Keys(probes)) {
+		p := probes[name]
+		t.Run("app/"+name, func(t *testing.T) {
+			err := appWrite(ctx, f, &scope, p.stmt, []any{p.foreign, f.OrgA})
+			var pgErr *pgconn.PgError
+			codes := p.appCodes
+			if codes == nil {
+				codes = []string{"23503"}
+			}
+			if !errors.As(err, &pgErr) || !slices.Contains(codes, pgErr.Code) {
+				t.Errorf("write with an object of another organization: got %v, want one of %v", err, codes)
+			}
+			if ownErr := appWrite(ctx, f, &scope, p.stmt, []any{p.own, f.OrgA}); ownErr != nil {
+				t.Errorf("write with the own object: %v", ownErr)
+			}
+		})
+		t.Run("fk/"+name, func(t *testing.T) {
+			err := pgx.BeginFunc(ctx, f.Admin, func(tx pgx.Tx) error {
+				if _, err := tx.Exec(ctx, `ALTER TABLE `+p.table+` DISABLE TRIGGER USER`); err != nil {
+					return err
+				}
+				stmt := p.stmt
+				if p.fkStmt != "" {
+					stmt = p.fkStmt
+				}
+				_, err := tx.Exec(ctx, stmt, p.foreign, f.OrgA)
+				if err == nil {
+					return errRollback
+				}
+				return err
+			})
+			var pgErr *pgconn.PgError
+			if !errors.As(err, &pgErr) || pgErr.Code != "23503" || pgErr.ConstraintName != p.constraint {
+				t.Errorf("write with an object of another organization without triggers: got %v, want 23503 on %s", err, p.constraint)
+			}
+		})
+	}
+}
+
+// seedRest2 seeds the referenced objects in both organizations and returns
+// one write per target table of migration 000288.
+func seedRest2(t *testing.T, f *scopetest.Fixture) map[string]rest1Probe {
+	t.Helper()
+	ctx := context.Background()
+	one := func(stmt string, args ...any) string {
+		t.Helper()
+		var id string
+		if err := f.Admin.QueryRow(ctx, stmt, args...).Scan(&id); err != nil {
+			t.Fatalf("seed %q: %v", stmt, err)
+		}
+		return id
+	}
+	type objects struct {
+		user, ci, ticket, sla, hook, workflow, window, document, order, team string
+	}
+	var o [2]objects
+	for i, org := range []string{f.OrgA, f.OrgB} {
+		x := &o[i]
+		x.user = f.AppUser(t, org, "w877-"+[2]string{"a", "b"}[i])
+		x.ci = f.CI(t, org, "", "w877")
+		x.ticket = one(`INSERT INTO ticket (organization_id, title, reporter_id) VALUES ($1, 'w877', $2) RETURNING id::text`, org, x.user)
+		x.sla = one(`INSERT INTO sla (organization_id, name, priority, response_target_minutes, resolution_target_minutes)
+			VALUES ($1, 'w877', 'high', 60, 240) RETURNING id::text`, org)
+		x.hook = one(`INSERT INTO webhook_subscription (organization_id, name, url, secret)
+			VALUES ($1, 'w877', 'https://hooks.example.org/w877', 'w877-secret') RETURNING id::text`, org)
+		x.workflow = one(`INSERT INTO workflow_def (organization_id, name) VALUES ($1, 'w877') RETURNING id::text`, org)
+		x.window = one(`INSERT INTO maintenance_window (organization_id, title, starts_at, ends_at)
+			VALUES ($1, 'w877', now(), now() + interval '1 hour') RETURNING id::text`, org)
+		x.document = one(`INSERT INTO document (organization_id, title, file_name, storage_key, uploaded_by)
+			VALUES ($1, 'w877', 'w877.txt', '', $2) RETURNING id::text`, org, x.user)
+		x.order = one(`INSERT INTO internal_order (organization_id, order_number, title) VALUES ($1, 'W877', 'w877') RETURNING id::text`, org)
+		x.team = one(`INSERT INTO team (organization_id, name) VALUES ($1, 'w877') RETURNING id::text`, org)
+	}
+	a, b := o[0], o[1]
+	return map[string]rest1Probe{
+		"app_user": {table: "notification_inbox", constraint: "notification_inbox_user_id_fkey", foreign: b.user, own: a.user,
+			stmt: `INSERT INTO notification_inbox (organization_id, user_id, category, subject) VALUES ($2, $1, 'w877', 'w877')`},
+		"ticket": {table: "ticket_comment", constraint: "ticket_comment_ticket_id_fkey", foreign: b.ticket, own: a.ticket,
+			stmt: `INSERT INTO ticket_comment (organization_id, ticket_id, content, author_type) VALUES ($2, $1, 'w877', 'system')`},
+		"sla": {table: "ticket_sla", constraint: "ticket_sla_sla_id_fkey", foreign: b.sla, own: a.sla,
+			stmt: `INSERT INTO ticket_sla (organization_id, ticket_id, sla_id, response_due_at, resolution_due_at)
+				VALUES ($2, '` + a.ticket + `', $1, now(), now())`},
+		"webhook_subscription": {table: "webhook_delivery", constraint: "webhook_delivery_subscription_id_fkey", foreign: b.hook, own: a.hook,
+			stmt: `INSERT INTO webhook_delivery (subscription_id, organization_id, event, payload) VALUES ($1, $2, 'ci.changed', '{}')`},
+		"workflow_def": {table: "workflow_run", constraint: "workflow_run_workflow_id_fkey", foreign: b.workflow, own: a.workflow,
+			stmt: `INSERT INTO workflow_run (organization_id, workflow_id, trigger) VALUES ($2, $1, 'manual')`},
+		"maintenance_window": {table: "maintenance_window_ci", constraint: "maintenance_window_ci_maintenance_window_id_fkey",
+			foreign: b.window, own: a.window,
+			stmt: `INSERT INTO maintenance_window_ci (organization_id, maintenance_window_id, ci_id) VALUES ($2, $1, '` + a.ci + `')`,
+			// The scope trigger refuses the invisible target first (42501).
+			appCodes: []string{"23503", "42501"}},
+		"document": {table: "document_link", constraint: "document_link_document_id_fkey", foreign: b.document, own: a.document,
+			stmt: `INSERT INTO document_link (organization_id, document_id, entity_type, entity_id) VALUES ($2, $1, 'ci', '` + a.ci + `')`,
+			// The scope trigger refuses the invisible target first (42501).
+			appCodes: []string{"23503", "42501"}},
+		"internal_order": {table: "internal_order_item", constraint: "internal_order_item_order_id_fkey", foreign: b.order, own: a.order,
+			stmt: `INSERT INTO internal_order_item (organization_id, order_id, description, quantity) VALUES ($2, $1, 'w877', 1)`},
+		"ci": {table: "maintenance_window_ci", constraint: "maintenance_window_ci_ci_id_fkey", foreign: b.ci, own: a.ci,
+			stmt: `INSERT INTO maintenance_window_ci (organization_id, maintenance_window_id, ci_id) VALUES ($2, '` + a.window + `', $1)`},
+		"team": {table: "ticket", constraint: "ticket_team_id_fkey", foreign: b.team, own: a.team,
+			stmt:   `INSERT INTO ticket (organization_id, title, reporter_id, team_id) VALUES ($2, 'w877-t', '` + a.user + `', $1)`,
+			fkStmt: `INSERT INTO ticket (organization_id, title, reporter_id, ticket_number, team_id) VALUES ($2, 'w877-t', '` + a.user + `', 877, $1)`},
+	}
+}

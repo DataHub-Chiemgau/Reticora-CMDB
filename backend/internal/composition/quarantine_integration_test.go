@@ -102,9 +102,21 @@ func migrationSection(t *testing.T, file, begin, end string) string {
 // ledger stock_movement (000242), asset_tag_link_asset_fkey (000249),
 // barcode_registry_asset_fkey (000255), stocktake_item_asset_fkey
 // (000260) and the endpoint references of relationship_change (000261).
-// The references on ci and asset that migration 000287 (WP-876) made
-// composite get their simple form again.
+// The references on ci and asset that migrations 000287 (WP-876) and
+// 000288 (WP-877) made composite get their simple form again.
 const dropLaterReferences = `
+	ALTER TABLE compliance_result DROP CONSTRAINT compliance_result_ci_id_fkey,
+		ADD CONSTRAINT compliance_result_ci_id_fkey FOREIGN KEY (ci_id) REFERENCES ci (id) ON DELETE CASCADE;
+	ALTER TABLE form_submission DROP CONSTRAINT form_submission_ci_id_fkey,
+		ADD CONSTRAINT form_submission_ci_id_fkey FOREIGN KEY (ci_id) REFERENCES ci (id) ON DELETE SET NULL;
+	ALTER TABLE maintenance_window_ci DROP CONSTRAINT maintenance_window_ci_ci_id_fkey,
+		ADD CONSTRAINT maintenance_window_ci_ci_id_fkey FOREIGN KEY (ci_id) REFERENCES ci (id) ON DELETE CASCADE;
+	ALTER TABLE security_finding DROP CONSTRAINT security_finding_ci_id_fkey,
+		ADD CONSTRAINT security_finding_ci_id_fkey FOREIGN KEY (ci_id) REFERENCES ci (id) ON DELETE CASCADE;
+	ALTER TABLE stock_scan DROP CONSTRAINT stock_scan_asset_id_fkey,
+		ADD CONSTRAINT stock_scan_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES asset (id);
+	ALTER TABLE stock_scan DROP CONSTRAINT stock_scan_ci_id_fkey,
+		ADD CONSTRAINT stock_scan_ci_id_fkey FOREIGN KEY (ci_id) REFERENCES ci (id);
 	ALTER TABLE asset_location DROP CONSTRAINT asset_location_asset_id_fkey,
 		ADD CONSTRAINT asset_location_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES asset (id) ON DELETE CASCADE;
 	ALTER TABLE ci_change DROP CONSTRAINT ci_change_ci_id_fkey,

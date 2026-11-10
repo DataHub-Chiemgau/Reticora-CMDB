@@ -463,6 +463,15 @@ func TestTicketTagsMigration(t *testing.T) {
 	// 000275 hangs reservation.ticket_id on the key the down drops; the
 	// later migration goes first, as a real rollback would order it.
 	exec("later fk", `ALTER TABLE reservation DROP CONSTRAINT reservation_ticket_id_fkey`)
+	// 000288 (WP-877) made the references on ticket composite; they go back
+	// to their simple form before the down drops the key.
+	exec("later fk 000288", `
+		ALTER TABLE ticket_comment DROP CONSTRAINT ticket_comment_ticket_id_fkey,
+			ADD CONSTRAINT ticket_comment_ticket_id_fkey FOREIGN KEY (ticket_id) REFERENCES ticket (id) ON DELETE CASCADE;
+		ALTER TABLE ticket_sla DROP CONSTRAINT ticket_sla_ticket_id_fkey,
+			ADD CONSTRAINT ticket_sla_ticket_id_fkey FOREIGN KEY (ticket_id) REFERENCES ticket (id) ON DELETE CASCADE;
+		ALTER TABLE form_submission DROP CONSTRAINT form_submission_ticket_id_fkey,
+			ADD CONSTRAINT form_submission_ticket_id_fkey FOREIGN KEY (ticket_id) REFERENCES ticket (id) ON DELETE SET NULL;`)
 	exec("down", read("down"))
 	var tags []string
 	if err = tx.QueryRow(bg, `SELECT tags FROM ticket WHERE id = $1`, kept).Scan(&tags); err != nil || !slices.Equal(tags, []string{"netz"}) {

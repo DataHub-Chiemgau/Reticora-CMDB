@@ -265,8 +265,13 @@ func TestIntegrityCheckCountsEveryViolation(t *testing.T) {
 		{"orphan: CI reference attribute without target", true, []stmt{sq(`UPDATE ci SET attributes = jsonb_build_object('ic_ref',
 			gen_random_uuid()::text) WHERE id = $1`, refCI)}},
 		// One row for every single-column foreign key between tenant tables
-		// without the organization (rls.ReferencesWithoutOrganization).
-		{"cross-tenant: reference without the organization", false, []stmt{sq(`UPDATE document SET uploaded_by = $2 WHERE id = $1`, docA, userB)}},
+		// without the organization. Since migration 000288 (WP-877, SR-03)
+		// there is none (rls.ReferencesWithoutOrganization is empty); the
+		// case adds one in its rolled-back transaction and writes past the
+		// composite key as a replica would.
+		{"cross-tenant: reference without the organization", true, []stmt{
+			sq(`ALTER TABLE document ADD CONSTRAINT document_uploaded_by_loose_fkey FOREIGN KEY (uploaded_by) REFERENCES app_user (id)`),
+			sq(`UPDATE document SET uploaded_by = $2 WHERE id = $1`, docA, userB)}},
 		{"cross-tenant: stock movement context", true, []stmt{sq(`INSERT INTO stock_movement (organization_id, item_kind, asset_id,
 			movement_type, assignee_user_id, document_id) VALUES ($1, 'asset', $2, 'assignment', $3, $4)`, f.OrgA, free, user1, docB)}},
 		{"cycle: CI type inheritance", true, []stmt{sq(`UPDATE ci_type SET parent_type_id = $2 WHERE id = $1`, typeA1, typeA2),

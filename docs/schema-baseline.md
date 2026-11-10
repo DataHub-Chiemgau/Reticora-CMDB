@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000287_tenant_fk_rest_1
+Stand: Migration 000288_tenant_fk_rest_2
 
 ## Prüfung
 
@@ -708,6 +708,15 @@ anderen Organisation bricht die Migration mit der Liste ab. Die Down-Migration
 stellt die einfachen Fremdschlüssel und die Zeilen wieder her und entfernt
 einen angelegten Schlüssel nur, wenn kein Fremdschlüssel ihn mehr nutzt.
 
+Migration 000288 (WP-877, SR-03 Rest II) stellt die übrigen 55 Verweise um
+(28 Tabellen): Modul- und Ticket-Tabellen (`ticket`, `ticket_comment`,
+`ticket_sla`, `stocktake`, `stock_scan`, `internal_order_item`, `document`,
+`document_link`), Benachrichtigungen und Webhooks, die vorhandenen Tabellen
+der Phase-3-Module (Wartung, Workflows, Formulare, Compliance), KI und IGA. Wo
+das Ziel noch keinen hatte, legt sie `<tabelle>_id_organization_key` an (u. a.
+`sla`, `webhook_subscription`, `workflow_def`, `maintenance_window`,
+`notification_channel`). Quarantäne und Down-Migration wie 000287.
+
 Migration 000275 (WP-827) legt `UNIQUE (id, organization_id)`
 (`internal_order_id_organization_key`) auf `internal_order` an und gibt den
 bis dahin ungebundenen Spalten `reservation.assignee_id`,
@@ -729,68 +738,14 @@ umgestellte Spalte mit der ID eines Objekts einer fremden Organisation
 (23503) und prüft die Fremdschlüssel bei abgeschalteten Triggern. Die Liste
 wird mit `RETICORA_UPDATE_SCHEMA_BASELINE=1 go test -run
 TestReferencesWithoutOrganizationDocumented ./internal/tenant/rls/` neu
-erzeugt. Rest von SR-03 vor GA (E-137, WP-329); Tabellen, die Phase-2-WPs
-ersetzen, folgen K19 in ihren Nachfolgern.
+erzeugt. Seit Migration 000288 (WP-877) ist die Liste leer: Jeder Verweis
+zwischen zwei Mandantentabellen trägt die Organisation, SR-03 ist behoben, und
+ein neuer Verweis ohne Organisation lässt den Test scheitern.
 
 <!-- rls-references-without-organization:begin -->
 
 | Verweis | Fremdschlüssel | Ziel | Grund |
 |---|---|---|---|
-| `ai_conversation.user_id` | `ai_conversation_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ai_message.conversation_id` | `ai_message_conversation_id_fkey` | `ai_conversation` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `compliance_result.ci_id` | `compliance_result_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `compliance_result.rule_id` | `compliance_result_rule_id_fkey` | `compliance_rule` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `document.uploaded_by` | `document_uploaded_by_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `document_link.document_id` | `document_link_document_id_fkey` | `document` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `form_submission.ci_id` | `form_submission_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `form_submission.form_id` | `form_submission_form_id_fkey` | `form_def` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `form_submission.submitted_by` | `form_submission_submitted_by_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `form_submission.ticket_id` | `form_submission_ticket_id_fkey` | `ticket` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_access_request.connector_id` | `iga_access_request_connector_id_fkey` | `iga_connector` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_access_request.decision_by` | `iga_access_request_decision_by_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_access_request.requester_id` | `iga_access_request_requester_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_access_request.subject_user_id` | `iga_access_request_subject_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_access_request.workflow_run_id` | `iga_access_request_workflow_run_id_fkey` | `workflow_run` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_access_review_item.connector_id` | `iga_access_review_item_connector_id_fkey` | `iga_connector` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_access_review_item.decision_by` | `iga_access_review_item_decision_by_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_access_review_item.review_id` | `iga_access_review_item_review_id_fkey` | `iga_access_review` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_access_review_item.user_id` | `iga_access_review_item_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_connector.collector_id` | `iga_connector_collector_id_fkey` | `collector` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_connector.credential_id` | `iga_connector_credential_id_fkey` | `credential` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_drift_finding.connector_id` | `iga_drift_finding_connector_id_fkey` | `iga_connector` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_drift_finding.remediation_task_id` | `iga_drift_finding_remediation_task_id_fkey` | `iga_provisioning_task` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_drift_finding.user_id` | `iga_drift_finding_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_provisioning_task.connector_id` | `iga_provisioning_task_connector_id_fkey` | `iga_connector` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_provisioning_task.user_id` | `iga_provisioning_task_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `internal_order_item.order_id` | `internal_order_item_order_id_fkey` | `internal_order` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `maintenance_notification.maintenance_window_id` | `maintenance_notification_maintenance_window_id_fkey` | `maintenance_window` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `maintenance_window_ci.ci_id` | `maintenance_window_ci_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `maintenance_window_ci.maintenance_window_id` | `maintenance_window_ci_maintenance_window_id_fkey` | `maintenance_window` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `notification_delivery.channel_id` | `notification_delivery_channel_id_fkey` | `notification_channel` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `notification_delivery.recipient_user_id` | `notification_delivery_recipient_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `notification_digest_item.channel_id` | `notification_digest_item_channel_id_fkey` | `notification_channel` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `notification_digest_item.delivery_id` | `notification_digest_item_delivery_id_fkey` | `notification_delivery` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `notification_digest_item.recipient_user_id` | `notification_digest_item_recipient_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `notification_inbox.user_id` | `notification_inbox_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `notification_preference.user_id` | `notification_preference_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `security_finding.ci_id` | `security_finding_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `stock_scan.asset_id` | `stock_scan_asset_id_fkey` | `asset` | stock_scan is replaced by the stocktake scans of WP-287 (K19); the successor references with the organization |
-| `stock_scan.ci_id` | `stock_scan_ci_id_fkey` | `ci` | stock_scan is replaced by the stocktake scans of WP-287 (K19); the successor references with the organization |
-| `stock_scan.scanned_by` | `stock_scan_scanned_by_fkey` | `app_user` | stock_scan is replaced by the stocktake scans of WP-287 (K19); the successor references with the organization |
-| `stock_scan.stocktake_id` | `stock_scan_stocktake_id_fkey` | `stocktake` | stock_scan is replaced by the stocktake scans of WP-287 (K19); the successor references with the organization |
-| `stocktake.started_by` | `stocktake_started_by_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ticket.assignee_id` | `ticket_assignee_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ticket.reporter_id` | `ticket_reporter_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ticket.team_id` | `ticket_team_id_fkey` | `team` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ticket_comment.author_id` | `ticket_comment_author_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ticket_comment.ticket_id` | `ticket_comment_ticket_id_fkey` | `ticket` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ticket_sla.sla_id` | `ticket_sla_sla_id_fkey` | `sla` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ticket_sla.ticket_id` | `ticket_sla_ticket_id_fkey` | `ticket` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `webhook_dead_letter.delivery_id` | `webhook_dead_letter_delivery_id_fkey` | `webhook_delivery` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `webhook_dead_letter.subscription_id` | `webhook_dead_letter_subscription_id_fkey` | `webhook_subscription` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `webhook_delivery.subscription_id` | `webhook_delivery_subscription_id_fkey` | `webhook_subscription` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `workflow_run.workflow_id` | `workflow_run_workflow_id_fkey` | `workflow_def` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `workflow_step.run_id` | `workflow_step_run_id_fkey` | `workflow_run` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
 
 <!-- rls-references-without-organization:end -->
 
