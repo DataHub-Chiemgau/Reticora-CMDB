@@ -15,28 +15,36 @@ Release-Kandidat für die erneute Entscheidung über G1 ist der Stand von
 den letzten Commit nennt, der das Produkt geändert hat (Code, Deployment,
 Installer; Test- und Audit-Pfade ausgenommen), oder einen späteren.
 
+Mit der Gate-Entscheidung des Auftraggebers vom 2026-11-10
+(`docs/acceptance/g1-gate.md`, Abschnitt „Freigabe nach E-76“) ist
+Release-Kandidat der Commit `536e3ab8` (`main` nach PR #154). Die letzte
+Produktänderung ist `b5bf2342` (PR #150); `536e3ab8` enthält sie. Ein Tag
+`v1.0.0-rc.<n>` ist nicht gesetzt; der Lauf unten ist der Push-Lauf auf
+`main`. Der Job `release-mode` läuft nur auf Tags `v*` und ist deshalb
+übersprungen.
+
 | Punkt | Wert |
 |---|---|
-| Tag | `v1.0.0-rc.<n>`: RC-Lauf ausstehend (WP-595) |
-| Commit | RC-Lauf ausstehend (WP-595) |
-| Workflow | `.github/workflows/install-smoke.yml` („Install Smoke Test“), Push des Tags |
-| Lauf | RC-Lauf ausstehend (WP-595) |
-| Datum | RC-Lauf ausstehend (WP-595) |
-| Ergebnis | RC-Lauf ausstehend (WP-595) |
+| Tag | `v1.0.0-rc.<n>`: RC-Lauf ausstehend (WP-595); kein Tag gesetzt |
+| Commit | `536e3ab8` (`536e3ab812b158e124b87c71f776096cb775a7df`, `main` nach PR #154) |
+| Workflow | `.github/workflows/install-smoke.yml` („Install Smoke Test“), Push auf `main` (auf dem Tag: Push des Tags) |
+| Lauf | [#390, Run 42712217841](https://github.com/DataHub-Chiemgau/Reticora-CMDB/actions/runs/42712217841); vorher auf `e17954ca` (gleicher Produktstand) Run 42695897334, grün |
+| Datum | 2026-11-09, 22:28–23:22 UTC |
+| Ergebnis | **success**, 13 von 13 ausgeführten Jobs grün, `release-mode` übersprungen (kein Tag) |
 
 Jobs des Laufs auf dem Release-Kandidaten:
 
 | Job | Prüfung | Ergebnis |
 |---|---|---|
-| `installer-script-tests` | Installer-Hilfsfunktionen, Preflight, Backup-Konfiguration, NATS-mTLS, Signaturprüfung | RC-Lauf ausstehend (WP-595) |
-| `install-cloud-smoke (ubuntu-22.04)` | Installation, Dienste healthy, Backup-Kette, `/health`, SPA, Keycloak | RC-Lauf ausstehend (WP-595) |
-| `install-cloud-smoke (ubuntu-24.04)` | wie oben, dazu Onboarding-E2E | RC-Lauf ausstehend (WP-595) |
-| `install-cloud-smoke (debian-12)` | wie oben, Container `debian:12` | RC-Lauf ausstehend (WP-595) |
-| `e2e-real` (chromium, edge, firefox, webkit, mobile-chrome, mobile-safari) | Real-Stack-Suite und Modul-Lauf `maintenance.spec.ts` je Browserprojekt gegen die Erwartungsliste | RC-Lauf ausstehend (WP-595) |
-| `e2e-real-ratchet` | Ratchet über alle sechs Projekte; zulässig sind nur Zeilen der nach E-60 zurückgestellten Befunde | RC-Lauf ausstehend (WP-595) |
-| `tls-domain-pebble` | Installation mit Domäne und ACME (Pebble) | RC-Lauf ausstehend (WP-595) |
-| `reinstall` | erneute Installation über eine bestehende | RC-Lauf ausstehend (WP-595) |
-| `release-mode` | Standardpfad mit den signierten Release-Artefakten des Tags (WP-388, E-69) | RC-Lauf ausstehend (WP-595) |
+| `installer-script-tests` | Installer-Hilfsfunktionen, Preflight, Backup-Konfiguration, NATS-mTLS, Signaturprüfung | grün |
+| `install-cloud-smoke (ubuntu-22.04)` | Installation, Dienste healthy, Backup-Kette, `/health`, SPA, Keycloak | grün |
+| `install-cloud-smoke (ubuntu-24.04)` | wie oben, dazu Onboarding-E2E | grün |
+| `install-cloud-smoke (debian-12)` | wie oben, Container `debian:12` | grün |
+| `e2e-real` (chromium, edge, firefox, webkit, mobile-chrome, mobile-safari) | Real-Stack-Suite und Modul-Lauf `maintenance.spec.ts` je Browserprojekt gegen die Erwartungsliste | grün in allen sechs Projekten |
+| `e2e-real-ratchet` | Ratchet über alle sechs Projekte; zulässig sind nur Zeilen der nach E-60 zurückgestellten Befunde | grün |
+| `tls-domain-pebble` | Installation mit Domäne und ACME (Pebble) | grün |
+| `reinstall` | erneute Installation über eine bestehende | grün |
+| `release-mode` | Standardpfad mit den signierten Release-Artefakten des Tags (WP-388, E-69) | RC-Lauf ausstehend (WP-595); übersprungen, weil kein Tag `v*` gesetzt ist |
 
 Release-Hinweis (F-212, nach E-60 zurückgestellt): Die Datenkorrektur der
 Migration 000086 benennt die Add-on-Zeilen nur um. Installationen eines

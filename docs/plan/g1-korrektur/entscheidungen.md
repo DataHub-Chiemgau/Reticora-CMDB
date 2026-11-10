@@ -6,6 +6,8 @@ Stand: 2026-10-19. Fortsetzung der Nummerierung aus [`../entscheidungen.md`](../
 
 **Nachtrag vom 2026-11-03:** E-Nummern sind über alle drei Entscheidungsdateien eindeutig, und E-103 bis E-143 führt [`../phase2/entscheidungen.md`](../phase2/entscheidungen.md). Die neue Entscheidung dieser Datei zum SMTP-Szenario der Ausfallsuite erhält deshalb E-144; die nächste freie Nummer ist E-146 (E-145 führt [`../phase2/entscheidungen.md`](../phase2/entscheidungen.md), WP-779).
 
+**Nachtrag vom 2026-11-10 (Gate G1):** Am 2026-11-09 hat der Auftraggeber entschieden: „behandle WP-600 als erledigt“. Am 2026-11-10 hat er entschieden, wörtlich: „Trag die G1-Entscheidung auch ein und starte gate-final“. Nach [E-76](#e-76) (Option 2) und E-103 lautet `docs/acceptance/g1-gate.md` „Ergebnis: bedingt bestanden“ (Release-Kandidat `536e3ab8`, Abschnitt „Freigabe nach E-76“). Die Traceability-Zeilen von WP-600 (GATE-01, GATE-02, GATE-05, SEQ-01) stehen in `docs/traceability.csv`. Zu [E-59](#e-59): Phase 2 begann vor dieser Gate-Entscheidung (PR #112, 2026-11-02); die Entscheidungen vom 2026-11-09 und 2026-11-10 decken das ab. Die Wiederholungsprüfung WP-596 bis WP-599 und `audit/g1-reaudit/GATE_DECISION.md` liegen nicht vor, ebenso die Läufe auf einem Tag `v1.0.0-rc.<n>`. Zu [E-60](#e-60): Die zurückgestellten Befunde F-212, F-287 und F-316 bleiben bekannte Einschränkungen; ob F-287 nach WP-427 aus der Zurückstellung fällt, ist nicht neu bewertet. Kein Status ändert sich.
+
 ## Übersicht
 
 | Nr. | Thema | Status | Betroffene WPs |
@@ -498,6 +500,8 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 - WP-453, WP-454, WP-455 und WP-457 bleiben offen, sind keine Voraussetzung von G1 (wie bisher) und entfernen mit der Lieferung ihre Zeilen; die Frist „vor GA“ steht in `g1-ausnahmen.csv`.
 
 **Nachtrag vom 2026-11-02 (Beschluss des Auftraggebers vom 2026-10-28):** Der Auftraggeber hat am 2026-10-28 entschieden, dass seine Erklärung vom 2026-10-15 als Nachweis für B3, B4 und B6 gilt, für G1 und G2 ([E-103](../phase2/entscheidungen.md#e-103), [E-02](../entscheidungen.md#e-02), [E-28](../entscheidungen.md#e-28), [E-35](../entscheidungen.md#e-35)). Das löst Option 2 in zwei Punkten ab: Die betroffenen IDs gelten als nachgewiesen, und die Lieferungen A-02, A-07 und A-11 mit Frist „vor GA“ entfallen. WP-453, WP-454, WP-455 und WP-457 entfallen. Die Umstellung von `docs/acceptance/g1-gate.md`, `docs/acceptance/g1-ausnahmen.csv` und `tests/rep01-structure.test.sh` übernimmt WP-831 (`g1-nachweise`) des Phase-2-Plans.
+
+**Nachtrag vom 2026-11-10 (Gate-Entscheidung G1):** Nach der Entscheidung des Auftraggebers vom 2026-11-10 („Trag die G1-Entscheidung auch ein und starte gate-final“) und der Entscheidung vom 2026-11-09 zu WP-600 („behandle WP-600 als erledigt“) lautet G1 „bedingt bestanden“. Die Ausnahmen der Art `erklaerung` (AUT-05, AUT-06, NET-04, NFR-08, NFR-09, ABN-01, GATE-03 Pentest-Anteil, GATE-02) bleiben mit E-103 und „entfällt (E-103)“ in `docs/acceptance/g1-ausnahmen.csv`; die GATE-02-Zeile bleibt, weil weitere Ausnahmen der Art `erklaerung` bestehen.
 
 **Betroffene IDs:** GATE-02, GATE-03, NFR-08, NFR-09, ABN-01, AUT-05, AUT-06, NET-04, GLO-11
 

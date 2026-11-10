@@ -1593,3 +1593,7 @@ INS-01;[Q];G2;tests/install-smoke-health.test.sh;WP-331
 INS-04;[Q];G2;frontend/e2e/onboarding.spec.ts;WP-331
 DIS-08;[Q];G2;backend/internal/discovery/errors_test.go;WP-331
 TST-04;[Q];G2;.github/workflows/ci.yml;WP-331
+GATE-01;[Q];G1;tests/rep01-structure.test.sh;WP-600
+GATE-02;[Q];G1;tests/rep01-structure.test.sh;WP-600
+GATE-05;[Q];G1;tests/rep01-structure.test.sh;WP-600
+SEQ-01;[Q];G1;tests/rep01-structure.test.sh;WP-600

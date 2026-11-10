@@ -146,21 +146,56 @@ Statuszelle steht auf PASS durch Erklärung. Das Ergebnis ändert dieser
 Nachtrag nicht. Die Zeile NTF-04 nennt zusätzlich den Digest aus WP-508
 (E-129).
 
+Nachtrag 2026-11-10 (Gate-Entscheidung G1): Am 2026-11-09 hat der
+Auftraggeber entschieden: „behandle WP-600 als erledigt“; eine
+Gate-Entscheidung trug dieser Stand nicht ein. Am 2026-11-10 hat er
+entschieden (wörtlich): „Trag die G1-Entscheidung auch ein und starte
+gate-final“. Die Statuspflege auf dem Release-Kandidaten `536e3ab8` setzt
+GATE-01, CI-13, MET-15 und TEN-09 (mit der GATE-03-Zeile zum
+Isolationstest) auf PASS, weil das Review SR-11, SR-12, SR-13 und SR-14 bis
+SR-26 als behoben führt. Die Läufe auf `536e3ab8` sind nachgetragen. Das
+Ergebnis lautet „bedingt bestanden“ (Abschnitt „Freigabe nach E-76“); die
+Ausnahmeliste bleibt unverändert. Ohne Tag `v1.0.0-rc.<n>` fehlen die Läufe
+von `release.yml`, des Jobs `release-mode` und von `gate-final.yml`.
+
 ## Ergebnis
 
-**Ergebnis: offen.** G1 ist nicht bestanden. Keine [B]/[Q]-ID steht allein
-durch die Erklärung des Auftraggebers auf PASS (E-76, Option 2). Ausstehende
-Nachweise:
+**Ergebnis: bedingt bestanden.** G1 ist durch den Auftraggeber am
+2026-11-10 entschieden (Abschnitt „Freigabe nach E-76“). Bedingt, weil
+AUT-05, AUT-06, NET-04, NFR-08, NFR-09, ABN-01 (a)/(b), GATE-03
+(Pentest-Anteil) und GATE-02 nicht PASS sind; sie stehen als Ausnahmen der
+Art `erklaerung` mit E-103 in `docs/acceptance/g1-ausnahmen.csv`, GATE-04
+mit der Art `np`. Keine [B]/[Q]-ID steht allein durch die Erklärung des
+Auftraggebers auf PASS (E-76, Option 2). „bestanden“ verlangte jede
+GATE-Zeile PASS. Release-Kandidat ist `536e3ab8` (`main` nach PR #154; die
+letzte Produktänderung ist `b5bf2342`, enthalten seit `e17954ca`).
 
-- Sicherheitsreview (WP-452): SR-11 fortschreiben, die Befunde SR-12
-  (Site-Scope-Bypass im Rack-Kanal, F-002) und SR-13 (Review-Items, F-003)
-  sowie die übrigen P0-Befunde des Phase-1-Audits aufnehmen. Betrifft
-  GATE-01, CI-13, MET-15 und TEN-09.
-- Läufe auf dem Release-Kandidaten und endgültige Statuspflege (WP-595),
-  danach `tests/rep01-structure.test.sh --final` und die Gate-Entscheidung
-  (WP-600).
-- GATE-02 folgt aus den übrigen Zeilen. Seine Ausnahme der Art `erklaerung`
-  nennt E-103; eine Lieferung entfällt.
+Bestanden (belegt):
+
+- GATE-01: kein offenes Critical. Das Sicherheitsreview führt SR-11
+  fortgeschrieben, SR-12 (F-002), SR-13 (F-003) und die P0-Befunde des
+  Phase-1-Audits (SR-14 bis SR-26) als behoben mit Testverweis (WP-452),
+  kein SR-Befund mit Critical oder High ist offen; die Scans sind im
+  CI-Lauf 42712217817 auf `536e3ab8` grün.
+- CI-13, MET-15 (SR-11 behoben, WP-418) und TEN-09 mit der GATE-03-Zeile
+  „Isolationstest (TEN-09) vollständig“ (SR-12, SR-13 behoben; alle
+  Korrektur-WPs zu WP-208 gemergt): Statuspflege auf dem Release-Kandidaten
+  (Abschnitt GATE-02, „PASS nach der Statuspflege auf dem
+  Release-Kandidaten“).
+- GATE-05, SEQ-01, DOD-01, GLO-11 und REP-01 (Abschnitte unten).
+- Läufe auf dem Release-Kandidaten `536e3ab8`: CI, Install-Smoke mit
+  Real-Stack-Suite in sechs Browserprojekten und Ratchet, Ausfallsuite,
+  Restore-Test, Kubernetes-Smoke grün; der nächtliche Lastlauf ist in den
+  G1-Szenarien grün und im G2-Szenario `phase2` rot (Abschnitt „Läufe auf
+  dem Release-Kandidaten“).
+
+Nicht durch einen Lauf belegt: Ein Tag `v1.0.0-rc.<n>` ist nicht gesetzt;
+deshalb fehlen der Lauf von `release.yml` (Pre-Release), der Job
+`release-mode` von `install-smoke.yml` und der Lauf von `gate-final.yml`
+auf dem Release-Kandidaten (Abschnitt „Läufe auf dem Release-Kandidaten“).
+Die Wiederholungsprüfung WP-596 bis WP-599 liegt nicht vor
+(`audit/g1-reaudit/` enthält nur `FINDINGS.md`); WP-600 gilt nach der
+Entscheidung des Auftraggebers vom 2026-11-09 als erledigt.
 
 Kein ausstehender Nachweis sind B3 (Pentest; NFR-08, Pentest-Anteil von
 GATE-03 und GATE-01), B4 (v2-Texte; AUT-05, AUT-06, NET-04, ABN-01 (a)/(b))
@@ -215,11 +250,38 @@ Punkten Nachweis und Lieferfrist ab; die übrigen Regeln von E-76 bleiben:
   PASS oder selbst eine Ausnahme dieser Freigabe. `tests/rep01-structure.test.sh`
   prüft diese Bedingungen (1) bis (5) im Normalmodus und mit `--final`
   (WP-595, Konsistenzprüfung oben); für die Zeilen mit E-103 verlangen (1)
-  und (3) keine Frist (WP-831). Die Entscheidung trifft WP-600.
+  und (3) keine Frist (WP-831). Die Entscheidung war Gegenstand von WP-600.
 
-Das Ergebnis lautet derzeit „offen“, weil weitere Bedingungen fehlen: GATE-01
-und die offenen Befunde zu CI-13, MET-15 und TEN-09 sowie die Läufe auf dem
-Release-Kandidaten (WP-595).
+Entscheidung des Auftraggebers vom 2026-11-09 zu WP-600 (`k-gate`):
+„behandle WP-600 als erledigt“. Eine Gate-Entscheidung trug dieser Stand
+bewusst nicht ein; das Ergebnis blieb „offen“ (`docs/acceptance/g2-gate.md`,
+D-8).
+
+Entscheidung des Auftraggebers vom 2026-11-10 (wörtlich): „Trag die
+G1-Entscheidung auch ein und starte gate-final“. Damit ist G1 mit dem
+Ergebnis „bedingt bestanden“ entschieden, nach der Mechanik dieses
+Abschnitts (E-76 Option 2, E-103):
+
+- Release-Kandidat ist `536e3ab8`. Die Statuspflege auf diesem Stand setzt
+  GATE-01, CI-13, MET-15 und TEN-09 (mit der GATE-03-Zeile
+  „Isolationstest (TEN-09) vollständig“) auf PASS, weil das
+  Sicherheitsreview SR-11, SR-12, SR-13 und die P0-Befunde SR-14 bis SR-26
+  als behoben mit Testverweis führt; kein Critical und kein SR-Befund mit
+  High ist offen, der Pentest führt keine Befundzeile.
+- Nicht PASS bleiben AUT-05, AUT-06, NET-04, NFR-08, NFR-09, ABN-01 (a)/(b),
+  GATE-03 (Pentest-Anteil) und GATE-02, je als Ausnahme der Art
+  `erklaerung` mit E-103 in `docs/acceptance/g1-ausnahmen.csv` (unverändert,
+  eine Frist entfällt), und GATE-04 als Ausnahme der Art `np`. Keine
+  Ausnahme hat die Art `luecke`. Neue Ausnahmen kommen nicht hinzu.
+- Die Freigabe ersetzt keinen Nachweis: Die Läufe von `release.yml`,
+  `install-smoke.yml` (Job `release-mode`) und `gate-final.yml` auf einem
+  Tag `v1.0.0-rc.<n>` liegen nicht vor, und die Wiederholungsprüfung
+  WP-596 bis WP-599 mit `audit/g1-reaudit/GATE_DECISION.md` und
+  `PASSED_REGRESSION.md` ist nicht durchgeführt. Das Ergebnis stützt sich
+  auf die Entscheidung des Auftraggebers, WP-600 als erledigt zu behandeln.
+- Die Auftraggeber-Anweisung „starte gate-final“ ist mit dieser Eintragung
+  nicht ausgeführt; den Lauf und seine Run-ID trägt der Abschnitt „Läufe auf
+  dem Release-Kandidaten“ nach.
 
 ### Bekannte Einschränkungen nach E-60
 
@@ -261,18 +323,28 @@ Tag. Ein roter Lauf steht hier mit Ursache und Folge-WP. CI und Release
 stehen in `docs/security/review-g1.md`, Install-Smoke in
 `docs/acceptance/g1-installation.md`.
 
+Mit der Entscheidung vom 2026-11-10 ist Release-Kandidat der Commit
+`536e3ab8` (`main` nach PR #154). Ein Tag `v1.0.0-rc.<n>` ist nicht gesetzt;
+die Läufe unten liefen auf `main` (Push und nächtlicher Zeitplan). Die
+letzte Produktänderung ist `b5bf2342` (PR #150); `536e3ab8` und `e17954ca`
+haben denselben Produktstand. Die Läufe auf einem Tag (`release.yml`,
+Job `release-mode` von `install-smoke.yml`, `gate-final.yml` auf dem Tag)
+fehlen.
+
 | Workflow | Gegenstand | Commit | Lauf | Ergebnis |
 |---|---|---|---|---|
-| `gate-final.yml` | `tests/rep01-structure.test.sh --final`, `TestTraceabilityFile`; bei Rot die offenen Lieferungen und IDs | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
-| `install-smoke.yml`, Jobs `e2e-real` und `e2e-real-ratchet` | Real-Stack-Suite in allen sechs Browserprojekten und Modul-Lauf `maintenance.spec.ts`; Ratchet nur mit Zeilen der nach E-60 zurückgestellten Befunde | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
-| `outage.yml` | Ausfallsuite | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
-| `restore-test.yml` | Restore, PITR, RPO/RTO | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
-| `k8s-smoke.yml` | Kubernetes-Smoke (kind) | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
-| `load.yml` (nächtlich) | Lasttest NFR-10 nach E-58 | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
+| `gate-final.yml` | `tests/rep01-structure.test.sh --final`, `TestTraceabilityFile`; bei Rot die offenen Lieferungen und IDs | nicht auf `536e3ab8` gelaufen (Auslöser nur Tag `v*` oder von Hand); letzter Lauf auf `201f6fbe` | RC-Lauf ausstehend (WP-595); letzter Lauf 41514357730 | RC-Lauf ausstehend (WP-595); 41514357730 rot |
+| `install-smoke.yml`, Jobs `e2e-real` und `e2e-real-ratchet` | Real-Stack-Suite in allen sechs Browserprojekten und Modul-Lauf `maintenance.spec.ts`; Ratchet nur mit Zeilen der nach E-60 zurückgestellten Befunde | `536e3ab8` | 42712217841 (Push auf `main`) | grün: `e2e-real` in chromium, edge, firefox, webkit, mobile-chrome, mobile-safari und `e2e-real-ratchet` grün |
+| `outage.yml` | Ausfallsuite | `536e3ab8` | 42742369040 (nächtlich; vorher 42695925438 auf `e17954ca`) | grün |
+| `restore-test.yml` | Restore, PITR, RPO/RTO | `536e3ab8` | 42747382418 (nächtlich) | grün |
+| `k8s-smoke.yml` | Kubernetes-Smoke (kind) | `536e3ab8` | 42744908714 (nächtlich) | grün |
+| `load.yml` (nächtlich) | Lasttest NFR-10 nach E-58 | `536e3ab8` | 42742582391 | rot nur im Job `phase2` (Lastnachweis G2, nicht NFR-10 der G1): `relation_search` p95 1,51 s gegen 1.500 ms und `view_presets` p95 3,07 s gegen 3.000 ms im vorläufigen Budgetsatz G2 (E-146), Einzellauf; Ursache und Folge-WP-Vorschläge V-3 `g2-graph-cache` und V-8 `g2-view-presets` in `docs/acceptance/lasttest-g2.md` (D-1 in `docs/acceptance/g2-gate.md`). Die übrigen zehn Jobs grün, darunter die NFR-10-Szenarien `api` und `ingest` (4 Spuren) sowie `ingest-spool`, `ingest-rediscover` und `nfr01-volume` |
 
 Die Läufe dieser Tabelle stammen aus WP-595 und WP-600; WP-831 ändert ihre
-Einträge nicht. Nach dem Merge von WP-831 (`g1-nachweise`) ist der Lauf von
-`gate-final.yml` auf `main` mit Run-ID und Commit hier nachzutragen.
+Einträge nicht. Die Läufe auf `536e3ab8` hat die Eintragung der
+Gate-Entscheidung vom 2026-11-10 übernommen. Der Lauf von `gate-final.yml`
+auf dem Stand mit dieser Eintragung ist mit Run-ID und Commit hier
+nachzutragen.
 
 Geschlossen mit der G1-Nachbesserung:
 
@@ -315,14 +387,16 @@ Auftraggeber entschieden):
 | Audit-Befunde, Teil 03 (`docs/audit/befunde.csv`, Abschnitt `03`; 26 Critical/High, davon 5 Critical) | 0 | WP-832 (A-03, A-28): LOC-10, LOC-11, MET-14, X-SCOPE und X-MANUAL geschlossen, jeder mit schließendem WP und Tests im Anhang von `docs/security/review-g1.md`, Abschnitt „Teil 03“. Zusammen mit der Zeile davor sind es 251 Critical/High, davon 54 Critical. `tests/rep01-structure.test.sh` verlangt jede Critical-Zeile aus `befunde.csv` mit Status im Anhang (Regel `audit_findings`). |
 | Befunde des Sicherheitsreviews (SR-01 bis SR-49) | 0 | `docs/security/review-g1.md`: Neue Befunde SR-01 bis SR-13 (SR-12 Site-Scope-Bypass im Rack-Kanal, F-002; SR-13 Review-Items, F-003), P0-Befunde des Phase-1-Audits SR-14 bis SR-26 (WP-452) und Befunde der Korrektur SR-27 bis SR-49 (WP-699). Kein Critical offen. |
 | Befunde der Korrektur G1 (`audit/g1-reaudit/FINDINGS.md`, ab F-355) | 0 | Jeder Befund mit Sicherheitswirkung oder Critical nach dem Bewertungsschema steht als SR-Befund mit Severity im Review (SR-27 bis SR-49, F-397 in SR-18), die übrigen mit Begründung im Abschnitt „Befunde der Korrektur ohne Sicherheitswirkung“. `tests/rep01-structure.test.sh` verlangt das für jeden Befund P0 bis P2 der Übersicht, auch für später hinzukommende (F-428). |
-| P0-Befunde des Phase-1-Abnahmeaudits (F-001 bis F-016) | offen bis zum Nachweis | Die Korrektur-WPs aller 16 P0-Befunde (Tabelle „Schwere Befunde (P0/P1) und ihre Korrektur“ in `docs/plan/g1-korrektur/implementierungsplan.md`) sind gemergt. Geschlossen sind die Befunde erst mit ihrer Aufnahme ins Review (WP-452) und den Läufen auf dem Release-Kandidaten (WP-595). |
+| P0-Befunde des Phase-1-Abnahmeaudits (F-001 bis F-016) | 0 | Die Korrektur-WPs aller 16 P0-Befunde (Tabelle „Schwere Befunde (P0/P1) und ihre Korrektur“ in `docs/plan/g1-korrektur/implementierungsplan.md`) sind gemergt. Das Review führt sie als behoben mit Testverweis: SR-12 (F-002), SR-13 (F-003) und SR-14 bis SR-26 (WP-452). Die Läufe auf dem Release-Kandidaten `536e3ab8` sind grün (Abschnitt „Läufe auf dem Release-Kandidaten“; CI-Lauf 42712217817). |
 | Abhängigkeits- und Image-Scans | 0 | govulncheck, npm audit, Trivy blockierend in CI |
 | Externer Pentest | keines laut Erklärung des Auftraggebers | Nach dem Beschluss vom 2026-10-28 gilt die Erklärung des Auftraggebers vom 2026-10-15 als Nachweis für G1 und G2 (E-103). `docs/security/pentest-g1.md` enthält keine Befundliste; sie wird nicht nachgereicht (WP-453 entfällt). |
 
-**Status:** offen. GATE-01 bleibt offen, solange ein P0-Befund des
-Phase-1-Audits offen ist (`docs/plan/g1-korrektur/implementierungsplan.md`).
-Für den Pentest ist die Erklärung des Auftraggebers der Nachweis (E-103);
-eine Statuszelle wird dadurch nicht PASS durch Erklärung.
+**Status:** PASS. Kein Critical ist in Review und Pentest offen, kein
+P0-Befund des Phase-1-Audits ist offen (Statuspflege auf dem
+Release-Kandidaten `536e3ab8`, Entscheidung vom 2026-11-10). Für den
+Pentest ist die Erklärung des Auftraggebers der Nachweis (E-103); der
+Pentest-Anteil steht als Ausnahme bei GATE-03, die Statuszelle von GATE-01
+stützt sich auf das Review.
 `tests/rep01-structure.test.sh`
 verbietet PASS von GATE-01 und das Ergebnis „bestanden“, solange eine
 Critical-Zeile in Review oder Pentest offen ist, in jeder Schreibweise und
@@ -342,12 +416,15 @@ gemischte Tags wie „[B], Teilumfang [P2]“ zählt der [B]-Anteil.
   9 Ausnahmen, davon 4 mit Zeile, aber nicht abgenommen.
 - Der Status je ID steht im [Anhang](#anhang-status-je-bq-id).
 - Abweichungen von PASS stehen mit Begründung in den Tabellen unten: N/P,
-  offen nach E-76 und offen wegen offener Befunde. Der Abgleich offener
-  Befunde begründet, warum eine ID trotz eines offenen Befunds unter High
-  PASS ist. Die IDs, die mit der G1-Nachbesserung PASS wurden, stehen in der
-  letzten Tabelle.
+  offen nach E-76 und E-103. Die IDs, die bis zur Statuspflege auf dem
+  Release-Kandidaten wegen offener Befunde offen waren, stehen in der Tabelle
+  „PASS nach der Statuspflege auf dem Release-Kandidaten“. Der Abgleich
+  offener Befunde begründet, warum eine ID trotz eines offenen Befunds unter
+  High PASS ist. Die IDs, die mit der G1-Nachbesserung PASS wurden, stehen in
+  der letzten Tabelle.
 
-**Status:** offen. Folgt aus den Tabellen unten; die Ausnahme der Art
+**Status:** offen. Folgt aus den Ausnahmen der Art `erklaerung` (Tabelle
+„Offen: Erklärung des Auftraggebers als Nachweis“); die Ausnahme der Art
 `erklaerung` für GATE-02 nennt E-103, eine Lieferung entfällt.
 
 ### N/P und WARN
@@ -382,21 +459,24 @@ auf PASS durch Erklärung. Von 2026-10-15 bis 2026-10-25 standen sie hier als
 | ABN-01 | offen | (d) und (e) sind durch Tests belegt (`docs/acceptance/abn-01.md`). (a) und (b): Erklärung des Auftraggebers vom 2026-10-15 gilt nach dem Beschluss vom 2026-10-28 als Nachweis für G1 und G2 (B4, E-02, E-103); die Szenariotexte „V §65–66“ werden nicht nachgereicht. (c) ist [P2]. |
 | NFR-08 | offen | Erklärung des Auftraggebers vom 2026-10-15 gilt nach dem Beschluss vom 2026-10-28 als Nachweis für G1 und G2 (B3, E-28, E-103). Zusammenfassung, Befundliste und Nachtest des externen Pentests werden nicht nachgereicht (`docs/security/pentest-g1.md`). „Sicherheit nach SEC-11“ ist mit WP-209 belegt (`docs/security/review-g1.md`). |
 | NFR-09 | offen | Erklärung des Auftraggebers vom 2026-10-15 gilt nach dem Beschluss vom 2026-10-28 als Nachweis für G1 und G2 (B6, E-35, E-103). Die Subprozessorenliste wird nicht nachgereicht; `docs/legal/subprozessoren.md` verweist auf die Erklärung. Die Datenresidenz ist belegt (`docs/betrieb/referenzmodell.md`, WP-105). |
-| GATE-03 | offen | Pentest-Anteil: Erklärung des Auftraggebers vom 2026-10-15 gilt nach dem Beschluss vom 2026-10-28 als Nachweis für G1 und G2 (B3, E-28, E-103). Außerdem ist der Isolationstest (TEN-09) offen (nächste Tabelle). Lasttest und Install-Smoke sind belegt (Abschnitt GATE-03). |
-| GATE-02 | offen | Folgt aus den übrigen Zeilen: die Ausnahmen der Art `erklaerung` (E-103) und die offenen IDs der nächsten Tabelle. Die GATE-02-Zeile in `docs/acceptance/g1-ausnahmen.csv` nennt E-103, eine Lieferung entfällt. |
+| GATE-03 | offen | Pentest-Anteil: Erklärung des Auftraggebers vom 2026-10-15 gilt nach dem Beschluss vom 2026-10-28 als Nachweis für G1 und G2 (B3, E-28, E-103). Lasttest, Install-Smoke und Isolationstest (TEN-09) sind belegt (Abschnitt GATE-03). |
+| GATE-02 | offen | Folgt aus den übrigen Zeilen: die Ausnahmen der Art `erklaerung` (E-103); seit der Statuspflege auf dem Release-Kandidaten `536e3ab8` ist keine andere ID offen. Die GATE-02-Zeile in `docs/acceptance/g1-ausnahmen.csv` nennt E-103, eine Lieferung entfällt. |
 
-### Offen: offene Befunde und Korrektur-WPs
+### PASS nach der Statuspflege auf dem Release-Kandidaten
 
-Diese IDs stehen auf „offen“, weil ein Befund in `docs/security/review-g1.md`
-offen ist oder dort noch fehlt. Die Statuswerte auf dem Release-Kandidaten
-pflegt WP-595 (`t5-rc-evidence`).
+Diese IDs standen bis zur Eintragung der Gate-Entscheidung vom 2026-11-10
+auf „offen“, weil ein Befund in `docs/security/review-g1.md` offen war oder
+dort fehlte (F-038, F-040). Die Statuspflege auf dem Release-Kandidaten
+`536e3ab8` (WP-595, `t5-rc-evidence`) setzt sie auf PASS: Das Review führt
+die Befunde als behoben mit Testverweis, die Läufe auf dem
+Release-Kandidaten sind grün.
 
 | ID | Status | Begründung |
 |---|---|---|
-| GATE-01 | offen | Die Korrektur-WPs der 16 P0-Befunde des Phase-1-Audits sind gemergt, aber die P0-Befunde, SR-12 und SR-13 stehen noch nicht im Review (WP-452). Für den Pentest gilt die Erklärung des Auftraggebers als Nachweis (E-103). Abschnitt GATE-01. |
-| CI-13 | offen | Alle Korrektur-WPs zu WP-087 sind gemergt: WP-418 (`t5-sr11-decorator`, `423a538`) und WP-369 (`t3-resurrect-new`, `44a0db2`). SR-11 steht in `docs/security/review-g1.md` noch als offen; solange verbietet der Befund PASS (F-038). Die Fortschreibung von SR-11 übernimmt WP-452 (`t5-review-g1`). |
-| MET-15 | offen | SR-11 nennt MET-15: In der Produktionsverdrahtung entfiel die serverseitige Vorabprüfung eindeutiger Attribute. WP-418 (`423a538`) reicht `UniqueConflicts` durch; SR-11 steht im Review noch als offen (WP-452). |
-| TEN-09 | offen | Alle Korrektur-WPs zu WP-208 sind gemergt: WP-340 (`t1-rack-site-scope`, `5b29d6f`), WP-342 (`t1-review-scope`, `c8225dd`), WP-409 (`t1-channel-matrix`, `52ac11d`), WP-347 (`t1-export-job-visibility`, `dc1dd90`), WP-406 (`t1-err-ident-loc`, `bf46eff`) und WP-407 (`t1-err-modules`, `012abb5`). Das Review führt den Site-Scope-Bypass im Rack-Kanal (F-002) und den Review-Items-Leak (F-003) noch nicht als Befunde SR-12 und SR-13 (WP-452); bis dahin gilt der Isolationstest nicht als vollständig (F-040). |
+| GATE-01 | PASS | Die Korrektur-WPs der 16 P0-Befunde des Phase-1-Audits sind gemergt; das Review führt SR-12, SR-13 und die P0-Befunde SR-14 bis SR-26 als behoben (WP-452), kein Critical ist offen. Abschnitt GATE-01. |
+| CI-13 | PASS | Alle Korrektur-WPs zu WP-087 sind gemergt: WP-418 (`t5-sr11-decorator`, `423a538`) und WP-369 (`t3-resurrect-new`, `44a0db2`). SR-11 steht im Review als behoben (WP-418) mit `TestAuditT5CIReactivationThroughProductionDecoratorChain` (`backend/internal/tenant/rls/ci_decorator_chain_integration_test.go`). |
+| MET-15 | PASS | SR-11 nennt MET-15; WP-418 (`423a538`) reicht `UniqueConflicts` durch, SR-11 steht im Review als behoben. Weitere Nachweise: WP-692, WP-700, WP-702, WP-703 und WP-833 (`docs/traceability.csv`). |
+| TEN-09 | PASS | Alle Korrektur-WPs zu WP-208 sind gemergt: WP-340 (`t1-rack-site-scope`, `5b29d6f`), WP-342 (`t1-review-scope`, `c8225dd`), WP-409 (`t1-channel-matrix`, `52ac11d`), WP-347 (`t1-export-job-visibility`, `dc1dd90`), WP-406 (`t1-err-ident-loc`, `bf46eff`) und WP-407 (`t1-err-modules`, `012abb5`). Das Review führt den Site-Scope-Bypass im Rack-Kanal (F-002) als SR-12 und den Review-Items-Leak (F-003) als SR-13, beide behoben (F-040). Die Kanalmatrix läuft im CI-Lauf 42712217817 auf `536e3ab8` grün. |
 
 ### Abgleich offener Befunde
 
@@ -459,12 +539,14 @@ verschoben (`docs/security/review-g1.md`).
 
 | Bedingung | Status | Nachweis |
 |---|---|---|
-| Lasttest (NFR-10) bestanden | PASS | `docs/acceptance/lasttest-g1.md`: drei Nachweisläufe von `load.yml` auf `main` (Commit `3910aae`, Runs 40316485305, 40316488267, 40316491988), bewertet nach E-58 (Ergänzung vom 2026-10-26, Median über drei Läufe) mit `load-evidence.yml` (Run 40320307297): alle Budgets gehalten, auch NFR-02 auf den NFR-01-Volumina und die Wiederentdeckung (F-118). Umgebung nach E-58 (Option 1); dedizierter Referenzhost vor GA (SR-06). Läufe auf dem Release-Kandidaten: WP-595 |
+| Lasttest (NFR-10) bestanden | PASS | `docs/acceptance/lasttest-g1.md`: drei Nachweisläufe von `load.yml` auf `main` (Commit `3910aae`, Runs 40316485305, 40316488267, 40316491988), bewertet nach E-58 (Ergänzung vom 2026-10-26, Median über drei Läufe) mit `load-evidence.yml` (Run 40320307297): alle Budgets gehalten, auch NFR-02 auf den NFR-01-Volumina und die Wiederentdeckung (F-118). Umgebung nach E-58 (Option 1); dedizierter Referenzhost vor GA (SR-06). Nächtlicher Lauf auf dem Release-Kandidaten `536e3ab8`: 42742582391, Jobs `api` und `ingest` grün, rot nur im G2-Job `phase2` (Abschnitt „Läufe auf dem Release-Kandidaten“) |
 | Pentest ohne offene High/Critical | offen | Erklärung des Auftraggebers vom 2026-10-15 gilt nach dem Beschluss vom 2026-10-28 als Nachweis für G1 und G2 (B3, E-103); `docs/security/pentest-g1.md` verweist auf sie, eine Befundliste wird nicht nachgereicht |
-| Isolationstest (TEN-09) vollständig | offen | Die Korrektur-WPs zu WP-208 sind gemergt (Abschnitt GATE-02, TEN-09); der Site-Scope-Bypass im Rack-Kanal (F-002) steht noch nicht als Befund im Review (WP-452). Statuspflege auf dem Release-Kandidaten: WP-595. |
+| Isolationstest (TEN-09) vollständig | PASS | Die Korrektur-WPs zu WP-208 sind gemergt (Abschnitt GATE-02, TEN-09); das Review führt den Site-Scope-Bypass im Rack-Kanal (F-002) als SR-12, behoben (WP-340). Statuspflege auf dem Release-Kandidaten `536e3ab8`. |
 | Install-Smoke auf beiden Plattformen | PASS | `docs/acceptance/g1-installation.md` (WP-211) |
 
-**Status:** offen. `tests/rep01-structure.test.sh` verbietet PASS von GATE-03,
+**Status:** offen. Offen ist nur der Pentest-Anteil (Ausnahme der Art
+`erklaerung` mit E-103 in `docs/acceptance/g1-ausnahmen.csv`).
+`tests/rep01-structure.test.sh` verbietet PASS von GATE-03,
 solange im Pentest ein High oder Critical offen ist, und PASS des
 Isolationstests, solange der Rack-Befund nicht im Review steht.
 
@@ -511,6 +593,12 @@ SEQ-01 ist das Vorziehen von M0; E-07 erlaubt sie.
 Nach Schritt 8 folgt die G1-Nachbesserung (WP-332 bis WP-335, Epic G1, Planung
 in PR #63). Sie behebt die Befunde SR-02 und SR-05 des Sicherheitsreviews und
 wiederholt den Lasttest (NFR-10).
+
+Danach folgen der Korrekturplan (WP-336 ff.) und die Gate-Entscheidung vom
+2026-11-10. Phase 2 begann vor dieser Entscheidung (PR #112, 2026-11-02);
+das weicht von E-59 (Option 1) ab, nicht von der Reihenfolge der Phase 1,
+und ist durch die Entscheidungen des Auftraggebers vom 2026-11-09 und
+2026-11-10 abgedeckt (`docs/acceptance/g2-gate.md`, D-8).
 
 **Status:** PASS.
 
@@ -582,7 +670,7 @@ Erzeugt aus `docs/traceability.csv`. PASS heißt: Der Nachweis liegt in den gena
 | CI-10 | [B] | PASS | `backend/internal/server/authz_test.go`, `backend/internal/override/decide_test.go`, `backend/internal/ci/effective_view_integration_test.go` (+1) | WP-045, WP-058, WP-060, WP-091 |
 | CI-11 | [B] | PASS | `backend/internal/ci/typechange_test.go` | WP-172 |
 | CI-12 | [B] | PASS | `backend/internal/ci/merge_integration_test.go`, `backend/internal/ci/unmerge_integration_test.go` | WP-173, WP-174 |
-| CI-13 | [B] | offen | `backend/internal/discovery/resurrect_test.go`, `backend/internal/tenant/rls/ci_decorator_chain_integration_test.go` | WP-087, WP-369, WP-418 |
+| CI-13 | [B] | PASS | `backend/internal/discovery/resurrect_test.go`, `backend/internal/tenant/rls/ci_decorator_chain_integration_test.go` | WP-087, WP-369, WP-418 |
 | COL-01 | [B] | PASS | `backend/internal/discovery/collector_status_integration_test.go` | WP-143 |
 | COL-02 | [B] | PASS | `collector/plugins/redfish/redfish_test.go`, `backend/internal/credential/handler_test.go`, `backend/internal/credential/bundle_test.go` | WP-048, WP-047, WP-147 |
 | COL-04 | [B] | PASS | `backend/internal/discovery/enroll_handler_test.go`, `backend/internal/discovery/ca_test.go` | WP-144, WP-145 |
@@ -609,11 +697,11 @@ Erzeugt aus `docs/traceability.csv`. PASS heißt: Der Nachweis liegt in den gena
 | EVT-01 | [B] | PASS | `backend/internal/events/outbox_integration_test.go` | WP-136 |
 | EVT-02 | [B] | PASS | `backend/internal/events/outbox_integration_test.go` | WP-136 |
 | EXP-01 | [B], DATEV [P2] | PASS | `backend/internal/export/scope_integration_test.go`, `backend/internal/export/export_test.go` | WP-035, WP-189 |
-| GATE-01 | [Q] | offen | `tests/rep01-structure.test.sh` | WP-213, WP-451 |
-| GATE-02 | [Q] | offen | `tests/rep01-structure.test.sh`, `backend/internal/tenant/rls/ci_decorator_chain_integration_test.go`; Ausnahme in `docs/acceptance/g1-ausnahmen.csv` | WP-213, WP-418, WP-451 |
+| GATE-01 | [Q] | PASS | `tests/rep01-structure.test.sh` | WP-213, WP-451, WP-600 |
+| GATE-02 | [Q] | offen | `tests/rep01-structure.test.sh`, `backend/internal/tenant/rls/ci_decorator_chain_integration_test.go`; Ausnahme in `docs/acceptance/g1-ausnahmen.csv` | WP-213, WP-418, WP-451, WP-600 |
 | GATE-03 | [Q] | offen | `tests/install-smoke-health.test.sh`, `tests/rep01-structure.test.sh`, `docs/security/review-g1.md` (+2); Pentest-Anteil: Ausnahme in `docs/acceptance/g1-ausnahmen.csv` (E-103, Lieferung entfällt) | WP-092, WP-209, WP-210, WP-211, WP-451 |
 | GATE-04 | [Q], Bezug GA | N/P | Ausnahme in `docs/acceptance/g1-ausnahmen.csv` (Art `np`) | WP-213, WP-450 |
-| GATE-05 | [Q] | PASS | `tests/rep01-structure.test.sh` | WP-213 |
+| GATE-05 | [Q] | PASS | `tests/rep01-structure.test.sh` | WP-213, WP-600 |
 | GLO-10 | [B] | PASS | `frontend/src/i18n/catalog.test.ts` | WP-194 |
 | GLO-11 | [Q] | PASS | `backend/internal/traceability/traceability_test.go`, `tests/rep01-structure.test.sh` | WP-005, WP-213 |
 | GLO-12 | [B] | PASS | `backend/internal/discovery/devicerecord_test.go`, `backend/internal/override/decide_test.go` | WP-083, WP-084 |
@@ -657,7 +745,7 @@ Erzeugt aus `docs/traceability.csv`. PASS heißt: Der Nachweis liegt in den gena
 | MET-04 | B/G1 | PASS | `backend/internal/citype/compose_test.go` | WP-119 |
 | MET-10 | B/G1, Teil P2/G2 | PASS | `backend/internal/citype/attrdef_integration_test.go` | WP-116 |
 | MET-11 | B/G1, Teil P2/G2 | PASS | `backend/internal/fieldmeta/fieldmeta_test.go` | WP-117 |
-| MET-15 | B/G1 | offen | `backend/internal/citype/ddl_job_integration_test.go` | WP-142 |
+| MET-15 | B/G1 | PASS | `backend/internal/citype/ddl_job_integration_test.go` | WP-142 |
 | MET-16 | B/G1, Teil P2/G2 | PASS | `backend/internal/citype/compose_test.go` | WP-119 |
 | MET-54 | B/G1, Teil P2/G2 | PASS | `backend/internal/citype/export_audit_integration_test.go` | WP-134 |
 | MON-01 | [B] | PASS | `backend/internal/monitoring/timescale_rls_spike_integration_test.go`, `backend/internal/monitoring/pg_store_integration_test.go` | WP-039, WP-040 |
@@ -723,7 +811,7 @@ Erzeugt aus `docs/traceability.csv`. PASS heißt: Der Nachweis liegt in den gena
 | SEC-08 | [B] | PASS | `backend/internal/platform/egress/egress_test.go` | WP-049 |
 | SEC-10 | [B] | PASS | `backend/internal/graphqlbff/graphqlbff_test.go` | WP-184 |
 | SEC-11 | [Q] | PASS | `docs/security/abhaengigkeitsscans.md`, `docs/security/review-g1.md` | WP-004, WP-209 |
-| SEQ-01 | [Q] | PASS | `tests/rep01-structure.test.sh` | WP-213 |
+| SEQ-01 | [Q] | PASS | `tests/rep01-structure.test.sh` | WP-213, WP-600 |
 | SIM-01 | [B], Teilumfang [P2] | PASS | `.github/workflows/ci.yml`, `backend/cmd/seed/seed_integration_test.go` | WP-106, WP-203 |
 | SIM-02 | [B] | PASS | `collector/plugins/simulate/simulate_test.go` | WP-162 |
 | SRC-01 | [B] | PASS | `backend/internal/tenant/rls/ci_children_integration_test.go`, `backend/internal/search/scope_integration_test.go`, `backend/internal/search/search_test.go` | WP-025, WP-032, WP-186 |
@@ -738,7 +826,7 @@ Erzeugt aus `docs/traceability.csv`. PASS heißt: Der Nachweis liegt in den gena
 | TEN-04 | [B] | PASS | `backend/internal/database/tenant_scope_test.go`, `backend/internal/permission/scope_integration_test.go`, `backend/internal/tenant/rls/site_policies_integration_test.go` | WP-008, WP-009, WP-027 |
 | TEN-05 | [B] | PASS | `backend/internal/tenant/rls/catalog_integration_test.go`, `backend/internal/tenant/rls/client_policies_integration_test.go`, `backend/internal/tenant/rls/global_rows_integration_test.go` (+4) | WP-007, WP-023, WP-024, WP-022 … |
 | TEN-06 | [B] | PASS | `backend/internal/database/tenant_scope_test.go`, `backend/internal/ci/ci_scope_integration_test.go`, `backend/internal/citype/citype_scope_integration_test.go` (+51) | WP-008, WP-010, WP-011, WP-012 … |
-| TEN-09 | [Q] | offen | `backend/internal/tenant/rls/catalog_integration_test.go`, `backend/internal/tenant/rls/matrix_integration_test.go`, `backend/internal/tenant/rls/channel_matrix_integration_test.go` (+6) | WP-007, WP-065, WP-208, WP-340 … |
+| TEN-09 | [Q] | PASS | `backend/internal/tenant/rls/catalog_integration_test.go`, `backend/internal/tenant/rls/matrix_integration_test.go`, `backend/internal/tenant/rls/channel_matrix_integration_test.go` (+6) | WP-007, WP-065, WP-208, WP-340 … |
 | TEN-10 | [B] | PASS | `backend/internal/ipam/vrf_integration_test.go` | WP-082 |
 | TLC-01 | [B] | PASS | `backend/internal/signup/service_test.go`, `backend/internal/signup/protect_test.go` | WP-111, WP-112 |
 | TLC-02 | [B], Reseller [P4] | PASS | `backend/internal/operator/orgs_test.go` | WP-113 |
