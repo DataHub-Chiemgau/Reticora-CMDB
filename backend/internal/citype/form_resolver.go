@@ -298,6 +298,9 @@ func (f *FormResolver) ResolveForm(ctx context.Context, orgID string, req FormRe
 	if req.CIID == "" {
 		values = defaultValues(defs)
 	}
+	// The states follow only the values the reader may read (SR-59,
+	// form_unknown.go).
+	values = readableValues(values, f.policy)
 	candidates, err := f.source.FormLayouts(ctx, orgID, subject.Chain, templates, roles)
 	if err != nil {
 		return nil, err
@@ -499,6 +502,9 @@ func fieldStates(in *formInput) map[string]fieldmeta.FieldState {
 			st = &catalogState{}
 			byField[rule.AttributeKey] = st
 		}
+		if !conditionKnown(rule.Condition, in.policy) {
+			continue // unknown: the rule has no effect (SR-59)
+		}
 		applies := rule.Applies(in.values)
 		switch rule.Kind {
 		case fieldmeta.CatalogRequired:
@@ -512,7 +518,7 @@ func fieldStates(in *formInput) map[string]fieldmeta.FieldState {
 	out := make(map[string]fieldmeta.FieldState, len(in.defs))
 	for i := range in.defs {
 		def := &in.defs[i]
-		state := fieldmeta.Evaluate(def, in.values)
+		state := fieldmeta.Evaluate(knownDefinition(def, in.policy), in.values)
 		hidden := !state.Visible
 		if st := byField[def.Name]; st != nil {
 			state.Required = state.Required || st.required
@@ -556,7 +562,7 @@ func buildForm(in *formInput) *ResolvedForm {
 		form.Source, form.LayoutID = FormSourceLayout, in.layout.ID
 		form.TemplateID, form.RoleID = in.layout.TemplateID, in.layout.RoleID
 		for _, s := range in.layout.Layout.Sections {
-			section := FormSection{Key: s.Key, Title: s.Title, Visible: sectionVisible(s.VisibleWhen, in.sectionRules, in.values),
+			section := FormSection{Key: s.Key, Title: s.Title, Visible: sectionVisible(s.VisibleWhen, in.sectionRules, in.values, in.policy),
 				Fields: []FormField{}}
 			for _, lf := range s.Fields {
 				if defs[lf.Name] == nil || placed[lf.Name] {
@@ -614,10 +620,11 @@ func buildForm(in *formInput) *ResolvedForm {
 }
 
 // sectionVisible reports whether every visible_when rule of a section
-// holds for values; a key without a condition holds.
-func sectionVisible(keys []string, conditions map[string]*rules.Rule, values map[string]any) bool {
+// holds for values; a key without a condition holds, and so does a
+// condition over a field the policy does not let read (SR-59).
+func sectionVisible(keys []string, conditions map[string]*rules.Rule, values map[string]any, policy FieldPolicy) bool {
 	for _, key := range keys {
-		if cond := conditions[key]; cond != nil && !rules.EvaluateCondition(cond, values) {
+		if cond := conditions[key]; cond != nil && conditionKnown(cond, policy) && !rules.EvaluateCondition(cond, values) {
 			return false
 		}
 	}

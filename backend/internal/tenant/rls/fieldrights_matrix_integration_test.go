@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -226,6 +227,9 @@ func TestFieldRightsChannelMatrix(t *testing.T) {
 	exec(`INSERT INTO field_grant (organization_id, role_id, object_kind, field_key, level) VALUES ($1, $2, 'ci', 'core.serial_number', 'none')`,
 		f.OrgA, roleID)
 	exec(`INSERT INTO field_sensitivity (organization_id, object_kind, field_key) VALUES ($1, 'ci', 'attributes.salary')`, f.OrgA)
+	// SR-59 (row ci-form): wp872_secret is closed for the role.
+	exec(`INSERT INTO field_grant (organization_id, role_id, object_kind, field_key, level) VALUES ($1, $2, 'ci', 'attributes.wp872_secret', 'none')`,
+		f.OrgA, roleID)
 	// SR-58: the computed attribute wp871_assetsn reads asset.serial_number,
 	// which the role reads with the grant none at the asset.
 	exec(`INSERT INTO field_grant (organization_id, role_id, object_kind, field_key, level) VALUES ($1, $2, 'asset', 'core.serial_number', 'none')`,
@@ -259,7 +263,7 @@ func TestFieldRightsChannelMatrix(t *testing.T) {
 	// number, then the serial number alone.
 	ciID := f.CI(t, f.OrgA, f.Client1, "wp730-ci")
 	exec(`UPDATE ci SET hostname = 'fr730oldhost', serial_number = 'fr730oldsn',
-		attributes = jsonb_build_object('salary', $2::text, 'rack', 'r730') WHERE id = $1`, ciID, frmSalary)
+		attributes = jsonb_build_object('salary', $2::text, 'rack', 'r730', 'wp872_secret', 'fr872on') WHERE id = $1`, ciID, frmSalary)
 	for _, patch := range []map[string]any{
 		{"hostname": frmHost, "serial_number": frmSerialMid},
 		{"serial_number": frmSerial},
@@ -532,6 +536,97 @@ func TestFieldRightsChannelMatrix(t *testing.T) {
 			t.Errorf("bound delivery changed_fields %v, want [hostname]", changed)
 		}
 	}
+
+	// SR-59 (WP-872), row ci-form: a catalog rule makes wp872_note
+	// required while wp872_secret holds its value. The reader cannot read
+	// wp872_secret (grant none): the rule is unknown, wp872_note is not
+	// required, and REST and GraphQL ciForm answer the same states; the
+	// administrator, who reads wp872_secret, gets it required.
+	t.Run("ci-form", func(t *testing.T) {
+		var typeID string
+		if err := f.Admin.QueryRow(bg, `SELECT ci_type_id::text FROM ci WHERE id = $1`, ciID).Scan(&typeID); err != nil {
+			t.Fatal(err)
+		}
+		exec(`INSERT INTO attribute_definition (organization_id, ci_type_id, scope, key, data_type, display_name)
+			VALUES ($1, $2, 'type', 'wp872_note', 'text', '{"en":"Note","de":"Notiz"}')
+			ON CONFLICT (ci_type_id, key) DO NOTHING`, f.OrgA, typeID)
+		exec(`INSERT INTO metamodel_rule (organization_id, key, attribute_key, kind, ci_type_id, condition)
+			VALUES ($1, 'wp872-secret', 'wp872_note', 'required', $2, '{"op":"eq","field":"wp872_secret","value":"fr872on"}')`,
+			f.OrgA, typeID)
+		type fieldState struct{ Visible, Required, ReadOnly bool }
+		restStates := func(user string) (map[string]fieldState, map[string]bool) {
+			t.Helper()
+			r := e.call(user, http.MethodGet, "/api/v1/cis/"+ciID+"/form", nil)
+			ok(r, "GET /cis/{id}/form")
+			var form struct {
+				Sections []struct {
+					Key     string `json:"key"`
+					Visible bool   `json:"visible"`
+					Fields  []struct {
+						Name  string `json:"name"`
+						State struct {
+							Visible  bool `json:"visible"`
+							Required bool `json:"required"`
+							ReadOnly bool `json:"read_only"`
+						} `json:"state"`
+					} `json:"fields"`
+				} `json:"sections"`
+			}
+			if err := json.Unmarshal([]byte(r.body), &form); err != nil {
+				t.Fatalf("form: %v %s", err, trim(r.body))
+			}
+			fields, sections := map[string]fieldState{}, map[string]bool{}
+			for _, sec := range form.Sections {
+				sections[sec.Key] = sec.Visible
+				for _, fl := range sec.Fields {
+					fields[fl.Name] = fieldState{fl.State.Visible, fl.State.Required, fl.State.ReadOnly}
+				}
+			}
+			return fields, sections
+		}
+		rest, restSections := restStates(reader)
+		r := gql(fmt.Sprintf(`{ ciForm(id: %q) { sections { key visible fields { name state { visible required readOnly } } } } }`, ciID))
+		var body struct {
+			Data struct {
+				CIForm struct {
+					Sections []struct {
+						Key     string `json:"key"`
+						Visible bool   `json:"visible"`
+						Fields  []struct {
+							Name  string `json:"name"`
+							State struct {
+								Visible  bool `json:"visible"`
+								Required bool `json:"required"`
+								ReadOnly bool `json:"readOnly"`
+							} `json:"state"`
+						} `json:"fields"`
+					} `json:"sections"`
+				} `json:"ciForm"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(r.body), &body); err != nil {
+			t.Fatal(err)
+		}
+		graph, graphSections := map[string]fieldState{}, map[string]bool{}
+		for _, sec := range body.Data.CIForm.Sections {
+			graphSections[sec.Key] = sec.Visible
+			for _, fl := range sec.Fields {
+				graph[fl.Name] = fieldState{fl.State.Visible, fl.State.Required, fl.State.ReadOnly}
+			}
+		}
+		if !reflect.DeepEqual(rest, graph) || !reflect.DeepEqual(restSections, graphSections) {
+			t.Errorf("REST and GraphQL ciForm differ:\n%v %v\n%v %v", rest, restSections, graph, graphSections)
+		}
+		if st, has := rest["wp872_note"]; !has || st.Required || !st.Visible {
+			t.Errorf("reader: wp872_note = %+v (in form %v), want visible and not required (unknown rule)", st, has)
+		}
+		if _, has := rest["wp872_secret"]; has {
+			t.Errorf("reader: unreadable wp872_secret in the form")
+		}
+		if st := func() fieldState { f, _ := restStates(admin); return f["wp872_note"] }(); !st.Required {
+			t.Errorf("administrator: wp872_note = %+v, want required (wp872_secret readable)", st)
+		}
+	})
 }
 
 // frmKindField is one field of an object kind of the matrix: its field key

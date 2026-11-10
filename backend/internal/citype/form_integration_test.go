@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strconv"
 	"testing"
@@ -478,4 +479,60 @@ func TestResolvedFormFieldRightsAgainstPostgres(t *testing.T) {
 	own := get(manager, managePerms, "/api/v1/cis/"+ciID+"/form")
 	state("caller without restricting roles", &own, nil,
 		map[string]bool{"wp727_open": false, "wp727_hidden": false, "wp727_ro": false, "wp727_inst": false})
+
+	// SR-59 (WP-872): a catalog rule, an attribute condition and the
+	// visible_when of a section over wp727_hidden, which role R cannot
+	// read. Two CIs that differ only in wp727_hidden give R the same form,
+	// with the conservative states; the caller without restricting roles
+	// sees the conditions act.
+	a.createRule(org, `{"key":"wp872-req","attribute_key":"wp727_open","kind":"required","ci_type_id":"`+leaf.ID+`",
+		"condition":{"op":"eq","field":"wp727_hidden","value":"on"}}`)
+	a.createRule(org, `{"key":"wp872-sec","attribute_key":"wp727_ro","kind":"readonly","ci_type_id":"`+leaf.ID+`",
+		"condition":{"op":"eq","field":"wp727_hidden","value":"on"}}`)
+	a.definition(org, `{"ci_type_id":"`+leaf.ID+`","key":"wp872_cond","data_type":"text","order":9,
+		"conditional":{"visible_when":[{"field":"wp727_hidden","op":"eq","value":"off"}]}}`)
+	a.createLayout(org, `{"key":"wp872-layout","ci_type_id":"`+leaf.ID+`","layout":{"sections":[
+		{"key":"main","title":{"de":"Haupt","en":"Main"},"fields":[{"name":"wp727_open"},{"name":"wp727_ro"}]},
+		{"key":"cond","title":{"de":"Bedingt","en":"Conditional"},"visible_when":["wp872-sec"],"fields":[{"name":"wp872_cond"}]}]}}`)
+	ciWith := func(name, hidden string) string {
+		t.Helper()
+		var id string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO ci (organization_id, client_id, ci_type_id, name, status, attributes)
+			VALUES ($1, $2, $3, $4, 'active', jsonb_build_object('wp727_hidden', $5::text)) RETURNING id::text`,
+			org, f.Client1, leaf.ID, name, hidden).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	onCI, offCI := ciWith("wp872-on", "on"), ciWith("wp872-off", "off")
+	formOn := get(userR, write, "/api/v1/cis/"+onCI+"/form")
+	formOff := get(userR, write, "/api/v1/cis/"+offCI+"/form")
+	if !reflect.DeepEqual(formOn, formOff) {
+		t.Errorf("SR-59: the value of the unreadable wp727_hidden changes the form of role R:\n%+v\n%+v", formOn, formOff)
+	}
+	for _, form := range []*citype.ResolvedForm{&formOn, &formOff} {
+		if open, _ := resolvedField(form, "wp727_open"); open == nil || open.State.Required {
+			t.Errorf("SR-59: wp727_open must not be required by an unknown rule: %+v", open)
+		}
+		if cond, _ := resolvedField(form, "wp872_cond"); cond == nil || !cond.State.Visible {
+			t.Errorf("SR-59: wp872_cond must stay visible under an unknown condition: %+v", cond)
+		}
+		for _, sec := range form.Sections {
+			if sec.Key == "cond" && !sec.Visible {
+				t.Errorf("SR-59: section cond hidden by an unknown visible_when")
+			}
+		}
+	}
+	// The caller without restricting roles: the conditions act.
+	fullOn := get(manager, managePerms, "/api/v1/cis/"+onCI+"/form")
+	fullOff := get(manager, managePerms, "/api/v1/cis/"+offCI+"/form")
+	if open, _ := resolvedField(&fullOn, "wp727_open"); open == nil || !open.State.Required {
+		t.Errorf("readable wp727_hidden=on: wp727_open must be required: %+v", open)
+	}
+	if cond, _ := resolvedField(&fullOn, "wp872_cond"); cond != nil && cond.State.Visible {
+		t.Errorf("readable wp727_hidden=on: wp872_cond must be hidden: %+v", cond)
+	}
+	if reflect.DeepEqual(fullOn, fullOff) {
+		t.Errorf("readable wp727_hidden: both values give the same form")
+	}
 }
