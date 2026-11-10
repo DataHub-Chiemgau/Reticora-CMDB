@@ -949,8 +949,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The vendor findings have a file of their own (E-246): they never
+      # suppress an ID in the scans of the own images.
       - name: Check scan exceptions (SEC-11 SLA)
-        run: ./scripts/ci/check-scan-exceptions.sh
+        run: |
+          ./scripts/ci/check-scan-exceptions.sh
+          ./scripts/ci/check-scan-exceptions.sh security/scan-exceptions-thirdparty.txt
+          cat security/scan-exceptions.txt security/scan-exceptions-thirdparty.txt > "$RUNNER_TEMP/trivyignore-thirdparty"
 
       # The reference of the compose service and the third-party images of
       # the manifest (Deployment, StatefulSet, CronJob); both must be pinned
@@ -1000,9 +1005,10 @@ jobs:
         run: |
           docker run --rm \
             -v "$PWD:/work" -w /work \
+            -v "$RUNNER_TEMP/trivyignore-thirdparty:/trivyignore:ro" \
             aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa image \
             --severity CRITICAL,HIGH --ignore-unfixed \
-            --ignorefile security/scan-exceptions.txt \
+            --ignorefile /trivyignore \
             --format json --output "trivy-${{ matrix.image }}.json" \
             --exit-code 1 \
             "$REF"

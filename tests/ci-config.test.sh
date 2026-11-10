@@ -160,6 +160,7 @@ problems = []
 for name, job, scanner in [("ci.yml govulncheck", ci["jobs"]["govulncheck"], "govulncheck -format"),
                            ("ci.yml npm-audit", ci["jobs"]["npm-audit"], "npm audit"),
                            ("ci.yml image-scan", ci["jobs"]["image-scan"], "aquasec/trivy"),
+                           ("ci.yml image-scan-thirdparty", ci["jobs"]["image-scan-thirdparty"], "aquasec/trivy"),
                            ("release.yml images", rel["jobs"]["images"], "aquasec/trivy")]:
     runs = [st.get("run", "") for st in job["steps"]]
     c = next((i for i, r in enumerate(runs) if check in r), None)
@@ -229,6 +230,28 @@ if out="$("$CHECK" 2>&1)"; then
     ok "scan_exceptions_repository: security/scan-exceptions.txt keeps the SLA ($out)"
 else
     fail "scan_exceptions_repository: security/scan-exceptions.txt keeps the SLA" "$out"
+fi
+# The vendor findings of image-scan-thirdparty (E-246): the same SLA, and
+# only that job reads the file.
+if out="$("$CHECK" security/scan-exceptions-thirdparty.txt 2>&1)"; then
+    ok "scan_exceptions_thirdparty: security/scan-exceptions-thirdparty.txt keeps the SLA ($out)"
+else
+    fail "scan_exceptions_thirdparty: security/scan-exceptions-thirdparty.txt keeps the SLA" "$out"
+fi
+readers="$(grep -rl 'scan-exceptions-thirdparty.txt' .github/workflows)"
+if [ "$readers" = ".github/workflows/ci.yml" ] \
+    && python3 - "$CI" <<'PY'
+import sys, yaml
+job = yaml.safe_load(open(sys.argv[1]))["jobs"]["image-scan-thirdparty"]
+runs = "\n".join(st.get("run", "") for st in job["steps"])
+others = [n for n, j in yaml.safe_load(open(sys.argv[1]))["jobs"].items()
+          if n != "image-scan-thirdparty" and "scan-exceptions-thirdparty" in str(j)]
+sys.exit(0 if "scan-exceptions-thirdparty.txt" in runs and "--ignorefile /trivyignore" in runs and not others else 1)
+PY
+then
+    ok "scan_exceptions_thirdparty_scope: only image-scan-thirdparty reads the vendor exceptions"
+else
+    fail "scan_exceptions_thirdparty_scope: only image-scan-thirdparty reads the vendor exceptions" "$readers"
 fi
 
 # ─── F-291, E-96: reproducible database image ───────────────────────────────

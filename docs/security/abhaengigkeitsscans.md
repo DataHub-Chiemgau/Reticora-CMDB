@@ -42,6 +42,15 @@ dasselbe Image dieselbe Referenz; `tests/ci-config.test.sh`
 (`thirdparty_image_pins`) prüft Pin, Matrixeintrag und diese Tabelle
 (SR-60, WP-873).
 
+Befunde in Abhängigkeiten der Hersteller-Images ohne neueres Release stehen
+in `security/scan-exceptions-thirdparty.txt` (E-246): gleiches Format und
+gleiche SLA wie `security/scan-exceptions.txt` (Critical 7, High 30 Tage ab
+dem ersten Scan), geprüft von `scripts/ci/check-scan-exceptions.sh`. Nur
+`image-scan-thirdparty` liest diese Datei, so verdeckt ein Hersteller-Befund
+keine ID in den Scans der eigenen Images. Stand 2026-11-10: 90 IDs (8
+Critical, Ablauf 2026-11-17); Behebung nach E-246, Risikoakzeptanz für MinIO
+und OpenSearch offen (A-85).
+
 | Image | Ort | Scan |
 |---|---|---|
 | `clamav/clamav:1.5.4@sha256:6d87c712e3391e13c1ba6e05dfb074d4b1ddb5a6834b23bb9da990d2a4ef042a` | `deploy/docker-compose/docker-compose.yml` (`clamd`), `deploy/k8s/base/components/clamav/clamd.yaml`, Dev-Stack `docker-compose.yml` | `image-scan-thirdparty` (`clamd`) |
