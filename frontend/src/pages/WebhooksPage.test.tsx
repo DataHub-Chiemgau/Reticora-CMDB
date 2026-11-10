@@ -140,7 +140,9 @@ describe('WebhooksPage', () => {
     ]) {
       expect(screen.queryByLabelText(notOffered)).not.toBeInTheDocument();
     }
-    expect(screen.getAllByRole('checkbox')).toHaveLength(40);
+    // 40 types of G1/G2 and the 44 of the Phase-3 register (WP-867, WP-868,
+    // WP-870), which are subscribable before their producers exist.
+    expect(screen.getAllByRole('checkbox')).toHaveLength(84);
   });
 
   it('retries a dead delivery (WHK-01)', async () => {
