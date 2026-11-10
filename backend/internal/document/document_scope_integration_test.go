@@ -150,13 +150,14 @@ func TestDocumentHandlerErrorsAreSanitized(t *testing.T) {
 		{"delete client-2 document", http.MethodDelete, "/api/v1/documents/" + foreignDoc.ID, "", http.StatusNotFound, false},
 		{"link client-2 document", http.MethodPost, "/api/v1/documents/" + foreignDoc.ID + "/links", link("ci", ownCI), http.StatusNotFound, false},
 		// A client-2 CI does not exist for client 1: it answers like an
-		// unknown CI, without telling the cases apart (WP-267). An entity
-		// type outside the registry is refused before anything is read.
-		{"link to a client-2 CI", http.MethodPost, "/api/v1/documents/" + ownDoc.ID + "/links", link("ci", foreignCI), http.StatusNotFound, false},
-		{"link to an unknown CI (client 1)", http.MethodPost, "/api/v1/documents/" + ownDoc.ID + "/links", link("ci", unknown), http.StatusNotFound, false},
+		// unknown CI, without telling the cases apart (WP-267), 422 on
+		// entity_id since SR-50 (WP-879). An entity type outside the
+		// registry is refused before anything is read.
+		{"link to a client-2 CI", http.MethodPost, "/api/v1/documents/" + ownDoc.ID + "/links", link("ci", foreignCI), http.StatusUnprocessableEntity, false},
+		{"link to an unknown CI (client 1)", http.MethodPost, "/api/v1/documents/" + ownDoc.ID + "/links", link("ci", unknown), http.StatusUnprocessableEntity, false},
 		{"link to a disallowed entity type (client 1)", http.MethodPost, "/api/v1/documents/" + ownDoc.ID + "/links", link("bogus", ownCI), http.StatusUnprocessableEntity, false},
 		// Invalid reference.
-		{"link to an unknown CI", http.MethodPost, "/api/v1/documents/" + ownDoc.ID + "/links", link("ci", unknown), http.StatusNotFound, true},
+		{"link to an unknown CI", http.MethodPost, "/api/v1/documents/" + ownDoc.ID + "/links", link("ci", unknown), http.StatusUnprocessableEntity, true},
 		{"link to a disallowed entity type", http.MethodPost, "/api/v1/documents/" + ownDoc.ID + "/links", link("bogus", ownCI), http.StatusUnprocessableEntity, true},
 		{"link to an unknown document", http.MethodPost, "/api/v1/documents/" + unknown + "/links", link("ci", ownCI), http.StatusNotFound, false},
 		// Invalid id.

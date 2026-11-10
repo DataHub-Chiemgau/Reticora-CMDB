@@ -141,6 +141,25 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, item)
 }
 
+// bodyReferenceError maps the not-found error of an object the body of POST
+// /reservations names onto a 422 field error with a fixed text, the same for
+// an unknown id and one of another organization or outside the scope (no
+// existence oracle, SR-50); nil for any other error.
+func bodyReferenceError(err error) *api.FieldError {
+	field := ""
+	switch {
+	case errors.Is(err, ErrAssetNotFound), errors.Is(err, assignment.ErrAssetNotFound), errors.Is(err, movement.ErrAssetNotFound):
+		field = "asset_id"
+	case errors.Is(err, ErrItemNotFound), errors.Is(err, consumable.ErrNotFound):
+		field = "consumable_id"
+	case errors.Is(err, ErrBinNotFound):
+		field = "location_id"
+	default:
+		return nil
+	}
+	return &api.FieldError{Field: field, Message: "not found", Status: http.StatusUnprocessableEntity}
+}
+
 // writeReservationError answers a failed reservation request: a reservation,
 // asset, consumable or bin that is unknown, of another organization or outside
 // the caller's scope, or an asset the caller may not lock, is 404 with a
@@ -206,7 +225,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteFieldError(w, err)
 		return
 	}
-	h.create(w, r, t.OrganizationID, &req)
+	h.create(w, r, t.OrganizationID, &req, true)
 }
 
 // normalizeCreate resolves the deprecated aliases of a reservation request
@@ -285,7 +304,7 @@ func (h *Handler) ReserveAsset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.create(w, r, t.OrganizationID, &CreateRequest{ItemKind: "asset", AssetID: assetID, ReservedUntil: req.ReservedUntil,
-		AssigneeID: req.AssigneeID, ProjectRef: req.ProjectRef, Reason: req.Reason, ExpiresAt: req.ExpiresAt})
+		AssigneeID: req.AssigneeID, ProjectRef: req.ProjectRef, Reason: req.Reason, ExpiresAt: req.ExpiresAt}, false)
 }
 
 // parseTime reads the RFC 3339 time of field; empty is nil.
@@ -303,8 +322,12 @@ func parseTime(field, value string) (*time.Time, error) {
 }
 
 // create validates req and creates the reservation (Create, ReserveAsset).
-// A quantity reservation needs the feature stock (E-44, WP-759).
-func (h *Handler) create(w http.ResponseWriter, r *http.Request, orgID string, req *CreateRequest) {
+// A quantity reservation needs the feature stock (E-44, WP-759). With
+// bodyRefs the asset, article and bin are references of the body (POST
+// /reservations): an unknown or foreign one is a 422 field error (SR-50,
+// API-03); for POST /assets/{id}/reserve the asset is the object of the
+// path and stays 404.
+func (h *Handler) create(w http.ResponseWriter, r *http.Request, orgID string, req *CreateRequest, bodyRefs bool) {
 	if req.ItemKind == "consumable" && !h.stockEntitled(w, r, orgID) {
 		return
 	}
@@ -360,6 +383,10 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request, orgID string, r
 		res.CreatedBy = p.Subject
 	}
 	if err = h.repo.Create(r.Context(), res); err != nil {
+		if fe := bodyReferenceError(err); bodyRefs && fe != nil {
+			api.WriteFieldError(w, fe)
+			return
+		}
 		writeReservationError(w, r, err)
 		return
 	}

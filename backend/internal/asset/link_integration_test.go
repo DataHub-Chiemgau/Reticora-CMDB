@@ -296,15 +296,17 @@ func TestAssetCILink(t *testing.T) {
 		t.Errorf("asset client against its linked CIs: %v, want ci_asset_client", err)
 	}
 
-	// Visibility: an asset or a CI outside the caller's scope is 404.
+	// Visibility: an asset outside the caller's scope (path) is 404, a CI
+	// of the body outside the scope, unknown or malformed 422 on ci_id
+	// (SR-50, WP-879).
 	client1 := f.ClientCtx(f.Client1)
 	ciOther := f.CI(t, f.OrgA, f.Client2, "link-other")
 	w.do(t, &linkCall{scope: client1, method: http.MethodPost, path: cisOf(asset2), body: `{"ci_id":"` + ciC1 + `"}`, want: http.StatusNotFound})
-	w.do(t, &linkCall{scope: client1, method: http.MethodPost, path: cisOf(assetA), body: `{"ci_id":"` + ciOther + `"}`, want: http.StatusNotFound})
+	w.do(t, &linkCall{scope: client1, method: http.MethodPost, path: cisOf(assetA), body: `{"ci_id":"` + ciOther + `"}`, want: http.StatusUnprocessableEntity})
 	w.do(t, &linkCall{scope: client1, method: http.MethodDelete, path: cisOf(asset2) + "/" + ci2, want: http.StatusNotFound})
 	w.do(t, &linkCall{method: http.MethodPost, path: cisOf(f.ID()), body: `{"ci_id":"` + ciC1 + `"}`, want: http.StatusNotFound})
-	w.do(t, &linkCall{method: http.MethodPost, path: cisOf(assetA), body: `{"ci_id":"` + f.ID() + `"}`, want: http.StatusNotFound})
-	w.do(t, &linkCall{method: http.MethodPost, path: cisOf(assetA), body: `{"ci_id":"no-uuid"}`, want: http.StatusNotFound})
+	w.do(t, &linkCall{method: http.MethodPost, path: cisOf(assetA), body: `{"ci_id":"` + f.ID() + `"}`, want: http.StatusUnprocessableEntity})
+	w.do(t, &linkCall{method: http.MethodPost, path: cisOf(assetA), body: `{"ci_id":"no-uuid"}`, want: http.StatusUnprocessableEntity})
 	w.do(t, &linkCall{method: http.MethodPost, path: cisOf(assetA), body: `{}`, want: http.StatusBadRequest, wantField: "ci_id"})
 
 	// A client-scoped principal may not change an org-wide asset (TEN-05):

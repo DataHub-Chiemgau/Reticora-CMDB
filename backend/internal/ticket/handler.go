@@ -616,8 +616,9 @@ func (h *Handler) ListLinks(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateLink handles POST /api/v1/tickets/{id}/links (WP-764): an unknown
-// entity_type is 422, a ticket or target that does not exist or lies
-// outside the caller's scope 404, a second link of the same object 409.
+// entity_type is 422, a ticket that does not exist or lies outside the
+// caller's scope 404, such a target 422 on entity_id (SR-50), a second
+// link of the same object 409.
 func (h *Handler) CreateLink(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -642,12 +643,17 @@ func (h *Handler) CreateLink(w http.ResponseWriter, r *http.Request) {
 			Message: "must be one of " + strings.Join(LinkEntityTypes, ", ")})
 		return
 	}
+	targetRefused := &api.FieldError{Field: "entity_id", Message: "not found", Status: http.StatusUnprocessableEntity}
 	if !api.IsUUID(req.EntityID) {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "linked object not found")
+		api.WriteFieldError(w, targetRefused)
 		return
 	}
 	link := &Link{OrganizationID: t.OrganizationID, TicketID: ticketID, EntityType: req.EntityType, EntityID: req.EntityID}
 	if err := h.repo.CreateLink(r.Context(), link); err != nil {
+		if errors.Is(err, ErrLinkTargetNotFound) {
+			api.WriteFieldError(w, targetRefused)
+			return
+		}
 		writeTicketError(w, r, err)
 		return
 	}

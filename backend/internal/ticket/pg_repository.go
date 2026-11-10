@@ -904,8 +904,11 @@ func (r *PGRepository) CreateLink(ctx context.Context, link *Link) error {
 		return &api.FieldError{Field: "entity_type", Status: http.StatusUnprocessableEntity,
 			Message: "must be one of " + strings.Join(LinkEntityTypes, ", ")}
 	}
-	if !api.IsUUID(link.TicketID) || !api.IsUUID(link.EntityID) {
+	if !api.IsUUID(link.TicketID) {
 		return ErrNotFound
+	}
+	if !api.IsUUID(link.EntityID) {
+		return ErrLinkTargetNotFound
 	}
 	return database.WithRequestTenant(ctx, r.pool, link.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		clientID, siteID, err := visibleTicketScope(ctx, tx, link.OrganizationID, link.TicketID)
@@ -917,7 +920,7 @@ func (r *PGRepository) CreateLink(ctx context.Context, link *Link) error {
 			return fmt.Errorf("check link target: %w", err)
 		}
 		if !visible {
-			return ErrNotFound
+			return ErrLinkTargetNotFound
 		}
 		err = tx.QueryRow(ctx, `INSERT INTO ticket_link (organization_id, ticket_id, entity_type, `+target.column+`)
 			VALUES ($1, $2, $3, $4)

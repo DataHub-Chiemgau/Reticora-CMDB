@@ -93,6 +93,13 @@ func checkEntityType(entityType string) error {
 // id never reaches SQL.
 var errInvalidEntityID = &api.FieldError{Field: "entity_id", Message: "must be a UUID"}
 
+// ErrTargetNotFound is the link target of the body that is unknown, of
+// another organization or outside the tenant scope. It wraps
+// api.ErrNotFound for the callers of LinkTx; POST /documents/{id}/links
+// answers it 422 on entity_id, unlike the document of its path (404,
+// SR-50).
+var ErrTargetNotFound = fmt.Errorf("%w: link target", api.ErrNotFound)
+
 // linkVisible is the SQL condition "the row of document_link links a target
 // visible under the tenant scope". An entity type outside the registry is
 // never visible (no ELSE true).
@@ -132,7 +139,7 @@ func targetVisible(ctx context.Context, tx pgx.Tx, link *DocumentLink) error {
 		return err
 	}
 	if !ok {
-		return api.ErrNotFound
+		return ErrTargetNotFound
 	}
 	return nil
 }

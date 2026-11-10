@@ -119,8 +119,12 @@ func (h *Handler) LinkCI(w http.ResponseWriter, r *http.Request) {
 		api.WriteFieldError(w, &api.FieldError{Field: "ci_id", Message: "is required"})
 		return
 	}
+	// ci_id is a reference of the body: malformed, unknown, of another
+	// organization or outside the scope is a 422 field error, the same for
+	// each (SR-50, API-03); the asset of the path stays 404.
+	ciRefused := &api.FieldError{Field: "ci_id", Message: "not found", Status: http.StatusUnprocessableEntity}
 	if !api.IsUUID(ciID) {
-		writeAssetError(w, r, ErrCINotFound)
+		api.WriteFieldError(w, ciRefused)
 		return
 	}
 	var link CILink
@@ -146,6 +150,10 @@ func (h *Handler) LinkCI(w http.ResponseWriter, r *http.Request) {
 		link = CILink{AssetID: current.ID, CIID: ciID, Primary: primary}
 		return store.RecordLink(ctx, orgID, ActionLinked, current.ID, ciID, primary)
 	})
+	if errors.Is(err, ErrCINotFound) {
+		api.WriteFieldError(w, ciRefused)
+		return
+	}
 	if err != nil {
 		writeAssetError(w, r, err)
 		return

@@ -538,13 +538,13 @@ func (m *channelMatrix) p2Rows(rows map[string]matrixRow) {
 		var out []matrixProbe
 		until := time.Now().UTC().AddDate(0, 1, 0).Format(time.RFC3339)
 		// A reservation writes its asset (the active reservation): an
-		// asset the principal may not write, in the body or in the path, is
-		// not found (404, OpenAPI createReservation), like an unknown one;
-		// the team principal writes the assets of its team only.
+		// asset the principal may not write is, like an unknown one, a 422
+		// on asset_id in the body (SR-50, WP-879) and 404 in the path; the
+		// team principal writes the assets of its team only.
 		for i := range 3 {
 			team := map[int]string{0: m.team}[i]
 			id := s.freshAsset(t, m, i, team)
-			want := writeSeen[i].status(p, http.StatusCreated)
+			want := bodyRef(writeSeen[i].status(p, http.StatusCreated))
 			out = append(out, matrixProbe{name: fmt.Sprintf("asset of side %d", i+1), method: http.MethodPost, path: "/api/v1/reservations",
 				body: map[string]any{"asset_id": id, "reserved_until": until}, want: want,
 				after: m.count(want == http.StatusCreated, `SELECT count(*) FROM reservation WHERE asset_id = $1`, id)})
@@ -557,7 +557,7 @@ func (m *channelMatrix) p2Rows(rows map[string]matrixRow) {
 		return append(out, matrixProbe{method: http.MethodPost, path: "/api/v1/assets/" + unknownID + "/reserve",
 			body: map[string]any{"reserved_until": until, "assignee_id": p.user}, want: http.StatusNotFound},
 			matrixProbe{name: "unknown asset", method: http.MethodPost, path: "/api/v1/reservations",
-				body: map[string]any{"asset_id": unknownID, "reserved_until": until}, want: http.StatusNotFound})
+				body: map[string]any{"asset_id": unknownID, "reserved_until": until}, want: http.StatusUnprocessableEntity})
 	}
 	rows["reservation"] = reservation
 
@@ -603,7 +603,8 @@ func (m *channelMatrix) p2Rows(rows map[string]matrixRow) {
 		// a document outside the scope is not found (404); the team
 		// principal sees a document whose links name no team but may not
 		// write it (403, migration 000217); a target outside the scope is
-		// not found first (WP-851, 404) like an unknown one.
+		// refused first like an unknown one (422 on entity_id, SR-50,
+		// WP-879; 404 before).
 		for i := range 3 {
 			for j := range 3 {
 				doc := m.create(t, s.owners[i], "/api/v1/documents", map[string]any{"title": m.name(p2Prefix + "-ldoc"), "file_name": "x.txt"})
@@ -611,8 +612,10 @@ func (m *channelMatrix) p2Rows(rows map[string]matrixRow) {
 				target := s.freshAsset(t, m, j, "")
 				want := http.StatusCreated
 				switch {
-				case !s.located[i][p.kind] || !s.located[j][p.kind]:
+				case !s.located[i][p.kind]:
 					want = http.StatusNotFound
+				case !s.located[j][p.kind]:
+					want = http.StatusUnprocessableEntity
 				case !p.scope.Teams.All:
 					want = http.StatusForbidden
 				}
@@ -690,12 +693,13 @@ func (m *channelMatrix) p2Rows(rows map[string]matrixRow) {
 		var out []matrixProbe
 		for i := range 3 {
 			// A receipt of an article into a bin of its side: an article
-			// outside the scope is not found (404), a bin outside it is a
-			// 422 on to_location_id like an unknown location.
+			// outside the scope is a 422 on consumable_id (SR-50, WP-879), a
+			// bin outside it a 422 on to_location_id, each like an unknown
+			// one.
 			want, show := http.StatusCreated, []string(nil)
 			switch {
 			case !s.byClient[i][p.kind]:
-				want = http.StatusNotFound
+				want, show = http.StatusUnprocessableEntity, []string{`"field":"consumable_id"`}
 			case !s.located[i][p.kind]:
 				want, show = http.StatusUnprocessableEntity, []string{`"field":"to_location_id"`}
 			}
@@ -704,10 +708,10 @@ func (m *channelMatrix) p2Rows(rows map[string]matrixRow) {
 				body: map[string]any{"movement_type": "receipt", "consumable_id": s.consumables[i].id, "to_location_id": s.binLocs[i], "quantity": 1, "reason": reason},
 				want: want, show: show, after: m.count(want == http.StatusCreated, `SELECT count(*) FROM stock_movement WHERE reason = $1`, reason)})
 			// A transfer of an asset to the room of its side: an asset the
-			// principal may not write is not found (404).
+			// principal may not write is a 422 on asset_id (SR-50, WP-879).
 			id := s.freshAsset(t, m, i, map[int]string{0: m.team}[i])
 			reason = m.name(p2Prefix + "-transfer")
-			want = writeSeen[i].status(p, http.StatusCreated)
+			want = bodyRef(writeSeen[i].status(p, http.StatusCreated))
 			out = append(out, matrixProbe{name: fmt.Sprintf("transfer of side %d", i+1), method: http.MethodPost, path: "/api/v1/stock-movements",
 				body: map[string]any{"movement_type": "transfer", "asset_id": id, "to_location_id": s.rooms[i], "reason": reason},
 				want: want, after: m.count(want == http.StatusCreated, `SELECT count(*) FROM stock_movement WHERE reason = $1`, reason)})
@@ -1098,4 +1102,13 @@ func newAssetStatus(p *channelPrincipal, org, client, team string) int {
 		return http.StatusCreated
 	}
 	return http.StatusForbidden
+}
+
+// bodyRef is the answer to a reference of the body: 422 where the object of
+// a path would be 404, like an unknown id (SR-50, WP-879).
+func bodyRef(status int) int {
+	if status == http.StatusNotFound {
+		return http.StatusUnprocessableEntity
+	}
+	return status
 }

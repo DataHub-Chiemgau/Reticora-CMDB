@@ -19,6 +19,12 @@ import (
 // caller's scope; all answer 404 alike (TEN-04).
 var ErrNotFound = errors.New("ticket not found")
 
+// ErrLinkTargetNotFound: the object a link names in its body is unknown, of
+// another organization or outside the caller's scope. It wraps ErrNotFound;
+// POST /tickets/{id}/links answers it 422 on entity_id, unlike the ticket of
+// its path (404, SR-50).
+var ErrLinkTargetNotFound = fmt.Errorf("%w: link target", ErrNotFound)
+
 // ErrLinkExists: the object is already linked to the ticket (409, WP-764).
 var ErrLinkExists = errors.New("the object is already linked to the ticket")
 

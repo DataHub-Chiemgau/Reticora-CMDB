@@ -31139,7 +31139,15 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      422: components['responses']['UnprocessableEntity'];
+      /** @description An unknown entity_type, an entity_id that is no UUID, or a link target that is unknown, of another organization or outside the caller's scope (all alike, no existence oracle; SR-50, WP-879) (`field` entity_id). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -40030,7 +40038,7 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
-      /** @description The asset, consumable or bin is unknown, of another organization or outside the caller's scope, or an asset the caller may not change (all alike, TEN-04). */
+      /** @description No path object: since SR-50 (WP-879) a reference of the body answers 422; kept for an asset the caller may not lock at creation (TEN-04). */
       404: {
         headers: {
           [name: string]: unknown;
@@ -40048,7 +40056,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description An id field is no UUID or a time no RFC 3339 date-time, the request names both or the wrong object for item_kind, location_id is no bin, or location_id is missing while the consumable has none or several bins; `field` names it. */
+      /** @description An id field is no UUID or a time no RFC 3339 date-time, the request names both or the wrong object for item_kind, location_id is no bin, or location_id is missing while the consumable has none or several bins; or asset_id, consumable_id or location_id is unknown, of another organization or outside the caller's scope (all alike, no existence oracle; SR-50, WP-879). `field` names it. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -40487,7 +40495,7 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description The asset or consumable (also named by quantity_item_id) is unknown, of another organization or outside the caller's scope (all alike, TEN-04); nothing is recorded. */
+      /** @description No path object: since SR-50 (WP-879) an asset or consumable of the body answers 422 on its field; kept for compatibility, nothing is recorded. */
       404: {
         headers: {
           [name: string]: unknown;
@@ -40501,7 +40509,7 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description assignment, return, reservation, release and disposal arise only in their domain paths (type https://reticora.io/problems/movement-type-reserved). Otherwise `field` names the refused field: a legacy or unknown movement_type, a type not booked for the object (an asset only transfer), none or several objects, quantity on an asset or missing for a consumable, the locations a type does not take, an id that is no UUID, a location that is not visible, no bin (consumable) or of another client, or a ticket, order, workflow run or document that is not visible. */
+      /** @description assignment, return, reservation, release and disposal arise only in their domain paths (type https://reticora.io/problems/movement-type-reserved). Otherwise `field` names the refused field: a legacy or unknown movement_type, a type not booked for the object (an asset only transfer), none or several objects, quantity on an asset or missing for a consumable, the locations a type does not take, an id that is no UUID, a location that is not visible, no bin (consumable) or of another client, a ticket, order, workflow run or document that is not visible, or an asset_id or consumable_id that is unknown, of another organization or outside the caller's scope (all alike, no existence oracle; SR-50, WP-879). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -42471,7 +42479,7 @@ export interface operations {
             components['schemas']['ProblemDetail'] | components['schemas']['FieldForbiddenProblem'];
         };
       };
-      /** @description The asset or the CI is unknown, of another organization or outside the caller's scope (all alike, TEN-04). */
+      /** @description The asset of the path is unknown, of another organization or outside the caller's scope (all alike, TEN-04). */
       404: {
         headers: {
           [name: string]: unknown;
@@ -42480,7 +42488,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description The CI and the asset belong to different clients (both set; a missing client on either side is compatible), or the asset has no location and the caller may not let it take the CI's location; `field` is asset_id. */
+      /** @description The CI and the asset belong to different clients (both set; a missing client on either side is compatible), or the asset has no location and the caller may not let it take the CI's location (`field` asset_id); or ci_id is no UUID or unknown, of another organization or outside the caller's scope (all alike, no existence oracle; SR-50, WP-879) (`field` ci_id). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -43448,7 +43456,15 @@ export interface operations {
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description An unknown entity_type, an entity_id that is no UUID, or a link target that is unknown, of another organization or outside the caller's scope (all alike, no existence oracle; SR-50, WP-879) (`field` entity_id). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   deleteTicketLink: {

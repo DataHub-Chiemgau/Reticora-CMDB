@@ -67,11 +67,6 @@ type frProbe struct {
 	body         func(ref string) any
 	foreign, own string
 	want         int
-	// deviation: the path answers a foreign or unknown reference in the
-	// body with 404 instead of the 422 of the matrix row reference (WP-409),
-	// for both alike, so without an existence oracle; handed to WP-329 as
-	// finding SR-P2-01 (docs/acceptance/abn-03-phase2.md).
-	deviation bool
 }
 
 // TestForeignReferencesP2 covers WP-827 (ABN-03 cross-tenant references,
@@ -83,9 +78,9 @@ type frProbe struct {
 // with supplier and contract, import, CI and asset bulk, ticket link,
 // order item and stocktake. A synchronous write answers exactly 422 for a
 // foreign reference in the body and 404 for a foreign object in the path,
-// like an unknown id (the paths marked deviation answer 404 for a foreign
-// reference in the body, for an unknown one alike: finding SR-P2-01 for
-// WP-329); the import names every affected row in its report,
+// like an unknown id (since WP-879 also reservations, stock bookings, the
+// asset-CI link and document and ticket links, SR-50); the import names
+// every affected row in its report,
 // the bulk every affected id in its partial failure report. No row of
 // either organization holds the foreign reference, and each write
 // succeeds with the own references. Second line (SR-03): as the
@@ -119,15 +114,15 @@ func TestForeignReferencesP2(t *testing.T) {
 			body: func(ref string) any {
 				return map[string]any{"item_kind": "asset", "asset_id": ref, "reserved_until": at}
 			},
-			foreign: a.asset, own: "fresh", want: http.StatusNotFound, deviation: true},
+			foreign: a.asset, own: "fresh", want: http.StatusUnprocessableEntity},
 		{name: "reservation of an article", method: http.MethodPost, path: at0("/api/v1/reservations"),
 			body: func(ref string) any {
 				return map[string]any{"item_kind": "consumable", "consumable_id": ref, "location_id": b.bin, "quantity": 1, "project_ref": "wp827"}
-			}, foreign: a.consumable, own: b.consumable, want: http.StatusNotFound, deviation: true},
+			}, foreign: a.consumable, own: b.consumable, want: http.StatusUnprocessableEntity},
 		{name: "reservation in a bin", method: http.MethodPost, path: at0("/api/v1/reservations"),
 			body: func(ref string) any {
 				return map[string]any{"item_kind": "consumable", "consumable_id": b.consumable, "location_id": ref, "quantity": 1, "project_ref": "wp827"}
-			}, foreign: a.bin, own: b.bin, want: http.StatusNotFound, deviation: true},
+			}, foreign: a.bin, own: b.bin, want: http.StatusUnprocessableEntity},
 		// Columns of reservation without a foreign key.
 		{name: "reservation for a user", method: http.MethodPost, path: at0("/api/v1/reservations"),
 			body: func(ref string) any {
@@ -167,7 +162,7 @@ func TestForeignReferencesP2(t *testing.T) {
 		{name: "booking of an article", method: http.MethodPost, path: at0("/api/v1/stock-movements"),
 			body: func(ref string) any {
 				return map[string]any{"movement_type": "receipt", "consumable_id": ref, "to_location_id": b.bin, "quantity": 1, "reason": "wp827"}
-			}, foreign: a.consumable, own: b.consumable, want: http.StatusNotFound, deviation: true},
+			}, foreign: a.consumable, own: b.consumable, want: http.StatusUnprocessableEntity},
 		{name: "booking into a bin", method: http.MethodPost, path: at0("/api/v1/stock-movements"),
 			body: func(ref string) any {
 				return map[string]any{"movement_type": "receipt", "consumable_id": b.consumable, "to_location_id": ref, "quantity": 1, "reason": "wp827"}
@@ -179,7 +174,7 @@ func TestForeignReferencesP2(t *testing.T) {
 		{name: "transfer of an asset", method: http.MethodPost, path: at0("/api/v1/stock-movements"),
 			body: func(ref string) any {
 				return map[string]any{"movement_type": "transfer", "asset_id": ref, "to_location_id": b.room, "reason": "wp827"}
-			}, foreign: a.asset, own: "fresh", want: http.StatusNotFound, deviation: true},
+			}, foreign: a.asset, own: "fresh", want: http.StatusUnprocessableEntity},
 		{name: "transfer of an asset to a location", method: http.MethodPost, path: at0("/api/v1/stock-movements"),
 			body: func(ref string) any {
 				return map[string]any{"movement_type": "transfer", "asset_id": e.freshAsset(t, b), "to_location_id": ref, "reason": "wp827"}
@@ -208,7 +203,7 @@ func TestForeignReferencesP2(t *testing.T) {
 		{name: "link of a CI", method: http.MethodPost,
 			path:    func(string) string { return "/api/v1/assets/" + e.freshAsset(t, b) + "/cis" },
 			body:    func(ref string) any { return map[string]any{"ci_id": ref} },
-			foreign: a.ci, own: "freshci", want: http.StatusNotFound, deviation: true},
+			foreign: a.ci, own: "freshci", want: http.StatusUnprocessableEntity},
 		{name: "link of a CI to an asset of the path", method: http.MethodPost,
 			path: func(ref string) string { return "/api/v1/assets/" + ref + "/cis" },
 			body: func(string) any { return map[string]any{"ci_id": e.freshCI(t, b)} }, foreign: a.asset, want: http.StatusNotFound},
@@ -242,7 +237,7 @@ func TestForeignReferencesP2(t *testing.T) {
 		probes = append(probes, frProbe{name: "document link to a " + target.kind, method: http.MethodPost,
 			path:    at0("/api/v1/documents/" + b.document + "/links"),
 			body:    func(ref string) any { return map[string]any{"entity_type": target.kind, "entity_id": ref} },
-			foreign: target.foreign, own: target.own, want: http.StatusNotFound, deviation: true})
+			foreign: target.foreign, own: target.own, want: http.StatusUnprocessableEntity})
 	}
 	probes = append(probes, frProbe{name: "document link of a document of the path", method: http.MethodPost,
 		path: func(ref string) string { return "/api/v1/documents/" + ref + "/links" },
@@ -254,7 +249,7 @@ func TestForeignReferencesP2(t *testing.T) {
 		probes = append(probes, frProbe{name: "ticket link to a " + target.kind, method: http.MethodPost,
 			path:    at0("/api/v1/tickets/" + b.ticket + "/links"),
 			body:    func(ref string) any { return map[string]any{"entity_type": target.kind, "entity_id": ref} },
-			foreign: target.foreign, own: target.own, want: http.StatusNotFound, deviation: true})
+			foreign: target.foreign, own: target.own, want: http.StatusUnprocessableEntity})
 	}
 	// Reference attributes (WP-254): one value of every reference type.
 	for _, r := range frRefAttributes(a, b) {
@@ -269,7 +264,7 @@ func TestForeignReferencesP2(t *testing.T) {
 			for _, ref := range refs {
 				code, body := e.env.call(b.p, pr.method, pr.path(ref.id), pr.body(ref.id))
 				if code != pr.want {
-					t.Errorf("%s %s: %d %s, want %d as for an unknown id (deviation SR-P2-01: %v)", pr.name, ref.label, code, trim(body), pr.want, pr.deviation)
+					t.Errorf("%s %s: %d %s, want %d as for an unknown id", pr.name, ref.label, code, trim(body), pr.want)
 				}
 				if ref.id == pr.foreign && strings.Contains(body, pr.foreign) {
 					t.Errorf("%s %s: the answer names the object of organization A: %s", pr.name, ref.label, trim(body))
