@@ -1618,3 +1618,4 @@ ALR-02;[P3];G3;backend/internal/events/types_test.go;WP-867
 EVT-03;[P2–P3];G3;backend/internal/events/types_test.go;WP-868
 NTF-05;[B], Zusätze [P2], [P3];G3;backend/internal/webhook/scope_test.go;WP-868
 MGT-04;[P3];G3;backend/internal/events/types_test.go;WP-868
+OPS-02;[B], [P3], [A];G3;backend/cmd/server/workers_metrics_test.go;WP-869

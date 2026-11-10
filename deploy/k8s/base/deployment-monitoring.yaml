@@ -1,0 +1,194 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reticora-monitoring
+  # Deployment profile monitoring (WP-869, E-162 Option 2): the same image,
+  # secrets and ConfigMap as reticora-server, but only the monitoring workers
+  # run here, so the probe load of NFR-11 (at least 353 results per second)
+  # does not take its CPU from the API (NFR-02). RETICORA_MODULES must equal
+  # that of reticora-server. The server deployment keeps its monitoring
+  # switches and may switch them off.
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: monitoring
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: monitoring
+    spec:
+      serviceAccountName: reticora-server
+      containers:
+        - name: server
+          image: reticora-cmdb/server:latest
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: RETICORA_PORT
+              value: "8080"
+            # Runtime login only (TEN-03): the DSN names a dedicated login
+            # with LOGIN NOSUPERUSER NOBYPASSRLS that is a member of
+            # reticora_app and of no other role (deploy/README.md). The
+            # migration login (owner/superuser) lives in the separate secret
+            # reticora-db-migrate and never reaches this pod, so a RESET ROLE
+            # on a pooled connection gains nothing (F-057).
+            - name: RETICORA_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: reticora-db-runtime
+                  key: database-url
+                  optional: false
+            - name: RETICORA_NATS_URL
+              value: "nats://nats:4222"
+            - name: RETICORA_REDIS_URL
+              value: "redis://redis:6379"
+            - name: RETICORA_ENVIRONMENT
+              value: "production"
+            # OTLP exporter endpoint (Epic H3). Empty disables export and the
+            # server runs with no-op telemetry providers.
+            - name: RETICORA_OTEL_ENDPOINT
+              value: ""
+            # Opt-in tenant label on HTTP metrics; multiplies series by the
+            # tenant count. Enable only for bounded-tenant deployments.
+            - name: RETICORA_METRICS_TENANT_LABEL
+              value: "false"
+            # Session-token signature verification is mandatory in
+            # production; the pod refuses to start without the key.
+            - name: RETICORA_SESSION_KEY_PATH
+              value: "/etc/reticora/session/private.pem"
+            # Mandatory master key for envelope encryption (OPS-03). Without
+            # the secret key the pod does not start (CreateContainerConfigError),
+            # and the server's start check refuses an empty key (WP-097).
+            - name: RETICORA_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: reticora-secrets
+                  key: master-key
+                  optional: false
+            # Master key rotation (SEC-06, docs/ops/workers.md "Key
+            # rotation"): the old key(s), comma-separated, while
+            # rotation.master_key rewraps the data keys. Optional, so the pod
+            # starts once the key master-key-previous is removed again.
+            - name: RETICORA_MASTER_KEY_PREVIOUS
+              valueFrom:
+                secretKeyRef:
+                  name: reticora-secrets
+                  key: master-key-previous
+                  optional: true
+            # OIDC login. The issuer is mandatory outside development (start
+            # check, requiredOutsideDevelopment, F-036); issuer, client ID and
+            # redirect URL come from the operator's ConfigMap reticora-config,
+            # the client secret from reticora-secrets. Like the master key,
+            # every reference is mandatory: a missing ConfigMap, secret or
+            # key keeps the pod in CreateContainerConfigError.
+            - name: RETICORA_OIDC_ISSUER_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: reticora-config
+                  key: oidc-issuer-url
+                  optional: false
+            - name: RETICORA_OIDC_CLIENT_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: reticora-config
+                  key: oidc-client-id
+                  optional: false
+            - name: RETICORA_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: reticora-secrets
+                  key: oidc-client-secret
+                  optional: false
+            - name: RETICORA_OIDC_REDIRECT_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: reticora-config
+                  key: oidc-redirect-url
+                  optional: false
+            # Accept page of the invitation mail, an absolute URL
+            # https://<host>/invitations/accept. Without it issuing and
+            # renewing invitations answers 503 (WP-421, F-041).
+            # The start check requires clamd while the release runs the module
+            # documents (WP-853); the component clamav provides the service.
+            - name: RETICORA_CLAMD_ADDR
+              value: "clamd:3310"
+            - name: RETICORA_INVITATION_ACCEPT_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: reticora-config
+                  key: invitation-accept-url
+                  optional: false
+            # Operator switches of the background workers (OPS-02,
+            # docs/ops/workers.md): only the monitoring workers run in this
+            # profile; a new worker of a P3 module is added here and in
+            # reticora-server (TestEveryWorkerSwitchIsDeployable).
+            - name: RETICORA_WORKER_WEBHOOK_DISPATCHER_ENABLED
+              value: "false"
+            - name: RETICORA_WORKER_EXPORT_ENABLED
+              value: "false"
+            - name: RETICORA_WORKER_INGEST_ENABLED
+              value: "false"
+            - name: RETICORA_WORKER_MONITORING_ENABLED
+              value: "true"
+            - name: RETICORA_WORKER_HEALTH_ENABLED
+              value: "false"
+            - name: RETICORA_WORKER_SCHEDULER_ENABLED
+              value: "false"
+            - name: RETICORA_WORKER_JOBS_ENABLED
+              value: "false"
+            - name: RETICORA_WORKER_EVENTS_ENABLED
+              value: "false"
+            - name: RETICORA_WORKER_NOTIFIER_ENABLED
+              value: "false"
+            # Collector NATS endpoint (COL-08): PKI export and authorization
+            # callout; configured by the nats-edge component.
+            - name: RETICORA_WORKER_NATS_EDGE_ENABLED
+              value: "false"
+            - name: RETICORA_WORKER_CREDENTIAL_BUNDLES_ENABLED
+              value: "false"
+            - name: RETICORA_WORKER_DISCOVERY_SCOPES_ENABLED
+              value: "false"
+            # CI offline detector (REC-09, LCY-05), a system job of the
+            # scheduler.
+            - name: RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED
+              value: "false"
+            # Hourly refresh of computed attributes (JOB-02, WP-718), a
+            # system job of the scheduler.
+            - name: RETICORA_WORKER_COMPUTED_REFRESH_ENABLED
+              value: "false"
+          volumeMounts:
+            - name: session-key
+              mountPath: /etc/reticora/session
+              readOnly: true
+          # Liveness only asks whether the process serves HTTP; readiness
+          # (/readyz) also checks database, Redis, object storage, NATS and,
+          # with RETICORA_SMTP_HOST, the SMTP server, so a dependency outage
+          # removes the pod from the Service without restarting it (OPS-01).
+          # /readyz answers within 2 s (its check timeout); the probe waits
+          # longer, so the answer decides.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: session-key
+          secret:
+            secretName: reticora-session-key

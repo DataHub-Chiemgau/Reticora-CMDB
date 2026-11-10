@@ -449,28 +449,72 @@ func (h fakeHealth) RefreshHealth(context.Context) error { return h.err }
 // deploy/docker-compose/docker-compose.yml from .env
 // ("${RETICORA_WORKER_<NAME>_ENABLED:-true}") and in the server container
 // of deploy/k8s/base/deployment.yaml. A switch missing in either file is
-// reported (negative case).
+// TestEveryWorkerSwitchIsDeployable covers OPS-02 (WP-447, WP-869): every
+// worker switch is set in both Compose services (server with "${KEY:-true}",
+// monitoring with "${RETICORA_MONITORING_<NAME>:-…}", true only for the
+// monitoring worker) and in both Kubernetes deployments (reticora-server and
+// TestEveryWorkerSwitchIsDeployable covers OPS-02 (WP-447, WP-869): every
+// worker switch is set in both Compose services (server with "${KEY:-true}",
+// monitoring with "${RETICORA_MONITORING_<NAME>:-…}", true only for the
+// monitoring worker) and in both Kubernetes deployments (reticora-server and
+// reticora-monitoring, E-162).
 func TestEveryWorkerSwitchIsDeployable(t *testing.T) {
-	compose, k8s := deployedWorkerSwitches(t)
-	for _, name := range config.WorkerNames {
-		key := config.WorkerEnvKey(name)
-		if got, ok := compose[key]; !ok || got != "${"+key+":-true}" {
-			t.Errorf("docker-compose.yml, service server: %s = %q (set %v), want \"${%s:-true}\" (settable from .env)", key, got, ok, key)
-		}
-		if !k8s[key] {
-			t.Errorf("deploy/k8s/base/deployment.yaml, container server: %s is not set", key)
-		}
+	deployed := deployedWorkerSwitches(t)
+	for _, problem := range workerSwitchProblems(deployed) {
+		t.Error(problem)
 	}
-	// Negative case: the check reports a switch the files do not set.
-	if key := config.WorkerEnvKey("wp447_undeployed"); compose[key] != "" || k8s[key] {
+	// Negative cases: a switch the files do not set, and one missing in the
+	// monitoring deployment only, are reported.
+	if key := config.WorkerEnvKey("wp447_undeployed"); deployed.compose["server"][key] != "" || deployed.k8s["reticora-server"][key] != "" {
 		t.Errorf("negative case: %s found in the deployment files", key)
+	}
+	delete(deployed.k8s["reticora-monitoring"], config.WorkerEnvKey(config.WorkerHealth))
+	if problems := workerSwitchProblems(deployed); len(problems) != 1 || !strings.Contains(problems[0], "reticora-monitoring") {
+		t.Errorf("negative case: a switch missing in reticora-monitoring gives %v, want one problem", problems)
 	}
 }
 
+// workerSwitchProblems checks every worker switch in both Compose services
+// and both Kubernetes deployments.
+func workerSwitchProblems(deployed deployedSwitches) []string {
+	var problems []string
+	for _, name := range config.WorkerNames {
+		key := config.WorkerEnvKey(name)
+		if got, ok := deployed.compose["server"][key]; !ok || got != "${"+key+":-true}" {
+			problems = append(problems, fmt.Sprintf("docker-compose.yml, service server: %s = %q (set %v), want \"${%s:-true}\" (settable from .env)", key, got, ok, key))
+		}
+		def := "false"
+		if name == config.WorkerMonitoring {
+			def = "true"
+		}
+		monitoringKey := "RETICORA_MONITORING_" + strings.TrimPrefix(key, "RETICORA_")
+		if got := deployed.compose["monitoring"][key]; got != "${"+monitoringKey+":-"+def+"}" {
+			problems = append(problems, fmt.Sprintf("docker-compose.yml, service monitoring: %s = %q, want \"${%s:-%s}\"", key, got, monitoringKey, def))
+		}
+		for _, deployment := range []string{"reticora-server", "reticora-monitoring"} {
+			value, ok := deployed.k8s[deployment][key]
+			switch {
+			case !ok:
+				problems = append(problems, fmt.Sprintf("deploy/k8s/base, deployment %s: %s is not set", deployment, key))
+			case deployment == "reticora-monitoring" && (value == "true") != (name == config.WorkerMonitoring):
+				problems = append(problems, fmt.Sprintf("deployment reticora-monitoring: %s = %q, only the monitoring worker runs there", key, value))
+			}
+		}
+	}
+	return problems
+}
+
+// deployedSwitches are the RETICORA_WORKER_*_ENABLED variables per Compose
+// service and per Kubernetes deployment, with their values.
+type deployedSwitches struct {
+	compose map[string]map[string]string
+	k8s     map[string]map[string]string
+}
+
 // deployedWorkerSwitches reads the RETICORA_WORKER_*_ENABLED variables of the
-// server in the Compose file (with their values) and in the Kubernetes
-// deployment.
-func deployedWorkerSwitches(t *testing.T) (compose map[string]string, k8s map[string]bool) {
+// Compose services server and monitoring and of the Kubernetes deployments
+// reticora-server and reticora-monitoring.
+func deployedWorkerSwitches(t *testing.T) deployedSwitches {
 	t.Helper()
 	var c struct {
 		Services map[string]struct {
@@ -478,47 +522,65 @@ func deployedWorkerSwitches(t *testing.T) (compose map[string]string, k8s map[st
 		} `yaml:"services"`
 	}
 	readDeployYAML(t, "../../../deploy/docker-compose/docker-compose.yml", &c)
-	svc, ok := c.Services["server"]
-	if !ok {
-		t.Fatal("docker-compose.yml has no service server")
-	}
-	compose = map[string]string{}
-	for k, v := range svc.Environment {
-		if strings.HasPrefix(k, "RETICORA_WORKER_") {
-			compose[k] = v
+	out := deployedSwitches{compose: map[string]map[string]string{}, k8s: map[string]map[string]string{}}
+	for _, name := range []string{"server", "monitoring"} {
+		svc, ok := c.Services[name]
+		if !ok {
+			t.Fatalf("docker-compose.yml has no service %s", name)
+		}
+		out.compose[name] = map[string]string{}
+		for k, v := range svc.Environment {
+			if strings.HasPrefix(k, "RETICORA_WORKER_") {
+				out.compose[name][k] = v
+			}
 		}
 	}
-	var d struct {
-		Kind string `yaml:"kind"`
+	type deployment struct {
+		Kind     string `yaml:"kind"`
+		Metadata struct {
+			Name string `yaml:"name"`
+		} `yaml:"metadata"`
 		Spec struct {
 			Template struct {
 				Spec struct {
 					Containers []struct {
 						Name string `yaml:"name"`
 						Env  []struct {
-							Name string `yaml:"name"`
+							Name  string `yaml:"name"`
+							Value string `yaml:"value"`
 						} `yaml:"env"`
 					} `yaml:"containers"`
 				} `yaml:"spec"`
 			} `yaml:"template"`
 		} `yaml:"spec"`
 	}
-	readDeployYAML(t, "../../../deploy/k8s/base/deployment.yaml", &d)
-	k8s = map[string]bool{}
-	for _, ctr := range d.Spec.Template.Spec.Containers {
-		if d.Kind != "Deployment" || ctr.Name != "server" {
-			continue
-		}
-		for _, e := range ctr.Env {
-			if strings.HasPrefix(e.Name, "RETICORA_WORKER_") {
-				k8s[e.Name] = true
+	for _, file := range []string{"deployment.yaml", "deployment-monitoring.yaml"} {
+		var d deployment
+		readDeployYAML(t, "../../../deploy/k8s/base/"+file, &d)
+		switches := map[string]string{}
+		for _, ctr := range d.Spec.Template.Spec.Containers {
+			if d.Kind != "Deployment" || ctr.Name != "server" {
+				continue
+			}
+			for _, e := range ctr.Env {
+				if strings.HasPrefix(e.Name, "RETICORA_WORKER_") {
+					switches[e.Name] = e.Value
+				}
 			}
 		}
+		out.k8s[d.Metadata.Name] = switches
 	}
-	if len(compose) == 0 || len(k8s) == 0 {
-		t.Fatalf("no worker switches found: compose %v, k8s %v", compose, k8s)
+	for name, m := range out.compose {
+		if len(m) == 0 {
+			t.Fatalf("no worker switches in the Compose service %s", name)
+		}
 	}
-	return compose, k8s
+	for _, name := range []string{"reticora-server", "reticora-monitoring"} {
+		if len(out.k8s[name]) == 0 {
+			t.Fatalf("no worker switches in the deployment %s", name)
+		}
+	}
+	return out
 }
 
 func readDeployYAML(t *testing.T, path string, v any) {

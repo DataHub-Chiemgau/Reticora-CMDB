@@ -25,11 +25,37 @@ stop a single worker during an incident, without touching the API.
 - A new worker adds its name to `config.WorkerNames`, registers under it in
   `buildWorkers` (or `systemJobs`) and records its cycles (see
   [Metrics and alerts](#metrics-and-alerts-ops-05)), in the work package that
-  introduces it. Its switch goes into `deploy/docker-compose/docker-compose.yml`
-  (from `.env`) and `deploy/k8s/base/deployment.yaml`;
+  introduces it. Its switch goes into both Compose services `server` and
+  `monitoring` of `deploy/docker-compose/docker-compose.yml` (from `.env`) and
+  into both deployments `deploy/k8s/base/deployment.yaml` and
+  `deploy/k8s/base/deployment-monitoring.yaml`;
   `TestEveryWorkerExportsRunAndErrorMetrics` and
   `TestEveryWorkerSwitchIsDeployable` (`backend/cmd/server/workers_metrics_test.go`)
   fail for a registered worker without them.
+- A worker of a P3 module also adds its name to `LateModules[].Workers` of its
+  module and to `p3Workers` (`TestP3WorkersBelongToTheirModule`,
+  `backend/internal/server/modules_test.go`); it does not start in the release
+  G2.
+
+## Deployment profile monitoring (WP-869, E-162)
+
+The probe load of NFR-11 (at least 353 results per second) runs apart from
+the API, so it does not take CPU from the budgets of NFR-02. The profile
+`monitoring` runs the server image with the environment of the server and
+only the monitoring workers switched on:
+
+- Kubernetes: the deployment `reticora-monitoring`
+  (`deploy/k8s/base/deployment-monitoring.yaml`) with its HPA
+  `reticora-monitoring` (1 to 4 replicas at 70 % CPU). `RETICORA_MODULES` must
+  equal that of `reticora-server`.
+- Compose: the service `monitoring` with the profile `monitoring`, not
+  started by default (`docker compose --profile monitoring up -d`). Its
+  switches are `RETICORA_MONITORING_WORKER_<NAME>_ENABLED` in `.env`, default
+  `true` for `monitoring`, `false` for the others.
+
+With the profile running, switch the monitoring worker of the server off
+(`RETICORA_WORKER_MONITORING_ENABLED=false`); without it the server runs the
+monitoring workers itself.
 
 ## Registered workers
 

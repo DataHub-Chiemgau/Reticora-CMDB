@@ -775,3 +775,46 @@ func TestP3ModulePrefixesAreGated(t *testing.T) {
 		}
 	}
 }
+
+// p3Workers are the workers of the P3 modules (OPS-02 [P3], WP-869). A work
+// package that adds a worker of a P3 module (WP-980 monitoring, WP-1114
+// workflow) adds its name here, in LateModules[].Workers, in both
+// deployments (TestEveryWorkerSwitchIsDeployable) and in docs/ops/workers.md.
+var p3Workers = []string{config.WorkerMonitoring}
+
+// TestP3WorkersBelongToTheirModule covers OPS-02 [P3] (WP-869, E-162):
+// every worker of a P3 module is listed in LateModules[].Workers of a P3
+// module, is a registered worker switch and does not start in the release
+// G2; every worker a P3 module lists is a worker of p3Workers.
+func TestP3WorkersBelongToTheirModule(t *testing.T) {
+	g2, err := ParseModules("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := map[string]string{}
+	for _, m := range LateModules {
+		if m.Phase != PhaseP3 {
+			continue
+		}
+		for _, w := range m.Workers {
+			listed[w] = m.Key
+			if !slices.Contains(p3Workers, w) {
+				t.Errorf("module %s lists the worker %s, which is no P3 worker of p3Workers", m.Key, w)
+			}
+		}
+	}
+	for _, w := range p3Workers {
+		if _, ok := listed[w]; !ok {
+			t.Errorf("P3 worker %s is listed by no P3 module", w)
+		}
+		if !slices.Contains(config.WorkerNames, w) {
+			t.Errorf("P3 worker %s is no registered worker switch", w)
+		}
+		if g2.WorkerAllowed(w) {
+			t.Errorf("P3 worker %s starts in the release G2", w)
+		}
+	}
+	if g3, _ := ParseModules(PhaseP3); !g3.WorkerAllowed(config.WorkerMonitoring) {
+		t.Error("the monitoring worker does not start in the release G3")
+	}
+}

@@ -118,6 +118,13 @@ type renderedEnv struct {
 // container.
 func renderServerEnv(t *testing.T, kustomize, dir string) renderedEnv {
 	t.Helper()
+	return renderDeploymentEnv(t, kustomize, dir, "reticora-server")
+}
+
+// renderDeploymentEnv is renderServerEnv for any deployment of the build,
+// e.g. reticora-monitoring (WP-869).
+func renderDeploymentEnv(t *testing.T, kustomize, dir, deployment string) renderedEnv {
+	t.Helper()
 	var stdout, stderr bytes.Buffer
 	cmd := exec.Command(kustomize, "build", dir)
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -137,7 +144,7 @@ func renderServerEnv(t *testing.T, kustomize, dir string) renderedEnv {
 			t.Fatalf("decode kustomize output of %s: %v", dir, err)
 		}
 		objects[obj.Kind+"/"+obj.Metadata.Name] = obj
-		if obj.Kind == "Deployment" && obj.Metadata.Name == "reticora-server" {
+		if obj.Kind == "Deployment" && obj.Metadata.Name == deployment {
 			for i := range obj.Spec.Template.Spec.Containers {
 				c := obj.Spec.Template.Spec.Containers[i]
 				for _, e := range c.Env {
@@ -150,7 +157,7 @@ func renderServerEnv(t *testing.T, kustomize, dir string) renderedEnv {
 		}
 	}
 	if server == nil {
-		t.Fatalf("%s renders no reticora-server Deployment with a RETICORA_* container", dir)
+		t.Fatalf("%s renders no %s Deployment with a RETICORA_* container", dir, deployment)
 	}
 	r := renderedEnv{values: map[string]string{}, refs: map[string]bool{}, optional: map[string]bool{}}
 	for _, ef := range server.EnvFrom {
@@ -301,6 +308,19 @@ func TestAuditT5K8sRenderedEnvSatisfiesStartCheck(t *testing.T) {
 			}
 		})
 	}
+
+	// The deployment profile monitoring (WP-869, E-162) passes the start
+	// check of the same binary as well.
+	t.Run("deploy/k8s/base reticora-monitoring", func(t *testing.T) {
+		r := renderDeploymentEnv(t, kustomize, filepath.Join(repo, "deploy/k8s/base"), "reticora-monitoring")
+		missing, optional, startErr := checkRenderedEnv(t, r)
+		if len(missing) > 0 || len(optional) > 0 || startErr != nil {
+			t.Errorf("reticora-monitoring: missing %v, optional %v, start check %v", missing, optional, startErr)
+		}
+		if r.values["RETICORA_WORKER_MONITORING_ENABLED"] != "true" || r.values["RETICORA_WORKER_INGEST_ENABLED"] != "false" {
+			t.Errorf("reticora-monitoring runs other workers than monitoring: %v", r.values)
+		}
+	})
 
 	// Negative cases: the check reports a key a manifest drops.
 	for _, tc := range []struct {

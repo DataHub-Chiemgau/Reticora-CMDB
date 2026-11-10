@@ -350,7 +350,7 @@ services:
     # standalone with prebuilt registry images.
     restart: unless-stopped
     logging: *logging
-    environment:
+    environment: &server-environment
       RETICORA_PORT: "8080"
       # Runtime login reticora_runtime (TEN-03): LOGIN NOSUPERUSER NOBYPASSRLS,
       # member of reticora_app only; install-cloud.sh creates it after the
@@ -496,6 +496,53 @@ services:
     healthcheck:
       # /readyz also checks database, Redis, object storage, NATS and, with
       # RETICORA_SMTP_HOST, the SMTP server (OPS-01).
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/readyz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 15s
+
+  # Deployment profile monitoring (WP-869, E-162 Option 2): the server image
+  # with the environment of the service server, but only the monitoring
+  # workers run (switches RETICORA_MONITORING_WORKER_<NAME>_ENABLED in .env),
+  # so the probe load of NFR-11 does not slow the API. Not started by
+  # default: docker compose --profile monitoring up -d. Then switch the
+  # monitoring worker of the service server off
+  # (RETICORA_WORKER_MONITORING_ENABLED=false).
+  monitoring:
+    image: ${RETICORA_SERVER_IMAGE:-reticora-server:latest}
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      <<: *server-environment
+      RETICORA_WORKER_WEBHOOK_DISPATCHER_ENABLED: "${RETICORA_MONITORING_WORKER_WEBHOOK_DISPATCHER_ENABLED:-false}"
+      RETICORA_WORKER_EXPORT_ENABLED: "${RETICORA_MONITORING_WORKER_EXPORT_ENABLED:-false}"
+      RETICORA_WORKER_INGEST_ENABLED: "${RETICORA_MONITORING_WORKER_INGEST_ENABLED:-false}"
+      RETICORA_WORKER_MONITORING_ENABLED: "${RETICORA_MONITORING_WORKER_MONITORING_ENABLED:-true}"
+      RETICORA_WORKER_HEALTH_ENABLED: "${RETICORA_MONITORING_WORKER_HEALTH_ENABLED:-false}"
+      RETICORA_WORKER_SCHEDULER_ENABLED: "${RETICORA_MONITORING_WORKER_SCHEDULER_ENABLED:-false}"
+      RETICORA_WORKER_JOBS_ENABLED: "${RETICORA_MONITORING_WORKER_JOBS_ENABLED:-false}"
+      RETICORA_WORKER_EVENTS_ENABLED: "${RETICORA_MONITORING_WORKER_EVENTS_ENABLED:-false}"
+      RETICORA_WORKER_NOTIFIER_ENABLED: "${RETICORA_MONITORING_WORKER_NOTIFIER_ENABLED:-false}"
+      RETICORA_WORKER_NATS_EDGE_ENABLED: "${RETICORA_MONITORING_WORKER_NATS_EDGE_ENABLED:-false}"
+      RETICORA_WORKER_CREDENTIAL_BUNDLES_ENABLED: "${RETICORA_MONITORING_WORKER_CREDENTIAL_BUNDLES_ENABLED:-false}"
+      RETICORA_WORKER_DISCOVERY_SCOPES_ENABLED: "${RETICORA_MONITORING_WORKER_DISCOVERY_SCOPES_ENABLED:-false}"
+      RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED: "${RETICORA_MONITORING_WORKER_OFFLINE_DETECTOR_ENABLED:-false}"
+      RETICORA_WORKER_COMPUTED_REFRESH_ENABLED: "${RETICORA_MONITORING_WORKER_COMPUTED_REFRESH_ENABLED:-false}"
+    volumes:
+      - ./secrets/session-private.pem:/etc/reticora/session/private.pem:ro
+      - ./letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/readyz || exit 1"]
       interval: 10s
       timeout: 3s
