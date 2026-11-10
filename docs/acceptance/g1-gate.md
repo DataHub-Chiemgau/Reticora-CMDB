@@ -333,7 +333,7 @@ fehlen.
 
 | Workflow | Gegenstand | Commit | Lauf | Ergebnis |
 |---|---|---|---|---|
-| `gate-final.yml` | `tests/rep01-structure.test.sh --final`, `TestTraceabilityFile`; bei Rot die offenen Lieferungen und IDs | nicht auf `536e3ab8` gelaufen (Auslöser nur Tag `v*` oder von Hand); letzter Lauf auf `201f6fbe` | RC-Lauf ausstehend (WP-595); letzter Lauf 41514357730 | RC-Lauf ausstehend (WP-595); 41514357730 rot |
+| `gate-final.yml` | `tests/rep01-structure.test.sh --final`, `TestTraceabilityFile`; bei Rot die offenen Lieferungen und IDs | auf dem Tag `v1.0.0-rc.1` gelaufen (Auslöser Tag `v*`); zuvor von Hand 42769677851 auf `9989d9d3` (main) | Tag `v1.0.0-rc.1` (`9989d9d3`): Lauf 42780580702 | rot nur mit den sechs Platzhaltern der Tag-Läufe (`final_rc_runs`), die erst nach diesem Lauf entstehen konnten; nach dem Nachtrag ist `rep01-structure.test.sh --final` grün; auf Entscheidung des Auftraggebers vom 2026-11-10 kein erneuter Lauf |
 | `install-smoke.yml`, Jobs `e2e-real` und `e2e-real-ratchet` | Real-Stack-Suite in allen sechs Browserprojekten und Modul-Lauf `maintenance.spec.ts`; Ratchet nur mit Zeilen der nach E-60 zurückgestellten Befunde | `536e3ab8` | 42712217841 (Push auf `main`) | grün: `e2e-real` in chromium, edge, firefox, webkit, mobile-chrome, mobile-safari und `e2e-real-ratchet` grün |
 | `outage.yml` | Ausfallsuite | `536e3ab8` | 42742369040 (nächtlich; vorher 42695925438 auf `e17954ca`) | grün |
 | `restore-test.yml` | Restore, PITR, RPO/RTO | `536e3ab8` | 42747382418 (nächtlich) | grün |
