@@ -1,6 +1,7 @@
 package traceability
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -320,7 +321,13 @@ func TestWorkPackagesIn(t *testing.T) {
 		in   string
 		want []string
 	}{
-		{"WP-005: Traceability; Arbeitspakete: WP-005, WP-006 und WP-1234", []string{"WP-005", "WP-006", "WP-123"}},
+		{"WP-005: Traceability; Arbeitspakete: WP-005, WP-006 und WP-1234", []string{"WP-005", "WP-006", "WP-1234"}},
+		// Phase 3 (E-244): four digits, never read as WP-100; five digits and
+		// suffixes are no WP numbers.
+		{"WP-1000", []string{"WP-1000"}},
+		{"WP-998 – WP-1001", []string{"WP-998", "WP-999", "WP-1000", "WP-1001"}},
+		{"Arbeitspakete: WP-860 bis WP-862", []string{"WP-860", "WP-861", "WP-862"}},
+		{"WP-12345 und WP-1000a", nil},
 		// F-286: ranges in PR titles and on the line "Arbeitspakete:".
 		{"G1-Nachbesserung: WP-332 – WP-335 (NFR-02, NFR-03) (#64)", []string{"WP-332", "WP-333", "WP-334", "WP-335"}},
 		{"Arbeitspakete: WP-010 bis WP-012", []string{"WP-010", "WP-011", "WP-012"}},
@@ -553,7 +560,7 @@ func TestValidateAcceptsNonTestEvidenceOnlyFromTheAllowList(t *testing.T) {
 }
 
 // TestPlannedRowsPassTheEvidenceRule requires that the allow-list holds
-// exactly the planned non-test rows of the three plans and that every row of
+// exactly the planned non-test rows of the four plans and that every row of
 // the remediation plan, including the frame WPs WP-595 to WP-600, names a test
 // file.
 func TestPlannedRowsPassTheEvidenceRule(t *testing.T) {
@@ -576,9 +583,9 @@ func TestPlannedRowsPassTheEvidenceRule(t *testing.T) {
 		}
 		allowed[a] = true
 		switch planned[a] {
-		case "docs/plan/implementierungsplan.md", Phase2PlanFile:
+		case "docs/plan/implementierungsplan.md", Phase2PlanFile, Phase3PlanFile:
 		default:
-			t.Errorf("allow-list entry %+v is no planned row of docs/plan/implementierungsplan.md or %s", a, Phase2PlanFile)
+			t.Errorf("allow-list entry %+v is no planned row of docs/plan/implementierungsplan.md, %s or %s", a, Phase2PlanFile, Phase3PlanFile)
 		}
 	}
 	for row, file := range planned {
@@ -586,8 +593,8 @@ func TestPlannedRowsPassTheEvidenceRule(t *testing.T) {
 			t.Errorf("planned row %+v of %s names no test file and is not allow-listed", row, file)
 		}
 	}
-	if len(AllowedEvidence) != 27 {
-		t.Errorf("allow-list has %d entries, the plans prescribe 27", len(AllowedEvidence))
+	if len(AllowedEvidence) != 32 {
+		t.Errorf("allow-list has %d entries, the plans prescribe 32", len(AllowedEvidence))
 	}
 	for _, id := range []string{"WP-595", "WP-596", "WP-597", "WP-598", "WP-599", "WP-600"} {
 		wp, ok := plan[id]
@@ -796,6 +803,23 @@ func TestTraceabilityFile(t *testing.T) {
 		errs = append(errs, phase2Rows...)
 	}
 
+	// Phase 3 (WP-860): the same rules with the Phase-3 plan and coverage;
+	// level P3 makes the completeness blocking (gate G3).
+	errs = append(errs, CheckPhase3Consistency(catalog, repo.phase3, plan)...)
+	open3 := MissingPhase(entries, repo.phase3, plan)
+	t.Logf("Phase 3: %d of %d IDs of %s without a row of their abschluss_wp", len(open3), len(repo.phase3.order), repo.phase3.File)
+	if len(open3) > 0 {
+		t.Logf("Phase-3 IDs without a row of their abschluss_wp: %s", strings.Join(open3, " "))
+	}
+	phase3Rows := CheckWorkPackages(entries, plan, PhaseWorkPackages(plan, Phase3PlanFile))
+	t.Logf("Phase 3: %d planned rows missing", len(phase3Rows))
+	if complete.Phase3 {
+		if len(open3) > 0 {
+			errs = append(errs, &missingError{what: "Phase-3 IDs without a row of their abschluss_wp", ids: open3})
+		}
+		errs = append(errs, phase3Rows...)
+	}
+
 	for _, err := range errs {
 		t.Error(err)
 	}
@@ -816,8 +840,10 @@ type repository struct {
 	formatErrs []error
 	catalog    Catalog
 	plan       map[string]*WorkPackage
-	// phase2 is the Phase-2 coverage with its column abschluss_wp.
+	// phase2 and phase3 are the phase coverages with their column
+	// abschluss_wp.
 	phase2 *Coverage
+	phase3 *Coverage
 }
 
 func loadRepository(t *testing.T) repository {
@@ -841,13 +867,18 @@ func loadRepository(t *testing.T) repository {
 		readInto(t, filepath.Join(repoRoot, filepath.FromSlash(name)), func(r io.Reader) error {
 			cov, cerr := ParseCoverage(name, r)
 			coverages = append(coverages, cov)
+			switch name {
+			case Phase2CoverageFile:
+				repo.phase2 = cov
+			case Phase3CoverageFile:
+				repo.phase3 = cov
+			}
 			return cerr
 		})
 	}
 	if err = repo.catalog.AddCoverages(coverages...); err != nil {
 		t.Fatalf("coverages: %v", err)
 	}
-	repo.phase2 = coverages[len(coverages)-1]
 
 	plans := map[string]map[string]*WorkPackage{}
 	for _, name := range PlanFiles {
@@ -1084,7 +1115,16 @@ func TestParseRequireComplete(t *testing.T) {
 			t.Errorf("ParseRequireComplete(%q) = %+v, %v; want %+v", v, got, err, want)
 		}
 	}
-	for _, v := range []string{"P3", "X", "P2,P4", "true"} {
+	for v, want := range map[string]Completeness{
+		"P3":        {Phase3: true},
+		"B,Q,P2,P3": {Phase2: true, Phase3: true},
+	} {
+		got, err := ParseRequireComplete(v)
+		if err != nil || got != want {
+			t.Errorf("ParseRequireComplete(%q) = %+v, %v; want %+v", v, got, err, want)
+		}
+	}
+	for _, v := range []string{"P4", "X", "P2,P4", "true"} {
 		if _, err := ParseRequireComplete(v); err == nil {
 			t.Errorf("ParseRequireComplete(%q) accepted an unknown level", v)
 		}
@@ -1148,6 +1188,20 @@ func TestPhase2TagPattern(t *testing.T) {
 	}
 }
 
+func TestPhase3TagPattern(t *testing.T) {
+	for _, tag := range []string{"[P3]", "[P2–P3]", "[P3–P4]", "[P2–P4, A]", "[P2–P4], [A]", "(V), [B–P4], [A]",
+		"[B], Zusätze [P2], [P3]", "[B], [P3], [A]", "[P2]/[P3]/[P4]/[A]", "[B], [P3]-Anteil", "[P2], Health [P3]"} {
+		if !HasPhase3Part(tag) {
+			t.Errorf("HasPhase3Part(%q) = false", tag)
+		}
+	}
+	for _, tag := range []string{"[B]", "[P2]", "[P4]", "[Q]", "[A]", "[B–P2]", "[P4–P5]", "nicht geliefert", ""} {
+		if HasPhase3Part(tag) {
+			t.Errorf("HasPhase3Part(%q) = true", tag)
+		}
+	}
+}
+
 func TestCheckPhase2Consistency(t *testing.T) {
 	catalog, cov, plan := phase2Fixture(t)
 	if errs := CheckPhase2Consistency(catalog, cov, plan); len(errs) != 0 {
@@ -1183,6 +1237,13 @@ func TestDeferredWorkPackagesAreRejected(t *testing.T) {
 	if !strings.Contains(errs[0].Error(), "Verschobene Arbeitspakete aus Phase 1 (WP-215 bis WP-239)") {
 		t.Errorf("error does not point to the table: %v", errs[0])
 	}
+	// WP-231 is replaced by the Phase-3 plan, WP-232 stays with the Phase-2
+	// table; both are rejected (E-46).
+	both := parsePlanOrFail(t, "docs/plan/implementierungsplan.md", testDeferredP3Plan)
+	assertErrors(t, CheckWorkPackages(nil, both, []string{"WP-231", "WP-232"}), []string{
+		"WP-231 (docs/plan/implementierungsplan.md:1) is deferred by E-03 and replaced by Phase-3 work packages (E-46); see the section \"Verschobene Arbeitspakete aus Phase 1 mit P3-Anteil\" of " + Phase3PlanFile,
+		"WP-232 (docs/plan/implementierungsplan.md:3) is deferred by E-03 and replaced by Phase-2 work packages (E-46); see the table \"Verschobene Arbeitspakete aus Phase 1 (WP-215 bis WP-239)\" of " + Phase2PlanFile,
+	})
 	entries, perrs := ParseCSV(strings.NewReader(Header + "\nGLO-11;[Q];Phase;backend/x_test.go;WP-222\nGLO-11;[Q];Phase;backend/x_test.go;WP-214\n"))
 	if len(perrs) != 0 {
 		t.Fatal(perrs)
@@ -1192,9 +1253,9 @@ func TestDeferredWorkPackagesAreRejected(t *testing.T) {
 	})
 }
 
-// TestRealPlansAndPhase2Coverage reads the three plans and the coverages of
-// the repository: no WP number is defined twice, the Phase-2 plan is
-// consistent with its coverage, and gate G1 keeps its 219 [B]/[Q] IDs.
+// TestRealPlansAndPhase2Coverage reads the four plans and the coverages of
+// the repository: no WP number is defined twice, the Phase-2 and Phase-3 plans
+// are consistent with their coverages, and gate G1 keeps its 220 [B]/[Q] IDs.
 func TestRealPlansAndPhase2Coverage(t *testing.T) {
 	repo := loadRepository(t)
 	byPlan := map[string]int{}
@@ -1235,7 +1296,145 @@ func TestRealPlansAndPhase2Coverage(t *testing.T) {
 	if errs := CheckPhase2Consistency(repo.catalog, repo.phase2, repo.plan); len(errs) != 0 {
 		t.Errorf("Phase-2 plan and coverage are inconsistent:\n%v", errs)
 	}
-	if n := len(repo.catalog.RequiredForGate()); n != 219 {
-		t.Errorf("gate G1 requires %d [B]/[Q] IDs, want 219", n)
+	for _, id := range []string{"WP-860", "WP-999", "WP-1000", "WP-1177"} {
+		if wp := repo.plan[id]; wp == nil || wp.Plan != Phase3PlanFile {
+			t.Errorf("%s not in the Phase-3 plan", id)
+		}
+	}
+	if errs := CheckPhase3Consistency(repo.catalog, repo.phase3, repo.plan); len(errs) != 0 {
+		t.Errorf("Phase-3 plan and coverage are inconsistent:\n%v", errors.Join(errs...))
+	}
+	// 220 since WP-860: the catalogue gives SEC-05 no tag, the Phase-3
+	// coverage lists it as [B], as docs/acceptance/g1-gate.md already counts it.
+	if n := len(repo.catalog.RequiredForGate()); n != 220 {
+		t.Errorf("gate G1 requires %d [B]/[Q] IDs, want 220", n)
+	}
+}
+
+// Phase 3 (WP-860, E-244).
+
+const testDeferredP3Plan = "### WP-231 – Workflow\n" +
+	"**Schlüssel:** `m-wf` · **Meilenstein:** M-S · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,5 PT\n" +
+	"### WP-232 – IGA\n" +
+	"**Schlüssel:** `m-iga` · **Meilenstein:** M-S · **G1-Umfang:** nein, verschoben (E-03) · **Epic (Traceability):** Phase · **Aufwand:** 1,5 PT\n"
+
+const testPhase3Plan = "## M3.0 Werkzeugkette\n\n" +
+	"### WP-999 – Letztes dreistelliges Paket\n\n" +
+	"**Schlüssel:** `p3-a` · **Meilenstein:** M3.0 · **Epic (Traceability):** G3 · **Aufwand:** 1,0 PT · **G3-Umfang:** ja\n\n" +
+	"**Traceability (`docs/traceability.csv`):**\n\n" +
+	"```text\n" +
+	"MON-03;[P3];G3;backend/m_test.go;WP-999\n" +
+	"```\n\n" +
+	"### WP-1000 – Erstes vierstelliges Paket\n\n" +
+	"**Schlüssel:** `p3-b` · **Meilenstein:** M3.0 · **Epic (Traceability):** E · **Aufwand:** 1,0 PT · **G3-Umfang:** ja\n\n" +
+	"**Traceability (`docs/traceability.csv`):**\n\n" +
+	"```text\n" +
+	"MON-03;[P3];E;backend/n_test.go;WP-1000\n" +
+	"```\n\n" +
+	"### WP-1014 – Bedingtes Paket\n\n" +
+	"**Schlüssel:** `p3-c` · **Meilenstein:** M3.10 · **Epic (Traceability):** E · **Aufwand:** 1,0 PT · **G3-Umfang:** optional (GATE-05, [O])\n\n" +
+	"**Traceability (`docs/traceability.csv`):**\n\n" +
+	"```text\n" +
+	"PRT-14;[P3];E;backend/t_test.go;WP-1014\n" +
+	"```\n"
+
+const testPhase3Coverage = "id;tag;status;befund;quelle;hinweis;wps;abschluss_wp\n" +
+	"MON-03;[P3];PARTIAL;x;x;x;WP-999(T) WP-1000(S);WP-1000\n" +
+	"PRT-14;[P3];N/P;x;x;x;WP-1014(S);WP-1014\n"
+
+func phase3Fixture(t *testing.T) (Catalog, *Coverage, map[string]*WorkPackage) {
+	t.Helper()
+	plan, err := MergePlans(map[string]map[string]*WorkPackage{
+		Phase2PlanFile: parsePlanOrFail(t, Phase2PlanFile, testPhase2Plan),
+		Phase3PlanFile: parsePlanOrFail(t, Phase3PlanFile, testPhase3Plan),
+	})
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	cov, err := ParseCoverage(Phase3CoverageFile, strings.NewReader(testPhase3Coverage))
+	if err != nil {
+		t.Fatalf("parse coverage: %v", err)
+	}
+	catalog := testCatalog(t)
+	if err := catalog.AddCoverages(cov); err != nil {
+		t.Fatalf("add coverage: %v", err)
+	}
+	return catalog, cov, plan
+}
+
+func TestParsePlanReadsFourDigitNumbersAndG3Scope(t *testing.T) {
+	plan := parsePlanOrFail(t, Phase3PlanFile, testPhase3Plan)
+	if wp := plan["WP-1000"]; wp == nil || wp.Location() != Phase3PlanFile+":13" || wp.Epic != "E" || wp.Optional() || len(wp.Rows) != 1 {
+		t.Errorf("WP-1000 = %+v", wp)
+	}
+	if wp := plan["WP-1014"]; wp == nil || !wp.Optional() || wp.Scope != "optional (GATE-05, [O])" {
+		t.Errorf("WP-1014 = %+v", wp)
+	}
+	_, err := ParsePlan(Phase3PlanFile, strings.NewReader("### WP-10000 – Fünf Ziffern\n\n**Epic (Traceability):** E\n"))
+	if err == nil || !strings.Contains(err.Error(), `must start with "### WP-nnn " (three or four digits, no suffix)`) {
+		t.Errorf("five digits must be rejected: %v", err)
+	}
+	entries, errs := ParseCSV(strings.NewReader(Header + "\nMON-03;[P3];E;backend/n_test.go;WP-1000\nMON-03;[P3];E;backend/n_test.go;WP-10000\n"))
+	if len(entries) != 1 || len(errs) != 1 || !strings.Contains(errs[0].Error(), `line 3: wp "WP-10000" must look like WP-nnn or WP-nnnn`) {
+		t.Errorf("ParseCSV = %v, %v", entries, errs)
+	}
+}
+
+func TestMergePlansRejectsNumberInPhase2AndPhase3(t *testing.T) {
+	_, err := MergePlans(map[string]map[string]*WorkPackage{
+		Phase2PlanFile: parsePlanOrFail(t, Phase2PlanFile, testPhase2Plan),
+		Phase3PlanFile: parsePlanOrFail(t, Phase3PlanFile, strings.ReplaceAll(testPhase3Plan, "WP-999", "WP-243")),
+	})
+	if err == nil || !strings.Contains(err.Error(), "WP-243 is defined in "+Phase2PlanFile+":3 and in "+Phase3PlanFile+":3") {
+		t.Errorf("expected a duplicate with both locations, got %v", err)
+	}
+}
+
+func TestMissingPhase3CountsOnlyTheClosingWorkPackage(t *testing.T) {
+	_, cov, plan := phase3Fixture(t)
+	// A row of another WP (Phase 2 or an earlier Phase-3 WP) does not close
+	// MON-03; PRT-14 is closed by an optional WP and never required.
+	entries := []Entry{{ID: "MON-03", WP: "WP-243"}, {ID: "MON-03", WP: "WP-999"}}
+	if got := MissingPhase(entries, cov, plan); strings.Join(got, ",") != "MON-03" {
+		t.Errorf("MissingPhase() = %v, want MON-03", got)
+	}
+	entries = append(entries, Entry{ID: "MON-03", WP: "WP-1000"})
+	if got := MissingPhase(entries, cov, plan); len(got) != 0 {
+		t.Errorf("MissingPhase() = %v, want none", got)
+	}
+	if got := PhaseWorkPackages(plan, Phase3PlanFile); strings.Join(got, ",") != "WP-999,WP-1000" {
+		t.Errorf("PhaseWorkPackages() = %v, want WP-999,WP-1000 in numeric order without the optional WP-1014", got)
+	}
+}
+
+func TestCheckPhase3Consistency(t *testing.T) {
+	catalog, cov, plan := phase3Fixture(t)
+	if errs := CheckPhase3Consistency(catalog, cov, plan); len(errs) != 0 {
+		t.Fatalf("consistent fixture: %v", errs)
+	}
+	catalog["MGT-04"] = "[P3]"
+	catalog["LOC-08"] = "[P2]"
+	cov.Closing["MON-03"] = "WP-243"
+	assertErrors(t, CheckPhase3Consistency(catalog, cov, plan), []string{
+		"abschluss_wp WP-243 of MON-03 (" + Phase2PlanFile + ":3) prescribes no traceability row of MON-03",
+		`MGT-04 with Phase-3 part "[P3]" is not listed in ` + Phase3CoverageFile,
+	})
+}
+
+func TestCoverageTagsMustAgreeAcrossThreeFiles(t *testing.T) {
+	p1, _ := ParseCoverage("docs/plan/abdeckung.csv", strings.NewReader("id;tag\nGLO-11;[Q]\n"))
+	p2, _ := ParseCoverage(Phase2CoverageFile, strings.NewReader("id;tag;abschluss_wp\nGLO-11;[Q];WP-243\n"))
+	p3, _ := ParseCoverage(Phase3CoverageFile, strings.NewReader("id;tag;abschluss_wp\nGLO-11;[B];WP-860\n"))
+	err := Catalog{}.AddCoverages(p1, p2, p3)
+	if err == nil || !strings.Contains(err.Error(), `GLO-11: tag "[B]" in `+Phase3CoverageFile+` differs from "[Q]" in docs/plan/abdeckung.csv`) {
+		t.Errorf("expected a tag conflict naming both files, got %v", err)
+	}
+}
+
+func TestSortWorkPackagesIsNumeric(t *testing.T) {
+	ids := []string{"WP-1000", "WP-860", "WP-999", "WP-1177"}
+	SortWorkPackages(ids)
+	if strings.Join(ids, ",") != "WP-860,WP-999,WP-1000,WP-1177" {
+		t.Errorf("SortWorkPackages = %v", ids)
 	}
 }

@@ -14808,7 +14808,7 @@ Nach WP-928 trägt `admp_connection.holder_subject_id` einen zusammengesetzten F
 
 ```text
 ADM-06;[P3];E;backend/internal/admp/holder_integration_test.go;WP-1076
-SEC-05;[B], [P3]-Anteil;E;backend/internal/admp/holder_integration_test.go;WP-1076
+SEC-05;[B];E;backend/internal/admp/holder_integration_test.go;WP-1076
 ```
 
 **Entscheidungsbedarf:** [E-243](entscheidungen.md#e-243) Anschlussinhaber aus ADMP als personenbezogene Daten: Vault-Speicherung oder nur flüchtige Anzeige (entschieden 2026-11-09, Option 1; dieses WP setzt die Vault-Speicherung mit Art `person` voraus); Aufgabe A-57 (ADMP-Datenschutz) erledigt (2026-11-09)
@@ -20486,7 +20486,7 @@ TLC-06;[P3];F;backend/internal/tenantapi/purge_integration_test.go;WP-1154
 
 ```text
 TLC-06;[P3];F;backend/internal/tenantapi/purge_external_test.go;WP-1155
-SEC-05;[B], [P3]-Anteil;F;backend/internal/tenantapi/purge_external_test.go;WP-1155
+SEC-05;[B];F;backend/internal/tenantapi/purge_external_test.go;WP-1155
 ```
 
 **Entscheidungsbedarf:** [E-166](entscheidungen.md#e-166) audit_log bei Org-Löschung gegenüber 10 Jahren Aufbewahrung (AUD-09, NFR-06) (entschieden 2026-11-09, Option 1). Aufgabe A-80 (DSGVO-Workflows) erledigt (2026-11-09).
@@ -20662,7 +20662,7 @@ TLC-06;[P3];F;frontend/src/pages/OrgDataPage.test.tsx;WP-1157
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-SEC-05;[B], [P3]-Anteil;F;backend/internal/privacy/subject_integration_test.go;WP-1158
+SEC-05;[B];F;backend/internal/privacy/subject_integration_test.go;WP-1158
 ```
 
 **Entscheidungsbedarf:** [E-165](entscheidungen.md#e-165) Personenbezogene Daten im Vollexport (TLC-05) (entschieden 2026-11-09, Option 1); Auskunft mit entsiegelten Werten, analog zum Vollexport.
@@ -20714,7 +20714,7 @@ SEC-05;[B], [P3]-Anteil;F;backend/internal/privacy/subject_integration_test.go;W
 **Traceability (`docs/traceability.csv`):**
 
 ```text
-SEC-05;[B], [P3]-Anteil;F;backend/internal/pii/history_redaction_integration_test.go;WP-1159
+SEC-05;[B];F;backend/internal/pii/history_redaction_integration_test.go;WP-1159
 ```
 
 **Entscheidungsbedarf:** [E-242](entscheidungen.md#e-242) EU-Residenz, Unterauftragsverarbeiter und Self-Hosting für SEC-05 [P3] (entschieden 2026-11-09, Option 1); Regel aus NFR-09 unverändert auf die P3-Datenorte anwenden, AVV-Anlage im Repository, Self-Hosting und Air-Gapped in der Verantwortung des Betreibers der Instanz. [E-165](entscheidungen.md#e-165) Personenbezogene Daten im Vollexport (TLC-05) (entschieden 2026-11-09, Option 1); die AVV-Anlage beschreibt diese Regel. [E-163](entscheidungen.md#e-163) Umfang SMS/Pager, Eskalation und Quittungswege (entschieden 2026-11-09, Option 2; Eskalation in M3.18, kanalneutral); Kanalumfang der Datenorte. [E-103](../phase2/entscheidungen.md#e-103) Fortgeltung der in G1 durch Erklärung abgenommenen Punkte (B3 Pentest-Befundliste, B4 v2-Texte, B6 Subprozessoren) für G2 (entschieden (2026-10-28, Beschluss des Auftraggebers: Die Erklärung vom 2026-10-15 gilt als Nachweis für G1 und G2; die Nachweise B3, B4 und B6 sind gestrichen; angepasst 2026-11-02)). Aufgabe A-84 (G3 ohne ADMP-API-Dokumentation) erledigt (2026-11-09); bis zur Antwort schließt WP-1159 SEC-05 ohne WP-1076. Aufgabe A-55 (ADMP-API-Doku) offen (nur ADMP-Anteil über WP-1076).

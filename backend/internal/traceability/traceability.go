@@ -2,18 +2,19 @@
 //
 // The file links every requirement ID of the catalogue (docs/spec/katalog-v3)
 // to its epic, a test file and the work package that delivered it. The work
-// packages come from three plans (PlanFiles): the Phase-1 plan, the G1
-// remediation plan and the Phase-2 plan; the IDs from the catalogue and the
-// coverage files of Phase 1 and Phase 2 (CoverageFiles). The checks follow
-// decisions E-30 and E-48: format, known IDs, existing test files, the rows
-// the plans prescribe for the work packages of a pull request and the
-// consistency of the Phase-2 plan with its coverage are blocking. A row names a
+// packages come from four plans (PlanFiles): the Phase-1 plan, the G1
+// remediation plan, the Phase-2 plan and the Phase-3 plan; the IDs from the
+// catalogue and the coverage files of Phases 1 to 3 (CoverageFiles). The
+// checks follow decisions E-30 and E-48: format, known IDs, existing test
+// files, the rows the plans prescribe for the work packages of a pull request
+// and the consistency of the Phase-2 and Phase-3 plans with their coverages
+// are blocking. A row names a
 // test file by its form (IsTestFile); other evidence is accepted only for the
 // rows a plan prescribes (AllowedEvidence), the gate checklist never (F-121).
 // Since gate G1 (WP-213) every [B] and [Q] ID needs a row or an entry in
 // docs/acceptance/g1-ausnahmen.csv (E-76). Completeness over the [Pn]/[A] IDs
-// and over Phase 2 (a row of the closing work package of every ID of the
-// Phase-2 coverage) is reported and blocks per gate via
+// and over Phases 2 and 3 (a row of the closing work package of every ID of
+// the phase coverage) is reported and blocks per gate via
 // TRACEABILITY_REQUIRE_COMPLETE (ParseRequireComplete).
 package traceability
 
@@ -55,10 +56,13 @@ func (e *Entry) requirementKey() string {
 var (
 	// idPattern accepts IDs with a middle segment such as IMP-IO-01.
 	idPattern = regexp.MustCompile(`^(?:[A-Z]{2,5}(?:-[A-Z]{2})?-\d{2}|CH\d+)$`)
-	wpPattern = regexp.MustCompile(`^WP-\d{3}$`)
+	// wpPattern accepts three or four digits: Phase 3 numbers from WP-860 to
+	// beyond WP-1000 (E-244).
+	wpPattern = regexp.MustCompile(`^WP-\d{3,4}$`)
 	// wpReferences matches a WP number or a range "WP-332 – WP-335" (en or em
-	// dash, hyphen) or "WP-010 bis WP-012" on one line.
-	wpReferences = regexp.MustCompile(`WP-(\d{3})(?:(?:[ \t]*[–—-][ \t]*|[ \t]+bis[ \t]+)WP-(\d{3}))?`)
+	// dash, hyphen) or "WP-010 bis WP-012" on one line. The word boundaries
+	// keep "WP-1000" from being read as WP-100 and ignore five digits.
+	wpReferences = regexp.MustCompile(`\bWP-(\d{3,4})\b(?:(?:[ \t]*[–—-][ \t]*|[ \t]+bis[ \t]+)WP-(\d{3,4})\b)?`)
 )
 
 // ParseCSV reads docs/traceability.csv. It returns every well-formed row and
@@ -102,7 +106,7 @@ func ParseCSV(r io.Reader) ([]Entry, []error) {
 			problems = append(problems, fmt.Sprintf("id %q is not a requirement ID", e.ID))
 		}
 		if e.WP != "" && !wpPattern.MatchString(e.WP) {
-			problems = append(problems, fmt.Sprintf("wp %q must look like WP-nnn", e.WP))
+			problems = append(problems, fmt.Sprintf("wp %q must look like WP-nnn or WP-nnnn", e.WP))
 		}
 		if len(problems) > 0 {
 			errs = append(errs, fmt.Errorf("line %d: %s", line, strings.Join(problems, "; ")))
@@ -206,14 +210,22 @@ func splitID(id string) (prefix string, number int, ok bool) {
 }
 
 // CoverageFiles are the coverage files of the plans, relative to the
-// repository root: Phase 1 and Phase 2. The Phase-2 file names the closing
-// work package of every ID (column abschluss_wp).
+// repository root: Phases 1, 2 and 3. The Phase-2 and Phase-3 files name the
+// closing work package of every ID (column abschluss_wp).
 var CoverageFiles = []string{
 	"docs/plan/abdeckung.csv",
-	"docs/plan/phase2/abdeckung.csv",
+	Phase2CoverageFile,
+	Phase3CoverageFile,
 }
 
-// NoClosingWP marks an ID of the Phase-2 coverage without closing work package
+// Phase2CoverageFile and Phase3CoverageFile are the coverages with the column
+// abschluss_wp.
+const (
+	Phase2CoverageFile = "docs/plan/phase2/abdeckung.csv"
+	Phase3CoverageFile = "docs/plan/phase3/abdeckung.csv"
+)
+
+// NoClosingWP marks an ID of a phase coverage without closing work package
 // (abschluss_wp "–", E-37: catalogue text not delivered).
 const NoClosingWP = "–"
 
@@ -224,8 +236,8 @@ type Coverage struct {
 	// Tags are the tags in their docs/traceability.csv spelling (NormalizeTag).
 	Tags map[string]string
 	// Closing maps an ID to its column abschluss_wp; empty for a file
-	// without that column. CheckPhase2Consistency validates the values of the
-	// Phase-2 file.
+	// without that column. CheckPhaseConsistency validates the values of the
+	// Phase-2 and Phase-3 files.
 	Closing map[string]string
 	// order keeps the IDs in file order for stable reports.
 	order []string
@@ -327,18 +339,32 @@ func HasPhase2Part(tag string) bool {
 	return phase2Tag.MatchString(tag)
 }
 
+// phase3Tag matches the tags with a Phase-3 part: "[P3]", "[P2–P3]",
+// "[P3–P4]", "[P2–P4, A]", "(V), [B–P4], [A]", "[B], Zusätze [P2], [P3]",
+// "[P2]/[P3]/[P4]/[A]", "[B]; [P3]-Anteil" and "P3/G3". A range counts when
+// it starts at B, P2 or P3 and ends at P3 or later.
+var phase3Tag = regexp.MustCompile(`\[P3[\]–]|\bP3/G|\[(?:B|P2)–P[3-5]`)
+
+// HasPhase3Part reports whether a tag carries a Phase-3 part; such an ID must
+// be listed in the Phase-3 coverage.
+func HasPhase3Part(tag string) bool {
+	return phase3Tag.MatchString(tag)
+}
+
 // Completeness levels of TRACEABILITY_REQUIRE_COMPLETE (E-30, E-48).
 type Completeness struct {
 	// All makes every [B]/[Pn]/[A] ID without a row blocking ("1").
 	All bool
 	// Phase2 makes the Phase-2 completeness blocking ("P2", gate G2).
 	Phase2 bool
+	// Phase3 makes the Phase-3 completeness blocking ("P3", gate G3).
+	Phase3 bool
 }
 
 // ParseRequireComplete reads a comma-separated list of levels. "B" and "Q"
 // are accepted and change nothing, because [B]/[Q] block since gate G1;
-// "P2" blocks on Phase 2, "1" on every [B]/[Pn]/[A] ID. An empty value only
-// reports; any other value is an error.
+// "P2" blocks on Phase 2, "P3" on Phase 3, "1" on every [B]/[Pn]/[A] ID. An
+// empty value only reports; any other value is an error.
 func ParseRequireComplete(v string) (Completeness, error) {
 	var c Completeness
 	if strings.TrimSpace(v) == "" {
@@ -349,10 +375,12 @@ func ParseRequireComplete(v string) (Completeness, error) {
 		case "B", "Q":
 		case "P2":
 			c.Phase2 = true
+		case "P3":
+			c.Phase3 = true
 		case "1":
 			c.All = true
 		default:
-			return Completeness{}, fmt.Errorf("unknown completeness level %q (allowed: B, Q, P2, 1)", strings.TrimSpace(level))
+			return Completeness{}, fmt.Errorf("unknown completeness level %q (allowed: B, Q, P2, P3, 1)", strings.TrimSpace(level))
 		}
 	}
 	return c, nil
@@ -375,24 +403,35 @@ func (c Catalog) RequiredForGate() []string {
 }
 
 // PlanFiles are the plans whose WP blocks the check reads, relative to the
-// repository root: the Phase-1 plan, the G1 remediation plan (WP-336) and the
-// Phase-2 plan (WP-243). WP numbers are unique across all of them.
+// repository root: the Phase-1 plan, the G1 remediation plan (WP-336), the
+// Phase-2 plan (WP-243) and the Phase-3 plan (WP-860). WP numbers are unique
+// across all of them.
 var PlanFiles = []string{
 	"docs/plan/implementierungsplan.md",
 	"docs/plan/g1-korrektur/implementierungsplan.md",
 	Phase2PlanFile,
+	Phase3PlanFile,
 }
 
-// Phase2PlanFile is the plan of Phase 2 (gate G2).
-const Phase2PlanFile = "docs/plan/phase2/implementierungsplan.md"
+// Phase2PlanFile and Phase3PlanFile are the plans of Phase 2 (gate G2) and
+// Phase 3 (gate G3).
+const (
+	Phase2PlanFile = "docs/plan/phase2/implementierungsplan.md"
+	Phase3PlanFile = "docs/plan/phase3/implementierungsplan.md"
+)
+
+// phase3Replaces are the deferred Phase-1 work packages with a Phase-3 part:
+// the Phase-3 plan replaces them (section "Verschobene Arbeitspakete aus
+// Phase 1 mit P3-Anteil"), the Phase-2 plan keeps them deferred.
+var phase3Replaces = map[string]bool{"WP-220": true, "WP-228": true, "WP-231": true, "WP-234": true}
 
 // DeferredScope is the header field of the Phase-1 blocks WP-215 to WP-239,
 // deferred by E-03 and replaced by Phase-2 work packages (E-46); their
 // numbers are no work packages of a pull request.
 const DeferredScope = "nein, verschoben (E-03)"
 
-// OptionalScope starts the header field "G2-Umfang" of a work package
-// without gate effect (GATE-05, [O]).
+// OptionalScope starts the header field "G2-Umfang" or "G3-Umfang" of a work
+// package without gate effect (GATE-05, [O]).
 const OptionalScope = "optional"
 
 // planNames names the plans in error messages.
@@ -409,7 +448,8 @@ type WorkPackage struct {
 	Plan string
 	// Line is the line of the heading "### WP-nnn".
 	Line int
-	// Scope is the header field "G1-Umfang" or "G2-Umfang" ("" without one).
+	// Scope is the header field "G1-Umfang", "G2-Umfang" or "G3-Umfang" (""
+	// without one).
 	Scope string
 }
 
@@ -423,13 +463,20 @@ func (wp *WorkPackage) Deferred() bool {
 	return wp.Scope == DeferredScope
 }
 
-// Optional reports whether the block has no gate effect ("G2-Umfang: optional").
+// Optional reports whether the block has no gate effect ("G2-Umfang: optional"
+// or "G3-Umfang: optional").
 func (wp *WorkPackage) Optional() bool {
 	return strings.HasPrefix(wp.Scope, OptionalScope)
 }
 
 // deferredError is the error for a deferred WP number used as work package.
+// WP-220, WP-228, WP-231 and WP-234 point to the Phase-3 plan, which replaces
+// them; the other numbers to the table of the Phase-2 plan (E-46).
 func deferredError(prefix string, wp *WorkPackage) error {
+	if phase3Replaces[wp.ID] {
+		return fmt.Errorf("%s%s (%s) is deferred by E-03 and replaced by Phase-3 work packages (E-46); see the section "+
+			"\"Verschobene Arbeitspakete aus Phase 1 mit P3-Anteil\" of %s", prefix, wp.ID, wp.Location(), Phase3PlanFile)
+	}
 	return fmt.Errorf("%s%s (%s) is deferred by E-03 and replaced by Phase-2 work packages (E-46); see the table "+
 		"\"Verschobene Arbeitspakete aus Phase 1 (WP-215 bis WP-239)\" of %s", prefix, wp.ID, wp.Location(), Phase2PlanFile)
 }
@@ -468,14 +515,14 @@ func MergePlans(plans map[string]map[string]*WorkPackage) (map[string]*WorkPacka
 }
 
 var (
-	wpHeading    = regexp.MustCompile(`^### (WP-\d{3}) `)
+	wpHeading    = regexp.MustCompile(`^### (WP-\d{3,4}) `)
 	wpAnyHeading = regexp.MustCompile(`^### WP-`)
 	epicField    = regexp.MustCompile(`\*\*Epic \(Traceability\):\*\* ([^·]+?)\s*(?:·|$)`)
-	scopeField   = regexp.MustCompile(`\*\*G[12]-Umfang:\*\* ([^·]+?)\s*(?:·|$)`)
+	scopeField   = regexp.MustCompile(`\*\*G[123]-Umfang:\*\* ([^·]+?)\s*(?:·|$)`)
 )
 
 // ParsePlan reads one plan (see PlanFiles) and returns, per WP, the
-// epic of its block, its header field "G1-Umfang"/"G2-Umfang" and the rows
+// epic of its block, its header field "G1-Umfang"/"G2-Umfang"/"G3-Umfang" and the rows
 // listed under "Traceability". name is the plan file; every error names it
 // with the line ("file:line").
 func ParsePlan(name string, r io.Reader) (map[string]*WorkPackage, error) {
@@ -502,8 +549,9 @@ func ParsePlan(name string, r io.Reader) (map[string]*WorkPackage, error) {
 			continue
 		}
 		if wpAnyHeading.MatchString(text) {
-			// WP-nnna and the like: wpPattern and the CI expect exactly three digits.
-			errs = append(errs, fmt.Errorf("%s:%d: heading %q must start with \"### WP-nnn \" (three digits, no suffix)", name, line, text))
+			// WP-nnna, five digits and the like: wpPattern and the CI expect three
+			// or four digits (E-244).
+			errs = append(errs, fmt.Errorf("%s:%d: heading %q must start with \"### WP-nnn \" (three or four digits, no suffix)", name, line, text))
 			current, inTrace, inBlock = nil, false, false
 			continue
 		}
@@ -586,11 +634,11 @@ type Evidence struct {
 	Path string
 }
 
-// AllowedEvidence lists the 27 rows of the plans (PlanFiles) whose evidence is
+// AllowedEvidence lists the 32 rows of the plans (PlanFiles) whose evidence is
 // no test file: the CI workflows, scan, review, pentest and installation
 // records, the operating reference model and the load and outage harnesses
-// (21 rows of the Phase-1 plan, 6 of the Phase-2 plan; the remediation plan
-// has none). Any other row must name a test file (F-121).
+// (21 rows of the Phase-1 plan, 6 of the Phase-2 plan, 5 of the Phase-3 plan;
+// the remediation plan has none). Any other row must name a test file (F-121).
 var AllowedEvidence = []Evidence{
 	{"TST-04", "WP-001", ".github/workflows/ci.yml"},
 	{"TST-04", "WP-002", ".github/workflows/ci.yml"},
@@ -620,6 +668,12 @@ var AllowedEvidence = []Evidence{
 	{"NFR-03", "WP-327", "tests/load/"},
 	{"SEC-11", "WP-329", "docs/security/review-phase2.md"},
 	{"TST-04", "WP-331", ".github/workflows/ci.yml"},
+	// Phase-3 plan.
+	{"INS-01", "WP-1170", ".github/workflows/install-smoke.yml"},
+	{"SEC-11", "WP-1175", "docs/security/review-phase3.md"},
+	{"GATE-01", "WP-1175", "docs/security/review-phase3.md"},
+	{"GATE-06", "WP-1175", "docs/security/review-phase3.md"},
+	{"TST-04", "WP-1177", ".github/workflows/ci.yml"},
 }
 
 func allowedEvidence(e *Entry) bool {
@@ -729,11 +783,12 @@ func missingOf(entries []Entry, required []string) []string {
 	return missing
 }
 
-// MissingPhase2 returns the IDs of the Phase-2 coverage whose closing work
-// package (abschluss_wp) has no row for them; rows of other work packages, in
-// particular of Phase 1, do not count (E-48). IDs without closing work package
-// ("–", E-37) and IDs closed by an optional work package are exempt.
-func MissingPhase2(entries []Entry, cov *Coverage, plan map[string]*WorkPackage) []string {
+// MissingPhase returns the IDs of a phase coverage (Phase 2 or 3) whose
+// closing work package (abschluss_wp) has no row for them; rows of other work
+// packages, in particular of earlier phases, do not count (E-48). IDs without
+// closing work package ("–", E-37) and IDs closed by an optional work package
+// are exempt.
+func MissingPhase(entries []Entry, cov *Coverage, plan map[string]*WorkPackage) []string {
 	have := map[string]bool{}
 	for _, e := range entries {
 		have[e.ID+";"+e.WP] = true
@@ -755,27 +810,47 @@ func MissingPhase2(entries []Entry, cov *Coverage, plan map[string]*WorkPackage)
 	return missing
 }
 
-// Phase2WorkPackages returns the sorted work packages of the Phase-2 plan
-// that the gate requires, i.e. without the optional ones.
-func Phase2WorkPackages(plan map[string]*WorkPackage) []string {
+// MissingPhase2 is MissingPhase for the Phase-2 coverage.
+func MissingPhase2(entries []Entry, cov *Coverage, plan map[string]*WorkPackage) []string {
+	return MissingPhase(entries, cov, plan)
+}
+
+// PhaseWorkPackages returns the work packages of one plan that the gate
+// requires, i.e. without the optional ones, in numeric order.
+func PhaseWorkPackages(plan map[string]*WorkPackage, planFile string) []string {
 	var ids []string
 	for id, wp := range plan {
-		if wp.Plan == Phase2PlanFile && !wp.Optional() {
+		if wp.Plan == planFile && !wp.Optional() {
 			ids = append(ids, id)
 		}
 	}
-	sort.Strings(ids)
+	SortWorkPackages(ids)
 	return ids
 }
 
-// CheckPhase2Consistency checks the Phase-2 plan against the catalogue and
-// the Phase-2 coverage (E-48): (a) the closing work package of every ID is "–"
-// or a work package of a plan whose block prescribes a row of that ID; (b)
-// every known ID with a Phase-2 part in its tag (HasPhase2Part) is listed in
-// the Phase-2 coverage; (c) every row of the Phase-2 plan names a known ID with
-// its tag, the epic and the number of its block. Test files are not checked:
-// they are created with the work package.
-func CheckPhase2Consistency(catalog Catalog, cov *Coverage, plan map[string]*WorkPackage) []error {
+// Phase2WorkPackages is PhaseWorkPackages for the Phase-2 plan.
+func Phase2WorkPackages(plan map[string]*WorkPackage) []string {
+	return PhaseWorkPackages(plan, Phase2PlanFile)
+}
+
+// SortWorkPackages sorts WP numbers numerically, so that WP-999 precedes
+// WP-1000.
+func SortWorkPackages(ids []string) {
+	sort.SliceStable(ids, func(i, j int) bool {
+		a, _ := strconv.Atoi(strings.TrimPrefix(ids[i], "WP-"))
+		b, _ := strconv.Atoi(strings.TrimPrefix(ids[j], "WP-"))
+		return a < b
+	})
+}
+
+// CheckPhaseConsistency checks one phase plan against the catalogue and its
+// coverage (E-48): (a) the closing work package of every ID is "–" or a work
+// package of a plan whose block prescribes a row of that ID; (b) every known
+// ID with a part of the phase in its tag (hasPart) is listed in the coverage;
+// (c) every row of the phase plan names a known ID with its tag, the epic and
+// the number of its block. Test files are not checked: they are created with
+// the work package.
+func CheckPhaseConsistency(catalog Catalog, cov *Coverage, plan map[string]*WorkPackage, planFile string, hasPart func(string) bool) []error {
 	var errs []error
 	for _, id := range cov.order {
 		closing := cov.Closing[id]
@@ -783,7 +858,7 @@ func CheckPhase2Consistency(catalog Catalog, cov *Coverage, plan map[string]*Wor
 		case closing == NoClosingWP:
 			continue
 		case !wpPattern.MatchString(closing):
-			errs = append(errs, fmt.Errorf("%s: abschluss_wp %q of %s must look like WP-nnn or be %q", cov.File, closing, id, NoClosingWP))
+			errs = append(errs, fmt.Errorf("%s: abschluss_wp %q of %s must look like WP-nnn or WP-nnnn or be %q", cov.File, closing, id, NoClosingWP))
 			continue
 		}
 		wp, ok := plan[closing]
@@ -796,12 +871,12 @@ func CheckPhase2Consistency(catalog Catalog, cov *Coverage, plan map[string]*Wor
 		}
 	}
 	for id, tag := range catalog {
-		if _, listed := cov.Tags[id]; HasPhase2Part(tag) && !listed {
-			errs = append(errs, fmt.Errorf("%s with Phase-2 part %q is not listed in %s", id, tag, cov.File))
+		if _, listed := cov.Tags[id]; hasPart(tag) && !listed {
+			errs = append(errs, fmt.Errorf("%s with %s part %q is not listed in %s", id, phaseName(planFile), tag, cov.File))
 		}
 	}
 	for _, wp := range plan {
-		if wp.Plan != Phase2PlanFile {
+		if wp.Plan != planFile {
 			continue
 		}
 		for _, row := range wp.Rows {
@@ -823,6 +898,24 @@ func CheckPhase2Consistency(catalog Catalog, cov *Coverage, plan map[string]*Wor
 	}
 	sort.Slice(errs, func(i, j int) bool { return errs[i].Error() < errs[j].Error() })
 	return errs
+}
+
+// CheckPhase2Consistency is CheckPhaseConsistency for the Phase-2 plan.
+func CheckPhase2Consistency(catalog Catalog, cov *Coverage, plan map[string]*WorkPackage) []error {
+	return CheckPhaseConsistency(catalog, cov, plan, Phase2PlanFile, HasPhase2Part)
+}
+
+// CheckPhase3Consistency is CheckPhaseConsistency for the Phase-3 plan.
+func CheckPhase3Consistency(catalog Catalog, cov *Coverage, plan map[string]*WorkPackage) []error {
+	return CheckPhaseConsistency(catalog, cov, plan, Phase3PlanFile, HasPhase3Part)
+}
+
+// phaseName is "Phase-2" or "Phase-3" for the plan of that phase.
+func phaseName(planFile string) string {
+	if planFile == Phase3PlanFile {
+		return "Phase-3"
+	}
+	return "Phase-2"
 }
 
 // ExceptionsFile lists the [B]/[Q] IDs of gate G1 that are not accepted by
