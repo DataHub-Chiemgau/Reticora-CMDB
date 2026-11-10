@@ -197,6 +197,14 @@ func EventReadPermission(event string) string {
 	case "import":
 		// The read right of the route imports (WP-301).
 		return "import:run"
+	case "ipam", "asn":
+		// IPAM and AS numbers read like the IPAM routes (WP-870).
+		return "ipam:read"
+	case "credential":
+		// Never a secret: the metadata of a credential (WP-870).
+		return "credential:read"
+	case "admp":
+		return "admp:read"
 	case "maintenance":
 		return "maintenance:read"
 	case "workflow":

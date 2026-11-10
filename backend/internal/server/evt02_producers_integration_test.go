@@ -1190,6 +1190,13 @@ var plannedProducers = map[string]string{
 	"org.export_completed":          "WP-1151",
 	"org.deletion_requested":        "WP-1152",
 	"org.deletion_cancelled":        "WP-1152",
+	"ipam.subnet.changed":           "WP-904",
+	"ipam.address.state_changed":    "WP-902",
+	"asn.changed":                   "WP-1066",
+	"credential.rotated":            "WP-889",
+	"credential.rotation_due":       "WP-897",
+	"credential.resolution_failed":  "WP-898",
+	"admp.connection.refreshed":     "WP-929",
 }
 
 // evt02CoverageProblems checks the producer cases (their types) against

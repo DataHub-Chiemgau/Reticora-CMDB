@@ -31590,6 +31590,13 @@ components:
         - org.export_completed
         - org.deletion_requested
         - org.deletion_cancelled
+        - ipam.subnet.changed
+        - ipam.address.state_changed
+        - asn.changed
+        - credential.rotated
+        - credential.rotation_due
+        - credential.resolution_failed
+        - admp.connection.refreshed
         - ci.updated
         - relationship.deleted
         - lifecycle.transitioned

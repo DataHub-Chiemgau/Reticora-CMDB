@@ -124,6 +124,10 @@ var unroutedUntil = map[string]string{
 	"escalation:manage": "WP-1145 (escalation policies)",
 	"org:export":        "WP-1151 (organization export)",
 	"org:delete":        "WP-1152 (organization deletion)",
+	"credential:bind":   "WP-890 (credential bindings)",
+	"vault:manage":      "WP-893 (vault connections)",
+	"admp:holder_read":  "WP-1076 (holder of an ADMP connection)",
+	"admp:manage":       "WP-925 (ADMP accounts)",
 }
 
 // TestRBA01KeysGateTheirActions covers WP-068 and WP-363 (RBA-01): the
@@ -205,7 +209,8 @@ func TestRBA01KeysGateTheirActions(t *testing.T) {
 }
 
 // p3ActionKeys are the action keys of phase 3 (RBA-05, E-161, WP-866).
-var p3ActionKeys = []string{"alert:acknowledge", "workflow:approve", "admp:read", "escalation:manage", "org:export", "org:delete"}
+var p3ActionKeys = []string{"alert:acknowledge", "workflow:approve", "admp:read", "escalation:manage", "org:export", "org:delete",
+	"credential:bind", "vault:manage", "admp:holder_read", "admp:manage"}
 
 // p2Keys are the module and action keys of phase 2 (RBA-05, E-106).
 var p2Keys = []string{

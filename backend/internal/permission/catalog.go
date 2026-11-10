@@ -120,4 +120,9 @@ var Catalogue = []Permission{
 	{Key: "escalation:manage", Resource: "escalation", Action: "manage", Description: "Manage escalation policies and notification escalations"},
 	{Key: "org:export", Resource: "org", Action: "export", Description: "Export all data of the organization"},
 	{Key: "org:delete", Resource: "org", Action: "delete", Description: "Request and cancel the deletion of the organization"},
+	// Keys of the network domain of phase 3 (E-159, WP-870, migration 000286).
+	{Key: "credential:bind", Resource: "credential", Action: "bind", Description: "Bind credentials to CIs, device groups, subnets and probes"},
+	{Key: "vault:manage", Resource: "vault", Action: "manage", Description: "Manage vault connections for credential references"},
+	{Key: "admp:holder_read", Resource: "admp", Action: "holder_read", Description: "Read the holder of an ADMP connection (personal data)"},
+	{Key: "admp:manage", Resource: "admp", Action: "manage", Description: "Manage ADMP accounts"},
 }

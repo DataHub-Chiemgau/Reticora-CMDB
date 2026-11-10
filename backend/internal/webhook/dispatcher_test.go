@@ -830,7 +830,8 @@ func TestBoundSubscriptionsReceiveP2EventsWithTheReadPermission(t *testing.T) {
 	const ci1, asset1, item1 = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "33333333-3333-4333-8333-333333333333"
 	objects := fakeResolver{ci1: {ClientID: "c1"}, asset1: {ClientID: "c1"}, item1: {ClientID: "c1"}}
 	permissions := []string{"ci:read", "asset:read", "stock:read", "contract:read", "ticket:read", "document:read", "import:run", "reservation:read", "monitoring:read",
-		"maintenance:read", "workflow:read", "finding:read", "escalation:manage", "entitlement:read", "org:export"}
+		"maintenance:read", "workflow:read", "finding:read", "escalation:manage", "entitlement:read", "org:export",
+		"ipam:read", "credential:read", "admp:read"}
 	want := map[string]string{
 		events.CIStatusChanged: "ci:read", events.RelationshipChanged: "ci:read",
 		events.AssetCreated: "asset:read", events.AssetChanged: "asset:read", events.AssetDeleted: "asset:read",
@@ -859,6 +860,12 @@ func TestBoundSubscriptionsReceiveP2EventsWithTheReadPermission(t *testing.T) {
 			want[typ] = "entitlement:read"
 		case "org":
 			want[typ] = "org:export"
+		case "ipam", "asn":
+			want[typ] = "ipam:read"
+		case "credential":
+			want[typ] = "credential:read"
+		case "admp":
+			want[typ] = "admp:read"
 		default:
 			want[typ] = "monitoring:read"
 		}

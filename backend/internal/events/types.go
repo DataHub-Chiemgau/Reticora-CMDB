@@ -112,11 +112,25 @@ const (
 	OrgDeletionCancelled      = "org.deletion_cancelled"
 )
 
+// Event types of the network domain of phase 3 (IPAM/ASN, credentials, ADMP;
+// WP-870). Their data never carry a secret or the holder of a connection in
+// plain text (SEC-05).
+const (
+	IPAMSubnetChanged          = "ipam.subnet.changed"
+	IPAMAddressStateChanged    = "ipam.address.state_changed"
+	ASNChanged                 = "asn.changed"
+	CredentialRotated          = "credential.rotated"
+	CredentialRotationDue      = "credential.rotation_due"
+	CredentialResolutionFailed = "credential.resolution_failed"
+	ADMPConnectionRefreshed    = "admp.connection.refreshed"
+)
+
 // Phase3Types are the event types of phase 3 (EVT-03 [P3]); every one has a
 // producer case or a planned producer (TestEveryEVT02TypeHasAProducer).
 var Phase3Types = []string{
 	ProbeStateChanged, AlarmOpened, AlarmAcknowledged, AlarmEscalated, AlarmSeverityChanged, AlarmResolved, IncidentOpened, IncidentUpdated, IncidentResolved, CollectorGroupUnreachable, CollectorGroupReachable, CollectorGroupFailover, CollectorClockSkew, ProbeConfigChanged, CIConfigChanged, MonitoringSuspensionChanged, CapacityForecastExceeded, SLAViolated,
 	MaintenanceScheduled, MaintenanceStarted, MaintenanceEnded, WorkflowRunStarted, WorkflowRunSucceeded, WorkflowRunFailed, WorkflowRunCancelled, WorkflowApprovalRequested, WorkflowApprovalDecided, WorkflowWebhook, FindingCreated, FindingChanged, FindingResolved, NotificationEscalated, NotificationAcknowledged, EntitlementChanged, OrgExportCompleted, OrgDeletionRequested, OrgDeletionCancelled,
+	IPAMSubnetChanged, IPAMAddressStateChanged, ASNChanged, CredentialRotated, CredentialRotationDue, CredentialResolutionFailed, ADMPConnectionRefreshed,
 }
 
 // Types lists the event types, in the order of the type enum of
@@ -134,6 +148,7 @@ var Types = []string{
 	TicketUpdated, TicketSLABreached, MetamodelPublished, DocumentScanned, ImportCompleted,
 	ProbeStateChanged, AlarmOpened, AlarmAcknowledged, AlarmEscalated, AlarmSeverityChanged, AlarmResolved, IncidentOpened, IncidentUpdated, IncidentResolved, CollectorGroupUnreachable, CollectorGroupReachable, CollectorGroupFailover, CollectorClockSkew, ProbeConfigChanged, CIConfigChanged, MonitoringSuspensionChanged, CapacityForecastExceeded, SLAViolated,
 	MaintenanceScheduled, MaintenanceStarted, MaintenanceEnded, WorkflowRunStarted, WorkflowRunSucceeded, WorkflowRunFailed, WorkflowRunCancelled, WorkflowApprovalRequested, WorkflowApprovalDecided, WorkflowWebhook, FindingCreated, FindingChanged, FindingResolved, NotificationEscalated, NotificationAcknowledged, EntitlementChanged, OrgExportCompleted, OrgDeletionRequested, OrgDeletionCancelled,
+	IPAMSubnetChanged, IPAMAddressStateChanged, ASNChanged, CredentialRotated, CredentialRotationDue, CredentialResolutionFailed, ADMPConnectionRefreshed,
 }
 
 // IsType reports whether t is a registered event type. The reservation of
@@ -596,6 +611,54 @@ type OrgDeletionData struct {
 	EffectiveAt string `json:"effective_at,omitempty"`
 }
 
+// SubnetChangedData is the data of ipam.subnet.changed (IPM-02): a subnet
+// was created, changed, allocated or deleted.
+type SubnetChangedData struct {
+	ID         string `json:"id"`
+	ClientID   string `json:"client_id,omitempty"`
+	SiteID     string `json:"site_id,omitempty"`
+	CIDR       string `json:"cidr"`
+	ChangeKind string `json:"change_kind"`
+}
+
+// AddressStateChangedData is the data of ipam.address.state_changed
+// (IPM-04): the state of an IP address changed.
+type AddressStateChangedData struct {
+	ID       string `json:"id"`
+	ClientID string `json:"client_id,omitempty"`
+	SiteID   string `json:"site_id,omitempty"`
+	CIID     string `json:"ci_id,omitempty"`
+	From     string `json:"from,omitempty"`
+	To       string `json:"to"`
+}
+
+// ASNChangedData is the data of asn.changed (IPM-15): an AS number was
+// created, assigned or released.
+type ASNChangedData struct {
+	ID       string `json:"id"`
+	ClientID string `json:"client_id,omitempty"`
+	ASN      int64  `json:"asn"`
+}
+
+// CredentialEventData is the data of the credential.* types (CRD-05,
+// CRD-06): the credential and its client; never a secret.
+type CredentialEventData struct {
+	ID       string `json:"id"`
+	ClientID string `json:"client_id,omitempty"`
+	Kind     string `json:"kind"`
+	Reason   string `json:"reason,omitempty"`
+}
+
+// ADMPConnectionRefreshedData is the data of admp.connection.refreshed
+// (ADM-03): the read-only copy of an ADMP connection was refreshed; never
+// the holder in plain text.
+type ADMPConnectionRefreshedData struct {
+	ID       string `json:"id"`
+	CIID     string `json:"ci_id,omitempty"`
+	ClientID string `json:"client_id,omitempty"`
+	SiteID   string `json:"site_id,omitempty"`
+}
+
 // Payloads assigns every phase 2 and phase 3 type the frame of its data.
 var Payloads = map[string]any{
 	CIStatusChanged:             CIStatusChangedData{},
@@ -656,4 +719,11 @@ var Payloads = map[string]any{
 	OrgExportCompleted:          OrgExportData{},
 	OrgDeletionRequested:        OrgDeletionData{},
 	OrgDeletionCancelled:        OrgDeletionData{},
+	IPAMSubnetChanged:           SubnetChangedData{},
+	IPAMAddressStateChanged:     AddressStateChangedData{},
+	ASNChanged:                  ASNChangedData{},
+	CredentialRotated:           CredentialEventData{},
+	CredentialRotationDue:       CredentialEventData{},
+	CredentialResolutionFailed:  CredentialEventData{},
+	ADMPConnectionRefreshed:     ADMPConnectionRefreshedData{},
 }

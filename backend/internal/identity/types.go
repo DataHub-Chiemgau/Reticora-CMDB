@@ -138,6 +138,13 @@ const (
 	PermEscalationManage Permission = "escalation:manage"
 	PermOrgExport        Permission = "org:export"
 	PermOrgDelete        Permission = "org:delete"
+
+	// Keys of the network domain of phase 3 (E-159, WP-870, migration
+	// 000286).
+	PermCredentialBind Permission = "credential:bind"
+	PermVaultManage    Permission = "vault:manage"
+	PermADMPHolderRead Permission = "admp:holder_read"
+	PermADMPManage     Permission = "admp:manage"
 )
 
 // AllPermissions returns the full set of permissions the identity layer can
@@ -258,6 +265,10 @@ func allPermissions() []Permission {
 		PermEscalationManage,
 		PermOrgExport,
 		PermOrgDelete,
+		PermCredentialBind,
+		PermVaultManage,
+		PermADMPHolderRead,
+		PermADMPManage,
 	}
 }
 

@@ -161,6 +161,14 @@ func TestEventScopeResolution(t *testing.T) {
 		{"org.export_completed", `{"id":"o"}`, result{objects: shared}},
 		{"org.deletion_requested", `{"id":"o"}`, result{objects: shared}},
 		{"org.deletion_cancelled", `{"id":"o"}`, result{objects: shared}},
+		// Network domain of phase 3 (WP-870).
+		{"ipam.subnet.changed", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"ipam.address.state_changed", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"asn.changed", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"credential.rotated", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"credential.rotation_due", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"credential.resolution_failed", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"admp.connection.refreshed", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
 		// Payloads that are no JSON object.
 		{"ci.created", `["` + ci1 + `"]`, unknown},
 		{"ci_type.created", `null`, unknown},
@@ -407,7 +415,8 @@ func TestP2EventsReachBoundSubscriptionsInScope(t *testing.T) {
 		item1: {ClientID: "c1", SiteID: "s1"}, item2: {ClientID: "c2", SiteID: "s2"}}
 	access := fakeAccess{}
 	for _, p := range []string{"ci:read", "asset:read", "stock:read", "contract:read", "ticket:read", "document:read", "import:run", "reservation:read", "monitoring:read",
-		"maintenance:read", "workflow:read", "finding:read", "escalation:manage", "entitlement:read", "org:export"} {
+		"maintenance:read", "workflow:read", "finding:read", "escalation:manage", "entitlement:read", "org:export",
+		"ipam:read", "credential:read", "admp:read"} {
 		access["sa-c1|"+p+"|c1"], access["sa-c1|"+p+"|"] = true, true
 	}
 	byClient := func(client string) map[string]map[string]any {

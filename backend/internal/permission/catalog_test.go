@@ -213,3 +213,45 @@ func TestCatalogueHoldsTheP3Keys(t *testing.T) {
 		t.Error("org_admin lacks workflow:approve")
 	}
 }
+
+// TestCatalogueHoldsTheNetworkKeys covers WP-870 (RBA-05, E-159 supplement
+// network): the four keys of the network domain are in the catalogue and the
+// identity vocabulary; credential:bind belongs to engineer as well,
+// admp:holder_read, admp:manage and vault:manage to org_admin only;
+// client_technician and viewer hold no credential or ADMP key.
+func TestCatalogueHoldsTheNetworkKeys(t *testing.T) {
+	catalogue := catalogueKeys()
+	identityKeys := map[string]bool{}
+	for _, p := range identity.AllPermissions() {
+		identityKeys[string(p)] = true
+	}
+	for _, k := range []string{"credential:bind", "vault:manage", "admp:holder_read", "admp:manage"} {
+		if !slices.Contains(catalogue, k) || !identityKeys[k] {
+			t.Errorf("%s missing from the catalogue or identity.AllPermissions", k)
+		}
+	}
+	holds := func(role, key string) bool {
+		keys, _ := permission.StandardRolePermissions(role)
+		return slices.Contains(keys, key)
+	}
+	for key, roles := range map[string][]string{
+		"credential:bind":  {"org_admin", "engineer"},
+		"vault:manage":     {"org_admin"},
+		"admp:holder_read": {"org_admin"},
+		"admp:manage":      {"org_admin"},
+	} {
+		for _, role := range []string{"org_admin", "engineer", "viewer", "client_technician"} {
+			if want := slices.Contains(roles, role); holds(role, key) != want {
+				t.Errorf("%s holds %s = %v, want %v", role, key, !want, want)
+			}
+		}
+	}
+	for _, role := range []string{"viewer", "client_technician"} {
+		keys, _ := permission.StandardRolePermissions(role)
+		for _, k := range keys {
+			if strings.HasPrefix(k, "credential:") || strings.HasPrefix(k, "admp:") || strings.HasPrefix(k, "vault:") {
+				t.Errorf("%s holds %s", role, k)
+			}
+		}
+	}
+}

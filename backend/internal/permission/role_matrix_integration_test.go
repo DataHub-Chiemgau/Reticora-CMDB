@@ -313,7 +313,14 @@ func TestMigration285TranslatesSecurityToFinding(t *testing.T) {
 		if role.Permissions == nil {
 			continue
 		}
-		want := append([]string(nil), role.Permissions...)
+		// The keys of migration 000286 (WP-870) are not part of the seed of
+		// 000285.
+		var want []string
+		for _, k := range role.Permissions {
+			if !slices.Contains([]string{"credential:bind", "vault:manage", "admp:holder_read", "admp:manage"}, k) {
+				want = append(want, k)
+			}
+		}
 		sort.Strings(want)
 		if got := roleKeys(role.Name); !slices.Equal(got, want) {
 			t.Errorf("%s after up:\n got  %v\n want %v", role.Name, got, want)

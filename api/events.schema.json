@@ -93,7 +93,14 @@
         "entitlement.changed",
         "org.export_completed",
         "org.deletion_requested",
-        "org.deletion_cancelled"
+        "org.deletion_cancelled",
+        "ipam.subnet.changed",
+        "ipam.address.state_changed",
+        "asn.changed",
+        "credential.rotated",
+        "credential.rotation_due",
+        "credential.resolution_failed",
+        "admp.connection.refreshed"
       ]
     },
     "org_id": {
@@ -1169,6 +1176,132 @@
         "properties": {
           "data": {
             "$ref": "#/$defs/org.deletion_cancelled"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "ipam.subnet.changed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/ipam.subnet.changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "ipam.address.state_changed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/ipam.address.state_changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "asn.changed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/asn.changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "credential.rotated"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/credential.rotated"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "credential.rotation_due"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/credential.rotation_due"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "credential.resolution_failed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/credential.resolution_failed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "admp.connection.refreshed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/admp.connection.refreshed"
           }
         }
       }
@@ -4025,6 +4158,261 @@
         {
           "id": "11111111-1111-4111-8111-111111111111",
           "effective_at": "2026-12-01T22:00:00Z"
+        }
+      ]
+    },
+    "ipam.subnet.changed": {
+      "description": "Data of ipam.subnet.changed. entity_id: the subnet. Origin: EVT-03 [P3], IPM-02. Producer: WP-904. a subnet was created, changed, allocated or deleted.",
+      "type": "object",
+      "required": ["id", "cidr", "change_kind"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The subnet."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "cidr": {
+          "type": "string",
+          "description": "The prefix of the subnet."
+        },
+        "change_kind": {
+          "type": "string",
+          "enum": ["created", "updated", "allocated", "deleted"],
+          "description": "Kind of the change."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "cidr": "10.20.0.0/24",
+          "change_kind": "created"
+        }
+      ]
+    },
+    "ipam.address.state_changed": {
+      "description": "Data of ipam.address.state_changed. entity_id: the IP address. Origin: EVT-03 [P3], IPM-04. Producer: WP-902. the state of an IP address changed.",
+      "type": "object",
+      "required": ["id", "to"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The IP address."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the address is bound to."
+        },
+        "from": {
+          "type": "string",
+          "description": "State before the change."
+        },
+        "to": {
+          "type": "string",
+          "description": "State after the change (active, reserved, offline, dhcp)."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "from": "reserved",
+          "to": "active"
+        }
+      ]
+    },
+    "asn.changed": {
+      "description": "Data of asn.changed. entity_id: the AS number record. Origin: EVT-03 [P3], IPM-15. Producer: WP-1066. an AS number was created, assigned or released.",
+      "type": "object",
+      "required": ["id", "asn"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The AS number record."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "asn": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The AS number."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "asn": 64512
+        }
+      ]
+    },
+    "credential.rotated": {
+      "description": "Data of credential.rotated. entity_id: the credential. Origin: EVT-03 [P3], CRD-05. Producer: WP-889. the credential and its client; never a secret.",
+      "type": "object",
+      "required": ["id", "kind"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The credential."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "kind": {
+          "type": "string",
+          "description": "Kind of the credential (snmp_v3, ssh, api_token, …)."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Reason of a failed resolution or the due date of a rotation."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "kind": "snmp_v3",
+          "reason": "vault_unreachable"
+        }
+      ]
+    },
+    "credential.rotation_due": {
+      "description": "Data of credential.rotation_due. entity_id: the credential. Origin: EVT-03 [P3], CRD-05. Producer: WP-897. the credential and its client; never a secret.",
+      "type": "object",
+      "required": ["id", "kind"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The credential."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "kind": {
+          "type": "string",
+          "description": "Kind of the credential (snmp_v3, ssh, api_token, …)."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Reason of a failed resolution or the due date of a rotation."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "kind": "snmp_v3",
+          "reason": "vault_unreachable"
+        }
+      ]
+    },
+    "credential.resolution_failed": {
+      "description": "Data of credential.resolution_failed. entity_id: the credential. Origin: EVT-03 [P3], CRD-06. Producer: WP-898. the credential and its client; never a secret.",
+      "type": "object",
+      "required": ["id", "kind"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The credential."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "kind": {
+          "type": "string",
+          "description": "Kind of the credential (snmp_v3, ssh, api_token, …)."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Reason of a failed resolution or the due date of a rotation."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "kind": "snmp_v3",
+          "reason": "vault_unreachable"
+        }
+      ]
+    },
+    "admp.connection.refreshed": {
+      "description": "Data of admp.connection.refreshed. entity_id: the ADMP connection. Origin: EVT-03 [P3], ADM-03. Producer: WP-929. the read-only copy of an ADMP connection was refreshed; never the holder in plain text.",
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The ADMP connection."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The port CI of the connection."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444"
         }
       ]
     }

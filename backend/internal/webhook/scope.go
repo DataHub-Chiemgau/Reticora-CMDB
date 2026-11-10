@@ -232,6 +232,16 @@ var scopeRules = map[string]scopeRule{
 	"org.export_completed":        organizational,
 	"org.deletion_requested":      organizational,
 	"org.deletion_cancelled":      organizational,
+
+	// Network domain of phase 3 (WP-870): subnets, addresses, AS numbers and
+	// credentials carry their client, ADMP connections name their port CI.
+	"ipam.subnet.changed":          payloadScope,
+	"ipam.address.state_changed":   ciObject,
+	"asn.changed":                  payloadScope,
+	"credential.rotated":           payloadScope,
+	"credential.rotation_due":      payloadScope,
+	"credential.resolution_failed": payloadScope,
+	"admp.connection.refreshed":    ciObject,
 }
 
 // eventObjects returns the scope of every object of the event, nil when it
