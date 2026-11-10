@@ -102,7 +102,35 @@ func migrationSection(t *testing.T, file, begin, end string) string {
 // ledger stock_movement (000242), asset_tag_link_asset_fkey (000249),
 // barcode_registry_asset_fkey (000255), stocktake_item_asset_fkey
 // (000260) and the endpoint references of relationship_change (000261).
+// The references on ci and asset that migration 000287 (WP-876) made
+// composite get their simple form again.
 const dropLaterReferences = `
+	ALTER TABLE asset_location DROP CONSTRAINT asset_location_asset_id_fkey,
+		ADD CONSTRAINT asset_location_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES asset (id) ON DELETE CASCADE;
+	ALTER TABLE ci_change DROP CONSTRAINT ci_change_ci_id_fkey,
+		ADD CONSTRAINT ci_change_ci_id_fkey FOREIGN KEY (ci_id) REFERENCES ci (id) ON DELETE CASCADE;
+	ALTER TABLE ci_contact DROP CONSTRAINT ci_contact_ci_id_fkey,
+		ADD CONSTRAINT ci_contact_ci_id_fkey FOREIGN KEY (ci_id) REFERENCES ci (id) ON DELETE CASCADE;
+	ALTER TABLE ci_field_value DROP CONSTRAINT ci_field_value_ci_id_fkey,
+		ADD CONSTRAINT ci_field_value_ci_id_fkey FOREIGN KEY (ci_id) REFERENCES ci (id) ON DELETE CASCADE;
+	ALTER TABLE ci_instance_field_definition DROP CONSTRAINT ci_instance_field_definition_ci_id_fkey,
+		ADD CONSTRAINT ci_instance_field_definition_ci_id_fkey FOREIGN KEY (ci_id) REFERENCES ci (id) ON DELETE CASCADE;
+	ALTER TABLE ci_relationship DROP CONSTRAINT ci_relationship_source_ci_id_fkey,
+		ADD CONSTRAINT ci_relationship_source_ci_id_fkey FOREIGN KEY (source_ci_id) REFERENCES ci (id) ON DELETE CASCADE;
+	ALTER TABLE ci_relationship DROP CONSTRAINT ci_relationship_target_ci_id_fkey,
+		ADD CONSTRAINT ci_relationship_target_ci_id_fkey FOREIGN KEY (target_ci_id) REFERENCES ci (id) ON DELETE CASCADE;
+	ALTER TABLE discovery_result DROP CONSTRAINT discovery_result_matched_ci_id_fkey,
+		ADD CONSTRAINT discovery_result_matched_ci_id_fkey FOREIGN KEY (matched_ci_id) REFERENCES ci (id);
+	ALTER TABLE endpoint_agent DROP CONSTRAINT endpoint_agent_ci_id_fkey,
+		ADD CONSTRAINT endpoint_agent_ci_id_fkey FOREIGN KEY (ci_id) REFERENCES ci (id) ON DELETE SET NULL;
+	ALTER TABLE network_interface DROP CONSTRAINT network_interface_ci_id_fkey,
+		ADD CONSTRAINT network_interface_ci_id_fkey FOREIGN KEY (ci_id) REFERENCES ci (id) ON DELETE CASCADE;
+	ALTER TABLE rack_mount DROP CONSTRAINT rack_mount_ci_id_fkey,
+		ADD CONSTRAINT rack_mount_ci_id_fkey FOREIGN KEY (ci_id) REFERENCES ci (id) ON DELETE CASCADE;
+	ALTER TABLE relationship_suppression DROP CONSTRAINT relationship_suppression_source_ci_id_fkey,
+		ADD CONSTRAINT relationship_suppression_source_ci_id_fkey FOREIGN KEY (source_ci_id) REFERENCES ci (id) ON DELETE CASCADE;
+	ALTER TABLE relationship_suppression DROP CONSTRAINT relationship_suppression_target_ci_id_fkey,
+		ADD CONSTRAINT relationship_suppression_target_ci_id_fkey FOREIGN KEY (target_ci_id) REFERENCES ci (id) ON DELETE CASCADE;
 	ALTER TABLE ci DROP CONSTRAINT ci_asset_id_fkey;
 	ALTER TABLE ci DROP CONSTRAINT ci_parent_ci_fkey;
 	ALTER TABLE ci DROP CONSTRAINT ci_merged_into_fkey;
