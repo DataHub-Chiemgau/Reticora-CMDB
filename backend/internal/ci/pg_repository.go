@@ -80,6 +80,9 @@ type PGRepository struct {
 	// computed resolves the computed attribute definitions (WithComputed,
 	// WP-717); nil computes nothing.
 	computed FieldResolver
+	// features reports the feature assets_basic for the computed asset
+	// sources (WithFeatureCheck, SR-58); nil: enabled.
+	features FeatureCheck
 }
 
 // WithEvents makes every CI mutation write its domain event into the

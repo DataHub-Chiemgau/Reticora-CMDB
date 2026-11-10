@@ -54,6 +54,27 @@ func (r *PGRepository) WithComputed(fields FieldResolver) *PGRepository {
 	return r
 }
 
+// FeatureCheck reports whether a feature is enabled for the organization
+// (entitlement.Service.IsEnabled).
+type FeatureCheck func(ctx context.Context, orgID, featureKey string) bool
+
+// featureAssetsBasic is entitlement.FeatureAssetsBasic.
+const featureAssetsBasic = "assets_basic"
+
+// WithFeatureCheck makes the computation read no asset field for an
+// organization without the feature assets_basic (SR-58, WP-871): an asset
+// source is empty there, as for a CI without asset.
+func (r *PGRepository) WithFeatureCheck(check FeatureCheck) *PGRepository {
+	r.features = check
+	return r
+}
+
+// assetsEnabled reports assets_basic for the organization; the check
+// reads outside the write transaction of ctx.
+func assetsEnabled(ctx context.Context, check FeatureCheck, orgID string) bool {
+	return check == nil || check(database.WithoutTx(ctx), orgID, featureAssetsBasic)
+}
+
 // fieldsMemoKey carries a fieldsMemo in a context.
 type fieldsMemoKey struct{}
 
@@ -144,8 +165,9 @@ type computeEnv struct {
 
 // loadComputeEnv reads the time zone and the asset fields defs need for
 // the CIs linked to assetIDs, with one statement and only when an
-// expression needs them.
-func loadComputeEnv(ctx context.Context, tx pgx.Tx, orgID string, defs []fieldmeta.FieldDefinition, assetIDs []string) (*computeEnv, error) {
+// expression needs them. Without the feature assets_basic (check) no
+// asset field is read (SR-58).
+func loadComputeEnv(ctx context.Context, tx pgx.Tx, check FeatureCheck, orgID string, defs []fieldmeta.FieldDefinition, assetIDs []string) (*computeEnv, error) {
 	env := &computeEnv{now: time.Now().UTC(), loc: time.UTC, assets: map[string]map[string]any{}}
 	today, asset := false, false
 	for i := range defs {
@@ -154,7 +176,7 @@ func loadComputeEnv(ctx context.Context, tx pgx.Tx, orgID string, defs []fieldme
 		asset = asset || slices.ContainsFunc(e.Fields(), func(f string) bool { return strings.HasPrefix(f, rules.AssetPrefix) })
 	}
 	var ids []string
-	if asset {
+	if asset && assetsEnabled(ctx, check, orgID) {
 		for _, id := range assetIDs {
 			if id != "" && !slices.Contains(ids, id) {
 				ids = append(ids, id)
@@ -342,7 +364,7 @@ func (r *PGRepository) computedOfNew(ctx context.Context, tx pgx.Tx, orgID strin
 	if len(all) == 0 {
 		return nil, nil, nil
 	}
-	env, err := loadComputeEnv(ctx, tx, orgID, all, assets)
+	env, err := loadComputeEnv(ctx, tx, r.features, orgID, all, assets)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -395,7 +417,7 @@ func (r *PGRepository) computedUpdate(ctx context.Context, tx pgx.Tx, orgID stri
 	if req.AssetID != nil {
 		assetID = *req.AssetID
 	}
-	env, err := loadComputeEnv(ctx, tx, orgID, defs, []string{assetID})
+	env, err := loadComputeEnv(ctx, tx, r.features, orgID, defs, []string{assetID})
 	if err != nil {
 		return nil, nil, computedAt, err
 	}
@@ -463,7 +485,7 @@ func (r *PGRepository) recomputeRow(ctx context.Context, tx pgx.Tx, orgID, ciID 
 	results := map[string]any{}
 	env := &computeEnv{now: time.Now().UTC()}
 	if len(defs) > 0 {
-		if env, err = loadComputeEnv(ctx, tx, orgID, defs, []string{item.AssetID}); err != nil {
+		if env, err = loadComputeEnv(ctx, tx, r.features, orgID, defs, []string{item.AssetID}); err != nil {
 			return false, err
 		}
 		results = env.evaluate(defs, withTyped(item.Attributes, typedValues(item)), item.AssetID)

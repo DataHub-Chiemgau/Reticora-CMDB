@@ -63,6 +63,7 @@ type snapshotIndex struct {
 	field     map[string]map[ObjectKind][]*FieldGrant  // by role key
 	object    map[ObjectKind]map[string][]*ObjectGrant // by object id
 	sensitive map[ObjectKind][]*SensitiveField
+	computed  map[string][]*ComputedSource // by attribute key (SR-58)
 }
 
 func roleKey(roleID, customRoleID *string) string {
@@ -80,6 +81,7 @@ func newSnapshotIndex(s *Snapshot) *snapshotIndex {
 		field:     map[string]map[ObjectKind][]*FieldGrant{},
 		object:    map[ObjectKind]map[string][]*ObjectGrant{},
 		sensitive: map[ObjectKind][]*SensitiveField{},
+		computed:  map[string][]*ComputedSource{},
 	}
 	for i := range s.FieldGrants {
 		g := &s.FieldGrants[i]
@@ -100,6 +102,10 @@ func newSnapshotIndex(s *Snapshot) *snapshotIndex {
 		f := &s.Sensitive[i]
 		idx.sensitive[f.ObjectKind] = append(idx.sensitive[f.ObjectKind], f)
 	}
+	for i := range s.Computed {
+		c := &s.Computed[i]
+		idx.computed[c.Attribute] = append(idx.computed[c.Attribute], c)
+	}
 	return idx
 }
 
@@ -117,6 +123,9 @@ type FieldPolicy struct {
 	// parents maps CI types to their parent type.
 	parents map[string]string
 	idx     *snapshotIndex
+	// assetsOff closes computed attributes with asset sources: the
+	// organization lacks the feature assets_basic (SR-58, WP-871).
+	assetsOff bool
 }
 
 // UnrestrictedPolicy is the policy without field permissions for the
@@ -267,6 +276,12 @@ func (p *FieldPolicy) roleLevel(r *roleScope, kind ObjectKind, chain []string, r
 // row of the key) or, without a resolved row, the key (rel_type); fieldKey is core.<column>, attributes.<key> or
 // _instance.<key>, empty for the object as a whole.
 func (p *FieldPolicy) Level(kind ObjectKind, typeID, fieldKey string, obj ObjectRef) Level {
+	return p.level(kind, typeID, fieldKey, &obj, false)
+}
+
+// level is Level; forceSensitive treats the field as sensitive (a computed
+// attribute with a sensitive asset source, SR-58).
+func (p *FieldPolicy) level(kind ObjectKind, typeID, fieldKey string, obj *ObjectRef, forceSensitive bool) Level {
 	if p == nil {
 		return LevelNone
 	}
@@ -278,14 +293,14 @@ func (p *FieldPolicy) Level(kind ObjectKind, typeID, fieldKey string, obj Object
 	if kind == KindRelationship {
 		relType = typeID
 	}
-	sensitive := p.sensitive(kind, chain, fieldKey)
+	sensitive := forceSensitive || p.sensitive(kind, chain, fieldKey)
 	best := LevelNone
 	for i := range p.roles {
 		r := &p.roles[i]
-		if !r.inScope(&obj) {
+		if !r.inScope(obj) {
 			continue
 		}
-		best = maxLevel(best, p.roleLevel(r, kind, chain, relType, fieldKey, &obj, sensitive))
+		best = maxLevel(best, p.roleLevel(r, kind, chain, relType, fieldKey, obj, sensitive))
 		if best == LevelWrite {
 			break
 		}
@@ -364,9 +379,13 @@ func (p *FieldPolicy) ActionAllowed(kind ObjectKind, typeID, action string, obj 
 // object right for this principal: a sensitive field, an object grant of
 // the kind for one of its roles or teams, or a field grant of the kind for
 // one of its roles. Without any it is false and callers can skip the
-// projection.
+// projection. The CI kind is also restricted when a computed attribute
+// with asset sources can be closed (computedHidden, SR-58).
 func (p *FieldPolicy) Restricted(kind ObjectKind) bool {
 	if p == nil {
+		return true
+	}
+	if kind == KindCI && p.computedHidden() {
 		return true
 	}
 	if p.unrestricted {
@@ -439,6 +458,7 @@ type FieldResolver struct {
 	repo            FieldGrantRepository
 	cache           cache.Store
 	ttl             time.Duration
+	features        FeatureCheck
 }
 
 // NewFieldResolver creates a resolver. access resolves the roles of users
@@ -459,7 +479,9 @@ func (r *FieldResolver) WithTTL(ttl time.Duration) *FieldResolver {
 	return r
 }
 
-func fieldGrantsKey(orgID string) string { return "fieldgrants:" + orgID }
+// fieldGrantsKey is the cache key of the snapshot; v2 carries the computed
+// sources (WP-871), so no instance reads a snapshot without them.
+func fieldGrantsKey(orgID string) string { return "fieldgrants:v2:" + orgID }
 
 // snapshot returns the cached snapshot of the organization or reads it.
 func (r *FieldResolver) snapshot(ctx context.Context, orgID string) (Snapshot, error) {
@@ -509,7 +531,7 @@ func (r *FieldResolver) Resolve(ctx context.Context, p identity.Principal) (*Fie
 		return nil, err
 	}
 	if snap.Empty() {
-		return UnrestrictedPolicy(p.Permissions), nil
+		return r.unrestricted(ctx, orgID, &snap, p.Permissions)
 	}
 	var grants []identity.Grant
 	var teams []string
@@ -539,7 +561,27 @@ func (r *FieldResolver) Resolve(ctx context.Context, p identity.Principal) (*Fie
 	if err != nil {
 		return nil, err
 	}
-	return buildPolicy(&snap, grants, teams, parents, permissionSet(p.Permissions)), nil
+	policy := buildPolicy(&snap, grants, teams, parents, permissionSet(p.Permissions))
+	policy.assetsOff = r.assetsOff(ctx, orgID)
+	return policy, nil
+}
+
+// unrestricted returns the policy of an organization without field
+// permissions; with computed asset sources it keeps them, the type chain
+// and the state of assets_basic (SR-58).
+func (r *FieldResolver) unrestricted(ctx context.Context, orgID string, snap *Snapshot, perms []identity.Permission) (*FieldPolicy, error) {
+	policy := UnrestrictedPolicy(perms)
+	if len(snap.Computed) == 0 {
+		return policy, nil
+	}
+	parents, err := r.repo.TypeChain(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	policy.idx = newSnapshotIndex(snap)
+	policy.parents = parents
+	policy.assetsOff = r.assetsOff(ctx, orgID)
+	return policy, nil
 }
 
 // PolicyForGrants returns the policy of grants and team memberships for a
@@ -557,11 +599,13 @@ func (r *FieldResolver) PolicyForGrants(ctx context.Context, orgID string, grant
 		for i := range grants {
 			perms = append(perms, grants[i].Permissions...)
 		}
-		return UnrestrictedPolicy(perms), nil
+		return r.unrestricted(ctx, orgID, &snap, perms)
 	}
 	parents, err := r.repo.TypeChain(ctx, orgID)
 	if err != nil {
 		return nil, err
 	}
-	return buildPolicy(&snap, grants, teamIDs, parents, nil), nil
+	policy := buildPolicy(&snap, grants, teamIDs, parents, nil)
+	policy.assetsOff = r.assetsOff(ctx, orgID)
+	return policy, nil
 }

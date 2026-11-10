@@ -53,8 +53,10 @@ const RefreshBatch = 100
 type ComputedRefresh struct {
 	pool   *pgxpool.Pool
 	fields FieldResolver
-	jobs   *jobs.Service
-	now    func() time.Time
+	// features reports assets_basic (WithFeatureCheck, SR-58).
+	features FeatureCheck
+	jobs     *jobs.Service
+	now      func() time.Time
 	// Batch bounds the CIs of one transaction (RefreshBatch).
 	Batch int
 	// DueBatch bounds the backfill jobs of one run.
@@ -66,6 +68,13 @@ type ComputedRefresh struct {
 func NewComputedRefresh(pool *pgxpool.Pool, fields FieldResolver) *ComputedRefresh {
 	return &ComputedRefresh{pool: pool, fields: fields, now: func() time.Time { return time.Now().UTC() },
 		Batch: RefreshBatch, DueBatch: 50}
+}
+
+// WithFeatureCheck makes the refresh read no asset field for an
+// organization without assets_basic (SR-58, WP-871).
+func (j *ComputedRefresh) WithFeatureCheck(check FeatureCheck) *ComputedRefresh {
+	j.features = check
+	return j
 }
 
 // WithJobs runs the backfill jobs through svc and registers their kind.
@@ -378,7 +387,7 @@ func (j *ComputedRefresh) batch(ctx context.Context, tx pgx.Tx, orgID string, b 
 	}
 	env := &computeEnv{}
 	if len(all) > 0 {
-		if env, err = loadComputeEnv(ctx, tx, orgID, all, assets); err != nil {
+		if env, err = loadComputeEnv(ctx, tx, j.features, orgID, all, assets); err != nil {
 			return 0, 0, "", err
 		}
 	}

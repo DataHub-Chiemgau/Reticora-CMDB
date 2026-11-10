@@ -233,6 +233,30 @@ func ItemPermission(kind, op string) identity.Permission {
 	return identity.PermCITypeManage
 }
 
+// ItemPermissions returns every permission an item needs: ItemPermission
+// and, for an attribute definition or global field whose payload sets a
+// computed expression over asset fields, field_permission:manage (SR-58,
+// WP-871, like POST and PATCH /api/v1/attribute-definitions).
+func ItemPermissions(kind, op string, payload json.RawMessage) []identity.Permission {
+	need := []identity.Permission{ItemPermission(kind, op)}
+	if (kind == KindAttributeDefinition || kind == KindGlobalField) && payloadReadsAsset(payload) {
+		need = append(need, identity.PermFieldPermissionManage)
+	}
+	return need
+}
+
+// payloadReadsAsset reports whether the computed member of an item
+// payload reads an asset field.
+func payloadReadsAsset(payload json.RawMessage) bool {
+	var p struct {
+		Computed json.RawMessage `json:"computed"`
+	}
+	if len(payload) == 0 || json.Unmarshal(payload, &p) != nil {
+		return false
+	}
+	return citype.ComputedReadsAsset(p.Computed)
+}
+
 // Errors of the draft routes.
 var (
 	ErrDraftNotFound = errors.New("metamodel draft not found")

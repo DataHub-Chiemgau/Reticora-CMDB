@@ -112,15 +112,30 @@ type SensitiveField struct {
 	CreatedAt      time.Time  `json:"created_at"`
 }
 
-// Snapshot holds every field permission row of an organization; the
-// resolver caches it (fieldgrants:<org>).
+// ComputedSource names the asset fields a computed CI attribute reads
+// (SR-58, WP-871): the attribute is readable only where its own field and
+// every source field of the linked asset are. CITypeID is the CI type of a
+// type-scoped definition (its subtypes inherit it); nil for a global or
+// set-scoped definition, which applies to every CI type. AssetFields are
+// the asset DTO names without rules.AssetPrefix.
+type ComputedSource struct {
+	CITypeID    *string  `json:"ci_type_id"`
+	Attribute   string   `json:"attribute"`
+	AssetFields []string `json:"asset_fields"`
+}
+
+// Snapshot holds every field permission row of an organization and the
+// asset sources of its computed attributes; the resolver caches it
+// (fieldgrants:<org>).
 type Snapshot struct {
 	FieldGrants  []FieldGrant     `json:"field_grants"`
 	ObjectGrants []ObjectGrant    `json:"object_grants"`
 	Sensitive    []SensitiveField `json:"sensitive"`
+	Computed     []ComputedSource `json:"computed"`
 }
 
-// Empty reports whether the organization has no field permission at all.
+// Empty reports whether the organization has no field permission at all;
+// computed sources alone restrict nothing while the asset policy does not.
 func (s *Snapshot) Empty() bool {
 	return len(s.FieldGrants) == 0 && len(s.ObjectGrants) == 0 && len(s.Sensitive) == 0
 }
@@ -336,6 +351,7 @@ type MemoryFieldGrants struct {
 	teams     map[string]map[string][]string
 	// relationshipTypes maps relationship type ids to their key.
 	relationshipTypes map[string]string
+	computed          map[string][]ComputedSource
 	now               func() time.Time
 }
 
@@ -639,7 +655,19 @@ func (m *MemoryFieldGrants) Snapshot(_ context.Context, orgID string) (Snapshot,
 		FieldGrants:  slices.Clone(m.field[orgID]),
 		ObjectGrants: slices.Clone(m.object[orgID]),
 		Sensitive:    slices.Clone(m.sensitive[orgID]),
+		Computed:     slices.Clone(m.computed[orgID]),
 	}, nil
+}
+
+// SetComputed sets the computed sources of the organization (the PG
+// repository reads them from attribute_definition).
+func (m *MemoryFieldGrants) SetComputed(orgID string, sources []ComputedSource) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.computed == nil {
+		m.computed = map[string][]ComputedSource{}
+	}
+	m.computed[orgID] = slices.Clone(sources)
 }
 
 func (m *MemoryFieldGrants) TeamIDs(_ context.Context, orgID, userID string) ([]string, error) {

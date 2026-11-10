@@ -272,7 +272,17 @@ func (c *projectConfig) readable(policy *FieldPolicy, kind ObjectKind, typeID st
 	if !ok {
 		return false
 	}
-	return structural || policy.Level(kind, typeID, key, *ref).Readable()
+	if structural {
+		return true
+	}
+	if kind == KindCI {
+		if name, isAttr := strings.CutPrefix(key, NamespaceAttributes+"."); isAttr {
+			if sources := policy.assetSources(typeID, name); len(sources) > 0 {
+				return c.computedReadable(policy, typeID, ref, key, sources)
+			}
+		}
+	}
+	return policy.Level(kind, typeID, key, *ref).Readable()
 }
 
 // Readable reports whether the principal may read the field at the DTO
@@ -633,6 +643,11 @@ func (p *FieldPolicy) scopePoints() []ObjectRef {
 // readableEverywhere reports whether each key is readable at every type
 // and every scope point an assignment of the principal covers.
 func (p *FieldPolicy) readableEverywhere(kind ObjectKind, types []string, points []ObjectRef, keys []string) bool {
+	if p.unrestricted {
+		// No roles to place: only computed asset sources can close a field
+		// (SR-58).
+		return p.readableForTypes(kind, types, keys)
+	}
 	for i := range points {
 		visible := false
 		for j := range p.roles {
@@ -646,7 +661,7 @@ func (p *FieldPolicy) readableEverywhere(kind ObjectKind, types []string, points
 		}
 		for _, t := range types {
 			for _, key := range keys {
-				if !p.Level(kind, t, key, points[i]).Readable() {
+				if !p.listReadable(kind, t, key, points[i]) {
 					return false
 				}
 			}

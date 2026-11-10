@@ -132,7 +132,7 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 		// The field policy of the job's creator is resolved at render time
 		// with the role assignments of then (RBA-07, WP-729); the snapshots
 		// share the cache of the API, so an invalidation reaches the worker.
-		exportWorker.Policies = server.NewFieldResolver(d.repos, d.fieldPolicyCache)
+		exportWorker.Policies = server.WithAssetsFeature(server.NewFieldResolver(d.repos, d.fieldPolicyCache), d.entitlements)
 		// DATEV jobs read assets and the mapping override (WP-310).
 		exportWorker.Assets, _ = d.repos.Asset.(export.AssetSource)
 		exportWorker.Orgs = d.repos.TenantHierarchy
@@ -475,6 +475,10 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 		// G1 path attribute-definitions).
 		if typeRepo, ok := d.repos.CIType.(*citype.PGRepository); ok {
 			computed := ci.NewComputedRefresh(pool, typeRepo)
+			if d.entitlements != nil {
+				// No asset source without assets_basic (SR-58).
+				computed.WithFeatureCheck(d.entitlements.IsEnabled)
+			}
 			if d.repos.Jobs != nil {
 				computed.WithJobs(jobs.NewService(d.repos.Jobs))
 				typeRepo.WithComputedScheduler(computed)

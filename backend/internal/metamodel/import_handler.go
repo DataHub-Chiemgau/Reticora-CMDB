@@ -163,12 +163,17 @@ func missingPermissions(r *http.Request, items []ImportItem) []string {
 	seen := map[string]bool{}
 	var out []string
 	for i := range items {
-		need := ItemPermission(items[i].Kind, items[i].Op)
-		if seen[string(need)] || identity.HasPermission(perms, need) {
-			continue
+		var payload json.RawMessage
+		if items[i].Payload != nil {
+			payload, _ = json.Marshal(items[i].Payload)
 		}
-		seen[string(need)] = true
-		out = append(out, string(need))
+		for _, need := range ItemPermissions(items[i].Kind, items[i].Op, payload) {
+			if seen[string(need)] || identity.HasPermission(perms, need) {
+				continue
+			}
+			seen[string(need)] = true
+			out = append(out, string(need))
+		}
 	}
 	sort.Strings(out)
 	return out

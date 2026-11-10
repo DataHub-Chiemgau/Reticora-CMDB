@@ -33,6 +33,9 @@ type Handler struct {
 	// formPolicy makes the field policy of a resolved form (WP-727,
 	// form_handler.go); nil: NoopFieldPolicy.
 	formPolicy FormPolicyFactory
+	// fieldPolicy drops the cached field policy after a change of an
+	// attribute definition (SR-58, computed_rights.go); nil: none.
+	fieldPolicy FieldPolicyInvalidator
 }
 
 // WithGrantExporter sets the reader of the field permissions for the
@@ -425,6 +428,9 @@ func (h *Handler) CreateAttributeDefinition(w http.ResponseWriter, r *http.Reque
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	if ComputedReadsAsset(req.Computed) && !assetSourceRight(w, r) {
+		return
+	}
 	d := &AttributeDefinition{CITypeID: req.CITypeID, AttributeSetID: req.AttributeSetID, Key: req.Key,
 		UniqueScope: "org", Inheritable: true}
 	if err := req.apply(d); err != nil {
@@ -435,6 +441,7 @@ func (h *Handler) CreateAttributeDefinition(w http.ResponseWriter, r *http.Reque
 		writeAttributeError(w, err)
 		return
 	}
+	h.invalidateFieldPolicy(r.Context(), t.OrganizationID)
 	h.dispatch(r, t.OrganizationID, "ci_attribute.changed", d)
 	api.WriteJSON(w, http.StatusCreated, d)
 }
@@ -454,11 +461,27 @@ func (h *Handler) UpdateAttributeDefinition(w http.ResponseWriter, r *http.Reque
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	d, err := store.UpdateAttributeDefinition(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), &patch)
+	id := chi.URLParam(r, "id")
+	// A definition with asset sources, before or after the change, needs
+	// field_permission:manage (SR-58).
+	assetSources := ComputedReadsAsset(patch.Computed)
+	if !assetSources {
+		current, err := store.GetAttributeDefinition(r.Context(), t.OrganizationID, id)
+		if err != nil {
+			writeAttributeError(w, err)
+			return
+		}
+		assetSources = exprReadsAsset(current.Computed)
+	}
+	if assetSources && !assetSourceRight(w, r) {
+		return
+	}
+	d, err := store.UpdateAttributeDefinition(r.Context(), t.OrganizationID, id, &patch)
 	if err != nil {
 		writeAttributeError(w, err)
 		return
 	}
+	h.invalidateFieldPolicy(r.Context(), t.OrganizationID)
 	h.dispatch(r, t.OrganizationID, "ci_attribute.changed", d)
 	api.WriteJSON(w, http.StatusOK, d)
 }
@@ -474,10 +497,22 @@ func (h *Handler) DeleteAttributeDefinition(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	id := chi.URLParam(r, "id")
+	// Deleting a definition with asset sources leaves its stored values
+	// under the attribute's own rule only, so it needs
+	// field_permission:manage like a change (SR-58).
+	current, err := store.GetAttributeDefinition(r.Context(), t.OrganizationID, id)
+	if err != nil {
+		writeAttributeError(w, err)
+		return
+	}
+	if exprReadsAsset(current.Computed) && !assetSourceRight(w, r) {
+		return
+	}
 	if err := store.DeleteAttributeDefinition(r.Context(), t.OrganizationID, id); err != nil {
 		writeAttributeError(w, err)
 		return
 	}
+	h.invalidateFieldPolicy(r.Context(), t.OrganizationID)
 	h.dispatch(r, t.OrganizationID, "ci_attribute.changed", map[string]string{"id": id})
 	w.WriteHeader(http.StatusNoContent)
 }

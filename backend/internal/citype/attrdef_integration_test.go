@@ -19,6 +19,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
@@ -748,14 +749,20 @@ func TestComputedAttributeDefinitions(t *testing.T) {
 	bg := context.Background()
 	repo := NewPGRepository(f.App)
 	mux := chi.NewRouter()
-	NewHandler(repo).RegisterRoutes(mux)
-	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
-	call := func(method, path, body string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(method, path, strings.NewReader(body)).WithContext(ctx)
+	invalidations := &countingInvalidator{}
+	NewHandler(repo).WithFieldPolicyInvalidator(invalidations).RegisterRoutes(mux)
+	base := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	// A computed attribute over asset fields needs field_permission:manage
+	// besides ci_attribute:manage (SR-58, WP-871).
+	ctx := identity.WithPermissions(base, []identity.Permission{identity.PermCIAttributeManage, identity.PermFieldPermissionManage})
+	attrOnly := identity.WithPermissions(base, []identity.Permission{identity.PermCIAttributeManage})
+	callAs := func(c context.Context, method, path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body)).WithContext(c)
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, req)
 		return w
 	}
+	call := func(method, path, body string) *httptest.ResponseRecorder { return callAs(ctx, method, path, body) }
 	normalized := func(s string) any {
 		t.Helper()
 		var v any
@@ -977,4 +984,59 @@ func TestComputedAttributeDefinitions(t *testing.T) {
 	if _, after := schemaOf(server.ID); after != before {
 		t.Errorf("refused definitions changed the schema: v%d, want v%d", after, before)
 	}
+
+	// SR-58 (WP-871, AK4): without field_permission:manage a definition
+	// with asset sources can be neither created nor changed nor deleted;
+	// one without asset sources stays at ci_attribute:manage.
+	forbidden := func(name string, w *httptest.ResponseRecorder) {
+		t.Helper()
+		if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), string(identity.PermFieldPermissionManage)) {
+			t.Errorf("%s: %d %s, want 403 naming %s", name, w.Code, w.Body.String(), identity.PermFieldPermissionManage)
+		}
+	}
+	const priceExpr = `{"op":"field","field":"asset.purchase_price"}`
+	forbidden("POST with asset source", callAs(attrOnly, http.MethodPost, "/api/v1/attribute-definitions",
+		typed("wp871_price", `"data_type":"number","computed":`+priceExpr)))
+	var priceCount int
+	if err = f.Admin.QueryRow(bg, `SELECT count(*) FROM attribute_definition WHERE key = 'wp871_price'`).Scan(&priceCount); err != nil || priceCount != 0 {
+		t.Errorf("refused POST stored the definition: %d %v", priceCount, err)
+	}
+	literal := callAs(attrOnly, http.MethodPost, "/api/v1/attribute-definitions",
+		typed("wp871_literal", `"data_type":"text","computed":{"op":"literal","value":"x"}`))
+	if literal.Code != http.StatusCreated {
+		t.Fatalf("POST without asset source: %d %s", literal.Code, literal.Body.String())
+	}
+	var lit struct {
+		ID string `json:"id"`
+	}
+	if err = json.Unmarshal(literal.Body.Bytes(), &lit); err != nil {
+		t.Fatal(err)
+	}
+	forbidden("PATCH to an asset source", callAs(attrOnly, http.MethodPatch, "/api/v1/attribute-definitions/"+lit.ID, `{"computed":`+priceExpr+`}`))
+	forbidden("PATCH of a definition with asset source", callAs(attrOnly, http.MethodPatch, "/api/v1/attribute-definitions/"+daysID, `{"description":"x"}`))
+	forbidden("DELETE of a definition with asset source", callAs(attrOnly, http.MethodDelete, "/api/v1/attribute-definitions/"+daysID, ""))
+	if w := callAs(attrOnly, http.MethodPatch, "/api/v1/attribute-definitions/"+lit.ID, `{"description":"plain"}`); w.Code != http.StatusOK {
+		t.Errorf("PATCH without asset source: %d %s", w.Code, w.Body.String())
+	}
+	if !reflect.DeepEqual(stored(daysID), normalized(nextExpr)) {
+		t.Errorf("refused requests changed %s: %v", daysID, stored(daysID))
+	}
+	// With the permission: created, changed and deleted; every change
+	// drops the cached field policy.
+	before871 := invalidations.n
+	priceID, _ := created(typed("wp871_price", `"data_type":"number","computed":`+priceExpr))
+	if w := call(http.MethodPatch, "/api/v1/attribute-definitions/"+priceID, `{"description":"price"}`); w.Code != http.StatusOK {
+		t.Errorf("PATCH with field_permission:manage: %d %s", w.Code, w.Body.String())
+	}
+	if w := call(http.MethodDelete, "/api/v1/attribute-definitions/"+priceID, ""); w.Code != http.StatusNoContent {
+		t.Errorf("DELETE with field_permission:manage: %d %s", w.Code, w.Body.String())
+	}
+	if got := invalidations.n - before871; got != 3 {
+		t.Errorf("field policy invalidations = %d, want 3 (POST, PATCH, DELETE)", got)
+	}
 }
+
+// countingInvalidator counts the invalidations of the field policy.
+type countingInvalidator struct{ n int }
+
+func (c *countingInvalidator) Invalidate(context.Context, string) { c.n++ }

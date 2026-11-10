@@ -394,6 +394,13 @@ func main() {
 		Cache:   cacheStore,
 		Enforce: cfg.EntitlementEnforcement,
 	})
+	// Computed attributes read no asset field without assets_basic
+	// (SR-58, WP-871). Set on the plain repository, before
+	// bootstrap.NewCIRepository decorates it (the decorators keep the
+	// pointer).
+	if cis, ok := repos.CI.(*ci.PGRepository); ok {
+		cis.WithFeatureCheck(entitlementSvc.IsEnabled)
+	}
 	// A missing entitlement row means not entitled (ENT-05): every
 	// organization gets the missing rows of its plan at each start (F-210).
 	if err = provisionEntitlements(context.Background(), entitlementSvc, auditPool, cfg.DefaultPlan); err != nil {
@@ -446,7 +453,7 @@ func main() {
 		// by the field policy of the account, unbound ones by the default
 		// policy without role (RBA-07, WP-730). The policy shares the cache
 		// of the API, so a change of the grants reaches the dispatcher.
-		Access: user.ServiceAccountAccess{Repo: repos.ServiceAccounts, Fields: server.NewFieldResolver(&repos, cacheStore)},
+		Access: user.ServiceAccountAccess{Repo: repos.ServiceAccounts, Fields: server.WithAssetsFeature(server.NewFieldResolver(&repos, cacheStore), entitlementSvc)},
 		// Events without client_id/site_id in the payload are scoped by
 		// the CIs and assets they reference.
 		Objects: objectResolverOf(auditPool),

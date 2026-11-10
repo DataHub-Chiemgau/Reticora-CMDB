@@ -556,11 +556,26 @@ func (fs *fieldScope) readable(q *Query) []string {
 	}
 	kind := permission.ObjectKind(fs.entityType)
 	for _, key := range fs.attributes {
-		if !strings.Contains(key, ",") && q.Policy.Level(kind, fs.typeID, key, ref).Readable() {
+		if !strings.Contains(key, ",") && fs.attributeReadable(q, kind, &ref, key) {
 			out = append(out, key)
 		}
 	}
 	return out
+}
+
+// attributeReadable reports whether a custom field row counts: a CI
+// attribute through the central projection rule with the linked asset, so
+// a computed attribute over asset fields follows its sources (SR-58,
+// WP-871); the custom field of another kind by its level.
+func (fs *fieldScope) attributeReadable(q *Query, kind permission.ObjectKind, ref *permission.ObjectRef, key string) bool {
+	if kind != permission.KindCI {
+		return q.Policy.Level(kind, fs.typeID, key, *ref).Readable()
+	}
+	var opts []permission.ProjectOption
+	if parts := strings.Split(fs.assetRef, "|"); len(parts) == 4 && parts[0] != "" {
+		opts = append(opts, permission.WithAsset(parts[1], permission.ObjectRef{ID: parts[0], ClientID: parts[2], SiteID: parts[3]}))
+	}
+	return permission.Readable(q.Policy, kind, fs.typeID, *ref, permission.DTOPath(key), opts...)
 }
 
 // restrictedQuery builds the query of a search with restricted field

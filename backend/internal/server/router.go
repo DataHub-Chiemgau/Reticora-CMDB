@@ -330,7 +330,17 @@ func agentHandler(repos *Repositories, sessions *identity.SessionIssuer, conflic
 // accounts through their role assignments, the snapshots are cached in
 // opts.FieldPolicyCache.
 func newFieldResolver(repos *Repositories, opts *Options) *permission.FieldResolver {
-	return NewFieldResolver(repos, opts.FieldPolicyCache)
+	return WithAssetsFeature(NewFieldResolver(repos, opts.FieldPolicyCache), opts.Entitlements)
+}
+
+// WithAssetsFeature makes the resolver close computed attributes with
+// asset sources for an organization without assets_basic (SR-58, WP-871);
+// without entitlements the feature counts as enabled.
+func WithAssetsFeature(r *permission.FieldResolver, svc *entitlement.Service) *permission.FieldResolver {
+	if svc != nil {
+		r.WithFeatureCheck(svc.IsEnabled)
+	}
+	return r
 }
 
 // NewFieldResolver builds the field permission resolver of the
@@ -495,7 +505,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	if opts.Dispatcher != nil {
 		draftDispatcher = opts.Dispatcher
 	}
-	draftHandler.WithPublish(repos.CIType, draftDispatcher)
+	draftHandler.WithPublish(repos.CIType, draftDispatcher).WithFieldPolicyInvalidator(fieldResolver)
 	// The generic job API (API-09) serves in both profiles; without a
 	// database it has an empty in-memory job table.
 	jobAPI := jobs.NewAPIHandler(jobs.NewService(jobs.NewMemoryRepository()))
@@ -889,7 +899,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			WithLifecycleModels(lifecycleModelExport{repo: repos.Lifecycle}).WithRoles(roleExport{repo: repos.User}).
 			WithGrantExporter(fieldGrantExport{repo: repos.FieldGrants}).
 			// The resolved forms follow the field permissions (WP-727).
-			WithFormPolicy(FormPolicyFactory(&repos, fieldResolver)),
+			WithFormPolicy(FormPolicyFactory(&repos, fieldResolver)).
+			// Computed asset sources are part of the policy (SR-58).
+			WithFieldPolicyInvalidator(fieldResolver),
 		// Administration of the field permissions (RBA-07, WP-726); a write
 		// drops the resolver's snapshot after the commit.
 		permission.NewFieldGrantHandler(repos.FieldGrants, fieldResolver),

@@ -68,12 +68,19 @@ const (
 	frmSerial    = "fr730nonesn"
 	frmSerialMid = "fr730midsn"
 	frmSalary    = "fr730sensal"
+	// frmAssetSN is the serial number of the linked asset, which the
+	// computed attribute wp871_assetsn reads (SR-58, WP-871).
+	frmAssetSN = "fr871assetsn"
 )
 
 var frmFields = []frField{
 	{name: "readable", path: "hostname", gql: "hostname", value: frmHost, readable: true, unbound: true},
 	{name: "none", path: "serial_number", gql: "serialNumber", value: frmSerial, readable: false, unbound: true},
 	{name: "sensitive", path: "attributes.salary", value: frmSalary, readable: false, unbound: false},
+	// SR-58 (WP-871): a computed attribute over an asset field the role
+	// reads with the grant none at the asset; the unbound policy has no
+	// role, so the grant does not apply.
+	{name: "computed-asset-source", path: "attributes.wp871_assetsn", value: frmAssetSN, readable: false, unbound: true},
 }
 
 // frmEnv is the router of the PostgreSQL profile as newChannelEnvWithBlobs
@@ -212,13 +219,21 @@ func TestFieldRightsChannelMatrix(t *testing.T) {
 
 	// The role of the reader and of the service account: CIs readable,
 	// serial_number with grant none; salary is sensitive without grant.
-	readerPerms := []string{"ci:read", "search:read", "export:run", "job:read"}
+	readerPerms := []string{"ci:read", "asset:read", "search:read", "export:run", "job:read"}
 	roleID := f.ID()
 	raw, _ := json.Marshal(readerPerms)
 	exec(`INSERT INTO role (id, organization_id, name, permissions) VALUES ($1, $2, 'wp730-reader', $3::jsonb)`, roleID, f.OrgA, string(raw))
 	exec(`INSERT INTO field_grant (organization_id, role_id, object_kind, field_key, level) VALUES ($1, $2, 'ci', 'core.serial_number', 'none')`,
 		f.OrgA, roleID)
 	exec(`INSERT INTO field_sensitivity (organization_id, object_kind, field_key) VALUES ($1, 'ci', 'attributes.salary')`, f.OrgA)
+	// SR-58: the computed attribute wp871_assetsn reads asset.serial_number,
+	// which the role reads with the grant none at the asset.
+	exec(`INSERT INTO field_grant (organization_id, role_id, object_kind, field_key, level) VALUES ($1, $2, 'asset', 'core.serial_number', 'none')`,
+		f.OrgA, roleID)
+	exec(`INSERT INTO attribute_definition (organization_id, scope, key, data_type, searchable, display_name, computed)
+		VALUES ($1, 'global', 'wp871_assetsn', 'text', true, '{"en":"Asset serial","de":"Asset-Seriennummer"}', '{"op":"field","field":"asset.serial_number"}')`, f.OrgA)
+	frmAsset := f.Asset(t, f.OrgA, f.Client1, "wp871-asset")
+	exec(`UPDATE asset SET serial_number = $2 WHERE id = $1`, frmAsset, frmAssetSN)
 	reader := f.AppUser(t, f.OrgA, "wp730-reader")
 	exec(`INSERT INTO role_assignment (organization_id, user_id, role_id) VALUES ($1, $2, $3)`, f.OrgA, reader, roleID)
 	admin := f.AppUser(t, f.OrgA, "wp730-admin")
@@ -253,6 +268,17 @@ func TestFieldRightsChannelMatrix(t *testing.T) {
 			t.Fatalf("setup: PATCH as admin: %d %s", r.code, trim(r.body))
 		}
 	}
+	// SR-58: then the asset is linked (the serial number of a linked CI is
+	// the asset's) and a third change computes wp871_assetsn on the write
+	// path from asset.serial_number.
+	exec(`UPDATE ci SET asset_id = $2 WHERE id = $1`, ciID, frmAsset)
+	if r := e.call(admin, http.MethodPatch, "/api/v1/cis/"+ciID, map[string]any{"model": "wp871-model"}); r.code != http.StatusOK {
+		t.Fatalf("setup: PATCH model as admin: %d %s", r.code, trim(r.body))
+	}
+	var computedValue string
+	if err := f.Admin.QueryRow(bg, `SELECT coalesce(attributes->>'wp871_assetsn', '') FROM ci WHERE id = $1`, ciID).Scan(&computedValue); err != nil || computedValue != frmAssetSN {
+		t.Fatalf("setup: computed wp871_assetsn = %q (%v), want %q", computedValue, err, frmAssetSN)
+	}
 	if _, err := e.publisher.PublishPending(bg); err != nil {
 		t.Fatalf("setup: publish the CI events: %v", err)
 	}
@@ -284,13 +310,13 @@ func TestFieldRightsChannelMatrix(t *testing.T) {
 		return out
 	}
 	bound, unbound := deliveries("bound"), deliveries("unbound")
-	if len(unbound) != 2 {
-		t.Fatalf("setup: unbound subscription has %d deliveries, want both changes", len(unbound))
+	if len(unbound) != 3 {
+		t.Fatalf("setup: unbound subscription has %d deliveries, want the three changes", len(unbound))
 	}
 	// The second change names only the serial number: withheld from the
 	// account, which cannot read it.
-	if len(bound) != 1 {
-		t.Errorf("webhook: bound subscription has %d deliveries, want 1 (the change of serial_number alone is withheld)", len(bound))
+	if len(bound) != 2 {
+		t.Errorf("webhook: bound subscription has %d deliveries, want 2 (the change of serial_number alone is withheld)", len(bound))
 	}
 
 	// The export job of the reader, rendered by the worker of cmd/server.
