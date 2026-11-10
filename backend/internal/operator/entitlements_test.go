@@ -221,7 +221,10 @@ func TestOperatorGrantRefusesUnknownKeys(t *testing.T) {
 				Properties map[string]struct {
 					Enum          []string `yaml:"enum"`
 					PropertyNames struct {
-						Enum []string `yaml:"enum"`
+						AnyOf []struct {
+							Enum    []string `yaml:"enum"`
+							Pattern string   `yaml:"pattern"`
+						} `yaml:"anyOf"`
 					} `yaml:"propertyNames"`
 				} `yaml:"properties"`
 			} `yaml:"schemas"`
@@ -234,8 +237,9 @@ func TestOperatorGrantRefusesUnknownKeys(t *testing.T) {
 	if got := request["feature_key"].Enum; !slices.Equal(got, entitlement.FeatureKeys()) {
 		t.Errorf("openapi feature_key enum %v, want %v", got, entitlement.FeatureKeys())
 	}
-	if got := request["limits"].PropertyNames.Enum; !slices.Equal(got, entitlement.Quotas) {
-		t.Errorf("openapi limits keys %v, want %v", got, entitlement.Quotas)
+	if names := request["limits"].PropertyNames.AnyOf; len(names) != 2 || !slices.Equal(names[0].Enum, entitlement.Quotas) ||
+		names[1].Pattern != entitlement.TargetTypeQuotaPattern {
+		t.Errorf("openapi limits keys %+v, want %v and %s", names, entitlement.Quotas, entitlement.TargetTypeQuotaPattern)
 	}
 	grant, _ := spec.Paths["/api/v1/admin/orgs/{id}/entitlements"]["post"].(map[string]any)
 	responses, _ := grant["responses"].(map[string]any)

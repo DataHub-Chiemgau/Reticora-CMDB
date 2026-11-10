@@ -652,3 +652,58 @@ func TestOperatorCreationValidates(t *testing.T) {
 		t.Errorf("without repository: %v", err)
 	}
 }
+
+// TestPlanEntitlementsStoreQuotaDefaults covers PKG-04 (WP-881): an
+// organization created by the operator stores the default limits of its plan
+// (E-153) with origin plan, a limit the operator passes wins, and a trial
+// keeps its configured max_cis.
+func TestPlanEntitlementsStoreQuotaDefaults(t *testing.T) {
+	ents, err := PlanEntitlements(entitlement.PlanStandard, map[string]int64{entitlement.LimitMaxCIs: 3000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]int64{}
+	for i := range ents {
+		if ents[i].Origin != entitlement.OriginPlan {
+			t.Errorf("%s origin = %q, want plan", ents[i].FeatureKey, ents[i].Origin)
+		}
+		for q, v := range ents[i].Limits {
+			got[q] = v
+		}
+	}
+	want := entitlement.PlanQuotaDefaults(entitlement.PlanStandard)
+	want[entitlement.LimitMaxCIs] = 3000
+	for q, v := range want {
+		if got[q] != v {
+			t.Errorf("limit %s = %d, want %d", q, got[q], v)
+		}
+	}
+	if got[entitlement.LimitMaxMonitoredTargets] != 500 || got[entitlement.LimitMinProbeIntervalS] != 30 {
+		t.Errorf("monitoring defaults of standard missing: %v", got)
+	}
+
+	ess, err := PlanEntitlements(entitlement.PlanEssential, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range ess {
+		if _, ok := ess[i].Limits[entitlement.LimitMaxMonitoredTargets]; ok {
+			t.Errorf("essential carries a monitoring quota: %+v", ess[i])
+		}
+	}
+	if _, err = PlanEntitlements(entitlement.PlanStandard, map[string]int64{"max_targets_Bad": 1}); err == nil {
+		t.Error("an invalid target type quota is accepted")
+	}
+
+	cfg := DefaultConfig()
+	cfg.TrialMaxCIs = 250
+	trial, err := TrialEntitlements(cfg, time.Now().Add(24*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range trial {
+		if trial[i].FeatureKey == entitlement.FeatureCMDBCore && trial[i].Limits[entitlement.LimitMaxCIs] != 250 {
+			t.Errorf("trial max_cis = %d, want 250", trial[i].Limits[entitlement.LimitMaxCIs])
+		}
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -447,7 +448,8 @@ func TestPhase1FeaturesAndQuotas(t *testing.T) {
 			}
 		}
 	}
-	if !slices.Equal(Quotas, []string{"max_cis", "max_collectors", "max_users", "max_api_keys", "max_storage_mb"}) {
+	if !slices.Equal(Quotas, []string{"max_cis", "max_collectors", "max_users", "max_api_keys", "max_storage_mb",
+		"max_monitored_targets", "max_probes_per_minute", "min_probe_interval_s"}) {
 		t.Errorf("quotas %v", Quotas)
 	}
 
@@ -900,4 +902,97 @@ func mustList(t *testing.T, repo *MemoryRepository, org string) []Entitlement {
 		t.Fatal(err)
 	}
 	return items
+}
+
+// TestPlanQuotaDefaultsFollowE151 covers AK2 of WP-881 (E-153): the default
+// limits of the four plans; the monitoring quotas only where the plan
+// includes monitoring.
+func TestPlanQuotaDefaultsFollowE151(t *testing.T) {
+	want := map[Plan]map[string]int64{
+		PlanEssential: {LimitMaxCIs: 500, LimitMaxCollectors: 2, LimitMaxUsers: 5, LimitMaxStorageMB: 1000},
+		PlanStandard: {LimitMaxCIs: 2500, LimitMaxCollectors: 5, LimitMaxUsers: 25, LimitMaxStorageMB: 10000,
+			LimitMaxMonitoredTargets: 500, LimitMaxProbesPerMinute: 1000, LimitMinProbeIntervalS: 30},
+		PlanPro: {LimitMaxCIs: 10000, LimitMaxCollectors: 20, LimitMaxUsers: 100, LimitMaxStorageMB: 50000,
+			LimitMaxMonitoredTargets: 5000, LimitMaxProbesPerMinute: 10000, LimitMinProbeIntervalS: 30},
+		PlanEnterprise: {LimitMaxCIs: 50000, LimitMaxMonitoredTargets: 25000, LimitMaxProbesPerMinute: 30000, LimitMinProbeIntervalS: 10},
+	}
+	for plan, w := range want {
+		got := PlanQuotaDefaults(plan)
+		if !maps.Equal(got, w) {
+			t.Errorf("PlanQuotaDefaults(%s) = %v, want %v", plan, got, w)
+		}
+		_, hasMonitoring := got[LimitMaxMonitoredTargets]
+		if hasMonitoring != slices.Contains(PlanFeatures(plan), FeatureMonitoring) {
+			t.Errorf("%s: monitoring quotas %v, monitoring in plan %v", plan, hasMonitoring, !hasMonitoring)
+		}
+	}
+}
+
+// TestTargetTypeQuotaKeys covers AK1 of WP-881 (E-154): max_targets_<type>
+// is a monitoring quota; a malformed key is refused on limits.
+func TestTargetTypeQuotaKeys(t *testing.T) {
+	ok := Entitlement{FeatureKey: FeatureMonitoring, Plan: PlanStandard, Enabled: true, Limits: map[string]int64{"max_targets_icmp": 100}}
+	if err := ok.Validate(); err != nil {
+		t.Errorf("max_targets_icmp: %v", err)
+	}
+	if f, known := QuotaFeatureOf("max_targets_icmp"); !known || f != FeatureMonitoring {
+		t.Errorf("QuotaFeatureOf(max_targets_icmp) = %q, %v", f, known)
+	}
+	for _, key := range []string{"max_targets_", "max_targetsx", "max_targets_ICMP", "max_whatever"} {
+		e := Entitlement{FeatureKey: FeatureMonitoring, Plan: PlanStandard, Enabled: true, Limits: map[string]int64{key: 1}}
+		var verr *ValidationError
+		if err := e.Validate(); !errors.As(err, &verr) || verr.Field != "limits" {
+			t.Errorf("%s: %v, want a ValidationError on limits", key, err)
+		}
+	}
+}
+
+// TestCheckInterval covers AK6 of WP-881: an interval below
+// min_probe_interval_s is a 422 on interval_s; equal and above pass; without
+// a stored value every interval passes.
+func TestCheckInterval(t *testing.T) {
+	repo := NewMemoryRepository()
+	svc := NewService(repo, Options{Enforce: true})
+	ctx := context.Background()
+	if _, err := repo.Upsert(ctx, &Entitlement{OrganizationID: "o", FeatureKey: FeatureMonitoring, Plan: PlanStandard, Enabled: true,
+		Limits: map[string]int64{LimitMinProbeIntervalS: 30}}); err != nil {
+		t.Fatal(err)
+	}
+	var fe *api.FieldError
+	if err := svc.CheckInterval(ctx, "o", 29); !errors.As(err, &fe) || fe.Field != "interval_s" || fe.Status != http.StatusUnprocessableEntity {
+		t.Errorf("29 s: %v, want 422 on interval_s", err)
+	}
+	for _, sec := range []int{30, 60} {
+		if err := svc.CheckInterval(ctx, "o", sec); err != nil {
+			t.Errorf("%d s: %v", sec, err)
+		}
+	}
+	if _, err := repo.Upsert(ctx, &Entitlement{OrganizationID: "p", FeatureKey: FeatureMonitoring, Plan: PlanStandard, Enabled: true,
+		Limits: map[string]int64{}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.CheckInterval(ctx, "p", 1); err != nil {
+		t.Errorf("without min_probe_interval_s: %v", err)
+	}
+}
+
+// TestLimitOrigin covers AK4 of WP-881.
+func TestLimitOrigin(t *testing.T) {
+	v := func(n int64) *int64 { return &n }
+	for _, c := range []struct {
+		plan  Plan
+		quota string
+		value *int64
+		want  string
+	}{
+		{PlanStandard, LimitMaxCIs, v(2500), "plan"},
+		{PlanStandard, LimitMaxCIs, v(3000), "override"},
+		{PlanStandard, LimitMaxCIs, nil, "override"},
+		{PlanEnterprise, LimitMaxUsers, nil, "plan"},
+		{PlanEnterprise, LimitMaxUsers, v(10), "override"},
+	} {
+		if got := LimitOrigin(c.plan, c.quota, c.value); got != c.want {
+			t.Errorf("LimitOrigin(%s, %s, %v) = %s, want %s", c.plan, c.quota, c.value, got, c.want)
+		}
+	}
 }

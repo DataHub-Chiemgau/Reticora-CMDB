@@ -4,13 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
@@ -767,4 +771,69 @@ func TestPhase3RouteGatesAgainstPostgres(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestMonitoredTargetsQuotaUnderConcurrency covers PKG-04 and ENT-03 (WP-881):
+// with max_monitored_targets 5, 20 parallel transactions each admit one
+// target through AdmitCount (counting rows of notice_sent of a test kind,
+// standing in for the probe targets of M3.6) and then store it: exactly 5
+// succeed, 15 get LimitExceededError. Without a context transaction
+// AdmitCount fails with database.ErrNoLockTx.
+func TestMonitoredTargetsQuotaUnderConcurrency(t *testing.T) {
+	if os.Getenv("TEST_DATABASE_URL") == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping PostgreSQL integration test")
+	}
+	f := scopetest.Seed(t, "66")
+	bg := context.Background()
+	svc := entitlement.NewService(entitlement.NewPGRepository(f.App), entitlement.Options{Enforce: true})
+	if _, err := svc.Grant(f.OrgCtx(f.OrgA), &entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureMonitoring,
+		Plan: entitlement.PlanStandard, Enabled: true, Limits: map[string]int64{entitlement.LimitMaxMonitoredTargets: 5}}); err != nil {
+		t.Fatal(err)
+	}
+	const kind = "wp881.target"
+	count := func(ctx context.Context) (int64, error) {
+		var n int64
+		err := database.WithRequestTenant(ctx, nil, f.OrgA, func(ctx context.Context, tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT count(*) FROM notice_sent WHERE kind = $1`, kind).Scan(&n)
+		})
+		return n, err
+	}
+	scope := database.OrgWideScope(f.OrgA, f.User)
+	var wg sync.WaitGroup
+	results := make([]error, 20)
+	for i := range results {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			results[i] = database.WithTenant(bg, f.App, &scope, func(ctx context.Context, tx pgx.Tx) error {
+				ctx = database.ContextWithTx(ctx, tx)
+				if err := svc.AdmitCount(ctx, f.OrgA, entitlement.LimitMaxMonitoredTargets, 1, count); err != nil {
+					return err
+				}
+				_, err := tx.Exec(ctx, `INSERT INTO notice_sent (organization_id, kind, dedup_key) VALUES ($1, $2, $3)`,
+					f.OrgA, kind, fmt.Sprintf("t-%d", i))
+				return err
+			})
+		}(i)
+	}
+	wg.Wait()
+	admitted, refused := 0, 0
+	for _, err := range results {
+		var le *entitlement.LimitExceededError
+		switch {
+		case err == nil:
+			admitted++
+		case errors.As(err, &le):
+			refused++
+		default:
+			t.Errorf("unexpected error: %v", err)
+		}
+	}
+	if admitted != 5 || refused != 15 {
+		t.Errorf("admitted %d, refused %d; want exactly 5 and 15", admitted, refused)
+	}
+	if err := svc.AdmitCount(f.OrgCtx(f.OrgA), f.OrgA, entitlement.LimitMaxMonitoredTargets, 1, count); !errors.Is(err, database.ErrNoLockTx) {
+		t.Errorf("without a context transaction: %v, want ErrNoLockTx", err)
+	}
+	t.Cleanup(func() { _, _ = f.Admin.Exec(bg, `DELETE FROM notice_sent WHERE kind = $1`, kind) })
 }

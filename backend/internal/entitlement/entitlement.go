@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"net/http"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -222,22 +224,88 @@ const (
 	// LimitMaxStorageMB is the document storage of the organization in MiB
 	// (2^20 bytes). A value stored in the limits of the documents row goes
 	// first (E-34); without one the plan default of E-44 applies
-	// (storageDefaultMB, StorageLimitBytes). The usage check "usage +
+	// (PlanQuotaDefaults, StorageLimitBytes). The usage check "usage +
 	// upload > limit" belongs to the document upload, not to AllowCreate.
 	LimitMaxStorageMB = "max_storage_mb"
+	// Monitoring quotas (PKG-04, E-153) on the monitoring row: the probe
+	// targets, the probes per minute of all targets and the shortest
+	// interval of a probe in seconds.
+	LimitMaxMonitoredTargets = "max_monitored_targets"
+	LimitMaxProbesPerMinute  = "max_probes_per_minute"
+	LimitMinProbeIntervalS   = "min_probe_interval_s"
 )
 
-// storageDefaultMB is the document storage per plan in MiB when the
-// documents row stores no max_storage_mb (E-44): essential 1,000 MiB,
-// standard 10,000 MiB, pro 50,000 MiB; enterprise is unlimited (no entry).
-var storageDefaultMB = map[Plan]int64{
-	PlanEssential: 1000,
-	PlanStandard:  10000,
-	PlanPro:       50000,
+// targetTypeQuota is the optional cap of the probe targets of one probe
+// type, max_targets_<type> (E-154); WP-934 checks <type> against the type
+// register.
+// TargetTypeQuotaPattern is its pattern, also in the OpenAPI limits.
+const TargetTypeQuotaPattern = `^max_targets_[a-z][a-z0-9_]{1,30}$`
+
+var targetTypeQuota = regexp.MustCompile(TargetTypeQuotaPattern)
+
+// QuotaFeatureOf returns the feature whose row stores the quota: those of
+// QuotaFeature and monitoring for max_targets_<type>; false for any other
+// key.
+func QuotaFeatureOf(quota string) (string, bool) {
+	if f, ok := QuotaFeature[quota]; ok {
+		return f, true
+	}
+	if targetTypeQuota.MatchString(quota) {
+		return FeatureMonitoring, true
+	}
+	return "", false
 }
 
-// Quotas are the quota keys an entitlement row may carry.
-var Quotas = []string{LimitMaxCIs, LimitMaxCollectors, LimitMaxUsers, LimitMaxAPIKeys, LimitMaxStorageMB}
+// planQuotaDefaults are the default limits per plan (PKG-04, E-153; ENT-06
+// limits): a missing entry is unlimited, or the feature is not in the plan.
+// essential / standard / pro / enterprise: max_cis 500 / 2,500 / 10,000 /
+// 50,000; max_collectors 2 / 5 / 20 / -; max_users 5 / 25 / 100 / -;
+// max_storage_mb 1,000 / 10,000 / 50,000 / - (MiB, E-44);
+// max_monitored_targets - / 500 / 5,000 / 25,000; max_probes_per_minute
+// - / 1,000 / 10,000 / 30,000; min_probe_interval_s - / 30 / 30 / 10. The
+// monitoring values hold only for plans with monitoring (WP-862).
+var planQuotaDefaults = map[Plan]map[string]int64{
+	PlanEssential: {LimitMaxCIs: 500, LimitMaxCollectors: 2, LimitMaxUsers: 5, LimitMaxStorageMB: 1000},
+	PlanStandard: {LimitMaxCIs: 2500, LimitMaxCollectors: 5, LimitMaxUsers: 25, LimitMaxStorageMB: 10000,
+		LimitMaxMonitoredTargets: 500, LimitMaxProbesPerMinute: 1000, LimitMinProbeIntervalS: 30},
+	PlanPro: {LimitMaxCIs: 10000, LimitMaxCollectors: 20, LimitMaxUsers: 100, LimitMaxStorageMB: 50000,
+		LimitMaxMonitoredTargets: 5000, LimitMaxProbesPerMinute: 10000, LimitMinProbeIntervalS: 30},
+	PlanEnterprise: {LimitMaxCIs: 50000,
+		LimitMaxMonitoredTargets: 25000, LimitMaxProbesPerMinute: 30000, LimitMinProbeIntervalS: 10},
+}
+
+// PlanQuotaDefaults returns the default limits of the plan (E-153); a quota
+// without entry is unlimited. A monitoring quota appears only for a plan
+// that includes monitoring.
+func PlanQuotaDefaults(plan Plan) map[string]int64 {
+	plan = normalizePlan(plan)
+	features := PlanFeatures(plan)
+	out := map[string]int64{}
+	for quota, value := range planQuotaDefaults[plan] {
+		if f, _ := QuotaFeatureOf(quota); slices.Contains(features, f) {
+			out[quota] = value
+		}
+	}
+	return out
+}
+
+// LimitOrigin reports whether a stored limit is the default of the plan
+// (plan) or an override (override): a value equal to PlanQuotaDefaults is
+// plan; a missing value (nil, unlimited) is plan when the plan has no
+// default, else override. WP-882 and WP-885 use it.
+func LimitOrigin(plan Plan, quota string, value *int64) string {
+	def, has := PlanQuotaDefaults(plan)[quota]
+	switch {
+	case value == nil && !has, value != nil && has && *value == def:
+		return OriginPlan
+	}
+	return "override"
+}
+
+// Quotas are the quota keys an entitlement row may carry; the optional
+// caps max_targets_<type> (E-154) match targetTypeQuota.
+var Quotas = []string{LimitMaxCIs, LimitMaxCollectors, LimitMaxUsers, LimitMaxAPIKeys, LimitMaxStorageMB,
+	LimitMaxMonitoredTargets, LimitMaxProbesPerMinute, LimitMinProbeIntervalS}
 
 // QuotaFeature is the feature a quota belongs to: the quota is stored in the
 // limits of that feature's row, and a quota of a feature the organization is
@@ -248,6 +316,10 @@ var QuotaFeature = map[string]string{
 	LimitMaxUsers:      FeatureCMDBCore,
 	LimitMaxAPIKeys:    FeatureAPIAccess,
 	LimitMaxStorageMB:  FeatureDocuments,
+	// Monitoring quotas (PKG-04, E-153).
+	LimitMaxMonitoredTargets: FeatureMonitoring,
+	LimitMaxProbesPerMinute:  FeatureMonitoring,
+	LimitMinProbeIntervalS:   FeatureMonitoring,
 }
 
 // Origins of an entitlement row (PKG-01, E-155): a feature of the
@@ -290,7 +362,7 @@ var Sources = []string{"manual", "selfsignup", "billing", "reseller"}
 // (enterprise); the client confirmed it on 2026-11-09 (A-58).
 // No plan includes an add-on (CH14). Quotas only gate when stored in the
 // limits of a row (E-34); only max_storage_mb has a plan default (E-44,
-// storageDefaultMB).
+// PlanQuotaDefaults).
 var planFeatures = func() map[Plan][]string {
 	essential := slices.Concat(Phase1Features, []string{
 		FeatureAssetsBasic, FeatureDocuments, FeatureImport, FeatureTicketingEssential})
@@ -428,8 +500,8 @@ func (e *Entitlement) Validate() error {
 		return invalid("origin", fmt.Errorf("%s is no add-on and cannot have origin addon", e.FeatureKey))
 	}
 	for k, v := range e.Limits {
-		if !slices.Contains(Quotas, k) {
-			return invalid("limits", fmt.Errorf("unknown limit %q (allowed: %s)", k, strings.Join(Quotas, ", ")))
+		if _, ok := QuotaFeatureOf(k); !ok {
+			return invalid("limits", fmt.Errorf("unknown limit %q (allowed: %s, max_targets_<type>)", k, strings.Join(Quotas, ", ")))
 		}
 		if v < 0 {
 			return invalid("limits", fmt.Errorf("limit %s must not be negative", k))
@@ -742,7 +814,7 @@ func (s *Service) Quota(ctx context.Context, orgID, quota string) (*int64, error
 // StorageLimitBytes returns the document storage limit of the organization
 // in bytes (max_storage_mb · 2^20, MGT-01): the value stored in the limits
 // of the documents row (E-34), else the default of the row's plan (E-44,
-// storageDefaultMB). It returns nil, unlimited, with enforcement off or for
+// PlanQuotaDefaults). It returns nil, unlimited, with enforcement off or for
 // an unlimited plan, and FeatureNotEntitledError without documents.
 func (s *Service) StorageLimitBytes(ctx context.Context, orgID string) (*int64, error) {
 	if !s.opts.Enforce {
@@ -757,7 +829,7 @@ func (s *Service) StorageLimitBytes(ctx context.Context, orgID string) (*int64, 
 	}
 	mb, ok := ent.Limits[LimitMaxStorageMB]
 	if !ok {
-		if mb, ok = storageDefaultMB[normalizePlan(ent.Plan)]; !ok {
+		if mb, ok = PlanQuotaDefaults(ent.Plan)[LimitMaxStorageMB]; !ok {
 			return nil, nil
 		}
 	}
@@ -766,6 +838,68 @@ func (s *Service) StorageLimitBytes(ctx context.Context, orgID string) (*int64, 
 	}
 	limit := mb << 20
 	return &limit, nil
+}
+
+// AdmitCount admits n more resources of a quota exactly under concurrency
+// (PKG-04, ENT-03, WP-881): in the context transaction it takes the lock of
+// the quota (database.LockQuota), then counts with count, which must read
+// what every holder before committed, and refuses with LimitExceededError
+// when count + n exceeds the stored limit. Without a context transaction it
+// fails with database.ErrNoLockTx, without the feature of the quota with
+// FeatureNotEntitledError; without a stored limit or with enforcement off
+// it admits. WP-940 calls it for the probe targets.
+func (s *Service) AdmitCount(ctx context.Context, orgID, quota string, n int64, count func(ctx context.Context) (int64, error)) error {
+	feature, ok := QuotaFeatureOf(quota)
+	if !ok {
+		return fmt.Errorf("unknown quota %q", quota)
+	}
+	if !database.InTx(ctx) {
+		return database.ErrNoLockTx
+	}
+	if !s.opts.Enforce {
+		return nil
+	}
+	ent, entitled, err := s.Check(ctx, orgID, feature)
+	if err != nil {
+		return err
+	}
+	if !entitled {
+		return &FeatureNotEntitledError{FeatureKey: feature}
+	}
+	limit, limited := ent.Limits[quota]
+	if lockErr := database.LockQuota(ctx, orgID, quota); lockErr != nil {
+		return lockErr
+	}
+	if !limited {
+		return nil
+	}
+	current, err := count(ctx)
+	if err != nil {
+		return err
+	}
+	if current+n > limit {
+		return &LimitExceededError{FeatureKey: quota, Limit: limit, Current: current}
+	}
+	return nil
+}
+
+// CheckInterval refuses a probe interval below min_probe_interval_s of the
+// organization with a 422 field error on interval_s (PKG-04); without a
+// stored value, without monitoring or with enforcement off every interval
+// passes.
+func (s *Service) CheckInterval(ctx context.Context, orgID string, seconds int) error {
+	if !s.opts.Enforce {
+		return nil
+	}
+	ent, entitled, err := s.Check(ctx, orgID, FeatureMonitoring)
+	if err != nil || !entitled {
+		return err
+	}
+	if minimum, ok := ent.Limits[LimitMinProbeIntervalS]; ok && int64(seconds) < minimum {
+		return &api.FieldError{Field: "interval_s", Status: http.StatusUnprocessableEntity,
+			Message: fmt.Sprintf("the interval must be at least %d seconds (min_probe_interval_s of the plan)", minimum)}
+	}
+	return nil
 }
 
 // AllowCreate enforces a quota (max_cis, max_collectors, max_users,

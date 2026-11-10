@@ -12932,7 +12932,7 @@ export interface components {
       slug?: string;
       /** @enum {string} */
       plan: 'essential' | 'standard' | 'pro' | 'enterprise';
-      /** @description Quotas stored in the limits of their feature's entitlement (max_cis and max_users on cmdb_core, max_collectors on discovery, max_api_keys on api_access, max_storage_mb on documents). Without max_storage_mb the plan default is stored (E-44: essential 1000, standard 10000, pro 50000 MiB; enterprise unlimited, no entry). */
+      /** @description Quotas stored in the limits of their feature's entitlement (max_cis and max_users on cmdb_core, max_collectors on discovery, max_api_keys on api_access, max_storage_mb on documents, the monitoring quotas and max_targets_<type> on monitoring). A quota not passed gets the default of the plan (PKG-04, E-153): essential / standard / pro / enterprise max_cis 500 / 2500 / 10000 / 50000, max_collectors 2 / 5 / 20 / -, max_users 5 / 25 / 100 / -, max_storage_mb 1000 / 10000 / 50000 / - MiB, max_monitored_targets - / 500 / 5000 / 25000, max_probes_per_minute - / 1000 / 10000 / 30000, min_probe_interval_s - / 30 / 30 / 10 ("-" is unlimited, no entry). A passed value overrides the default. */
       limits?: {
         /** Format: int64 */
         max_cis?: number;
@@ -12947,6 +12947,23 @@ export interface components {
          * @description Document storage of the organization in MiB (MGT-01), stored on documents.
          */
         max_storage_mb?: number;
+        /**
+         * Format: int64
+         * @description Monitored targets of the organization (PKG-04), stored on monitoring; the plan must include monitoring.
+         */
+        max_monitored_targets?: number;
+        /**
+         * Format: int64
+         * @description Probes per minute of the organization (PKG-04), stored on monitoring.
+         */
+        max_probes_per_minute?: number;
+        /**
+         * Format: int64
+         * @description Shortest probe interval in seconds (PKG-04), stored on monitoring; a shorter interval is refused with 422, 0 sets no minimum.
+         */
+        min_probe_interval_s?: number;
+      } & {
+        [key: string]: number;
       };
       admin_email: string;
       admin_display_name?: string;
@@ -15366,7 +15383,7 @@ export interface components {
       plan?: components['schemas']['EntitlementPlan'];
       /** @description cmdb_core cannot be disabled (422). */
       enabled?: boolean;
-      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys, and max_storage_mb (MiB, on documents; MGT-01); any other key is 422 with `field` limits (F-209). A missing quota is unlimited (E-34). */
+      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys, max_storage_mb (MiB, on documents; MGT-01), the monitoring quotas max_monitored_targets, max_probes_per_minute, min_probe_interval_s and max_targets_<type> (PKG-04, WP-881); any other key is 422 with `field` limits (F-209). A missing quota is unlimited; the plan defaults (E-153) are stored at creation. */
       limits?: {
         [key: string]: number;
       };

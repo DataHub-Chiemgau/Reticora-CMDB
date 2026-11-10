@@ -393,7 +393,9 @@ the phase-3 keys (`monitoring`, `ipam`, `monitoring_network`,
 `compliance_findings`, `monitoring_access`, `monitoring_analytics`,
 `compliance_automation`; E-151, WP-862), the module key of phase 4
 (`endpoint_agent`) and the add-ons, and the quotas `max_cis`,
-`max_collectors`, `max_users`, `max_api_keys` and `max_storage_mb` are
+`max_collectors`, `max_users`, `max_api_keys`, `max_storage_mb`, the
+monitoring quotas `max_monitored_targets`, `max_probes_per_minute`,
+`min_probe_interval_s` and `max_targets_<type>` (WP-881) are
 accepted (`entitlement.FeatureKeys`, `entitlement.Quotas`); any other key,
 the former keys `inventory`, `stocktake`, `ticketing`, `workflow_forms` and
 `compliance` among them, is 422 with the field. Migration 000284 renamed
@@ -472,14 +474,23 @@ are add-ons (CH14): no plan includes them, only their own entitlement row
 unlocks them. `gps_standard` and `workplace` have
 no module in phase 2 (LOC-09 and MGT-06 are P4); `ticketing_pro`,
 `stocktake_pro`, `disposition`, `audit_extended` and `usage_tracking` are
-not created. Quotas have no plan default (E-34): a quota only gates when it
-is stored in the limits of a row. `max_storage_mb` (MiB) is stored on
-`documents` (MGT-01). New organizations get the plan default of E-44 stored
-there (WP-706): essential 1,000, standard 10,000, pro 50,000; enterprise is
-unlimited and gets no entry. The trial stores the value of the trial plan,
-the operator creation (`POST /api/v1/admin/orgs`) the plan's value unless
-`limits.max_storage_mb` is given; existing organizations get no value, so
-for them the quota stays unlimited until the operator stores one.
+not created. Every plan has default quotas (PKG-04, E-153, WP-881;
+`entitlement.PlanQuotaDefaults`), stored in the limits of the feature's
+row: essential / standard / pro / enterprise `max_cis` 500 / 2,500 /
+10,000 / 50,000, `max_collectors` 2 / 5 / 20 / –, `max_users` 5 / 25 /
+100 / –, `max_storage_mb` (MiB, on `documents`, MGT-01) 1,000 / 10,000 /
+50,000 / –; on `monitoring` from standard on `max_monitored_targets`
+500 / 5,000 / 25,000, `max_probes_per_minute` 1,000 / 10,000 / 30,000 and
+`min_probe_interval_s` 30 / 30 / 10 (– is unlimited, no entry). The trial
+stores the defaults of the trial plan (with its configured `max_cis`), the
+operator creation (`POST /api/v1/admin/orgs`) the defaults unless
+`limits` passes a value. A quota only gates when it is stored: existing
+organizations keep their rows, so a quota without entry stays unlimited
+until the operator stores one; `entitlement.LimitOrigin` tells a plan
+default from an override. Monitoring quotas are admitted under the
+advisory lock `database.LockQuota` (`Service.AdmitCount`), so concurrent
+creations cannot pass the limit; an interval below `min_probe_interval_s`
+is 422 on `interval_s` (`Service.CheckInterval`).
 `gps_standard` gates the GPS history in the P4 module `gps`; disposal
 records (MGT-02) are the P2 module `disposal` with `assets_basic`.
 Migration 000190 moved existing

@@ -310,40 +310,37 @@ func (s *Service) setup(now time.Time) (*Setup, error) {
 		FallbackPlan: s.cfg.FallbackPlan, Entitlements: ents}, nil
 }
 
-// planStorageMB is the document storage of a new organization per plan in
-// MiB (MGT-01, E-44: 1,000 / 10,000 / 50,000 / unlimited). A quota only
-// gates when it is stored (E-34), so a new organization gets the value of
-// its plan stored on documents (WP-706); enterprise is unlimited and gets
-// no entry. Existing organizations keep their rows.
-var planStorageMB = map[entitlement.Plan]int64{
-	entitlement.PlanEssential: 1000,
-	entitlement.PlanStandard:  10000,
-	entitlement.PlanPro:       50000,
-}
-
-// PlanStorageMB returns the max_storage_mb stored for a new organization of
-// the plan; false means unlimited (enterprise), stored as no entry.
-func PlanStorageMB(plan entitlement.Plan) (int64, bool) {
-	mb, ok := planStorageMB[plan]
-	return mb, ok
+// quotaDefaultsByFeature groups the default limits of the plan (E-153,
+// entitlement.PlanQuotaDefaults) by the feature whose row stores them.
+func quotaDefaultsByFeature(plan entitlement.Plan) map[string]map[string]int64 {
+	out := map[string]map[string]int64{}
+	for quota, value := range entitlement.PlanQuotaDefaults(plan) {
+		feature, _ := entitlement.QuotaFeatureOf(quota)
+		if out[feature] == nil {
+			out[feature] = map[string]int64{}
+		}
+		out[feature][quota] = value
+	}
+	return out
 }
 
 // TrialEntitlements returns the entitlement rows of a trial (ENT-07): every
-// feature of the trial plan with source selfsignup; features the fallback
-// plan lacks are valid until the trial ends; cmdb_core carries the trial's
-// max_cis and documents the trial plan's max_storage_mb (E-44, WP-706).
+// feature of the trial plan with source selfsignup and origin plan;
+// features the fallback plan lacks are valid until the trial ends; each row
+// stores the default limits of the trial plan for its feature (E-153,
+// WP-881), and cmdb_core the trial's max_cis instead of the plan's.
 func TrialEntitlements(cfg Config, endsAt time.Time) ([]entitlement.Entitlement, error) {
 	fallback := map[string]bool{}
 	for _, f := range entitlement.PlanFeatures(cfg.FallbackPlan) {
 		fallback[f] = true
 	}
-	storageMB, storageLimited := PlanStorageMB(cfg.TrialPlan)
+	defaults := quotaDefaultsByFeature(cfg.TrialPlan)
 	var out []entitlement.Entitlement
 	for _, f := range entitlement.PlanFeatures(cfg.TrialPlan) {
 		ent := entitlement.Entitlement{FeatureKey: f, Plan: cfg.TrialPlan, Enabled: true,
-			Limits: map[string]int64{}, Source: "selfsignup"}
-		if storageLimited && f == entitlement.QuotaFeature[entitlement.LimitMaxStorageMB] {
-			ent.Limits[entitlement.LimitMaxStorageMB] = storageMB
+			Limits: map[string]int64{}, Source: "selfsignup", Origin: entitlement.OriginPlan}
+		for quota, value := range defaults[f] {
+			ent.Limits[quota] = value
 		}
 		if f == entitlement.FeatureCMDBCore {
 			ent.Limits[entitlement.LimitMaxCIs] = cfg.TrialMaxCIs
@@ -462,16 +459,13 @@ func validateOrganization(req *operator.NewOrganization) (*OrganizationSpec, ent
 // Without an own max_storage_mb the plan's value is stored on documents
 // (E-44, WP-706); enterprise gets no entry.
 func PlanEntitlements(plan entitlement.Plan, limits map[string]int64) ([]entitlement.Entitlement, error) {
-	byFeature := map[string]map[string]int64{}
-	if _, own := limits[entitlement.LimitMaxStorageMB]; !own {
-		if mb, limited := PlanStorageMB(plan); limited {
-			byFeature[entitlement.QuotaFeature[entitlement.LimitMaxStorageMB]] = map[string]int64{entitlement.LimitMaxStorageMB: mb}
-		}
-	}
+	// The default limits of the plan (E-153, WP-881); the operator's limits
+	// go first.
+	byFeature := quotaDefaultsByFeature(plan)
 	for quota, value := range limits {
-		feature, known := entitlement.QuotaFeature[quota]
+		feature, known := entitlement.QuotaFeatureOf(quota)
 		if !known {
-			return nil, &api.FieldError{Field: "limits", Message: fmt.Sprintf("unknown limit %q (allowed: %s)",
+			return nil, &api.FieldError{Field: "limits", Message: fmt.Sprintf("unknown limit %q (allowed: %s, max_targets_<type>)",
 				quota, strings.Join(entitlement.Quotas, ", "))}
 		}
 		if value < 0 {
@@ -485,7 +479,8 @@ func PlanEntitlements(plan entitlement.Plan, limits map[string]int64) ([]entitle
 	var out []entitlement.Entitlement
 	covered := map[string]bool{}
 	for _, f := range entitlement.PlanFeatures(plan) {
-		ent := entitlement.Entitlement{FeatureKey: f, Plan: plan, Enabled: true, Limits: map[string]int64{}, Source: "manual"}
+		ent := entitlement.Entitlement{FeatureKey: f, Plan: plan, Enabled: true, Limits: map[string]int64{}, Source: "manual",
+			Origin: entitlement.OriginPlan}
 		for k, v := range byFeature[f] {
 			ent.Limits[k] = v
 		}
