@@ -1010,6 +1010,32 @@ type (both allow further fields).
 | `document.scanned` | document | plan addition | WP-734 |
 | `import.completed` | import run | plan addition | WP-775 |
 
+Monitoring types of phase 3 (EVT-03 [P3], ALR-02, PRB-03, ALR-07; WP-867,
+E-161 Option 2): one event per state change, never one per probe result
+(30.5 million results a day would exceed the outbox retention of EVT-01).
+They are registered with their frame (`events.Phase3Types`); until its
+producer is merged a type stands in `plannedProducers` of
+`backend/internal/server/evt02_producers_integration_test.go`, never in
+both lists, and the list is empty before WP-1177. Bound subscriptions read
+them with `monitoring:read`, `ci.config_changed` too (not `ci:read`);
+`monitoring.suspension_changed` reaches org-wide subscriptions only.
+
+| Type | `entity_id` | Origin | Producer |
+|---|---|---|---|
+| `probe.state_changed` | probe | ALR-02, PRB-05 | WP-961 |
+| `alarm.opened`, `alarm.acknowledged`, `alarm.severity_changed`, `alarm.resolved` | alarm | ALR-01, ALR-02 | WP-982 |
+| `alarm.escalated` | alarm | NTF-02 | WP-1146 |
+| `incident.opened`, `incident.resolved` | incident | ALR-03 | WP-1028 |
+| `incident.updated` | incident | ALR-03, ALR-10 | WP-1036 |
+| `collector_group.unreachable`, `collector_group.reachable` | collector group | PRB-03 | WP-964 |
+| `collector_group.failover` | collector group | PRB-10 | WP-963 |
+| `collector.clock_skew` | collector | PRB-07 | WP-962 |
+| `config.changed` | probe (configuration of the probe) | PRB-01 | WP-939 |
+| `ci.config_changed` | CI (configuration of the device) | ALR-07 | WP-1054 |
+| `monitoring.suspension_changed` | organization | PKG-06 | WP-942 |
+| `capacity.forecast_exceeded` | forecast | ALR-08 | WP-1060 |
+| `sla.violated` | availability target | ALR-06 | WP-1049 |
+
 **`ci.status_changed`** (WP-707): an update of a CI
 (`ci.PGRepository.Update`, e.g. `PATCH /api/v1/cis/{id}` and the bulk status
 change) whose `changed_fields` contain `status` writes, in the same

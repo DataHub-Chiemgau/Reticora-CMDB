@@ -162,6 +162,10 @@ func EventReadPermission(event string) string {
 	case events.StockBelowMinimum:
 		// A quantity item, read on the route consumables.
 		return "stock:read"
+	case events.CIConfigChanged, events.CollectorClockSkew:
+		// The configuration of a device and the clock of a collector are
+		// monitoring data (ALR-07, WP-867), not ci:read or discovery data.
+		return "monitoring:read"
 	}
 	prefix, _, _ := strings.Cut(event, ".")
 	switch prefix {
@@ -188,6 +192,10 @@ func EventReadPermission(event string) string {
 	case "import":
 		// The read right of the route imports (WP-301).
 		return "import:run"
+	case "probe", "alarm", "incident", "collector_group", "config", "capacity", "sla", "monitoring":
+		// The monitoring of phase 3 reads like GET /api/v1/monitoring/*
+		// (WP-867, E-161).
+		return "monitoring:read"
 	}
 	return ""
 }

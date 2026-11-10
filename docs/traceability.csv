@@ -1611,3 +1611,7 @@ ENT-06;(V), [B–P4], [A];G3;backend/internal/entitlement/enforce_integration_te
 ENT-05;[B];G3;backend/internal/entitlement/enforce_integration_test.go;WP-865
 ALR-09;[P3];G3;backend/internal/entitlement/entitlement_test.go;WP-865
 RBA-05;[P2–P4], [A];G3;backend/internal/permission/role_matrix_integration_test.go;WP-866
+EVT-03;[P2–P3];G3;backend/internal/events/types_test.go;WP-867
+NTF-05;[B], Zusätze [P2], [P3];G3;backend/internal/webhook/scope_test.go;WP-867
+MON-04;[P3];G3;backend/internal/webhook/scope_test.go;WP-867
+ALR-02;[P3];G3;backend/internal/events/types_test.go;WP-867

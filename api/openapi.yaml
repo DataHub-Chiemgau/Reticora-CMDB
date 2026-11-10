@@ -31495,7 +31495,8 @@ components:
       type: string
       description: >-
         A subscribable event (webhook.ValidEvents, WP-246): the registered
-        event types of api/events.schema.json (EVT-02, NTF-05, EVT-03 [P2])
+        event types of api/events.schema.json (EVT-02, NTF-05, EVT-03 [P2],
+        the monitoring types of EVT-03 [P3], WP-867)
         without `webhook.dead` and `apikey.creator_deactivated`, which
         notify the org_admins only. Deprecated former names, delivered under
         their new type: `ci.updated` (now `ci.changed`),
@@ -31552,6 +31553,24 @@ components:
         - metamodel.published
         - document.scanned
         - import.completed
+        - probe.state_changed
+        - alarm.opened
+        - alarm.acknowledged
+        - alarm.escalated
+        - alarm.severity_changed
+        - alarm.resolved
+        - incident.opened
+        - incident.updated
+        - incident.resolved
+        - collector_group.unreachable
+        - collector_group.reachable
+        - collector_group.failover
+        - collector.clock_skew
+        - config.changed
+        - ci.config_changed
+        - monitoring.suspension_changed
+        - capacity.forecast_exceeded
+        - sla.violated
         - ci.updated
         - relationship.deleted
         - lifecycle.transitioned

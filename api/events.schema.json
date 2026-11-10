@@ -56,7 +56,25 @@
         "ticket.sla_breached",
         "metamodel.published",
         "document.scanned",
-        "import.completed"
+        "import.completed",
+        "probe.state_changed",
+        "alarm.opened",
+        "alarm.acknowledged",
+        "alarm.escalated",
+        "alarm.severity_changed",
+        "alarm.resolved",
+        "incident.opened",
+        "incident.updated",
+        "incident.resolved",
+        "collector_group.unreachable",
+        "collector_group.reachable",
+        "collector_group.failover",
+        "collector.clock_skew",
+        "config.changed",
+        "ci.config_changed",
+        "monitoring.suspension_changed",
+        "capacity.forecast_exceeded",
+        "sla.violated"
       ]
     },
     "org_id": {
@@ -466,6 +484,330 @@
         "properties": {
           "data": {
             "$ref": "#/$defs/import.completed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "probe.state_changed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/probe.state_changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "alarm.opened"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/alarm.opened"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "alarm.acknowledged"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/alarm.acknowledged"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "alarm.escalated"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/alarm.escalated"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "alarm.severity_changed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/alarm.severity_changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "alarm.resolved"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/alarm.resolved"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "incident.opened"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/incident.opened"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "incident.updated"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/incident.updated"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "incident.resolved"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/incident.resolved"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "collector_group.unreachable"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/collector_group.unreachable"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "collector_group.reachable"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/collector_group.reachable"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "collector_group.failover"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/collector_group.failover"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "collector.clock_skew"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/collector.clock_skew"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "config.changed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/config.changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "ci.config_changed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/ci.config_changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "monitoring.suspension_changed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/monitoring.suspension_changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "capacity.forecast_exceeded"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/capacity.forecast_exceeded"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "sla.violated"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/sla.violated"
           }
         }
       }
@@ -1748,6 +2090,800 @@
           "skipped": 17,
           "failed": 3,
           "initiated_by": "88888888-8888-4888-8888-888888888888"
+        }
+      ]
+    },
+    "probe.state_changed": {
+      "description": "Data of probe.state_changed. entity_id: the probe. Origin: EVT-03 [P3], E-161. Producer: WP-961. one state change of a probe, never one result (E-161). suppressed_by and root_incident_id name the root of a consequential outage.",
+      "type": "object",
+      "required": ["id", "from", "to"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The probe."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object belongs to; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "from": {
+          "type": "string",
+          "enum": ["up", "degraded", "down", "unknown"],
+          "description": "State before the change."
+        },
+        "to": {
+          "type": "string",
+          "enum": ["up", "degraded", "down", "unknown"],
+          "description": "State after the change."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Reason code of the state (e.g. timeout, collector_unreachable, parent_down)."
+        },
+        "suppressed_by": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The root alarm that suppresses the notification of this change."
+        },
+        "root_incident_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident of the root cause of a consequential outage."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "from": "up",
+          "to": "unknown",
+          "reason": "timeout",
+          "suppressed_by": "99999999-9999-4999-8999-999999999999",
+          "root_incident_id": "99999999-9999-4999-8999-999999999999"
+        }
+      ]
+    },
+    "alarm.opened": {
+      "description": "Data of alarm.opened. entity_id: the alarm. Origin: EVT-03 [P3], E-161. Producer: WP-982. AlarmData is the data of the alarm.* types (ALR-01, ALR-02).",
+      "type": "object",
+      "required": ["id", "severity"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The alarm."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object belongs to; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["info", "warning", "critical"],
+          "description": "Severity."
+        },
+        "incident_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident the alarm belongs to; absent before the correlation."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "severity": "critical",
+          "incident_id": "99999999-9999-4999-8999-999999999999"
+        }
+      ]
+    },
+    "alarm.acknowledged": {
+      "description": "Data of alarm.acknowledged. entity_id: the alarm. Origin: EVT-03 [P3], E-161. Producer: WP-982. AlarmData is the data of the alarm.* types (ALR-01, ALR-02).",
+      "type": "object",
+      "required": ["id", "severity"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The alarm."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object belongs to; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["info", "warning", "critical"],
+          "description": "Severity."
+        },
+        "incident_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident the alarm belongs to; absent before the correlation."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "severity": "critical",
+          "incident_id": "99999999-9999-4999-8999-999999999999"
+        }
+      ]
+    },
+    "alarm.escalated": {
+      "description": "Data of alarm.escalated. entity_id: the alarm. Origin: EVT-03 [P3], E-161. Producer: WP-1146. AlarmData is the data of the alarm.* types (ALR-01, ALR-02).",
+      "type": "object",
+      "required": ["id", "severity"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The alarm."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object belongs to; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["info", "warning", "critical"],
+          "description": "Severity."
+        },
+        "incident_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident the alarm belongs to; absent before the correlation."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "severity": "critical",
+          "incident_id": "99999999-9999-4999-8999-999999999999"
+        }
+      ]
+    },
+    "alarm.severity_changed": {
+      "description": "Data of alarm.severity_changed. entity_id: the alarm. Origin: EVT-03 [P3], E-161. Producer: WP-982. AlarmData is the data of the alarm.* types (ALR-01, ALR-02).",
+      "type": "object",
+      "required": ["id", "severity"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The alarm."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object belongs to; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["info", "warning", "critical"],
+          "description": "Severity."
+        },
+        "incident_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident the alarm belongs to; absent before the correlation."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "severity": "critical",
+          "incident_id": "99999999-9999-4999-8999-999999999999"
+        }
+      ]
+    },
+    "alarm.resolved": {
+      "description": "Data of alarm.resolved. entity_id: the alarm. Origin: EVT-03 [P3], E-161. Producer: WP-982. AlarmData is the data of the alarm.* types (ALR-01, ALR-02).",
+      "type": "object",
+      "required": ["id", "severity"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The alarm."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object belongs to; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["info", "warning", "critical"],
+          "description": "Severity."
+        },
+        "incident_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident the alarm belongs to; absent before the correlation."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "severity": "critical",
+          "incident_id": "99999999-9999-4999-8999-999999999999"
+        }
+      ]
+    },
+    "incident.opened": {
+      "description": "Data of incident.opened. entity_id: the incident. Origin: EVT-03 [P3], E-161. Producer: WP-1028. the incident with its root CI and cause class.",
+      "type": "object",
+      "required": ["id", "severity"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident."
+        },
+        "root_ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI of the root cause; absent for a network outage of a collector group."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["info", "warning", "critical"],
+          "description": "Severity."
+        },
+        "cause_class": {
+          "type": "string",
+          "description": "Cause class (topology, collector_unreachable, config_change, unknown)."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "root_ci_id": "99999999-9999-4999-8999-999999999999",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "severity": "critical",
+          "cause_class": "topology"
+        }
+      ]
+    },
+    "incident.updated": {
+      "description": "Data of incident.updated. entity_id: the incident. Origin: EVT-03 [P3], E-161. Producer: WP-1036. the incident with its root CI and cause class.",
+      "type": "object",
+      "required": ["id", "severity"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident."
+        },
+        "root_ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI of the root cause; absent for a network outage of a collector group."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["info", "warning", "critical"],
+          "description": "Severity."
+        },
+        "cause_class": {
+          "type": "string",
+          "description": "Cause class (topology, collector_unreachable, config_change, unknown)."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "root_ci_id": "99999999-9999-4999-8999-999999999999",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "severity": "critical",
+          "cause_class": "topology"
+        }
+      ]
+    },
+    "incident.resolved": {
+      "description": "Data of incident.resolved. entity_id: the incident. Origin: EVT-03 [P3], E-161. Producer: WP-1028. the incident with its root CI and cause class.",
+      "type": "object",
+      "required": ["id", "severity"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident."
+        },
+        "root_ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI of the root cause; absent for a network outage of a collector group."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["info", "warning", "critical"],
+          "description": "Severity."
+        },
+        "cause_class": {
+          "type": "string",
+          "description": "Cause class (topology, collector_unreachable, config_change, unknown)."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "root_ci_id": "99999999-9999-4999-8999-999999999999",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "severity": "critical",
+          "cause_class": "topology"
+        }
+      ]
+    },
+    "collector_group.unreachable": {
+      "description": "Data of collector_group.unreachable. entity_id: the collector group. Origin: EVT-03 [P3], E-161. Producer: WP-964. the group, its scope and the root event of a network outage.",
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The collector group."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "root_event_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The root event of the network outage (collector_group.unreachable)."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "root_event_id": "99999999-9999-4999-8999-999999999999"
+        }
+      ]
+    },
+    "collector_group.reachable": {
+      "description": "Data of collector_group.reachable. entity_id: the collector group. Origin: EVT-03 [P3], E-161. Producer: WP-964. the group, its scope and the root event of a network outage.",
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The collector group."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "root_event_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The root event of the network outage (collector_group.unreachable)."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "root_event_id": "99999999-9999-4999-8999-999999999999"
+        }
+      ]
+    },
+    "collector_group.failover": {
+      "description": "Data of collector_group.failover. entity_id: the collector group. Origin: EVT-03 [P3], E-161. Producer: WP-963. the group, its scope and the root event of a network outage.",
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The collector group."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "root_event_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The root event of the network outage (collector_group.unreachable)."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "root_event_id": "99999999-9999-4999-8999-999999999999"
+        }
+      ]
+    },
+    "collector.clock_skew": {
+      "description": "Data of collector.clock_skew. entity_id: the collector. Origin: EVT-03 [P3], E-161. Producer: WP-962. a collector whose clock deviates from the server.",
+      "type": "object",
+      "required": ["id", "skew_ms"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The collector."
+        },
+        "collector_group_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The group of the collector."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "skew_ms": {
+          "type": "integer",
+          "description": "Deviation of the collector clock in milliseconds."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "collector_group_id": "99999999-9999-4999-8999-999999999999",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "skew_ms": 2500
+        }
+      ]
+    },
+    "config.changed": {
+      "description": "Data of config.changed. entity_id: the probe. Origin: EVT-03 [P3], E-161. Producer: WP-939. a change of the configuration of a probe, never of a device (E-161).",
+      "type": "object",
+      "required": ["id", "changed_fields"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The probe."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object belongs to; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "changed_fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The changed settings."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "changed_fields": ["interval_s"]
+        }
+      ]
+    },
+    "ci.config_changed": {
+      "description": "Data of ci.config_changed. entity_id: the CI. Origin: EVT-03 [P3], E-161. Producer: WP-1054. a new configuration version of a device.",
+      "type": "object",
+      "required": ["id", "ci_id", "hash"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The configuration version."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "hash": {
+          "type": "string",
+          "description": "Hash of the masked configuration."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "hash": "sha256:ab12"
+        }
+      ]
+    },
+    "monitoring.suspension_changed": {
+      "description": "Data of monitoring.suspension_changed. entity_id: the organization. Origin: EVT-03 [P3], E-161. Producer: WP-942. monitoring functions of the organization were suspended or resumed because their feature was lost or regained.",
+      "type": "object",
+      "required": ["feature_key", "suspended"],
+      "additionalProperties": true,
+      "properties": {
+        "feature_key": {
+          "type": "string",
+          "description": "The feature key whose functions changed."
+        },
+        "suspended": {
+          "type": "boolean",
+          "description": "true: suspended, false: resumed."
+        }
+      },
+      "examples": [
+        {
+          "feature_key": "monitoring_network",
+          "suspended": true
+        }
+      ]
+    },
+    "capacity.forecast_exceeded": {
+      "description": "Data of capacity.forecast_exceeded. entity_id: the forecast. Origin: EVT-03 [P3], E-161. Producer: WP-1060. a forecast reaches its threshold within the horizon.",
+      "type": "object",
+      "required": ["id", "ci_id", "metric", "threshold_at"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The forecast."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "metric": {
+          "type": "string",
+          "description": "The forecast metric."
+        },
+        "threshold_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the threshold is reached."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "metric": "if_in_utilization",
+          "threshold_at": "2026-12-01T00:00:00Z"
+        }
+      ]
+    },
+    "sla.violated": {
+      "description": "Data of sla.violated. entity_id: the availability target. Origin: EVT-03 [P3], E-161. Producer: WP-1049. an availability target missed its goal in a period.",
+      "type": "object",
+      "required": ["id", "period", "target_percent", "actual_percent"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The availability target."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "period": {
+          "type": "string",
+          "description": "The period (e.g. 2026-11)."
+        },
+        "target_percent": {
+          "type": "number",
+          "description": "The goal in percent."
+        },
+        "actual_percent": {
+          "type": "number",
+          "description": "The availability reached in percent."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "period": "2026-11",
+          "target_percent": 99.5,
+          "actual_percent": 99.5
         }
       ]
     }

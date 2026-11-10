@@ -61,6 +61,38 @@ const (
 	ImportCompleted       = "import.completed"
 )
 
+// Event types of the monitoring of phase 3 (EVT-03 [P3], ALR-02, PRB-03,
+// ALR-07; WP-867, E-161 Option 2): one event per state change, never one
+// per probe result. config.changed is a change of the configuration of a
+// probe, ci.config_changed one of a device. The producing work packages
+// write them (plannedProducers in evt02_producers_integration_test.go).
+const (
+	ProbeStateChanged           = "probe.state_changed"
+	AlarmOpened                 = "alarm.opened"
+	AlarmAcknowledged           = "alarm.acknowledged"
+	AlarmEscalated              = "alarm.escalated"
+	AlarmSeverityChanged        = "alarm.severity_changed"
+	AlarmResolved               = "alarm.resolved"
+	IncidentOpened              = "incident.opened"
+	IncidentUpdated             = "incident.updated"
+	IncidentResolved            = "incident.resolved"
+	CollectorGroupUnreachable   = "collector_group.unreachable"
+	CollectorGroupReachable     = "collector_group.reachable"
+	CollectorGroupFailover      = "collector_group.failover"
+	CollectorClockSkew          = "collector.clock_skew"
+	ProbeConfigChanged          = "config.changed"
+	CIConfigChanged             = "ci.config_changed"
+	MonitoringSuspensionChanged = "monitoring.suspension_changed"
+	CapacityForecastExceeded    = "capacity.forecast_exceeded"
+	SLAViolated                 = "sla.violated"
+)
+
+// Phase3Types are the event types of phase 3 (EVT-03 [P3]); every one has a
+// producer case or a planned producer (TestEveryEVT02TypeHasAProducer).
+var Phase3Types = []string{
+	ProbeStateChanged, AlarmOpened, AlarmAcknowledged, AlarmEscalated, AlarmSeverityChanged, AlarmResolved, IncidentOpened, IncidentUpdated, IncidentResolved, CollectorGroupUnreachable, CollectorGroupReachable, CollectorGroupFailover, CollectorClockSkew, ProbeConfigChanged, CIConfigChanged, MonitoringSuspensionChanged, CapacityForecastExceeded, SLAViolated,
+}
+
 // Types lists the event types, in the order of the type enum of
 // api/events.schema.json. New types are added here and in the schema only.
 var Types = []string{
@@ -74,6 +106,7 @@ var Types = []string{
 	ContractExpiring, StockMovement, StockBelowMinimum,
 	ReservationCreated, ReservationReleased, ReservationExpired, ReservationConverted,
 	TicketUpdated, TicketSLABreached, MetamodelPublished, DocumentScanned, ImportCompleted,
+	ProbeStateChanged, AlarmOpened, AlarmAcknowledged, AlarmEscalated, AlarmSeverityChanged, AlarmResolved, IncidentOpened, IncidentUpdated, IncidentResolved, CollectorGroupUnreachable, CollectorGroupReachable, CollectorGroupFailover, CollectorClockSkew, ProbeConfigChanged, CIConfigChanged, MonitoringSuspensionChanged, CapacityForecastExceeded, SLAViolated,
 }
 
 // Reserved are the event types of phase 3 (EVT-03 [P3]); a trailing ".*"
@@ -367,27 +400,150 @@ type ImportCompletedData struct {
 	InitiatedBy string `json:"initiated_by,omitempty"`
 }
 
-// Payloads assigns every phase 2 type the frame of its data.
+// ProbeStateChangedData is the data of probe.state_changed (PRB-05, ALR-02):
+// one state change of a probe, never one result (E-161). suppressed_by and
+// root_incident_id name the root of a consequential outage.
+type ProbeStateChangedData struct {
+	ID             string `json:"id"`
+	CIID           string `json:"ci_id,omitempty"`
+	ClientID       string `json:"client_id,omitempty"`
+	SiteID         string `json:"site_id,omitempty"`
+	From           string `json:"from"`
+	To             string `json:"to"`
+	Reason         string `json:"reason,omitempty"`
+	SuppressedBy   string `json:"suppressed_by,omitempty"`
+	RootIncidentID string `json:"root_incident_id,omitempty"`
+}
+
+// AlarmData is the data of the alarm.* types (ALR-01, ALR-02).
+type AlarmData struct {
+	ID         string `json:"id"`
+	CIID       string `json:"ci_id,omitempty"`
+	ClientID   string `json:"client_id,omitempty"`
+	SiteID     string `json:"site_id,omitempty"`
+	Severity   string `json:"severity"`
+	IncidentID string `json:"incident_id,omitempty"`
+}
+
+// IncidentData is the data of the incident.* types (ALR-03): the incident
+// with its root CI and cause class.
+type IncidentData struct {
+	ID         string `json:"id"`
+	RootCIID   string `json:"root_ci_id,omitempty"`
+	ClientID   string `json:"client_id,omitempty"`
+	SiteID     string `json:"site_id,omitempty"`
+	Severity   string `json:"severity"`
+	CauseClass string `json:"cause_class,omitempty"`
+}
+
+// CollectorGroupData is the data of the collector_group.* types (PRB-03,
+// PRB-10): the group, its scope and the root event of a network outage.
+type CollectorGroupData struct {
+	ID          string `json:"id"`
+	ClientID    string `json:"client_id,omitempty"`
+	SiteID      string `json:"site_id,omitempty"`
+	RootEventID string `json:"root_event_id,omitempty"`
+}
+
+// CollectorClockSkewData is the data of collector.clock_skew: a collector
+// whose clock deviates from the server.
+type CollectorClockSkewData struct {
+	ID               string `json:"id"`
+	CollectorGroupID string `json:"collector_group_id,omitempty"`
+	ClientID         string `json:"client_id,omitempty"`
+	SiteID           string `json:"site_id,omitempty"`
+	SkewMS           int64  `json:"skew_ms"`
+}
+
+// ProbeConfigChangedData is the data of config.changed: a change of the
+// configuration of a probe, never of a device (E-161).
+type ProbeConfigChangedData struct {
+	ID            string   `json:"id"`
+	CIID          string   `json:"ci_id,omitempty"`
+	ClientID      string   `json:"client_id,omitempty"`
+	SiteID        string   `json:"site_id,omitempty"`
+	ChangedFields []string `json:"changed_fields"`
+}
+
+// CIConfigChangedData is the data of ci.config_changed (ALR-07): a new
+// configuration version of a device.
+type CIConfigChangedData struct {
+	ID       string `json:"id"`
+	CIID     string `json:"ci_id"`
+	ClientID string `json:"client_id,omitempty"`
+	SiteID   string `json:"site_id,omitempty"`
+	Hash     string `json:"hash"`
+}
+
+// MonitoringSuspensionData is the data of monitoring.suspension_changed:
+// monitoring functions of the organization were suspended or resumed because
+// their feature was lost or regained.
+type MonitoringSuspensionData struct {
+	FeatureKey string `json:"feature_key"`
+	Suspended  bool   `json:"suspended"`
+}
+
+// CapacityForecastData is the data of capacity.forecast_exceeded (ALR-08): a
+// forecast reaches its threshold within the horizon.
+type CapacityForecastData struct {
+	ID          string `json:"id"`
+	CIID        string `json:"ci_id"`
+	ClientID    string `json:"client_id,omitempty"`
+	SiteID      string `json:"site_id,omitempty"`
+	Metric      string `json:"metric"`
+	ThresholdAt string `json:"threshold_at"`
+}
+
+// SLAViolatedData is the data of sla.violated (ALR-06): an availability
+// target missed its goal in a period.
+type SLAViolatedData struct {
+	ID            string  `json:"id"`
+	ClientID      string  `json:"client_id,omitempty"`
+	SiteID        string  `json:"site_id,omitempty"`
+	Period        string  `json:"period"`
+	TargetPercent float64 `json:"target_percent"`
+	ActualPercent float64 `json:"actual_percent"`
+}
+
+// Payloads assigns every phase 2 and phase 3 type the frame of its data.
 var Payloads = map[string]any{
-	CIStatusChanged:       CIStatusChangedData{},
-	LifecycleChanged:      LifecycleChangedData{},
-	RelationshipChanged:   RelationshipChangedData{},
-	AssetCreated:          AssetData{},
-	AssetChanged:          AssetChangedData{},
-	AssetDeleted:          AssetData{},
-	AssetAssigned:         AssetAssignmentData{},
-	AssetReturned:         AssetAssignmentData{},
-	AssetWarrantyExpiring: AssetWarrantyData{},
-	ContractExpiring:      ContractExpiringData{},
-	StockMovement:         StockMovementData{},
-	StockBelowMinimum:     StockBelowMinimumData{},
-	ReservationCreated:    ReservationData{},
-	ReservationReleased:   ReservationData{},
-	ReservationExpired:    ReservationData{},
-	ReservationConverted:  ReservationData{},
-	TicketUpdated:         TicketData{},
-	TicketSLABreached:     TicketSLABreachedData{},
-	MetamodelPublished:    MetamodelPublishedData{},
-	DocumentScanned:       DocumentScannedData{},
-	ImportCompleted:       ImportCompletedData{},
+	CIStatusChanged:             CIStatusChangedData{},
+	LifecycleChanged:            LifecycleChangedData{},
+	RelationshipChanged:         RelationshipChangedData{},
+	AssetCreated:                AssetData{},
+	AssetChanged:                AssetChangedData{},
+	AssetDeleted:                AssetData{},
+	AssetAssigned:               AssetAssignmentData{},
+	AssetReturned:               AssetAssignmentData{},
+	AssetWarrantyExpiring:       AssetWarrantyData{},
+	ContractExpiring:            ContractExpiringData{},
+	StockMovement:               StockMovementData{},
+	StockBelowMinimum:           StockBelowMinimumData{},
+	ReservationCreated:          ReservationData{},
+	ReservationReleased:         ReservationData{},
+	ReservationExpired:          ReservationData{},
+	ReservationConverted:        ReservationData{},
+	TicketUpdated:               TicketData{},
+	TicketSLABreached:           TicketSLABreachedData{},
+	MetamodelPublished:          MetamodelPublishedData{},
+	DocumentScanned:             DocumentScannedData{},
+	ImportCompleted:             ImportCompletedData{},
+	ProbeStateChanged:           ProbeStateChangedData{},
+	AlarmOpened:                 AlarmData{},
+	AlarmAcknowledged:           AlarmData{},
+	AlarmEscalated:              AlarmData{},
+	AlarmSeverityChanged:        AlarmData{},
+	AlarmResolved:               AlarmData{},
+	IncidentOpened:              IncidentData{},
+	IncidentUpdated:             IncidentData{},
+	IncidentResolved:            IncidentData{},
+	CollectorGroupUnreachable:   CollectorGroupData{},
+	CollectorGroupReachable:     CollectorGroupData{},
+	CollectorGroupFailover:      CollectorGroupData{},
+	CollectorClockSkew:          CollectorClockSkewData{},
+	ProbeConfigChanged:          ProbeConfigChangedData{},
+	CIConfigChanged:             CIConfigChangedData{},
+	MonitoringSuspensionChanged: MonitoringSuspensionData{},
+	CapacityForecastExceeded:    CapacityForecastData{},
+	SLAViolated:                 SLAViolatedData{},
 }

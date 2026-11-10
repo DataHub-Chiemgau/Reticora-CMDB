@@ -829,7 +829,7 @@ func TestLegacyNamesReceiveTheNewTypeOnce(t *testing.T) {
 func TestBoundSubscriptionsReceiveP2EventsWithTheReadPermission(t *testing.T) {
 	const ci1, asset1, item1 = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "33333333-3333-4333-8333-333333333333"
 	objects := fakeResolver{ci1: {ClientID: "c1"}, asset1: {ClientID: "c1"}, item1: {ClientID: "c1"}}
-	permissions := []string{"ci:read", "asset:read", "stock:read", "contract:read", "ticket:read", "document:read", "import:run", "reservation:read"}
+	permissions := []string{"ci:read", "asset:read", "stock:read", "contract:read", "ticket:read", "document:read", "import:run", "reservation:read", "monitoring:read"}
 	want := map[string]string{
 		events.CIStatusChanged: "ci:read", events.RelationshipChanged: "ci:read",
 		events.AssetCreated: "asset:read", events.AssetChanged: "asset:read", events.AssetDeleted: "asset:read",
@@ -839,6 +839,11 @@ func TestBoundSubscriptionsReceiveP2EventsWithTheReadPermission(t *testing.T) {
 		events.ReservationExpired: "reservation:read", events.ReservationConverted: "reservation:read",
 		events.TicketUpdated: "ticket:read", events.TicketSLABreached: "ticket:read", events.MetamodelPublished: "ci:read",
 		events.DocumentScanned: "document:read", events.ImportCompleted: "import:run",
+	}
+	// The monitoring types of phase 3 read with monitoring:read (WP-867);
+	// ci.config_changed too, not with ci:read.
+	for _, typ := range events.Phase3Types {
+		want[typ] = "monitoring:read"
 	}
 	type deliveryCase struct {
 		event      string

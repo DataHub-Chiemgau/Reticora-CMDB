@@ -14803,7 +14803,7 @@ export interface components {
       data: components['schemas']['RelationshipSuppression'][];
     };
     /**
-     * @description A subscribable event (webhook.ValidEvents, WP-246): the registered event types of api/events.schema.json (EVT-02, NTF-05, EVT-03 [P2]) without `webhook.dead` and `apikey.creator_deactivated`, which notify the org_admins only. Deprecated former names, delivered under their new type: `ci.updated` (now `ci.changed`), `relationship.deleted` (now `relationship.removed`), `lifecycle.transitioned` (now `lifecycle.changed`), `inventory.movement` and `asset.movement` (now `stock.movement`). Deprecated names without an event contract (dispatched directly or never raised): `ci_type.created`, `ci_type.updated`, `ci_type.deactivated`, `ci_attribute.changed`, `composition.created`, `composition.updated`, `composition.deleted`, `override.changed`, `reconciliation.policy_changed`, `discovery.completed`. `webhook.test` and the reserved types of phase 3 (`maintenance.scheduled`, `workflow.*`, `finding.*`) cannot be subscribed to.
+     * @description A subscribable event (webhook.ValidEvents, WP-246): the registered event types of api/events.schema.json (EVT-02, NTF-05, EVT-03 [P2], the monitoring types of EVT-03 [P3], WP-867) without `webhook.dead` and `apikey.creator_deactivated`, which notify the org_admins only. Deprecated former names, delivered under their new type: `ci.updated` (now `ci.changed`), `relationship.deleted` (now `relationship.removed`), `lifecycle.transitioned` (now `lifecycle.changed`), `inventory.movement` and `asset.movement` (now `stock.movement`). Deprecated names without an event contract (dispatched directly or never raised): `ci_type.created`, `ci_type.updated`, `ci_type.deactivated`, `ci_attribute.changed`, `composition.created`, `composition.updated`, `composition.deleted`, `override.changed`, `reconciliation.policy_changed`, `discovery.completed`. `webhook.test` and the reserved types of phase 3 (`maintenance.scheduled`, `workflow.*`, `finding.*`) cannot be subscribed to.
      * @enum {string}
      */
     WebhookEvent:
@@ -14847,6 +14847,24 @@ export interface components {
       | 'metamodel.published'
       | 'document.scanned'
       | 'import.completed'
+      | 'probe.state_changed'
+      | 'alarm.opened'
+      | 'alarm.acknowledged'
+      | 'alarm.escalated'
+      | 'alarm.severity_changed'
+      | 'alarm.resolved'
+      | 'incident.opened'
+      | 'incident.updated'
+      | 'incident.resolved'
+      | 'collector_group.unreachable'
+      | 'collector_group.reachable'
+      | 'collector_group.failover'
+      | 'collector.clock_skew'
+      | 'config.changed'
+      | 'ci.config_changed'
+      | 'monitoring.suspension_changed'
+      | 'capacity.forecast_exceeded'
+      | 'sla.violated'
       | 'ci.updated'
       | 'relationship.deleted'
       | 'lifecycle.transitioned'

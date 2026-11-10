@@ -1148,6 +1148,31 @@ func evt02ValidateValue(root map[string]any, path string, schema map[string]any,
 	return problems
 }
 
+// plannedProducers names the work package of the Phase-3 plan that will
+// produce a type of events.Phase3Types (WP-867, E-161). The producing work
+// package adds the producer case and removes its entry; before WP-1177
+// (p3-gate) the list is empty.
+var plannedProducers = map[string]string{
+	"probe.state_changed": "WP-961",
+	"alarm.opened": "WP-982",
+	"alarm.acknowledged": "WP-982",
+	"alarm.escalated": "WP-1146",
+	"alarm.severity_changed": "WP-982",
+	"alarm.resolved": "WP-982",
+	"incident.opened": "WP-1028",
+	"incident.updated": "WP-1036",
+	"incident.resolved": "WP-1028",
+	"collector_group.unreachable": "WP-964",
+	"collector_group.reachable": "WP-964",
+	"collector_group.failover": "WP-963",
+	"collector.clock_skew": "WP-962",
+	"config.changed": "WP-939",
+	"ci.config_changed": "WP-1054",
+	"monitoring.suspension_changed": "WP-942",
+	"capacity.forecast_exceeded": "WP-1060",
+	"sla.violated": "WP-1049",
+}
+
 // evt02CoverageProblems checks the producer cases (their types) against
 // the register (WP-246): every type of events.Types without a frame in
 // events.Payloads has exactly one case; a phase 2 type (with a frame) may
@@ -1164,11 +1189,22 @@ func evt02CoverageProblems(covered []string) []string {
 	}
 	for _, typ := range events.Types {
 		_, phase2 := events.Payloads[typ]
+		_, planned := plannedProducers[typ]
+		phase3 := slices.Contains(events.Phase3Types, typ)
 		switch n := count[typ]; {
 		case n > 1:
 			problems = append(problems, fmt.Sprintf("%d cases for %s, want one", n, typ))
+		case phase3 && n == 1 && planned:
+			problems = append(problems, typ+" has a producer case and a planned producer")
+		case phase3 && n == 0 && !planned:
+			problems = append(problems, typ+" has neither a producer case nor a planned producer")
 		case n == 0 && !phase2:
 			problems = append(problems, typ+" has no producer case")
+		}
+	}
+	for typ := range plannedProducers {
+		if !slices.Contains(events.Phase3Types, typ) {
+			problems = append(problems, fmt.Sprintf("planned producer for %q, which is no type of events.Phase3Types", typ))
 		}
 	}
 	sort.Strings(problems)
@@ -1190,6 +1226,19 @@ func TestEVT02ProducerCoverageRule(t *testing.T) {
 			base = append(base, typ)
 		}
 	}
+	// A planned producer of an unknown type and a phase-3 type without case
+	// and without plan fail as well (WP-867).
+	plannedProducers["asset.exploded"] = "WP-999"
+	if problems := evt02CoverageProblems(base); len(problems) != 1 {
+		t.Errorf("unknown planned type: problems %v, want one", problems)
+	}
+	delete(plannedProducers, "asset.exploded")
+	saved := plannedProducers[events.SLAViolated]
+	delete(plannedProducers, events.SLAViolated)
+	if problems := evt02CoverageProblems(base); len(problems) != 1 {
+		t.Errorf("phase-3 type without case and plan: problems %v, want one", problems)
+	}
+	plannedProducers[events.SLAViolated] = saved
 	for name, tc := range map[string]struct {
 		cases []string
 		fails bool
@@ -1201,6 +1250,7 @@ func TestEVT02ProducerCoverageRule(t *testing.T) {
 		"two cases of a phase 2 type": {append(slices.Clone(base), events.AssetCreated, events.AssetCreated), true},
 		"unknown type":                {append(slices.Clone(base), "asset.exploded"), true},
 		"reserved type":               {append(slices.Clone(base), "maintenance.scheduled"), true},
+		"phase 3 with a case and a plan": {append(slices.Clone(base), events.AlarmOpened), true},
 	} {
 		if problems := evt02CoverageProblems(tc.cases); (len(problems) != 0) != tc.fails {
 			t.Errorf("%s: problems %v, want failure %v", name, problems, tc.fails)

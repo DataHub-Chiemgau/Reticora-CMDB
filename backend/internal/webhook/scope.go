@@ -92,6 +92,13 @@ var (
 	}}
 	notResolvable = scopeRule{}
 
+	// The monitoring types of phase 3 (WP-867) carry client_id/site_id of
+	// their object; probes and alarms name their CI as ci_id (optional),
+	// ci.config_changed and capacity.forecast_exceeded always.
+	ciObject       = scopeRule{payload: true, refs: []refField{{field: "ci_id", kind: ObjectCI, optional: true}}}
+	incidentObject = scopeRule{payload: true, refs: []refField{{field: "root_ci_id", kind: ObjectCI, optional: true}}}
+	ciByCIID       = scopeRule{payload: true, refs: []refField{{field: "ci_id", kind: ObjectCI}}}
+
 	// The phase 2 types (EVT-03, WP-246) read client_id/site_id of their
 	// payload frame (api/events.schema.json) and resolve only CIs, assets
 	// and consumables (also by the alias quantity_item_id); for objects of
@@ -182,6 +189,27 @@ var scopeRules = map[string]scopeRule{
 
 	// No emitter defines its payload: not resolvable.
 	"discovery.completed": notResolvable,
+
+	// Monitoring of phase 3 (WP-867, E-161); the suspension of monitoring
+	// functions concerns the whole organization.
+	"probe.state_changed":           ciObject,
+	"alarm.opened":                  ciObject,
+	"alarm.acknowledged":            ciObject,
+	"alarm.escalated":               ciObject,
+	"alarm.severity_changed":        ciObject,
+	"alarm.resolved":                ciObject,
+	"incident.opened":               incidentObject,
+	"incident.updated":              incidentObject,
+	"incident.resolved":             incidentObject,
+	"collector_group.unreachable":   payloadScope,
+	"collector_group.reachable":     payloadScope,
+	"collector_group.failover":      payloadScope,
+	"collector.clock_skew":          payloadScope,
+	"config.changed":                ciObject,
+	"ci.config_changed":             ciByCIID,
+	"monitoring.suspension_changed": organizational,
+	"capacity.forecast_exceeded":    ciByCIID,
+	"sla.violated":                  payloadScope,
 }
 
 // eventObjects returns the scope of every object of the event, nil when it
