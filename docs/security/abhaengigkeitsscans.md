@@ -34,23 +34,25 @@ Ganzes prüfen (Stand WP-329):
 
 ### Fremdimages des Betriebs
 
-Neben den eigenen Release-Images startet der Betrieb Fremdimages. Gescannt
-wird das Image, das nicht vertrauenswürdige Eingaben parst (clamd, SEC-09);
-für die übrigen gilt eine begründete Ausnahme. Offene Maßnahme: SR-60 in
-`docs/security/review-phase2.md` (Pin per Digest und Aufnahme in
-`image-scan-thirdparty`).
+Neben den eigenen Release-Images startet der Betrieb Fremdimages. Jedes ist
+per Version und Digest gepinnt und wird im Job `image-scan-thirdparty`
+(`.github/workflows/ci.yml`) mit Trivy gescannt (Schwelle wie `image-scan`:
+CRITICAL und HIGH mit verfügbarem Fix). Compose und Kubernetes nennen für
+dasselbe Image dieselbe Referenz; `tests/ci-config.test.sh`
+(`thirdparty_image_pins`) prüft Pin, Matrixeintrag und diese Tabelle
+(SR-60, WP-873).
 
-| Image | Ort | Scan bzw. Ausnahme |
+| Image | Ort | Scan |
 |---|---|---|
-| `clamav/clamav:1.5.4@sha256:6d87c712e3391e13c1ba6e05dfb074d4b1ddb5a6834b23bb9da990d2a4ef042a` | `deploy/docker-compose/docker-compose.yml`, `deploy/k8s/base/components/clamav/clamd.yaml`, Dev-Stack `docker-compose.yml` | `image-scan-thirdparty` |
-| `timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731` | Basis von `reticora-postgres`; logischer Backup-CronJob in `deploy/k8s/base/components/backup` | über `image-scan` (`postgres`), dieselbe Referenz (E-96, `timescale_image_refs`) |
-| `nats:2.10-alpine` | Compose (`nats`, `nats-edge`), `deploy/k8s/base/components/nats-edge` | Ausnahme: nur intern erreichbar (Collector-Edge mit mTLS, T10); gleitender Tag ohne Digest, daher nicht reproduzierbar scanbar (SR-60) |
-| `redis:7-alpine` | Compose | Ausnahme: internes Netz, Port nur auf `127.0.0.1` veröffentlicht; gleitender Tag (SR-60) |
-| `pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372` | Compose | Ausnahme: erreichbar nur über `frontend/objects-proxy.conf` (GET auf zwei Buckets, signiert); Aufnahme in `image-scan-thirdparty` vorgesehen (SR-60) |
-| `postgres:16-alpine` | Compose (`keycloak-db`) | Ausnahme: nur von Keycloak erreichbar; gleitender Tag (SR-60) |
-| `quay.io/keycloak/keycloak:24.0` | Compose | Ausnahme befristet bis zur Maßnahme aus SR-60: Identity Provider (T1), Major-Version 24 ohne Herstellerpflege; gleitender Tag |
-| `opensearchproject/opensearch:2.13.0` | Compose, `deploy/k8s/base/components/opensearch` | Ausnahme: optionales Such-Backend, nur intern; ohne Digest (SR-60) |
-| `certbot/certbot:v2.11.0` | Compose (TLS-Zertifikate) | Ausnahme: kurzlebiger Job ohne eingehende Verbindungen; ohne Digest (SR-60) |
+| `clamav/clamav:1.5.4@sha256:6d87c712e3391e13c1ba6e05dfb074d4b1ddb5a6834b23bb9da990d2a4ef042a` | `deploy/docker-compose/docker-compose.yml` (`clamd`), `deploy/k8s/base/components/clamav/clamd.yaml`, Dev-Stack `docker-compose.yml` | `image-scan-thirdparty` (`clamd`) |
+| `timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731` | Basis von `reticora-postgres`; logischer Backup-CronJob in `deploy/k8s/base/components/backup/cronjob.yaml` | `image-scan-thirdparty` (`timescaledb-backup`); als Basis zusätzlich über `image-scan` (`postgres`), dieselbe Referenz (E-96, `timescale_image_refs`) |
+| `nats:2.14.9-alpine@sha256:c9706755679d8bcf05b4ce275fdd2ac8890058b1535881208a65b3cd613f00bd` | Compose (`nats`, `nats-edge`), `deploy/k8s/base/components/nats-edge/nats-edge.yaml` | `image-scan-thirdparty` (`nats`) |
+| `redis:7.4.12-alpine@sha256:7b1753b4c5ad8458906c272a8132b8c15f5557b000379eb115fb239706a384b7` | Compose (`redis`) | `image-scan-thirdparty` (`redis`) |
+| `pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372` | Compose (`minio`) | `image-scan-thirdparty` (`minio`) |
+| `postgres:16.15-alpine@sha256:aa6cb33cf4c19c765cefcf48d96176258800870a9a1e930ad126200f9d825139` | Compose (`keycloak-db`) | `image-scan-thirdparty` (`keycloak-db`) |
+| `quay.io/keycloak/keycloak:26.8.2@sha256:723b1d6e254c0fc96d5cffec860c7e0744d6a3277822b865bb538cf891575e41` | Compose (`keycloak`); vom Hersteller gepflegte Major-Version 26 | `image-scan-thirdparty` (`keycloak`) |
+| `opensearchproject/opensearch:2.19.7@sha256:3bfa1ec74d56928c2e018033d45c460ce2c0ea65a5cedd577de3102326c31b89` | Compose (`opensearch`), `deploy/k8s/base/components/opensearch/statefulset.yaml` | `image-scan-thirdparty` (`opensearch`) |
+| `certbot/certbot:v5.9.0@sha256:bc93cb710b413e6b456d622f9b0133b3e109c0a78c2ed9976af43d209b0a1805` | Compose (`certbot`, TLS-Zertifikate) | `image-scan-thirdparty` (`certbot`) |
 | Images von `docker-compose.yml` (Entwicklung) | Dev-Stack | Ausnahme: nur Entwicklung, nicht ausgeliefert; TimescaleDB, MinIO und clamd tragen dieselben Pins wie der Betrieb |
 
 Die Matrix von `image-scan` deckt jedes Image ab, das `release.yml` baut,

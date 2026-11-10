@@ -3,7 +3,7 @@
 # install-smoke-health.test.sh — tests for tests/install-smoke-health.sh with a
 # stubbed docker binary (WP-092) and, for scaled services and one-off
 # containers, against a real compose project (WP-440, F-288): a service
-# "web" ($SMOKE_HEALTH_TEST_IMAGE, default redis:7-alpine, the image of the
+# "web" ($SMOKE_HEALTH_TEST_IMAGE, default redis:7.4.12-alpine, the image of the
 # stack's redis service) with --scale web=2, removed again at the end.
 # Without Docker the real cases are skipped; with CI=true they fail then.
 #
@@ -295,7 +295,7 @@ if docker_available; then
     DOCKER_PROJECT="reticora-smoke-health-$$"
     DOCKER_DIR="$TMP_ROOT/real-compose"
     mkdir -p "$DOCKER_DIR"
-    printf 'name: %s\nservices:\n  web:\n    image: %s\n' "$DOCKER_PROJECT" "${SMOKE_HEALTH_TEST_IMAGE:-redis:7-alpine}" > "$DOCKER_DIR/docker-compose.yml"
+    printf 'name: %s\nservices:\n  web:\n    image: %s\n' "$DOCKER_PROJECT" "${SMOKE_HEALTH_TEST_IMAGE:-redis:7.4.12-alpine@sha256:7b1753b4c5ad8458906c272a8132b8c15f5557b000379eb115fb239706a384b7}" > "$DOCKER_DIR/docker-compose.yml"
     : > "$DOCKER_DIR/.env"
     if dc up -d --scale web=2 --wait >"$TMP_ROOT/up.log" 2>&1; then
         expect_real "docker: scale web=2, both replicas running" pass

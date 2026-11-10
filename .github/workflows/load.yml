@@ -218,7 +218,7 @@ jobs:
         include: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     services:
       redis:
-        image: redis:7-alpine
+        image: redis:7.4.12-alpine@sha256:7b1753b4c5ad8458906c272a8132b8c15f5557b000379eb115fb239706a384b7
         ports:
           - 6379:6379
     env:
@@ -282,7 +282,7 @@ jobs:
           exit 1
 
       - name: Start NATS with JetStream
-        run: docker run -d --name nats -p 4222:4222 nats:2.10-alpine -js
+        run: docker run -d --name nats -p 4222:4222 nats:2.14.9-alpine@sha256:c9706755679d8bcf05b4ce275fdd2ac8890058b1535881208a65b3cd613f00bd -js
 
       # writes.js (WP-823): the import over JSON rows stages them in the
       # object storage (WP-303; without it POST /imports is 503). The image

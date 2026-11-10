@@ -19,6 +19,10 @@
 #     repository (CI, deploy, compose, docs; not the historical records) is
 #     the TIMESCALE_IMAGE of that Dockerfile, version and digest (E-96), with
 #     a negative fixture;
+#   - thirdparty_image_pins: every third-party image of the operation
+#     (deploy compose stack, Kubernetes components) is pinned by version and
+#     digest, in the image-scan-thirdparty matrix and documented (SR-60,
+#     WP-873), with a negative fixture;
 #   - release_images_documented: docs/README.md and
 #     docs/security/abhaengigkeitsscans.md name every release image (F-294).
 #   - release_publish: release.yml refuses a tag whose GitHub release already
@@ -363,6 +367,103 @@ if [ "$(grep -c . <<<"$problems")" -eq 3 ] \
     ok "timescale_image_refs_negative: a floating tag, another digest and a missing reference are reported"
 else
     fail "timescale_image_refs_negative: a floating tag, another digest and a missing reference are reported" "$problems"
+fi
+
+# ─── SR-60 (WP-873): third-party images of the operation ───────────────────
+# thirdparty_pins <root>: every image reference of
+# deploy/docker-compose/docker-compose.yml and of the workloads of
+# deploy/k8s/base/components/** (Deployment, StatefulSet, DaemonSet,
+# CronJob, Job) except the own images (${RETICORA_*}, reticora-cmdb/*)
+# must carry version and digest, be scanned by an entry of the
+# image-scan-thirdparty matrix of ci.yml (its compose service or its
+# manifest) and be named in docs/security/abhaengigkeitsscans.md. First
+# output line: the number of references, then one line per problem.
+thirdparty_pins() {
+    python3 - "$1" <<'PY'
+import glob, os, re, sys, yaml
+root = sys.argv[1]
+pin = re.compile(r"^[^\s@]+:[^\s@]+@sha256:[0-9a-f]{64}$")
+own = lambda ref: ref.startswith("${RETICORA_") or ref.startswith("reticora-cmdb/")
+compose = yaml.safe_load(open(os.path.join(root, "deploy/docker-compose/docker-compose.yml")))["services"]
+def workload_images(path):
+    out = []
+    for d in yaml.safe_load_all(open(path)):
+        if not d or d.get("kind") not in ("Deployment", "StatefulSet", "DaemonSet", "CronJob", "Job"):
+            continue
+        spec = d["spec"]
+        if d["kind"] == "CronJob":
+            spec = spec["jobTemplate"]["spec"]
+        pod = spec["template"]["spec"]
+        out += [c["image"] for c in pod.get("initContainers", []) + pod["containers"]]
+    return out
+refs = {}  # reference -> where
+for name, svc in compose.items():
+    if "image" in svc and not own(svc["image"]):
+        refs.setdefault(svc["image"], []).append("docker-compose.yml " + name)
+manifests = sorted(glob.glob(os.path.join(root, "deploy/k8s/base/components/**/*.yaml"), recursive=True))
+for m in manifests:
+    for ref in workload_images(m):
+        if not own(ref):
+            refs.setdefault(ref, []).append(os.path.relpath(m, root))
+ci = yaml.safe_load(open(os.path.join(root, ".github/workflows/ci.yml")))
+scanned = set()
+for e in ci["jobs"]["image-scan-thirdparty"]["strategy"]["matrix"]["include"]:
+    if e.get("compose_service"):
+        scanned.add(compose.get(e["compose_service"], {}).get("image", ""))
+    if e.get("manifest"):
+        scanned.update(workload_images(os.path.join(root, e["manifest"])))
+doc = open(os.path.join(root, "docs/security/abhaengigkeitsscans.md")).read()
+problems = []
+for ref, where in sorted(refs.items()):
+    if not pin.match(ref):
+        problems.append(f"{ref} ({', '.join(where)}): not pinned by version and digest")
+    if ref not in scanned:
+        problems.append(f"{ref} ({', '.join(where)}): not in the image-scan-thirdparty matrix")
+    if ref not in doc:
+        problems.append(f"{ref}: not named in docs/security/abhaengigkeitsscans.md")
+print(len(refs))
+print("\n".join(problems))
+PY
+}
+
+out="$(thirdparty_pins . 2>&1)"
+problems="$(sed 1d <<<"$out")"
+if [ -z "$problems" ]; then
+    ok "thirdparty_image_pins: every third-party image of the operation is pinned, scanned and documented ($(head -n1 <<<"$out") references)"
+else
+    fail "thirdparty_image_pins: every third-party image of the operation is pinned, scanned and documented" "$problems"
+fi
+
+# Negative fixture (the state before WP-873 for two images): nats back on
+# the floating tag in compose and redis without its matrix entry are
+# reported, nothing else.
+fx="$TMP_ROOT/thirdparty-fixture"
+mkdir -p "$fx/deploy" "$fx/.github/workflows" "$fx/docs/security"
+cp -R deploy/docker-compose deploy/k8s "$fx/deploy/"
+cp "$CI" "$fx/.github/workflows/ci.yml"
+cp docs/security/abhaengigkeitsscans.md "$fx/docs/security/"
+python3 - "$fx" <<'PY'
+import re, sys
+root = sys.argv[1]
+p = root + "/deploy/docker-compose/docker-compose.yml"
+s = open(p).read()
+s = re.sub(r"image: nats:\S+", "image: nats:2.10-alpine", s, count=1)
+open(p, "w").write(s)
+p = root + "/.github/workflows/ci.yml"
+s = open(p).read()
+s = re.sub(r"\n          - image: redis\n            compose_service: redis\n            manifest: \"\"", "", s)
+open(p, "w").write(s)
+PY
+problems="$(thirdparty_pins "$fx" 2>&1 | sed 1d)"
+# (The matrix entry nats follows its compose service, so the floating tag
+# counts as scanned; the scan job refuses it as unpinned.)
+if [ "$(grep -c . <<<"$problems")" -eq 3 ] \
+    && grep -q '^nats:2\.10-alpine (docker-compose\.yml nats): not pinned by version and digest$' <<<"$problems" \
+    && grep -q '^nats:2\.10-alpine: not named in docs/security/abhaengigkeitsscans\.md$' <<<"$problems" \
+    && grep -q '^redis:[^ ]* (docker-compose\.yml redis): not in the image-scan-thirdparty matrix$' <<<"$problems"; then
+    ok "thirdparty_image_pins_negative: a floating tag and an image without scan entry are reported"
+else
+    fail "thirdparty_image_pins_negative: a floating tag and an image without scan entry are reported" "$problems"
 fi
 
 # ─── F-294: documentation of the release images ─────────────────────────────

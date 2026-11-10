@@ -1623,3 +1623,4 @@ RBA-05;[P2–P4], [A];G3;backend/internal/permission/role_matrix_integration_tes
 EVT-03;[P2–P3];G3;backend/internal/webhook/scope_test.go;WP-870
 ENT-06;(V), [B–P4], [A];G3;backend/internal/entitlement/entitlement_test.go;WP-870
 API-06;[P2]/[P3]/[P4]/[A];G3;backend/internal/server/modules_test.go;WP-870
+SEC-11;[Q];G3;tests/ci-config.test.sh;WP-873

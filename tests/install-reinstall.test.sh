@@ -2,7 +2,7 @@
 #
 # install-reinstall.test.sh — Keycloak 24 integration test: a re-run of
 # install-cloud.sh applies rotated Keycloak values (WP-386, INS-05, F-125).
-# Needs Docker (quay.io/keycloak/keycloak:24.0, postgres:16-alpine).
+# Needs Docker (the keycloak and keycloak-db images of deploy/docker-compose/docker-compose.yml).
 #
 # Runs the Keycloak steps of the installer — collect_config, write_env,
 # configure_realm and the Keycloak part of start_stack (keycloak-db and

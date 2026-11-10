@@ -1059,8 +1059,8 @@ collect_config() {
     fi
     # With a TLS domain nginx serves the UI only at https://<domain>; port 80
     # redirects everything but the ACME challenge there, and Keycloak behind
-    # the /realms/ proxy announces https://<domain>/realms/reticora (KC_PROXY
-    # edge). An http:// URL of that host never answers itself (the issuer
+    # the /realms/ proxy announces https://<domain>/realms/reticora
+    # (KC_PROXY_HEADERS=xforwarded). An http:// URL of that host never answers itself (the issuer
     # check failed with "announces itself as '<none>'"): base URL, OIDC issuer
     # and redirect URL follow to https://.
     if [ -n "$RETICORA_TLS_DOMAIN" ]; then
@@ -2566,7 +2566,7 @@ db_image() {
     local service="${1:-postgres}" fallback img
     case "$service" in
         postgres) fallback="reticora-postgres:latest" ;;
-        *) fallback="postgres:16-alpine" ;;
+        *) fallback="postgres:16.15-alpine@sha256:aa6cb33cf4c19c765cefcf48d96176258800870a9a1e930ad126200f9d825139" ;;
     esac
     img="$("${COMPOSE[@]}" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config 2>/dev/null \
         | awk -v svc="$service" '$0 == "  " svc ":" {f=1; next} f && /^  [^ ]/ {exit} f && /^    image:/ {print $2; exit}')"

@@ -98,7 +98,7 @@ an installation only through the installer: every run of `install-cloud.sh`
 (`apply_realm_settings`, before the initial administrator is created):
 
 - **User profile:** declares the attributes of the realm file that are
-  missing (`organization_id`, admin only). Keycloak 24 drops undeclared
+  missing (`organization_id`, admin only). Keycloak drops undeclared
   attributes: without it the installer's administrator would be created
   without organization.
 - **Roles and groups:** creates the missing realm roles (`mfa_required`,
@@ -131,6 +131,28 @@ see Sign-out) and all other realm settings are
 left alone; the server's admin client and the realm's SMTP server are the
 installer's (see Server admin client and realm SMTP). A failing call aborts the installer with this section as the hint;
 check the Keycloak log and re-run the installer.
+
+### Keycloak version (SR-60, WP-873)
+
+The stack runs Keycloak 26 (`quay.io/keycloak/keycloak:26.8.2`, pinned by
+digest in `deploy/docker-compose/docker-compose.yml`). An installation of an
+earlier release (Keycloak 24) is upgraded by the next `install-cloud.sh`
+run: Keycloak 26 migrates `keycloak-db` on its first start, then the
+installer applies the realm settings as above.
+`tests/keycloak-realm-upgrade.test.sh` runs the realm of step 1 on
+Keycloak 24 and every later step on Keycloak 26 on the same database.
+Changes of the version that the compose file carries:
+
+- `KC_PROXY=edge` no longer exists; `KC_PROXY_HEADERS=xforwarded` lets
+  Keycloak take scheme and host of the issuer from the `/realms/` proxy of
+  nginx, as before.
+- The temporary master administrator of the first start comes from
+  `KC_BOOTSTRAP_ADMIN_USERNAME` and `KC_BOOTSTRAP_ADMIN_PASSWORD`; `.env`
+  keeps `KEYCLOAK_ADMIN` and `KEYCLOAK_ADMIN_PASSWORD`, which the installer
+  rotates as before.
+- `/health/ready` is served on the management port 9000, not on 8080; the
+  compose healthcheck probes 9000 inside the container (the port is not
+  published).
 
 ## Policies (AUT-09, CH26)
 
@@ -287,7 +309,7 @@ page "You are already authenticated as different user".
 
 - The organization of a user is the user attribute `organization_id` (the
   organization UUID, CH26/AUT-09). It is declared in the realm's user profile
-  (Keycloak 24 drops undeclared attributes) and only administrators may view
+  (Keycloak drops undeclared attributes) and only administrators may view
   or edit it. The `organization_id` mapper on the `reticora-app` client emits
   it into the ID token; a login without it is rejected. Group names are never
   used to pick the organization.

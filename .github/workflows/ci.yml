@@ -10,12 +10,13 @@ permissions:
   contents: read
 
 # Pinned nats-server for the tests that start their own server
-# (TEST_NATS_SERVER_BIN); 2.10.x like the image nats:2.10-alpine. The step
+# (TEST_NATS_SERVER_BIN); the version of the image nats of
+# deploy/docker-compose/docker-compose.yml (WP-873). The step
 # "Install nats-server" is the same in the jobs go-modules (collector),
 # migrations and auditdefect (WP-337, WP-374).
 env:
-  NATS_SERVER_VERSION: "2.10.29"
-  NATS_SERVER_SHA256: e314da74a83a1d3876db8814c27eb990fe729640fd6452025b441bcede8390da
+  NATS_SERVER_VERSION: "2.14.9"
+  NATS_SERVER_SHA256: 74f20433c5b39d7cc6db54155ec1e669671c728f625e54cf307298924b2b4259
 
 jobs:
   backend:
@@ -121,7 +122,7 @@ jobs:
       # Session revocation and refresh rotation are tested against a real
       # Redis (AUT-02, internal/identity/revocation_integration_test.go).
       redis:
-        image: redis:7-alpine
+        image: redis:7.4.12-alpine@sha256:7b1753b4c5ad8458906c272a8132b8c15f5557b000379eb115fb239706a384b7
         ports:
           - 6379:6379
         options: >-
@@ -134,7 +135,7 @@ jobs:
       # node, security plugin off; internal/search/
       # opensearch_real_integration_test.go).
       opensearch:
-        image: opensearchproject/opensearch:2.13.0
+        image: opensearchproject/opensearch:2.19.7@sha256:3bfa1ec74d56928c2e018033d45c460ce2c0ea65a5cedd577de3102326c31b89
         env:
           discovery.type: single-node
           DISABLE_INSTALL_DEMO_CONFIG: "true"
@@ -235,7 +236,7 @@ jobs:
       # containers cannot pass arguments, so NATS is started here.
       - name: Start NATS with JetStream
         run: |
-          docker run -d --name nats -p 4222:4222 nats:2.10-alpine -js
+          docker run -d --name nats -p 4222:4222 nats:2.14.9-alpine@sha256:c9706755679d8bcf05b4ce275fdd2ac8890058b1535881208a65b3cd613f00bd -js
           for i in $(seq 1 30); do nc -z localhost 4222 && exit 0; sleep 1; done
           docker logs nats; exit 1
 
@@ -399,7 +400,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
       redis:
-        image: redis:7-alpine
+        image: redis:7.4.12-alpine@sha256:7b1753b4c5ad8458906c272a8132b8c15f5557b000379eb115fb239706a384b7
         ports:
           - 6379:6379
         options: >-
@@ -467,7 +468,7 @@ jobs:
 
       - name: Start NATS with JetStream
         run: |
-          docker run -d --name nats -p 4222:4222 nats:2.10-alpine -js
+          docker run -d --name nats -p 4222:4222 nats:2.14.9-alpine@sha256:c9706755679d8bcf05b4ce275fdd2ac8890058b1535881208a65b3cd613f00bd -js
           for i in $(seq 1 30); do nc -z localhost 4222 && exit 0; sleep 1; done
           docker logs nats; exit 1
 
@@ -910,36 +911,87 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # SR-60 (WP-873): every third-party image of the operation, pinned by
+      # version and digest. compose_service names the service of
+      # deploy/docker-compose/docker-compose.yml, manifest the Kubernetes
+      # component that runs the same image (empty: none, no comparison).
+      # tests/ci-config.test.sh (thirdparty_image_pins) checks that every
+      # third-party reference of both is in this matrix.
       matrix:
         include:
           - image: clamd
             compose_service: clamd
             manifest: deploy/k8s/base/components/clamav/clamd.yaml
+          - image: nats
+            compose_service: nats
+            manifest: deploy/k8s/base/components/nats-edge/nats-edge.yaml
+          - image: redis
+            compose_service: redis
+            manifest: ""
+          - image: keycloak-db
+            compose_service: keycloak-db
+            manifest: ""
+          - image: keycloak
+            compose_service: keycloak
+            manifest: ""
+          - image: opensearch
+            compose_service: opensearch
+            manifest: deploy/k8s/base/components/opensearch/statefulset.yaml
+          - image: certbot
+            compose_service: certbot
+            manifest: ""
+          - image: minio
+            compose_service: minio
+            manifest: ""
+          - image: timescaledb-backup
+            compose_service: ""
+            manifest: deploy/k8s/base/components/backup/cronjob.yaml
     steps:
       - uses: actions/checkout@v4
 
       - name: Check scan exceptions (SEC-11 SLA)
         run: ./scripts/ci/check-scan-exceptions.sh
 
+      # The reference of the compose service and the third-party images of
+      # the manifest (Deployment, StatefulSet, CronJob); both must be pinned
+      # by version and digest and, when both exist, be the same.
       - name: Resolve the pinned image
         id: pin
         env:
           SERVICE: ${{ matrix.compose_service }}
           MANIFEST: ${{ matrix.manifest }}
         run: |
-          compose=$(python3 -c 'import sys, yaml; print(yaml.safe_load(open("deploy/docker-compose/docker-compose.yml"))["services"][sys.argv[1]]["image"])' "$SERVICE")
-          k8s=$(python3 -c 'import sys, yaml; print(" ".join(c["image"] for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind") == "Deployment" for c in d["spec"]["template"]["spec"]["containers"]))' "$MANIFEST")
-          echo "compose: $compose"
-          echo "k8s:     $k8s"
-          if ! [[ "$compose" =~ ^[^[:space:]@]+:[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::$SERVICE in docker-compose.yml is not pinned by version and digest: $compose"
-            exit 1
-          fi
-          if [ "$compose" != "$k8s" ]; then
-            echo "::error::$MANIFEST pins '$k8s', docker-compose.yml '$compose'"
-            exit 1
-          fi
-          echo "ref=$compose" >> "$GITHUB_OUTPUT"
+          ref=$(python3 - <<'PY'
+          import os, re, sys, yaml
+          pin = re.compile(r"^[^\s@]+:[^\s@]+@sha256:[0-9a-f]{64}$")
+          service, manifest = os.environ["SERVICE"], os.environ["MANIFEST"]
+          refs = []
+          if service:
+              refs.append(("docker-compose.yml " + service,
+                           yaml.safe_load(open("deploy/docker-compose/docker-compose.yml"))["services"][service]["image"]))
+          if manifest:
+              for d in yaml.safe_load_all(open(manifest)):
+                  if not d or d.get("kind") not in ("Deployment", "StatefulSet", "CronJob"):
+                      continue
+                  spec = d["spec"]
+                  if d["kind"] == "CronJob":
+                      spec = spec["jobTemplate"]["spec"]
+                  pod = spec["template"]["spec"]
+                  for c in pod.get("initContainers", []) + pod["containers"]:
+                      if not c["image"].startswith("reticora-cmdb/"):
+                          refs.append((manifest + " " + c["name"], c["image"]))
+          if not refs:
+              sys.exit("::error::no image for service '%s' and manifest '%s'" % (service, manifest))
+          for where, ref in refs:
+              print(where + ": " + ref, file=sys.stderr)
+              if not pin.match(ref):
+                  sys.exit("::error::%s is not pinned by version and digest: %s" % (where, ref))
+          if len({ref for _, ref in refs}) != 1:
+              sys.exit("::error::the references differ: %s" % refs)
+          print(refs[0][1])
+          PY
+          )
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
       # Trivy pulls the image from its registry by digest; no local build.
       - name: Scan image with Trivy

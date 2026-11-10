@@ -1,18 +1,22 @@
 #!/usr/bin/env bash
 #
-# keycloak-realm-upgrade.test.sh — Keycloak 24 integration test: an upgrade
+# keycloak-realm-upgrade.test.sh — Keycloak integration test: an upgrade
 # brings the realm of an earlier release to the settings of the current realm
-# export (WP-428, AUT-09, SEC-07, F-061). Needs Docker (the keycloak and
-# keycloak-db images of deploy/docker-compose/docker-compose.yml) and jq.
+# export (WP-428, AUT-09, SEC-07, F-061), across the Keycloak upgrade of
+# WP-873 (SR-60): step 1 runs the previous Keycloak (LEGACY_KC_IMAGE, 24),
+# steps 2 and later the keycloak image of deploy/docker-compose/
+# docker-compose.yml (26) on the same keycloak-db, which migrates it. Needs
+# Docker (the keycloak and keycloak-db images of that file) and jq.
 #
 # Runs keycloak-db and keycloak of deploy/docker-compose/docker-compose.yml in
 # a throwaway compose project (Keycloak on 127.0.0.1) and the Keycloak steps
 # of install-cloud.sh like tests/install-reinstall.test.sh:
-#   1. Keycloak imports the realm of the release before WP-044
+#   1. Keycloak 24 imports the realm of the release before WP-044
 #      (tests/keycloak/realm-reticora-legacy.json: no password, lockout or MFA
 #      policy, group reticora-admin without roles, demo administrator
 #      admin@reticora.local);
-#   2. upgrade without the installer: Keycloak is recreated with
+#   2. upgrade without the installer: Keycloak is recreated in the current
+#      version (26) on the database of step 1 with
 #      `start --import-realm` and the current realm export. Confirms F-061:
 #      Keycloak skips the existing realm, password policy, browser flow and
 #      groups stay those of step 1 (the observed state is printed);
@@ -64,6 +68,25 @@ cp tests/keycloak/realm-reticora-legacy.json "$LEGACY_TREE/deploy/keycloak/realm
 
 compose() { docker compose -p "$PROJECT" --env-file "$T_ENV" -f "$T_COMPOSE_DIR/docker-compose.yml" "$@"; }
 
+# The previous Keycloak major (the release before WP-873), pinned by version
+# and digest. The legacy step runs it through a compose override that the
+# installer's compose_cmd merges: the image, the admin variables and the
+# health endpoint on 8080 of Keycloak 24 (Keycloak 26 serves it on 9000).
+LEGACY_KC_IMAGE="quay.io/keycloak/keycloak:24.0.5@sha256:f8ade94c1d0ad2f2fa7734a455fee5392764f402c43ca35e9af6bf63a2541dc9"
+LEGACY_OVERRIDE="$T_COMPOSE_DIR/docker-compose.override.yml"
+write_legacy_override() {
+    cat > "$LEGACY_OVERRIDE" <<YAML
+services:
+  keycloak:
+    image: ${LEGACY_KC_IMAGE}
+    environment:
+      KEYCLOAK_ADMIN: \${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: \${KEYCLOAK_ADMIN_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /health/ready HTTP/1.0\\\\r\\\\n\\\\r\\\\n' >&3 && grep -q '200' <&3"]
+YAML
+}
+
 cleanup() {
     [ ! -f "$T_ENV" ] || compose down -v --remove-orphans >/dev/null 2>&1
     rm -rf "$TMP_ROOT"
@@ -113,6 +136,7 @@ installer_run() {
         write_env
         case "$mode" in
             legacy)
+                write_legacy_override
                 SCRIPT_DIR="$LEGACY_TREE" configure_realm
                 compose_cmd up -d keycloak-db
                 wait_for_service keycloak-db || die "keycloak-db did not become healthy."
@@ -193,6 +217,8 @@ if ! installer_run legacy "$LOG"; then
     exit 1
 fi
 ok "Keycloak imports the legacy realm"
+check "step 1 runs the previous Keycloak ($LEGACY_KC_IMAGE)" \
+    test "$(docker inspect --format '{{.Config.Image}}' "$(compose ps -q keycloak)")" = "$LEGACY_KC_IMAGE"
 kc_login
 export_realm "$TMP_ROOT/legacy.json"
 legacy_state() {
@@ -204,7 +230,12 @@ check "legacy realm: no password policy, no lockout, built-in browser flow, reti
 
 # ─── 2. upgrade without the installer: --import-realm with the current export ─
 LOG="$TMP_ROOT/import.log"
+# From here on the keycloak image of docker-compose.yml (the upgrade).
+rm -f "$LEGACY_OVERRIDE"
+CURRENT_KC_IMAGE="$(sed -n 's/^    image: \(quay\.io\/keycloak\/keycloak:.*\)$/\1/p' "$T_COMPOSE_DIR/docker-compose.yml")"
 if installer_run import "$LOG"; then ok "Keycloak recreated with the current realm export"; else fail "Keycloak recreated with the current realm export"; show_log "$LOG"; fi
+check "step 2 runs the current Keycloak of docker-compose.yml ($CURRENT_KC_IMAGE) on the database of step 1" \
+    test "$(docker inspect --format '{{.Config.Image}}' "$(compose ps -q keycloak)")" = "$CURRENT_KC_IMAGE"
 kc_login
 export_realm "$TMP_ROOT/import.json"
 # grep reads the whole log: with pipefail, grep -q would end the pipe at the

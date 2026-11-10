@@ -118,7 +118,7 @@ jobs:
       - name: install-cloud.sh Let's Encrypt issuance (placeholder, deploy hook)
         run: sudo ./tests/install-cloud-acme.test.sh
 
-      # WP-440 (F-288): besides the stubs, a real compose project (redis:7-alpine)
+      # WP-440 (F-288): besides the stubs, a real compose project (redis:7.4.12-alpine)
       # with a scaled service and a one-off container; fails without Docker.
       - name: TLS origin of the WebKit real-stack projects (setup-tls-origin.sh, stubs, WP-646)
         run: ./tests/e2e-real-tls-origin.test.sh
@@ -944,7 +944,7 @@ jobs:
 
   # INS-02/TEC-09 (WP-420, F-033/F-034/F-035): the TLS-domain path against a
   # real ACME server. Pebble with challtestsrv (tests/fixtures/pebble/)
-  # issues, certbot/certbot:v2.11.0 requests and renews, the installer runs
+  # issues, certbot/certbot:v5.9.0 requests and renews, the installer runs
   # with RETICORA_TLS_DOMAIN, RETICORA_ACME_SERVER and the CA bundles: first
   # installation, re-run without a new order, key and chain readable for
   # nginx (uid 101) after the issuance and after a forced renewal, both
@@ -1073,17 +1073,18 @@ jobs:
       - name: Make installer scripts executable
         run: chmod +x install.sh install-cloud.sh install-vm.sh tests/*.sh
 
-      # Keycloak 24 on its own: admin password, client secret and redirect URL
+      # Keycloak of docker-compose.yml on its own: admin password, client secret and redirect URL
       # rotated between the installer's Keycloak steps.
-      - name: Keycloak rotation of the installer (Keycloak 24)
+      - name: Keycloak rotation of the installer
         run: ./tests/install-reinstall.test.sh
 
       # AUT-09/SEC-07 (WP-428, F-061): --import-realm skips the realm an
       # earlier release imported (the one before WP-044); the installer
       # applies policies, MFA flow, roles, groups, acr scope and the declared
       # organization_id, creates the administrator in it, keeps stricter
-      # values and changes nothing on a re-run.
-      - name: Keycloak realm upgrade from the realm before WP-044 (Keycloak 24)
+      # values and changes nothing on a re-run. Step 1 runs Keycloak 24, the
+      # later steps Keycloak 26 on the same database (SR-60, WP-873).
+      - name: Keycloak realm upgrade from the realm before WP-044 (Keycloak 24 to 26)
         run: ./tests/keycloak-realm-upgrade.test.sh
 
       # Local build of the checked-out state in every run (E-69).

@@ -4,7 +4,7 @@
 # against a real ACME server (WP-420; INS-02, TEC-09; F-033, F-034, F-035).
 #
 # Pebble with challtestsrv (tests/fixtures/pebble/) issues the certificate,
-# certbot/certbot:v2.11.0 (the certbot service of docker-compose.yml)
+# certbot/certbot:v5.9.0 (the certbot service of docker-compose.yml)
 # requests and renews it, and install-cloud.sh runs for real
 # (--non-interactive --build-from-source) with RETICORA_TLS_DOMAIN (in .env),
 # RETICORA_ACME_SERVER, RETICORA_ACME_CA_BUNDLE and RETICORA_TLS_CA_BUNDLE:
@@ -72,7 +72,7 @@ COMPOSE_DIR="$REPO_ROOT/deploy/docker-compose"
 ENV_FILE="$COMPOSE_DIR/.env"
 LE_DIR="$COMPOSE_DIR/letsencrypt"
 PEBBLE_COMPOSE="$REPO_ROOT/tests/fixtures/pebble/docker-compose.pebble.yml"
-CERTBOT_IMAGE="certbot/certbot:v2.11.0"
+CERTBOT_IMAGE="certbot/certbot:v5.9.0@sha256:bc93cb710b413e6b456d622f9b0133b3e109c0a78c2ed9976af43d209b0a1805"
 SYSTEM_CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
 # HTTPS endpoint of the frontend (port 443 published on the host).
 HTTPS_ADDR="127.0.0.1:443"

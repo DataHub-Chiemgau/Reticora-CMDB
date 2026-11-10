@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Exercise the actual runtime packaging instructions without compiling Go or
 # installing packages. Override the base with an already available Alpine image
-# for offline testing: RETICORA_TEST_BASE_IMAGE=nats:2.10-alpine.
+# for offline testing: RETICORA_TEST_BASE_IMAGE=nats:2.14.9-alpine@sha256:c9706755679d8bcf05b4ce275fdd2ac8890058b1535881208a65b3cd613f00bd.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 tmp="$(mktemp -d)"
