@@ -640,6 +640,30 @@ operations it does not implement and regenerates
 for each planned resource is listed in the path inventory of E-38
 (`docs/plan/phase2/entscheidungen.md`).
 
+Path inventory of phase 3 (WP-864, E-160): the scaffold below marks every
+prefix of the P3 modules of WP-863 and the operator package management with
+`x-status: planned`; the paths of P3 modules carry `x-phase: P3`, the
+operator paths none. Feature keys follow E-151 (gates of the new prefixes:
+WP-865), permissions WP-866 and WP-870 or the work package that registers
+the route. Below `/api/v1/admp` only GET is documented except the account
+management `/api/v1/admp/accounts` (`TestADMPPathsAreReadOnly`); the access
+to ADMP itself is read-only (WP-926, WP-927).
+
+| Prefix | Module | Feature key | Permission | Work packages |
+|---|---|---|---|---|
+| `/api/v1/monitoring/{targets,probes,probe-types,profiles,groups,events}` | `monitoring` | `monitoring` | `monitoring:read`/`monitoring:write` | WP-934 – WP-949, WP-975, WP-979 |
+| `/api/v1/monitoring/{alarms,incidents,alarm-settings,alarm-playbooks}` | `monitoring` | `monitoring`; recommendation `monitoring_network` | `monitoring:read`; ack `alert:acknowledge` | WP-982 – WP-1043 |
+| `/api/v1/monitoring/{sla,forecasts}` | `monitoring` | `monitoring_analytics` | `monitoring:read`/`monitoring:write` | WP-1048 – WP-1061 |
+| `/api/v1/collector-groups` | `monitoring` | `monitoring` | `monitoring:read`/`collector:manage` | WP-947 |
+| `/api/v1/cis/{id}/{availability,configs}` | `monitoring` | `monitoring`; configs `monitoring_network` | `monitoring:read` | WP-973, WP-1056 |
+| `/api/v1/credential-bindings`, `/api/v1/cis/{id}/credentials` | `monitoring` | `monitoring` | `credential:read`/`credential:bind` | WP-890, WP-894 – WP-896 |
+| `/api/v1/vault-connections` | `monitoring` | `credential_vault` | `credential:read`/`vault:manage` | WP-893 |
+| `/api/v1/ipam`, `/api/v1/ipam-sections`, `/api/v1/asns`, `/api/v1/asn-ranges`, `/api/v1/bgp-peerings`, `/api/v1/nat-translations`, `/api/v1/nameserver-sets`, `/api/v1/vlan-domains`, `/api/v1/cis/{id}/addresses`, `/api/v1/subnets/{id}/{scan,rpki}` | `ipam` | `ipam`; rpki `monitoring_network` | `ipam:read`/`ipam:write` | WP-900 – WP-924, WP-1062 – WP-1072 |
+| `/api/v1/admp`, `/api/v1/cis/{id}/admp-connections`, `/api/v1/network-interfaces/{id}/admp` | `admp` | `admp` (add-on) | `admp:read`; holder `admp:holder_read`; accounts `admp:manage` | WP-925 – WP-932, WP-1073 – WP-1078 |
+| `/api/v1/escalation-policies`, `/api/v1/notification-escalations`, `/api/v1/notification-callbacks` | `escalation` | `notifications_sms_pager` | `escalation:manage`; ack `alert:acknowledge`; callback public (provider signature) | WP-1140 – WP-1148 |
+| `/api/v1/org/exports`, `/api/v1/org/deletion` | `org_lifecycle` | none (core) | `org:export`, `org:delete` | WP-1149 – WP-1157 |
+| `/api/v1/admin/orgs/{id}/{plan,addons,usage}` | none (operator) | none | operator login | WP-880 – WP-885 |
+
 Deprecation follows API-01 (E-25, WP-167): the operation carries
 `deprecated: true`, `x-deprecated-at`, `x-sunset` (at least 12 months later)
 and `x-successor` (a plain path, filters go into `description`). The

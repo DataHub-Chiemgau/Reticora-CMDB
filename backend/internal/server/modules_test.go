@@ -703,3 +703,30 @@ func TestBFFFollowsTheModuleGate(t *testing.T) {
 		t.Errorf("asset with inventory on: %v, want null without error", body)
 	}
 }
+
+// TestEveryP3PrefixIsDocumented covers WP-864 (API-06, E-160): every prefix
+// of a P3 module has at least one documented operation, implemented or a
+// scaffold with x-status: planned.
+func TestEveryP3PrefixIsDocumented(t *testing.T) {
+	documented, err := speccheck.Load(filepath.Clean(specPath))
+	if err != nil {
+		t.Fatalf("load spec: %v", err)
+	}
+	for _, m := range LateModules {
+		if m.Phase != PhaseP3 {
+			continue
+		}
+		for _, prefix := range m.Prefixes {
+			found := false
+			for _, op := range documented {
+				if mod, ok := ModuleForRoute(op.Path); ok && mod.Key == m.Key && prefixSegments(prefix, strings.Split(op.Path, "/")) >= 0 {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("module %s: prefix %s has no documented operation", m.Key, prefix)
+			}
+		}
+	}
+}

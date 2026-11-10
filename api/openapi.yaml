@@ -21818,6 +21818,3704 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  # Phase 3 (WP-864, E-160): scaffold of the P3 prefixes with x-status:
+  # planned (WP-247 pattern). The domain work packages replace each
+  # operation and drop x-status with the implementation.
+
+  /api/v1/monitoring/targets:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    get:
+      operationId: listMonitoringTargets
+      tags: [Monitoring]
+      summary: List monitoring targets
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List monitoring targets. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createMonitoringTarget
+      tags: [Monitoring]
+      summary: Create a monitoring target
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '201':
+          description: Created. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/targets/{id}:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getMonitoringTarget
+      tags: [Monitoring]
+      summary: Get a monitoring target
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get a monitoring target. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateMonitoringTarget
+      tags: [Monitoring]
+      summary: Update a monitoring target
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Update a monitoring target. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteMonitoringTarget
+      tags: [Monitoring]
+      summary: Delete a monitoring target
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '204':
+          description: Done.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/probes:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    get:
+      operationId: listProbes
+      tags: [Monitoring]
+      summary: List probes
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List probes. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createProbe
+      tags: [Monitoring]
+      summary: Create a probe
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '201':
+          description: Created. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/probes/{id}:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getProbe
+      tags: [Monitoring]
+      summary: Get a probe
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get a probe. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateProbe
+      tags: [Monitoring]
+      summary: Update a probe
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Update a probe. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteProbe
+      tags: [Monitoring]
+      summary: Delete a probe
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '204':
+          description: Done.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/probes/{id}/effective:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getProbeEffectiveSettings
+      tags: [Monitoring]
+      summary: Get the effective settings of a probe
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get the effective settings of a probe. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/probes/{id}/state:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getProbeState
+      tags: [Monitoring]
+      summary: Get the current state of a probe
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get the current state of a probe. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/probes/{id}/results:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listProbeResults
+      tags: [Monitoring]
+      summary: List the results of a probe
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List the results of a probe. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/probes/{id}/state-changes:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listProbeStateChanges
+      tags: [Monitoring]
+      summary: List the state changes of a probe
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List the state changes of a probe. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/probes/{id}/availability:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getProbeAvailability
+      tags: [Monitoring]
+      summary: Get the availability of a probe
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get the availability of a probe. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/probe-types:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    get:
+      operationId: listProbeTypes
+      tags: [Monitoring]
+      summary: List the probe types of the registry
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List the probe types of the registry. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/probe-types/{key}:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    parameters:
+      - name: key
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getProbeType
+      tags: [Monitoring]
+      summary: Get a probe type of the registry
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get a probe type of the registry. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/profiles:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    get:
+      operationId: listMonitoringProfiles
+      tags: [Monitoring]
+      summary: List monitoring profiles
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List monitoring profiles. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createMonitoringProfile
+      tags: [Monitoring]
+      summary: Create a monitoring profile
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '201':
+          description: Created. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/profiles/{id}:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getMonitoringProfile
+      tags: [Monitoring]
+      summary: Get a monitoring profile
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get a monitoring profile. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateMonitoringProfile
+      tags: [Monitoring]
+      summary: Update a monitoring profile
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Update a monitoring profile. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteMonitoringProfile
+      tags: [Monitoring]
+      summary: Delete a monitoring profile
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '204':
+          description: Done.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/groups:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    get:
+      operationId: listMonitoringGroups
+      tags: [Monitoring]
+      summary: List monitoring groups
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List monitoring groups. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createMonitoringGroup
+      tags: [Monitoring]
+      summary: Create a monitoring group
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '201':
+          description: Created. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/groups/{id}:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getMonitoringGroup
+      tags: [Monitoring]
+      summary: Get a monitoring group
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get a monitoring group. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateMonitoringGroup
+      tags: [Monitoring]
+      summary: Update a monitoring group
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Update a monitoring group. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteMonitoringGroup
+      tags: [Monitoring]
+      summary: Delete a monitoring group
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '204':
+          description: Done.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/events:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    get:
+      operationId: listMonitoringEvents
+      tags: [Monitoring]
+      summary: List monitoring events
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List monitoring events. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/alarms:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    get:
+      operationId: listAlarms
+      tags: [Monitoring]
+      summary: List alarms
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List alarms. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/alarms/{id}:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getAlarm
+      tags: [Monitoring]
+      summary: Get an alarm
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get an alarm. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/alarms/{id}/ack:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: acknowledgeAlarm
+      tags: [Monitoring]
+      summary: Acknowledge an alarm
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Acknowledge an alarm. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/alarms/{id}/unack:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: unacknowledgeAlarm
+      tags: [Monitoring]
+      summary: Withdraw the acknowledgement of an alarm
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Withdraw the acknowledgement of an alarm. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/incidents:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    get:
+      operationId: listIncidents
+      tags: [Monitoring]
+      summary: List incidents
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List incidents. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/incidents/{id}:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getIncident
+      tags: [Monitoring]
+      summary: Get an incident
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get an incident. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/incidents/{id}/recommendation:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getIncidentRecommendation
+      tags: [Monitoring]
+      summary: Get the recommendation of an incident
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get the recommendation of an incident. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/incidents/{id}/ack:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: acknowledgeIncident
+      tags: [Monitoring]
+      summary: Acknowledge an incident
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Acknowledge an incident. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/incidents/{id}/root:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: setIncidentRoot
+      tags: [Monitoring]
+      summary: Set the root alarm of an incident
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Set the root alarm of an incident. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/incidents/{id}/ticket:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: createIncidentTicket
+      tags: [Monitoring]
+      summary: Open a ticket for an incident
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Open a ticket for an incident. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/alarm-settings:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    get:
+      operationId: getAlarmSettings
+      tags: [Monitoring]
+      summary: Get the alarm settings of the organization
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get the alarm settings of the organization. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    put:
+      operationId: replaceAlarmSettings
+      tags: [Monitoring]
+      summary: Replace the alarm settings of the organization
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Replace the alarm settings of the organization. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/alarm-playbooks:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    get:
+      operationId: listAlarmPlaybooks
+      tags: [Monitoring]
+      summary: List alarm playbooks
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List alarm playbooks. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/alarm-playbooks/{cause_class}:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    parameters:
+      - name: cause_class
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getAlarmPlaybook
+      tags: [Monitoring]
+      summary: Get the playbook of a cause class
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get the playbook of a cause class. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    put:
+      operationId: replaceAlarmPlaybook
+      tags: [Monitoring]
+      summary: Replace the playbook of a cause class
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Replace the playbook of a cause class. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteAlarmPlaybook
+      tags: [Monitoring]
+      summary: Delete the playbook of a cause class
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '204':
+          description: Done.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/sla/targets:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    get:
+      operationId: listAvailabilityTargets
+      tags: [Monitoring]
+      summary: List availability targets
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List availability targets. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createAvailabilityTarget
+      tags: [Monitoring]
+      summary: Create a availability target
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '201':
+          description: Created. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/sla/targets/{id}:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getAvailabilityTarget
+      tags: [Monitoring]
+      summary: Get a availability target
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get a availability target. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateAvailabilityTarget
+      tags: [Monitoring]
+      summary: Update a availability target
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Update a availability target. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteAvailabilityTarget
+      tags: [Monitoring]
+      summary: Delete a availability target
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '204':
+          description: Done.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/sla/reports:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    get:
+      operationId: listAvailabilityReports
+      tags: [Monitoring]
+      summary: List availability reports
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List availability reports. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/forecasts:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    get:
+      operationId: listCapacityForecasts
+      tags: [Monitoring]
+      summary: List capacity forecasts
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List capacity forecasts. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/forecasts/{id}:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getCapacityForecast
+      tags: [Monitoring]
+      summary: Get a capacity forecast
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get a capacity forecast. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/collector-groups:
+    x-phase: P3
+    x-status: planned
+    get:
+      operationId: listCollectorGroups
+      tags: [Collectors]
+      summary: List collector groups
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List collector groups. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createCollectorGroup
+      tags: [Collectors]
+      summary: Create a collector group
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '201':
+          description: Created. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/collector-groups/{id}:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getCollectorGroup
+      tags: [Collectors]
+      summary: Get a collector group
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get a collector group. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateCollectorGroup
+      tags: [Collectors]
+      summary: Update a collector group
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Update a collector group. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteCollectorGroup
+      tags: [Collectors]
+      summary: Delete a collector group
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '204':
+          description: Done.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/cis/{id}/availability:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getCIAvailability
+      tags: [Monitoring]
+      summary: Get the availability of a CI
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get the availability of a CI. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/cis/{id}/configs:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listCIConfigs
+      tags: [Monitoring]
+      summary: List the configuration versions of a CI
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List the configuration versions of a CI. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/credential-bindings:
+    x-phase: P3
+    x-status: planned
+    get:
+      operationId: listCredentialBindings
+      tags: [Credentials]
+      summary: List credential bindings
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List credential bindings. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createCredentialBinding
+      tags: [Credentials]
+      summary: Create a credential binding
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '201':
+          description: Created. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/credential-bindings/{id}:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getCredentialBinding
+      tags: [Credentials]
+      summary: Get a credential binding
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get a credential binding. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateCredentialBinding
+      tags: [Credentials]
+      summary: Update a credential binding
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Update a credential binding. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteCredentialBinding
+      tags: [Credentials]
+      summary: Delete a credential binding
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '204':
+          description: Done.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/vault-connections:
+    x-phase: P3
+    x-status: planned
+    get:
+      operationId: listVaultConnections
+      tags: [Credentials]
+      summary: List vault connections
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List vault connections. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createVaultConnection
+      tags: [Credentials]
+      summary: Create a vault connection
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '201':
+          description: Created. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/vault-connections/{id}:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getVaultConnection
+      tags: [Credentials]
+      summary: Get a vault connection
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get a vault connection. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateVaultConnection
+      tags: [Credentials]
+      summary: Update a vault connection
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Update a vault connection. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteVaultConnection
+      tags: [Credentials]
+      summary: Delete a vault connection
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '204':
+          description: Done.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/vault-connections/{id}/test:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: testVaultConnection
+      tags: [Credentials]
+      summary: Test a vault connection
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Test a vault connection. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/cis/{id}/credentials:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listCICredentials
+      tags: [Credentials]
+      summary: List the credential bindings of a CI
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: List the credential bindings of a CI. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    put:
+      operationId: replaceCICredentials
+      tags: [Credentials]
+      summary: Replace the credential bindings of a CI
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Replace the credential bindings of a CI. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/cis/{id}/credentials/effective:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getCIEffectiveCredentials
+      tags: [Credentials]
+      summary: Get the effective credentials of a CI (references only)
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get the effective credentials of a CI (references only). The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/ipam/imports:
+    x-phase: P3
+    x-status: planned
+    post:
+      operationId: createIPAMImport
+      tags: [IPAM]
+      summary: Start an IPAM import
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '202':
+          description: Accepted as a job. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/ipam/ptr-mismatches:
+    x-phase: P3
+    x-status: planned
+    get:
+      operationId: listPTRMismatches
+      tags: [IPAM]
+      summary: List PTR mismatches
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List PTR mismatches. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/ipam-sections:
+    x-phase: P3
+    x-status: planned
+    get:
+      operationId: listIPAMSections
+      tags: [IPAM]
+      summary: List IPAM sections
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List IPAM sections. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createIpamSection
+      tags: [IPAM]
+      summary: Create a IPAM section
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '201':
+          description: Created. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/ipam-sections/{id}:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getIpamSection
+      tags: [IPAM]
+      summary: Get a IPAM section
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get a IPAM section. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateIpamSection
+      tags: [IPAM]
+      summary: Update a IPAM section
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Update a IPAM section. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteIpamSection
+      tags: [IPAM]
+      summary: Delete a IPAM section
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '204':
+          description: Done.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/ipam-sections/{id}/permissions:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listIPAMSectionPermissions
+      tags: [IPAM]
+      summary: List the permissions of an IPAM section
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List the permissions of an IPAM section. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createIPAMSectionPermission
+      tags: [IPAM]
+      summary: Grant a permission on an IPAM section
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '201':
+          description: Created. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/ipam-sections/{id}/permissions/{permission_id}:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - name: permission_id
+        in: path
+        required: true
+        schema:
+          type: string
+    patch:
+      operationId: updateIPAMSectionPermission
+      tags: [IPAM]
+      summary: Update a permission on an IPAM section
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Update a permission on an IPAM section. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteIPAMSectionPermission
+      tags: [IPAM]
+      summary: Revoke a permission on an IPAM section
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '204':
+          description: Done.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/asns:
+    x-phase: P3
+    x-status: planned
+    get:
+      operationId: listASNs
+      tags: [IPAM]
+      summary: List ASNs
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List ASNs. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createAsn
+      tags: [IPAM]
+      summary: Create a ASN
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '201':
+          description: Created. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/asns/{id}:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getAsn
+      tags: [IPAM]
+      summary: Get a ASN
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get a ASN. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateAsn
+      tags: [IPAM]
+      summary: Update a ASN
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Update a ASN. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteAsn
+      tags: [IPAM]
+      summary: Delete a ASN
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '204':
+          description: Done.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/asns/{id}/prefixes:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listASNPrefixes
+      tags: [IPAM]
+      summary: List the prefixes of an ASN
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List the prefixes of an ASN. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/asns/{id}/rpki:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getASNRPKIState
+      tags: [IPAM]
+      summary: Get the RPKI state of an ASN
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get the RPKI state of an ASN. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/asn-ranges:
+    x-phase: P3
+    x-status: planned
+    get:
+      operationId: listASNRanges
+      tags: [IPAM]
+      summary: List ASN ranges
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List ASN ranges. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createAsnRange
+      tags: [IPAM]
+      summary: Create a ASN range
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '201':
+          description: Created. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/asn-ranges/{id}:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getAsnRange
+      tags: [IPAM]
+      summary: Get a ASN range
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get a ASN range. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateAsnRange
+      tags: [IPAM]
+      summary: Update a ASN range
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Update a ASN range. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteAsnRange
+      tags: [IPAM]
+      summary: Delete a ASN range
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '204':
+          description: Done.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/asn-ranges/{id}/usage:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getASNRangeUsage
+      tags: [IPAM]
+      summary: Get the usage of an ASN range
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get the usage of an ASN range. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/asn-ranges/{id}/allocate:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: allocateASN
+      tags: [IPAM]
+      summary: Allocate the next free ASN of a range
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Allocate the next free ASN of a range. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/bgp-peerings:
+    x-phase: P3
+    x-status: planned
+    get:
+      operationId: listBGPPeerings
+      tags: [IPAM]
+      summary: List BGP peerings
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List BGP peerings. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createBgpPeering
+      tags: [IPAM]
+      summary: Create a BGP peering
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '201':
+          description: Created. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/bgp-peerings/{id}:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getBgpPeering
+      tags: [IPAM]
+      summary: Get a BGP peering
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get a BGP peering. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateBgpPeering
+      tags: [IPAM]
+      summary: Update a BGP peering
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Update a BGP peering. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteBgpPeering
+      tags: [IPAM]
+      summary: Delete a BGP peering
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '204':
+          description: Done.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/nat-translations:
+    x-phase: P3
+    x-status: planned
+    get:
+      operationId: listNATTranslations
+      tags: [IPAM]
+      summary: List NAT translations
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List NAT translations. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createNatTranslation
+      tags: [IPAM]
+      summary: Create a NAT translation
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '201':
+          description: Created. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/nat-translations/{id}:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getNatTranslation
+      tags: [IPAM]
+      summary: Get a NAT translation
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get a NAT translation. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateNatTranslation
+      tags: [IPAM]
+      summary: Update a NAT translation
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Update a NAT translation. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteNatTranslation
+      tags: [IPAM]
+      summary: Delete a NAT translation
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '204':
+          description: Done.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/nameserver-sets:
+    x-phase: P3
+    x-status: planned
+    get:
+      operationId: listNameserverSets
+      tags: [IPAM]
+      summary: List nameserver sets
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List nameserver sets. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createNameserverSet
+      tags: [IPAM]
+      summary: Create a nameserver set
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '201':
+          description: Created. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/nameserver-sets/{id}:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getNameserverSet
+      tags: [IPAM]
+      summary: Get a nameserver set
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get a nameserver set. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateNameserverSet
+      tags: [IPAM]
+      summary: Update a nameserver set
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Update a nameserver set. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteNameserverSet
+      tags: [IPAM]
+      summary: Delete a nameserver set
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '204':
+          description: Done.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/vlan-domains:
+    x-phase: P3
+    x-status: planned
+    get:
+      operationId: listVLANDomains
+      tags: [IPAM]
+      summary: List VLAN domains
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List VLAN domains. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createVlanDomain
+      tags: [IPAM]
+      summary: Create a VLAN domain
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '201':
+          description: Created. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/vlan-domains/{id}:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getVlanDomain
+      tags: [IPAM]
+      summary: Get a VLAN domain
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get a VLAN domain. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateVlanDomain
+      tags: [IPAM]
+      summary: Update a VLAN domain
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Update a VLAN domain. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteVlanDomain
+      tags: [IPAM]
+      summary: Delete a VLAN domain
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '204':
+          description: Done.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/vlan-domains/{id}/vlans:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listVLANDomainVLANs
+      tags: [IPAM]
+      summary: List the VLANs of a VLAN domain
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List the VLANs of a VLAN domain. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/cis/{id}/addresses:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listCIAddresses
+      tags: [IPAM]
+      summary: List the IP addresses of a CI
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List the IP addresses of a CI. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/subnets/{id}/scan:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getSubnetScan
+      tags: [IPAM]
+      summary: Get the scan settings and last result of a subnet
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get the scan settings and last result of a subnet. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/subnets/{id}/rpki:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getSubnetRPKIState
+      tags: [IPAM]
+      summary: Get the RPKI state of a subnet
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get the RPKI state of a subnet. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/admp/accounts:
+    x-phase: P3
+    x-status: planned
+    get:
+      operationId: listADMPAccounts
+      tags: [ADMP]
+      summary: List ADMP accounts
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List ADMP accounts. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createAdmpAccount
+      tags: [ADMP]
+      summary: Create a ADMP account
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '201':
+          description: Created. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/admp/accounts/{id}:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getAdmpAccount
+      tags: [ADMP]
+      summary: Get a ADMP account
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get a ADMP account. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateAdmpAccount
+      tags: [ADMP]
+      summary: Update a ADMP account
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Update a ADMP account. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteAdmpAccount
+      tags: [ADMP]
+      summary: Delete a ADMP account
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '204':
+          description: Done.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/admp/connections:
+    x-phase: P3
+    x-status: planned
+    get:
+      operationId: listADMPConnections
+      tags: [ADMP]
+      summary: List ADMP connections
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List ADMP connections. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/admp/connections/{id}:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getADMPConnection
+      tags: [ADMP]
+      summary: Get an ADMP connection
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get an ADMP connection. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/admp/connections/{id}/holder:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getADMPConnectionHolder
+      tags: [ADMP]
+      summary: Get the holder of an ADMP connection
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get the holder of an ADMP connection. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/cis/{id}/admp-connections:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listCIADMPConnections
+      tags: [ADMP]
+      summary: List the ADMP connections of a CI
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List the ADMP connections of a CI. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/network-interfaces/{id}/admp:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getNetworkInterfaceADMP
+      tags: [ADMP]
+      summary: Get the ADMP service of a port
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get the ADMP service of a port. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/escalation-policies:
+    x-phase: P3
+    x-status: planned
+    get:
+      operationId: listEscalationPolicies
+      tags: [Notifications]
+      summary: List escalation policies
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List escalation policies. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createEscalationPolicy
+      tags: [Notifications]
+      summary: Create a escalation policy
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '201':
+          description: Created. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/escalation-policies/{id}:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getEscalationPolicy
+      tags: [Notifications]
+      summary: Get a escalation policy
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get a escalation policy. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateEscalationPolicy
+      tags: [Notifications]
+      summary: Update a escalation policy
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Update a escalation policy. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: deleteEscalationPolicy
+      tags: [Notifications]
+      summary: Delete a escalation policy
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '204':
+          description: Done.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/notification-escalations:
+    x-phase: P3
+    x-status: planned
+    get:
+      operationId: listNotificationEscalations
+      tags: [Notifications]
+      summary: List notification escalations
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List notification escalations. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/notification-escalations/{id}:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getNotificationEscalation
+      tags: [Notifications]
+      summary: Get a notification escalation
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get a notification escalation. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/notification-escalations/{id}/acknowledge:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: acknowledgeNotificationEscalation
+      tags: [Notifications]
+      summary: Acknowledge a notification escalation
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Acknowledge a notification escalation. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/notification-callbacks/{org_id}/{channel_id}:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - name: org_id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: channel_id
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: receiveNotificationCallback
+      tags: [Notifications]
+      summary: Receive a delivery callback of an SMS or pager provider
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      security: []
+      responses:
+        '204':
+          description: Done.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/org/exports:
+    x-phase: P3
+    x-status: planned
+    get:
+      operationId: listOrganizationExports
+      tags: [Privacy]
+      summary: List the full exports of the organization
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List the full exports of the organization. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: createOrganizationExport
+      tags: [Privacy]
+      summary: Start a full export of the organization
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '202':
+          description: Accepted as a job. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/org/exports/{id}:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getOrganizationExport
+      tags: [Privacy]
+      summary: Get a full export of the organization
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get a full export of the organization. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/org/exports/{id}/download:
+    x-phase: P3
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: downloadOrganizationExport
+      tags: [Privacy]
+      summary: Download a full export of the organization
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Download a full export of the organization. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/org/deletion:
+    x-phase: P3
+    x-status: planned
+    get:
+      operationId: getOrganizationDeletion
+      tags: [Privacy]
+      summary: Get the deletion request of the organization
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '200':
+          description: Get the deletion request of the organization. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: requestOrganizationDeletion
+      tags: [Privacy]
+      summary: Request the deletion of the organization
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '202':
+          description: Accepted as a job. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: cancelOrganizationDeletion
+      tags: [Privacy]
+      summary: Withdraw the deletion request of the organization
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      responses:
+        '204':
+          description: Done.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/admin/orgs/{id}/plan:
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    put:
+      operationId: changeOrganizationPlan
+      tags: [Operator]
+      summary: Change the plan of an organization
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      security:
+        - OperatorAuth: []
+        - BreakGlassAuth: []
+      responses:
+        '200':
+          description: Change the plan of an organization. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/admin/orgs/{id}/addons:
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listOrganizationAddons
+      tags: [Operator]
+      summary: List the add-ons of an organization
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      security:
+        - OperatorAuth: []
+        - BreakGlassAuth: []
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: List the add-ons of an organization. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/admin/orgs/{id}/addons/{key}:
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - name: key
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: bookOrganizationAddon
+      tags: [Operator]
+      summary: Book an add-on for an organization
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      security:
+        - OperatorAuth: []
+        - BreakGlassAuth: []
+      responses:
+        '201':
+          description: Created. The schema comes with the implementing work package.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: cancelOrganizationAddon
+      tags: [Operator]
+      summary: Cancel an add-on of an organization
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      security:
+        - OperatorAuth: []
+        - BreakGlassAuth: []
+      responses:
+        '204':
+          description: Done.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/admin/orgs/{id}/usage:
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getOrganizationUsage
+      tags: [Operator]
+      summary: Get the quota usage of an organization
+      description: >-
+        Planned (E-160, WP-864). The work package of the Phase-3 plan
+        that implements the path replaces this scaffold.
+      security:
+        - OperatorAuth: []
+        - BreakGlassAuth: []
+      responses:
+        '200':
+          description: Get the quota usage of an organization. The schema comes with the implementing work package.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
 components:
   securitySchemes:
     BearerAuth:
