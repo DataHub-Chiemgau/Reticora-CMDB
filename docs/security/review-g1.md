@@ -289,18 +289,24 @@ Commits nach dem Tag. Ein roter Lauf steht hier mit Ursache und Folge-WP.
 Die übrigen Läufe stehen in `docs/acceptance/g1-gate.md` (Abschnitt „Läufe
 auf dem Release-Kandidaten“) und `docs/acceptance/g1-installation.md`.
 
+Mit der Gate-Entscheidung des Auftraggebers vom 2026-11-10
+(`docs/acceptance/g1-gate.md`, Abschnitt „Freigabe nach E-76“) ist
+Release-Kandidat der Commit `536e3ab8` (`main` nach PR #154; letzte
+Produktänderung `b5bf2342`, derselbe Produktstand wie `e17954ca`). Ein Tag
+ist nicht gesetzt; `release.yml` läuft nur auf Tags `v*`.
+
 | Punkt | Wert |
 |---|---|
-| Tag | `v1.0.0-rc.<n>`: RC-Lauf ausstehend (WP-595) |
-| Commit | RC-Lauf ausstehend (WP-595) |
+| Tag | `v1.0.0-rc.<n>`: RC-Lauf ausstehend (WP-595); kein Tag gesetzt |
+| Commit | `536e3ab8` (`536e3ab812b158e124b87c71f776096cb775a7df`) |
 
 | Workflow | Jobs | Lauf | Ergebnis |
 |---|---|---|---|
-| `ci.yml` | `govulncheck` (backend, collector, edgecore) | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
-| `ci.yml` | `npm-audit` | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
-| `ci.yml` | `image-scan` (vier Images) | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
-| `ci.yml` | `traceability`, `gate` und alle übrigen Jobs (Regression) | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
-| `release.yml` | Pre-Release mit SBOMs, Sigstore-Bundles, Image-Signaturen, SBOM-Attestierungen und dem `cosign_real`-Test | RC-Lauf ausstehend (WP-595) | RC-Lauf ausstehend (WP-595) |
+| `ci.yml` | `govulncheck` (backend, collector, edgecore) | 42712217817 (Push auf `main`, `536e3ab8`) | grün, alle drei Jobs |
+| `ci.yml` | `npm-audit` | 42712217817 | grün |
+| `ci.yml` | `image-scan` (vier Images) | 42712217817 | grün: backend, collector, frontend, postgres; dazu `image-scan-thirdparty` (clamd) grün |
+| `ci.yml` | `traceability`, `gate` und alle übrigen Jobs (Regression) | 42712217817 | grün, 30 von 30 Jobs (u. a. `backend`, `frontend`, `e2e` in sechs Browserprojekten, `migrations`, `auditdefect`, `cosign-verify`) |
+| `release.yml` | Pre-Release mit SBOMs, Sigstore-Bundles, Image-Signaturen, SBOM-Attestierungen und dem `cosign_real`-Test | RC-Lauf ausstehend (WP-595); kein Lauf, weil kein Tag `v*` gesetzt ist | RC-Lauf ausstehend (WP-595) |
 
 ## ASVS Level 2 – Abgleich je Kapitel
 
