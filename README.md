@@ -311,11 +311,12 @@ Feature-Keys mit Limits pro Mandant auf einer Codebasis, serverseitig in REST un
 
 | Paket | Umfang (Auszug) | max_cis / Collectors / Nutzer / Beta-Preis / Final-Preis |
 |---|---|---|
-| **Essential** | CMDB-Kern, Discovery, Topologie, Rack, Export, Webhooks, API; ab P2 Assets, Dokumente, Import, Ticketing Essential | 500 / 2 / 5 / 29€-290€ / 49€-490€ |
-| **Standard** | + Ticketing Standard, Signatur, Lager, Inventur, Barcode, DATEV | 2.500 / 5 / 25 / 69€-690€ / 149€-1490€ |
-| **Pro** | + SMS/Pager, Workflows, Compliance-Findings, Ticketing Pro, Disposition, erweitertes Audit | 10.000 / 20 / 100 / 149€-1490€ / 299€-2990€ |
-| **Enterprise** | + Monitoring, Reseller, RFID, GIS, Endpoint-Agent, Schlüssel, Schulung, Dedicated Instance | 50.000 / ∞ / ∞ / NONE / ab 990€ |
+| **Essential** | CMDB-Kern, Discovery, Topologie, Rack, Export, Webhooks, API; ab P2 Assets, Dokumente, Import, Ticketing Essential | 500 / 2 / 5 / 19€-190€ / 29€-290€ |
+| **Standard** | + Ticketing Standard, Signatur, Lager, Inventur, Barcode, DATEV | 2.500 / 5 / 25 / 59€-590€ / 119€-1190€ |
+| **Pro** | + SMS/Pager, Monitoring, Workflows, Compliance-Findings, Ticketing Pro, Disposition, erweitertes Audit | 10.000 / 20 / 100 / 149€-1490€ / 299€-2990€ |
+| **Enterprise** | + Reseller, RFID, GIS, Endpoint-Agent, Schlüssel, Schulung, Dedicated Instance | 50.000 / ∞ / ∞ / NONE / ab 990€ |
 | **Add-ons** | IGA, KI – zu jedem Paket zubuchbar | – |
+| **Extra-Kosten** | pro zusätzlicher CI 0,05€ | pro Monitoring Service 0,03€ |
 
 Paketmatrix und Limits sind noch zu bestätigen.
 
