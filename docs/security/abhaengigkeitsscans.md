@@ -47,14 +47,14 @@ in `security/scan-exceptions-thirdparty.txt` (E-246): gleiches Format und
 gleiche SLA wie `security/scan-exceptions.txt` (Critical 7, High 30 Tage ab
 dem ersten Scan), geprüft von `scripts/ci/check-scan-exceptions.sh`. Nur
 `image-scan-thirdparty` liest diese Datei, so verdeckt ein Hersteller-Befund
-keine ID in den Scans der eigenen Images. Stand 2026-11-10: 90 IDs (8
-Critical, Ablauf 2026-11-17); Behebung nach E-246, Risikoakzeptanz für MinIO
-und OpenSearch offen (A-85).
+keine ID in den Scans der eigenen Images. Stand 2026-11-10: 70 IDs (6
+Critical, Ablauf 2026-11-17) nach WP-1178 (Backup-CronJob auf eigenem Image);
+Risikoakzeptanz für MinIO, OpenSearch und keycloak-db offen (A-85).
 
 | Image | Ort | Scan |
 |---|---|---|
 | `clamav/clamav:1.5.4@sha256:6d87c712e3391e13c1ba6e05dfb074d4b1ddb5a6834b23bb9da990d2a4ef042a` | `deploy/docker-compose/docker-compose.yml` (`clamd`), `deploy/k8s/base/components/clamav/clamd.yaml`, Dev-Stack `docker-compose.yml` | `image-scan-thirdparty` (`clamd`) |
-| `timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731` | Basis von `reticora-postgres`; logischer Backup-CronJob in `deploy/k8s/base/components/backup/cronjob.yaml` | `image-scan-thirdparty` (`timescaledb-backup`); als Basis zusätzlich über `image-scan` (`postgres`), dieselbe Referenz (E-96, `timescale_image_refs`) |
+| `timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731` | Basis von `reticora-postgres` (der logische Backup-CronJob nutzt seit WP-1178 das eigene Image `reticora-cmdb/postgres`) | über `image-scan` (`postgres`), dieselbe Referenz (E-96, `timescale_image_refs`) |
 | `nats:2.14.9-alpine@sha256:c9706755679d8bcf05b4ce275fdd2ac8890058b1535881208a65b3cd613f00bd` | Compose (`nats`, `nats-edge`), `deploy/k8s/base/components/nats-edge/nats-edge.yaml` | `image-scan-thirdparty` (`nats`) |
 | `redis:7.4.12-alpine@sha256:7b1753b4c5ad8458906c272a8132b8c15f5557b000379eb115fb239706a384b7` | Compose (`redis`) | `image-scan-thirdparty` (`redis`) |
 | `pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372` | Compose (`minio`) | `image-scan-thirdparty` (`minio`) |

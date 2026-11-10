@@ -333,7 +333,7 @@ HISTORY = ("audit/", "docs/audit/", "docs/plan/", "docs/acceptance/")
 SELF = "tests/ci-config.test.sh"
 # Where the CI database, the deploy and dev stacks and the docs name the image.
 REQUIRED = {".github/workflows/ci.yml", ".github/workflows/load.yml",
-            ".github/workflows/restore-test.yml", "deploy/k8s/base/components/backup/cronjob.yaml",
+            ".github/workflows/restore-test.yml",
             "docker-compose.yml", "deploy/docker-compose/postgres/Dockerfile", "docs/README.md",
             "docs/security/abhaengigkeitsscans.md", "docs/decisions/0001-timescale-rls.md"}
 df = open(os.path.join(root, "deploy/docker-compose/postgres/Dockerfile")).read()

@@ -6,21 +6,19 @@
 # ID in the scans of the own release images, govulncheck or npm audit.
 #
 # The findings lie in the vendor images (Go and Java dependencies and OS
-# packages of minio, opensearch, keycloak, certbot, the postgres image of
-# keycloak-db and the TimescaleDB image of the logical backup); none of these
-# images has a newer release (2026-11-10). since: is the first scan of the
+# packages of minio, opensearch, keycloak, certbot and the postgres image of
+# keycloak-db; the logical backup runs on the own image since WP-1178);
+# none of these images has a newer release (2026-11-10). since: is the first scan of the
 # image (WP-873), exp: the SLA limit of SEC-11 (critical 7, high 30 days).
 # The resolution per image is E-246 (docs/plan/phase3/entscheidungen.md).
 
 # critical
-CVE-2025-68121 exp:2026-11-17 since:2026-11-10 sev:critical # keycloak-db: stdlib; timescaledb-backup: stdlib
+CVE-2025-68121 exp:2026-11-17 since:2026-11-10 sev:critical # keycloak-db: stdlib
 CVE-2026-77405 exp:2026-11-17 since:2026-11-10 sev:critical # minio: github.com/rabbitmq/amqp091-go
 CVE-2026-77408 exp:2026-11-17 since:2026-11-10 sev:critical # minio: github.com/rabbitmq/amqp091-go
 CVE-2026-77411 exp:2026-11-17 since:2026-11-10 sev:critical # minio: github.com/rabbitmq/amqp091-go
 CVE-2025-14813 exp:2026-11-17 since:2026-11-10 sev:critical # opensearch: org.bouncycastle:bcprov-jdk15to18
 CVE-2026-8763 exp:2026-11-17 since:2026-11-10 sev:critical # opensearch: org.bouncycastle:bcprov-jdk15to18
-CVE-2026-33815 exp:2026-11-17 since:2026-11-10 sev:critical # timescaledb-backup: github.com/jackc/pgx/v5
-CVE-2026-33816 exp:2026-11-17 since:2026-11-10 sev:critical # timescaledb-backup: github.com/jackc/pgx/v5
 # high
 CVE-2025-47273 exp:2026-12-10 since:2026-11-10 sev:high # certbot: setuptools
 CVE-2026-114613 exp:2026-12-10 since:2026-11-10 sev:high # certbot: msgpack
@@ -28,36 +26,36 @@ CVE-2026-97687 exp:2026-12-10 since:2026-11-10 sev:high # certbot: urllib3
 CVE-2026-97689 exp:2026-12-10 since:2026-11-10 sev:high # certbot: urllib3
 GHSA-6v7p-g79w-8964 exp:2026-12-10 since:2026-11-10 sev:high # certbot: msgpack
 CVE-2026-102554 exp:2026-12-10 since:2026-11-10 sev:high # keycloak: com.google.guava:guava; opensearch: com.google.guava:guava
-CVE-2025-61726 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; timescaledb-backup: stdlib
-CVE-2025-61729 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; timescaledb-backup: stdlib
-CVE-2026-111943 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib; timescaledb-backup: stdlib
-CVE-2026-25679 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; timescaledb-backup: stdlib
-CVE-2026-27145 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; timescaledb-backup: stdlib
-CVE-2026-32280 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; timescaledb-backup: stdlib
-CVE-2026-32281 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; timescaledb-backup: stdlib
-CVE-2026-32283 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; timescaledb-backup: stdlib
-CVE-2026-33811 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; timescaledb-backup: stdlib
-CVE-2026-33814 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; timescaledb-backup: stdlib
-CVE-2026-33818 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib; timescaledb-backup: stdlib
-CVE-2026-39820 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; timescaledb-backup: stdlib
-CVE-2026-39821 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib; timescaledb-backup: stdlib
-CVE-2026-39822 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; timescaledb-backup: stdlib
-CVE-2026-39836 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; timescaledb-backup: stdlib
-CVE-2026-42499 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; timescaledb-backup: stdlib
-CVE-2026-42504 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; timescaledb-backup: stdlib
-CVE-2026-56853 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib; timescaledb-backup: stdlib
-CVE-2026-56858 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib; timescaledb-backup: stdlib
-CVE-2026-56859 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib; timescaledb-backup: stdlib
-CVE-2026-56860 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib; timescaledb-backup: stdlib
-CVE-2026-56862 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib; timescaledb-backup: stdlib
-CVE-2026-78667 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib; timescaledb-backup: stdlib
-CVE-2026-78669 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: golang.org/x/net, stdlib; timescaledb-backup: stdlib
-CVE-2026-97031 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib; timescaledb-backup: stdlib
+CVE-2025-61726 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
+CVE-2025-61729 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
+CVE-2026-111943 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib
+CVE-2026-25679 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
+CVE-2026-27145 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
+CVE-2026-32280 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
+CVE-2026-32281 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
+CVE-2026-32283 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
+CVE-2026-33811 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
+CVE-2026-33814 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
+CVE-2026-33818 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib
+CVE-2026-39820 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
+CVE-2026-39821 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib
+CVE-2026-39822 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
+CVE-2026-39836 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
+CVE-2026-42499 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
+CVE-2026-42504 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
+CVE-2026-56853 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib
+CVE-2026-56858 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib
+CVE-2026-56859 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib
+CVE-2026-56860 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib
+CVE-2026-56862 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib
+CVE-2026-78667 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib
+CVE-2026-78669 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: golang.org/x/net, stdlib
+CVE-2026-97031 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib
 CVE-2026-103111 exp:2026-12-10 since:2026-11-10 sev:high # minio: pcre2, pcre2-syntax
 CVE-2026-116587 exp:2026-12-10 since:2026-11-10 sev:high # minio: github.com/go-jose/go-jose/v4
-CVE-2026-46600 exp:2026-12-10 since:2026-11-10 sev:high # minio: stdlib; timescaledb-backup: stdlib
-CVE-2026-56851 exp:2026-12-10 since:2026-11-10 sev:high # minio: golang.org/x/text; timescaledb-backup: golang.org/x/text
-CVE-2026-56854 exp:2026-12-10 since:2026-11-10 sev:high # minio: golang.org/x/crypto; timescaledb-backup: golang.org/x/crypto
+CVE-2026-46600 exp:2026-12-10 since:2026-11-10 sev:high # minio: stdlib
+CVE-2026-56851 exp:2026-12-10 since:2026-11-10 sev:high # minio: golang.org/x/text
+CVE-2026-56854 exp:2026-12-10 since:2026-11-10 sev:high # minio: golang.org/x/crypto
 CVE-2026-77403 exp:2026-12-10 since:2026-11-10 sev:high # minio: github.com/rabbitmq/amqp091-go
 CVE-2026-77404 exp:2026-12-10 since:2026-11-10 sev:high # minio: github.com/rabbitmq/amqp091-go
 CVE-2026-77406 exp:2026-12-10 since:2026-11-10 sev:high # minio: github.com/rabbitmq/amqp091-go
@@ -86,21 +84,3 @@ CVE-2026-91776 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: com.faster
 CVE-2026-91777 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: com.fasterxml.jackson.core:jackson-databind
 CVE-2026-93451 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: org.xerial.snappy:snappy-java
 CVE-2026-95519 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: python3-rpm, rpm, rpm-build-libs, rpm-libs, rpm-sign-libs
-CVE-2025-22869 exp:2026-12-10 since:2026-11-10 sev:high # timescaledb-backup: golang.org/x/crypto
-CVE-2025-47913 exp:2026-12-10 since:2026-11-10 sev:high # timescaledb-backup: golang.org/x/crypto
-CVE-2026-107891 exp:2026-12-10 since:2026-11-10 sev:high # timescaledb-backup: musl, musl-utils
-CVE-2026-113351 exp:2026-12-10 since:2026-11-10 sev:high # timescaledb-backup: libexpat
-CVE-2026-115506 exp:2026-12-10 since:2026-11-10 sev:high # timescaledb-backup: libexpat
-CVE-2026-117610 exp:2026-12-10 since:2026-11-10 sev:high # timescaledb-backup: libexpat
-CVE-2026-118370 exp:2026-12-10 since:2026-11-10 sev:high # timescaledb-backup: libexpat
-CVE-2026-39828 exp:2026-12-10 since:2026-11-10 sev:high # timescaledb-backup: golang.org/x/crypto
-CVE-2026-39829 exp:2026-12-10 since:2026-11-10 sev:high # timescaledb-backup: golang.org/x/crypto
-CVE-2026-39830 exp:2026-12-10 since:2026-11-10 sev:high # timescaledb-backup: golang.org/x/crypto
-CVE-2026-39831 exp:2026-12-10 since:2026-11-10 sev:high # timescaledb-backup: golang.org/x/crypto
-CVE-2026-39832 exp:2026-12-10 since:2026-11-10 sev:high # timescaledb-backup: golang.org/x/crypto
-CVE-2026-39835 exp:2026-12-10 since:2026-11-10 sev:high # timescaledb-backup: golang.org/x/crypto
-CVE-2026-42508 exp:2026-12-10 since:2026-11-10 sev:high # timescaledb-backup: golang.org/x/crypto
-CVE-2026-46595 exp:2026-12-10 since:2026-11-10 sev:high # timescaledb-backup: golang.org/x/crypto
-CVE-2026-46597 exp:2026-12-10 since:2026-11-10 sev:high # timescaledb-backup: golang.org/x/crypto
-CVE-2026-56852 exp:2026-12-10 since:2026-11-10 sev:high # timescaledb-backup: golang.org/x/text
-CVE-2026-77214 exp:2026-12-10 since:2026-11-10 sev:high # timescaledb-backup: libexpat

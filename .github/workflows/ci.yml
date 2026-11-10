@@ -943,9 +943,6 @@ jobs:
           - image: minio
             compose_service: minio
             manifest: ""
-          - image: timescaledb-backup
-            compose_service: ""
-            manifest: deploy/k8s/base/components/backup/cronjob.yaml
     steps:
       - uses: actions/checkout@v4
 
