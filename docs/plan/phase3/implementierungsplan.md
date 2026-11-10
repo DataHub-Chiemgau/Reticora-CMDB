@@ -1104,7 +1104,7 @@ SEC-11;[Q];G3;tests/ci-config.test.sh;WP-873
 - [ ] **AK1** Suffixregel `{prefix: "/api/v1/tickets", suffix: "/attachments", features: [ticketing_essential, documents]}` in `featureRules`: ohne `documents` antwortet die Route 403 `feature-not-entitled`. `x-feature` des Pfads bleibt `ticketing_essential` (erstes Feature, Muster `/label`), `TestLateRoutesAreMarkedInSpecification` bleibt grün.
 - [ ] **AK2** Ist das Release-Modul `documents` abgeschaltet, erhält der Ticket-Handler kein Dokument-Repository und die Route antwortet 404 wie ein nicht registrierter Pfad (nicht 503).
 - [ ] **AK3** `returnTo` wird nur übernommen, wenn es mit genau einem `/` beginnt und weder `//` noch `\` enthält und sich mit `new URL(returnTo, location.origin)` auf den eigenen Ursprung auflöst; sonst `/dashboard`. Dieselbe Prüfung gilt beim Lesen der Transaktion im Callback.
-- [ ] **AK4** `react-router-dom` (und damit `react-router`) steht auf der ersten Version, für die `npm audit --omit=dev` keine der beiden Advisories meldet; `package-lock.json` ist nachgeführt, alle Frontend-Tests grün.
+- [ ] **AK4** `react-router-dom` (und damit `react-router`) steht auf der ersten Version, für die `npm audit --omit=dev` keine der beiden Advisories meldet; `package-lock.json` ist nachgeführt, alle Frontend-Tests grün. Nach [E-245](entscheidungen.md#e-245): GHSA-wrjc-x8rr-h8h6 hat in Version 6 keinen Fix; `react-router-dom` steht auf 6.30.6 (schließt GHSA-jjmj-jmhj-qwj2), das Restrisiko steht in `review-phase2.md`.
 - [ ] **AK5** `docs/README.md` nennt die Regel in der Zuordnungstabelle der Features; `docs/security/review-phase2.md` führt SR-61 und SR-62 als behoben.
 
 **Dateien (12 Einträge):**

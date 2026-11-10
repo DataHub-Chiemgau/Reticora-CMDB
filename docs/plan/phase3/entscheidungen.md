@@ -4,7 +4,7 @@ Stand: 2026-11-09 (Grundlage main `6d019370`; Anforderungen des Auftraggebers vo
 
 **Geltung der früheren Entscheidungen:** Alle Entscheidungen der Phase 1, des Korrekturplans und der Phase 2 sind entschieden (Beschluss des Auftraggebers vom 2026-10-28) und gelten in Phase 3 unverändert weiter. Diese Datei ändert keine von ihnen. Wo eine Phase-3-Entscheidung eine frühere ergänzt oder einschränkt (zum Beispiel [E-34](../entscheidungen.md#e-34) durch [E-151](#e-151) und [E-153](#e-153), [E-44](../phase2/entscheidungen.md#e-44) durch [E-153](#e-153) und [E-157](#e-157)), nennt sie die frühere ausdrücklich; ohne diese Nennung gilt die frühere Festlegung. Zitiert wird mit relativem Link, der Korrekturplan mit dem Zusatz „(Korrekturplan)“, zum Beispiel [E-59](../g1-korrektur/entscheidungen.md#e-59) (Korrekturplan). Alle Aufgaben A-01 bis A-53 sind erledigt (A-28 am 2026-11-09 mit WP-832).
 
-**Nummern:** E-Nummern sind über alle vier Entscheidungsdateien eindeutig. Phase 1 belegt E-01 bis E-36 und E-56 bis E-58, der Korrekturplan E-59 bis E-102 und E-144, Phase 2 E-37 bis E-55, E-103 bis E-143 und E-145 bis E-147. Diese Datei führt E-148 bis E-244. A-Nummern sind über die Dateien der Phasen 1 bis 3 eindeutig: Phase 1 belegt A-01 bis A-14, Phase 2 A-15 bis A-54, diese Datei A-55 bis A-84. Neue Entscheidungen erhalten die nächste freie Nummer über alle vier Dateien, neue Aufgaben die nächste freie Nummer über die Dateien der Phasen 1 bis 3 (Stand dieser Fassung: **E-245** und **A-85**). **Nachtrag vom 2026-11-10:** Phase 2 hat am 2026-11-09 E-146, E-147 und A-54 selbst vergeben. Die Nummern dieser Datei sind deshalb um zwei (E) bzw. eins (A) verschoben; Inhalt und Status bleiben gleich.
+**Nummern:** E-Nummern sind über alle vier Entscheidungsdateien eindeutig. Phase 1 belegt E-01 bis E-36 und E-56 bis E-58, der Korrekturplan E-59 bis E-102 und E-144, Phase 2 E-37 bis E-55, E-103 bis E-143 und E-145 bis E-147. Diese Datei führt E-148 bis E-244. A-Nummern sind über die Dateien der Phasen 1 bis 3 eindeutig: Phase 1 belegt A-01 bis A-14, Phase 2 A-15 bis A-54, diese Datei A-55 bis A-84. Neue Entscheidungen erhalten die nächste freie Nummer über alle vier Dateien, neue Aufgaben die nächste freie Nummer über die Dateien der Phasen 1 bis 3 (Stand dieser Fassung: **E-246** und **A-85**; E-245 vom 2026-11-10 nach Empfehlung). **Nachtrag vom 2026-11-10:** Phase 2 hat am 2026-11-09 E-146, E-147 und A-54 selbst vergeben. Die Nummern dieser Datei sind deshalb um zwei (E) bzw. eins (A) verschoben; Inhalt und Status bleiben gleich.
 
 **Status:** Alle Entscheidungen dieser Datei sind am 2026-11-09 entschieden. Jede nennt Schlüssel, Status, Kontext, Optionen, Empfehlung, Auswirkung, Quelle sowie betroffene IDs und WPs. Die WP-Blöcke des Plans nennen den Status im Feld „Entscheidungsbedarf“.
 
@@ -2517,3 +2517,23 @@ Mengengerüst (aus [E-222](#e-222)/[E-225](#e-225)): Mit gezielter Auffrischung 
 **Betroffene IDs:** GLO-11, DOD-01
 
 **Betroffene WPs:** WP-860 (`p3-trace`)
+
+## E-245 – React Router 6 ohne Fix für GHSA-wrjc-x8rr-h8h6 (SR-62)
+
+**Status:** entschieden (2026-11-10, nach Empfehlung: Option 1; Beschluss vom 2026-11-09, Punkt 6)
+**Kontext:** WP-874 AK4 verlangt die erste Version von `react-router-dom`, für die `npm audit --omit=dev` weder GHSA-jjmj-jmhj-qwj2 noch GHSA-wrjc-x8rr-h8h6 meldet, und schließt die Migration auf React Router 7 aus. Stand 2026-11-10: GHSA-jjmj-jmhj-qwj2 (Open Redirect, `react-router-dom` 6.30.2 bis 6.30.5) ist in 6.30.6 behoben. GHSA-wrjc-x8rr-h8h6 (Open Redirect über Backslash in `<Link>` und `useNavigate`, `react-router` ab 6.0.0 unter 7.18.0) hat in Version 6 keinen Fix; ebenso GHSA-337j-9hxr-rhxg (nur SSR-Hydration, im SPA-Bundle nicht genutzt). Beide sind Moderate und blockieren den Job `npm-audit` nicht (Schwelle High/Critical). Der einzige Navigationspfad mit Eingaben von außen ist das `returnTo` des Logins; WP-874 lässt dort nur lokale Pfade ohne `//` und Backslash zu (`safeReturnTo`, `frontend/src/auth/oidc.ts`).
+**Optionen:**
+
+1. `react-router-dom` 6.30.6 (schließt GHSA-jjmj-jmhj-qwj2); GHSA-wrjc-x8rr-h8h6 und GHSA-337j-9hxr-rhxg als Restrisiko in `docs/security/review-phase2.md` (SR-62) mit der Mitigation `safeReturnTo`; die Migration auf React Router 7 wird beim nächsten Planstand als eigenes WP vor dem G3-Gate eingeplant. Folge: AK4 gilt für GHSA-jjmj-jmhj-qwj2; WP-874 bleibt bei 0,5 PT.
+2. Migration auf React Router 7.18 in WP-874. Folge: gegen „Nicht Bestandteil“ des WP; Umbau aller Routen-Importe und Tests, deutlich mehr als 0,5 PT, Risiko für das ganze Frontend in einem Sicherheits-WP.
+3. Override von `react-router` auf einen eigenen Patch. Folge: Fork einer Kernbibliothek ohne Herstellerpflege.
+
+**Empfehlung:** Option 1. Der ausnutzbare Weg (Navigation auf ein Ziel aus Eingaben von außen) ist durch `safeReturnTo` geschlossen; die Migration auf React Router 7 gehört in ein eigenes, testbares WP.
+
+**Auswirkung:** WP-874 hebt `react-router-dom` auf 6.30.6, prüft `returnTo` nach AK3 und führt in `review-phase2.md` das Restrisiko. Die Migration auf React Router 7 wird beim nächsten Planstand eingeplant.
+
+**Quelle:** frontend/package.json; npm audit vom 2026-11-10 (GHSA-wrjc-x8rr-h8h6: `>=6.0.0 <7.18.0`; GHSA-jjmj-jmhj-qwj2: `>=6.30.2 <=6.30.5`)
+
+**Betroffene IDs:** – (Befund SR-62)
+
+**Betroffene WPs:** WP-874 (`p3-sr61-62`)
