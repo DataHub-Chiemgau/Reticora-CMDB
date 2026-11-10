@@ -141,6 +141,39 @@ function assertUsableAuthConfig(config: AuthConfig) {
   }
 }
 
+const DEFAULT_RETURN_TO = '/dashboard';
+
+/**
+ * The target after the login if it is a local path of this origin, otherwise
+ * /dashboard (SR-62, WP-874): exactly one leading slash, no "//" and no
+ * backslash (also percent-encoded), and the path resolves to the own origin.
+ * "//host", "/\host" or "https://host" would navigate away after the login.
+ */
+export function safeReturnTo(returnTo: unknown): string {
+  if (typeof returnTo !== 'string' || !returnTo.startsWith('/')) {
+    return DEFAULT_RETURN_TO;
+  }
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(returnTo);
+  } catch {
+    return DEFAULT_RETURN_TO;
+  }
+  for (const value of [returnTo, decoded]) {
+    if (value.startsWith('//') || value.includes('\\')) {
+      return DEFAULT_RETURN_TO;
+    }
+  }
+  try {
+    if (new URL(returnTo, window.location.origin).origin !== window.location.origin) {
+      return DEFAULT_RETURN_TO;
+    }
+  } catch {
+    return DEFAULT_RETURN_TO;
+  }
+  return returnTo;
+}
+
 export async function startAuthorizationCodeFlow(returnTo: string) {
   // The PKCE code challenge is derived from the Web Crypto API, which browsers
   // only expose in secure contexts (HTTPS or localhost). Fail early with a
@@ -150,11 +183,13 @@ export async function startAuthorizationCodeFlow(returnTo: string) {
   const state = randomBase64Url();
   const codeVerifier = randomBase64Url();
   const codeChallenge = await sha256Base64Url(codeVerifier);
-  const safeReturnTo = returnTo.startsWith('/') ? returnTo : '/dashboard';
-
   window.sessionStorage.setItem(
     AUTH_TRANSACTION_KEY,
-    JSON.stringify({ state, codeVerifier, returnTo: safeReturnTo } satisfies AuthTransaction),
+    JSON.stringify({
+      state,
+      codeVerifier,
+      returnTo: safeReturnTo(returnTo),
+    } satisfies AuthTransaction),
   );
 
   const authorizationUrl = new URL(config.authorization_endpoint);
@@ -215,7 +250,9 @@ export async function completeAuthorizationCodeFlow(search: string) {
   useAuthStore.getState().setSession(session);
   window.sessionStorage.removeItem(AUTH_TRANSACTION_KEY);
 
-  return { session, returnTo: transaction.returnTo || '/dashboard' };
+  // The stored target is checked again: sessionStorage is writable by any
+  // script of the origin.
+  return { session, returnTo: safeReturnTo(transaction.returnTo) };
 }
 
 export function clearAuthTransaction() {

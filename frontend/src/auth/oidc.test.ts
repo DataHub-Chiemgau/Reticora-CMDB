@@ -61,3 +61,51 @@ describe('OIDC configuration validation', () => {
     await expect(startAuthorizationCodeFlow('/dashboard')).rejects.toThrow(/redirect_uri/);
   });
 });
+
+describe('returnTo after the login (SR-62, WP-874)', () => {
+  it('keeps a local path and replaces every other target with /dashboard', async () => {
+    const { safeReturnTo } = await import('./oidc');
+
+    for (const local of ['/cmdb?x=1', '/dashboard', '/cmdb/ci/1#history', '/']) {
+      expect(safeReturnTo(local)).toBe(local);
+    }
+    for (const foreign of [
+      '//evil.example',
+      '/\\evil.example',
+      '/%5Cevil',
+      '/%2F%2Fevil.example',
+      '/\t/evil.example',
+      'https://evil.example',
+      'javascript:alert(1)',
+      'cmdb',
+      '',
+      '/%E0%A4%A',
+      undefined,
+      42,
+    ]) {
+      expect(safeReturnTo(foreign)).toBe('/dashboard');
+    }
+  });
+
+  it('checks the stored target again in the callback', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            JSON.stringify({ token: 't', expires_at: '2099-01-01T00:00:00Z', user: { id: 'u' } }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        ),
+    );
+    window.sessionStorage.setItem(
+      'reticora-auth-transaction',
+      JSON.stringify({ state: 's', codeVerifier: 'v', returnTo: '//evil.example/path' }),
+    );
+    const { completeAuthorizationCodeFlow } = await import('./oidc');
+
+    const result = await completeAuthorizationCodeFlow('?code=abc&state=s');
+    expect(result.returnTo).toBe('/dashboard');
+  });
+});

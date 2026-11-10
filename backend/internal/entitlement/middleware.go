@@ -113,6 +113,9 @@ var featureRules = []featureRule{
 	// Ticketing (TKT-01, E-39): SLAs and business calendars are standard.
 	gate("/api/v1/tickets", FeatureTicketingEssential),
 	{prefix: "/api/v1/tickets", suffix: "/sla", features: []string{FeatureTicketingStandard}},
+	// The attachments of a ticket are documents (SR-61, WP-874): both
+	// features, like /label (x-feature stays ticketing_essential).
+	{prefix: "/api/v1/tickets", suffix: "/attachments", features: []string{FeatureTicketingEssential, FeatureDocuments}},
 	gate("/api/v1/slas", FeatureTicketingStandard),
 	gate("/api/v1/business-calendars", FeatureTicketingStandard),
 	// Reading the review queue stays core; opening a ticket from an item

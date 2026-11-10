@@ -51,7 +51,9 @@ func NewHandler(svc *Service) *Handler {
 }
 
 // WithDocuments gives the handler the document repository the attachments
-// of a ticket are read from (WP-765); without it the attachments answer 503.
+// of a ticket are read from (WP-765). Without it the route
+// GET /tickets/{id}/attachments is not registered (404, SR-61): the server
+// leaves it out while the release module documents is off.
 func (h *Handler) WithDocuments(docs AttachmentReader) *Handler {
 	h.docs = docs
 	return h
@@ -69,7 +71,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/tickets/{id}/links", h.ListLinks)
 	r.Post("/api/v1/tickets/{id}/links", h.CreateLink)
 	r.Delete("/api/v1/tickets/{id}/links/{link_id}", h.DeleteLink)
-	r.Get("/api/v1/tickets/{id}/attachments", h.ListAttachments)
+	if h.docs != nil {
+		r.Get("/api/v1/tickets/{id}/attachments", h.ListAttachments)
+	}
 }
 
 // parseTagFilter splits the filter tags (comma separated) into keys.
@@ -703,7 +707,7 @@ func (h *Handler) ListAttachments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.docs == nil {
-		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "ticket attachments are not available")
+		api.WriteError(w, http.StatusNotFound, "Not Found", "ticket attachments are not available")
 		return
 	}
 	policy, err := permission.PolicyFrom(r.Context())

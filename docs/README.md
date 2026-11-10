@@ -514,7 +514,7 @@ discovery license stops only `IsIngest` requests. The phase-2 mapping:
 | stock | `/api/v1/consumables*`, `/api/v1/inventory/*`, POST (and every method but GET) `/api/v1/stock-movements*` |
 | stocktake_standard | `/api/v1/stocktakes*` |
 | internal_orders | `/api/v1/orders*` |
-| documents | `/api/v1/documents*` |
+| documents | `/api/v1/documents*`, `/api/v1/tickets/{id}/attachments` (together with ticketing_essential; without the release module `documents` the route is not registered, 404; SR-61, WP-874) |
 | import | `/api/v1/imports*`, `/api/v1/import-profiles*` |
 | ticketing_essential | `/api/v1/tickets*`, POST `/api/v1/review-items/{id}/ticket` (reading the review queue stays core) |
 | ticketing_standard | `/api/v1/slas*`, `/api/v1/tickets/{id}/sla`, `/api/v1/business-calendars*` |

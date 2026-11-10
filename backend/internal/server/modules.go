@@ -40,6 +40,9 @@ const (
 	// ModuleMetamodel is the metamodel module of phase 2 (attribute sets,
 	// templates, rules, layouts, drafts; E-105). It has no feature key.
 	ModuleMetamodel = "metamodel"
+	// ModuleDocuments is the documents module (P2); without it the ticket
+	// attachments are not served (SR-61, WP-874).
+	ModuleDocuments = "documents"
 )
 
 // PhaseP2 is the phase value of RETICORA_MODULES that switches on every

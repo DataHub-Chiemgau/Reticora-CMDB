@@ -659,6 +659,7 @@ func TestPhase2RouteGates(t *testing.T) {
 	ok := func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }
 	mux.Get("/api/v1/tickets", ok)
 	mux.Get("/api/v1/tickets/{id}/sla", ok)
+	mux.Get("/api/v1/tickets/{id}/attachments", ok)
 	mux.Get("/api/v1/stock-movements", ok)
 	mux.Post("/api/v1/stock-movements", ok)
 	mux.Get("/api/v1/slas", ok)
@@ -673,6 +674,7 @@ func TestPhase2RouteGates(t *testing.T) {
 		{http.MethodGet, "/api/v1/slas", false},
 		{http.MethodPost, "/api/v1/stock-movements", false},
 		{http.MethodGet, "/api/v1/tickets/t1/sla", false},
+		{http.MethodGet, "/api/v1/tickets/t1/attachments", true},
 	} {
 		essential := call(t, routes, f.OrgA, c.method, c.path)
 		switch {
@@ -684,6 +686,20 @@ func TestPhase2RouteGates(t *testing.T) {
 		if standard := call(t, routes, f.OrgB, c.method, c.path); standard.status != http.StatusNoContent {
 			t.Errorf("standard %s %s: %+v, want 204", c.method, c.path, standard)
 		}
+	}
+
+	// SR-61 (WP-874): the attachments of a ticket are documents and need
+	// both ticketing_essential and documents; without documents 403
+	// feature-not-entitled, the ticket itself stays reachable.
+	if _, err = f.Admin.Exec(bg, `UPDATE entitlement SET enabled = false WHERE organization_id = $1 AND feature_key = 'documents'`, f.OrgB); err != nil {
+		t.Fatal(err)
+	}
+	_ = store.Delete(bg, "entitlements:"+f.OrgB)
+	if got := call(t, routes, f.OrgB, http.MethodGet, "/api/v1/tickets/t1/attachments"); got.status != http.StatusForbidden || got.problem != api.ProblemFeatureNotEntitled {
+		t.Errorf("attachments without documents: %+v, want 403 feature-not-entitled", got)
+	}
+	if got := call(t, routes, f.OrgB, http.MethodGet, "/api/v1/tickets"); got.status != http.StatusNoContent {
+		t.Errorf("tickets without documents: %+v, want 204", got)
 	}
 }
 

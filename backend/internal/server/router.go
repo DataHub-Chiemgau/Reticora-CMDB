@@ -870,7 +870,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		agentHandler(&repos, opts.Sessions, conflictReviews),
 		security.NewHandler(repos.Security),
 		// The attachments of a ticket are its linked documents (WP-765).
-		ticket.NewHandler(tickets).WithDocuments(repos.Document),
+		ticketHandler(tickets, &repos, &opts),
 		userHandler(&repos, &opts),
 		permission.NewHandler(repos.Permission),
 		searchHandler,
@@ -1521,4 +1521,16 @@ func exportDATEVGate(opts *Options) *export.DATEVGate {
 		entitlements = opts.Entitlements
 	}
 	return export.NewDATEVGate(entitlements, opts.Modules.Enabled(ModuleInventory))
+}
+
+// ticketHandler builds the ticket routes; the attachments (documents
+// linked to the ticket) exist only with the release module documents
+// (SR-61, WP-874): without it GET /tickets/{id}/attachments is not
+// registered and answers 404 like any unknown path.
+func ticketHandler(tickets *ticket.Service, repos *Repositories, opts *Options) *ticket.Handler {
+	h := ticket.NewHandler(tickets)
+	if opts.Modules.Enabled(ModuleDocuments) && repos.Document != nil {
+		h.WithDocuments(repos.Document)
+	}
+	return h
 }

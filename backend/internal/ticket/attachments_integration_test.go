@@ -187,14 +187,15 @@ func TestTicketAttachments(t *testing.T) {
 		}
 	}
 
-	// Without the document repository the route answers 503.
+	// Without the document repository (release module documents off) the
+	// route is not registered: 404 like an unknown path (SR-61, WP-874).
 	bare := chi.NewRouter()
 	ticket.NewHandler(ticket.NewService(ticket.NewPGRepository(f.App), nil)).RegisterRoutes(bare)
 	req := httptest.NewRequest(http.MethodGet, url, nil)
 	rec := httptest.NewRecorder()
 	bare.ServeHTTP(rec, req.WithContext(tenant.WithTenant(org, tenant.TenantInfo{OrganizationID: f.OrgA, UserID: e.user})))
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Errorf("without documents: %d, want 503", rec.Code)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("without documents: %d, want 404", rec.Code)
 	}
 
 	// The route needs document:read; ticket:read alone is 403.
