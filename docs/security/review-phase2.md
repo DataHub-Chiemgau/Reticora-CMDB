@@ -348,7 +348,7 @@ Status der offenen G1-Befunde aus `docs/security/review-g1.md` (`:433–438`):
 | SR-06 | Info | offen | Dedizierter Referenzhost für den Lastnachweis; bleibt nach E-58 bis vor GA offen. |
 | SR-08 | Low | **behoben** | WP-834 (PR #113), Migration 000193; Kontrollmessung in `docs/acceptance/lasttest-g1.md`. |
 | SR-09 | Low | **behoben** | WP-835 (PR #113). Bewertung bei der Entitlement-Umgehung: `max_cis` gilt für REST, Import und Bulk-Anlage unter der Zulassungssperre (`TestPhase2AutomatedWriters`); Rest wie in G1 (HTTP-Ingest ohne Queue mit einer Spur). |
-| SR-10 | Low | offen | Obergrenze für Identitätsschlüssel je Record; Termin vor GA mit WPs einer späteren Phase (E-137). |
+| SR-10 | Low | **behoben** (WP-878) | Obergrenze von 256 Identitätswerten je Record im Vertrag; ein Record darüber wird einzeln verworfen (`rejected_identity_limit`). Nachweis `TestIngestRejectsRecordOverIdentityCap`. |
 | SR-11 | High | **behoben** | WP-418 (PR #91). |
 
 Externer Pentest: Für G1 gilt die Erklärung des Auftraggebers vom 2026-10-15

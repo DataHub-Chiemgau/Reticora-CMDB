@@ -459,7 +459,9 @@ func (r *BulkIngestResponse) finish(received, future int, err error) error {
 		}
 	}
 	r.Rejected = len(r.Errors)
-	r.Accepted = max(0, received-future-r.Rejected)
+	// Records refused for their identity values (RejectedIdentityLimit,
+	// set before) are neither accepted nor listed as errors.
+	r.Accepted = max(0, received-future-r.RejectedIdentityLimit-r.Rejected)
 	if r.Rejected > 0 && r.Accepted == 0 {
 		return ie.Records[0].Err
 	}
@@ -549,6 +551,7 @@ func (r *BulkIngestResponse) add(o *BulkIngestResponse) {
 	r.Resurrected += o.Resurrected
 	r.Queued += o.Queued
 	r.RejectedFuture += o.RejectedFuture
+	r.RejectedIdentityLimit += o.RejectedIdentityLimit
 }
 
 // RecordLedger remembers processed record_ids (REC-01). The PostgreSQL and
@@ -736,6 +739,15 @@ var deadLetters = prometheus.NewCounterVec(prometheus.CounterOpts{
 	Namespace: "reticora",
 	Name:      "ingest_dead_letters_total",
 	Help:      "Ingest messages given up (terminated), by reason: undecodable, permanent (the record can never succeed) or max_deliver.",
+}, []string{"reason"})
+
+// recordsRejected counts the records refused on their own before
+// processing, by reason (identity_keys: more identity values than the
+// contract allows, SR-10).
+var recordsRejected = prometheus.NewCounterVec(prometheus.CounterOpts{
+	Namespace: "reticora",
+	Name:      "ingest_records_rejected_total",
+	Help:      "Ingest records refused on their own before processing, by reason (identity_keys: more identity values than the contract allows).",
 }, []string{"reason"})
 
 // deadLetter counts an ingest message given up for reason.

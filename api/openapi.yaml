@@ -31860,7 +31860,13 @@ components:
       type: object
       description: >-
         One device observation (DIS-05). Mirrors api/devicerecord.schema.json,
-        the normative schema; observed_at is the source time (GLO-12).
+        the normative schema; observed_at is the source time (GLO-12). A
+        record carries at most 256 identity values (serial number, hardware
+        UUID, every MAC of identity and interfaces, every IP of the
+        interfaces and target_ip, distinct values); the server refuses a
+        record with more on its own and counts it in rejected_identity_limit
+        (SR-10).
+      x-max-identity-keys: 256
       required: [record_id, observed_at, source, target_ip, identity, classification, system]
       additionalProperties: false
       properties:
@@ -32002,6 +32008,12 @@ components:
           description: >-
             Records whose observed_at lies more than five minutes in the
             future; they are rejected and counted (GLO-12).
+        rejected_identity_limit:
+          type: integer
+          description: >-
+            Records with more than 256 identity values (DeviceRecord
+            x-max-identity-keys); each is refused on its own, the others of
+            the batch are processed (SR-10).
         unlicensed:
           type: integer
           description: >-

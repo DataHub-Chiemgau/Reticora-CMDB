@@ -67,7 +67,7 @@ func RegisterMetrics(reg prometheus.Registerer) {
 	reg.MustRegister(scopeRuns, discoveryErrors)
 	// Losses and backpressure reported by the collectors (NFR-04, F-234).
 	reg.MustRegister(collectorSpoolDropped, collectorSpoolBackpressure)
-	reg.MustRegister(ingestLanesGauge, laneBacklog, laneRecords, recordRetries, deadLetters)
+	reg.MustRegister(ingestLanesGauge, laneBacklog, laneRecords, recordRetries, deadLetters, recordsRejected)
 }
 
 // discoveredAttributes are the attributes a discovered device stores on its

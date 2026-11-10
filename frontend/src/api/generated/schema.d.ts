@@ -15020,7 +15020,7 @@ export interface components {
     DeviceRecordBatch: {
       records: components['schemas']['DeviceRecord'][];
     };
-    /** @description One device observation (DIS-05). Mirrors api/devicerecord.schema.json, the normative schema; observed_at is the source time (GLO-12). */
+    /** @description One device observation (DIS-05). Mirrors api/devicerecord.schema.json, the normative schema; observed_at is the source time (GLO-12). A record carries at most 256 identity values (serial number, hardware UUID, every MAC of identity and interfaces, every IP of the interfaces and target_ip, distinct values); the server refuses a record with more on its own and counts it in rejected_identity_limit (SR-10). */
     DeviceRecord: {
       /** Format: uuid */
       record_id: string;
@@ -15128,6 +15128,8 @@ export interface components {
       duplicates?: number;
       /** @description Records whose observed_at lies more than five minutes in the future; they are rejected and counted (GLO-12). */
       rejected_future?: number;
+      /** @description Records with more than 256 identity values (DeviceRecord x-max-identity-keys); each is refused on its own, the others of the batch are processed (SR-10). */
+      rejected_identity_limit?: number;
       /** @description New devices held as unlicensed_ci review items because max_cis is reached (ENT-03, CH21). */
       unlicensed?: number;
       /** @description Sum over the processed records of the discovered values dropped because a manual write would refuse them: the data type of a typed CI column (MET-11; a multi-line hostname, a hardware_uuid that is no UUID, a malformed MAC or IP), the field definitions of the CI type (CI-03) or a unique attribute whose value another active CI holds (MET-15, also before the unique index exists; the CI keeps its own value). The rest of each record is stored; no value fails a record or the batch (WP-501). Absent when no value was dropped; with the queue the records are processed asynchronously and it stays absent. */

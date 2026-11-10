@@ -161,7 +161,7 @@ func (h *Handler) edgeIngest(ctx context.Context, orgID, collectorID string, dat
 	if status != 0 {
 		return EdgeReply{Status: status, Error: msg}
 	}
-	received := len(items)
+	received := len(items) + body.identityRejected
 	items, rejected := admitObservedAt(items, time.Now().UTC())
 	// The records of a client-bound collector are processed in its client
 	// (F-406/F-407, DIS-05): its scope carries them to the consumer, a
@@ -179,6 +179,7 @@ func (h *Handler) edgeIngest(ctx context.Context, orgID, collectorID string, dat
 	}
 	// Records that fail are listed in the reply; only when no record was
 	// accepted does the request fail as a whole (WP-481).
+	resp.RejectedIdentityLimit = body.identityRejected
 	if err = resp.finish(received, rejected, withRecordErrors(err, outside)); err != nil {
 		var se *collectorScopeError
 		if errors.As(err, &se) {

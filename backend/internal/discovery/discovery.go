@@ -148,6 +148,9 @@ type BulkIngestResponse struct {
 	// RejectedFuture counts records observed more than five minutes in the
 	// future; they change nothing (GLO-12).
 	RejectedFuture int `json:"rejected_future,omitempty"`
+	// RejectedIdentityLimit counts records with more identity values than
+	// plugins.MaxIdentityKeys; they change nothing (SR-10, WP-878).
+	RejectedIdentityLimit int `json:"rejected_identity_limit,omitempty"`
 	// Unlicensed counts new devices held as unlicensed_ci because max_cis is
 	// reached (ENT-03, CH21); already queued devices count again.
 	Unlicensed int    `json:"unlicensed,omitempty"`
@@ -1233,14 +1236,14 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	items, ok := readIngestItems(w, r)
+	items, identityRejected, ok := readIngestItems(w, r)
 	if !ok {
 		return
 	}
 	// Times compare by the source's observed_at (GLO-12): items of the
 	// deprecated contract carry none and take the arrival time; records
 	// from the future are rejected and counted.
-	received := len(items)
+	received := len(items) + identityRejected
 	items, rejected := admitObservedAt(items, time.Now().UTC())
 
 	// Every record goes the path of the ingest.> consumer (REC-01): with a
@@ -1250,6 +1253,7 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.dispatch(r.Context(), msgs)
 	// Records that fail are listed in the answer; only when no record was
 	// accepted does the request fail as a whole (WP-481).
+	resp.RejectedIdentityLimit = identityRejected
 	if err = resp.finish(received, rejected, err); err != nil {
 		api.WriteRepoError(w, err)
 		return

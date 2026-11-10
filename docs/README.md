@@ -882,6 +882,17 @@ delayed alert is usually worse than a lost one. Trap storms are bounded by a
 64-events-in-flight cap. The BER parser is deliberately tolerant: malformed
 varbinds are skipped, never fatal.
 
+**Identity values per record (SR-10, WP-878):** a DeviceRecord
+(`api/devicerecord.schema.json`) carries at most 256 identity values
+(`x-max-identity-keys`; counted as distinct values: serial number, hardware
+UUID, every MAC of identity and interfaces, every IP of the interfaces and
+`target_ip`). The server refuses a record with more on its own and never
+shortens it: HTTP ingest and edge channel count it in
+`rejected_identity_limit` of the answer, log its `record_id` with the count and
+raise `reticora_ingest_records_rejected_total{reason="identity_keys"}`; the
+other records of the batch are processed. A record within the limit never
+takes the organization's identity lock exclusively.
+
 **Metric polling (Epic E, MON-02):** the collector polls base metrics over
 SNMP and uploads them to the monitoring ingest (labels `collector_id` and
 `kind` are added on upload):

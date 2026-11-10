@@ -38,6 +38,38 @@ type DeviceRecord struct {
 	Power          *DevicePower         `json:"power,omitempty"`
 }
 
+// MaxIdentityKeys bounds the identity values of one record (SR-10, WP-878):
+// serial number, hardware UUID, every MAC (primary and of the interfaces),
+// every IP of the interfaces and the management IP (target_ip). A record
+// with more is refused on its own by the server (rejected_identity_limit):
+// the identity locks of one ingest transaction stay below their limit, so
+// a single record never takes the organization's identity lock exclusively.
+const MaxIdentityKeys = 256
+
+// IdentityKeyCount returns the number of distinct identity values of the
+// record as MaxIdentityKeys counts them: an upper bound of the identity
+// locks the server takes for it (it resolves no VRF and folds no case
+// beyond lower case).
+func (r *DeviceRecord) IdentityKeyCount() int {
+	seen := map[string]bool{}
+	add := func(kind, value string) {
+		if value = strings.ToLower(strings.TrimSpace(value)); value != "" {
+			seen[kind+":"+value] = true
+		}
+	}
+	add("serial", r.Identity.SerialNumber)
+	add("uuid", r.Identity.HardwareUUID)
+	add("mac", r.Identity.PrimaryMAC)
+	add("ip", r.TargetIP)
+	for i := range r.Interfaces {
+		add("mac", r.Interfaces[i].MAC)
+		for _, ip := range r.Interfaces[i].IPs {
+			add("ip", ip.Address)
+		}
+	}
+	return len(seen)
+}
+
 // DeviceIdentity holds the values the server matches CIs on (REC-01).
 type DeviceIdentity struct {
 	SerialNumber string `json:"serial_number,omitempty"`
