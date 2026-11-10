@@ -388,12 +388,16 @@ deny access (fail-closed). The tenant API is read-only (`GET
 in `operator_audit` with the previous and the new state, in the same
 transaction: without its entry the change is rolled back (500) (ENT-04,
 E-12). Only the feature keys of ENT-02, the phase-2 keys of ENT-06 (E-44),
-the module keys of phases 3 and 4 (`monitoring`, `endpoint_agent`,
-`workflow_forms`, `compliance`) and the add-ons, and the quotas `max_cis`,
+the phase-3 keys (`monitoring`, `ipam`, `monitoring_network`,
+`credential_vault`, `notifications_sms_pager`, `workflows`,
+`compliance_findings`, `monitoring_access`, `monitoring_analytics`,
+`compliance_automation`; E-151, WP-862), the module key of phase 4
+(`endpoint_agent`) and the add-ons, and the quotas `max_cis`,
 `max_collectors`, `max_users`, `max_api_keys` and `max_storage_mb` are
 accepted (`entitlement.FeatureKeys`, `entitlement.Quotas`); any other key,
-the former keys `inventory`, `stocktake` and `ticketing` among them, is 422
-with the field.
+the former keys `inventory`, `stocktake`, `ticketing`, `workflow_forms` and
+`compliance` among them, is 422 with the field. Migration 000284 renamed
+`workflow_forms` to `workflows` and `compliance` to `compliance_findings`.
 
 Route→feature mapping of the phase-1 features (ENT-02, ENT-05;
 `featureRules`/`coreRoutes` in `backend/internal/entitlement/middleware.go`,
@@ -448,18 +452,24 @@ server (`RETICORA_SMTP_HOST`, whose settings the installer also gives the
 realm) the first org_admin is invited by the IdP's mail to set a password
 (`admin_invited`), otherwise the organization is created without an IdP
 account.
-Plan matrix (ENT-06 in the version of E-44, confirmed with E-34;
+Plan matrix (ENT-06 in the version of E-44 and E-151, confirmed with E-34;
 `planFeatures` in `backend/internal/entitlement/entitlement.go`):
 
 | Plan | Features |
 |------|----------|
 | essential | cmdb_core, discovery, topology, rack_view, export_csv, webhooks, api_access, notifications_email, assets_basic, documents, import, ticketing_essential |
-| standard | + ticketing_standard, signature, stock, stocktake_standard, barcode, gps_standard, workplace, export_datev |
-| pro | + internal_orders, monitoring, workflow_forms |
-| enterprise | + endpoint_agent, compliance |
+| standard | + ticketing_standard, signature, stock, stocktake_standard, barcode, gps_standard, workplace, export_datev, monitoring, ipam |
+| pro | + internal_orders, monitoring_network, credential_vault, notifications_sms_pager, workflows, compliance_findings |
+| enterprise | + monitoring_access, monitoring_analytics, compliance_automation, endpoint_agent |
 
-IGA (`iga`) and AI (`ai`) are add-ons (CH14): no plan includes them, only
-their own entitlement row unlocks them. `gps_standard` and `workplace` have
+`monitoring` from standard on deviates from ENT-06 (there enterprise only):
+by decision of the client of 2026-11-09 standard holds the monitoring core
+(reachability probes, state changes, notification, root-cause suppression,
+flapping, maintenance windows, availability history); threshold rules,
+recommendations and the network-protocol probes are `monitoring_network`
+from pro on (E-151). IGA (`iga`), AI (`ai`) and the ADMP connection (`admp`)
+are add-ons (CH14): no plan includes them, only their own entitlement row
+unlocks them. `gps_standard` and `workplace` have
 no module in phase 2 (LOC-09 and MGT-06 are P4); `ticketing_pro`,
 `stocktake_pro`, `disposition`, `audit_extended` and `usage_tracking` are
 not created. Quotas have no plan default (E-34): a quota only gates when it

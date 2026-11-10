@@ -119,7 +119,8 @@ export function useModules() {
  * Every value is a feature key the server knows (entitlement.FeatureKeys):
  * isEnabled reports an unknown key as not entitled, which would hide the
  * page for every organization. The phase-2 pages use the keys of ENT-06
- * (E-44, E-39).
+ * (E-44, E-39), the phase-3 pages those of E-151 (WP-862): workflows and
+ * compliance_findings replace workflow_forms and compliance.
  */
 export const navFeatureFor: Record<string, string | undefined> = {
   dashboard: undefined,
@@ -140,20 +141,20 @@ export const navFeatureFor: Record<string, string | undefined> = {
   orders: 'internal_orders',
   maintenance: 'monitoring',
   disposal: 'assets_basic',
-  keys: 'compliance',
-  trainings: 'workflow_forms',
+  keys: 'compliance_findings',
+  trainings: 'workflows',
   desks: 'workplace',
   agents: 'endpoint_agent',
-  findings: 'compliance',
+  findings: 'compliance_findings',
   reviews: undefined,
   jobs: undefined,
   tickets: 'ticketing_essential',
   users: undefined,
   permissions: undefined,
   slas: 'ticketing_standard',
-  forms: 'workflow_forms',
-  workflows: 'workflow_forms',
-  compliance: 'compliance',
+  forms: 'workflows',
+  workflows: 'workflows',
+  compliance: 'compliance_findings',
   iga: 'iga',
   assistant: 'ai',
   webhooks: 'webhooks',

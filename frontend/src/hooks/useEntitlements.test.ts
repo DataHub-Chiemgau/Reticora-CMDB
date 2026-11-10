@@ -42,11 +42,19 @@ const FEATURE_KEYS = [
   'export_datev',
   'internal_orders',
   'monitoring',
+  'ipam',
+  'monitoring_network',
+  'credential_vault',
+  'notifications_sms_pager',
+  'workflows',
+  'compliance_findings',
+  'monitoring_access',
+  'monitoring_analytics',
+  'compliance_automation',
   'endpoint_agent',
-  'workflow_forms',
-  'compliance',
   'iga',
   'ai',
+  'admp',
 ];
 
 describe('navFeatureFor', () => {
@@ -56,7 +64,7 @@ describe('navFeatureFor', () => {
         expect(FEATURE_KEYS, page).toContain(feature);
       }
     }
-    for (const former of ['inventory', 'stocktake', 'ticketing']) {
+    for (const former of ['inventory', 'stocktake', 'ticketing', 'workflow_forms', 'compliance']) {
       expect(Object.values(navFeatureFor)).not.toContain(former);
     }
   });
@@ -90,8 +98,9 @@ describe('navFeatureFor', () => {
     expect(navFeatureFor.tickets).toBe('ticketing_essential');
     expect(navFeatureFor.iga).toBe('iga');
     expect(navFeatureFor.monitoring).toBe('monitoring');
-    expect(navFeatureFor.workflows).toBe('workflow_forms');
-    expect(navFeatureFor.forms).toBe('workflow_forms');
+    expect(navFeatureFor.workflows).toBe('workflows');
+    expect(navFeatureFor.forms).toBe('workflows');
+    expect(navFeatureFor.compliance).toBe('compliance_findings');
     expect(navFeatureFor.assistant).toBe('ai');
     expect(navFeatureFor.export).toBe('export_csv');
   });
@@ -101,7 +110,7 @@ describe('navFeatureFor', () => {
     expect(navFeatureFor.racks).toBe('rack_view');
     expect(navFeatureFor.roomplan).toBe('rack_view');
     expect(navFeatureFor.webhooks).toBe('webhooks');
-    expect(navFeatureFor.compliance).toBe('compliance');
+    expect(navFeatureFor.compliance).toBe('compliance_findings');
   });
 });
 

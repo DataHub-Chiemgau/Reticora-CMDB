@@ -104,8 +104,8 @@ export const KNOWN_DEVIATIONS: Record<string, Deviation[]> = {};
 
 // Every product module is licensed in the mocked tenant, so the navigation
 // and the command palette show all pages: every key of the plan matrix
-// (ENT-06 in the version of E-44) and the add-ons, as the server's
-// entitlement.FeatureKeys (WP-244).
+// (ENT-06 in the version of E-44 and E-151) and the add-ons, as the server's
+// entitlement.FeatureKeys (WP-244, WP-862).
 export const FEATURES = [
   'cmdb_core',
   'discovery',
@@ -129,11 +129,19 @@ export const FEATURES = [
   'export_datev',
   'internal_orders',
   'monitoring',
+  'ipam',
+  'monitoring_network',
+  'credential_vault',
+  'notifications_sms_pager',
+  'workflows',
+  'compliance_findings',
+  'monitoring_access',
+  'monitoring_analytics',
+  'compliance_automation',
   'endpoint_agent',
-  'workflow_forms',
-  'compliance',
   'iga',
   'ai',
+  'admp',
 ];
 
 export const ORG_ID = '00000000-0000-0000-0000-0000000000aa';

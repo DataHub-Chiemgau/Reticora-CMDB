@@ -83,35 +83,62 @@ var Phase2Features = []string{
 	FeatureInternalOrders,
 }
 
-// Module feature keys of phases 3 and 4 (ENT-06); they gate modules already
-// present in the code and stay in their plans (E-34).
+// Feature keys of phase 3 (ENT-06, PKG-08, E-151 Option 2 and the decision
+// of the client of 2026-11-09): monitoring holds the core functions from
+// standard on (reachability probes, state changes, notification, root-cause
+// suppression, flapping, maintenance windows, availability history);
+// threshold rules, recommendations and the network-protocol probes are
+// monitoring_network from pro on, access networks and analytics enterprise.
+// workflows and compliance_findings replace workflow_forms and compliance
+// (E-152, migration 000284).
 const (
-	FeatureMonitoring    = "monitoring"
-	FeatureEndpointAgent = "endpoint_agent"
-	FeatureWorkflowForms = "workflow_forms"
-	FeatureCompliance    = "compliance"
+	FeatureMonitoring            = "monitoring"
+	FeatureIPAM                  = "ipam"
+	FeatureMonitoringNetwork     = "monitoring_network"
+	FeatureCredentialVault       = "credential_vault"
+	FeatureNotificationsSMSPager = "notifications_sms_pager"
+	FeatureWorkflows             = "workflows"
+	FeatureComplianceFindings    = "compliance_findings"
+	FeatureMonitoringAccess      = "monitoring_access"
+	FeatureMonitoringAnalytics   = "monitoring_analytics"
+	FeatureComplianceAutomation  = "compliance_automation"
 )
 
-// LaterFeatures are the module feature keys of phases 3 and 4 in use.
-var LaterFeatures = []string{FeatureMonitoring, FeatureEndpointAgent, FeatureWorkflowForms, FeatureCompliance}
+// Phase3Features are the feature keys of phase 3, ordered by the plan that
+// includes them first.
+var Phase3Features = []string{
+	FeatureMonitoring, FeatureIPAM,
+	FeatureMonitoringNetwork, FeatureCredentialVault, FeatureNotificationsSMSPager, FeatureWorkflows,
+	FeatureComplianceFindings,
+	FeatureMonitoringAccess, FeatureMonitoringAnalytics, FeatureComplianceAutomation,
+}
 
-// Add-ons (CH14, ENT-06): IGA and AI are no part of any plan; they are
-// unlocked only by their own entitlement row.
+// Module feature key of phase 4 (ENT-06); it gates a module already present
+// in the code and stays in its plan (E-34).
+const FeatureEndpointAgent = "endpoint_agent"
+
+// LaterFeatures are the module feature keys of phase 4 in use.
+var LaterFeatures = []string{FeatureEndpointAgent}
+
+// Add-ons (CH14, ENT-06): IGA, AI and the ADMP connection (PKG-08) are no
+// part of any plan; they are unlocked only by their own entitlement row.
 const (
-	FeatureIGA = "iga"
-	FeatureAI  = "ai"
+	FeatureIGA  = "iga"
+	FeatureAI   = "ai"
+	FeatureADMP = "admp"
 )
 
 // Addons are the add-on feature keys of CH14.
-var Addons = []string{FeatureIGA, FeatureAI}
+var Addons = []string{FeatureIGA, FeatureAI, FeatureADMP}
 
 // FeatureKeys are the feature keys an entitlement row may carry (F-209):
 // the phase-1 keys of ENT-02, the phase-2 keys of ENT-06 (E-44), the
-// module keys of phases 3 and 4 in use and the add-ons. The former keys
-// inventory, stocktake and ticketing are no feature keys any more
-// (migration 000190).
+// phase-3 keys (E-151), the module keys of phase 4 in use and the add-ons.
+// The former keys inventory, stocktake and ticketing (migration 000190) and
+// workflow_forms and compliance (migration 000284) are no feature keys any
+// more.
 func FeatureKeys() []string {
-	return slices.Concat(Phase1Features, Phase2Features, LaterFeatures, Addons)
+	return slices.Concat(Phase1Features, Phase2Features, Phase3Features, LaterFeatures, Addons)
 }
 
 // Quotas of ENT-02 and the storage quota of MGT-01 (ENT-06, E-44), stored
@@ -156,10 +183,14 @@ var QuotaFeature = map[string]string{
 var Sources = []string{"manual", "selfsignup", "billing", "reseller"}
 
 // planFeatures maps a plan to the features it includes (ENT-06 in the
-// version of E-44, E-34): every plan includes the phase-1 features and
-// assets_basic, documents, import and ticketing_essential; standard adds
-// the remaining phase-2 keys but internal_orders, pro adds internal_orders,
-// monitoring and workflow_forms, enterprise endpoint_agent and compliance.
+// version of E-44 and E-151, E-34): every plan includes the phase-1
+// features and assets_basic, documents, import and ticketing_essential;
+// standard adds the remaining phase-2 keys but internal_orders, monitoring
+// and ipam; pro adds internal_orders, monitoring_network, credential_vault,
+// notifications_sms_pager, workflows and compliance_findings; enterprise
+// monitoring_access, monitoring_analytics, compliance_automation and
+// endpoint_agent. monitoring from standard on deviates from ENT-06
+// (enterprise); the client confirmed it on 2026-11-09 (A-58).
 // No plan includes an add-on (CH14). Quotas only gate when stored in the
 // limits of a row (E-34); only max_storage_mb has a plan default (E-44,
 // storageDefaultMB).
@@ -168,9 +199,13 @@ var planFeatures = func() map[Plan][]string {
 		FeatureAssetsBasic, FeatureDocuments, FeatureImport, FeatureTicketingEssential})
 	standard := slices.Concat(essential, []string{
 		FeatureTicketingStandard, FeatureSignature, FeatureStock, FeatureStocktakeStandard,
-		FeatureBarcode, FeatureGPSStandard, FeatureWorkplace, FeatureExportDATEV})
-	pro := slices.Concat(standard, []string{FeatureInternalOrders, FeatureMonitoring, FeatureWorkflowForms})
-	enterprise := slices.Concat(pro, []string{FeatureEndpointAgent, FeatureCompliance})
+		FeatureBarcode, FeatureGPSStandard, FeatureWorkplace, FeatureExportDATEV,
+		FeatureMonitoring, FeatureIPAM})
+	pro := slices.Concat(standard, []string{FeatureInternalOrders,
+		FeatureMonitoringNetwork, FeatureCredentialVault, FeatureNotificationsSMSPager, FeatureWorkflows,
+		FeatureComplianceFindings})
+	enterprise := slices.Concat(pro, []string{FeatureMonitoringAccess, FeatureMonitoringAnalytics,
+		FeatureComplianceAutomation, FeatureEndpointAgent})
 	return map[Plan][]string{PlanEssential: essential, PlanStandard: standard, PlanPro: pro, PlanEnterprise: enterprise}
 }()
 

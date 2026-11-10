@@ -55,7 +55,8 @@ func TestProvisionedPlanGrantsOnlyPlanFeatures(t *testing.T) {
 	}
 	added, err := svc.Provision(ctx, "org-1", PlanStandard)
 	if err != nil || !slices.Equal(added, []string{FeatureTicketingStandard, FeatureSignature, FeatureStock,
-		FeatureStocktakeStandard, FeatureBarcode, FeatureGPSStandard, FeatureWorkplace, FeatureExportDATEV}) {
+		FeatureStocktakeStandard, FeatureBarcode, FeatureGPSStandard, FeatureWorkplace, FeatureExportDATEV,
+		FeatureMonitoring, FeatureIPAM}) {
 		t.Errorf("provisioning a larger plan: %v, %v; want only the missing features", added, err)
 	}
 	if svc.IsEnabled(ctx, "org-1", FeatureExportCSV) {
@@ -489,10 +490,11 @@ func TestPhase1FeaturesAndQuotas(t *testing.T) {
 
 // TestGrantAcceptsOnlyENT02Keys covers WP-564 (ENT-02, F-209) and WP-244
 // (ENT-06, E-44): Grant stores only the feature keys of ENT-02, the
-// phase-2 keys of ENT-06, the module keys of phases 3 and 4 in use and the
-// add-ons, and only the quotas max_cis, max_collectors, max_users,
+// phase-2 keys of ENT-06, the phase-3 keys (WP-862, E-151), the module key
+// of phase 4 in use and the add-ons, and only the quotas max_cis, max_collectors, max_users,
 // max_api_keys and max_storage_mb; any other key, the former keys
-// inventory, stocktake and ticketing among them, is a ValidationError
+// inventory, stocktake, ticketing, workflow_forms and compliance among
+// them, is a ValidationError
 // naming the field, and nothing is stored.
 func TestGrantAcceptsOnlyENT02Keys(t *testing.T) {
 	ctx := context.Background()
@@ -502,13 +504,15 @@ func TestGrantAcceptsOnlyENT02Keys(t *testing.T) {
 	for _, f := range slices.Concat(Phase1Features, Addons, []string{"assets_basic", "documents", "import",
 		"ticketing_essential", "ticketing_standard", "signature", "stock", "stocktake_standard", "barcode",
 		"gps_standard", "workplace", "export_datev", "internal_orders",
-		"monitoring", "endpoint_agent", "workflow_forms", "compliance"}) {
+		"monitoring", "ipam", "monitoring_network", "credential_vault", "notifications_sms_pager", "workflows",
+		"compliance_findings", "monitoring_access", "monitoring_analytics", "compliance_automation",
+		"endpoint_agent", "admp"}) {
 		if !slices.Contains(keys, f) {
 			t.Errorf("FeatureKeys lacks %s", f)
 		}
 	}
-	if len(keys) != 27 {
-		t.Errorf("FeatureKeys %v, want the 8 keys of ENT-02, 13 keys of phase 2, 4 module keys of phases 3 and 4 and 2 add-ons", keys)
+	if len(keys) != 35 {
+		t.Errorf("FeatureKeys %v, want the 8 keys of ENT-02, 13 keys of phase 2, 10 keys of phase 3, 1 module key of phase 4 and 3 add-ons", keys)
 	}
 	for _, plan := range []Plan{PlanEssential, PlanStandard, PlanPro, PlanEnterprise} {
 		for _, f := range PlanFeatures(plan) {
@@ -527,6 +531,8 @@ func TestGrantAcceptsOnlyENT02Keys(t *testing.T) {
 		"former key inventory":      {Entitlement{FeatureKey: "inventory", Enabled: true}, "feature_key"},
 		"former key stocktake":      {Entitlement{FeatureKey: "stocktake", Enabled: true}, "feature_key"},
 		"former key ticketing":      {Entitlement{FeatureKey: "ticketing", Enabled: true}, "feature_key"},
+		"former key workflow_forms": {Entitlement{FeatureKey: "workflow_forms", Enabled: true}, "feature_key"},
+		"former key compliance":     {Entitlement{FeatureKey: "compliance", Enabled: true}, "feature_key"},
 		"feature key in upper case": {Entitlement{FeatureKey: "Discovery", Enabled: true}, "feature_key"},
 		"feature key with a space":  {Entitlement{FeatureKey: "discovery ", Enabled: true}, "feature_key"},
 		"empty feature key":         {Entitlement{FeatureKey: " ", Enabled: true}, "feature_key"},
@@ -563,22 +569,26 @@ func TestGrantAcceptsOnlyENT02Keys(t *testing.T) {
 // E-34, E-39, CH14): every plan includes assets_basic, documents, import
 // and ticketing_essential; standard adds ticketing_standard, signature,
 // stock, stocktake_standard, barcode, gps_standard, workplace and
-// export_datev (essential has no stock); pro adds internal_orders,
-// monitoring and workflow_forms; enterprise endpoint_agent and compliance.
-// No plan includes an add-on, a former key or a key not created in
-// phase 2.
+// export_datev (essential has no stock) and from WP-862 (E-151) monitoring
+// and ipam; pro adds internal_orders, monitoring_network, credential_vault,
+// notifications_sms_pager, workflows and compliance_findings; enterprise
+// monitoring_access, monitoring_analytics, compliance_automation and
+// endpoint_agent. No plan includes an add-on (admp among them), a former key
+// or a key not created.
 func TestPlanMatrixFollowsE44(t *testing.T) {
 	essential := slices.Concat(Phase1Features, []string{"assets_basic", "documents", "import", "ticketing_essential"})
 	standard := slices.Concat(essential, []string{"ticketing_standard", "signature", "stock", "stocktake_standard",
-		"barcode", "gps_standard", "workplace", "export_datev"})
-	pro := slices.Concat(standard, []string{"internal_orders", "monitoring", "workflow_forms"})
-	enterprise := slices.Concat(pro, []string{"endpoint_agent", "compliance"})
+		"barcode", "gps_standard", "workplace", "export_datev", "monitoring", "ipam"})
+	pro := slices.Concat(standard, []string{"internal_orders", "monitoring_network", "credential_vault",
+		"notifications_sms_pager", "workflows", "compliance_findings"})
+	enterprise := slices.Concat(pro, []string{"monitoring_access", "monitoring_analytics", "compliance_automation",
+		"endpoint_agent"})
 	for plan, want := range map[Plan][]string{PlanEssential: essential, PlanStandard: standard, PlanPro: pro, PlanEnterprise: enterprise} {
 		got := PlanFeatures(plan)
 		if !slices.Equal(sorted(got), sorted(want)) {
 			t.Errorf("plan %s: %v, want %v", plan, got, want)
 		}
-		for _, f := range slices.Concat(Addons, []string{"inventory", "stocktake", "ticketing", "ticketing_pro",
+		for _, f := range slices.Concat(Addons, []string{"inventory", "stocktake", "ticketing", "workflow_forms", "compliance", "ticketing_pro",
 			"stocktake_pro", "disposition", "audit_extended", "usage_tracking"}) {
 			if slices.Contains(got, f) {
 				t.Errorf("plan %s includes %s", plan, f)
@@ -601,6 +611,12 @@ func TestPlanMatrixFollowsE44(t *testing.T) {
 		"ticketing_standard", "signature", "stock", "stocktake_standard", "barcode", "gps_standard", "workplace",
 		"export_datev", "internal_orders"}) {
 		t.Errorf("Phase2Features %v", Phase2Features)
+	}
+	// Standard holds the monitoring core only; the extended functions start
+	// with pro (decision of the client of 2026-11-09, E-151).
+	if !slices.Contains(PlanFeatures(PlanStandard), FeatureMonitoring) || slices.Contains(PlanFeatures(PlanStandard), FeatureMonitoringNetwork) ||
+		slices.Contains(PlanFeatures(PlanEssential), FeatureMonitoring) {
+		t.Error("monitoring: want it from standard on, monitoring_network from pro on")
 	}
 	// An unknown plan provisions the essential plan.
 	if !slices.Equal(PlanFeatures("trial"), PlanFeatures(PlanEssential)) {

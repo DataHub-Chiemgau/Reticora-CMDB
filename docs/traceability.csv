@@ -1601,3 +1601,5 @@ GLO-11;[Q];G3;backend/internal/traceability/traceability_test.go;WP-860
 DOD-01;[Q];G3;backend/internal/traceability/traceability_test.go;WP-860
 GLO-11;[Q];G3;tests/rep01-structure.test.sh;WP-861
 DOD-01;[Q];G3;tests/rep01-structure.test.sh;WP-861
+ENT-06;(V), [B–P4], [A];G3;backend/internal/entitlement/entitlement_test.go;WP-862
+PKG-08;[P3];G3;backend/internal/entitlement/entitlement_test.go;WP-862
