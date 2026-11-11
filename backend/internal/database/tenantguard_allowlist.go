@@ -137,6 +137,10 @@ var withSystemCallers = map[string]string{
 	// Operator listing: lists every organization for the platform operator.
 	"internal/operator/handler.go": "organization listing of the platform operator",
 
+	// Trial end (WP-884, PKG-03): lists the organizations whose trial has
+	// ended; each plan change runs in that organization's transaction.
+	"internal/operator/trial_end.go": "organizations whose trial has ended",
+
 	// Derivation root (SEC-06): reads the system table platform_secret,
 	// which has no organization.
 	"internal/platform/crypto/derivation_store.go": "derivation root in platform_secret",
