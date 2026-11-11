@@ -83,10 +83,16 @@ func (m *memoryAudit) RecordChange(ctx context.Context, _ string, change func(ct
 	return m.Record(ctx, e)
 }
 
-func (m *memoryAudit) List(context.Context, int, int) ([]AuditEntry, int, error) {
+func (m *memoryAudit) List(_ context.Context, targetOrg string, _, _ int) ([]AuditEntry, int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return slices.Clone(m.entries), len(m.entries), nil
+	var out []AuditEntry
+	for i := range m.entries {
+		if targetOrg == "" || m.entries[i].TargetOrg == targetOrg {
+			out = append(out, m.entries[i])
+		}
+	}
+	return out, len(out), nil
 }
 
 func (m *memoryAudit) Verify(context.Context) (VerifyResult, error) {

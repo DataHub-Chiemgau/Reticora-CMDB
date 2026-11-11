@@ -205,7 +205,14 @@ func (h *Handler) ListAudit(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", page.CursorError.Error())
 		return
 	}
-	entries, total, err := h.audit.List(r.Context(), page.Limit, page.Offset)
+	// target_org (WP-888): the history of one organization.
+	target := r.URL.Query().Get("target_org")
+	if target != "" && !api.IsUUID(target) {
+		api.WriteFieldError(w, &api.FieldError{Field: "target_org", Message: "target_org must be a UUID",
+			Status: http.StatusBadRequest})
+		return
+	}
+	entries, total, err := h.audit.List(r.Context(), strings.ToLower(target), page.Limit, page.Offset)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return

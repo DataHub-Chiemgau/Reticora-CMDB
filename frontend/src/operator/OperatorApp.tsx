@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
-import { Route, Routes } from 'react-router-dom';
+import { Link, Navigate, Route, Routes } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { InsecureContextError, startAuthorizationCodeFlow } from '../auth/oidc';
 import { AuthCard } from '../components/shell/AuthCard';
 import { Button } from '../components/ui/Button';
 import { PageHeader } from '../components/ui/PageHeader';
 import { isSessionValid, useOperatorAuth } from './operatorAuth';
+import { OrganizationDetailPage } from './OrganizationDetailPage';
+import { OrganizationsPage } from './OrganizationsPage';
 import type { OperatorSession } from './operatorAuth';
 
 /**
@@ -92,7 +94,12 @@ function OperatorShell({
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-6">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 pb-4 dark:border-gray-800">
-        <p className="text-sm font-semibold">{t('operator.shell.title')}</p>
+        <nav aria-label={t('operator.shell.title')} className="flex items-center gap-4 text-sm">
+          <span className="font-semibold">{t('operator.shell.title')}</span>
+          <Link to="/operator/orgs" className="text-accent hover:underline">
+            {t('operator.orgs.title')}
+          </Link>
+        </nav>
         <div className="flex items-center gap-3 text-sm">
           <span>{t('operator.shell.signedInAs', { name: who })}</span>
           <Button variant="secondary" size="sm" onClick={onSignOut}>
@@ -102,15 +109,9 @@ function OperatorShell({
       </header>
       <main id="main-content">
         <Routes>
-          <Route
-            index
-            element={
-              <PageHeader
-                title={t('operator.home.title')}
-                description={t('operator.home.description')}
-              />
-            }
-          />
+          <Route index element={<Navigate to="orgs" replace />} />
+          <Route path="orgs" element={<OrganizationsPage />} />
+          <Route path="orgs/:id" element={<OrganizationDetailPage />} />
           <Route path="*" element={<PageHeader title={t('operator.home.notFound')} />} />
         </Routes>
       </main>

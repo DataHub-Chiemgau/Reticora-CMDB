@@ -639,6 +639,11 @@ paths:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
+        - name: target_org
+          in: query
+          required: false
+          description: Only the entries of this organization (its history, WP-888); not a UUID is 400.
+          schema: { type: string, format: uuid }
       responses:
         '200':
           description: Operator audit entries
@@ -646,6 +651,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OperatorAuditListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':

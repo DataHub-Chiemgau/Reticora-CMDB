@@ -64,12 +64,24 @@ func (h *Handler) ListEntitlements(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, err := h.entitlements.List(orgContext(r.Context(), orgID), orgID)
+	ctx := orgContext(r.Context(), orgID)
+	items, err := h.entitlements.List(ctx, orgID)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, api.ListResponse[entitlement.Entitlement]{Data: items, Total: len(items), Limit: len(items)})
+	// The leading plan and the time of its last change, as the schema
+	// EntitlementListResponse requires (WP-880; the detail page of WP-888).
+	plan, changed, err := h.entitlements.OrganizationPlan(ctx, orgID)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	if items == nil {
+		items = []entitlement.Entitlement{}
+	}
+	api.WriteJSON(w, http.StatusOK, entitlement.ListResponse{Data: items, Total: len(items), Limit: len(items),
+		Plan: plan, PlanChangedAt: changed})
 }
 
 // GrantEntitlement stores (or updates) an entitlement of an organization.

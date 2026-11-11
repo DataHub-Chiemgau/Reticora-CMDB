@@ -20825,6 +20825,8 @@ export interface operations {
          *     supplied.
          */
         offset?: components['parameters']['Offset'];
+        /** @description Only the entries of this organization (its history, WP-888); not a UUID is 400. */
+        target_org?: string;
       };
       header?: never;
       path?: never;
@@ -20841,6 +20843,7 @@ export interface operations {
           'application/json': components['schemas']['OperatorAuditListResponse'];
         };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
     };

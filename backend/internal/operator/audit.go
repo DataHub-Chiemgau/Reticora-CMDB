@@ -65,7 +65,7 @@ func entryHash(e *AuditEntry) (string, error) {
 type auditLog interface {
 	Record(ctx context.Context, e *AuditEntry) error
 	RecordChange(ctx context.Context, orgID string, change func(ctx context.Context) (*AuditEntry, error)) error
-	List(ctx context.Context, limit, offset int) ([]AuditEntry, int, error)
+	List(ctx context.Context, targetOrg string, limit, offset int) ([]AuditEntry, int, error)
 	Verify(ctx context.Context) (VerifyResult, error)
 }
 
@@ -193,17 +193,25 @@ func scanEntry(row pgx.Row) (AuditEntry, error) {
 }
 
 // List returns entries, newest first.
-func (a *Auditor) List(ctx context.Context, limit, offset int) ([]AuditEntry, int, error) {
+func (a *Auditor) List(ctx context.Context, targetOrg string, limit, offset int) ([]AuditEntry, int, error) {
 	if a == nil || a.pool == nil {
 		return nil, 0, errAuditNotConfigured
+	}
+	// targetOrg (WP-888) narrows the list to the entries of one organization;
+	// empty lists every entry. The filter runs in SQL.
+	var target any
+	if targetOrg != "" {
+		target = targetOrg
 	}
 	var entries []AuditEntry
 	var total int
 	err := database.WithOperator(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM operator_audit`).Scan(&total); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM operator_audit WHERE ($1::uuid IS NULL OR target_org = $1::uuid)`,
+			target).Scan(&total); err != nil {
 			return fmt.Errorf("count operator audit: %w", err)
 		}
-		rows, err := tx.Query(ctx, `SELECT `+auditColumns+` FROM operator_audit ORDER BY id DESC LIMIT $1 OFFSET $2`, limit, offset)
+		rows, err := tx.Query(ctx, `SELECT `+auditColumns+` FROM operator_audit
+			WHERE ($3::uuid IS NULL OR target_org = $3::uuid) ORDER BY id DESC LIMIT $1 OFFSET $2`, limit, offset, target)
 		if err != nil {
 			return fmt.Errorf("list operator audit: %w", err)
 		}
