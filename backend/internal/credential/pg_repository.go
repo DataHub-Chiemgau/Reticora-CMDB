@@ -21,6 +21,9 @@ const credentialSelectColumns = `
 	kind,
 	COALESCE(scope, ''),
 	key_version,
+	secret_version,
+	rotated_at,
+	max_age_days,
 	created_at,
 	updated_at,
 	ciphertext
@@ -98,9 +101,10 @@ func (r *PGRepository) Create(ctx context.Context, cred *StoredCredential) error
 				kind,
 				ciphertext,
 				key_version,
-				scope
-			) VALUES ($1, $2, $3, $4, $5, $6, $7)
-			RETURNING id::text, created_at, updated_at
+				scope,
+				max_age_days
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			RETURNING id::text, secret_version, created_at, updated_at
 		`
 		if err := tx.QueryRow(ctx, query,
 			cred.OrganizationID,
@@ -110,7 +114,8 @@ func (r *PGRepository) Create(ctx context.Context, cred *StoredCredential) error
 			cred.Ciphertext,
 			cred.KeyVersion,
 			nilIfEmpty(cred.Scope),
-		).Scan(&cred.ID, &cred.CreatedAt, &cred.UpdatedAt); err != nil {
+			cred.MaxAgeDays,
+		).Scan(&cred.ID, &cred.SecretVersion, &cred.CreatedAt, &cred.UpdatedAt); err != nil {
 			return fmt.Errorf("create credential: %w", err)
 		}
 		return nil
@@ -286,6 +291,9 @@ func scanStoredCredential(scanner credentialScanner) (*StoredCredential, error) 
 		&item.Kind,
 		&item.Scope,
 		&item.KeyVersion,
+		&item.SecretVersion,
+		&item.RotatedAt,
+		&item.MaxAgeDays,
 		&item.CreatedAt,
 		&item.UpdatedAt,
 		&item.Ciphertext,
@@ -429,4 +437,77 @@ func (r *PGRepository) RewrapOrgDEK(ctx context.Context, orgID string, enc *cryp
 		return nil
 	})
 	return changed, err
+}
+
+// ReplaceSecret implements SecretReplacer: the DEK row is locked FOR SHARE,
+// so a key rotation (RotateOrgDEK locks it FOR UPDATE) cannot re-encrypt
+// the credentials in between and leave this ciphertext under the old DEK.
+func (r *PGRepository) ReplaceSecret(ctx context.Context, orgID, id string, plaintext []byte, enc *crypto.EnvelopeEncryptor,
+	inTx func(ctx context.Context, cred *Credential) error) (*Credential, error) {
+	if !api.IsUUID(id) {
+		return nil, ErrNotFound
+	}
+	var out *Credential
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var wrapped []byte
+		if err := tx.QueryRow(ctx, `SELECT encrypted_dek FROM org_dek WHERE organization_id = $1 FOR SHARE`, orgID).
+			Scan(&wrapped); err != nil {
+			if err == pgx.ErrNoRows {
+				return ErrNotFound
+			}
+			return fmt.Errorf("lock org dek: %w", err)
+		}
+		dek, err := enc.UnwrapDEK(wrapped)
+		if err != nil {
+			return fmt.Errorf("unwrap org dek: %w", err)
+		}
+		ciphertext, err := crypto.Encrypt(dek, plaintext)
+		if err != nil {
+			return fmt.Errorf("encrypt secret: %w", err)
+		}
+		query := fmt.Sprintf(`UPDATE credential SET ciphertext = $3, secret_version = secret_version + 1,
+			rotated_at = now(), updated_at = now() WHERE id = $1 AND organization_id = $2 RETURNING %s`, credentialSelectColumns)
+		stored, err := scanStoredCredential(tx.QueryRow(ctx, query, id, orgID, ciphertext))
+		if err != nil {
+			if err == pgx.ErrNoRows {
+				return ErrNotFound
+			}
+			return fmt.Errorf("replace secret: %w", err)
+		}
+		out = &stored.Credential
+		if inTx != nil {
+			return inTx(ctx, out)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// UpdateMetadata implements MetadataUpdater.
+func (r *PGRepository) UpdateMetadata(ctx context.Context, orgID, id string, u MetadataUpdate) (*Credential, error) {
+	if !api.IsUUID(id) {
+		return nil, ErrNotFound
+	}
+	var out *Credential
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		query := fmt.Sprintf(`UPDATE credential SET name = COALESCE($3, name),
+			max_age_days = CASE WHEN $4 THEN $5::integer ELSE max_age_days END, updated_at = now()
+			WHERE id = $1 AND organization_id = $2 RETURNING %s`, credentialSelectColumns)
+		stored, err := scanStoredCredential(tx.QueryRow(ctx, query, id, orgID, u.Name, u.SetMaxAge, u.MaxAgeDays))
+		if err != nil {
+			if err == pgx.ErrNoRows {
+				return ErrNotFound
+			}
+			return fmt.Errorf("update credential: %w", err)
+		}
+		out = &stored.Credential
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }

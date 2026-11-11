@@ -373,8 +373,12 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	// DELETE /users/{id} records user.deleted in its transaction (F-393).
 	crud(m, v1+"users", "app_user", "POST", "PATCH")
 	crud(m, v1+"collectors", "collector", "POST", "PATCH")
-	crud(m, v1+"credentials", "credential", "DELETE")
+	// PATCH changes name and max_age_days; PUT .../secret replaces the
+	// secret (WP-889): the entry shows secret_version and rotated_at, the
+	// ciphertext stays excluded.
+	crud(m, v1+"credentials", "credential", "DELETE", "PATCH")
 	m["POST "+v1+"credentials/"] = created("credential")
+	m["PUT "+v1+"credentials/{id}/secret"] = row("credential")
 	crud(m, v1+"webhooks", "webhook_subscription", "POST", "DELETE")
 	crud(m, v1+"lifecycle-definitions", "lifecycle_definition", "POST", "DELETE")
 	crud(m, v1+"lifecycle-models", "lifecycle_definition", all...)

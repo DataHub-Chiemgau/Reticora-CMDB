@@ -242,6 +242,7 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 		failingJob                         *jobs.Job
 		jobService                         *jobs.Service
 		warned, expired                    string
+		rotatedCredential                  string
 		hookServer                         *httptest.Server
 		hookSubscription, hookDelivery     string
 		hookDispatcher                     *webhook.Dispatcher
@@ -592,6 +593,42 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 			data: func(t *testing.T, _ string, data map[string]any) {
 				if data["feature"] != "monitoring" || data["expired_at"] == nil {
 					t.Errorf("entitlement.expired data %v, want monitoring with expired_at", data)
+				}
+			}},
+		{typ: events.CredentialRotated,
+			// PUT /credentials/{id}/secret replaces the secret (WP-889).
+			setup: func(t *testing.T) {
+				r := call(t, admin, http.MethodPost, "/api/v1/credentials",
+					`{"name":"evt02-cred","kind":"ssh_password","secret":{"username":"u","password":"evt02-old"}}`)
+				if r.Code != http.StatusCreated {
+					t.Fatalf("create credential: %d %s", r.Code, t6Short(r.Body))
+				}
+				var c struct {
+					ID string `json:"id"`
+				}
+				if err := json.Unmarshal(r.Body, &c); err != nil {
+					t.Fatal(err)
+				}
+				rotatedCredential = c.ID
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPut, "/api/v1/credentials/"+rotatedCredential+"/secret",
+					`{"secret":{"username":"u","password":"evt02-new"}}`)
+				answered(t, "PUT /credentials/{id}/secret", r, refused, http.StatusOK)
+				if refused {
+					unchanged(t, "secret_version", scalar(t, `SELECT secret_version::text FROM credential WHERE id = $1`, rotatedCredential), "1")
+				}
+				return rotatedCredential
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["source"] != "stored" || data["secret_version"] != float64(2) ||
+					data["kind"] != "ssh_password" {
+					t.Errorf("credential.rotated data %v", data)
+				}
+				for _, v := range data {
+					if s, ok := v.(string); ok && strings.Contains(s, "evt02-") {
+						t.Errorf("credential.rotated carries a secret value: %v", data)
+					}
 				}
 			}},
 		{typ: events.EntitlementChanged,
@@ -1221,7 +1258,6 @@ var plannedProducers = map[string]string{
 	"ipam.subnet.changed":           "WP-904",
 	"ipam.address.state_changed":    "WP-902",
 	"asn.changed":                   "WP-1066",
-	"credential.rotated":            "WP-889",
 	"credential.rotation_due":       "WP-897",
 	"credential.resolution_failed":  "WP-898",
 	"admp.connection.refreshed":     "WP-929",

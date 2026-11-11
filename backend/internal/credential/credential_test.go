@@ -350,3 +350,39 @@ func TestService_RotateKeysFailsWhenKeyVersionUnreadable(t *testing.T) {
 		t.Fatalf("credential rewritten by a failed rotation: key version %d -> %d", beforeVersion, after.KeyVersion)
 	}
 }
+
+// TestService_ReplaceSecretDecryptsNewValue covers WP-889: after the
+// replacement Decrypt returns the new value, also after RotateKeys.
+func TestService_ReplaceSecretDecryptsNewValue(t *testing.T) {
+	svc := NewService(NewMemoryRepository(), testEncryptor(t))
+	ctx := context.Background()
+	cred, err := svc.Create(ctx, CreateRequest{OrganizationID: "org-1", Name: "n", Kind: KindSSHPassword,
+		Secret: map[string]any{"password": "old"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	replaced, err := svc.ReplaceSecret(ctx, "org-1", cred.ID, map[string]any{"password": "new"},
+		func(_ context.Context, c *Credential) error {
+			calls++
+			if c.SecretVersion != 2 {
+				t.Errorf("in-transaction step sees secret_version %d, want 2", c.SecretVersion)
+			}
+			return nil
+		})
+	if err != nil || replaced.SecretVersion != 2 || calls != 1 {
+		t.Fatalf("replace: %+v, %v, %d calls", replaced, err, calls)
+	}
+	for _, step := range []string{"replace", "rotate keys"} {
+		secret, decErr := svc.Decrypt(ctx, "org-1", cred.ID)
+		if decErr != nil || secret["password"] != "new" {
+			t.Errorf("after %s: %v, %v", step, secret, decErr)
+		}
+		if _, err = svc.RotateKeys(ctx, "org-1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = svc.ReplaceSecret(ctx, "org-2", cred.ID, map[string]any{"password": "x"}, nil); !errors.Is(err, ErrNotFound) {
+		t.Errorf("foreign organization: %v", err)
+	}
+}

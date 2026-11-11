@@ -53,15 +53,24 @@ var validKinds = map[string]bool{
 
 // Credential is the domain model for an encrypted credential.
 type Credential struct {
-	ID             string    `json:"id"`
-	OrganizationID string    `json:"organization_id"`
-	ClientID       string    `json:"client_id,omitempty"`
-	Name           string    `json:"name"`
-	Kind           string    `json:"kind"`
-	Scope          string    `json:"scope,omitempty"`
-	KeyVersion     int       `json:"key_version"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	ClientID       string `json:"client_id,omitempty"`
+	Name           string `json:"name"`
+	Kind           string `json:"kind"`
+	Scope          string `json:"scope,omitempty"`
+	KeyVersion     int    `json:"key_version"`
+	// SecretVersion counts the secrets the credential had: 1 at creation,
+	// raised by every PUT /credentials/{id}/secret (CRD-05, WP-889).
+	SecretVersion int `json:"secret_version"`
+	// RotatedAt is the time of the last replacement of the secret; nil
+	// while the secret of the creation applies.
+	RotatedAt *time.Time `json:"rotated_at"`
+	// MaxAgeDays is the age limit of the secret in days (1–3650); nil is
+	// none. WP-897 checks it.
+	MaxAgeDays *int      `json:"max_age_days"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // OrgDEK represents an organization's wrapped data encryption key.
@@ -88,7 +97,40 @@ type CreateRequest struct {
 	Scope          string `json:"scope,omitempty"`
 	// Secret is the plaintext credential data (JSON map).
 	Secret map[string]any `json:"secret"`
+	// MaxAgeDays is the optional age limit of the secret (1–3650).
+	MaxAgeDays *int `json:"max_age_days,omitempty"`
 }
+
+// MetadataUpdate is a change of name and age limit (PATCH, WP-889).
+// SetMaxAge marks that max_age_days was sent (nil removes the limit).
+type MetadataUpdate struct {
+	Name       *string
+	MaxAgeDays *int
+	SetMaxAge  bool
+}
+
+// SecretReplacer replaces the secret of a credential in one transaction
+// (WP-889): it locks the organization's DEK (a concurrent key rotation
+// waits), encrypts plaintext with it, raises secret_version, sets
+// rotated_at and runs inTx (the event of the replacement) before the
+// commit. PGRepository and MemoryRepository implement it.
+type SecretReplacer interface {
+	ReplaceSecret(ctx context.Context, orgID, id string, plaintext []byte, enc *crypto.EnvelopeEncryptor,
+		inTx func(ctx context.Context, cred *Credential) error) (*Credential, error)
+}
+
+// MetadataUpdater changes name and age limit of a credential without
+// touching its secret (WP-889).
+type MetadataUpdater interface {
+	UpdateMetadata(ctx context.Context, orgID, id string, u MetadataUpdate) (*Credential, error)
+}
+
+// ErrUnsupported is returned when the store cannot replace secrets or
+// change metadata.
+var ErrUnsupported = errors.New("credential store does not support this change")
+
+// MaxAgeDaysValid reports whether an age limit lies in 1–3650.
+func MaxAgeDaysValid(days int) bool { return days >= 1 && days <= 3650 }
 
 // Repository defines the storage interface for credentials and DEKs.
 type Repository interface {
@@ -164,6 +206,8 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Credential, e
 			Kind:           req.Kind,
 			Scope:          req.Scope,
 			KeyVersion:     1,
+			SecretVersion:  1,
+			MaxAgeDays:     req.MaxAgeDays,
 			CreatedAt:      now,
 			UpdatedAt:      now,
 		},
@@ -214,6 +258,35 @@ func (s *Service) Decrypt(ctx context.Context, orgID, id string) (map[string]any
 // List returns all credential metadata for an organization.
 func (s *Service) List(ctx context.Context, orgID string) ([]Credential, error) {
 	return s.repo.List(ctx, orgID)
+}
+
+// ReplaceSecret replaces the secret of a credential (PUT
+// /credentials/{id}/secret, CRD-05, WP-889); the new value is never
+// returned. inTx runs in the transaction of the replacement (the event
+// credential.rotated); it may be nil.
+func (s *Service) ReplaceSecret(ctx context.Context, orgID, id string, secret map[string]any,
+	inTx func(ctx context.Context, cred *Credential) error) (*Credential, error) {
+	replacer, ok := s.repo.(SecretReplacer)
+	if !ok {
+		return nil, ErrUnsupported
+	}
+	if _, err := s.getOrCreateDEK(ctx, orgID); err != nil {
+		return nil, err
+	}
+	plaintext, err := json.Marshal(secret)
+	if err != nil {
+		return nil, err
+	}
+	return replacer.ReplaceSecret(ctx, orgID, id, plaintext, s.encryptor, inTx)
+}
+
+// UpdateMetadata changes name and age limit (PATCH /credentials/{id}).
+func (s *Service) UpdateMetadata(ctx context.Context, orgID, id string, u MetadataUpdate) (*Credential, error) {
+	updater, ok := s.repo.(MetadataUpdater)
+	if !ok {
+		return nil, ErrUnsupported
+	}
+	return updater.UpdateMetadata(ctx, orgID, id, u)
 }
 
 // Delete removes a credential.

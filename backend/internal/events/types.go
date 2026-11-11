@@ -652,6 +652,10 @@ type CredentialEventData struct {
 	ClientID string `json:"client_id,omitempty"`
 	Kind     string `json:"kind"`
 	Reason   string `json:"reason,omitempty"`
+	// SecretVersion is the version of the secret after a rotation and
+	// Source where it lives, stored or vault (WP-889).
+	SecretVersion int    `json:"secret_version,omitempty"`
+	Source        string `json:"source,omitempty"`
 }
 
 // ADMPConnectionRefreshedData is the data of admp.connection.refreshed

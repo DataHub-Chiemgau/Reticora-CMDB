@@ -927,7 +927,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		// inventory and assets_basic (WP-309); the route stays ungated.
 		savedview.NewHandler(repos.SavedView).WithQueryEngine(repos.FilterQuery).WithPermissions(repos.Permission).
 			WithEntitlements(aiEntitlements).WithInventory(opts.Modules.Enabled(ModuleInventory)),
-		credential.NewHandler(opts.Credentials),
+		// credential.rotated goes to the outbox of the application pool (WP-889).
+		credential.NewHandler(opts.Credentials).WithEvents(opts.AuditPool),
 		ai.NewHandler(repos.AI, opts.AIProvider,
 			ai.NewRetriever(repos.AI, repos.Search, repos.Permission, opts.AIProvider).WithConsent(aiConsent)).
 			WithConsent(aiConsent),

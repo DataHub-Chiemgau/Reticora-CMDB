@@ -4541,6 +4541,33 @@ export interface paths {
     delete: operations['deleteCredential'];
     options?: never;
     head?: never;
+    /**
+     * Change name and age limit of a credential
+     * @description Changes name and max_age_days (null removes the limit) with credential:manage (WP-889). kind, client_id, scope and secret cannot be changed (422 with the field); the secret is replaced with PUT /credentials/{id}/secret. An id that is no UUID is answered like an unknown one (404).
+     */
+    patch: operations['updateCredential'];
+    trace?: never;
+  };
+  '/api/v1/credentials/{id}/secret': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Replace the secret of a credential
+     * @description CRD-05 (WP-889): encrypts the new secret with the current DEK, raises secret_version and sets rotated_at in one transaction under a lock of the DEK, and appends credential.rotated (source stored) as its last write. The answer carries the metadata, never the old or the new secret. Requires credential:manage. The id stays, so discovery scopes and connectors keep their reference.
+     */
+    put: operations['replaceCredentialSecret'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
     patch?: never;
     trace?: never;
   };
@@ -19668,11 +19695,32 @@ export interface components {
         | 'nut'
         | 'nas';
       scope?: string;
+      /** @description Version of the organization's data encryption key. */
       key_version: number;
+      /** @description Version of the secret; 1 at creation, raised by every replacement (WP-889). */
+      secret_version?: number;
+      /**
+       * Format: date-time
+       * @description Time of the last replacement of the secret; null while the secret of the creation applies.
+       */
+      rotated_at?: string | null;
+      /** @description Age limit of the secret in days; null is none (checked by WP-897). */
+      max_age_days?: number | null;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    CredentialUpdate: {
+      name?: string;
+      /** @description Age limit in days; null removes it. */
+      max_age_days?: number | null;
+    };
+    CredentialSecretReplace: {
+      /** @description The new plaintext secret, encrypted at rest; never returned. */
+      secret: {
+        [key: string]: unknown;
+      };
     };
     CredentialListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Credential'][];
@@ -19697,6 +19745,8 @@ export interface components {
       secret: {
         [key: string]: unknown;
       };
+      /** @description Optional age limit of the secret in days (WP-889). */
+      max_age_days?: number;
     };
     DocumentLink: {
       id: string;
@@ -31313,6 +31363,86 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  updateCredential: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CredentialUpdate'];
+      };
+    };
+    responses: {
+      /** @description Credential metadata */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Credential'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      /** @description A member that cannot be changed (kind, client_id, scope, secret), an unknown member, an empty name or max_age_days outside 1–3650 (`field`). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  replaceCredentialSecret: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CredentialSecretReplace'];
+      };
+    };
+    responses: {
+      /** @description Credential metadata after the replacement */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Credential'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      /** @description The secret is missing or empty (`field` secret). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };

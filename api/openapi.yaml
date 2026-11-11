@@ -10572,6 +10572,44 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateCredential
+      tags: [Credentials]
+      summary: Change name and age limit of a credential
+      description: >-
+        Changes name and max_age_days (null removes the limit) with
+        credential:manage (WP-889). kind, client_id, scope and secret cannot
+        be changed (422 with the field); the secret is replaced with
+        PUT /credentials/{id}/secret. An id that is no UUID is answered like
+        an unknown one (404).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CredentialUpdate'
+      responses:
+        '200':
+          description: Credential metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Credential'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: >-
+            A member that cannot be changed (kind, client_id, scope, secret), an
+            unknown member, an empty name or max_age_days outside 1–3650 (`field`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '500':
+          $ref: '#/components/responses/InternalServerError'
     delete:
       operationId: deleteCredential
       tags: [Credentials]
@@ -10585,6 +10623,47 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/credentials/{id}/secret:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    put:
+      operationId: replaceCredentialSecret
+      tags: [Credentials]
+      summary: Replace the secret of a credential
+      description: >-
+        CRD-05 (WP-889): encrypts the new secret with the current DEK, raises
+        secret_version and sets rotated_at in one transaction under a lock of
+        the DEK, and appends credential.rotated (source stored) as its last
+        write. The answer carries the metadata, never the old or the new
+        secret. Requires credential:manage. The id stays, so discovery scopes
+        and connectors keep their reference.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CredentialSecretReplace'
+      responses:
+        '200':
+          description: Credential metadata after the replacement
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Credential'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: The secret is missing or empty (`field` secret).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -39527,12 +39606,51 @@ components:
           type: string
         key_version:
           type: integer
+          description: Version of the organization's data encryption key.
+        secret_version:
+          type: integer
+          minimum: 1
+          description: Version of the secret; 1 at creation, raised by every replacement (WP-889).
+        rotated_at:
+          type: [string, 'null']
+          format: date-time
+          description: Time of the last replacement of the secret; null while the secret of the creation applies.
+        max_age_days:
+          type: [integer, 'null']
+          minimum: 1
+          maximum: 3650
+          description: Age limit of the secret in days; null is none (checked by WP-897).
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+
+    CredentialUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name: { type: string, minLength: 1 }
+        max_age_days:
+          type: [integer, 'null']
+          minimum: 1
+          maximum: 3650
+          description: Age limit in days; null removes it.
+
+    CredentialSecretReplace:
+      type: object
+      writeOnly: true
+      additionalProperties: false
+      required: [secret]
+      properties:
+        secret:
+          type: object
+          writeOnly: true
+          minProperties: 1
+          additionalProperties: true
+          description: The new plaintext secret, encrypted at rest; never returned.
 
     CredentialListResponse:
       allOf:
@@ -39562,6 +39680,11 @@ components:
           type: object
           description: Plaintext secret data, encrypted at rest before storage.
           additionalProperties: true
+        max_age_days:
+          type: integer
+          minimum: 1
+          maximum: 3650
+          description: Optional age limit of the secret in days (WP-889).
 
     DocumentLink:
       type: object

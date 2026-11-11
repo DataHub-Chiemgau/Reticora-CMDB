@@ -218,3 +218,96 @@ func TestHandlerCreateCredentialKinds(t *testing.T) {
 		t.Errorf("stored credentials = %+v, want only the nas credential", stored)
 	}
 }
+
+// createCredential creates a credential of org-1 through the API.
+func createCredential(t *testing.T, router *chi.Mux, body string) Credential {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, withTenant(httptest.NewRequest(http.MethodPost, "/api/v1/credentials", bytes.NewBufferString(body)), "org-1"))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	var cred Credential
+	if err := json.Unmarshal(rec.Body.Bytes(), &cred); err != nil {
+		t.Fatal(err)
+	}
+	return cred
+}
+
+// TestHandlerReplaceSecretReturnsNoSecret covers CRD-05 (WP-889): PUT
+// /credentials/{id}/secret answers the metadata with secret_version 2 and
+// rotated_at, neither the old nor the new value; an empty secret is 422, a
+// foreign or unknown id 404.
+func TestHandlerReplaceSecretReturnsNoSecret(t *testing.T) {
+	router, _ := testRouter(t)
+	cred := createCredential(t, router, `{"name":"sw","kind":"ssh_password","secret":{"username":"admin","password":"old-value-889"}}`)
+	if cred.SecretVersion != 1 || cred.RotatedAt != nil {
+		t.Fatalf("created %+v, want secret_version 1 without rotated_at", cred)
+	}
+	put := func(org, id, body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, withTenant(httptest.NewRequest(http.MethodPut, "/api/v1/credentials/"+id+"/secret", bytes.NewBufferString(body)), org))
+		return rec
+	}
+	rec := put("org-1", cred.ID, `{"secret":{"username":"admin","password":"new-value-889"}}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("replace: %d %s", rec.Code, rec.Body.String())
+	}
+	if body := rec.Body.String(); strings.Contains(body, "old-value-889") || strings.Contains(body, "new-value-889") ||
+		strings.Contains(body, `"password"`) || strings.Contains(body, `"secret"`) {
+		t.Errorf("the answer carries the secret: %s", body)
+	}
+	var replaced Credential
+	if err := json.Unmarshal(rec.Body.Bytes(), &replaced); err != nil {
+		t.Fatal(err)
+	}
+	if replaced.SecretVersion != 2 || replaced.RotatedAt == nil || replaced.ID != cred.ID {
+		t.Errorf("replaced %+v, want secret_version 2 with rotated_at", replaced)
+	}
+	if rec = put("org-1", cred.ID, `{"secret":{}}`); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"field":"secret"`) {
+		t.Errorf("empty secret: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec = put("org-2", cred.ID, `{"secret":{"password":"x"}}`); rec.Code != http.StatusNotFound {
+		t.Errorf("foreign organization: %d", rec.Code)
+	}
+	if rec = put("org-1", "00000000-0000-4000-8000-000000000000", `{"secret":{"password":"x"}}`); rec.Code != http.StatusNotFound {
+		t.Errorf("unknown id: %d", rec.Code)
+	}
+}
+
+// TestHandlerPatchRejectsImmutableFields covers WP-889: PATCH changes name
+// and max_age_days (null removes it); kind, client_id, scope and secret are
+// 422 with their field, an age limit outside 1–3650 too.
+func TestHandlerPatchRejectsImmutableFields(t *testing.T) {
+	router, _ := testRouter(t)
+	cred := createCredential(t, router, `{"name":"sw","kind":"ssh_password","secret":{"password":"p"}}`)
+	patch := func(body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, withTenant(httptest.NewRequest(http.MethodPatch, "/api/v1/credentials/"+cred.ID, bytes.NewBufferString(body)), "org-1"))
+		return rec
+	}
+	for body, field := range map[string]string{
+		`{"kind":"snmp_v2c"}`:         "kind",
+		`{"client_id":"c-1"}`:         "client_id",
+		`{"scope":"x"}`:               "scope",
+		`{"secret":{"password":"x"}}`: "secret",
+		`{"max_age_days":0}`:          "max_age_days",
+		`{"max_age_days":3651}`:       "max_age_days",
+		`{"name":""}`:                 "name",
+	} {
+		if rec := patch(body); rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"field":"`+field+`"`) {
+			t.Errorf("%s: %d %s, want 422 on %s", body, rec.Code, rec.Body.String(), field)
+		}
+	}
+	rec := patch(`{"name":"core-switch","max_age_days":90}`)
+	var got Credential
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &got) != nil || got.Name != "core-switch" ||
+		got.MaxAgeDays == nil || *got.MaxAgeDays != 90 || got.SecretVersion != 1 {
+		t.Fatalf("patch: %d %s", rec.Code, rec.Body.String())
+	}
+	rec = patch(`{"max_age_days":null}`)
+	got = Credential{}
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &got) != nil || got.MaxAgeDays != nil || got.Name != "core-switch" {
+		t.Errorf("remove the age limit: %d %s", rec.Code, rec.Body.String())
+	}
+}

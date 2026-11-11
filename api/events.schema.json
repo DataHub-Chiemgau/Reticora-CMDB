@@ -4311,6 +4311,16 @@
         "reason": {
           "type": "string",
           "description": "Reason of a failed resolution or the due date of a rotation."
+        },
+        "secret_version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Version of the secret after a rotation (WP-889)."
+        },
+        "source": {
+          "type": "string",
+          "enum": ["stored", "vault"],
+          "description": "Where the secret lives: stored in Reticora or referenced in a vault (WP-889, WP-894)."
         }
       },
       "examples": [
@@ -4345,6 +4355,16 @@
         "reason": {
           "type": "string",
           "description": "Reason of a failed resolution or the due date of a rotation."
+        },
+        "secret_version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Version of the secret after a rotation (WP-889)."
+        },
+        "source": {
+          "type": "string",
+          "enum": ["stored", "vault"],
+          "description": "Where the secret lives: stored in Reticora or referenced in a vault (WP-889, WP-894)."
         }
       },
       "examples": [
@@ -4379,6 +4399,16 @@
         "reason": {
           "type": "string",
           "description": "Reason of a failed resolution or the due date of a rotation."
+        },
+        "secret_version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Version of the secret after a rotation (WP-889)."
+        },
+        "source": {
+          "type": "string",
+          "enum": ["stored", "vault"],
+          "description": "Where the secret lives: stored in Reticora or referenced in a vault (WP-889, WP-894)."
         }
       },
       "examples": [
