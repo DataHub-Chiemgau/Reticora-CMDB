@@ -2,6 +2,7 @@ import {
   Activity,
   Archive,
   Armchair,
+  BadgeCheck,
   Bookmark,
   Building,
   Boxes,
@@ -175,6 +176,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
     items: [
       { page: 'users', icon: Users },
       { page: 'clients', icon: Building },
+      { page: 'plan', icon: BadgeCheck },
       { page: 'permissions', icon: UserCheck },
       { page: 'ci-types', icon: Shapes },
       { page: 'rules', icon: ListTodo },

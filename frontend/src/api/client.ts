@@ -3142,9 +3142,53 @@ export interface EntitlementListResponse extends PaginatedResponse<Entitlement> 
   plan_changed_at: string | null;
 }
 
+/** The use of one quota (PKG-05, WP-885). */
+export interface QuotaUsage {
+  quota: string;
+  /** Current use; null when the caller may not see the counts (F-414). */
+  used: number | null;
+  /** The limit; null is unlimited. */
+  limit: number | null;
+  /** The limit is the plan default or an override. */
+  origin: 'plan' | 'override';
+}
+
+/** GET /entitlements/usage. */
+export interface QuotaUsageResponse {
+  data: QuotaUsage[];
+  plan: string;
+}
+
+/** One plan of the plan matrix (E-151, E-153). */
+export interface PlanInfo {
+  plan: string;
+  features: string[];
+  /** Default limits; a quota without entry is unlimited. */
+  quota_defaults: Record<string, number>;
+}
+
+/** A bookable add-on (CH14). */
+export interface AddonInfo {
+  key: string;
+  phase: 'A';
+  description_key: string;
+}
+
+/** GET /entitlements/plans: the plan matrix and the add-ons. */
+export interface PlanMatrixResponse {
+  data: PlanInfo[];
+  addons: AddonInfo[];
+}
+
 export const entitlementApi = {
   list(params: ListParams = {}): Promise<EntitlementListResponse> {
     return fetchAPI(`/entitlements${buildQuery(params)}`);
+  },
+  usage(): Promise<QuotaUsageResponse> {
+    return fetchAPI('/entitlements/usage');
+  },
+  plans(): Promise<PlanMatrixResponse> {
+    return fetchAPI('/entitlements/plans');
   },
 };
 

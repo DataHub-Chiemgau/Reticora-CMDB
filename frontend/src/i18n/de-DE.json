@@ -52,7 +52,8 @@
     "import": "Import",
     "contracts": "Verträge",
     "suppliers": "Lieferanten",
-    "clients": "Kunden"
+    "clients": "Kunden",
+    "plan": "Paket und Add-ons"
   },
   "common": {
     "save": "Speichern",
@@ -118,7 +119,8 @@
       "scan": "Scannen",
       "import": "Import-Assistent öffnen",
       "contracts": "Verträge öffnen",
-      "suppliers": "Lieferanten öffnen"
+      "suppliers": "Lieferanten öffnen",
+      "plan": "Paket und Add-ons öffnen"
     },
     "contact": {
       "label": "Kontakt",
@@ -190,7 +192,8 @@
     "locked": {
       "title": "„{{name}}“ gehört nicht zu Ihrem Paket",
       "description": "Die Funktion ist in Reticora vorhanden, aber im Paket Ihrer Organisation nicht freigeschaltet. Wenden Sie sich an die Administration Ihrer Organisation, wenn Sie sie nutzen möchten.",
-      "back": "Zum Dashboard"
+      "back": "Zum Dashboard",
+      "toPlan": "Paket und Add-ons ansehen"
     },
     "quickAccess": {
       "title": "Schnellzugriff",
@@ -4795,5 +4798,100 @@
     "filterError": "Die Treffer des Filters konnten nicht geladen werden.",
     "filterEmpty": "Der Filter hat keine Treffer.",
     "filterCapped": "Der Filter hat {{total}} Treffer; eine Massenänderung umfasst höchstens {{max}}, die ersten {{max}} sind ausgewählt. Schränken Sie den Filter ein oder nutzen Sie den Export."
+  },
+  "planPage": {
+    "title": "Paket und Add-ons",
+    "subtitle": "Paket, enthaltene Funktionen, gebuchte Add-ons und Kontingente Ihrer Organisation.",
+    "forbidden": "Sie dürfen Paket und Kontingente nicht einsehen",
+    "forbiddenHint": "Dafür ist das Recht entitlement:read nötig. Wenden Sie sich an die Administration Ihrer Organisation.",
+    "loadError": "Paket und Kontingente konnten nicht geladen werden",
+    "current": {
+      "title": "Ihr Paket",
+      "changedAt": "Zuletzt geändert am {{date}}.",
+      "sinceCreation": "Gilt seit der Anlage der Organisation.",
+      "changeHint": "Einen Paketwechsel oder ein Add-on vereinbaren Sie mit Ihrem Anbieter; hier wird nichts gekauft."
+    },
+    "quotas": {
+      "title": "Kontingente",
+      "quota": "Kontingent",
+      "usage": "Verbrauch",
+      "origin": "Herkunft",
+      "unlimited": "unbegrenzt",
+      "limitOnly": "Grenze: {{limit}}",
+      "usedOf": "{{used}} von {{limit}}",
+      "seconds": "{{value}} s",
+      "mib": "{{value}} MiB"
+    },
+    "quotaNames": {
+      "max_cis": "CIs",
+      "max_collectors": "Collectoren",
+      "max_users": "Benutzer",
+      "max_api_keys": "API-Schlüssel",
+      "max_storage_mb": "Dokumentenspeicher",
+      "max_monitored_targets": "Prüfziele",
+      "max_probes_per_minute": "Prüfungen pro Minute",
+      "min_probe_interval_s": "Kürzestes Prüfintervall",
+      "maxTargetsOfType": "Prüfziele vom Typ {{type}}"
+    },
+    "origins": {
+      "plan": "Paket",
+      "override": "Abweichung"
+    },
+    "addons": {
+      "title": "Add-ons",
+      "booked": "Gebucht",
+      "cancelled": "Gekündigt",
+      "notBooked": "Nicht gebucht",
+      "validUntil": "Laufzeit bis {{date}}"
+    },
+    "expiry": {
+      "title": "Ablaufdaten",
+      "none": "Keine Funktion Ihres Pakets hat ein Ablaufdatum.",
+      "entry": "{{feature}} läuft am {{date}} ab."
+    },
+    "compare": {
+      "title": "Paketvergleich",
+      "feature": "Funktion",
+      "included": "enthalten",
+      "locked": "nicht enthalten",
+      "yourPlan": "Ihr Paket"
+    },
+    "features": {
+      "cmdb_core": "CMDB-Kern",
+      "discovery": "Discovery",
+      "topology": "Topologie",
+      "rack_view": "Rackansicht",
+      "export_csv": "CSV-Export",
+      "webhooks": "Webhooks",
+      "api_access": "API-Zugriff",
+      "notifications_email": "E-Mail-Benachrichtigungen",
+      "assets_basic": "Assets",
+      "documents": "Dokumente",
+      "import": "Import",
+      "ticketing_essential": "Tickets (Basis)",
+      "ticketing_standard": "Tickets mit SLA",
+      "signature": "Digitale Unterschrift",
+      "stock": "Lager und Mengenartikel",
+      "stocktake_standard": "Inventur",
+      "barcode": "Barcode und Scan",
+      "gps_standard": "GPS-Standorte",
+      "workplace": "Arbeitsplätze",
+      "export_datev": "DATEV-Export",
+      "internal_orders": "Interne Bestellungen",
+      "monitoring": "Monitoring",
+      "ipam": "IP-Adressverwaltung",
+      "monitoring_network": "Netz-Monitoring",
+      "credential_vault": "Zugangsdaten-Tresor",
+      "notifications_sms_pager": "SMS- und Pager-Benachrichtigungen",
+      "workflows": "Workflows und Formulare",
+      "compliance_findings": "Compliance-Befunde",
+      "monitoring_access": "Zugangs-Monitoring",
+      "monitoring_analytics": "Monitoring-Analysen",
+      "compliance_automation": "Compliance-Automatisierung",
+      "endpoint_agent": "Endpoint-Agent",
+      "iga": "IGA",
+      "ai": "KI-Assistent",
+      "admp": "ADMP-Anbindung"
+    }
   }
 }

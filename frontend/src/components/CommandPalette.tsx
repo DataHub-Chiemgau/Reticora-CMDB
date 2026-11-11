@@ -64,7 +64,9 @@ export type AppPage =
   | 'contracts'
   | 'suppliers'
   // Client administration (UI-14, WP-855).
-  | 'clients';
+  | 'clients'
+  // Plan and add-ons of the organization (PKG-06, WP-886).
+  | 'plan';
 
 export const pageToPath: Record<AppPage, string> = {
   dashboard: '/dashboard',
@@ -114,6 +116,7 @@ export const pageToPath: Record<AppPage, string> = {
   contracts: '/contracts',
   suppliers: '/suppliers',
   clients: '/clients',
+  plan: '/plan',
 };
 
 interface CommandPaletteProps {
@@ -389,6 +392,12 @@ export function CommandPalette({
         label: t('commandPalette.commands.users', 'Benutzer & Teams öffnen'),
         keywords: ['users teams roles benutzer rollen'],
         action: () => onNavigate('users'),
+      },
+      {
+        id: 'nav-plan',
+        label: t('commandPalette.commands.plan'),
+        keywords: ['plan paket add-ons limits verbrauch usage quota'],
+        action: () => onNavigate('plan'),
       },
       {
         id: 'nav-permissions',

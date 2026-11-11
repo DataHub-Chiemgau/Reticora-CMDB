@@ -91,6 +91,38 @@ function isPageServed(modules: ModuleList | undefined, page: string): boolean {
 }
 
 /**
+ * usePlanOverview reads what the page "Paket und Add-ons" shows (PKG-06,
+ * WP-886): the rows with plan and plan_changed_at, the usage of every
+ * quota and the plan matrix. All three need entitlement:read; a 403 is not
+ * retried (entitlementReadOptions).
+ */
+export function usePlanOverview() {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated());
+  const rows = useQuery({
+    queryKey: ['entitlements', 'rows'],
+    queryFn: () => entitlementApi.list({ limit: 200 }),
+    enabled: isAuthenticated,
+    staleTime: 60_000,
+    ...entitlementReadOptions,
+  });
+  const usage = useQuery({
+    queryKey: ['entitlements', 'usage'],
+    queryFn: () => entitlementApi.usage(),
+    enabled: isAuthenticated,
+    staleTime: 60_000,
+    ...entitlementReadOptions,
+  });
+  const plans = useQuery({
+    queryKey: ['entitlements', 'plans'],
+    queryFn: () => entitlementApi.plans(),
+    enabled: isAuthenticated,
+    staleTime: 5 * 60_000,
+    ...entitlementReadOptions,
+  });
+  return { rows, usage, plans };
+}
+
+/**
  * useModules resolves which late modules (phase P2 and later, add-ons) this
  * release serves (WP-214, E-03). The pages of a switched-off module are
  * hidden whatever the plan says: their routes do not exist on the server.
@@ -174,6 +206,8 @@ export const navFeatureFor: Record<string, string | undefined> = {
   'saved-views': undefined,
   // The client administration (WP-855) is core like the location tree.
   clients: undefined,
+  // Plan and add-ons (WP-886) belong to every plan.
+  plan: undefined,
 };
 
 /**
@@ -185,6 +219,8 @@ export const navFeatureFor: Record<string, string | undefined> = {
  */
 export const navPermissionFor: Record<string, string | undefined> = {
   'ci-types': 'citype:manage',
+  // Plan and add-ons (PKG-06, WP-886): no feature gate, entitlement:read.
+  plan: 'entitlement:read',
   // The client list reads with location:read; writing needs user:manage (WP-855).
   clients: 'location:read',
 };

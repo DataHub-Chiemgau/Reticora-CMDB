@@ -221,6 +221,50 @@ const DEFAULTS: Handler[] = [
       ),
     }),
   },
+  // Usage and plan matrix of the page "Paket und Add-ons" (WP-885, WP-886).
+  {
+    path: '/entitlements/usage',
+    reply: () => ({
+      body: {
+        plan: 'enterprise',
+        data: [
+          { quota: 'max_cis', used: 3, limit: 50000, origin: 'plan' },
+          { quota: 'max_users', used: 2, limit: null, origin: 'plan' },
+          { quota: 'max_storage_mb', used: null, limit: null, origin: 'plan' },
+        ],
+      },
+    }),
+  },
+  {
+    path: '/entitlements/plans',
+    reply: () => ({
+      body: {
+        data: [
+          { plan: 'essential', features: ['cmdb_core'], quota_defaults: { max_cis: 500 } },
+          {
+            plan: 'standard',
+            features: ['cmdb_core', 'monitoring'],
+            quota_defaults: { max_cis: 2500 },
+          },
+          {
+            plan: 'pro',
+            features: ['cmdb_core', 'monitoring', 'workflows'],
+            quota_defaults: { max_cis: 10000 },
+          },
+          {
+            plan: 'enterprise',
+            features: ['cmdb_core', 'monitoring', 'workflows', 'monitoring_analytics'],
+            quota_defaults: { max_cis: 50000 },
+          },
+        ],
+        addons: [
+          { key: 'iga', phase: 'A', description_key: 'addons.iga.description' },
+          { key: 'ai', phase: 'A', description_key: 'addons.ai.description' },
+          { key: 'admp', phase: 'A', description_key: 'addons.admp.description' },
+        ],
+      },
+    }),
+  },
   // The effective rights of the signed-in administrator (signIn): the review
   // inbox offers its resolutions only with review:resolve (WP-557).
   {

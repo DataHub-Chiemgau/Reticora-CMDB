@@ -942,6 +942,12 @@ const ROUTES: A11yRoute[] = [
     url: '/clients',
     ready: (page) => page.locator('#main-content tr').filter({ hasText: 'a11y-client' }),
   },
+  {
+    // WP-886: plan, comparison, add-ons, usage bars and expiry.
+    path: '/plan',
+    url: '/plan',
+    ready: (page) => page.getByRole('progressbar', { name: 'CIs' }),
+  },
   { path: '/saved-views', url: '/saved-views', ready: text(M.savedView) },
   {
     // WP-817: the tag catalog, read-only without tag:manage.

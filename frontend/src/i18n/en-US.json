@@ -52,7 +52,8 @@
     "import": "Import",
     "contracts": "Contracts",
     "suppliers": "Suppliers",
-    "clients": "Customers"
+    "clients": "Customers",
+    "plan": "Plan and add-ons"
   },
   "common": {
     "save": "Save",
@@ -118,7 +119,8 @@
       "scan": "Scan",
       "import": "Open import assistant",
       "contracts": "Open contracts",
-      "suppliers": "Open suppliers"
+      "suppliers": "Open suppliers",
+      "plan": "Open plan and add-ons"
     },
     "contact": {
       "label": "Contact",
@@ -190,7 +192,8 @@
     "locked": {
       "title": "“{{name}}” is not part of your plan",
       "description": "The function exists in Reticora but is not enabled in your organization's plan. Contact your organization's administrators if you want to use it.",
-      "back": "Go to dashboard"
+      "back": "Go to dashboard",
+      "toPlan": "View plan and add-ons"
     },
     "quickAccess": {
       "title": "Quick access",
@@ -4795,5 +4798,100 @@
     "filterError": "The matches of the filter could not be loaded.",
     "filterEmpty": "The filter has no matches.",
     "filterCapped": "The filter has {{total}} matches; a bulk change covers at most {{max}}, the first {{max}} are selected. Narrow the filter or use the export."
+  },
+  "planPage": {
+    "title": "Plan and add-ons",
+    "subtitle": "Plan, included features, booked add-ons and quotas of your organization.",
+    "forbidden": "You may not view the plan and the quotas",
+    "forbiddenHint": "This needs the permission entitlement:read. Contact the administration of your organization.",
+    "loadError": "The plan and the quotas could not be loaded",
+    "current": {
+      "title": "Your plan",
+      "changedAt": "Last changed on {{date}}.",
+      "sinceCreation": "In effect since the organization was created.",
+      "changeHint": "Arrange a plan change or an add-on with your provider; nothing is purchased here."
+    },
+    "quotas": {
+      "title": "Quotas",
+      "quota": "Quota",
+      "usage": "Usage",
+      "origin": "Origin",
+      "unlimited": "unlimited",
+      "limitOnly": "Limit: {{limit}}",
+      "usedOf": "{{used}} of {{limit}}",
+      "seconds": "{{value}} s",
+      "mib": "{{value}} MiB"
+    },
+    "quotaNames": {
+      "max_cis": "CIs",
+      "max_collectors": "Collectors",
+      "max_users": "Users",
+      "max_api_keys": "API keys",
+      "max_storage_mb": "Document storage",
+      "max_monitored_targets": "Probe targets",
+      "max_probes_per_minute": "Probes per minute",
+      "min_probe_interval_s": "Shortest probe interval",
+      "maxTargetsOfType": "Probe targets of type {{type}}"
+    },
+    "origins": {
+      "plan": "Plan",
+      "override": "Override"
+    },
+    "addons": {
+      "title": "Add-ons",
+      "booked": "Booked",
+      "cancelled": "Cancelled",
+      "notBooked": "Not booked",
+      "validUntil": "Term until {{date}}"
+    },
+    "expiry": {
+      "title": "Expiry dates",
+      "none": "No feature of your plan has an expiry date.",
+      "entry": "{{feature}} expires on {{date}}."
+    },
+    "compare": {
+      "title": "Plan comparison",
+      "feature": "Feature",
+      "included": "included",
+      "locked": "not included",
+      "yourPlan": "Your plan"
+    },
+    "features": {
+      "cmdb_core": "CMDB core",
+      "discovery": "Discovery",
+      "topology": "Topology",
+      "rack_view": "Rack view",
+      "export_csv": "CSV export",
+      "webhooks": "Webhooks",
+      "api_access": "API access",
+      "notifications_email": "Email notifications",
+      "assets_basic": "Assets",
+      "documents": "Documents",
+      "import": "Import",
+      "ticketing_essential": "Tickets (basic)",
+      "ticketing_standard": "Tickets with SLA",
+      "signature": "Digital signature",
+      "stock": "Stock and consumables",
+      "stocktake_standard": "Stocktake",
+      "barcode": "Barcode and scan",
+      "gps_standard": "GPS locations",
+      "workplace": "Workplaces",
+      "export_datev": "DATEV export",
+      "internal_orders": "Internal orders",
+      "monitoring": "Monitoring",
+      "ipam": "IP address management",
+      "monitoring_network": "Network monitoring",
+      "credential_vault": "Credential vault",
+      "notifications_sms_pager": "SMS and pager notifications",
+      "workflows": "Workflows and forms",
+      "compliance_findings": "Compliance findings",
+      "monitoring_access": "Access monitoring",
+      "monitoring_analytics": "Monitoring analytics",
+      "compliance_automation": "Compliance automation",
+      "endpoint_agent": "Endpoint agent",
+      "iga": "IGA",
+      "ai": "AI assistant",
+      "admp": "ADMP connection"
+    }
   }
 }
