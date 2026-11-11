@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000291_credential_version
+Stand: Migration 000292_credential_binding
 
 ## Prüfung
 
@@ -1921,6 +1921,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `contact` | ja | ja | contact_scoped_delete (DELETE), contact_scoped_update (UPDATE), org_isolation (ALL) |
 | `contract` | ja | ja | contract_isolation (ALL), contract_scoped_delete (DELETE), contract_scoped_update (UPDATE) |
 | `credential` | ja | ja | credential_isolation (ALL), credential_scoped_delete (DELETE), credential_scoped_update (UPDATE) |
+| `credential_binding` | ja | ja | credential_binding_isolation (ALL), credential_binding_scoped_delete (DELETE), credential_binding_scoped_update (UPDATE) |
 | `custom_role` | ja | ja | custom_role_tenant_isolation (ALL) |
 | `desk` | ja | ja | desk_isolation (ALL), desk_scoped_delete (DELETE), desk_scoped_update (UPDATE) |
 | `desk_booking` | ja | ja | desk_booking_isolation (ALL), desk_booking_scoped_delete (DELETE), desk_booking_scoped_update (UPDATE) |

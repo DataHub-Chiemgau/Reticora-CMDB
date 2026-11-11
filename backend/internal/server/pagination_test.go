@@ -35,6 +35,7 @@ var notALists = map[string]string{
 	"/api/v1/export/cis":            "export download (JSON file of the whole selection)",
 	"/api/v1/modules":               "the fixed module catalog of the release (WP-214), no tenant data",
 	"/api/v1/admin/addons":          "the fixed add-on catalog (WP-883), no tenant data",
+	"/api/v1/cis/{id}/credentials":  "the few bindings of one CI, replaced as a whole by PUT (WP-890)",
 	"/api/v1/admin/plans":           "the fixed plan matrix (WP-885), no tenant data",
 	"/api/v1/entitlements/plans":    "the fixed plan matrix (WP-885), no tenant data",
 	"/api/v1/entitlements/usage":    "one report row per quota of the plan model (WP-885), no list resource",

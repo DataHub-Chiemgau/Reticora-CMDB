@@ -10616,6 +10616,8 @@ paths:
       summary: Delete a credential
       description: >-
         An id that is no UUID is answered like an unknown one (404, API-03).
+        A credential with bindings is not deleted: 409 lists up to 50 binding
+        IDs in `bindings` (WP-890).
       responses:
         '204':
           description: Credential deleted
@@ -10623,6 +10625,20 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: The credential is bound; `bindings` lists up to 50 binding IDs.
+          content:
+            application/problem+json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ProblemDetail'
+                  - type: object
+                    required: [bindings]
+                    properties:
+                      bindings:
+                        type: array
+                        maxItems: 50
+                        items: { type: string }
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -23643,20 +23659,29 @@ paths:
   /api/v1/credential-bindings:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     get:
       operationId: listCredentialBindings
       tags: [Credentials]
       summary: List credential bindings
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        The bindings of credentials to targets (CRD-01, WP-890) in the
+        caller's scope, newest first; filters credential_id, target_kind,
+        target_id. Requires credential:read.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
+        - { name: credential_id, in: query, required: false, schema: { type: string, format: uuid } }
+        - name: target_kind
+          in: query
+          required: false
+          schema: { type: string, enum: [ci, device_group, subnet, probe] }
+        - { name: target_id, in: query, required: false, schema: { type: string, format: uuid } }
       responses:
         '200':
-          description: List credential bindings. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+          description: Credential bindings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CredentialBindingListResponse' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -23670,11 +23695,23 @@ paths:
       tags: [Credentials]
       summary: Create a credential binding
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Binds a credential to a CI or subnet for one namespace with a priority
+        (credential:bind). The namespace must be that of the credential's kind
+        (empty: derived). A credential of a client binds only to a target of
+        the same client; a target of another client, outside the caller's
+        scope or unknown is 422 target_id alike. device_group and probe are
+        422 target_kind until WP-935.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CredentialBindingCreate' }
       responses:
         '201':
-          description: Created. The schema comes with the implementing work package.
+          description: Binding created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CredentialBinding' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -23684,26 +23721,28 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: Invalid credential_id, target_kind, target_id, namespace or priority (`field`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
 
   /api/v1/credential-bindings/{id}:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: getCredentialBinding
       tags: [Credentials]
       summary: Get a credential binding
-      description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
       responses:
         '200':
-          description: Get a credential binding. The schema comes with the implementing work package.
+          description: The binding
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CredentialBinding' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -23716,12 +23755,18 @@ paths:
       operationId: updateCredentialBinding
       tags: [Credentials]
       summary: Update a credential binding
-      description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+      description: Changes namespace and priority; any other member is 422 with its field.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CredentialBindingUpdate' }
       responses:
         '200':
-          description: Update a credential binding. The schema comes with the implementing work package.
+          description: The binding
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CredentialBinding' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -23733,16 +23778,16 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: Invalid namespace or priority, or another member (`field`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
     delete:
       operationId: deleteCredentialBinding
       tags: [Credentials]
       summary: Delete a credential binding
-      description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
       responses:
         '204':
           description: Done.
@@ -23752,11 +23797,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalServerError'
-
   /api/v1/vault-connections:
     x-phase: P3
     x-feature: credential_vault
@@ -23906,19 +23948,19 @@ paths:
   /api/v1/cis/{id}/credentials:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: listCICredentials
       tags: [Credentials]
       summary: List the credential bindings of a CI
-      description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+      description: The bindings with target ci of the CI (credential:read); an invisible or unknown CI is 404.
       responses:
         '200':
-          description: List the credential bindings of a CI. The schema comes with the implementing work package.
+          description: The bindings of the CI
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CredentialBindingSet' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -23932,11 +23974,20 @@ paths:
       tags: [Credentials]
       summary: Replace the credential bindings of a CI
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Replaces every binding of the CI in one transaction (credential:bind);
+        a refused entry leaves the former bindings. 422 names the entry
+        (`field` bindings[i].<member>).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CICredentialBindingsReplace' }
       responses:
         '200':
-          description: Replace the credential bindings of a CI. The schema comes with the implementing work package.
+          description: The bindings of the CI
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CredentialBindingSet' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -23945,11 +23996,15 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: An invalid entry (`field` bindings[i].<member>).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
-
   /api/v1/cis/{id}/credentials/effective:
     x-phase: P3
     x-feature: monitoring
@@ -39627,6 +39682,73 @@ components:
           type: string
           format: date-time
 
+    CredentialBinding:
+      type: object
+      required: [id, organization_id, credential_id, target_kind, target_id, namespace, priority, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        credential_id: { type: string, format: uuid }
+        target_kind: { type: string, enum: [ci, device_group, subnet, probe] }
+        target_id: { type: string, format: uuid }
+        namespace: { type: string, enum: [snmp, ssh, redfish, ipmi, wmi, api, nut, nas] }
+        priority: { type: integer, minimum: 0, maximum: 10000 }
+        client_id: { type: string, format: uuid, description: Client of the target. }
+        site_id: { type: string, format: uuid, description: Site of the target. }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CredentialBindingCreate:
+      type: object
+      additionalProperties: false
+      required: [credential_id, target_kind, target_id]
+      properties:
+        credential_id: { type: string, format: uuid }
+        target_kind: { type: string, enum: [ci, device_group, subnet, probe] }
+        target_id: { type: string, format: uuid }
+        namespace:
+          type: string
+          enum: [snmp, ssh, redfish, ipmi, wmi, api, nut, nas]
+          description: Empty takes the namespace of the credential's kind.
+        priority: { type: integer, minimum: 0, maximum: 10000, default: 100 }
+    CredentialBindingUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        namespace: { type: string, enum: [snmp, ssh, redfish, ipmi, wmi, api, nut, nas] }
+        priority: { type: integer, minimum: 0, maximum: 10000 }
+    CredentialBindingListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/CredentialBinding' }
+    CredentialBindingSet:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/CredentialBinding' }
+    CICredentialBindingsReplace:
+      type: object
+      additionalProperties: false
+      required: [bindings]
+      properties:
+        bindings:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [credential_id]
+            properties:
+              credential_id: { type: string, format: uuid }
+              namespace: { type: string, enum: [snmp, ssh, redfish, ipmi, wmi, api, nut, nas] }
+              priority: { type: integer, minimum: 0, maximum: 10000, default: 100 }
     CredentialUpdate:
       type: object
       additionalProperties: false

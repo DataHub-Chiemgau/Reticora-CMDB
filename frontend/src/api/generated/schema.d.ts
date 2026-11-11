@@ -4536,7 +4536,7 @@ export interface paths {
     post?: never;
     /**
      * Delete a credential
-     * @description An id that is no UUID is answered like an unknown one (404, API-03).
+     * @description An id that is no UUID is answered like an unknown one (404, API-03). A credential with bindings is not deleted: 409 lists up to 50 binding IDs in `bindings` (WP-890).
      */
     delete: operations['deleteCredential'];
     options?: never;
@@ -10241,13 +10241,13 @@ export interface paths {
     };
     /**
      * List credential bindings
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description The bindings of credentials to targets (CRD-01, WP-890) in the caller's scope, newest first; filters credential_id, target_kind, target_id. Requires credential:read.
      */
     get: operations['listCredentialBindings'];
     put?: never;
     /**
      * Create a credential binding
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Binds a credential to a CI or subnet for one namespace with a priority (credential:bind). The namespace must be that of the credential's kind (empty: derived). A credential of a client binds only to a target of the same client; a target of another client, outside the caller's scope or unknown is 422 target_id alike. device_group and probe are 422 target_kind until WP-935.
      */
     post: operations['createCredentialBinding'];
     delete?: never;
@@ -10266,23 +10266,17 @@ export interface paths {
       };
       cookie?: never;
     };
-    /**
-     * Get a credential binding
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
-     */
+    /** Get a credential binding */
     get: operations['getCredentialBinding'];
     put?: never;
     post?: never;
-    /**
-     * Delete a credential binding
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
-     */
+    /** Delete a credential binding */
     delete: operations['deleteCredentialBinding'];
     options?: never;
     head?: never;
     /**
      * Update a credential binding
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Changes namespace and priority; any other member is 422 with its field.
      */
     patch: operations['updateCredentialBinding'];
     trace?: never;
@@ -10377,12 +10371,12 @@ export interface paths {
     };
     /**
      * List the credential bindings of a CI
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description The bindings with target ci of the CI (credential:read); an invisible or unknown CI is 404.
      */
     get: operations['listCICredentials'];
     /**
      * Replace the credential bindings of a CI
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Replaces every binding of the CI in one transaction (credential:bind); a refused entry leaves the former bindings. 422 names the entry (`field` bindings[i].<member>).
      */
     put: operations['replaceCICredentials'];
     post?: never;
@@ -19710,6 +19704,71 @@ export interface components {
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    CredentialBinding: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      /** Format: uuid */
+      credential_id: string;
+      /** @enum {string} */
+      target_kind: 'ci' | 'device_group' | 'subnet' | 'probe';
+      /** Format: uuid */
+      target_id: string;
+      /** @enum {string} */
+      namespace: 'snmp' | 'ssh' | 'redfish' | 'ipmi' | 'wmi' | 'api' | 'nut' | 'nas';
+      priority: number;
+      /**
+       * Format: uuid
+       * @description Client of the target.
+       */
+      client_id?: string;
+      /**
+       * Format: uuid
+       * @description Site of the target.
+       */
+      site_id?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CredentialBindingCreate: {
+      /** Format: uuid */
+      credential_id: string;
+      /** @enum {string} */
+      target_kind: 'ci' | 'device_group' | 'subnet' | 'probe';
+      /** Format: uuid */
+      target_id: string;
+      /**
+       * @description Empty takes the namespace of the credential's kind.
+       * @enum {string}
+       */
+      namespace?: 'snmp' | 'ssh' | 'redfish' | 'ipmi' | 'wmi' | 'api' | 'nut' | 'nas';
+      /** @default 100 */
+      priority: number;
+    };
+    CredentialBindingUpdate: {
+      /** @enum {string} */
+      namespace?: 'snmp' | 'ssh' | 'redfish' | 'ipmi' | 'wmi' | 'api' | 'nut' | 'nas';
+      priority?: number;
+    };
+    CredentialBindingListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['CredentialBinding'][];
+    };
+    CredentialBindingSet: {
+      data: components['schemas']['CredentialBinding'][];
+    };
+    CICredentialBindingsReplace: {
+      bindings: {
+        /** Format: uuid */
+        credential_id: string;
+        /** @enum {string} */
+        namespace?: 'snmp' | 'ssh' | 'redfish' | 'ipmi' | 'wmi' | 'api' | 'nut' | 'nas';
+        /** @default 100 */
+        priority: number;
+      }[];
     };
     CredentialUpdate: {
       name?: string;
@@ -31363,6 +31422,17 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description The credential is bound; `bindings` lists up to 50 binding IDs. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'] & {
+            bindings: string[];
+          };
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -46095,6 +46165,9 @@ export interface operations {
          *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
+        credential_id?: string;
+        target_kind?: 'ci' | 'device_group' | 'subnet' | 'probe';
+        target_id?: string;
       };
       header?: never;
       path?: never;
@@ -46102,12 +46175,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List credential bindings. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description Credential bindings */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CredentialBindingListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -46122,20 +46197,34 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CredentialBindingCreate'];
+      };
+    };
     responses: {
-      /** @description Created. The schema comes with the implementing work package. */
+      /** @description Binding created */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CredentialBinding'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       409: components['responses']['Conflict'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description Invalid credential_id, target_kind, target_id, namespace or priority (`field`). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -46151,12 +46240,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get a credential binding. The schema comes with the implementing work package. */
+      /** @description The binding */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CredentialBinding'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -46186,7 +46277,6 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -46200,21 +46290,35 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CredentialBindingUpdate'];
+      };
+    };
     responses: {
-      /** @description Update a credential binding. The schema comes with the implementing work package. */
+      /** @description The binding */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CredentialBinding'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description Invalid namespace or priority, or another member (`field`). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -46393,12 +46497,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the credential bindings of a CI. The schema comes with the implementing work package. */
+      /** @description The bindings of the CI */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CredentialBindingSet'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -46416,20 +46522,35 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CICredentialBindingsReplace'];
+      };
+    };
     responses: {
-      /** @description Replace the credential bindings of a CI. The schema comes with the implementing work package. */
+      /** @description The bindings of the CI */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CredentialBindingSet'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
+      409: components['responses']['Conflict'];
+      /** @description An invalid entry (`field` bindings[i].<member>). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };

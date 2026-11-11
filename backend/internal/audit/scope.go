@@ -66,8 +66,10 @@ var resourceTables = map[string][]string{
 	// Types of earlier recorders that entries in the log still carry.
 	"contact":    {"contact"},
 	"credential": {"credential"},
-	"document":   {"document"},
-	"ticket":     {"ticket"},
+	// Credential bindings (WP-890).
+	"credential_binding": {"credential_binding"},
+	"document":           {"document"},
+	"ticket":             {"ticket"},
 
 	// Route audit (the first route segment): the route's resource_id is
 	// its first id parameter or the id of the created row, so the tables
@@ -93,6 +95,7 @@ var resourceTables = map[string][]string{
 	"contacts":                  {"contact"},
 	"contracts":                 {"contract"},
 	"credentials":               {"credential"},
+	"credential-bindings":       {"credential_binding"},
 	"desk-bookings":             {"desk_booking"},
 	"desks":                     {"desk"},
 	"discovery":                 {"discovery_job", "review_item"},

@@ -1649,3 +1649,4 @@ SEC-07;[B];G3;frontend/src/operator/operatorAuth.test.ts;WP-887
 PKG-07;[P3];G3;frontend/e2e/operator.spec.ts;WP-888
 UI-14;[P2–P4, A];G3;frontend/src/operator/OrganizationDetailPage.test.tsx;WP-888
 CRD-05;[P3];G3;backend/internal/credential/handler_test.go;WP-889
+CRD-01;[P3];G3;backend/internal/credential/binding_integration_test.go;WP-890

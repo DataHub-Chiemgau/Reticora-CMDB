@@ -165,14 +165,23 @@ type Service struct {
 	// cycles counts the bundle requests that failed on the server's side
 	// (worker credential_bundles, OPS-05); nil counts none.
 	cycles *observability.Cycles
+	// bindings is the binding service (WP-890); a copy of the service
+	// (WithCycles) shares it.
+	bindings *BindingService
 }
 
 // NewService creates a new credential service.
 func NewService(repo Repository, encryptor *crypto.EnvelopeEncryptor) *Service {
-	return &Service{
+	s := &Service{
 		repo:      repo,
 		encryptor: encryptor,
 	}
+	bindingRepo, ok := repo.(BindingRepository)
+	if !ok {
+		bindingRepo = newMemoryBindings()
+	}
+	s.bindings = &BindingService{creds: s, bindings: bindingRepo}
+	return s
 }
 
 // Create stores a new encrypted credential. It retrieves (or creates) the org DEK,

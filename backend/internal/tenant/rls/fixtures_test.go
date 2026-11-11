@@ -65,7 +65,9 @@ type matrixTable struct {
 // catalog (cross-column checks, patterns). "@uuid" is a fresh UUID, "@text"
 // a fresh text, "@seq" the running number of the synthesized row.
 var matrixOverrides = map[string]map[string]string{
-	"asset_movement":       {"asset_id": "@uuid"},
+	"asset_movement": {"asset_id": "@uuid"},
+	// One target column per target kind (credential_binding_target_check, WP-890).
+	"credential_binding":   {"target_kind": "ci", "ci_id": "@uuid"},
 	"stock_movement":       {"asset_id": "@uuid"},
 	"disposal_record":      {"asset_id": "@uuid"},
 	"assignment":           {"asset_id": "@uuid"},

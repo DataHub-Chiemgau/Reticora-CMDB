@@ -54,6 +54,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		// connectors (Service.Decrypt).
 		r.Delete("/{id}", h.delete)
 	})
+	h.registerBindingRoutes(r)
 }
 
 // organizationID resolves the tenant from the authenticated request context.
@@ -158,6 +159,11 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	}
 	id := chi.URLParam(r, "id")
 
+	// A bound credential is not deleted (WP-890): 409 with its bindings,
+	// also without the foreign key of the database.
+	if h.refuseBoundDeletion(w, r, orgID, id) {
+		return
+	}
 	err := h.svc.Delete(r.Context(), orgID, id)
 	if errors.Is(err, ErrNotFound) {
 		writeError(w, http.StatusNotFound, "credential not found")

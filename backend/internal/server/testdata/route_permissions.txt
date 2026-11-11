@@ -19,6 +19,7 @@ DELETE /api/v1/compliance/rules/{id} compliance:write
 DELETE /api/v1/consumables/{id} stock:write
 DELETE /api/v1/contacts/{id} contact:write
 DELETE /api/v1/contracts/{id} contract:write
+DELETE /api/v1/credential-bindings/{id} credential:bind
 DELETE /api/v1/credentials/{id} credential:manage
 DELETE /api/v1/desks/{id} desk:write
 DELETE /api/v1/discovery-scopes/{id} discovery:manage
@@ -131,6 +132,7 @@ GET /api/v1/cis/{id}/as-of ci:read
 GET /api/v1/cis/{id}/blast-radius topology:read
 GET /api/v1/cis/{id}/changes ci:read
 GET /api/v1/cis/{id}/contacts contact:read
+GET /api/v1/cis/{id}/credentials credential:read
 GET /api/v1/cis/{id}/dependencies topology:read
 GET /api/v1/cis/{id}/field-definitions ci:read
 GET /api/v1/cis/{id}/fields ci:read
@@ -163,6 +165,8 @@ GET /api/v1/contacts contact:read
 GET /api/v1/contacts/{id} contact:read
 GET /api/v1/contracts contract:read
 GET /api/v1/contracts/{id} contract:read
+GET /api/v1/credential-bindings/ credential:read
+GET /api/v1/credential-bindings/{id} credential:read
 GET /api/v1/credentials/ credential:read
 GET /api/v1/credentials/{id} credential:read
 GET /api/v1/desks desk:read
@@ -375,6 +379,7 @@ PATCH /api/v1/compliance/rules/{id} compliance:write
 PATCH /api/v1/consumables/{id} stock:write
 PATCH /api/v1/contacts/{id} contact:write
 PATCH /api/v1/contracts/{id} contract:write
+PATCH /api/v1/credential-bindings/{id} credential:bind
 PATCH /api/v1/credentials/{id} credential:manage
 PATCH /api/v1/desks/{id} desk:write
 PATCH /api/v1/discovery-scopes/{id} discovery:manage
@@ -484,6 +489,7 @@ POST /api/v1/consumables stock:write
 POST /api/v1/consumables/{id}/movements stock:write
 POST /api/v1/contacts contact:write
 POST /api/v1/contracts contract:write
+POST /api/v1/credential-bindings/ credential:bind
 POST /api/v1/credentials/ credential:manage
 POST /api/v1/credentials/rotate-keys credential:manage
 POST /api/v1/desk-bookings/{id}/cancel desk:write
@@ -628,6 +634,7 @@ PUT /api/v1/assets/{id}/tags asset:write
 PUT /api/v1/ci-fields/global ci_attribute:manage
 PUT /api/v1/ci-types/{id}/attribute-sets citype:manage
 PUT /api/v1/ci-types/{id}/fields citype:manage
+PUT /api/v1/cis/{id}/credentials credential:bind
 PUT /api/v1/cis/{id}/field-definitions ci_instance_attribute:manage
 PUT /api/v1/cis/{id}/fields/{name}/override override:write
 PUT /api/v1/cis/{id}/instance-attributes/{key} ci_instance_attribute:manage

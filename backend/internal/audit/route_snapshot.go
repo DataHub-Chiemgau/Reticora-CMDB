@@ -379,6 +379,12 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	crud(m, v1+"credentials", "credential", "DELETE", "PATCH")
 	m["POST "+v1+"credentials/"] = created("credential")
 	m["PUT "+v1+"credentials/{id}/secret"] = row("credential")
+	// Credential bindings (WP-890). PUT /cis/{id}/credentials replaces the
+	// whole set of the CI (possibly with none); the entry names the CI, the
+	// bindings are read through GET /cis/{id}/credentials.
+	crud(m, v1+"credential-bindings", "credential_binding", "PATCH", "DELETE")
+	m["POST "+v1+"credential-bindings/"] = created("credential_binding")
+	m["PUT "+v1+"cis/{id}/credentials"] = noValues("replaces the set of bindings of the CI, which may be empty")
 	crud(m, v1+"webhooks", "webhook_subscription", "POST", "DELETE")
 	crud(m, v1+"lifecycle-definitions", "lifecycle_definition", "POST", "DELETE")
 	crud(m, v1+"lifecycle-models", "lifecycle_definition", all...)

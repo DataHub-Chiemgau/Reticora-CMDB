@@ -98,20 +98,22 @@ var readPermissionFor = map[string]identity.Permission{
 	"notification-channels":   identity.PermNotificationManage,
 	"notification-deliveries": identity.PermNotificationManage,
 	"credentials":             identity.PermCredentialRead,
-	"export":                  identity.PermCIRead,
-	"ip-addresses":            identity.PermIPAMRead,
-	"ips":                     identity.PermIPAMRead,
-	"subnets":                 identity.PermIPAMRead,
-	"vlans":                   identity.PermIPAMRead,
-	"vrfs":                    identity.PermIPAMRead,
-	"network-interfaces":      identity.PermIPAMRead,
-	"cables":                  identity.PermRackRead,
-	"forms":                   identity.PermFormRead,
-	"form-submissions":        identity.PermFormRead,
-	"workflows":               identity.PermWorkflowRead,
-	"workflow-runs":           identity.PermWorkflowRead,
-	"compliance":              identity.PermComplianceRead,
-	"security":                identity.PermFindingRead,
+	// Credential bindings (CRD-01, WP-890): read with credential:read.
+	"credential-bindings": identity.PermCredentialRead,
+	"export":              identity.PermCIRead,
+	"ip-addresses":        identity.PermIPAMRead,
+	"ips":                 identity.PermIPAMRead,
+	"subnets":             identity.PermIPAMRead,
+	"vlans":               identity.PermIPAMRead,
+	"vrfs":                identity.PermIPAMRead,
+	"network-interfaces":  identity.PermIPAMRead,
+	"cables":              identity.PermRackRead,
+	"forms":               identity.PermFormRead,
+	"form-submissions":    identity.PermFormRead,
+	"workflows":           identity.PermWorkflowRead,
+	"workflow-runs":       identity.PermWorkflowRead,
+	"compliance":          identity.PermComplianceRead,
+	"security":            identity.PermFindingRead,
 	// Phase 3 (WP-866, E-160, E-161): IPAM/ASN and ADMP. The writes of ipam
 	// follow the suffix convention (ipam:write); the ADMP accounts get
 	// admp:manage with WP-925.
@@ -207,6 +209,8 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"modules":        identity.PermEntitlementManage, // no write route: RETICORA_MODULES sets them (WP-214)
 	"webhooks":       identity.PermWebhookManage,
 	"credentials":    identity.PermCredentialManage,
+	// Binding a credential is its own right (WP-870, WP-890).
+	"credential-bindings": identity.PermCredentialBind,
 	// The only write below /admp is the account management of WP-925 with
 	// admp:manage (WP-870); until then no write route exists and writes
 	// need the org_admin key entitlement:manage (fail-closed).
@@ -314,6 +318,9 @@ var routeRules = []routeRule{
 	{http.MethodPost, "cis/*/lifecycle-transitions", identity.PermLifecycleTransition},
 	{http.MethodPost, "assets/*/lifecycle-transitions", identity.PermLifecycleTransition},
 	// Nested sub-resources are protected by their own resource's rights.
+	// The credential bindings of a CI (CRD-01, WP-890).
+	{http.MethodGet, "cis/*/credentials", identity.PermCredentialRead},
+	{http.MethodPut, "cis/*/credentials", identity.PermCredentialBind},
 	{http.MethodGet, "cis/*/contacts", identity.PermContactRead},
 	{http.MethodPost, "cis/*/contacts", identity.PermContactWrite},
 	{http.MethodGet, "cis/*/interfaces", identity.PermIPAMRead},
