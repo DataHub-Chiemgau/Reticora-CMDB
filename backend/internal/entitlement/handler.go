@@ -26,6 +26,36 @@ func NewHandler(service *Service) *Handler {
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/entitlements", h.List)
 	r.Get("/api/v1/entitlements/check/{feature}", h.Check)
+	r.Get("/api/v1/entitlements/usage", h.Usage)
+	r.Get("/api/v1/entitlements/plans", h.Plans)
+}
+
+// Usage handles GET /api/v1/entitlements/usage (PKG-05, WP-885): use, limit
+// and origin of every quota; a principal without an org-wide scope gets
+// used null (F-414).
+func (h *Handler) Usage(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	items, err := h.service.Usage(r.Context(), t.OrganizationID, UsageVisible(r.Context()))
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	plan, _, err := h.service.OrganizationPlan(r.Context(), t.OrganizationID)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, QuotaUsageResponse{Data: items, Plan: plan})
+}
+
+// Plans handles GET /api/v1/entitlements/plans: the plan matrix and the
+// add-ons for the plan comparison (WP-885, WP-886).
+func (h *Handler) Plans(w http.ResponseWriter, _ *http.Request) {
+	api.WriteJSON(w, http.StatusOK, PlanMatrixResponse{Data: PlanMatrix(), Addons: AddonCatalog()})
 }
 
 // List handles GET /api/v1/entitlements.

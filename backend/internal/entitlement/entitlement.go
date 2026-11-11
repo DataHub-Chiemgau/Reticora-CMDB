@@ -628,6 +628,9 @@ type Service struct {
 	cache   cache.Store
 	now     func() time.Time
 	adopter UnlicensedAdopter
+	// counters and monitoring feed the usage report (WP-885).
+	counters   UsageCounters
+	monitoring MonitoringUsage
 }
 
 // NewService creates an entitlement service backed by the given repository.

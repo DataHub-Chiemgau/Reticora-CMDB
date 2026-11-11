@@ -94,17 +94,10 @@ func (h *APIKeyHandler) allowNewKey(w http.ResponseWriter, r *http.Request, orgI
 	if h.quota == nil {
 		return true
 	}
-	keys, err := h.keys.List(r.Context(), orgID)
+	active, err := CountActiveAPIKeys(r.Context(), h.keys, orgID, time.Now())
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return false
-	}
-	now := time.Now()
-	var active int64
-	for i := range keys {
-		if keys[i].RevokedAt == nil && (keys[i].ExpiresAt == nil || keys[i].ExpiresAt.After(now)) {
-			active++
-		}
 	}
 	if err = h.quota.AllowCreate(r.Context(), orgID, QuotaMaxAPIKeys, active); err != nil {
 		if !api.WriteEntitlementError(w, err) {
@@ -475,4 +468,25 @@ func writeAPIKeyError(w http.ResponseWriter, err error) {
 		return
 	}
 	api.WriteRepoError(w, err)
+}
+
+// apiKeyLister lists the stored API keys of an organization.
+type apiKeyLister interface {
+	List(ctx context.Context, orgID string) ([]StoredAPIKey, error)
+}
+
+// CountActiveAPIKeys counts the keys max_api_keys is checked against: not
+// revoked and not expired at now (ENT-03; also the usage report, WP-885).
+func CountActiveAPIKeys(ctx context.Context, keys apiKeyLister, orgID string, now time.Time) (int64, error) {
+	list, err := keys.List(ctx, orgID)
+	if err != nil {
+		return 0, err
+	}
+	var active int64
+	for i := range list {
+		if list[i].RevokedAt == nil && (list[i].ExpiresAt == nil || list[i].ExpiresAt.After(now)) {
+			active++
+		}
+	}
+	return active, nil
 }

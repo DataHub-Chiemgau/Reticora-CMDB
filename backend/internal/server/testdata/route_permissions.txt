@@ -86,6 +86,8 @@ GET /api/v1/admin/audit/verify operator
 GET /api/v1/admin/me operator
 GET /api/v1/admin/orgs operator
 GET /api/v1/admin/orgs/{id}/entitlements operator
+GET /api/v1/admin/orgs/{id}/usage operator
+GET /api/v1/admin/plans operator
 GET /api/v1/agents agent:read
 GET /api/v1/ai/conversations ai:read
 GET /api/v1/api-keys apikey:manage
@@ -181,6 +183,8 @@ GET /api/v1/documents/{id}/links document:read
 GET /api/v1/documents/{id}/versions document:read
 GET /api/v1/entitlements entitlement:read
 GET /api/v1/entitlements/check/{feature} entitlement:read
+GET /api/v1/entitlements/plans entitlement:read
+GET /api/v1/entitlements/usage entitlement:read
 GET /api/v1/export/cis ci:read
 GET /api/v1/export/jobs job:read
 GET /api/v1/export/jobs/{id} job:read

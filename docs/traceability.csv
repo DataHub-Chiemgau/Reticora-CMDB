@@ -1640,3 +1640,4 @@ ENT-08;[B];G3;backend/internal/operator/plan_integration_test.go;WP-882
 PKG-03;[P3];G3;backend/internal/operator/addons_test.go;WP-883
 CH14;(S);G3;backend/internal/entitlement/addon_test.go;WP-883
 ENT-07;[B];G3;backend/internal/operator/trial_end_integration_test.go;WP-884
+PKG-05;[P3];G3;backend/internal/entitlement/usage_integration_test.go;WP-885

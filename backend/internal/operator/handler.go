@@ -50,6 +50,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.With(h.Middleware).Post("/api/v1/admin/orgs/{id}/entitlements", h.GrantEntitlement)
 	r.With(h.Middleware).Put("/api/v1/admin/orgs/{id}/plan", h.ChangePlan)
 	r.With(h.Middleware).Get("/api/v1/admin/addons", h.ListAddonCatalog)
+	r.With(h.Middleware).Get("/api/v1/admin/plans", h.PlanMatrix)
+	r.With(h.Middleware).Get("/api/v1/admin/orgs/{id}/usage", h.OrganizationUsage)
 	r.With(h.Middleware).Post("/api/v1/admin/orgs/{id}/addons/{key}", h.BookAddon)
 	r.With(h.Middleware).Delete("/api/v1/admin/orgs/{id}/addons/{key}", h.CancelAddon)
 }

@@ -842,7 +842,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		apiKeyHandler(&repos, &opts),
 		user.NewServiceAccountHandler(repos.ServiceAccounts),
 		invitationHandler(&repos, &opts),
-		entitlement.NewHandler(opts.Entitlements),
+		entitlement.NewHandler(withUsageCounters(opts.Entitlements, &repos)),
 		ciHandler(&repos, &opts),
 		jobAPI,
 		notifyHandler(&opts),
@@ -1533,4 +1533,47 @@ func ticketHandler(tickets *ticket.Service, repos *Repositories, opts *Options) 
 		h.WithDocuments(repos.Document)
 	}
 	return h
+}
+
+// withUsageCounters sets the counters of the usage report (UsageCounters)
+// on svc.
+func withUsageCounters(svc *entitlement.Service, repos *Repositories) *entitlement.Service {
+	if svc == nil {
+		return nil
+	}
+	return svc.WithUsageCounters(UsageCounters(repos))
+}
+
+// UsageCounters are the counters of the usage report (PKG-05, WP-885) from
+// the repositories, with the counting rules of the AllowCreate callers:
+// active CIs (ci.CountActive), collectors, active users, active API keys
+// and the stored document bytes in MiB (rounded up).
+func UsageCounters(repos *Repositories) entitlement.UsageCounters {
+	counters := entitlement.UsageCounters{}
+	if repos.CI != nil {
+		counters[entitlement.LimitMaxCIs] = func(ctx context.Context, orgID string) (int64, error) {
+			return ci.CountActive(ctx, repos.CI, orgID)
+		}
+	}
+	if repos.Discovery != nil {
+		counters[entitlement.LimitMaxCollectors] = repos.Discovery.CountCollectors
+	}
+	if repos.User != nil {
+		counters[entitlement.LimitMaxUsers] = repos.User.CountActiveUsers
+	}
+	if repos.APIKeys != nil {
+		counters[entitlement.LimitMaxAPIKeys] = func(ctx context.Context, orgID string) (int64, error) {
+			return identity.CountActiveAPIKeys(ctx, repos.APIKeys, orgID, time.Now())
+		}
+	}
+	if storage, ok := repos.Document.(interface {
+		StorageUsage(ctx context.Context, orgID string) (int64, error)
+	}); ok {
+		counters[entitlement.LimitMaxStorageMB] = func(ctx context.Context, orgID string) (int64, error) {
+			bytes, err := storage.StorageUsage(ctx, orgID)
+			const mib = 1 << 20
+			return (bytes + mib - 1) / mib, err
+		}
+	}
+	return counters
 }

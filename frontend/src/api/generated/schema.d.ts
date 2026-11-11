@@ -207,6 +207,49 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/admin/plans': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Plan matrix and add-ons
+     * @description The features and default quotas of every plan and the add-ons, for the preview of a plan change (WP-885, WP-888).
+     */
+    get: operations['getPlanMatrixAsOperator'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/admin/orgs/{id}/usage': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Get the quota usage of an organization
+     * @description PKG-05 (WP-885): use, limit and origin of every quota, read in the tenant context of the organization; the operator sees the counts.
+     */
+    get: operations['getOrganizationUsage'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/admin/audit': {
     parameters: {
       query?: never;
@@ -1472,6 +1515,46 @@ export interface paths {
     };
     /** Check whether a feature is entitled for the current tenant */
     get: operations['checkEntitlement'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/entitlements/usage': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Use, limit and origin of every quota of the organization
+     * @description PKG-05 (WP-885): every quota of the plan model and every stored max_targets_<type> with used, limit (null: unlimited) and origin of the limit (plan default or override). used is null for a principal without an organization-wide scope (F-414) and for min_probe_interval_s. The monitoring counts are 0 until WP-940. A fixed report, not a paginated list.
+     */
+    get: operations['getEntitlementUsage'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/entitlements/plans': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Plan matrix and add-ons
+     * @description The features and default quotas of every plan (E-151, E-153) and the add-ons, for the plan comparison (WP-885, WP-886). A fixed catalog, not a paginated list.
+     */
+    get: operations['getPlanMatrix'];
     put?: never;
     post?: never;
     delete?: never;
@@ -11401,29 +11484,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/api/v1/admin/orgs/{id}/usage': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    /**
-     * Get the quota usage of an organization
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
-     */
-    get: operations['getOrganizationUsage'];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -12988,6 +13048,42 @@ export interface components {
       };
       admin_email: string;
       admin_display_name?: string;
+    };
+    QuotaUsage: {
+      /** @description A quota of the plan model or max_targets_<type>. */
+      quota: string;
+      /**
+       * Format: int64
+       * @description Current use; null when the caller may not see the counts of the organization (F-414) or for min_probe_interval_s.
+       */
+      used: number | null;
+      /**
+       * Format: int64
+       * @description The limit; null is unlimited.
+       */
+      limit: number | null;
+      /**
+       * @description The limit is the default of the plan or an override.
+       * @enum {string}
+       */
+      origin: 'plan' | 'override';
+    };
+    QuotaUsageResponse: {
+      data: components['schemas']['QuotaUsage'][];
+      /** @enum {string} */
+      plan: 'essential' | 'standard' | 'pro' | 'enterprise';
+    };
+    PlanMatrixResponse: {
+      data: {
+        /** @enum {string} */
+        plan: 'essential' | 'standard' | 'pro' | 'enterprise';
+        features: string[];
+        /** @description Default limits of the plan; a quota without entry is unlimited. */
+        quota_defaults: {
+          [key: string]: number;
+        };
+      }[];
+      addons: components['schemas']['AddonInfo'][];
     };
     AddonInfo: {
       /** @enum {string} */
@@ -20663,6 +20759,54 @@ export interface operations {
       500: components['responses']['InternalServerError'];
     };
   };
+  getPlanMatrixAsOperator: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Plan matrix */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PlanMatrixResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getOrganizationUsage: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Usage report */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['QuotaUsageResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
   listOperatorAudit: {
     parameters: {
       query?: {
@@ -23179,6 +23323,52 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getEntitlementUsage: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Usage report */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['QuotaUsageResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getPlanMatrix: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Plan matrix */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PlanMatrixResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -48228,31 +48418,6 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
-      500: components['responses']['InternalServerError'];
-    };
-  };
-  getOrganizationUsage: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Get the quota usage of an organization. The schema comes with the implementing work package. */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
-      404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
     };
   };
