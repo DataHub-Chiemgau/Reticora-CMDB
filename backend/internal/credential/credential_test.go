@@ -386,3 +386,48 @@ func TestService_ReplaceSecretDecryptsNewValue(t *testing.T) {
 		t.Errorf("foreign organization: %v", err)
 	}
 }
+
+// TestVaultLoginOnlyThroughConnection covers the vault logins of WP-893 in
+// the memory store: a bundle never carries a login listed as a credential of
+// the collector's scopes, and the login of a connection is not deleted
+// (ErrCredentialIsVaultLogin, 409) while an unused one is.
+func TestVaultLoginOnlyThroughConnection(t *testing.T) {
+	ctx := context.Background()
+	svc := NewService(NewMemoryRepository(), testEncryptor(t))
+	mk := func(name, kind string, secret map[string]any) string {
+		t.Helper()
+		c, err := svc.Create(ctx, CreateRequest{OrganizationID: "org-1", Name: name, Kind: kind, Secret: secret})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c.ID
+	}
+	approle := mk("approle", KindVaultAppRole, map[string]any{"role_id": "role", "secret_id": "secret"})
+	token := mk("token", KindVaultToken, map[string]any{"token": "tok"})
+	ssh := mk("ssh", KindSSHPassword, map[string]any{"username": "u", "password": "pw"})
+
+	key := newCollectorKey(t)
+	_, ids, err := svc.Bundle(ctx, &BundleTarget{OrganizationID: "org-1", CollectorID: "col-1", PublicKey: &key.PublicKey,
+		CredentialIDs: []string{approle, token, ssh}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 || ids[0] != ssh {
+		t.Errorf("bundle with listed vault logins delivered %v, want only %s", ids, ssh)
+	}
+
+	if _, err = svc.Vaults().Create(ctx, "org-1", &VaultConnection{Name: "bao", Kind: "openbao_kv2",
+		Address: "https://vault.example.com", Mount: "secret", AuthMethod: "approle", AuthCredentialID: approle,
+		CollectorIDs: []string{"00000000-0000-4000-8000-0000000000c1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err = svc.Delete(ctx, "org-1", approle); !errors.Is(err, ErrCredentialIsVaultLogin) {
+		t.Errorf("delete the login of a connection: %v, want ErrCredentialIsVaultLogin", err)
+	}
+	if _, err = svc.Get(ctx, "org-1", approle); err != nil {
+		t.Errorf("the login is gone after a refused delete: %v", err)
+	}
+	if err = svc.Delete(ctx, "org-1", token); err != nil {
+		t.Errorf("delete an unused login: %v", err)
+	}
+}

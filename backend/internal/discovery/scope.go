@@ -440,14 +440,19 @@ func checkCredentials(ctx context.Context, tx pgx.Tx, s *Scope) error {
 	if len(s.CredentialIDs) == 0 {
 		return nil
 	}
-	var known, usable int
-	if err := tx.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE client_id IS NULL OR client_id = $3::uuid)
+	var known, usable, logins int
+	if err := tx.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE client_id IS NULL OR client_id = $3::uuid),
+			count(*) FILTER (WHERE kind IN (`+vaultLoginKinds+`))
 		FROM credential WHERE organization_id = $1 AND id = ANY($2::uuid[])`,
-		s.OrganizationID, s.CredentialIDs, nilIfEmpty(s.ClientID)).Scan(&known, &usable); err != nil {
+		s.OrganizationID, s.CredentialIDs, nilIfEmpty(s.ClientID)).Scan(&known, &usable, &logins); err != nil {
 		return err
 	}
 	if known != len(s.CredentialIDs) {
 		return fieldError("credential_ids", "unknown credential")
+	}
+	if logins != 0 {
+		// The vault logins (WP-893) are used by vault connections only.
+		return fieldError("credential_ids", "a vault login is not a credential of a discovery scope")
 	}
 	if usable != known {
 		return fieldError("credential_ids", "the credential belongs to another client")
@@ -455,12 +460,19 @@ func checkCredentials(ctx context.Context, tx pgx.Tx, s *Scope) error {
 	return nil
 }
 
+// vaultLoginKinds are the credential kinds of the vault logins (WP-893),
+// as an SQL list: they log a vault connection in and are no credential of a
+// scope; a collector receives one only as the login of a vault reference it
+// resolves (WP-894).
+const vaultLoginKinds = `'vault_approle', 'vault_token'`
+
 // scopeCredentials returns the effective credentials of the collector's
 // enabled scopes by scope id (E-67, transition rule option A): a scope with
 // credential_ids uses those, a scope without them the organization-wide
 // credentials and those of its client; either way only credentials that are
 // organization-wide or of the scope's client, which also drops the foreign
-// ones of scopes bound before F-264. The credential bundle holds their union.
+// ones of scopes bound before F-264, and never a vault login. The credential
+// bundle holds their union.
 // The collector takes the first credential of a namespace; the order is that
 // of the resolution (CRD-04, E-219, WP-891): an explicit list by id (scope
 // level), otherwise the client's credentials before the organization-wide
@@ -471,6 +483,7 @@ func scopeCredentials(ctx context.Context, tx pgx.Tx, orgID, collectorID string)
 		FROM discovery_scope s
 		LEFT JOIN credential c ON c.organization_id = s.organization_id
 			AND (c.client_id IS NULL OR c.client_id = s.client_id)
+			AND c.kind NOT IN (`+vaultLoginKinds+`)
 			AND (cardinality(s.credential_ids) = 0 OR c.id = ANY (s.credential_ids))
 		WHERE s.organization_id = $1 AND s.collector_id = $2 AND s.enabled
 		GROUP BY s.id`, orgID, collectorID)

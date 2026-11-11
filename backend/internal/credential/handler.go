@@ -55,6 +55,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Delete("/{id}", h.delete)
 	})
 	h.registerBindingRoutes(r)
+	h.registerVaultRoutes(r)
 }
 
 // organizationID resolves the tenant from the authenticated request context.
@@ -103,7 +104,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		// A client outside the scope (403), an unknown client (422) or a
+		// A secret without the members of its kind (422 secret), a client outside the scope (403), an unknown client (422) or a
 		// value the database refuses (400) through the sanitized
 		// contract (API-03, F-390); anything else 500.
 		api.WriteRepoError(w, err)
@@ -167,6 +168,11 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	err := h.svc.Delete(r.Context(), orgID, id)
 	if errors.Is(err, ErrNotFound) {
 		writeError(w, http.StatusNotFound, "credential not found")
+		return
+	}
+	if errors.Is(err, ErrCredentialIsVaultLogin) {
+		api.WriteFieldError(w, &api.ConflictError{Field: "id",
+			Message: "a vault connection logs in with the credential; change or delete the connection first"})
 		return
 	}
 	if err != nil {

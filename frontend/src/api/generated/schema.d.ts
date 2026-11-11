@@ -4508,7 +4508,7 @@ export interface paths {
     put?: never;
     /**
      * Create an encrypted credential
-     * @description Stores a credential whose secret is envelope-encrypted at rest. The owning organization is derived from the authenticated tenant; any `organization_id` in the request body is ignored. A missing or unknown `kind` is answered with 422 (`field` = `kind`); `nas` is the account of the NAS plugin (Synology DSM: username and password). Database refusals use the sanitized error contract (API-03): a value the store refuses (e.g. a `client_id` that is no UUID, a NUL byte) 400, an unknown `client_id` 422, a `client_id` outside the caller's client scope 403.
+     * @description Stores a credential whose secret is envelope-encrypted at rest. The owning organization is derived from the authenticated tenant; any `organization_id` in the request body is ignored. A missing or unknown `kind` is answered with 422 (`field` = `kind`); `nas` is the account of the NAS plugin (Synology DSM: username and password). `vault_approle` (role_id, secret_id) and `vault_token` (token) are the logins of vault connections (WP-893); a missing member is 422 (`field` = `secret`), and they are not bound to targets. Database refusals use the sanitized error contract (API-03): a value the store refuses (e.g. a `client_id` that is no UUID, a NUL byte) 400, an unknown `client_id` 422, a `client_id` outside the caller's client scope 403.
      */
     post: operations['createCredential'];
     delete?: never;
@@ -4536,7 +4536,7 @@ export interface paths {
     post?: never;
     /**
      * Delete a credential
-     * @description An id that is no UUID is answered like an unknown one (404, API-03). A credential with bindings is not deleted: 409 lists up to 50 binding IDs in `bindings` (WP-890).
+     * @description An id that is no UUID is answered like an unknown one (404, API-03). A credential with bindings is not deleted: 409 lists up to 50 binding IDs in `bindings` (WP-890). The login of a vault connection (auth_credential_id) is not deleted either: 409 with `field` id (WP-893).
      */
     delete: operations['deleteCredential'];
     options?: never;
@@ -10290,13 +10290,13 @@ export interface paths {
     };
     /**
      * List vault connections
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description The vault connections (CRD-03, WP-893) in the caller's scope, by name: a principal restricted to clients sees those of its clients and the org-wide ones. Requires credential:read; no answer carries a secret, the login is the credential `auth_credential_id` names.
      */
     get: operations['listVaultConnections'];
     put?: never;
     /**
      * Create a vault connection
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Creates a connection to an OpenBao or HashiCorp Vault KV v2 engine (vault:manage, E-221). `address` is an https URL with a host and without user information; `ca_pem` must parse as PEM certificate. `auth_credential_id` names a stored credential of kind vault_approle (auth_method approle) or vault_token (token) of the connection's client or org-wide, else 422 auth_credential_id. resolve_at collector (default, E-220) needs at least one collector of the client or org-wide in `collector_ids`; resolve_at server refuses collector_ids (422). The check of the address against the egress rules and the connection test follow with WP-896.
      */
     post: operations['createVaultConnection'];
     delete?: never;
@@ -10317,21 +10317,18 @@ export interface paths {
     };
     /**
      * Get a vault connection
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description A connection of another client or an unknown id is 404 (credential:read).
      */
     get: operations['getVaultConnection'];
     put?: never;
     post?: never;
-    /**
-     * Delete a vault connection
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
-     */
+    /** Delete a vault connection */
     delete: operations['deleteVaultConnection'];
     options?: never;
     head?: never;
     /**
      * Update a vault connection
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Changes the sent members; the result is checked like a new connection. client_id cannot change (422). Switching to resolve_at server without collector_ids drops the collectors.
      */
     patch: operations['updateVaultConnection'];
     trace?: never;
@@ -19687,7 +19684,9 @@ export interface components {
         | 'wmi'
         | 'api_token'
         | 'nut'
-        | 'nas';
+        | 'nas'
+        | 'vault_approle'
+        | 'vault_token';
       scope?: string;
       /** @description Version of the organization's data encryption key. */
       key_version: number;
@@ -19804,6 +19803,96 @@ export interface components {
         priority: number;
       }[];
     };
+    /** @description A connection to a KV v2 vault (CRD-03). It holds no secret; the login is the credential auth_credential_id names. */
+    VaultConnection: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      /**
+       * Format: uuid
+       * @description Client of the connection; absent for an org-wide one.
+       */
+      client_id?: string;
+      name: string;
+      /** @enum {string} */
+      kind: 'openbao_kv2' | 'hashicorp_kv2';
+      /**
+       * Format: uri
+       * @description https URL of the vault.
+       */
+      address: string;
+      /** @description Vault namespace (Enterprise */
+      namespace?: string;
+      /** @description Mount path of the KV v2 engine. */
+      mount: string;
+      /** @enum {string} */
+      auth_method: 'approle' | 'token';
+      /**
+       * Format: uuid
+       * @description Stored credential of kind vault_approle or vault_token.
+       */
+      auth_credential_id: string;
+      /** @description PEM certificates of the CA the certificate of the vault is checked against. */
+      ca_pem?: string;
+      /**
+       * @description Who reads the references (E-220).
+       * @enum {string}
+       */
+      resolve_at: 'collector' | 'server';
+      enabled: boolean;
+      /** @description The collectors resolving the references (resolve_at collector); empty for server. */
+      collector_ids: string[];
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    VaultConnectionCreate: {
+      /** Format: uuid */
+      client_id?: string;
+      name: string;
+      /** @enum {string} */
+      kind: 'openbao_kv2' | 'hashicorp_kv2';
+      /** Format: uri */
+      address: string;
+      namespace?: string;
+      mount: string;
+      /** @enum {string} */
+      auth_method: 'approle' | 'token';
+      /** Format: uuid */
+      auth_credential_id: string;
+      ca_pem?: string;
+      /**
+       * @default collector
+       * @enum {string}
+       */
+      resolve_at: 'collector' | 'server';
+      /** @default true */
+      enabled: boolean;
+      collector_ids?: string[];
+    };
+    VaultConnectionUpdate: {
+      name?: string;
+      /** @enum {string} */
+      kind?: 'openbao_kv2' | 'hashicorp_kv2';
+      /** Format: uri */
+      address?: string;
+      namespace?: string | null;
+      mount?: string;
+      /** @enum {string} */
+      auth_method?: 'approle' | 'token';
+      /** Format: uuid */
+      auth_credential_id?: string;
+      ca_pem?: string | null;
+      /** @enum {string} */
+      resolve_at?: 'collector' | 'server';
+      enabled?: boolean;
+      collector_ids?: string[];
+    };
+    VaultConnectionListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['VaultConnection'][];
+    };
     CredentialUpdate: {
       name?: string;
       /** @description Age limit in days; null removes it. */
@@ -19832,7 +19921,9 @@ export interface components {
         | 'wmi'
         | 'api_token'
         | 'nut'
-        | 'nas';
+        | 'nas'
+        | 'vault_approle'
+        | 'vault_token';
       scope?: string;
       /** @description Plaintext secret data, encrypted at rest before storage. */
       secret: {
@@ -31456,14 +31547,15 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      /** @description The credential is bound; `bindings` lists up to 50 binding IDs. */
+      /** @description The credential is bound (`bindings` lists up to 50 binding IDs) or a vault connection logs in with it (`field` id). */
       409: {
         headers: {
           [name: string]: unknown;
         };
         content: {
           'application/problem+json': components['schemas']['ProblemDetail'] & {
-            bindings: string[];
+            bindings?: string[];
+            field?: string;
           };
         };
       };
@@ -46376,12 +46468,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List vault connections. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description Vault connections */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['VaultConnectionListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -46396,20 +46490,34 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['VaultConnectionCreate'];
+      };
+    };
     responses: {
-      /** @description Created. The schema comes with the implementing work package. */
+      /** @description Vault connection created */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['VaultConnection'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       409: components['responses']['Conflict'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description Invalid name, kind, address, mount, namespace, auth_method, auth_credential_id, ca_pem, resolve_at, collector_ids or client_id (`field`). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -46425,12 +46533,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get a vault connection. The schema comes with the implementing work package. */
+      /** @description The vault connection */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['VaultConnection'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -46474,21 +46584,35 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['VaultConnectionUpdate'];
+      };
+    };
     responses: {
-      /** @description Update a vault connection. The schema comes with the implementing work package. */
+      /** @description The vault connection */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['VaultConnection'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description An invalid member, or client_id (`field`). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };

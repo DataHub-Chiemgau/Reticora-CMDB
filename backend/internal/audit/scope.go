@@ -68,8 +68,10 @@ var resourceTables = map[string][]string{
 	"credential": {"credential"},
 	// Credential bindings (WP-890).
 	"credential_binding": {"credential_binding"},
-	"document":           {"document"},
-	"ticket":             {"ticket"},
+	// Vault connections (WP-893).
+	"vault_connection": {"vault_connection"},
+	"document":         {"document"},
+	"ticket":           {"ticket"},
 
 	// Route audit (the first route segment): the route's resource_id is
 	// its first id parameter or the id of the created row, so the tables
@@ -96,6 +98,7 @@ var resourceTables = map[string][]string{
 	"contracts":                 {"contract"},
 	"credentials":               {"credential"},
 	"credential-bindings":       {"credential_binding"},
+	"vault-connections":         {"vault_connection"},
 	"desk-bookings":             {"desk_booking"},
 	"desks":                     {"desk"},
 	"discovery":                 {"discovery_job", "review_item"},

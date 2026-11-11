@@ -186,8 +186,12 @@ func (t *BundleTarget) AddTargets(targets []BundleTargetCredential) {
 }
 
 // relevant reports whether a credential belongs into the target's bundle:
-// only the listed ones.
+// only the listed ones, never a vault login (WP-893), which reaches a
+// collector only as the login of a vault reference it resolves (WP-894).
 func (t *BundleTarget) relevant(c *Credential) bool {
+	if _, login := vaultLoginFields[c.Kind]; login {
+		return false
+	}
 	return slices.Contains(t.CredentialIDs, c.ID)
 }
 

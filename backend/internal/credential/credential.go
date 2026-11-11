@@ -10,8 +10,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 )
@@ -28,6 +31,11 @@ const (
 	KindAPIToken    = "api_token"
 	KindNUT         = "nut"
 	KindNAS         = "nas" // NAS plugin account (Synology DSM: username, password; E-68)
+	// The logins of vault connections (CRD-03, WP-893): AppRole (role_id,
+	// secret_id) and token. The collector files them under vault, no plugin
+	// reads them.
+	KindVaultAppRole = "vault_approle"
+	KindVaultToken   = "vault_token"
 )
 
 var (
@@ -39,16 +47,37 @@ var (
 
 // validKinds is the set of allowed credential kinds.
 var validKinds = map[string]bool{
-	KindSNMPv2c:     true,
-	KindSNMPv3:      true,
-	KindSSHPassword: true,
-	KindSSHKey:      true,
-	KindRedfish:     true,
-	KindIPMI:        true,
-	KindWMI:         true,
-	KindAPIToken:    true,
-	KindNUT:         true,
-	KindNAS:         true,
+	KindSNMPv2c:      true,
+	KindSNMPv3:       true,
+	KindSSHPassword:  true,
+	KindSSHKey:       true,
+	KindRedfish:      true,
+	KindIPMI:         true,
+	KindWMI:          true,
+	KindAPIToken:     true,
+	KindNUT:          true,
+	KindNAS:          true,
+	KindVaultAppRole: true,
+	KindVaultToken:   true,
+}
+
+// vaultLoginFields are the required members of the secret of a vault login
+// (AK2 of WP-893).
+var vaultLoginFields = map[string][]string{
+	KindVaultAppRole: {"role_id", "secret_id"},
+	KindVaultToken:   {"token"},
+}
+
+// checkVaultLoginSecret requires the members of a vault login as non-empty
+// strings; other kinds are not checked.
+func checkVaultLoginSecret(kind string, secret map[string]any) error {
+	for _, field := range vaultLoginFields[kind] {
+		if v, ok := secret[field].(string); !ok || v == "" {
+			return &api.FieldError{Field: "secret", Status: http.StatusUnprocessableEntity,
+				Message: "a credential of kind " + kind + " needs " + strings.Join(vaultLoginFields[kind], " and ")}
+		}
+	}
+	return nil
 }
 
 // Credential is the domain model for an encrypted credential.
@@ -168,6 +197,8 @@ type Service struct {
 	// bindings is the binding service (WP-890); a copy of the service
 	// (WithCycles) shares it.
 	bindings *BindingService
+	// vaults is the vault connection service (WP-893), shared like bindings.
+	vaults *VaultService
 }
 
 // NewService creates a new credential service.
@@ -181,6 +212,11 @@ func NewService(repo Repository, encryptor *crypto.EnvelopeEncryptor) *Service {
 		bindingRepo = newMemoryBindings()
 	}
 	s.bindings = &BindingService{creds: s, bindings: bindingRepo, groups: NoDeviceGroups{}}
+	vaultRepo, ok := repo.(VaultRepository)
+	if !ok {
+		vaultRepo = newMemoryVaults()
+	}
+	s.vaults = &VaultService{creds: s, vaults: vaultRepo}
 	return s
 }
 
@@ -189,6 +225,9 @@ func NewService(repo Repository, encryptor *crypto.EnvelopeEncryptor) *Service {
 func (s *Service) Create(ctx context.Context, req CreateRequest) (*Credential, error) { //nolint:gocritic // API of credential.Service used by iga, discovery and jobs (WP-301 changes jobs in parallel)
 	if !validKinds[req.Kind] {
 		return nil, ErrInvalidKind
+	}
+	if err := checkVaultLoginSecret(req.Kind, req.Secret); err != nil {
+		return nil, err
 	}
 
 	dek, err := s.getOrCreateDEK(ctx, req.OrganizationID)
@@ -279,6 +318,13 @@ func (s *Service) ReplaceSecret(ctx context.Context, orgID, id string, secret ma
 	if !ok {
 		return nil, ErrUnsupported
 	}
+	// A vault login keeps the members of its kind (WP-893); an unknown id
+	// is reported by the replacement.
+	if current, err := s.repo.Get(ctx, orgID, id); err == nil {
+		if loginErr := checkVaultLoginSecret(current.Kind, secret); loginErr != nil {
+			return nil, loginErr
+		}
+	}
 	if _, err := s.getOrCreateDEK(ctx, orgID); err != nil {
 		return nil, err
 	}
@@ -300,7 +346,16 @@ func (s *Service) UpdateMetadata(ctx context.Context, orgID, id string, u Metada
 
 // Delete removes a credential.
 func (s *Service) Delete(ctx context.Context, orgID, id string) error {
-	return s.repo.Delete(ctx, orgID, id)
+	// The login of a vault connection is not deleted (WP-893): 409, in
+	// the memory store as well, where no foreign key refuses.
+	login, err := s.vaults.loginOfConnection(ctx, orgID, id)
+	if err != nil {
+		return err
+	}
+	if login {
+		return ErrCredentialIsVaultLogin
+	}
+	return credentialDeleteError(s.repo.Delete(ctx, orgID, id))
 }
 
 // RotationResult reports the outcome of a DEK rotation.

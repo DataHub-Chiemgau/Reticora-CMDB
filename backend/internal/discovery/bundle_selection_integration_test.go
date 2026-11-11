@@ -8,7 +8,8 @@
 //     accepted suggestion) uses the organization-wide credentials and those
 //     of its client, never another client's; a scope with credential_ids
 //     exactly those, without a credential of another client bound before the
-//     F-264 fix. The scope channel sends each scope its effective
+//     F-264 fix; never a vault login (WP-893), which a scope does not take
+//     as credential either. The scope channel sends each scope its effective
 //     credential_ids, whose union is the bundle. Over the collector endpoint
 //     the collector receives exactly these credentials, and the audit
 //     credential.bundle_delivered names them (an empty list for an empty
@@ -32,6 +33,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -39,6 +41,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 )
@@ -83,7 +86,12 @@ func TestAuditBundleCredentialSelection(t *testing.T) {
 	orgCred := mk("audit-org-snmp", "", credential.KindSNMPv2c, map[string]any{"community": "org-secret"})
 	scopeCred := mk("audit-scope-ssh", f.Client1, credential.KindSSHPassword, map[string]any{"username": "scope", "password": "scope-secret"})
 	c2Cred := mk("audit-c2-ssh", f.Client2, credential.KindSSHPassword, map[string]any{"username": "c2", "password": "c2-secret"})
-	secrets := []string{"org-secret", "scope-secret", "c2-secret"}
+	// The vault logins (WP-893) log vault connections in; no scope selects
+	// them, with or without credential_ids.
+	tokenLogin := mk("audit-org-vault-token", "", credential.KindVaultToken, map[string]any{"token": "vault-token-secret"})
+	approleLogin := mk("audit-c1-vault-approle", f.Client1, credential.KindVaultAppRole,
+		map[string]any{"role_id": "vault-role-id", "secret_id": "vault-secret-id"})
+	secrets := []string{"org-secret", "scope-secret", "c2-secret", "vault-token-secret", "vault-role-id", "vault-secret-id"}
 	off := false
 	cases := []struct {
 		name   string
@@ -108,6 +116,10 @@ func TestAuditBundleCredentialSelection(t *testing.T) {
 		{name: "scope of client 1 bound to a credential of client 2 before F-264", scopes: []bundleScope{{in: discovery.ScopeInput{Kind: "cidr",
 			Target: "10.231.5.0/24", ClientID: f.Client1, CredentialIDs: []string{c2Cred, scopeCred}}, raw: true, channel: []string{scopeCred}}},
 			want: []string{scopeCred}, reason: "F-264: an explicit credential of another client never reaches the scope's collector"},
+		{name: "scope of client 1 bound to vault logins past the check", scopes: []bundleScope{{in: discovery.ScopeInput{Kind: "cidr",
+			Target: "10.231.8.0/24", ClientID: f.Client1, CredentialIDs: []string{tokenLogin, approleLogin, scopeCred}}, raw: true,
+			channel: []string{scopeCred}}}, want: []string{scopeCred},
+			reason: "WP-893: a vault login reaches a collector only as the login of a vault reference it resolves"},
 		{name: "scopes of two clients and a disabled scope", scopes: []bundleScope{
 			{in: discovery.ScopeInput{Kind: "cidr", Target: "10.231.6.0/24", ClientID: f.Client1, CredentialIDs: []string{scopeCred}}, channel: []string{scopeCred}},
 			{in: discovery.ScopeInput{Kind: "host", Target: "10.231.7.1", ClientID: f.Client2}, channel: []string{orgCred, c2Cred}},
@@ -187,6 +199,19 @@ func TestAuditBundleCredentialSelection(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("a scope does not take a vault login as credential", func(t *testing.T) {
+		colID, _, _ := auditEnroll(t, e, "audit-bundle-login")
+		for _, login := range []string{tokenLogin, approleLogin} {
+			in := discovery.ScopeInput{CollectorID: colID, Kind: "cidr", Target: "10.231.9.0/24", ClientID: f.Client1,
+				CredentialIDs: []string{login}}
+			err := e.repo.CreateScope(org, discovery.NewScope(f.OrgA, &in))
+			var fe *api.FieldError
+			if !errors.As(err, &fe) || fe.Field != "credential_ids" || fe.Status != http.StatusUnprocessableEntity {
+				t.Errorf("WP-893: a scope with the vault login %s as credential: %v, want 422 credential_ids", login, err)
+			}
+		}
+	})
 
 	t.Run("delivery over the collector endpoint is audited with the delivered ids", func(t *testing.T) {
 		s := startRenewStack(t, e, enc)

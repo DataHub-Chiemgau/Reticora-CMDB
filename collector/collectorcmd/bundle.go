@@ -134,6 +134,9 @@ var credentialNamespace = map[string]string{
 	"snmp_v2c": "snmp", "snmp_v3": "snmp", "ssh_password": "ssh", "ssh_key": "ssh",
 	"redfish": "redfish", "ipmi": "ipmi", "wmi": "wmi", "api_token": "api", "nut": "nut",
 	"nas": "nas",
+	// The logins of vault connections (WP-893): no plugin reads them, the
+	// resolver of the vault references (WP-895) does.
+	"vault_approle": "vault", "vault_token": "vault",
 }
 
 // bundleCache holds the credentials of the last bundle in memory, by ID,

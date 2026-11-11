@@ -166,6 +166,11 @@ func (b *BindingService) validate(ctx context.Context, orgID string, in *Binding
 	if err != nil {
 		return err
 	}
+	if KindNamespace[cred.Kind] == "" {
+		// The vault logins (WP-893) are used by vault connections only.
+		return &api.FieldError{Field: "credential_id", Status: http.StatusUnprocessableEntity,
+			Message: "a credential of kind " + cred.Kind + " is not bound to targets"}
+	}
 	if in.Namespace == "" {
 		in.Namespace = KindNamespace[cred.Kind]
 	}

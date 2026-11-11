@@ -10520,6 +10520,9 @@ paths:
         `organization_id` in the request body is ignored. A missing or
         unknown `kind` is answered with 422 (`field` = `kind`); `nas` is the
         account of the NAS plugin (Synology DSM: username and password).
+        `vault_approle` (role_id, secret_id) and `vault_token` (token) are the
+        logins of vault connections (WP-893); a missing member is 422
+        (`field` = `secret`), and they are not bound to targets.
         Database refusals use the sanitized error contract (API-03): a value
         the store refuses (e.g. a `client_id` that is no UUID, a NUL byte)
         400, an unknown `client_id` 422, a `client_id` outside the caller's
@@ -10617,7 +10620,9 @@ paths:
       description: >-
         An id that is no UUID is answered like an unknown one (404, API-03).
         A credential with bindings is not deleted: 409 lists up to 50 binding
-        IDs in `bindings` (WP-890).
+        IDs in `bindings` (WP-890). The login of a vault connection
+        (auth_credential_id) is not deleted either: 409 with `field` id
+        (WP-893).
       responses:
         '204':
           description: Credential deleted
@@ -10626,19 +10631,22 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: The credential is bound; `bindings` lists up to 50 binding IDs.
+          description: >-
+            The credential is bound (`bindings` lists up to 50 binding IDs) or
+            a vault connection logs in with it (`field` id).
           content:
             application/problem+json:
               schema:
                 allOf:
                   - $ref: '#/components/schemas/ProblemDetail'
                   - type: object
-                    required: [bindings]
                     properties:
                       bindings:
                         type: array
                         maxItems: 50
                         items: { type: string }
+                      field:
+                        type: string
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -23802,20 +23810,24 @@ paths:
   /api/v1/vault-connections:
     x-phase: P3
     x-feature: credential_vault
-    x-status: planned
     get:
       operationId: listVaultConnections
       tags: [Credentials]
       summary: List vault connections
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        The vault connections (CRD-03, WP-893) in the caller's scope, by name:
+        a principal restricted to clients sees those of its clients and the
+        org-wide ones. Requires credential:read; no answer carries a secret,
+        the login is the credential `auth_credential_id` names.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: List vault connections. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+          description: Vault connections
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VaultConnectionListResponse' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -23829,11 +23841,27 @@ paths:
       tags: [Credentials]
       summary: Create a vault connection
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Creates a connection to an OpenBao or HashiCorp Vault KV v2 engine
+        (vault:manage, E-221). `address` is an https URL with a host and
+        without user information; `ca_pem` must parse as PEM certificate.
+        `auth_credential_id` names a stored credential of kind vault_approle
+        (auth_method approle) or vault_token (token) of the connection's
+        client or org-wide, else 422 auth_credential_id. resolve_at collector
+        (default, E-220) needs at least one collector of the client or
+        org-wide in `collector_ids`; resolve_at server refuses collector_ids
+        (422). The check of the address against the egress rules and the
+        connection test follow with WP-896.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VaultConnectionCreate' }
       responses:
         '201':
-          description: Created. The schema comes with the implementing work package.
+          description: Vault connection created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VaultConnection' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -23843,26 +23871,29 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: Invalid name, kind, address, mount, namespace, auth_method, auth_credential_id, ca_pem, resolve_at, collector_ids or client_id (`field`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
 
   /api/v1/vault-connections/{id}:
     x-phase: P3
     x-feature: credential_vault
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: getVaultConnection
       tags: [Credentials]
       summary: Get a vault connection
-      description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+      description: A connection of another client or an unknown id is 404 (credential:read).
       responses:
         '200':
-          description: Get a vault connection. The schema comes with the implementing work package.
+          description: The vault connection
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VaultConnection' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -23876,11 +23907,20 @@ paths:
       tags: [Credentials]
       summary: Update a vault connection
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Changes the sent members; the result is checked like a new connection.
+        client_id cannot change (422). Switching to resolve_at server without
+        collector_ids drops the collectors.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VaultConnectionUpdate' }
       responses:
         '200':
-          description: Update a vault connection. The schema comes with the implementing work package.
+          description: The vault connection
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VaultConnection' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -23892,16 +23932,16 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: An invalid member, or client_id (`field`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
     delete:
       operationId: deleteVaultConnection
       tags: [Credentials]
       summary: Delete a vault connection
-      description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
       responses:
         '204':
           description: Done.
@@ -39667,7 +39707,7 @@ components:
           type: string
         kind:
           type: string
-          enum: [snmp_v2c, snmp_v3, ssh_password, ssh_key, redfish, ipmi, wmi, api_token, nut, nas]
+          enum: [snmp_v2c, snmp_v3, ssh_password, ssh_key, redfish, ipmi, wmi, api_token, nut, nas, vault_approle, vault_token]
         scope:
           type: string
         key_version:
@@ -39808,6 +39848,76 @@ components:
               credential_id: { type: string, format: uuid }
               namespace: { type: string, enum: [snmp, ssh, redfish, ipmi, wmi, api, nut, nas] }
               priority: { type: integer, minimum: 0, maximum: 10000, default: 100 }
+    VaultConnection:
+      type: object
+      description: A connection to a KV v2 vault (CRD-03). It holds no secret; the login is the credential auth_credential_id names.
+      required: [id, organization_id, name, kind, address, mount, auth_method, auth_credential_id, resolve_at, enabled, collector_ids, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        client_id: { type: string, format: uuid, description: Client of the connection; absent for an org-wide one. }
+        name: { type: string }
+        kind: { type: string, enum: [openbao_kv2, hashicorp_kv2] }
+        address: { type: string, format: uri, description: https URL of the vault. }
+        namespace: { type: string, description: Vault namespace (Enterprise, OpenBao). }
+        mount: { type: string, description: Mount path of the KV v2 engine. }
+        auth_method: { type: string, enum: [approle, token] }
+        auth_credential_id: { type: string, format: uuid, description: Stored credential of kind vault_approle or vault_token. }
+        ca_pem: { type: string, description: PEM certificates of the CA the certificate of the vault is checked against. }
+        resolve_at: { type: string, enum: [collector, server], description: Who reads the references (E-220). }
+        enabled: { type: boolean }
+        collector_ids:
+          type: array
+          items: { type: string, format: uuid }
+          description: The collectors resolving the references (resolve_at collector); empty for server.
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    VaultConnectionCreate:
+      type: object
+      required: [name, kind, address, mount, auth_method, auth_credential_id]
+      properties:
+        client_id: { type: string, format: uuid }
+        name: { type: string, minLength: 1 }
+        kind: { type: string, enum: [openbao_kv2, hashicorp_kv2] }
+        address: { type: string, format: uri }
+        namespace: { type: string }
+        mount: { type: string, minLength: 1 }
+        auth_method: { type: string, enum: [approle, token] }
+        auth_credential_id: { type: string, format: uuid }
+        ca_pem: { type: string }
+        resolve_at: { type: string, enum: [collector, server], default: collector }
+        enabled: { type: boolean, default: true }
+        collector_ids:
+          type: array
+          maxItems: 100
+          items: { type: string, format: uuid }
+    VaultConnectionUpdate:
+      type: object
+      minProperties: 1
+      properties:
+        name: { type: string, minLength: 1 }
+        kind: { type: string, enum: [openbao_kv2, hashicorp_kv2] }
+        address: { type: string, format: uri }
+        namespace: { type: [string, 'null'] }
+        mount: { type: string, minLength: 1 }
+        auth_method: { type: string, enum: [approle, token] }
+        auth_credential_id: { type: string, format: uuid }
+        ca_pem: { type: [string, 'null'] }
+        resolve_at: { type: string, enum: [collector, server] }
+        enabled: { type: boolean }
+        collector_ids:
+          type: array
+          maxItems: 100
+          items: { type: string, format: uuid }
+    VaultConnectionListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/VaultConnection' }
     CredentialUpdate:
       type: object
       additionalProperties: false
@@ -39854,7 +39964,7 @@ components:
           type: string
         kind:
           type: string
-          enum: [snmp_v2c, snmp_v3, ssh_password, ssh_key, redfish, ipmi, wmi, api_token, nut, nas]
+          enum: [snmp_v2c, snmp_v3, ssh_password, ssh_key, redfish, ipmi, wmi, api_token, nut, nas, vault_approle, vault_token]
         scope:
           type: string
         secret:

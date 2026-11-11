@@ -100,20 +100,23 @@ var readPermissionFor = map[string]identity.Permission{
 	"credentials":             identity.PermCredentialRead,
 	// Credential bindings (CRD-01, WP-890): read with credential:read.
 	"credential-bindings": identity.PermCredentialRead,
-	"export":              identity.PermCIRead,
-	"ip-addresses":        identity.PermIPAMRead,
-	"ips":                 identity.PermIPAMRead,
-	"subnets":             identity.PermIPAMRead,
-	"vlans":               identity.PermIPAMRead,
-	"vrfs":                identity.PermIPAMRead,
-	"network-interfaces":  identity.PermIPAMRead,
-	"cables":              identity.PermRackRead,
-	"forms":               identity.PermFormRead,
-	"form-submissions":    identity.PermFormRead,
-	"workflows":           identity.PermWorkflowRead,
-	"workflow-runs":       identity.PermWorkflowRead,
-	"compliance":          identity.PermComplianceRead,
-	"security":            identity.PermFindingRead,
+	// Vault connections (CRD-03, WP-893): read without secret with
+	// credential:read, written with vault:manage.
+	"vault-connections":  identity.PermCredentialRead,
+	"export":             identity.PermCIRead,
+	"ip-addresses":       identity.PermIPAMRead,
+	"ips":                identity.PermIPAMRead,
+	"subnets":            identity.PermIPAMRead,
+	"vlans":              identity.PermIPAMRead,
+	"vrfs":               identity.PermIPAMRead,
+	"network-interfaces": identity.PermIPAMRead,
+	"cables":             identity.PermRackRead,
+	"forms":              identity.PermFormRead,
+	"form-submissions":   identity.PermFormRead,
+	"workflows":          identity.PermWorkflowRead,
+	"workflow-runs":      identity.PermWorkflowRead,
+	"compliance":         identity.PermComplianceRead,
+	"security":           identity.PermFindingRead,
 	// Phase 3 (WP-866, E-160, E-161): IPAM/ASN and ADMP. The writes of ipam
 	// follow the suffix convention (ipam:write); the ADMP accounts get
 	// admp:manage with WP-925.
@@ -211,6 +214,8 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"credentials":    identity.PermCredentialManage,
 	// Binding a credential is its own right (WP-870, WP-890).
 	"credential-bindings": identity.PermCredentialBind,
+	// Vault connections are their own right (WP-870, WP-893).
+	"vault-connections": identity.PermVaultManage,
 	// The only write below /admp is the account management of WP-925 with
 	// admp:manage (WP-870); until then no write route exists and writes
 	// need the org_admin key entitlement:manage (fail-closed).

@@ -124,7 +124,6 @@ var unroutedUntil = map[string]string{
 	"escalation:manage": "WP-1145 (escalation policies)",
 	"org:export":        "WP-1151 (organization export)",
 	"org:delete":        "WP-1152 (organization deletion)",
-	"vault:manage":      "WP-893 (vault connections)",
 	"admp:holder_read":  "WP-1076 (holder of an ADMP connection)",
 	"admp:manage":       "WP-925 (ADMP accounts)",
 }

@@ -385,6 +385,10 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	crud(m, v1+"credential-bindings", "credential_binding", "PATCH", "DELETE")
 	m["POST "+v1+"credential-bindings/"] = created("credential_binding")
 	m["PUT "+v1+"cis/{id}/credentials"] = noValues("replaces the set of bindings of the CI, which may be empty")
+	// Vault connections (WP-893): the row holds no secret, the login is a
+	// credential named by auth_credential_id.
+	crud(m, v1+"vault-connections", "vault_connection", "PATCH", "DELETE")
+	m["POST "+v1+"vault-connections/"] = created("vault_connection")
 	crud(m, v1+"webhooks", "webhook_subscription", "POST", "DELETE")
 	crud(m, v1+"lifecycle-definitions", "lifecycle_definition", "POST", "DELETE")
 	crud(m, v1+"lifecycle-models", "lifecycle_definition", all...)
