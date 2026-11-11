@@ -31,6 +31,8 @@ type PlanReader interface {
 type MemoryRepository struct {
 	mu    sync.RWMutex
 	items map[string][]Entitlement
+	// plans holds the plans set by SetOrganizationPlan.
+	plans map[string]Plan
 }
 
 // NewMemoryRepository creates an empty in-memory entitlement repository.
@@ -43,13 +45,41 @@ func NewMemoryRepository() *MemoryRepository {
 func (r *MemoryRepository) OrganizationPlan(_ context.Context, orgID string) (Plan, *time.Time, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
+	return r.planLocked(orgID), nil, nil
+}
+
+// planLocked is the plan set by SetOrganizationPlan, else the plan of the
+// cmdb_core row, else essential; r.mu is held.
+func (r *MemoryRepository) planLocked(orgID string) Plan {
+	if plan, ok := r.plans[orgID]; ok {
+		return plan
+	}
 	items := r.items[orgID]
 	for i := range items {
 		if items[i].FeatureKey == FeatureCMDBCore && items[i].Plan != "" {
-			return normalizePlan(items[i].Plan), nil, nil
+			return normalizePlan(items[i].Plan)
 		}
 	}
-	return PlanEssential, nil, nil
+	return PlanEssential
+}
+
+// LockOrganizationPlan returns the plan (the memory store has no
+// transactions to lock in).
+func (r *MemoryRepository) LockOrganizationPlan(_ context.Context, orgID string) (Plan, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.planLocked(orgID), nil
+}
+
+// SetOrganizationPlan stores the plan of the organization.
+func (r *MemoryRepository) SetOrganizationPlan(_ context.Context, orgID string, plan Plan) (time.Time, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.plans == nil {
+		r.plans = map[string]Plan{}
+	}
+	r.plans[orgID] = normalizePlan(plan)
+	return time.Now().UTC(), nil
 }
 
 // List returns the entitlements stored for the organization.

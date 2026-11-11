@@ -387,7 +387,22 @@ deny access (fail-closed). The tenant API is read-only (`GET
 `POST /api/v1/admin/orgs/{id}/entitlements`, and every change is recorded
 in `operator_audit` with the previous and the new state, in the same
 transaction: without its entry the change is rolled back (500) (ENT-04,
-E-12). Only the feature keys of ENT-02, the phase-2 keys of ENT-06 (E-44),
+E-12). The plan of an organization changes only through
+`PUT /api/v1/admin/orgs/{id}/plan` (`{plan, reason}`, PKG-02, WP-882): in
+one transaction `organization.plan` and `plan_changed_at` are set, every
+feature of the new plan gets a row of origin `plan` (a disabled one is
+enabled again), rows of origin `plan` outside the new plan are disabled
+with their limits and `valid_until`, and all rows of origin `plan` take
+the new plan (`entitlement.PlanTransition`). Rows of origin `addon` and
+`manual` stay as they are; nothing is deleted (ENT-08). A quota of a plan
+row that is missing or equal to the default of the old plan takes the
+default of the new plan (no default: unlimited), an override stays. The
+change is recorded as `plan.change` with before, after and reason in
+`operator_audit`; `entitlement.changed` (with `plan_before`) is the last
+write of the transaction and notifies the org_admins with
+`entitlement:read`; the entitlement cache of every instance is dropped
+after the commit. The current plan again answers 200 with `unchanged`,
+without event. Only the feature keys of ENT-02, the phase-2 keys of ENT-06 (E-44),
 the phase-3 keys (`monitoring`, `ipam`, `monitoring_network`,
 `credential_vault`, `notifications_sms_pager`, `workflows`,
 `compliance_findings`, `monitoring_access`, `monitoring_analytics`,
@@ -1066,7 +1081,7 @@ the monitoring with `monitoring:read`, `ci.config_changed` too (not
 | `workflow.webhook` | workflow run | WFL-02 | WP-1096 |
 | `finding.created`, `finding.changed`, `finding.resolved` | finding | SEC-02 | WP-1116 |
 | `notification.escalated`, `notification.acknowledged` | notification escalation | NTF-02 | WP-1146 |
-| `entitlement.changed` | organization (org-wide subscriptions only, `entitlement:read`) | PKG-02 | WP-882 |
+| `entitlement.changed` | organization (org-wide subscriptions only, `entitlement:read`); produced by the plan change | PKG-02 | WP-882 |
 | `org.export_completed` | export (org-wide only, `org:export`) | TLC-05 | WP-1151 |
 | `org.deletion_requested`, `org.deletion_cancelled` | deletion request (org-wide only, `org:export`) | TLC-06 | WP-1152 |
 

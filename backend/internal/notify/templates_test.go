@@ -22,6 +22,7 @@ var templateData = map[string]map[string]any{
 	events.CollectorOffline:   {"name": "dc1-collector", "last_seen_at": "2026-10-13T10:00:00Z"},
 	events.EntitlementWarning: {"feature": "discovery", "valid_until": "2026-11-08T04:13:00Z", "days_left": float64(7)},
 	events.EntitlementExpired: {"feature": "discovery", "expired_at": "2026-11-08T04:13:00Z"},
+	events.EntitlementChanged: {"id": "11111111-1111-4111-8111-111111111111", "plan": "standard", "plan_before": "pro", "changed": []any{"monitoring_network", "max_cis"}},
 	events.InvitationCreated: {"organization_name": "ACME", "expires_at": "2026-10-20T12:00:00Z",
 		"link": "https://cmdb.example/invitations/accept?token=t"},
 	events.ExportCompleted: {"format": "csv", "row_count": float64(3)},

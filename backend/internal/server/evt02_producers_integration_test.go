@@ -48,6 +48,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
@@ -64,6 +65,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/operator"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
@@ -590,6 +592,33 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 			data: func(t *testing.T, _ string, data map[string]any) {
 				if data["feature"] != "monitoring" || data["expired_at"] == nil {
 					t.Errorf("entitlement.expired data %v, want monitoring with expired_at", data)
+				}
+			}},
+		{typ: events.EntitlementChanged,
+			// The operator's plan change (WP-882): essential → standard.
+			setup: func(t *testing.T) {
+				exec(t, `UPDATE organization SET plan = 'essential' WHERE id = $1`, f.OrgA)
+			},
+			act: func(t *testing.T, refused bool) string {
+				const token = "evt02-break-glass-token-with-32-characters"
+				svc := entitlement.NewService(entitlement.NewPGRepository(f.App), entitlement.Options{Enforce: true})
+				mux := chi.NewRouter()
+				operator.NewHandler(operator.Config{BreakGlassToken: token}, nil, nil, operator.NewAuditor(f.App), f.App).
+					WithEntitlements(svc).RegisterRoutes(mux)
+				req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/orgs/"+f.OrgA+"/plan",
+					strings.NewReader(`{"plan":"standard","reason":"evt02"}`))
+				req.Header.Set(operator.BreakGlassHeader, token)
+				w := httptest.NewRecorder()
+				mux.ServeHTTP(w, req)
+				answered(t, "PUT /admin/orgs/{id}/plan", t6Response{Code: w.Code, Body: w.Body.Bytes()}, refused, http.StatusOK)
+				if refused {
+					unchanged(t, "plan", scalar(t, `SELECT plan FROM organization WHERE id = $1`, f.OrgA), "essential")
+				}
+				return f.OrgA
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["plan"] != "standard" || data["plan_before"] != "essential" {
+					t.Errorf("entitlement.changed data %v, want essential → standard of the organization", data)
 				}
 			}},
 		{typ: events.InvitationCreated,
@@ -1186,7 +1215,6 @@ var plannedProducers = map[string]string{
 	"finding.resolved":              "WP-1116",
 	"notification.escalated":        "WP-1146",
 	"notification.acknowledged":     "WP-1146",
-	"entitlement.changed":           "WP-882",
 	"org.export_completed":          "WP-1151",
 	"org.deletion_requested":        "WP-1152",
 	"org.deletion_cancelled":        "WP-1152",
@@ -1246,9 +1274,13 @@ func evt02CoverageProblems(covered []string) []string {
 // entity and refuses one without entity_seq and one whose data lacks a
 // required field of the type's frame.
 func TestEVT02ProducerCoverageRule(t *testing.T) {
+	// base: one case per type that needs one, the phase-3 types whose
+	// producer exists (no planned entry any more) among them.
 	var base []string
 	for _, typ := range events.Types {
-		if _, phase2 := events.Payloads[typ]; !phase2 {
+		_, phase2 := events.Payloads[typ]
+		_, planned := plannedProducers[typ]
+		if !phase2 || (slices.Contains(events.Phase3Types, typ) && !planned) {
 			base = append(base, typ)
 		}
 	}

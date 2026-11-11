@@ -48,6 +48,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.With(h.Middleware).Get("/api/v1/admin/audit/verify", h.VerifyAudit)
 	r.With(h.Middleware).Get("/api/v1/admin/orgs/{id}/entitlements", h.ListEntitlements)
 	r.With(h.Middleware).Post("/api/v1/admin/orgs/{id}/entitlements", h.GrantEntitlement)
+	r.With(h.Middleware).Put("/api/v1/admin/orgs/{id}/plan", h.ChangePlan)
 }
 
 var errNotOperator = errors.New("operator: login is not an operator with MFA")

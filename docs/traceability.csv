@@ -1633,3 +1633,7 @@ PKG-04;[P3];G3;backend/internal/entitlement/enforce_integration_test.go;WP-881
 ENT-06;(V), [B–P4], [A];G3;backend/internal/entitlement/entitlement_test.go;WP-881
 ENT-03;[B];G3;backend/internal/entitlement/enforce_integration_test.go;WP-881
 PKG-04;[P3];G3;backend/internal/signup/service_test.go;WP-881
+PKG-02;[P3];G3;backend/internal/operator/plan_integration_test.go;WP-882
+PKG-01;[P3];G3;backend/internal/operator/plan_integration_test.go;WP-882
+ENT-04;[B];G3;backend/internal/operator/plan_integration_test.go;WP-882
+ENT-08;[B];G3;backend/internal/operator/plan_integration_test.go;WP-882

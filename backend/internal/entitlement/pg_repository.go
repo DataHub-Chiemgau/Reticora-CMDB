@@ -71,6 +71,34 @@ func (r *PGRepository) OrganizationPlan(ctx context.Context, orgID string) (Plan
 	return normalizePlan(Plan(plan)), changed, nil
 }
 
+// LockOrganizationPlan reads organization.plan and locks the row until the
+// end of the context transaction (WP-882), so concurrent plan changes of the
+// organization run one after the other.
+func (r *PGRepository) LockOrganizationPlan(ctx context.Context, orgID string) (Plan, error) {
+	var plan string
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT plan FROM organization WHERE id = current_setting('app.org_id')::uuid FOR UPDATE`).Scan(&plan)
+	})
+	if err != nil {
+		return "", fmt.Errorf("lock organization plan: %w", err)
+	}
+	return normalizePlan(Plan(plan)), nil
+}
+
+// SetOrganizationPlan stores organization.plan with plan_changed_at = now()
+// (WP-882) and returns the time of the change.
+func (r *PGRepository) SetOrganizationPlan(ctx context.Context, orgID string, plan Plan) (time.Time, error) {
+	var at time.Time
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `UPDATE organization SET plan = $1, plan_changed_at = now()
+			WHERE id = current_setting('app.org_id')::uuid RETURNING plan_changed_at`, string(normalizePlan(plan))).Scan(&at)
+	})
+	if err != nil {
+		return time.Time{}, fmt.Errorf("set organization plan: %w", err)
+	}
+	return at.UTC(), nil
+}
+
 // Upsert stores an entitlement, replacing an existing row for the same
 // (organization, feature) pair.
 func (r *PGRepository) Upsert(ctx context.Context, in *Entitlement) (Entitlement, error) {

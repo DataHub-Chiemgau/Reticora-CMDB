@@ -63,8 +63,8 @@ func (l entitlementLister) List(ctx context.Context, orgID string) ([]compliance
 		return nil, err
 	}
 	out := make([]compliance.EntitlementStatus, len(ents))
-	for i, ent := range ents {
-		out[i] = compliance.EntitlementStatus{FeatureKey: ent.FeatureKey, Enabled: ent.Enabled}
+	for i := range ents {
+		out[i] = compliance.EntitlementStatus{FeatureKey: ents[i].FeatureKey, Enabled: ents[i].Enabled}
 	}
 	return out, nil
 }

@@ -637,6 +637,7 @@ var auditExemptions = map[string]string{
 	"POST /api/v1/admin/auth/callback":          "operator path, operator_audit",
 	"POST /api/v1/admin/orgs":                   "operator path, operator_audit",
 	"POST /api/v1/admin/orgs/{id}/entitlements": "operator path, operator_audit",
+	"PUT /api/v1/admin/orgs/{id}/plan":          "operator path, operator_audit",
 	// The Alertmanager bridge (OPS-05, E-75) records a queued alert itself,
 	// in the tenant transaction of the operator organization; refusals go to
 	// operator_audit.

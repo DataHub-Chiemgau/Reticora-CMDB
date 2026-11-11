@@ -413,6 +413,62 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/admin/orgs/{id}/plan:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    put:
+      operationId: changeOrganizationPlan
+      tags: [Operator]
+      security:
+        - OperatorAuth: []
+        - BreakGlassAuth: []
+      summary: Change the plan of an organization
+      description: >-
+        Up- or downgrade in one transaction (PKG-02, ENT-04, WP-882):
+        organization.plan and plan_changed_at are set; every feature of the
+        new plan gets a row of origin plan (or its disabled row is enabled
+        again), rows of origin plan outside the new plan are disabled with
+        their limits and valid_until (ENT-08: nothing is deleted), all rows
+        of origin plan take the new plan. Rows of origin addon or manual stay
+        unchanged. A quota of a plan row that is missing or equal to the
+        default of the old plan takes the default of the new plan (E-153), an
+        override stays. The change is recorded as plan.change with before,
+        after and reason in operator_audit in the same transaction (a failed
+        entry rolls everything back, 500); the event entitlement.changed
+        notifies the org_admins; the entitlement cache of every instance is
+        dropped after the commit. The current plan again answers 200 with
+        unchanged true, without event.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OperatorPlanChangeRequest'
+      responses:
+        '200':
+          description: Plan changed (or already set)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperatorPlanChange'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: >-
+            Unknown plan (`field` plan) or reason missing or longer than 500
+            characters (`field` reason); nothing is changed.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+
   /api/v1/admin/audit:
     get:
       operationId: listOperatorAudit
@@ -25445,36 +25501,6 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /api/v1/admin/orgs/{id}/plan:
-    x-status: planned
-    parameters:
-      - $ref: '#/components/parameters/ResourceID'
-    put:
-      operationId: changeOrganizationPlan
-      tags: [Operator]
-      summary: Change the plan of an organization
-      description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
-      security:
-        - OperatorAuth: []
-        - BreakGlassAuth: []
-      responses:
-        '200':
-          description: Change the plan of an organization. The schema comes with the implementing work package.
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-
   /api/v1/admin/orgs/{id}/addons:
     x-status: planned
     parameters:
@@ -28356,6 +28382,38 @@ components:
               description: Shortest probe interval in seconds (PKG-04), stored on monitoring; a shorter interval is refused with 422, 0 sets no minimum.
         admin_email: { type: string, maxLength: 254 }
         admin_display_name: { type: string, maxLength: 200 }
+    OperatorPlanChangeRequest:
+      type: object
+      additionalProperties: false
+      required: [plan, reason]
+      properties:
+        plan: { type: string, enum: [essential, standard, pro, enterprise] }
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Why the plan changes; stored in operator_audit.
+    OperatorPlanChange:
+      type: object
+      required: [plan, plan_before, plan_changed_at, unchanged, changed, entitlements]
+      properties:
+        plan: { type: string, enum: [essential, standard, pro, enterprise] }
+        plan_before: { type: string, enum: [essential, standard, pro, enterprise] }
+        plan_changed_at:
+          type: [string, 'null']
+          format: date-time
+          description: Time of the last plan change; null when the plan was never changed.
+        unchanged:
+          type: boolean
+          description: The organization already had the plan; nothing was written.
+        changed:
+          type: array
+          items: { type: string }
+          description: Feature keys and quotas that changed.
+        entitlements:
+          type: array
+          items: { $ref: '#/components/schemas/Entitlement' }
+          description: The rows the change wrote.
     OperatorCreatedOrganization:
       type: object
       required: [id, name, slug, plan, admin_invited, created_at]

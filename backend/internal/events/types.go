@@ -592,9 +592,12 @@ type NotificationEscalationData struct {
 // EntitlementChangedData is the data of entitlement.changed (PKG-02): a
 // change of plan, add-on or quota of the organization.
 type EntitlementChangedData struct {
-	ID      string   `json:"id"`
-	Plan    string   `json:"plan"`
-	Changed []string `json:"changed"`
+	ID   string `json:"id"`
+	Plan string `json:"plan"`
+	// PlanBefore is the plan before a plan change (WP-882); empty when the
+	// plan stayed (an add-on or a quota changed).
+	PlanBefore string   `json:"plan_before,omitempty"`
+	Changed    []string `json:"changed"`
 }
 
 // OrgExportData is the data of org.export_completed (TLC-05): the full

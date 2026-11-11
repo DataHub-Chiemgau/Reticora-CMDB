@@ -135,6 +135,29 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/admin/orgs/{id}/plan': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Change the plan of an organization
+     * @description Up- or downgrade in one transaction (PKG-02, ENT-04, WP-882): organization.plan and plan_changed_at are set; every feature of the new plan gets a row of origin plan (or its disabled row is enabled again), rows of origin plan outside the new plan are disabled with their limits and valid_until (ENT-08: nothing is deleted), all rows of origin plan take the new plan. Rows of origin addon or manual stay unchanged. A quota of a plan row that is missing or equal to the default of the old plan takes the default of the new plan (E-153), an override stays. The change is recorded as plan.change with before, after and reason in operator_audit in the same transaction (a failed entry rolls everything back, 500); the event entitlement.changed notifies the org_admins; the entitlement cache of every instance is dropped after the commit. The current plan again answers 200 with unchanged true, without event.
+     */
+    put: operations['changeOrganizationPlan'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/admin/audit': {
     parameters: {
       query?: never;
@@ -11306,29 +11329,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/api/v1/admin/orgs/{id}/plan': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    get?: never;
-    /**
-     * Change the plan of an organization
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
-     */
-    put: operations['changeOrganizationPlan'];
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   '/api/v1/admin/orgs/{id}/addons': {
     parameters: {
       query?: never;
@@ -12967,6 +12967,29 @@ export interface components {
       };
       admin_email: string;
       admin_display_name?: string;
+    };
+    OperatorPlanChangeRequest: {
+      /** @enum {string} */
+      plan: 'essential' | 'standard' | 'pro' | 'enterprise';
+      /** @description Why the plan changes; stored in operator_audit. */
+      reason: string;
+    };
+    OperatorPlanChange: {
+      /** @enum {string} */
+      plan: 'essential' | 'standard' | 'pro' | 'enterprise';
+      /** @enum {string} */
+      plan_before: 'essential' | 'standard' | 'pro' | 'enterprise';
+      /**
+       * Format: date-time
+       * @description Time of the last plan change; null when the plan was never changed.
+       */
+      plan_changed_at: string | null;
+      /** @description The organization already had the plan; nothing was written. */
+      unchanged: boolean;
+      /** @description Feature keys and quotas that changed. */
+      changed: string[];
+      /** @description The rows the change wrote. */
+      entitlements: components['schemas']['Entitlement'][];
     };
     OperatorCreatedOrganization: {
       /** Format: uuid */
@@ -20443,6 +20466,47 @@ export interface operations {
         };
       };
       500: components['responses']['InternalServerError'];
+    };
+  };
+  changeOrganizationPlan: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['OperatorPlanChangeRequest'];
+      };
+    };
+    responses: {
+      /** @description Plan changed (or already set) */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OperatorPlanChange'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      /** @description Unknown plan (`field` plan) or reason missing or longer than 500 characters (`field` reason); nothing is changed. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   listOperatorAudit: {
@@ -47974,33 +48038,6 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      500: components['responses']['InternalServerError'];
-    };
-  };
-  changeOrganizationPlan: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Change the plan of an organization. The schema comes with the implementing work package. */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      400: components['responses']['BadRequest'];
-      401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
-      404: components['responses']['NotFound'];
-      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };

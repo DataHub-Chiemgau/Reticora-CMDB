@@ -126,6 +126,24 @@ var Templates = map[string]map[string]render{
 				"The licence of " + str(d, "feature") + " expired on " + str(d, "expired_at") + "."}
 		},
 	},
+	events.EntitlementChanged: {
+		LocaleDE: func(d map[string]any) Text {
+			if before := str(d, "plan_before"); before != "" {
+				return Text{"Paket geändert: " + str(d, "plan"),
+					"Das Paket Ihrer Organisation wurde von " + before + " auf " + str(d, "plan") + " umgestellt. Geändert: " + strList(d["changed"]) + "."}
+			}
+			return Text{"Lizenzumfang geändert",
+				"Der Lizenzumfang Ihrer Organisation (Paket " + str(d, "plan") + ") wurde angepasst. Geändert: " + strList(d["changed"]) + "."}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			if before := str(d, "plan_before"); before != "" {
+				return Text{"Plan changed: " + str(d, "plan"),
+					"The plan of your organization was changed from " + before + " to " + str(d, "plan") + ". Changed: " + strList(d["changed"]) + "."}
+			}
+			return Text{"Licence scope changed",
+				"The licence scope of your organization (plan " + str(d, "plan") + ") was adjusted. Changed: " + strList(d["changed"]) + "."}
+		},
+	},
 	events.InvitationCreated: {
 		LocaleDE: func(d map[string]any) Text {
 			return Text{"Einladung zu Reticora",
@@ -425,4 +443,21 @@ func quantity(d map[string]any, key, locale string) string {
 		return n + " " + unit
 	}
 	return n
+}
+
+// strList joins a list of the event data (a JSON array) with commas.
+func strList(v any) string {
+	var parts []string
+	switch list := v.(type) {
+	case []any:
+		for _, item := range list {
+			parts = append(parts, fmt.Sprint(item))
+		}
+	case []string:
+		parts = list
+	}
+	if len(parts) == 0 {
+		return "–"
+	}
+	return strings.Join(parts, ", ")
 }

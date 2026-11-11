@@ -996,3 +996,190 @@ func TestLimitOrigin(t *testing.T) {
 		}
 	}
 }
+
+// planRows are the rows the creation of an organization of the plan
+// stores: every feature with origin plan and the default limits.
+func planRows(plan Plan) []Entitlement {
+	defaults := PlanQuotaDefaults(plan)
+	var rows []Entitlement
+	for _, f := range PlanFeatures(plan) {
+		limits := map[string]int64{}
+		for quota, value := range defaults {
+			if feature, _ := QuotaFeatureOf(quota); feature == f {
+				limits[quota] = value
+			}
+		}
+		rows = append(rows, Entitlement{OrganizationID: "org-1", FeatureKey: f, Plan: plan, Enabled: true,
+			Limits: limits, Source: "manual", Origin: OriginPlan})
+	}
+	return rows
+}
+
+// applyTransition writes the rows of PlanTransition over rows.
+func applyTransition(rows, written []Entitlement) []Entitlement {
+	out := slices.Clone(rows)
+	for _, w := range written {
+		i := slices.IndexFunc(out, func(e Entitlement) bool { return e.FeatureKey == w.FeatureKey })
+		if i < 0 {
+			out = append(out, w)
+			continue
+		}
+		out[i] = w
+	}
+	return out
+}
+
+// TestPlanTransitionFollowsMatrix covers PKG-01/PKG-02 (WP-882) for all 16
+// pairs of the four plans: after the transition the rows of origin plan are
+// exactly PlanFeatures(to) enabled, every other row of origin plan disabled
+// but kept, every row carries the new plan, the limits are the defaults of
+// the new plan, and add-on and manual rows are never written. A second
+// transition to the same plan writes nothing.
+func TestPlanTransitionFollowsMatrix(t *testing.T) {
+	plans := []Plan{PlanEssential, PlanStandard, PlanPro, PlanEnterprise}
+	extra := []Entitlement{
+		{FeatureKey: FeatureIGA, Plan: PlanEssential, Enabled: true, Limits: map[string]int64{}, Origin: OriginAddon},
+		{FeatureKey: FeatureMonitoringNetwork, Plan: PlanEssential, Enabled: true, Limits: map[string]int64{}, Origin: OriginManual},
+	}
+	for _, from := range plans {
+		for _, to := range plans {
+			rows := append(planRows(from), extra...)
+			if from == PlanPro || from == PlanEnterprise {
+				rows = planRows(from) // monitoring_network is a plan row there
+				rows = append(rows, extra[0])
+			}
+			written := PlanTransition(from, to, rows, TransitionOptions{})
+			for i := range written {
+				if written[i].Origin != OriginPlan {
+					t.Errorf("%s→%s writes the %s row %s", from, to, written[i].Origin, written[i].FeatureKey)
+				}
+			}
+			after := applyTransition(rows, written)
+			if len(after) < len(rows) {
+				t.Errorf("%s→%s deletes rows", from, to)
+			}
+			mismatch := PlanMismatch(to, after)
+			if len(mismatch) != 0 {
+				t.Errorf("%s→%s: rows deviating from the matrix %v", from, to, mismatch)
+			}
+			wantDefaults := PlanQuotaDefaults(to)
+			for i := range after {
+				row := &after[i]
+				switch row.Origin {
+				case OriginAddon, OriginManual:
+					if !row.Enabled || row.Plan != PlanEssential {
+						t.Errorf("%s→%s changed the %s row %+v", from, to, row.Origin, row)
+					}
+					continue
+				}
+				if in := slices.Contains(PlanFeatures(to), row.FeatureKey); row.Enabled != in || row.Plan != to {
+					t.Errorf("%s→%s: %s enabled %v plan %s", from, to, row.FeatureKey, row.Enabled, row.Plan)
+				}
+				if !row.Enabled {
+					continue
+				}
+				for quota, value := range row.Limits {
+					if def, ok := wantDefaults[quota]; !ok || def != value {
+						t.Errorf("%s→%s: %s.%s = %d, want the default of %s", from, to, row.FeatureKey, quota, value, to)
+					}
+				}
+				for quota, def := range wantDefaults {
+					if f, _ := QuotaFeatureOf(quota); f == row.FeatureKey && row.Limits[quota] != def {
+						t.Errorf("%s→%s: %s.%s missing, want %d", from, to, row.FeatureKey, quota, def)
+					}
+				}
+			}
+			if again := PlanTransition(to, to, after, TransitionOptions{}); len(again) != 0 {
+				t.Errorf("%s→%s→%s writes %d rows again", from, to, to, len(again))
+			}
+		}
+	}
+}
+
+// TestPlanTransitionKeepsOverrides covers the limit rule (WP-882): an
+// override stays, a value equal to the old default and a missing value take
+// the new default, a quota the new plan has no default for goes; with
+// ResetLimits (WP-884) every quota takes the new default.
+func TestPlanTransitionKeepsOverrides(t *testing.T) {
+	rows := planRows(PlanStandard)
+	for i := range rows {
+		switch rows[i].FeatureKey {
+		case FeatureCMDBCore:
+			rows[i].Limits[LimitMaxCIs] = 3000
+			delete(rows[i].Limits, LimitMaxUsers)
+		}
+	}
+	limitsOf := func(written []Entitlement, feature string) map[string]int64 {
+		for i := range written {
+			if written[i].FeatureKey == feature {
+				return written[i].Limits
+			}
+		}
+		return nil
+	}
+	written := PlanTransition(PlanStandard, PlanPro, rows, TransitionOptions{})
+	core := limitsOf(written, FeatureCMDBCore)
+	if core[LimitMaxCIs] != 3000 || core[LimitMaxUsers] != 100 {
+		t.Errorf("cmdb_core limits after standard→pro: %v, want max_cis 3000 (override), max_users 100", core)
+	}
+	if mon := limitsOf(written, FeatureMonitoring); mon[LimitMaxMonitoredTargets] != 5000 || mon[LimitMinProbeIntervalS] != 30 {
+		t.Errorf("monitoring limits after standard→pro: %v", mon)
+	}
+	written = PlanTransition(PlanStandard, PlanEnterprise, rows, TransitionOptions{})
+	if core = limitsOf(written, FeatureCMDBCore); core[LimitMaxCIs] != 3000 {
+		t.Errorf("standard→enterprise: %v, want max_cis 3000", core)
+	} else if _, ok := core[LimitMaxUsers]; ok {
+		t.Errorf("standard→enterprise keeps max_users although enterprise is unlimited: %v", core)
+	}
+	if docs := limitsOf(written, FeatureDocuments); len(docs) != 0 {
+		t.Errorf("standard→enterprise documents limits %v, want unlimited", docs)
+	}
+
+	written = PlanTransition(PlanStandard, PlanEssential, rows, TransitionOptions{ResetLimits: true})
+	if core = limitsOf(written, FeatureCMDBCore); core[LimitMaxCIs] != 500 || core[LimitMaxUsers] != 5 {
+		t.Errorf("reset to essential: %v, want the defaults", core)
+	}
+	if mon := limitsOf(written, FeatureMonitoring); mon[LimitMaxMonitoredTargets] != 500 {
+		t.Errorf("a disabled row keeps its limits: %v", mon)
+	}
+}
+
+// TestChangePlanWritesTheTransition covers Service.ChangePlan on the memory
+// store: the plan is stored, only the changed rows are written, Changed
+// names keys and quotas, the same plan is a no-op.
+func TestChangePlanWritesTheTransition(t *testing.T) {
+	repo := NewMemoryRepository()
+	svc := NewService(repo, Options{Enforce: true})
+	ctx := context.Background()
+	for _, row := range planRows(PlanEssential) {
+		if _, err := svc.Grant(ctx, &row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := repo.SetOrganizationPlan(ctx, "org-1", PlanEssential); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := svc.Check(ctx, "org-1", FeatureMonitoring); ok {
+		t.Fatal("essential is entitled to monitoring")
+	}
+	change, err := svc.ChangePlan(ctx, "org-1", PlanStandard, TransitionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if change.Unchanged || change.From != PlanEssential || change.To != PlanStandard || change.ChangedAt == nil {
+		t.Errorf("change %+v", change)
+	}
+	if !slices.Contains(change.Changed, FeatureMonitoring) || !slices.Contains(change.Changed, LimitMaxCIs) {
+		t.Errorf("changed %v, want monitoring and max_cis", change.Changed)
+	}
+	if _, ok, _ := svc.Check(ctx, "org-1", FeatureMonitoring); !ok {
+		t.Error("monitoring is not entitled right after the change (cache)")
+	}
+	if plan, _, _ := svc.OrganizationPlan(ctx, "org-1"); plan != PlanStandard {
+		t.Errorf("organization plan %s", plan)
+	}
+	same, err := svc.ChangePlan(ctx, "org-1", PlanStandard, TransitionOptions{})
+	if err != nil || !same.Unchanged || len(same.Written) != 0 {
+		t.Errorf("same plan: %+v, %v", same, err)
+	}
+}
