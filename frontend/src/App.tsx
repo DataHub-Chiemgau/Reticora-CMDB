@@ -107,6 +107,7 @@ const MetamodelDraftsPage = lazyPage(
 );
 const LocationTreePage = lazyPage(() => import('./pages/LocationTreePage'), 'LocationTreePage');
 const ClientsPage = lazyPage(() => import('./pages/ClientsPage'), 'ClientsPage');
+const OperatorApp = lazyPage(() => import('./operator/OperatorApp'), 'OperatorApp');
 const PlanPage = lazyPage(() => import('./pages/PlanPage'), 'PlanPage');
 const InventoryPage = lazyPage(() => import('./pages/InventoryPage'), 'InventoryPage');
 const SavedViewsPage = lazyPage(() => import('./pages/SavedViewsPage'), 'SavedViewsPage');
@@ -212,6 +213,15 @@ function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/auth/callback" element={<CallbackPage />} />
+      {/* The operator area has its own session, outside the tenant login (WP-887). */}
+      <Route
+        path="/operator/*"
+        element={
+          <Suspense fallback={<PageFallback />}>
+            <OperatorApp />
+          </Suspense>
+        }
+      />
       {/* Signup and verification run without a session (UI-17). */}
       <Route
         path="/onboarding"

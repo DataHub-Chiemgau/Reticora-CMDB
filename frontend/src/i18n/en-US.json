@@ -4893,5 +4893,26 @@
       "ai": "AI assistant",
       "admp": "ADMP connection"
     }
+  },
+  "operator": {
+    "login": {
+      "title": "Operator sign-in",
+      "description": "The operator area needs its own sign-in with a second factor; it lasts 15 minutes.",
+      "submit": "Sign in as operator",
+      "expired": "Your operator session has expired. Please sign in again.",
+      "refused": "The operator sign-in was refused.",
+      "unavailable": "The operator sign-in is not set up on this server.",
+      "startFailed": "The sign-in could not be started."
+    },
+    "shell": {
+      "title": "Reticora Operator",
+      "signedInAs": "Signed in as {{name}}",
+      "signOut": "Sign out operator"
+    },
+    "home": {
+      "title": "Operator area",
+      "description": "Administration of organizations, plans and add-ons.",
+      "notFound": "Page not found"
+    }
   }
 }

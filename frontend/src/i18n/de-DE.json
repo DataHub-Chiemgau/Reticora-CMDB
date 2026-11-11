@@ -4893,5 +4893,26 @@
       "ai": "KI-Assistent",
       "admp": "ADMP-Anbindung"
     }
+  },
+  "operator": {
+    "login": {
+      "title": "Operator-Anmeldung",
+      "description": "Der Operator-Bereich verlangt eine eigene Anmeldung mit zweitem Faktor; sie gilt 15 Minuten.",
+      "submit": "Als Operator anmelden",
+      "expired": "Ihre Operator-Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
+      "refused": "Die Operator-Anmeldung wurde abgelehnt.",
+      "unavailable": "Die Operator-Anmeldung ist auf diesem Server nicht eingerichtet.",
+      "startFailed": "Die Anmeldung konnte nicht gestartet werden."
+    },
+    "shell": {
+      "title": "Reticora Operator",
+      "signedInAs": "Angemeldet als {{name}}",
+      "signOut": "Operator abmelden"
+    },
+    "home": {
+      "title": "Operator-Bereich",
+      "description": "Verwaltung der Organisationen, Pakete und Add-ons.",
+      "notFound": "Seite nicht gefunden"
+    }
   }
 }

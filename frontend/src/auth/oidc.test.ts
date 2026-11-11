@@ -109,3 +109,70 @@ describe('returnTo after the login (SR-62, WP-874)', () => {
     expect(result.returnTo).toBe('/dashboard');
   });
 });
+
+describe('operator login (WP-887)', () => {
+  it('starts with acr_values=2 and an operator transaction', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(
+        async () =>
+          new Response(
+            JSON.stringify({
+              client_id: 'reticora-ui',
+              redirect_uri: 'http://localhost/auth/callback',
+              authorization_endpoint: 'http://idp.example/auth',
+              scopes: ['openid'],
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+      ),
+    );
+    const assign = vi.fn();
+    vi.spyOn(window, 'location', 'get').mockReturnValue({
+      ...window.location,
+      assign,
+      origin: 'http://localhost',
+    } as Location);
+    const { startAuthorizationCodeFlow } = await import('./oidc');
+
+    const url = new URL(await startAuthorizationCodeFlow('/dashboard', { kind: 'operator' }));
+    expect(url.searchParams.get('acr_values')).toBe('2');
+    const transaction = JSON.parse(window.sessionStorage.getItem('reticora-auth-transaction')!);
+    expect(transaction.kind).toBe('operator');
+    expect(transaction.returnTo).toBe('/operator');
+
+    const tenant = new URL(await startAuthorizationCodeFlow('/dashboard'));
+    expect(tenant.searchParams.has('acr_values')).toBe(false);
+    expect(JSON.parse(window.sessionStorage.getItem('reticora-auth-transaction')!).kind).toBe(
+      'tenant',
+    );
+  });
+
+  it('exchanges the code at the operator callback and leaves the tenant session alone', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          token: 'op-token',
+          expires_at: '2099-01-01T00:00:00Z',
+          operator: { id: 'op-1', name: 'Olga', kind: 'oidc' },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    window.sessionStorage.setItem(
+      'reticora-auth-transaction',
+      JSON.stringify({ state: 's', codeVerifier: 'v', returnTo: '/operator', kind: 'operator' }),
+    );
+    const { completeAuthorizationCodeFlow } = await import('./oidc');
+    const { useAuthStore } = await import('./authStore');
+    const { useOperatorAuth } = await import('../operator/operatorAuth');
+
+    const result = await completeAuthorizationCodeFlow('?code=abc&state=s');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/admin/auth/callback');
+    expect(result.returnTo).toBe('/operator');
+    expect(useOperatorAuth.getState().session?.token).toBe('op-token');
+    expect(useAuthStore.getState().token).toBeNull();
+    expect(window.sessionStorage.getItem('reticora-auth-session')).toBeNull();
+  });
+});

@@ -37,7 +37,7 @@ export default tseslint.config(
   // GLO-10: pages and components render enum values through the catalog
   // (negative fixture: src/i18n/rawEnum.test.ts).
   {
-    files: ['src/pages/**/*.tsx', 'src/components/**/*.tsx'],
+    files: ['src/pages/**/*.tsx', 'src/components/**/*.tsx', 'src/operator/**/*.tsx'],
     rules: {
       'no-restricted-syntax': ['error', ...rawEnumChildren],
     },

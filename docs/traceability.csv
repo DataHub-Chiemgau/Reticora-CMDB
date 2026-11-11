@@ -1644,3 +1644,5 @@ PKG-05;[P3];G3;backend/internal/entitlement/usage_integration_test.go;WP-885
 PKG-06;[P3];G3;frontend/src/pages/PlanPage.test.tsx;WP-886
 ENT-05;[B];G3;frontend/src/pages/PlanPage.test.tsx;WP-886
 UI-14;[P2–P4, A];G3;frontend/src/pages/PlanPage.test.tsx;WP-886
+PKG-07;[P3];G3;frontend/src/operator/operatorAuth.test.ts;WP-887
+SEC-07;[B];G3;frontend/src/operator/operatorAuth.test.ts;WP-887
