@@ -143,16 +143,25 @@ func checkSource(req *CreateRequest) error {
 }
 
 // decryptVaultRef answers Decrypt for a reference: the server holds no
-// plaintext of it (AK4).
-func (s *Service) decryptVaultRef(ctx context.Context, orgID string, stored *StoredCredential) error {
+// plaintext of it (AK4 of WP-894). A reference of a connection with
+// resolve_at server is read by the server's resolver in memory (WP-896);
+// one of a collector connection never on the server.
+func (s *Service) decryptVaultRef(ctx context.Context, orgID string, stored *StoredCredential) (map[string]any, error) {
 	conn, err := s.vaults.Get(ctx, orgID, stored.VaultRef.ConnectionID)
 	if err != nil {
-		return fmt.Errorf("credential %s: %w", stored.ID, err)
+		return nil, fmt.Errorf("credential %s: %w", stored.ID, err)
 	}
 	if conn.ResolveAt == ResolveAtCollector {
-		return ErrResolvedOnCollector
+		return nil, ErrResolvedOnCollector
 	}
-	return ErrVaultNotConfigured
+	if s.vault == nil || !conn.Enabled {
+		return nil, ErrVaultNotConfigured
+	}
+	login, err := s.Decrypt(ctx, orgID, conn.AuthCredentialID)
+	if err != nil {
+		return nil, fmt.Errorf("vault connection %s: login: %w", conn.ID, err)
+	}
+	return s.vault.resolve(ctx, orgID, conn, login, stored.VaultRef)
 }
 
 // VaultRefUpdate is a PATCH of the reference (AK3): path, version
@@ -242,6 +251,48 @@ func (s *Service) bundleEntries(ctx context.Context, t *BundleTarget, c *Credent
 		{ID: login.ID, Name: login.Name, Kind: login.Kind, Source: SourceStored, Secret: loginSecret},
 		{ID: c.ID, Name: c.Name, Kind: c.Kind, Source: SourceVaultRef, VaultRef: ref},
 	}, nil
+}
+
+// BundleVaultConnection is a connection a collector resolves (WP-896): what
+// it needs to log in for the connection test, never a value of the vault.
+type BundleVaultConnection struct {
+	ConnectionID string `json:"connection_id"`
+	Kind         string `json:"kind"`
+	Address      string `json:"address"`
+	Namespace    string `json:"namespace,omitempty"`
+	Mount        string `json:"mount"`
+	CAPEM        string `json:"ca_pem,omitempty"`
+	AuthMethod   string `json:"auth_method"`
+	LoginID      string `json:"login_id"`
+}
+
+// bundleVaultConnections returns the enabled connections with resolve_at
+// collector that list the target's collector, and their stored logins.
+func (s *Service) bundleVaultConnections(ctx context.Context, t *BundleTarget) ([]BundleVaultConnection, []BundleCredential, error) {
+	list, err := s.vaults.List(ctx, t.OrganizationID)
+	if err != nil {
+		return nil, nil, err
+	}
+	var conns []BundleVaultConnection
+	var logins []BundleCredential
+	for i := range list {
+		conn := &list[i]
+		if conn.ResolveAt != ResolveAtCollector || !conn.Enabled || !slices.Contains(conn.CollectorIDs, t.CollectorID) {
+			continue
+		}
+		login, err := s.Get(ctx, t.OrganizationID, conn.AuthCredentialID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("vault connection %s: %w", conn.ID, err)
+		}
+		secret, err := s.Decrypt(ctx, t.OrganizationID, login.ID)
+		if err != nil {
+			return nil, nil, fmt.Errorf("vault connection %s: %w", conn.ID, err)
+		}
+		conns = append(conns, BundleVaultConnection{ConnectionID: conn.ID, Kind: conn.Kind, Address: conn.Address,
+			Namespace: conn.Namespace, Mount: conn.Mount, CAPEM: conn.CAPEM, AuthMethod: conn.AuthMethod, LoginID: login.ID})
+		logins = append(logins, BundleCredential{ID: login.ID, Name: login.Name, Kind: login.Kind, Source: SourceStored, Secret: secret})
+	}
+	return conns, logins, nil
 }
 
 // --- vault connection deletion (AK3 of WP-893) ----------------------------

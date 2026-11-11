@@ -25,6 +25,11 @@ type Handler struct {
 	// pool writes credential.rotated into the outbox in the transaction of
 	// a replaced secret (WP-889); nil (--no-db) writes no event.
 	pool *pgxpool.Pool
+	// vaultJobs and vaultQueue run the connection tests vault.test
+	// (WP-896): on the job queue when there is one, else in this process;
+	// without either the test route answers 503.
+	vaultJobs  VaultTestJobs
+	vaultQueue VaultTestQueue
 }
 
 // WithEvents lets PUT /credentials/{id}/secret append credential.rotated

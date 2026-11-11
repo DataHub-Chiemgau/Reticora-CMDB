@@ -33,6 +33,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
@@ -1689,4 +1690,47 @@ func selfSignedPEM(t *testing.T, key *ecdsa.PrivateKey, cn, org string) string {
 		t.Fatal(err)
 	}
 	return string(pemOf(der))
+}
+
+// TestCollectorAnswersServerRequestWithinItsTree covers the request/reply
+// of the server to a collector on the deployed endpoint (WP-895 AK5,
+// WP-896 AK4): the collector may publish only below its own subject tree
+// (UserClaims), so an answer to the server's _INBOX is refused, and the
+// server's reply subject lies in the collector's tree
+// (credential.RequestCollector), where the answer arrives.
+func TestCollectorAnswersServerRequestWithinItsTree(t *testing.T) {
+	e, enc := auditEdge(t, "b5")
+	s := startKickStack(t, e, enc, nil, 0)
+	colID, colCert := e.enroll(t, "vault-test-reply")
+	col := s.collector(t, colID, colCert)
+	tree := discovery.CollectorSubject(e.f.OrgA, colID)
+	sub, err := col.nc.Subscribe(tree+".vault.test", func(m *nats.Msg) {
+		_ = m.Respond([]byte(`{"result":"ok"}`))
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+	if err = col.nc.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	bg := context.Background()
+	var msg *nats.Msg
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		// The leaf node propagates the collector's interest first.
+		ctx, cancel := context.WithTimeout(bg, time.Second)
+		msg, err = credential.RequestCollector(ctx, s.core, e.f.OrgA, colID, ".vault.test", []byte(`{"connection_id":"c"}`))
+		cancel()
+		if err == nil || time.Now().After(deadline) {
+			break
+		}
+	}
+	if err != nil || string(msg.Data) != `{"result":"ok"}` {
+		t.Fatalf("answer within the collector's tree = %v, %v", msg, err)
+	}
+	// Control: the same answer to the server's _INBOX does not arrive.
+	if msg, err = s.core.Request(tree+".vault.test", []byte(`{"connection_id":"c"}`), 2*time.Second); err == nil {
+		t.Fatalf("the collector published outside its subject tree: %s", msg.Data)
+	}
 }

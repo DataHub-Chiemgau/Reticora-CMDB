@@ -8,6 +8,8 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"slices"
@@ -21,14 +23,17 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
 // Vault connections (CRD-03, part of COL-03; WP-893, E-220, E-221): an
 // OpenBao or HashiCorp Vault KV v2 engine the references of WP-894 read
 // from. A connection holds no secret: it logs in with a stored credential
-// of kind vault_approle or vault_token (auth_credential_id). The test of a
-// connection and the egress check of its address for resolve_at server
-// follow with WP-896.
+// of kind vault_approle or vault_token (auth_credential_id). The address of
+// a connection with resolve_at server passes the egress policy, and POST
+// /vault-connections/{id}/test runs the job vault.test (WP-896).
 
 // Kinds of vault connection (E-221).
 const (
@@ -208,6 +213,18 @@ func (v *VaultService) validate(ctx context.Context, orgID string, c *VaultConne
 	if err := checkVaultAddress(c.Address); err != nil {
 		return err
 	}
+	// The server dials a connection with resolve_at server itself: its
+	// address must pass the egress policy (SEC-08, AK3 of WP-896); without
+	// a resolver the strict policy applies.
+	if c.ResolveAt == ResolveAtServer {
+		var policy egress.Options
+		if v.creds.vault != nil {
+			policy = v.creds.vault.egress
+		}
+		if err := policy.ValidateURL(c.Address); err != nil {
+			return vaultFieldError("address", "address is not an allowed destination of the server (egress policy)")
+		}
+	}
 	if c.CAPEM != "" {
 		if err := checkCAPEM(c.CAPEM); err != nil {
 			return err
@@ -315,6 +332,9 @@ func (v *VaultService) Update(ctx context.Context, orgID, id string, change func
 	if updateErr := v.vaults.UpdateVaultConnection(ctx, &next); updateErr != nil {
 		return nil, updateErr
 	}
+	// Values read and the client logged in with the old address, mount or
+	// login are not used again (WP-896).
+	v.creds.forgetVault(orgID, id)
 	return &next, nil
 }
 
@@ -328,7 +348,11 @@ func (v *VaultService) Delete(ctx context.Context, orgID, id string) error {
 	if referenced {
 		return ErrVaultConnectionInUse
 	}
-	return v.vaults.DeleteVaultConnection(ctx, orgID, id)
+	if derr := v.vaults.DeleteVaultConnection(ctx, orgID, id); derr != nil {
+		return derr
+	}
+	v.creds.forgetVault(orgID, id)
+	return nil
 }
 
 // --- PostgreSQL -----------------------------------------------------------
@@ -642,7 +666,116 @@ func (h *Handler) registerVaultRoutes(r chi.Router) {
 		r.Get("/{id}", h.getVaultConnection)
 		r.Patch("/{id}", h.updateVaultConnection)
 		r.Delete("/{id}", h.deleteVaultConnection)
+		r.Post("/{id}/test", h.testVaultConnection)
 	})
+}
+
+// VaultTestJobs runs a connection test as a job in this process;
+// jobs.Service implements it.
+type VaultTestJobs interface {
+	RunDetached(ctx context.Context, orgID, kind string, params any, createdBy string,
+		run func(ctx context.Context) (any, error)) (*jobs.Job, error)
+}
+
+// VaultTestQueue submits a connection test to the job queue on NATS,
+// whose workers run it with RunVaultTestJob; jobs.Queue implements it.
+type VaultTestQueue interface {
+	Submit(ctx context.Context, orgID, kind string, params any, opts jobs.EnqueueOptions) (*jobs.Job, bool, error)
+}
+
+// WithJobs runs the connection tests as jobs of svc in this process.
+func (h *Handler) WithJobs(svc VaultTestJobs) *Handler {
+	h.vaultJobs = svc
+	return h
+}
+
+// WithQueue runs the connection tests on the job queue.
+func (h *Handler) WithQueue(q VaultTestQueue) *Handler {
+	h.vaultQueue = q
+	return h
+}
+
+// errVaultTestFailed is the error of a test that could not run; the cause
+// goes to the log (API-03).
+var errVaultTestFailed = errors.New("the vault connection test could not run")
+
+// runVaultTest runs a test for a job; the result carries ok or the error
+// class only.
+func (h *Handler) runVaultTest(ctx context.Context, orgID string, p VaultTestParams) (any, error) {
+	res, err := h.svc.TestVaultConnection(ctx, orgID, p)
+	if err != nil {
+		slog.ErrorContext(ctx, "vault connection test", "connection_id", p.ConnectionID, "error", err)
+		return nil, errVaultTestFailed
+	}
+	return res, nil
+}
+
+// RunVaultTestJob runs a job vault.test of the job queue in the tenant and
+// scope of its creator.
+func (h *Handler) RunVaultTestJob(ctx context.Context, job *jobs.Job) (any, error) {
+	var p VaultTestParams
+	if err := json.Unmarshal(job.Params, &p); err != nil {
+		return nil, errVaultTestFailed
+	}
+	return h.runVaultTest(jobs.CreatorContext(ctx, job), job.OrganizationID, p)
+}
+
+// vaultTestResponse is the answer of POST /vault-connections/{id}/test.
+type vaultTestResponse struct {
+	JobID  string      `json:"job_id"`
+	Status jobs.Status `json:"status"`
+	Kind   string      `json:"kind"`
+}
+
+// testVaultConnection handles POST /vault-connections/{id}/test (AK4 of
+// WP-896): the job vault.test, answered with 202 and the job.
+func (h *Handler) testVaultConnection(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := organizationID(w, r)
+	if !ok {
+		return
+	}
+	var body struct {
+		Path string `json:"path"`
+	}
+	// The body is optional: an empty one (also chunked, without
+	// Content-Length) tests the default path.
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if body.Path != "" {
+		path, err := normalizeVaultPath(body.Path)
+		if err != nil {
+			api.WriteFieldError(w, vaultFieldError("path", "path must name an entry below the mount of the connection"))
+			return
+		}
+		body.Path = path
+	}
+	conn, err := h.svc.Vaults().Get(r.Context(), orgID, chi.URLParam(r, "id"))
+	if err != nil {
+		writeVaultError(w, err)
+		return
+	}
+	if h.svc.vault == nil || (h.vaultJobs == nil && h.vaultQueue == nil) {
+		writeError(w, http.StatusServiceUnavailable, "vault connection tests are not available")
+		return
+	}
+	params := VaultTestParams{ConnectionID: conn.ID, Path: body.Path}
+	userID := tenant.FromContext(r.Context()).UserID
+	var job *jobs.Job
+	if h.vaultQueue != nil {
+		job, _, err = h.vaultQueue.Submit(r.Context(), orgID, VaultTestJobKind, params, jobs.EnqueueOptions{CreatedBy: userID})
+	} else {
+		job, err = h.vaultJobs.RunDetached(r.Context(), orgID, VaultTestJobKind, params, userID,
+			func(ctx context.Context) (any, error) { return h.runVaultTest(ctx, orgID, params) })
+	}
+	if err != nil {
+		slog.ErrorContext(r.Context(), "vault connection test: submit the job", "error", err)
+		api.WriteRepoError(w, err)
+		return
+	}
+	w.Header().Set("Location", "/api/v1/jobs/"+job.ID)
+	api.WriteJSON(w, http.StatusAccepted, vaultTestResponse{JobID: job.ID, Status: job.Status, Kind: job.Kind})
 }
 
 // writeVaultError maps the errors of the vault connection service.

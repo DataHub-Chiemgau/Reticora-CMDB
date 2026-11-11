@@ -623,6 +623,7 @@ POST /api/v1/trainings/{id}/assignments training:write
 POST /api/v1/users user:manage
 POST /api/v1/users/{id}/anonymize user:manage
 POST /api/v1/vault-connections/ vault:manage
+POST /api/v1/vault-connections/{id}/test vault:manage
 POST /api/v1/vlans ipam:write
 POST /api/v1/vrfs vrf:manage
 POST /api/v1/webhooks webhook:manage

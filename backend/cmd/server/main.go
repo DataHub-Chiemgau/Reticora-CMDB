@@ -472,7 +472,12 @@ func main() {
 		}
 	}()
 
-	credentialService := credential.NewService(repos.Credential, encryptor)
+	// Vault references of connections with resolve_at server are read by
+	// the server over the egress policy; the tests of collector
+	// connections go over the core NATS connection (WP-896, E-220).
+	vaultResolver := credential.NewVaultResolver(egressPolicy, coreNATS)
+	defer vaultResolver.Close()
+	credentialService := credential.NewService(repos.Credential, encryptor).WithVault(vaultResolver)
 	// The internal CA of the collector certificates (COL-04) and the
 	// collector NATS endpoint (COL-08).
 	collectorPKI := collectorCA(auditPool, encryptor)

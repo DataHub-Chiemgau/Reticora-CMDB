@@ -23976,7 +23976,6 @@ paths:
   /api/v1/vault-connections/{id}/test:
     x-phase: P3
     x-feature: credential_vault
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -23984,11 +23983,34 @@ paths:
       tags: [Credentials]
       summary: Test a vault connection
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Starts the job `vault.test` (CRD-03, WP-896; vault:manage; one
+        attempt, at most 60 s, not cancellable). A connection with
+        resolve_at server is tested by the server: it logs in over its
+        egress policy (SEC-08) and reads the test entry
+        `<mount>/data/<path>`; one with resolve_at collector is tested by
+        the first of its collectors that answers on its NATS channel. The
+        job result (GET /api/v1/jobs/{id}, vault:manage) carries only
+        `result`: `ok` or the error class (`vault_unreachable`,
+        `vault_denied`, `vault_not_found`, `field_missing`,
+        `egress_blocked`), never a value or token; a collector that does not
+        answer within its share of the 60 s counts as `vault_unreachable`.
+        Without the job model or the vault resolver (profile
+        without a database) the answer is 503.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VaultConnectionTestRequest' }
       responses:
-        '200':
-          description: Test a vault connection. The schema comes with the implementing work package.
+        '202':
+          description: Test accepted; the job runs.
+          headers:
+            Location:
+              description: The job of the test (/api/v1/jobs/{id}).
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VaultConnectionTestResponse' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -23997,10 +24019,12 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/cis/{id}/credentials:
     x-phase: P3
@@ -39932,6 +39956,20 @@ components:
           type: array
           maxItems: 100
           items: { type: string, format: uuid }
+    VaultConnectionTestRequest:
+      type: object
+      description: The entry the test reads below the mount (WP-896).
+      properties:
+        path:
+          type: string
+          description: Path of the test entry below the mount; default reticora-test.
+    VaultConnectionTestResponse:
+      type: object
+      required: [job_id, status, kind]
+      properties:
+        job_id: { type: string, format: uuid }
+        status: { type: string }
+        kind: { type: string, description: vault.test }
     VaultConnectionListResponse:
       allOf:
         - $ref: '#/components/schemas/PaginationEnvelope'

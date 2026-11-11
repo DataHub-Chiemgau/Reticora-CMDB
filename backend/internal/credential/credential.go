@@ -211,6 +211,9 @@ type Service struct {
 	bindings *BindingService
 	// vaults is the vault connection service (WP-893), shared like bindings.
 	vaults *VaultService
+	// vault resolves references of connections with resolve_at server
+	// (WP-896); nil: Decrypt answers ErrVaultNotConfigured for them.
+	vault *VaultResolver
 }
 
 // NewService creates a new credential service.
@@ -331,8 +334,9 @@ func (s *Service) Decrypt(ctx context.Context, orgID, id string) (map[string]any
 		return nil, err
 	}
 	if stored.Source == SourceVaultRef {
-		// No plaintext of a reference exists on the server (AK4).
-		return nil, s.decryptVaultRef(ctx, orgID, stored)
+		// A reference is read from the vault in memory, only for a
+		// connection with resolve_at server (WP-894, WP-896).
+		return s.decryptVaultRef(ctx, orgID, stored)
 	}
 
 	dek, err := s.getDEK(ctx, orgID)

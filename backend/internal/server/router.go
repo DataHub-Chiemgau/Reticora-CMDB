@@ -494,6 +494,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	labelSource, _ := repos.Labels.(labels.BatchSource)
 	labelBatch := labels.NewBatchHandler(labelSource, opts.Blobs).WithFeatures(opts.Entitlements).
 		WithCreatorPolicy(labels.CreatorPolicy(SnapshotCreatorPolicy(&repos, fieldResolver)))
+	// credential.rotated goes to the outbox of the application pool
+	// (WP-889); the test of a vault connection is the job vault.test
+	// (WP-896, jobkinds.go).
+	credentialHandler := credential.NewHandler(opts.Credentials).WithEvents(opts.AuditPool)
 	// The draft handler (WP-260) runs the test run of a draft as a job
 	// (WP-721, metamodel.test) with the job service, like historyHandler.
 	draftHandler := metamodel.NewHandler(repos.MetamodelDraft)
@@ -612,6 +616,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			// The rebuild of the search index is read with search:write
 			// like its start (WP-786).
 			WithKind(search.ReindexJobKind, identity.PermSearchWrite, nil).
+			// The test of a vault connection is read with vault:manage like
+			// its start (WP-896); it has no revert.
+			WithKind(credential.VaultTestJobKind, identity.PermVaultManage, nil).
 			// The merge is reverted by its unmerge within 30 days (CI-12, E-25).
 			// It answers 200 (no revert job).
 			WithKind(ci.MergeJobKind, identity.PermCIDelete, func(ctx context.Context, job *jobs.Job) (*jobs.Job, error) {
@@ -657,7 +664,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			assetHandler.WithCreatorPolicy(ci.CreatorPolicyOf(fieldResolver, users))
 		}
 		registerJobKinds(jobService, opts.JobQueue, opts.CIService, bulkRevert, historyHandler, templateJobs, draftHandler,
-			importHandler, documentScanner, searchHandler, labelBatch, assetHandler, assetRevert)
+			importHandler, documentScanner, searchHandler, labelBatch, assetHandler, assetRevert, credentialHandler)
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -927,8 +934,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		// inventory and assets_basic (WP-309); the route stays ungated.
 		savedview.NewHandler(repos.SavedView).WithQueryEngine(repos.FilterQuery).WithPermissions(repos.Permission).
 			WithEntitlements(aiEntitlements).WithInventory(opts.Modules.Enabled(ModuleInventory)),
-		// credential.rotated goes to the outbox of the application pool (WP-889).
-		credential.NewHandler(opts.Credentials).WithEvents(opts.AuditPool),
+		credentialHandler,
 		ai.NewHandler(repos.AI, opts.AIProvider,
 			ai.NewRetriever(repos.AI, repos.Search, repos.Permission, opts.AIProvider).WithConsent(aiConsent)).
 			WithConsent(aiConsent),
@@ -1226,6 +1232,7 @@ func metricsHandler(version string, includeTenantLabel bool) (handler http.Handl
 	rack.RegisterMetrics(registry)
 	iga.RegisterMetrics(registry)
 	ipam.RegisterMetrics(registry)
+	credential.RegisterMetrics(registry)
 
 	httpMetrics := middleware.RegisterHTTPMetrics(registry, includeTenantLabel)
 

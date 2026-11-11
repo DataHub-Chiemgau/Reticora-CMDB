@@ -176,7 +176,9 @@ func TestRouteSnapshotRegisterIsValid(t *testing.T) {
 			tables++
 		}
 	}
-	if tables < len(routes)-12 {
+	// 13 routes write no row of their own (noValues); the last one is the
+	// test of a vault connection (WP-896), which only reads.
+	if tables < len(routes)-13 {
 		t.Errorf("only %d of %d entries name a table", tables, len(routes))
 	}
 	for _, bad := range []audit.RouteSnapshot{

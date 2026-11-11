@@ -6,9 +6,12 @@ toolchain go1.26.10
 
 replace github.com/DataHub-Chiemgau/Reticora-CMDB/collector => ../collector
 
+replace github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore => ../edgecore
+
 require (
 	github.com/99designs/gqlgen v0.17.93
 	github.com/DataHub-Chiemgau/Reticora-CMDB/collector v0.0.0-00010101000000-000000000000
+	github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore v0.0.0-00010101000000-000000000000
 	github.com/boombuler/barcode v1.1.0
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/go-pdf/fpdf v0.9.0

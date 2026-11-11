@@ -6,6 +6,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/importer"
@@ -77,6 +78,10 @@ var (
 	// stores its PDF under the key of the job; it is not repeated. A
 	// running batch can be cancelled; its result is dropped.
 	labelBatchJobKind = jobs.Kind{Name: labels.BatchJobKind, MaxAttempts: 1, Timeout: 10 * time.Minute, Cancellable: true}
+	// vaultTestJobKind (WP-896, CRD-03): the test of a vault connection
+	// only logs in and reads the test entry; it is not repeated and not
+	// cancellable while running. Its result is ok or the error class.
+	vaultTestJobKind = jobs.Kind{Name: credential.VaultTestJobKind, MaxAttempts: 1, Timeout: 60 * time.Second}
 )
 
 // jobKind is a submitted kind and the handler that runs its jobs.
@@ -97,17 +102,19 @@ type jobKind struct {
 // blob storage or a database its handler fails, the route answers 503
 // before), a bulk on assets on the asset handler (WP-781). The revert jobs
 // of asset bulks run on the asset revert (nil while the module inventory
-// is off or without the change set store, WP-784).
+// is off or without the change set store, WP-784). The test of a vault
+// connection runs on the credential handler (WP-896).
 func applicationJobKinds(ciService *ci.Service, bulkRevert *ci.BulkRevert, historyHandler *history.Handler,
 	templateJobs *ci.TemplateMigrationJobs, draftHandler *metamodel.Handler, importHandler *importer.ImportHandler,
 	scanner *document.Scanner, searchHandler *search.Handler, labelBatch *labels.BatchHandler, assets *asset.Handler,
-	assetRevert *asset.BulkRevert) []jobKind {
+	assetRevert *asset.BulkRevert, credentials *credential.Handler) []jobKind {
 	kinds := []jobKind{{kind: snapshotJobKind, handler: historyHandler.RunSnapshotJob},
 		{kind: metamodelTestJobKind, handler: draftHandler.RunTestJob},
 		{kind: importJobKind, handler: importHandler.RunJob},
 		{kind: searchReindexJobKind, handler: searchHandler.RunReindexJob},
 		{kind: labelBatchJobKind, handler: labelBatch.RunJob},
-		{kind: assetBulkJobKind, handler: assets.RunBulkJob}}
+		{kind: assetBulkJobKind, handler: assets.RunBulkJob},
+		{kind: vaultTestJobKind, handler: credentials.RunVaultTestJob}}
 	if ciService != nil {
 		kinds = append(kinds, jobKind{kind: bulkJobKind, handler: ciService.RunBulkJob})
 	}
@@ -153,7 +160,7 @@ func applicationJobKinds(ciService *ci.Service, bulkRevert *ci.BulkRevert, histo
 func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Service, bulkRevert *ci.BulkRevert,
 	historyHandler *history.Handler, templateJobs *ci.TemplateMigrationJobs, draftHandler *metamodel.Handler,
 	importHandler *importer.ImportHandler, scanner *document.Scanner, searchHandler *search.Handler,
-	labelBatch *labels.BatchHandler, assets *asset.Handler, assetRevert *asset.BulkRevert) {
+	labelBatch *labels.BatchHandler, assets *asset.Handler, assetRevert *asset.BulkRevert, credentials *credential.Handler) {
 	svc.Register(exportJobKind)
 	importHandler.WithJobs(svc)
 	labelBatch.WithJobs(svc)
@@ -166,7 +173,7 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 		ciService.WithBulkJobs(svc)
 	}
 	for _, k := range applicationJobKinds(ciService, bulkRevert, historyHandler, templateJobs, draftHandler, importHandler,
-		scanner, searchHandler, labelBatch, assets, assetRevert) {
+		scanner, searchHandler, labelBatch, assets, assetRevert, credentials) {
 		svc.Register(k.kind)
 		if queue != nil {
 			queue.Handle(k.kind, k.handler)
@@ -179,6 +186,7 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 		importHandler.WithQueue(queue)
 		labelBatch.WithQueue(queue)
 		assets.WithBulkQueue(queue)
+		credentials.WithQueue(queue)
 		if templateJobs != nil {
 			templateJobs.WithQueue(queue)
 		}
@@ -195,4 +203,5 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 	}
 	historyHandler.WithJobs(svc)
 	searchHandler.WithJobs(svc)
+	credentials.WithJobs(svc)
 }

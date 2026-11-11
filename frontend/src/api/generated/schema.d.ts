@@ -10350,7 +10350,7 @@ export interface paths {
     put?: never;
     /**
      * Test a vault connection
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Starts the job `vault.test` (CRD-03, WP-896; vault:manage; one attempt, at most 60 s, not cancellable). A connection with resolve_at server is tested by the server: it logs in over its egress policy (SEC-08) and reads the test entry `<mount>/data/<path>`; one with resolve_at collector is tested by the first of its collectors that answers on its NATS channel. The job result (GET /api/v1/jobs/{id}, vault:manage) carries only `result`: `ok` or the error class (`vault_unreachable`, `vault_denied`, `vault_not_found`, `field_missing`, `egress_blocked`), never a value or token; a collector that does not answer within its share of the 60 s counts as `vault_unreachable`. Without the job model or the vault resolver (profile without a database) the answer is 503.
      */
     post: operations['testVaultConnection'];
     delete?: never;
@@ -19898,6 +19898,18 @@ export interface components {
       resolve_at?: 'collector' | 'server';
       enabled?: boolean;
       collector_ids?: string[];
+    };
+    /** @description The entry the test reads below the mount (WP-896). */
+    VaultConnectionTestRequest: {
+      /** @description Path of the test entry below the mount; default reticora-test. */
+      path?: string;
+    };
+    VaultConnectionTestResponse: {
+      /** Format: uuid */
+      job_id: string;
+      status: string;
+      /** @description vault.test */
+      kind: string;
     };
     VaultConnectionListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['VaultConnection'][];
@@ -46666,21 +46678,30 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        'application/json': components['schemas']['VaultConnectionTestRequest'];
+      };
+    };
     responses: {
-      /** @description Test a vault connection. The schema comes with the implementing work package. */
-      200: {
+      /** @description Test accepted; the job runs. */
+      202: {
         headers: {
+          /** @description The job of the test (/api/v1/jobs/{id}). */
+          Location?: string;
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['VaultConnectionTestResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   listCICredentials: {

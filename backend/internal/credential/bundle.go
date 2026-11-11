@@ -67,6 +67,11 @@ type BundleContent struct {
 	// Targets are the per-device credentials (format 2, WP-891); each names
 	// a credential of Credentials.
 	Targets []BundleTargetCredential `json:"targets"`
+	// VaultConnections are the enabled connections with resolve_at
+	// collector the collector is assigned to (WP-896), for their test;
+	// their logins are entries of Credentials. A connection with
+	// resolve_at server never appears.
+	VaultConnections []BundleVaultConnection `json:"vault_connections,omitempty"`
 }
 
 func bundleKey(shared, ephemeral []byte, collectorID string) ([]byte, error) {
@@ -222,6 +227,19 @@ func (s *Service) Bundle(ctx context.Context, t *BundleTarget) (*SealedBundle, [
 				content.Credentials = append(content.Credentials, entry)
 				ids = append(ids, entry.ID)
 			}
+		}
+	}
+	// The connections the collector resolves, for their test (WP-896);
+	// the resolver of the server is never asked here (AK6).
+	conns, logins, err := s.bundleVaultConnections(ctx, t)
+	if err != nil {
+		return nil, nil, err
+	}
+	content.VaultConnections = conns
+	for _, login := range logins {
+		if !slices.Contains(ids, login.ID) {
+			content.Credentials = append(content.Credentials, login)
+			ids = append(ids, login.ID)
 		}
 	}
 	// A target whose credential is not in the bundle is dropped.

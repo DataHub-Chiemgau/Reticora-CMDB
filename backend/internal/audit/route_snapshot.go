@@ -390,6 +390,9 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	// credential named by auth_credential_id.
 	crud(m, v1+"vault-connections", "vault_connection", "PATCH", "DELETE")
 	m["POST "+v1+"vault-connections/"] = created("vault_connection")
+	// The test of a connection (WP-896) starts a job that liest nur: it
+	// logs in and reads the test entry, nothing is written.
+	m["POST "+v1+"vault-connections/{id}/test"] = noValues("liest nur: the job vault.test logs in and reads the test entry; it changes no row")
 	crud(m, v1+"webhooks", "webhook_subscription", "POST", "DELETE")
 	crud(m, v1+"lifecycle-definitions", "lifecycle_definition", "POST", "DELETE")
 	crud(m, v1+"lifecycle-models", "lifecycle_definition", all...)
