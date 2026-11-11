@@ -1655,3 +1655,4 @@ CRD-04;[P3];G3;collector/collectorcmd/discovery_credentials_test.go;WP-892
 CRD-03;[P3];G3;backend/internal/credential/vault_connection_integration_test.go;WP-893
 COL-03;[P4];G3;backend/internal/credential/vault_connection_integration_test.go;WP-893
 CRD-02;[P3];G3;backend/internal/credential/vault_ref_integration_test.go;WP-894
+CRD-04;[P3];G3;collector/collectorcmd/vault_test.go;WP-895

@@ -269,6 +269,9 @@ func Main() {
 		slog.Info("collector restarting into the update", "version", version)
 	}
 	cancel()
+	// The values read from vaults are overwritten before the process ends
+	// (WP-895).
+	collectorVault.close()
 }
 
 // spoolTopic is the buffer topic under which discovery result batches are

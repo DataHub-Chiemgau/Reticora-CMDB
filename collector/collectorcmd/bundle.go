@@ -51,18 +51,44 @@ type sealedBundle struct {
 
 // bundleCredential is one credential of the bundle. Source is "stored"
 // (or empty, before WP-894) for a secret, "vault_ref" for a reference into
-// a vault connection without secret, which this collector does not read yet
-// (WP-895).
+// a vault connection without secret (VaultRef). The collector resolves a
+// reference in memory (vault.go, WP-895) and keeps the values in Secret;
+// until then, and after a failure, Secret is empty.
 type bundleCredential struct {
-	ID     string         `json:"id"`
-	Name   string         `json:"name"`
-	Kind   string         `json:"kind"`
-	Source string         `json:"source,omitempty"`
-	Secret map[string]any `json:"secret"`
+	ID       string          `json:"id"`
+	Name     string          `json:"name"`
+	Kind     string          `json:"kind"`
+	Source   string          `json:"source,omitempty"`
+	Secret   map[string]any  `json:"secret"`
+	VaultRef *bundleVaultRef `json:"vault_ref,omitempty"`
 }
 
 // sourceVaultRef is the source of a vault reference in the bundle.
 const sourceVaultRef = "vault_ref"
+
+// bundleVaultConnection is what the collector needs to log in to a vault
+// connection: the connection and the id of its stored login in the bundle
+// (vault_approle or vault_token).
+type bundleVaultConnection struct {
+	ConnectionID string `json:"connection_id"`
+	Kind         string `json:"kind"`
+	Address      string `json:"address"`
+	Namespace    string `json:"namespace,omitempty"`
+	Mount        string `json:"mount"`
+	CAPEM        string `json:"ca_pem,omitempty"`
+	AuthMethod   string `json:"auth_method"`
+	LoginID      string `json:"login_id"`
+}
+
+// bundleVaultRef is the reference of a vault_ref credential (WP-894): the
+// connection, the entry (path, optional version) and the map of the kind's
+// fields to fields of the entry.
+type bundleVaultRef struct {
+	bundleVaultConnection
+	Path     string            `json:"path"`
+	Version  *int              `json:"version,omitempty"`
+	FieldMap map[string]string `json:"field_map"`
+}
 
 // bundleTarget is an entry of the targets of a bundle (format 2): the
 // credential of a CI in a namespace and its origin (probe, ci,
@@ -80,10 +106,13 @@ type bundleTarget struct {
 }
 
 // bundleContent is the plaintext of a bundle; a format 1 bundle has no
-// targets.
+// targets. VaultConnections are the connections with resolve_at collector
+// this collector is assigned to (WP-896), for the connection test; their
+// logins are entries of Credentials.
 type bundleContent struct {
-	Credentials []bundleCredential `json:"credentials"`
-	Targets     []bundleTarget     `json:"targets"`
+	Credentials      []bundleCredential      `json:"credentials"`
+	Targets          []bundleTarget          `json:"targets"`
+	VaultConnections []bundleVaultConnection `json:"vault_connections,omitempty"`
 }
 
 // openBundle decrypts a bundle with the collector's private key.
@@ -153,6 +182,7 @@ type bundleCache struct {
 	mu     sync.RWMutex
 	creds  map[string]bundleCredential
 	scopes map[string]*scopeBundleTargets
+	vaults map[string]bundleVaultConnection
 }
 
 // scopeBundleTargets are the targets of one scope by management address and by
@@ -166,15 +196,21 @@ var collectorBundle = &bundleCache{}
 
 // set replaces the cached credentials and the target indexes by those of
 // content in one step (nil clears them; format 1 leaves the indexes empty).
-// A target without a scope applies nowhere. An address the targets of a
+// A vault reference that is unchanged, with an unchanged login, keeps the
+// values resolved for it (WP-895) until the resolver reads it again. A
+// target without a scope applies nowhere. An address the targets of a
 // scope name for two CIs is ambiguous and left out of that scope's address
 // index; its devices resolve per scope (or by CI id).
 func (c *bundleCache) set(content *bundleContent) {
 	byID := map[string]bundleCredential{}
 	scopes := map[string]*scopeBundleTargets{}
+	vaults := map[string]bundleVaultConnection{}
 	if content != nil {
 		for _, cred := range content.Credentials {
 			byID[cred.ID] = cred
+		}
+		for _, conn := range content.VaultConnections {
+			vaults[conn.ConnectionID] = conn
 		}
 		type scopeIP struct{ scope, ip string }
 		ipOwner := map[scopeIP]string{}
@@ -208,7 +244,18 @@ func (c *bundleCache) set(content *bundleContent) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.creds, c.scopes = byID, scopes
+	for id, cred := range byID {
+		old, ok := c.creds[id]
+		if !ok || cred.VaultRef == nil || len(cred.Secret) > 0 || len(old.Secret) == 0 || old.VaultRef == nil {
+			continue
+		}
+		if sameVaultRef(old.VaultRef, cred.VaultRef) && maps.Equal(stringValues(c.creds[old.VaultRef.LoginID].Secret),
+			stringValues(byID[cred.VaultRef.LoginID].Secret)) {
+			cred.Secret = old.Secret
+			byID[id] = cred
+		}
+	}
+	c.creds, c.scopes, c.vaults = byID, scopes, vaults
 }
 
 // canonicalIP returns the canonical form of an address ("" for none or a
@@ -261,7 +308,9 @@ func (c *bundleCache) usableTargets(scope *collectorScope, ip, ciID string) map[
 	out := map[string]bundleTarget{}
 	for _, tgt := range c.targetEntries(scope, ip, ciID) {
 		cred, ok := c.creds[tgt.CredentialID]
-		if !ok || credentialNamespace[cred.Kind] != tgt.Namespace {
+		// An unresolved vault reference has no values: the scope's
+		// credential of the namespace stays (WP-895).
+		if !ok || credentialNamespace[cred.Kind] != tgt.Namespace || len(cred.Secret) == 0 {
 			continue
 		}
 		if _, taken := out[tgt.Namespace]; !taken {
@@ -321,8 +370,9 @@ func (c *bundleCache) overrideTarget(creds map[string]string, scope *collectorSc
 // protocol-namespaced entries: each credential under the namespace of its
 // kind, the first of a namespace in ids wins. IDs missing from the bundle,
 // kinds without a namespace and entries without secret values (a vault
-// reference, WP-894) are skipped without taking their namespace, so a
-// stored credential later in ids still applies.
+// reference not resolved, WP-894, WP-895) are skipped without taking their
+// namespace, so a stored credential later in ids still applies. A resolved
+// reference applies like a stored credential.
 func (c *bundleCache) resolve(ids []string) map[string]string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -334,7 +384,7 @@ func (c *bundleCache) resolve(ids []string) map[string]string {
 			continue
 		}
 		ns, known := credentialNamespace[cred.Kind]
-		if !known || taken[ns] || cred.Source == sourceVaultRef || len(cred.Secret) == 0 {
+		if !known || taken[ns] || len(cred.Secret) == 0 {
 			continue
 		}
 		taken[ns] = true
@@ -421,11 +471,29 @@ func syncBundle(ctx context.Context, nc *nats.Conn, creds *keystore.Credentials)
 		} else {
 			collectorBundle.set(fresh)
 			slog.Info("credential bundle updated", "credentials", len(fresh.Credentials), "targets", len(fresh.Targets))
+			// The vault references of the bundle, in memory (WP-895).
+			collectorVault.resolveBundle(ctx, collectorBundle)
 		}
+		if !waitBundleRefresh(ctx, ticker.C) {
+			return
+		}
+	}
+}
+
+// waitBundleRefresh waits for the next fetch of the bundle and meanwhile
+// resolves the vault references whose values expired (checked every
+// vaultRefreshCheck); it reports false when ctx ended.
+func waitBundleRefresh(ctx context.Context, refresh <-chan time.Time) bool {
+	check := time.NewTicker(vaultRefreshCheck)
+	defer check.Stop()
+	for {
 		select {
 		case <-ctx.Done():
-			return
-		case <-ticker.C:
+			return false
+		case <-refresh:
+			return true
+		case <-check.C:
+			collectorVault.resolveBundle(ctx, collectorBundle)
 		}
 	}
 }

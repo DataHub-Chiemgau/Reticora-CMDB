@@ -476,3 +476,37 @@ func TestHostScopeByNameUsesTargetCredential(t *testing.T) {
 		t.Errorf("ambiguous name: %v, want the scope's community", got)
 	}
 }
+
+// TestBundleCacheKeepsResolvedReferences covers WP-895 (AK3): a new
+// bundle with the same reference and the same login keeps the values
+// resolved in memory until the resolver reads it again; a changed
+// reference or a changed login drops them.
+func TestBundleCacheKeepsResolvedReferences(t *testing.T) {
+	useVaultResolver(t)
+	_, srv := newTestVault(t)
+	conn := vaultConn(srv)
+	content := func(path, secretID string) *bundleContent {
+		return &bundleContent{Credentials: []bundleCredential{
+			vaultLogin(secretID),
+			vaultRefCred("ref", "snmp_v2c", conn, path, map[string]string{"community": "snmp_ro"}),
+		}}
+	}
+	collectorBundle.set(content("network/sw1", testSecretID))
+	if out := collectorVault.resolveBundle(context.Background(), collectorBundle); out["ref"] != "ok" {
+		t.Fatalf("resolution = %v", out)
+	}
+	collectorBundle.set(content("network/sw1", testSecretID))
+	if got := collectorBundle.resolve([]string{"ref"}); got["snmp.community"] != testValue {
+		t.Fatalf("the same reference lost its values: %v", got)
+	}
+	collectorBundle.set(content("network/sw2", testSecretID))
+	if got := collectorBundle.resolve([]string{"ref"}); len(got) != 0 {
+		t.Fatalf("a changed path kept the values: %v", got)
+	}
+	collectorBundle.set(content("network/sw1", testSecretID))
+	collectorVault.resolveBundle(context.Background(), collectorBundle)
+	collectorBundle.set(content("network/sw1", "rotated-secret-id"))
+	if got := collectorBundle.resolve([]string{"ref"}); len(got) != 0 {
+		t.Fatalf("a changed login kept the values: %v", got)
+	}
+}

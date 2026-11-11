@@ -332,6 +332,13 @@ func runNATSSession(ctx context.Context, cfg collectorConfig) (renewed bool) {
 		wg.Add(2)
 		go func() { defer wg.Done(); syncScopes(sctx, nc, subject) }()
 		go func() { defer wg.Done(); reportSubnets(sctx, nc, subject, scopeSuggestions(&cfg, systemInterfaces)) }()
+		// The server's tests of the vault connections this collector
+		// resolves (WP-895, WP-896).
+		if vsub, verr := serveVaultTests(sctx, nc, subject); verr != nil {
+			slog.Warn("vault connection tests not served", "error", verr)
+		} else {
+			defer func() { _ = vsub.Unsubscribe() }()
+		}
 	}
 	wg.Add(1)
 	go func() {
