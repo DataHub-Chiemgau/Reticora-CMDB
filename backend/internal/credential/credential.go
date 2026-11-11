@@ -180,7 +180,7 @@ func NewService(repo Repository, encryptor *crypto.EnvelopeEncryptor) *Service {
 	if !ok {
 		bindingRepo = newMemoryBindings()
 	}
-	s.bindings = &BindingService{creds: s, bindings: bindingRepo}
+	s.bindings = &BindingService{creds: s, bindings: bindingRepo, groups: NoDeviceGroups{}}
 	return s
 }
 

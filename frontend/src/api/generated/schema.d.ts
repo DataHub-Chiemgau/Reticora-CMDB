@@ -10398,7 +10398,7 @@ export interface paths {
     };
     /**
      * Get the effective credentials of a CI (references only)
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Per namespace the effective credential of the CI (id, name, kind), its origin and the overridden candidates in resolution order (CRD-04, E-219): probe > ci > device_group > subnet (the narrowest subnet containing the management address in the VRF of the CI's scope) > scope > client > org; within a level the smallest priority, then the smallest id. The levels scope, client and org follow E-67: a covering scope with credential_ids offers exactly those, otherwise the client's and the organization-wide credentials. A credential of a client acts only on CIs of that client. Never a secret or ciphertext (credential:read); a CI outside the caller's scope is 404.
      */
     get: operations['getCIEffectiveCredentials'];
     put?: never;
@@ -19759,6 +19759,40 @@ export interface components {
     };
     CredentialBindingSet: {
       data: components['schemas']['CredentialBinding'][];
+    };
+    /**
+     * @description The level of a credential candidate (CRD-04).
+     * @enum {string}
+     */
+    CredentialOrigin: 'probe' | 'ci' | 'device_group' | 'subnet' | 'scope' | 'client' | 'org';
+    CredentialReference: {
+      /** Format: uuid */
+      id: string;
+      name: string;
+      kind: string;
+    };
+    ResolvedCredential: {
+      credential: components['schemas']['CredentialReference'];
+      origin: components['schemas']['CredentialOrigin'];
+      /**
+       * Format: uuid
+       * @description The binding (probe, ci, device_group, subnet), the scope (scope) or the client (client) the candidate comes from; absent for org.
+       */
+      source_id?: string;
+      /** @description The priority of the binding; absent for scope, client and org. */
+      priority?: number;
+    };
+    EffectiveCredential: components['schemas']['ResolvedCredential'] & {
+      /** @enum {string} */
+      namespace: 'snmp' | 'ssh' | 'redfish' | 'ipmi' | 'wmi' | 'api' | 'nut' | 'nas';
+      /** @description The other candidates of the namespace in resolution order. */
+      overridden: components['schemas']['ResolvedCredential'][];
+    };
+    EffectiveCredentialSet: {
+      /** Format: uuid */
+      ci_id: string;
+      /** @description One entry per namespace, in alphabetical order. */
+      data: components['schemas']['EffectiveCredential'][];
     };
     CICredentialBindingsReplace: {
       bindings: {
@@ -46566,12 +46600,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get the effective credentials of a CI (references only). The schema comes with the implementing work package. */
+      /** @description The effective credentials of the CI */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['EffectiveCredentialSet'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];

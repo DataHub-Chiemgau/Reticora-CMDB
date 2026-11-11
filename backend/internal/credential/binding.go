@@ -115,6 +115,9 @@ type BindingRepository interface {
 type BindingService struct {
 	creds    *Service
 	bindings BindingRepository
+	// groups is the membership source of the device-group level of the
+	// resolution (WP-891; empty until WP-935).
+	groups DeviceGroupSource
 }
 
 // Bindings returns the binding service (WP-890).
@@ -582,6 +585,7 @@ func (h *Handler) registerBindingRoutes(r chi.Router) {
 	})
 	r.Get("/api/v1/cis/{id}/credentials", h.listCIBindings)
 	r.Put("/api/v1/cis/{id}/credentials", h.replaceCIBindings)
+	r.Get("/api/v1/cis/{id}/credentials/effective", h.effectiveCredentials)
 }
 
 // writeBindingError maps the errors of the binding service.
@@ -756,6 +760,28 @@ func (h *Handler) replaceCIBindings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, map[string]any{"data": list})
+}
+
+// effectiveCredentials answers GET /cis/{id}/credentials/effective (CRD-04,
+// WP-891): per namespace the effective credential (id, name, kind), its
+// origin and the overridden candidates; never a secret. An invisible or
+// unknown CI is 404.
+func (h *Handler) effectiveCredentials(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := organizationID(w, r)
+	if !ok {
+		return
+	}
+	ciID := chi.URLParam(r, "id")
+	list, err := h.svc.Bindings().Effective(r.Context(), orgID, ciID)
+	if errors.Is(err, ErrBindingNotFound) {
+		writeError(w, http.StatusNotFound, "ci not found")
+		return
+	}
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, map[string]any{"ci_id": ciID, "data": list})
 }
 
 // bindingsProblem is the 409 of a credential deletion with bindings.

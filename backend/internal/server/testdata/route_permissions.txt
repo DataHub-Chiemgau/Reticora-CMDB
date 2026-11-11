@@ -133,6 +133,7 @@ GET /api/v1/cis/{id}/blast-radius topology:read
 GET /api/v1/cis/{id}/changes ci:read
 GET /api/v1/cis/{id}/contacts contact:read
 GET /api/v1/cis/{id}/credentials credential:read
+GET /api/v1/cis/{id}/credentials/effective credential:read
 GET /api/v1/cis/{id}/dependencies topology:read
 GET /api/v1/cis/{id}/field-definitions ci:read
 GET /api/v1/cis/{id}/fields ci:read

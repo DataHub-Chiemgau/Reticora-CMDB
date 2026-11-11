@@ -24008,7 +24008,6 @@ paths:
   /api/v1/cis/{id}/credentials/effective:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -24016,11 +24015,23 @@ paths:
       tags: [Credentials]
       summary: Get the effective credentials of a CI (references only)
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Per namespace the effective credential of the CI (id, name, kind),
+        its origin and the overridden candidates in resolution order
+        (CRD-04, E-219): probe > ci > device_group > subnet (the narrowest
+        subnet containing the management address in the VRF of the CI's
+        scope) > scope > client > org; within a level the smallest
+        priority, then the smallest id. The levels scope, client and org
+        follow E-67: a covering scope with credential_ids offers exactly
+        those, otherwise the client's and the organization-wide
+        credentials. A credential of a client acts only on CIs of that
+        client. Never a secret or ciphertext (credential:read); a CI
+        outside the caller's scope is 404.
       responses:
         '200':
-          description: Get the effective credentials of a CI (references only). The schema comes with the implementing work package.
+          description: The effective credentials of the CI
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EffectiveCredentialSet' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -39733,6 +39744,54 @@ components:
         data:
           type: array
           items: { $ref: '#/components/schemas/CredentialBinding' }
+    CredentialOrigin:
+      type: string
+      description: The level of a credential candidate (CRD-04).
+      enum: [probe, ci, device_group, subnet, scope, client, org]
+    CredentialReference:
+      type: object
+      required: [id, name, kind]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        kind: { type: string }
+    ResolvedCredential:
+      type: object
+      required: [credential, origin]
+      properties:
+        credential: { $ref: '#/components/schemas/CredentialReference' }
+        origin: { $ref: '#/components/schemas/CredentialOrigin' }
+        source_id:
+          type: string
+          format: uuid
+          description: >-
+            The binding (probe, ci, device_group, subnet), the scope (scope)
+            or the client (client) the candidate comes from; absent for org.
+        priority:
+          type: integer
+          description: The priority of the binding; absent for scope, client and org.
+    EffectiveCredential:
+      allOf:
+        - $ref: '#/components/schemas/ResolvedCredential'
+        - type: object
+          required: [namespace, overridden]
+          properties:
+            namespace:
+              type: string
+              enum: [snmp, ssh, redfish, ipmi, wmi, api, nut, nas]
+            overridden:
+              type: array
+              description: The other candidates of the namespace in resolution order.
+              items: { $ref: '#/components/schemas/ResolvedCredential' }
+    EffectiveCredentialSet:
+      type: object
+      required: [ci_id, data]
+      properties:
+        ci_id: { type: string, format: uuid }
+        data:
+          type: array
+          description: One entry per namespace, in alphabetical order.
+          items: { $ref: '#/components/schemas/EffectiveCredential' }
     CICredentialBindingsReplace:
       type: object
       additionalProperties: false

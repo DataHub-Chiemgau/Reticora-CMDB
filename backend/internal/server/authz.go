@@ -321,6 +321,8 @@ var routeRules = []routeRule{
 	// The credential bindings of a CI (CRD-01, WP-890).
 	{http.MethodGet, "cis/*/credentials", identity.PermCredentialRead},
 	{http.MethodPut, "cis/*/credentials", identity.PermCredentialBind},
+	// The effective credentials of a CI (CRD-04, WP-891): references only.
+	{http.MethodGet, "cis/*/credentials/effective", identity.PermCredentialRead},
 	{http.MethodGet, "cis/*/contacts", identity.PermContactRead},
 	{http.MethodPost, "cis/*/contacts", identity.PermContactWrite},
 	{http.MethodGet, "cis/*/interfaces", identity.PermIPAMRead},

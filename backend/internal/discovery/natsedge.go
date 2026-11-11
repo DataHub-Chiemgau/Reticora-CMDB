@@ -1357,11 +1357,21 @@ func sysRequestAll(nc *nats.Conn, subject string, data []byte) ([]edgeServerAnsw
 // records the delivery (COL-02).
 type BundleGate struct {
 	authorizer *EdgeAuthorizer
+	// groups is the device-group level of the resolution (empty until
+	// WP-935).
+	groups credential.DeviceGroupSource
 }
 
 // NewBundleGate creates the gate on the collector CA.
 func NewBundleGate(pool *pgxpool.Pool, ca *CA) *BundleGate {
-	return &BundleGate{authorizer: NewEdgeAuthorizer(pool, ca)}
+	return &BundleGate{authorizer: NewEdgeAuthorizer(pool, ca), groups: credential.NoDeviceGroups{}}
+}
+
+// WithDeviceGroups sets the membership source of the device-group level
+// (WP-935).
+func (g *BundleGate) WithDeviceGroups(groups credential.DeviceGroupSource) *BundleGate {
+	g.groups = groups
+	return g
 }
 
 // VerifyBundleTarget implements credential.CollectorVerifier: the
@@ -1399,6 +1409,14 @@ func (g *BundleGate) VerifyBundleTarget(ctx context.Context, orgID, collectorID,
 		}
 		slices.Sort(ids)
 		target.CredentialIDs = ids
+		// Format 2 (CRD-04, WP-891): the credentials of single CIs from a
+		// level above the scope, in the same transaction; a client
+		// credential only for CIs of its client.
+		targets, rerr := credential.ResolveCollector(ctx, tx, orgID, collectorID, id.ClientID, g.groups)
+		if rerr != nil {
+			return rerr
+		}
+		target.AddTargets(targets)
 		return nil
 	})
 	if err != nil {

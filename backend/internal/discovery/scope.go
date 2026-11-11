@@ -461,8 +461,13 @@ func checkCredentials(ctx context.Context, tx pgx.Tx, s *Scope) error {
 // credentials and those of its client; either way only credentials that are
 // organization-wide or of the scope's client, which also drops the foreign
 // ones of scopes bound before F-264. The credential bundle holds their union.
+// The collector takes the first credential of a namespace; the order is that
+// of the resolution (CRD-04, E-219, WP-891): an explicit list by id (scope
+// level), otherwise the client's credentials before the organization-wide
+// ones (client > org), each by id.
 func scopeCredentials(ctx context.Context, tx pgx.Tx, orgID, collectorID string) (map[string][]string, error) {
-	rows, err := tx.Query(ctx, `SELECT s.id::text, COALESCE(array_agg(c.id::text ORDER BY c.id) FILTER (WHERE c.id IS NOT NULL), '{}')
+	rows, err := tx.Query(ctx, `SELECT s.id::text, COALESCE(array_agg(c.id::text
+		ORDER BY (cardinality(s.credential_ids) > 0 OR c.client_id IS NULL), c.id) FILTER (WHERE c.id IS NOT NULL), '{}')
 		FROM discovery_scope s
 		LEFT JOIN credential c ON c.organization_id = s.organization_id
 			AND (c.client_id IS NULL OR c.client_id = s.client_id)

@@ -266,3 +266,122 @@ func askBundle(t *testing.T, nc *nats.Conn, subject, certPEM string, secrets []s
 		return resp
 	}
 }
+
+// TestBundleGateDeliversClientTargets covers CRD-04 AK2 and AK3 (WP-891)
+// over the real path: BundleGate.VerifyBundleTarget resolves the targets
+// with the collector's client (id.ClientID) in its transaction, the bundle
+// carries them, and the audit credential.bundle_delivered names their
+// credentials. The collector of client 2 receives the CI binding of its CI
+// (cred2) in its targets and credential ids and never the one of client 1
+// (cred1); an organization-wide collector receives both, each for the CI
+// and scope of its client.
+func TestBundleGateDeliversClientTargets(t *testing.T) {
+	e, enc := auditEdge(t, "0f")
+	f := e.f
+	bg := context.Background()
+	org := f.OrgCtx(f.OrgA)
+	gate := discovery.NewBundleGate(f.App, e.ca)
+	csvc := credential.NewService(credential.NewPGRepository(f.App), enc)
+	mk := func(name, clientID string) string {
+		t.Helper()
+		c, err := csvc.Create(org, credential.CreateRequest{OrganizationID: f.OrgA, ClientID: clientID, Name: name,
+			Kind: credential.KindSNMPv2c, Secret: map[string]any{"community": name + "-secret"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c.ID
+	}
+	cred1, cred2 := mk("wp891-gate-c1", f.Client1), mk("wp891-gate-c2", f.Client2)
+	ci1 := f.CI(t, f.OrgA, f.Client1, "wp891-gate-ci1")
+	ci2 := f.CI(t, f.OrgA, f.Client2, "wp891-gate-ci2")
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := f.Admin.Exec(bg, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	exec(`UPDATE ci SET management_ip = '10.94.1.10' WHERE id = $1`, ci1)
+	exec(`UPDATE ci SET management_ip = '10.94.2.10' WHERE id = $1`, ci2)
+	for ci, cred := range map[string]string{ci1: cred1, ci2: cred2} {
+		exec(`INSERT INTO credential_binding (organization_id, credential_id, target_kind, ci_id, namespace, priority)
+			VALUES ($1, $2, 'ci', $3, 'snmp', 100)`, f.OrgA, cred, ci)
+	}
+	scope := func(colID, clientID, cidr string) string {
+		t.Helper()
+		var client any
+		if clientID != "" {
+			client = clientID
+		}
+		var id string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO discovery_scope (organization_id, client_id, collector_id, name, kind, target, credential_ids)
+			VALUES ($1, $2, $3, $4, 'cidr', $4, '{}') RETURNING id::text`, f.OrgA, client, colID, cidr).Scan(&id); err != nil {
+			t.Fatalf("insert scope: %v", err)
+		}
+		return id
+	}
+
+	c2Col, _, c2Cert := auditEnroll(t, e, "wp891-gate-c2")
+	exec(`UPDATE collector SET client_id = $2 WHERE id = $1`, c2Col, f.Client2)
+	c2Scope := scope(c2Col, f.Client2, "10.94.0.0/16")
+	orgCol, _, orgCert := auditEnroll(t, e, "wp891-gate-org")
+	org1Scope := scope(orgCol, f.Client1, "10.94.1.0/24")
+	org2Scope := scope(orgCol, f.Client2, "10.94.2.0/24")
+
+	deliver := func(colID, certPEM string) (*credential.BundleTarget, []string) {
+		t.Helper()
+		tctx, target, err := gate.VerifyBundleTarget(bg, f.OrgA, colID, certPEM)
+		if err != nil {
+			t.Fatalf("bundle target: %v", err)
+		}
+		_, ids, err := csvc.Bundle(tctx, target)
+		if err != nil {
+			t.Fatalf("bundle: %v", err)
+		}
+		if err = gate.BundleDelivered(bg, target, ids); err != nil {
+			t.Fatalf("bundle delivered: %v", err)
+		}
+		var raw []byte
+		if err = f.Admin.QueryRow(bg, `SELECT changes->'credential_ids' FROM audit_log WHERE organization_id = $1
+			AND action = 'credential.bundle_delivered' AND resource_id = $2 ORDER BY created_at DESC LIMIT 1`, f.OrgA, colID).Scan(&raw); err != nil {
+			t.Fatalf("audit credential.bundle_delivered: %v", err)
+		}
+		var audited []string
+		if err = json.Unmarshal(raw, &audited); err != nil {
+			t.Fatal(err)
+		}
+		return target, audited
+	}
+
+	target, audited := deliver(c2Col, c2Cert.CertificatePEM)
+	if target.ClientID != f.Client2 {
+		t.Fatalf("bundle target of the client 2 collector has client %q, want %s", target.ClientID, f.Client2)
+	}
+	if !slices.Contains(target.CredentialIDs, cred2) || slices.Contains(target.CredentialIDs, cred1) {
+		t.Errorf("credential ids of the client 2 collector %v: want cred2, never cred1", target.CredentialIDs)
+	}
+	if len(target.Targets) != 1 || target.Targets[0].CIID != ci2 || target.Targets[0].CredentialID != cred2 || target.Targets[0].ScopeID != c2Scope {
+		t.Errorf("targets of the client 2 collector %+v, want only ci2 with cred2 in scope %s", target.Targets, c2Scope)
+	}
+	for _, x := range target.Targets {
+		if x.CredentialID == cred1 || x.CIID == ci1 {
+			t.Fatalf("the collector of client 2 receives %+v of client 1", x)
+		}
+	}
+	if !slices.Contains(audited, cred2) || slices.Contains(audited, cred1) {
+		t.Errorf("audit credential.bundle_delivered of the client 2 collector names %v, want cred2 (target), never cred1", audited)
+	}
+
+	target, audited = deliver(orgCol, orgCert.CertificatePEM)
+	want := map[string]credential.BundleTargetCredential{
+		ci1: {CIID: ci1, ScopeID: org1Scope, ManagementIP: "10.94.1.10", Namespace: "snmp", CredentialID: cred1, Origin: credential.OriginCI},
+		ci2: {CIID: ci2, ScopeID: org2Scope, ManagementIP: "10.94.2.10", Namespace: "snmp", CredentialID: cred2, Origin: credential.OriginCI},
+	}
+	if len(target.Targets) != 2 || want[target.Targets[0].CIID] != target.Targets[0] || want[target.Targets[1].CIID] != target.Targets[1] {
+		t.Errorf("targets of the org-wide collector %+v, want %+v", target.Targets, want)
+	}
+	for _, id := range []string{cred1, cred2} {
+		if !slices.Contains(audited, id) || !slices.Contains(target.CredentialIDs, id) {
+			t.Errorf("org-wide collector: credential ids %v, audited %v; want both target credentials", target.CredentialIDs, audited)
+		}
+	}
+}

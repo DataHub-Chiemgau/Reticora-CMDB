@@ -29,8 +29,11 @@ import (
 // plaintext exists only in the server's memory while sealing and in the
 // collector's memory; it is never stored, logged or returned by the API.
 
-// BundleVersion is the format of SealedBundle.
-const BundleVersion = 1
+// BundleVersion is the format of SealedBundle. Format 2 (WP-891) adds the
+// targets: the credential of a CI and namespace from a level above the
+// scope (CRD-04); a collector that does not know them ignores the field and
+// resolves per scope as in format 1.
+const BundleVersion = 2
 
 // BundleRequestSuffix is appended to the collector's subject tree
 // (collector.<org>.<id>) for bundle requests.
@@ -58,6 +61,9 @@ type BundleCredential struct {
 // BundleContent is the plaintext of a bundle.
 type BundleContent struct {
 	Credentials []BundleCredential `json:"credentials"`
+	// Targets are the per-device credentials (format 2, WP-891); each names
+	// a credential of Credentials.
+	Targets []BundleTargetCredential `json:"targets"`
 }
 
 func bundleKey(shared, ephemeral []byte, collectorID string) ([]byte, error) {
@@ -154,8 +160,29 @@ type BundleTarget struct {
 	PublicKey      *ecdsa.PublicKey
 	// CredentialIDs are the credentials of the bundle: the effective
 	// credentials of the collector's enabled discovery scopes (E-67). An
-	// empty list, like nil, selects none.
+	// empty list, like nil, selects none. It includes the credentials of
+	// Targets (AddTargets).
 	CredentialIDs []string
+	// Targets are the credentials of single CIs from a level above the scope
+	// (ResolveCollector, CRD-04).
+	Targets []BundleTargetCredential
+}
+
+// AddTargets sets the targets of the bundle and adds their credentials to
+// CredentialIDs (sorted, without duplicates).
+func (t *BundleTarget) AddTargets(targets []BundleTargetCredential) {
+	t.Targets = targets
+	ids := slices.Clone(t.CredentialIDs)
+	if ids == nil {
+		ids = []string{}
+	}
+	for i := range targets {
+		if !slices.Contains(ids, targets[i].CredentialID) {
+			ids = append(ids, targets[i].CredentialID)
+		}
+	}
+	slices.Sort(ids)
+	t.CredentialIDs = ids
 }
 
 // relevant reports whether a credential belongs into the target's bundle:
@@ -172,7 +199,7 @@ func (s *Service) Bundle(ctx context.Context, t *BundleTarget) (*SealedBundle, [
 	if err != nil {
 		return nil, nil, err
 	}
-	content := &BundleContent{Credentials: []BundleCredential{}}
+	content := &BundleContent{Credentials: []BundleCredential{}, Targets: []BundleTargetCredential{}}
 	ids := []string{}
 	for i := range all {
 		c := &all[i]
@@ -185,6 +212,12 @@ func (s *Service) Bundle(ctx context.Context, t *BundleTarget) (*SealedBundle, [
 		}
 		content.Credentials = append(content.Credentials, BundleCredential{ID: c.ID, Name: c.Name, Kind: c.Kind, Secret: secret})
 		ids = append(ids, c.ID)
+	}
+	// A target whose credential is not in the bundle is dropped.
+	for i := range t.Targets {
+		if slices.Contains(ids, t.Targets[i].CredentialID) {
+			content.Targets = append(content.Targets, t.Targets[i])
+		}
 	}
 	sealed, err := SealBundle(content, t.CollectorID, t.PublicKey, time.Now())
 	return sealed, ids, err

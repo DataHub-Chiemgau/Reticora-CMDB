@@ -25,6 +25,7 @@ type bindingEnv struct {
 	t                *testing.T
 	f                *scopetest.Fixture
 	mux              *chi.Mux
+	svc              *credential.Service
 	cred1, credOrg   string
 	ci1, ci2         string
 	subnet1, subnet2 string
@@ -42,8 +43,9 @@ func newBindingEnv(t *testing.T) *bindingEnv {
 		t.Fatal(err)
 	}
 	mux := chi.NewRouter()
-	credential.NewHandler(credential.NewService(credential.NewPGRepository(f.App), enc)).RegisterRoutes(mux)
-	e := &bindingEnv{t: t, f: f, mux: mux}
+	svc := credential.NewService(credential.NewPGRepository(f.App), enc)
+	credential.NewHandler(svc).RegisterRoutes(mux)
+	e := &bindingEnv{t: t, f: f, mux: mux, svc: svc}
 	e.cred1 = e.createCredential(`{"name":"wp890-c1","kind":"snmp_v2c","client_id":"` + f.Client1 + `","secret":{"community":"x"}}`)
 	e.credOrg = e.createCredential(`{"name":"wp890-org","kind":"ssh_password","secret":{"password":"x"}}`)
 	e.ci1 = f.CI(t, f.OrgA, f.Client1, "wp890-ci-1")
