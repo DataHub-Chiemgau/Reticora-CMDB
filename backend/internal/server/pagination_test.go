@@ -32,8 +32,9 @@ const paginationSpecPath = "../../../api/openapi.yaml"
 // notALists are GET operations whose body has a data array but that are no
 // list resources: a file export streams every row in one document.
 var notALists = map[string]string{
-	"/api/v1/export/cis": "export download (JSON file of the whole selection)",
-	"/api/v1/modules":    "the fixed module catalog of the release (WP-214), no tenant data",
+	"/api/v1/export/cis":   "export download (JSON file of the whole selection)",
+	"/api/v1/modules":      "the fixed module catalog of the release (WP-214), no tenant data",
+	"/api/v1/admin/addons": "the fixed add-on catalog (WP-883), no tenant data",
 }
 
 // TestEveryListIsCursorPaginated is the architecture test of API-02 over

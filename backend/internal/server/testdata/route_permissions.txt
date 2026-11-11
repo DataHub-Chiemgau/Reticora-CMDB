@@ -1,3 +1,4 @@
+DELETE /api/v1/admin/orgs/{id}/addons/{key} operator
 DELETE /api/v1/api-keys/{id} apikey:manage
 DELETE /api/v1/assets/{id} asset:write
 DELETE /api/v1/assets/{id}/cis/{ci_id} ci:write
@@ -79,6 +80,7 @@ DELETE /api/v1/webhooks/{id} webhook:manage
 DELETE /api/v1/workflows/{id} workflow:write
 DELETE /scim/v2/Groups/{id} iga:write
 DELETE /scim/v2/Users/{id} iga:write
+GET /api/v1/admin/addons operator
 GET /api/v1/admin/audit operator
 GET /api/v1/admin/audit/verify operator
 GET /api/v1/admin/me operator
@@ -420,6 +422,7 @@ PATCH /scim/v2/Users/{id} iga:write
 POST /api/v1/admin/alerts/alertmanager operator
 POST /api/v1/admin/auth/callback operator
 POST /api/v1/admin/orgs operator
+POST /api/v1/admin/orgs/{id}/addons/{key} operator
 POST /api/v1/admin/orgs/{id}/entitlements operator
 POST /api/v1/agents/enroll agent:manage
 POST /api/v1/agents/enrollment-tokens agent:manage

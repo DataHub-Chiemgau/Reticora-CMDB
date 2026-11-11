@@ -1637,3 +1637,5 @@ PKG-02;[P3];G3;backend/internal/operator/plan_integration_test.go;WP-882
 PKG-01;[P3];G3;backend/internal/operator/plan_integration_test.go;WP-882
 ENT-04;[B];G3;backend/internal/operator/plan_integration_test.go;WP-882
 ENT-08;[B];G3;backend/internal/operator/plan_integration_test.go;WP-882
+PKG-03;[P3];G3;backend/internal/operator/addons_test.go;WP-883
+CH14;(S);G3;backend/internal/entitlement/addon_test.go;WP-883

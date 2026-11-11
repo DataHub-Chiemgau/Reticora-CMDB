@@ -202,3 +202,9 @@ func quotaKeys(a, b map[string]int64) map[string]bool {
 	}
 	return out
 }
+
+// Stored returns the stored rows of the organization from the repository,
+// not the cache (inside a transaction: its state).
+func (s *Service) Stored(ctx context.Context, orgID string) ([]Entitlement, error) {
+	return s.repo.List(ctx, orgID)
+}

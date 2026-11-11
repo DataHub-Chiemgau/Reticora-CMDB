@@ -158,6 +158,55 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/admin/addons': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the bookable add-ons
+     * @description The add-on catalog (PKG-03, CH14, WP-883), derived from entitlement.Addons; no data of an organization, no pagination.
+     */
+    get: operations['listAddonCatalog'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/admin/orgs/{id}/addons/{key}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description The add-on (iga, ai, admp). */
+        key: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Book an add-on for an organization
+     * @description Books the add-on independently of the plan (PKG-03, WP-883): the row gets origin addon, enabled and the given valid_until and source (default manual). Recorded as addon.book with before and after in operator_audit in the same transaction (a failed entry rolls back, 500); emits entitlement.changed with the add-on. A plan change never touches the row.
+     */
+    post: operations['bookOrganizationAddon'];
+    /**
+     * Cancel an add-on of an organization
+     * @description Disables the add-on row (PKG-03, WP-883); row, limits and valid_until stay. Recorded as addon.cancel in operator_audit; emits entitlement.changed with the add-on. An add-on that is not booked is 404.
+     */
+    delete: operations['cancelOrganizationAddon'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/admin/audit': {
     parameters: {
       query?: never;
@@ -11352,34 +11401,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/api/v1/admin/orgs/{id}/addons/{key}': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-        key: string;
-      };
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Book an add-on for an organization
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
-     */
-    post: operations['bookOrganizationAddon'];
-    /**
-     * Cancel an add-on of an organization
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
-     */
-    delete: operations['cancelOrganizationAddon'];
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   '/api/v1/admin/orgs/{id}/usage': {
     parameters: {
       query?: never;
@@ -12967,6 +12988,29 @@ export interface components {
       };
       admin_email: string;
       admin_display_name?: string;
+    };
+    AddonInfo: {
+      /** @enum {string} */
+      key: 'iga' | 'ai' | 'admp';
+      /**
+       * @description Catalog tag of an add-on (CH14).
+       * @enum {string}
+       */
+      phase: 'A';
+      /** @description i18n key of the description (addons.<key>.description). */
+      description_key: string;
+    };
+    OperatorAddonBookRequest: {
+      /**
+       * Format: date-time
+       * @description End of the booking; absent is unlimited.
+       */
+      valid_until?: string;
+      /**
+       * @default manual
+       * @enum {string}
+       */
+      source: 'manual' | 'selfsignup' | 'billing' | 'reseller';
     };
     OperatorPlanChangeRequest: {
       /** @enum {string} */
@@ -20507,6 +20551,116 @@ export interface operations {
       };
       500: components['responses']['InternalServerError'];
       503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  listAddonCatalog: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Add-on catalog */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            data: components['schemas']['AddonInfo'][];
+          };
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  bookOrganizationAddon: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description The add-on (iga, ai, admp). */
+        key: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        'application/json': components['schemas']['OperatorAddonBookRequest'];
+      };
+    };
+    responses: {
+      /** @description Add-on booked again */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Entitlement'];
+        };
+      };
+      /** @description Add-on booked */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Entitlement'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      /** @description The key is no add-on (`field` key), valid_until not in the future (`field` valid_until) or an unknown source (`field` source). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  cancelOrganizationAddon: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description The add-on (iga, ai, admp). */
+        key: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Add-on cancelled */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      /** @description The key is no add-on (`field` key). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
     };
   };
   listOperatorAudit: {
@@ -48074,60 +48228,6 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
-      500: components['responses']['InternalServerError'];
-    };
-  };
-  bookOrganizationAddon: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-        key: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Created. The schema comes with the implementing work package. */
-      201: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      400: components['responses']['BadRequest'];
-      401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
-      404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
-      500: components['responses']['InternalServerError'];
-    };
-  };
-  cancelOrganizationAddon: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Resource identifier. */
-        id: components['parameters']['ResourceID'];
-        key: string;
-      };
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Done. */
-      204: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
-      404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
     };
   };

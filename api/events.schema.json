@@ -4078,6 +4078,10 @@
           "enum": ["essential", "standard", "pro", "enterprise"],
           "description": "The plan before a plan change (WP-882); absent when the plan stayed."
         },
+        "addon": {
+          "type": "string",
+          "description": "The add-on booked or cancelled (WP-883); absent for a plan change."
+        },
         "changed": {
           "type": "array",
           "items": {

@@ -204,6 +204,25 @@ const (
 // Addons are the add-on feature keys of CH14.
 var Addons = []string{FeatureIGA, FeatureAI, FeatureADMP}
 
+// AddonInfo is one entry of the add-on catalog (PKG-03, WP-883).
+type AddonInfo struct {
+	Key string `json:"key"`
+	// Phase is the catalog tag of the add-on: A (add-on, CH14).
+	Phase string `json:"phase"`
+	// DescriptionKey is the i18n key of its description.
+	DescriptionKey string `json:"description_key"`
+}
+
+// AddonCatalog lists the bookable add-ons, derived from Addons; it holds
+// no data of an organization.
+func AddonCatalog() []AddonInfo {
+	out := make([]AddonInfo, 0, len(Addons))
+	for _, key := range Addons {
+		out = append(out, AddonInfo{Key: key, Phase: "A", DescriptionKey: "addons." + key + ".description"})
+	}
+	return out
+}
+
 // FeatureKeys are the feature keys an entitlement row may carry (F-209):
 // the phase-1 keys of ENT-02, the phase-2 keys of ENT-06 (E-44), the
 // phase-3 keys (E-151), the module keys of phase 4 in use and the add-ons.

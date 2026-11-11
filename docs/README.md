@@ -402,7 +402,18 @@ change is recorded as `plan.change` with before, after and reason in
 write of the transaction and notifies the org_admins with
 `entitlement:read`; the entitlement cache of every instance is dropped
 after the commit. The current plan again answers 200 with `unchanged`,
-without event. Only the feature keys of ENT-02, the phase-2 keys of ENT-06 (E-44),
+without event. Add-ons (`iga`, `ai`, `admp`; CH14, PKG-03, WP-883) are
+booked per organization independently of the plan:
+`POST /api/v1/admin/orgs/{id}/addons/{key}` with an optional
+`{valid_until, source}` stores the row with origin `addon`, enabled (201,
+200 when booked again); `DELETE` cancels it (204): the row is disabled,
+its limits and `valid_until` stay; an add-on that is not booked is 404, a
+key that is no add-on 422 (`field` key). Both are recorded as
+`addon.book`/`addon.cancel` with before and after in `operator_audit`
+and emit `entitlement.changed` with `addon`; a plan change never touches
+an add-on row. `GET /api/v1/admin/addons` lists the catalog
+(`entitlement.AddonCatalog`: key, phase `A`, i18n key
+`addons.<key>.description`). Only the feature keys of ENT-02, the phase-2 keys of ENT-06 (E-44),
 the phase-3 keys (`monitoring`, `ipam`, `monitoring_network`,
 `credential_vault`, `notifications_sms_pager`, `workflows`,
 `compliance_findings`, `monitoring_access`, `monitoring_analytics`,

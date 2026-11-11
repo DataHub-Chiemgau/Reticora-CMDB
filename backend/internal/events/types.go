@@ -596,8 +596,10 @@ type EntitlementChangedData struct {
 	Plan string `json:"plan"`
 	// PlanBefore is the plan before a plan change (WP-882); empty when the
 	// plan stayed (an add-on or a quota changed).
-	PlanBefore string   `json:"plan_before,omitempty"`
-	Changed    []string `json:"changed"`
+	PlanBefore string `json:"plan_before,omitempty"`
+	// Addon is the add-on booked or cancelled (WP-883); empty otherwise.
+	Addon   string   `json:"addon,omitempty"`
+	Changed []string `json:"changed"`
 }
 
 // OrgExportData is the data of org.export_completed (TLC-05): the full

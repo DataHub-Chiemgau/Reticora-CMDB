@@ -469,6 +469,116 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
 
+  /api/v1/admin/addons:
+    get:
+      operationId: listAddonCatalog
+      tags: [Operator]
+      security:
+        - OperatorAuth: []
+        - BreakGlassAuth: []
+      summary: List the bookable add-ons
+      description: >-
+        The add-on catalog (PKG-03, CH14, WP-883), derived from
+        entitlement.Addons; no data of an organization, no pagination.
+      responses:
+        '200':
+          description: Add-on catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/AddonInfo' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/admin/orgs/{id}/addons/{key}:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - name: key
+        in: path
+        required: true
+        description: The add-on (iga, ai, admp).
+        schema:
+          type: string
+    post:
+      operationId: bookOrganizationAddon
+      tags: [Operator]
+      security:
+        - OperatorAuth: []
+        - BreakGlassAuth: []
+      summary: Book an add-on for an organization
+      description: >-
+        Books the add-on independently of the plan (PKG-03, WP-883): the row
+        gets origin addon, enabled and the given valid_until and source
+        (default manual). Recorded as addon.book with before and after in
+        operator_audit in the same transaction (a failed entry rolls back,
+        500); emits entitlement.changed with the add-on. A plan change never
+        touches the row.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OperatorAddonBookRequest'
+      responses:
+        '200':
+          description: Add-on booked again
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Entitlement' }
+        '201':
+          description: Add-on booked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Entitlement' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: >-
+            The key is no add-on (`field` key), valid_until not in the future
+            (`field` valid_until) or an unknown source (`field` source).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    delete:
+      operationId: cancelOrganizationAddon
+      tags: [Operator]
+      security:
+        - OperatorAuth: []
+        - BreakGlassAuth: []
+      summary: Cancel an add-on of an organization
+      description: >-
+        Disables the add-on row (PKG-03, WP-883); row, limits and valid_until
+        stay. Recorded as addon.cancel in operator_audit; emits
+        entitlement.changed with the add-on. An add-on that is not booked is
+        404.
+      responses:
+        '204':
+          description: Add-on cancelled
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: The key is no add-on (`field` key).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /api/v1/admin/audit:
     get:
       operationId: listOperatorAudit
@@ -25530,62 +25640,6 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /api/v1/admin/orgs/{id}/addons/{key}:
-    x-status: planned
-    parameters:
-      - $ref: '#/components/parameters/ResourceID'
-      - name: key
-        in: path
-        required: true
-        schema:
-          type: string
-    post:
-      operationId: bookOrganizationAddon
-      tags: [Operator]
-      summary: Book an add-on for an organization
-      description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
-      security:
-        - OperatorAuth: []
-        - BreakGlassAuth: []
-      responses:
-        '201':
-          description: Created. The schema comes with the implementing work package.
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-    delete:
-      operationId: cancelOrganizationAddon
-      tags: [Operator]
-      summary: Cancel an add-on of an organization
-      description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
-      security:
-        - OperatorAuth: []
-        - BreakGlassAuth: []
-      responses:
-        '204':
-          description: Done.
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-
   /api/v1/admin/orgs/{id}/usage:
     x-status: planned
     parameters:
@@ -28382,6 +28436,19 @@ components:
               description: Shortest probe interval in seconds (PKG-04), stored on monitoring; a shorter interval is refused with 422, 0 sets no minimum.
         admin_email: { type: string, maxLength: 254 }
         admin_display_name: { type: string, maxLength: 200 }
+    AddonInfo:
+      type: object
+      required: [key, phase, description_key]
+      properties:
+        key: { type: string, enum: [iga, ai, admp] }
+        phase: { type: string, enum: [A], description: Catalog tag of an add-on (CH14). }
+        description_key: { type: string, description: i18n key of the description (addons.<key>.description). }
+    OperatorAddonBookRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        valid_until: { type: string, format: date-time, description: End of the booking; absent is unlimited. }
+        source: { type: string, enum: [manual, selfsignup, billing, reseller], default: manual }
     OperatorPlanChangeRequest:
       type: object
       additionalProperties: false
