@@ -10522,7 +10522,12 @@ paths:
         account of the NAS plugin (Synology DSM: username and password).
         `vault_approle` (role_id, secret_id) and `vault_token` (token) are the
         logins of vault connections (WP-893); a missing member is 422
-        (`field` = `secret`), and they are not bound to targets.
+        (`field` = `secret`), and they are not bound to targets and only
+        stored. Instead of `secret` a credential may carry `vault_ref`
+        (WP-894): a vault connection of the credential's client or an
+        org-wide one (else 422 `vault_ref.connection_id`), a path and a
+        `field_map` covering the required fields of the kind (else 422
+        `field_map`); both or none is 422.
         Database refusals use the sanitized error contract (API-03): a value
         the store refuses (e.g. a `client_id` that is no UUID, a NUL byte)
         400, an unknown `client_id` 422, a `client_id` outside the caller's
@@ -10583,8 +10588,11 @@ paths:
         Changes name and max_age_days (null removes the limit) with
         credential:manage (WP-889). kind, client_id, scope and secret cannot
         be changed (422 with the field); the secret is replaced with
-        PUT /credentials/{id}/secret. An id that is no UUID is answered like
-        an unknown one (404).
+        PUT /credentials/{id}/secret. A vault_ref credential changes
+        vault_path, vault_version and field_map (WP-894); each such change
+        raises secret_version, the audit names the fields without values.
+        source and vault_ref cannot be changed. An id that is no UUID is
+        answered like an unknown one (404).
       requestBody:
         required: true
         content:
@@ -10606,8 +10614,10 @@ paths:
           $ref: '#/components/responses/NotFound'
         '422':
           description: >-
-            A member that cannot be changed (kind, client_id, scope, secret), an
-            unknown member, an empty name or max_age_days outside 1–3650 (`field`).
+            A member that cannot be changed (kind, client_id, scope, secret,
+            source, vault_ref), an unknown member, an empty name, max_age_days
+            outside 1–3650, a reference member on a stored credential or an
+            invalid one (`field`).
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -10663,7 +10673,8 @@ paths:
         the DEK, and appends credential.rotated (source stored) as its last
         write. The answer carries the metadata, never the old or the new
         secret. Requires credential:manage. The id stays, so discovery scopes
-        and connectors keep their reference.
+        and connectors keep their reference. A vault_ref credential has no
+        stored secret: 409 (WP-894).
       requestBody:
         required: true
         content:
@@ -10683,8 +10694,13 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: The credential is a vault reference (`field` secret).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
-          description: The secret is missing or empty (`field` secret).
+          description: The secret is missing or empty, or lacks the members of a vault login (`field` secret).
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -23942,6 +23958,7 @@ paths:
       operationId: deleteVaultConnection
       tags: [Credentials]
       summary: Delete a vault connection
+      description: A connection credentials reference (vault_ref, WP-894) is not deleted (409).
       responses:
         '204':
           description: Done.
@@ -39726,6 +39743,12 @@ components:
           minimum: 1
           maximum: 3650
           description: Age limit of the secret in days; null is none (checked by WP-897).
+        source:
+          type: string
+          enum: [stored, vault_ref]
+          description: stored keeps the encrypted secret, vault_ref a reference into a vault connection without secret (CRD-02, WP-894).
+        vault_ref:
+          $ref: '#/components/schemas/CredentialVaultRef'
         created_at:
           type: string
           format: date-time
@@ -39929,6 +39952,18 @@ components:
           minimum: 1
           maximum: 3650
           description: Age limit in days; null removes it.
+        vault_path:
+          type: string
+          minLength: 1
+          description: New path of a vault_ref credential; raises secret_version (WP-894).
+        vault_version:
+          type: [integer, 'null']
+          minimum: 1
+          description: Version of a vault_ref credential; null is the latest. Raises secret_version.
+        field_map:
+          type: object
+          additionalProperties: { type: string, minLength: 1 }
+          description: New field map of a vault_ref credential; raises secret_version.
 
     CredentialSecretReplace:
       type: object
@@ -39954,9 +39989,25 @@ components:
               items:
                 $ref: '#/components/schemas/Credential'
 
+    CredentialVaultRef:
+      type: object
+      description: >-
+        Reference into a vault connection (WP-894). field_map maps every
+        required field of the kind (e.g. community for snmp_v2c) to a field
+        of the vault entry. The values are never stored in Reticora.
+      required: [connection_id, path, field_map]
+      properties:
+        connection_id: { type: string, format: uuid }
+        path: { type: string, minLength: 1, description: Path of the entry below the mount of the connection. }
+        version: { type: integer, minimum: 1, description: Version of the KV v2 entry; absent is the latest. }
+        field_map:
+          type: object
+          additionalProperties: { type: string, minLength: 1 }
+
     CreateCredentialRequest:
       type: object
-      required: [name, secret]
+      description: Exactly one of secret and vault_ref (WP-894); both or none is 422.
+      required: [name]
       properties:
         client_id:
           type: string
@@ -39971,6 +40022,8 @@ components:
           type: object
           description: Plaintext secret data, encrypted at rest before storage.
           additionalProperties: true
+        vault_ref:
+          $ref: '#/components/schemas/CredentialVaultRef'
         max_age_days:
           type: integer
           minimum: 1

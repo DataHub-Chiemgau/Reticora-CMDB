@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000293_vault_connection
+Stand: Migration 000294_credential_vault_ref
 
 ## Prüfung
 
@@ -726,6 +726,15 @@ Fremdschlüssel (`reservation_assignee_id_fkey` auf `app_user`,
 `internal_order`, je `ON DELETE SET NULL (spalte)`). Bestehende Verweise ohne
 Zeile in der eigenen Organisation stehen in `migration_quarantine`
 (Migration `000275`) und sind auf NULL gesetzt.
+
+Migration 000293 (WP-893) verweist von `vault_connection` mit Organisation
+auf `client` (`vault_connection_client_fkey`) und auf die Anmeldedaten in
+`credential` (`vault_connection_auth_credential_fkey`, ON DELETE RESTRICT),
+von `vault_connection_collector` auf `vault_connection` (ON DELETE CASCADE)
+und `collector`. Migration 000294 (WP-894) ergänzt
+`credential_vault_connection_fkey`: `credential (vault_connection_id,
+organization_id) REFERENCES vault_connection (id, organization_id)` mit ON
+DELETE RESTRICT; eine referenzierte Tresorverbindung wird nicht gelöscht.
 
 `TestTenantReferencesCarryOrganization`
 (`backend/internal/tenant/rls/object_reference_integration_test.go`) prüft

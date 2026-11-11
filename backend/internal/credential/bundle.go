@@ -50,12 +50,15 @@ type SealedBundle struct {
 	Ciphertext   []byte `json:"ciphertext"`
 }
 
-// BundleCredential is one credential in a bundle.
+// BundleCredential is one credential in a bundle: a stored secret, or a
+// vault reference without secret (source vault_ref, WP-894).
 type BundleCredential struct {
-	ID     string         `json:"id"`
-	Name   string         `json:"name"`
-	Kind   string         `json:"kind"`
-	Secret map[string]any `json:"secret"`
+	ID       string          `json:"id"`
+	Name     string          `json:"name"`
+	Kind     string          `json:"kind"`
+	Source   string          `json:"source,omitempty"`
+	Secret   map[string]any  `json:"secret,omitempty"`
+	VaultRef *BundleVaultRef `json:"vault_ref,omitempty"`
 }
 
 // BundleContent is the plaintext of a bundle.
@@ -210,12 +213,16 @@ func (s *Service) Bundle(ctx context.Context, t *BundleTarget) (*SealedBundle, [
 		if !t.relevant(c) {
 			continue
 		}
-		secret, derr := s.Decrypt(ctx, t.OrganizationID, c.ID)
-		if derr != nil {
-			return nil, nil, fmt.Errorf("credential %s: %w", c.ID, derr)
+		entries, berr := s.bundleEntries(ctx, t, c)
+		if berr != nil {
+			return nil, nil, berr
 		}
-		content.Credentials = append(content.Credentials, BundleCredential{ID: c.ID, Name: c.Name, Kind: c.Kind, Secret: secret})
-		ids = append(ids, c.ID)
+		for _, entry := range entries {
+			if !slices.Contains(ids, entry.ID) {
+				content.Credentials = append(content.Credentials, entry)
+				ids = append(ids, entry.ID)
+			}
+		}
 	}
 	// A target whose credential is not in the bundle is dropped.
 	for i := range t.Targets {

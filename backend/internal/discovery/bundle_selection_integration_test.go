@@ -410,3 +410,100 @@ func TestBundleGateDeliversClientTargets(t *testing.T) {
 		}
 	}
 }
+
+// TestBundleVaultReferencesOverScopes covers AK5 of WP-894 on the real path
+// of a bundle (scope -> VerifyBundleTarget -> Bundle): a scope without
+// credential_ids selects the organization's credentials, but a vault login
+// reaches the collector only as the login of a reference it resolves. A
+// reference of a connection with resolve_at server, of a disabled
+// connection or of one that does not name the collector yields no entry,
+// and neither does its login; a reference the collector resolves brings
+// itself and its login.
+//
+// Retest:
+//
+//	cd backend && go test -count=1 -p 1 -run TestBundleVaultReferencesOverScopes ./internal/discovery/
+func TestBundleVaultReferencesOverScopes(t *testing.T) {
+	e, enc := auditEdge(t, "0f")
+	f := e.f
+	bg := context.Background()
+	org := f.OrgCtx(f.OrgA)
+	gate := discovery.NewBundleGate(f.App, e.ca)
+	csvc := credential.NewService(credential.NewPGRepository(f.App), enc)
+	colID, key, issued := auditEnroll(t, e, "vault-ref-bundle")
+	otherCol, _, _ := auditEnroll(t, e, "vault-ref-other")
+
+	create := func(req credential.CreateRequest) string {
+		t.Helper()
+		req.OrganizationID = f.OrgA
+		c, err := csvc.Create(org, req)
+		if err != nil {
+			t.Fatalf("create credential %s: %v", req.Name, err)
+		}
+		return c.ID
+	}
+	stored := create(credential.CreateRequest{Name: "vr-stored", Kind: credential.KindSNMPv2c,
+		Secret: map[string]any{"community": "vr-stored-community"}})
+	login := create(credential.CreateRequest{Name: "vr-login", Kind: credential.KindVaultAppRole,
+		Secret: map[string]any{"role_id": "vr-role-id", "secret_id": "vr-secret-id"}})
+	connection := func(name, resolveAt string, enabled bool, collectors ...string) string {
+		t.Helper()
+		c, err := csvc.Vaults().Create(org, f.OrgA, &credential.VaultConnection{Name: name, Kind: "openbao_kv2",
+			Address: "https://vault.example.com:8200", Mount: "secret", AuthMethod: "approle", AuthCredentialID: login,
+			ResolveAt: resolveAt, Enabled: enabled, CollectorIDs: collectors})
+		if err != nil {
+			t.Fatalf("create connection %s: %v", name, err)
+		}
+		return c.ID
+	}
+	ref := func(name, conn string) string {
+		t.Helper()
+		return create(credential.CreateRequest{Name: name, Kind: credential.KindSNMPv2c, VaultRef: &credential.VaultRef{
+			ConnectionID: conn, Path: "network/" + name, FieldMap: map[string]string{"community": "snmp_ro"}}})
+	}
+	ref("vr-server", connection("vr-conn-server", credential.ResolveAtServer, true))
+	ref("vr-disabled", connection("vr-conn-disabled", credential.ResolveAtCollector, false, colID))
+	ref("vr-other", connection("vr-conn-other", credential.ResolveAtCollector, true, otherCol))
+
+	in := discovery.ScopeInput{CollectorID: colID, Kind: "cidr", Target: "10.232.0.0/24"}
+	if err := e.repo.CreateScope(org, discovery.NewScope(f.OrgA, &in)); err != nil {
+		t.Fatalf("create scope: %v", err)
+	}
+	bundle := func() (ids []string, content *credential.BundleContent) {
+		t.Helper()
+		tctx, target, err := gate.VerifyBundleTarget(bg, f.OrgA, colID, issued.CertificatePEM)
+		if err != nil {
+			t.Fatalf("bundle target: %v", err)
+		}
+		sealed, ids, err := csvc.Bundle(tctx, target)
+		if err != nil {
+			t.Fatalf("bundle: %v", err)
+		}
+		content, err = credential.OpenBundle(sealed, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		slices.Sort(ids)
+		return ids, content
+	}
+
+	ids, content := bundle()
+	if !slices.Equal(ids, []string{stored}) || len(content.Credentials) != 1 {
+		t.Errorf("bundle of a scope without credential_ids and only unresolvable references: %v, want only the stored %s (login %s)",
+			ids, stored, login)
+	}
+	for _, c := range content.Credentials {
+		if c.Secret["role_id"] != nil || c.Secret["secret_id"] != nil {
+			t.Errorf("the bundle carries the vault login %s", c.ID)
+		}
+	}
+
+	// A reference the collector resolves brings itself and its login.
+	resolved := ref("vr-collector", connection("vr-conn-collector", credential.ResolveAtCollector, true, colID))
+	ids, _ = bundle()
+	want := []string{stored, login, resolved}
+	slices.Sort(want)
+	if !slices.Equal(ids, want) {
+		t.Errorf("bundle with a reference the collector resolves: %v, want %v", ids, want)
+	}
+}

@@ -54,12 +54,16 @@ type vaultEnv struct {
 	col1, col2, colOrg   string
 	perms                []identity.Permission
 	clientScope          string
+	// svc is the service behind the routes (bundles, rotation; WP-894).
+	svc *credential.Service
 }
 
 // vaultRoutes are the routes the environment serves with their audit.
 var vaultRoutes = []struct{ method, pattern string }{
 	{http.MethodPost, "/api/v1/credentials/"},
 	{http.MethodPut, "/api/v1/credentials/{id}/secret"},
+	{http.MethodPatch, "/api/v1/credentials/{id}"},
+	{http.MethodDelete, "/api/v1/credentials/{id}"},
 	{http.MethodPost, "/api/v1/credential-bindings/"},
 	{http.MethodPost, "/api/v1/vault-connections/"},
 	{http.MethodGet, "/api/v1/vault-connections/"},
@@ -80,7 +84,8 @@ func newVaultEnv(t *testing.T) *vaultEnv {
 		t.Fatal(err)
 	}
 	inner := chi.NewRouter()
-	credential.NewHandler(credential.NewService(credential.NewPGRepository(f.App), enc)).RegisterRoutes(inner)
+	svc := credential.NewService(credential.NewPGRepository(f.App), enc)
+	credential.NewHandler(svc).RegisterRoutes(inner)
 	// Every route behind its permission and the production route audit,
 	// as the server wires it.
 	mux := chi.NewRouter()
@@ -93,7 +98,7 @@ func newVaultEnv(t *testing.T) *vaultEnv {
 		mux.With(server.AuthorizeRoute(rt.method, rt.pattern), middleware.AuditRoute(rt.method, rt.pattern, auditor, mode, "")).
 			Method(rt.method, rt.pattern, inner)
 	}
-	e := &vaultEnv{t: t, f: f, mux: mux, perms: identity.AllPermissions()}
+	e := &vaultEnv{t: t, f: f, mux: mux, perms: identity.AllPermissions(), svc: svc}
 	e.approle1 = e.createCredential(`{"name":"wp893-approle-1","kind":"vault_approle","client_id":"` + f.Client1 +
 		`","secret":{"role_id":"` + canaryRoleID + `","secret_id":"` + canarySecretID + `"}}`)
 	e.approleOrg = e.createCredential(`{"name":"wp893-approle-org","kind":"vault_approle","secret":{"role_id":"` +

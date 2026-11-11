@@ -8,6 +8,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 )
 
@@ -384,6 +385,161 @@ func TestService_ReplaceSecretDecryptsNewValue(t *testing.T) {
 	}
 	if _, err = svc.ReplaceSecret(ctx, "org-2", cred.ID, map[string]any{"password": "x"}, nil); !errors.Is(err, ErrNotFound) {
 		t.Errorf("foreign organization: %v", err)
+	}
+}
+
+// vaultRefService is a memory service with an org-wide token login and a
+// connection of each place of resolution (WP-894).
+func vaultRefService(t *testing.T) (svc *Service, collectorConn, serverConn string) {
+	t.Helper()
+	svc = NewService(NewMemoryRepository(), testEncryptor(t))
+	ctx := context.Background()
+	login, err := svc.Create(ctx, CreateRequest{OrganizationID: "org-1", Name: "login", Kind: KindVaultToken,
+		Secret: map[string]any{"token": "t"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn := func(name, resolveAt string, collectors []string) string {
+		c, cerr := svc.Vaults().Create(ctx, "org-1", &VaultConnection{Name: name, Kind: VaultKindOpenBao,
+			Address: "https://vault.example.com", Mount: "kv", AuthMethod: VaultAuthToken, AuthCredentialID: login.ID,
+			ResolveAt: resolveAt, Enabled: true, CollectorIDs: collectors})
+		if cerr != nil {
+			t.Fatalf("connection %s: %v", name, cerr)
+		}
+		return c.ID
+	}
+	return svc, conn("edge", ResolveAtCollector, []string{"00000000-0000-4000-8000-000000000001"}), conn("server", ResolveAtServer, nil)
+}
+
+func fieldOf(err error) string {
+	var fe *api.FieldError
+	if errors.As(err, &fe) {
+		return fe.Field
+	}
+	return ""
+}
+
+// TestService_CreateRequiresExactlyOneSource covers AK2 and AK3 of WP-894:
+// secret or vault_ref, both or none is 422; the secret of a reference is
+// not replaced; a change of the reference raises secret_version.
+func TestService_CreateRequiresExactlyOneSource(t *testing.T) {
+	svc, conn, _ := vaultRefService(t)
+	ctx := context.Background()
+	ref := &VaultRef{ConnectionID: conn, Path: "/net/switch/", FieldMap: map[string]string{"community": "snmp_ro"}}
+	base := CreateRequest{OrganizationID: "org-1", Name: "sw", Kind: KindSNMPv2c}
+	both := base
+	both.Secret, both.VaultRef = map[string]any{"community": "x"}, ref
+	if _, err := svc.Create(ctx, both); fieldOf(err) != "vault_ref" {
+		t.Errorf("both: %v", err)
+	}
+	if _, err := svc.Create(ctx, base); fieldOf(err) != "secret" {
+		t.Errorf("none: %v", err)
+	}
+	withRef := base
+	withRef.VaultRef = ref
+	cred, err := svc.Create(ctx, withRef)
+	if err != nil || cred.Source != SourceVaultRef || cred.VaultRef == nil || cred.VaultRef.Path != "net/switch" {
+		t.Fatalf("vault_ref: %+v %v", cred, err)
+	}
+	withSecret := base
+	withSecret.Secret = map[string]any{"community": "x"}
+	if stored, serr := svc.Create(ctx, withSecret); serr != nil || stored.Source != SourceStored {
+		t.Errorf("secret: %+v %v", stored, serr)
+	}
+	if _, err = svc.ReplaceSecret(ctx, "org-1", cred.ID, map[string]any{"community": "y"}, nil); !errors.Is(err, ErrVaultRefHasNoSecret) {
+		t.Errorf("replace the secret of a reference: %v", err)
+	}
+	path := "net/switch-2"
+	updated, err := svc.UpdateMetadata(ctx, "org-1", cred.ID, MetadataUpdate{Ref: VaultRefUpdate{Path: &path}})
+	if err != nil || updated.SecretVersion != 2 || updated.VaultRef.Path != path {
+		t.Errorf("update the reference: %+v %v", updated, err)
+	}
+	if _, err = svc.UpdateMetadata(ctx, "org-1", cred.ID, MetadataUpdate{Ref: VaultRefUpdate{FieldMap: map[string]string{}}}); fieldOf(err) != "field_map" {
+		t.Errorf("update with an empty field map: %v", err)
+	}
+}
+
+// TestService_FieldMapPerKind covers AK2: field_map maps every required
+// field of the kind and nothing else; the vault logins are only stored; the
+// connection must exist.
+func TestService_FieldMapPerKind(t *testing.T) {
+	svc, conn, _ := vaultRefService(t)
+	ctx := context.Background()
+	create := func(kind string, fieldMap map[string]string, connection string) error {
+		_, err := svc.Create(ctx, CreateRequest{OrganizationID: "org-1", Name: "ref-" + kind, Kind: kind,
+			VaultRef: &VaultRef{ConnectionID: connection, Path: "p", FieldMap: fieldMap}})
+		return err
+	}
+	for _, tc := range []struct {
+		kind     string
+		fieldMap map[string]string
+		field    string
+	}{
+		{KindSNMPv2c, map[string]string{"community": "snmp_ro"}, ""},
+		{KindSNMPv2c, map[string]string{}, "field_map"},
+		{KindSNMPv2c, map[string]string{"community": "c", "extra": "x"}, "field_map"},
+		{KindSSHPassword, map[string]string{"username": "user"}, "field_map"},
+		{KindSSHPassword, map[string]string{"username": "user", "password": "pw"}, ""},
+		{KindSSHKey, map[string]string{"username": "user", "private_key": "key"}, ""},
+		{KindVaultToken, map[string]string{"token": "t"}, "vault_ref"},
+		{KindVaultAppRole, map[string]string{"role_id": "r", "secret_id": "s"}, "vault_ref"},
+	} {
+		if err := create(tc.kind, tc.fieldMap, conn); fieldOf(err) != tc.field || (tc.field == "" && err != nil) {
+			t.Errorf("%s %v: %v, want field %q", tc.kind, tc.fieldMap, err, tc.field)
+		}
+	}
+	for kind := range validKinds {
+		if _, login := vaultLoginFields[kind]; !login && len(KindFields[kind]) == 0 {
+			t.Errorf("kind %s has no required fields for field_map", kind)
+		}
+	}
+	if err := create(KindSNMPv2c, map[string]string{"community": "c"}, "00000000-0000-4000-8000-0000000000ff"); fieldOf(err) != "vault_ref.connection_id" {
+		t.Errorf("unknown connection: %v", err)
+	}
+}
+
+// TestService_DecryptVaultRefOnServerFails covers AK4: the server decrypts
+// no reference; collector references say so, server references wait for
+// the resolver of WP-896.
+func TestService_DecryptVaultRefOnServerFails(t *testing.T) {
+	svc, edge, server := vaultRefService(t)
+	ctx := context.Background()
+	for conn, want := range map[string]error{edge: ErrResolvedOnCollector, server: ErrVaultNotConfigured} {
+		cred, err := svc.Create(ctx, CreateRequest{OrganizationID: "org-1", Name: "ref-" + conn, Kind: KindAPIToken,
+			VaultRef: &VaultRef{ConnectionID: conn, Path: "api/token", FieldMap: map[string]string{"token": "value"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if secret, derr := svc.Decrypt(ctx, "org-1", cred.ID); !errors.Is(derr, want) || secret != nil {
+			t.Errorf("decrypt a reference of %s: %v %v, want %v", conn, secret, derr, want)
+		}
+	}
+}
+
+// TestService_RotateKeysSkipsVaultRefs covers AK6: the rotation re-encrypts
+// the stored secrets only and counts them.
+func TestService_RotateKeysSkipsVaultRefs(t *testing.T) {
+	svc, conn, _ := vaultRefService(t)
+	ctx := context.Background()
+	if _, err := svc.Create(ctx, CreateRequest{OrganizationID: "org-1", Name: "ref", Kind: KindSNMPv2c,
+		VaultRef: &VaultRef{ConnectionID: conn, Path: "p", FieldMap: map[string]string{"community": "c"}}}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := svc.Create(ctx, CreateRequest{OrganizationID: "org-1", Name: "stored", Kind: KindSNMPv2c,
+		Secret: map[string]any{"community": "public"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.RotateKeys(ctx, "org-1")
+	if err != nil {
+		t.Fatalf("rotate: %v", err)
+	}
+	// The token login and the stored credential.
+	if result.Rotated != 2 {
+		t.Errorf("rotated %d, want 2", result.Rotated)
+	}
+	if secret, derr := svc.Decrypt(ctx, "org-1", stored.ID); derr != nil || secret["community"] != "public" {
+		t.Errorf("decrypt after the rotation: %v %v", secret, derr)
 	}
 }
 

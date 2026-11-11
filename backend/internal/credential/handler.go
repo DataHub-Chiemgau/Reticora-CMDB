@@ -89,10 +89,6 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	if req.Secret == nil {
-		writeError(w, http.StatusBadRequest, "secret is required")
-		return
-	}
 	if req.MaxAgeDays != nil && !MaxAgeDaysValid(*req.MaxAgeDays) {
 		writeFieldError(w, "max_age_days", "max_age_days must be an integer from 1 to 3650")
 		return
@@ -187,7 +183,7 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 // scope define how the collectors use the secret, client_id is checked
 // only when a scope is stored (discovery checkCredentials), and the
 // secret is replaced only through PUT /credentials/{id}/secret.
-var immutableFields = []string{"kind", "client_id", "scope", "secret"}
+var immutableFields = []string{"kind", "client_id", "scope", "secret", "source", "vault_ref", "vault_connection_id"}
 
 // update handles PATCH /api/v1/credentials/{id}: name and max_age_days
 // (null removes the limit); any other member is 422 with its field.
@@ -222,6 +218,31 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			u.MaxAgeDays = &days
+		case "vault_path":
+			var path string
+			if err := json.Unmarshal(raw, &path); err != nil {
+				writeFieldError(w, "vault_path", "vault_path must be a string")
+				return
+			}
+			u.Ref.Path = &path
+		case "vault_version":
+			u.Ref.SetVersion = true
+			if string(raw) == "null" {
+				continue
+			}
+			var version int
+			if err := json.Unmarshal(raw, &version); err != nil {
+				writeFieldError(w, "vault_version", "vault_version must be an integer or null")
+				return
+			}
+			u.Ref.Version = &version
+		case "field_map":
+			fieldMap := map[string]string{}
+			if err := json.Unmarshal(raw, &fieldMap); err != nil {
+				writeFieldError(w, "field_map", "field_map must map field names to vault field names")
+				return
+			}
+			u.Ref.FieldMap = fieldMap
 		default:
 			if slices.Contains(immutableFields, field) {
 				writeFieldError(w, field, field+" cannot be changed; the secret is replaced with PUT /credentials/{id}/secret")
@@ -285,6 +306,9 @@ func (h *Handler) writeCredential(w http.ResponseWriter, cred *Credential, err e
 	switch {
 	case errors.Is(err, ErrNotFound):
 		writeError(w, http.StatusNotFound, "credential not found")
+	case errors.Is(err, ErrVaultRefHasNoSecret):
+		api.WriteFieldError(w, &api.ConflictError{Field: "secret",
+			Message: "the credential is a vault reference; change vault_path, vault_version or field_map instead"})
 	case errors.Is(err, ErrUnsupported):
 		writeError(w, http.StatusServiceUnavailable, "credential changes are not available")
 	case err != nil:

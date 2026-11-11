@@ -318,8 +318,16 @@ func (v *VaultService) Update(ctx context.Context, orgID, id string, change func
 	return &next, nil
 }
 
-// Delete removes a connection.
+// Delete removes a connection; one referenced by credentials is refused
+// (ErrVaultConnectionInUse, 409; WP-894).
 func (v *VaultService) Delete(ctx context.Context, orgID, id string) error {
+	referenced, err := v.creds.connectionReferenced(ctx, orgID, id)
+	if err != nil {
+		return err
+	}
+	if referenced {
+		return ErrVaultConnectionInUse
+	}
 	return v.vaults.DeleteVaultConnection(ctx, orgID, id)
 }
 
@@ -354,6 +362,8 @@ func vaultConnectionError(err error) error {
 		return vaultFieldError("collector_ids", "a collector is not found or not of the connection's client")
 	case "vault_connection_client_fkey":
 		return vaultFieldError("client_id", "client not found")
+	case "credential_vault_connection_fkey":
+		return ErrVaultConnectionInUse
 	}
 	return err
 }
@@ -640,6 +650,8 @@ func writeVaultError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrVaultConnectionNotFound):
 		writeError(w, http.StatusNotFound, "vault connection not found")
+	case errors.Is(err, ErrVaultConnectionInUse):
+		api.WriteFieldError(w, &api.ConflictError{Field: "id", Message: "credentials reference the vault connection; change or delete them first"})
 	default:
 		// Field and conflict errors carry their field (422, 409); a
 		// client outside the scope 403; anything else 500 (API-03).

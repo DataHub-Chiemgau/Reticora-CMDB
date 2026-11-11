@@ -49,12 +49,20 @@ type sealedBundle struct {
 	Ciphertext   []byte `json:"ciphertext"`
 }
 
+// bundleCredential is one credential of the bundle. Source is "stored"
+// (or empty, before WP-894) for a secret, "vault_ref" for a reference into
+// a vault connection without secret, which this collector does not read yet
+// (WP-895).
 type bundleCredential struct {
 	ID     string         `json:"id"`
 	Name   string         `json:"name"`
 	Kind   string         `json:"kind"`
+	Source string         `json:"source,omitempty"`
 	Secret map[string]any `json:"secret"`
 }
+
+// sourceVaultRef is the source of a vault reference in the bundle.
+const sourceVaultRef = "vault_ref"
 
 // bundleTarget is an entry of the targets of a bundle (format 2): the
 // credential of a CI in a namespace and its origin (probe, ci,
@@ -311,8 +319,10 @@ func (c *bundleCache) overrideTarget(creds map[string]string, scope *collectorSc
 
 // resolve returns the cached credentials with the given IDs as
 // protocol-namespaced entries: each credential under the namespace of its
-// kind, the first of a namespace in ids wins. IDs missing from the bundle
-// and kinds without a namespace are skipped.
+// kind, the first of a namespace in ids wins. IDs missing from the bundle,
+// kinds without a namespace and entries without secret values (a vault
+// reference, WP-894) are skipped without taking their namespace, so a
+// stored credential later in ids still applies.
 func (c *bundleCache) resolve(ids []string) map[string]string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -324,7 +334,7 @@ func (c *bundleCache) resolve(ids []string) map[string]string {
 			continue
 		}
 		ns, known := credentialNamespace[cred.Kind]
-		if !known || taken[ns] {
+		if !known || taken[ns] || cred.Source == sourceVaultRef || len(cred.Secret) == 0 {
 			continue
 		}
 		taken[ns] = true

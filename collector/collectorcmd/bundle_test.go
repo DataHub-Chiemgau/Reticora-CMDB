@@ -139,6 +139,40 @@ func fileViews(t *testing.T, path string) []string {
 	return views
 }
 
+// TestBundleVaultRefKeepsNamespaceFree covers the bundle of WP-894 on the
+// collector side: a vault reference (source vault_ref, no secret) of a kind
+// does not take its namespace, so a stored credential of the same namespace
+// later in the scope's list still applies; the stored login of the
+// connection decodes as an ordinary entry. Reading the vault is WP-895.
+func TestBundleVaultRefKeepsNamespaceFree(t *testing.T) {
+	var content bundleContent
+	if err := json.Unmarshal([]byte(`{"credentials":[
+		{"id":"ref","name":"ref","kind":"snmp_v2c","source":"vault_ref",
+		 "vault_ref":{"connection_id":"conn","kind":"openbao_kv2","address":"https://vault.example.com","mount":"secret",
+		  "path":"network/sw1","field_map":{"community":"snmp_ro"},"auth_method":"approle","login_id":"login"}},
+		{"id":"login","name":"login","kind":"vault_approle","source":"stored","secret":{"role_id":"r","secret_id":"s"}},
+		{"id":"stored","name":"stored","kind":"snmp_v2c","source":"stored","secret":{"community":"stored-community"}},
+		{"id":"legacy","name":"legacy","kind":"ssh_password","secret":{"username":"u","password":"p"}}
+	]}`), &content); err != nil {
+		t.Fatal(err)
+	}
+	collectorBundle.set(&content)
+	t.Cleanup(func() { collectorBundle.set(nil) })
+	for _, c := range []struct {
+		ids  []string
+		want map[string]string
+	}{
+		{[]string{"ref", "stored"}, map[string]string{"snmp.community": "stored-community"}},
+		{[]string{"stored", "ref"}, map[string]string{"snmp.community": "stored-community"}},
+		{[]string{"ref"}, map[string]string{}},
+		{[]string{"ref", "legacy"}, map[string]string{"ssh.username": "u", "ssh.password": "p"}},
+	} {
+		if got := collectorBundle.resolve(c.ids); !maps.Equal(got, c.want) {
+			t.Errorf("resolve(%v) = %v, want %v", c.ids, got, c.want)
+		}
+	}
+}
+
 // TestBundlePlaintextOnlyInMemory covers WP-147 (COL-02; WP-378): the
 // collector opens its bundle with the key from its keystore and runs a
 // discovery pass whose plugins receive the secrets, while the ingest is

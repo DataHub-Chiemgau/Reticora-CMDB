@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -97,9 +98,14 @@ type Credential struct {
 	RotatedAt *time.Time `json:"rotated_at"`
 	// MaxAgeDays is the age limit of the secret in days (1–3650); nil is
 	// none. WP-897 checks it.
-	MaxAgeDays *int      `json:"max_age_days"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	MaxAgeDays *int `json:"max_age_days"`
+	// Source is stored (an encrypted secret) or vault_ref (a reference
+	// into a vault connection, no secret; CRD-02, WP-894).
+	Source string `json:"source"`
+	// VaultRef is the reference of a vault_ref credential.
+	VaultRef  *VaultRef `json:"vault_ref,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // OrgDEK represents an organization's wrapped data encryption key.
@@ -126,6 +132,9 @@ type CreateRequest struct {
 	Scope          string `json:"scope,omitempty"`
 	// Secret is the plaintext credential data (JSON map).
 	Secret map[string]any `json:"secret"`
+	// VaultRef replaces Secret for a reference into a vault connection
+	// (WP-894); exactly one of them is sent.
+	VaultRef *VaultRef `json:"vault_ref,omitempty"`
 	// MaxAgeDays is the optional age limit of the secret (1–3650).
 	MaxAgeDays *int `json:"max_age_days,omitempty"`
 }
@@ -136,6 +145,9 @@ type MetadataUpdate struct {
 	Name       *string
 	MaxAgeDays *int
 	SetMaxAge  bool
+	// Ref changes the reference of a vault_ref credential (WP-894); any
+	// change raises secret_version.
+	Ref VaultRefUpdate
 }
 
 // SecretReplacer replaces the secret of a credential in one transaction
@@ -226,6 +238,12 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Credential, e
 	if !validKinds[req.Kind] {
 		return nil, ErrInvalidKind
 	}
+	if err := checkSource(&req); err != nil {
+		return nil, err
+	}
+	if req.VaultRef != nil {
+		return s.createVaultRef(ctx, &req)
+	}
 	if err := checkVaultLoginSecret(req.Kind, req.Secret); err != nil {
 		return nil, err
 	}
@@ -256,6 +274,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Credential, e
 			KeyVersion:     1,
 			SecretVersion:  1,
 			MaxAgeDays:     req.MaxAgeDays,
+			Source:         SourceStored,
 			CreatedAt:      now,
 			UpdatedAt:      now,
 		},
@@ -266,6 +285,33 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Credential, e
 		return nil, err
 	}
 
+	return &stored.Credential, nil
+}
+
+// createVaultRef stores a reference into a vault connection: no secret,
+// no DEK (WP-894).
+func (s *Service) createVaultRef(ctx context.Context, req *CreateRequest) (*Credential, error) {
+	if err := s.checkVaultRef(ctx, req.OrganizationID, req.Kind, req.ClientID, req.VaultRef); err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	stored := &StoredCredential{Credential: Credential{
+		OrganizationID: req.OrganizationID,
+		ClientID:       req.ClientID,
+		Name:           req.Name,
+		Kind:           req.Kind,
+		Scope:          req.Scope,
+		KeyVersion:     1,
+		SecretVersion:  1,
+		MaxAgeDays:     req.MaxAgeDays,
+		Source:         SourceVaultRef,
+		VaultRef:       req.VaultRef,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}}
+	if err := s.repo.Create(ctx, stored); err != nil {
+		return nil, err
+	}
 	return &stored.Credential, nil
 }
 
@@ -283,6 +329,10 @@ func (s *Service) Decrypt(ctx context.Context, orgID, id string) (map[string]any
 	stored, err := s.repo.Get(ctx, orgID, id)
 	if err != nil {
 		return nil, err
+	}
+	if stored.Source == SourceVaultRef {
+		// No plaintext of a reference exists on the server (AK4).
+		return nil, s.decryptVaultRef(ctx, orgID, stored)
 	}
 
 	dek, err := s.getDEK(ctx, orgID)
@@ -321,6 +371,9 @@ func (s *Service) ReplaceSecret(ctx context.Context, orgID, id string, secret ma
 	// A vault login keeps the members of its kind (WP-893); an unknown id
 	// is reported by the replacement.
 	if current, err := s.repo.Get(ctx, orgID, id); err == nil {
+		if current.Source == SourceVaultRef {
+			return nil, ErrVaultRefHasNoSecret
+		}
 		if loginErr := checkVaultLoginSecret(current.Kind, secret); loginErr != nil {
 			return nil, loginErr
 		}
@@ -340,6 +393,15 @@ func (s *Service) UpdateMetadata(ctx context.Context, orgID, id string, u Metada
 	updater, ok := s.repo.(MetadataUpdater)
 	if !ok {
 		return nil, ErrUnsupported
+	}
+	if u.Ref.Changes() {
+		current, err := s.repo.Get(ctx, orgID, id)
+		if err != nil {
+			return nil, err
+		}
+		if refErr := checkVaultRefUpdate(current, &u.Ref); refErr != nil {
+			return nil, refErr
+		}
 	}
 	return updater.UpdateMetadata(ctx, orgID, id, u)
 }
@@ -406,6 +468,9 @@ func (s *Service) RotateKeys(ctx context.Context, orgID string) (*RotationResult
 
 	// Re-encrypt every credential with the new DEK before committing the DEK
 	// swap, so a failure mid-rotation leaves the store untouched.
+	// A vault reference has no ciphertext (WP-894); Rotated counts the
+	// stored secrets only.
+	stored = slices.DeleteFunc(stored, func(c StoredCredential) bool { return c.Source == SourceVaultRef })
 	reEncrypted := make([]StoredCredential, len(stored))
 	for i := range stored {
 		cred := stored[i]

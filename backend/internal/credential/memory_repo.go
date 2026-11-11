@@ -170,6 +170,9 @@ func (r *MemoryRepository) ReplaceSecret(ctx context.Context, orgID, id string, 
 	if !ok || cred.OrganizationID != orgID {
 		return nil, ErrNotFound
 	}
+	if cred.Source == SourceVaultRef {
+		return nil, ErrVaultRefHasNoSecret
+	}
 	dekRow, ok := r.deks[orgID]
 	if !ok {
 		return nil, ErrNotFound
@@ -211,6 +214,21 @@ func (r *MemoryRepository) UpdateMetadata(_ context.Context, orgID, id string, u
 	}
 	if u.SetMaxAge {
 		cred.MaxAgeDays = u.MaxAgeDays
+	}
+	// A change of the reference raises secret_version (WP-894).
+	if u.Ref.Changes() && cred.VaultRef != nil {
+		ref := *cred.VaultRef
+		if u.Ref.Path != nil {
+			ref.Path = *u.Ref.Path
+		}
+		if u.Ref.SetVersion {
+			ref.Version = u.Ref.Version
+		}
+		if u.Ref.FieldMap != nil {
+			ref.FieldMap = u.Ref.FieldMap
+		}
+		cred.VaultRef = &ref
+		cred.SecretVersion++
 	}
 	cred.UpdatedAt = time.Now().UTC()
 	out := cred.Credential

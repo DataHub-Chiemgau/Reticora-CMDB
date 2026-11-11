@@ -119,9 +119,10 @@ var tableRules = map[string]tableRule{
 	"webhook_subscription": {Exclude: []string{"secret", "previous_secret", "headers"}},
 	"webhook_delivery":     {Exclude: []string{"payload", "response_body"}},
 	"notification_channel": {Exclude: []string{"config_ciphertext", "config_dek"}},
-	"credential":           {Exclude: []string{"ciphertext"}},
-	"iga_connector":        {Exclude: []string{"config"}},
-	"collector":            {Exclude: []string{"config"}},
+	// The reference of a vault_ref credential (WP-894) is named, not shown.
+	"credential":    {Exclude: []string{"ciphertext", "vault_path", "vault_version", "field_map"}},
+	"iga_connector": {Exclude: []string{"config"}},
+	"collector":     {Exclude: []string{"config"}},
 }
 
 // alwaysExcluded are bookkeeping columns of every table.

@@ -4508,7 +4508,7 @@ export interface paths {
     put?: never;
     /**
      * Create an encrypted credential
-     * @description Stores a credential whose secret is envelope-encrypted at rest. The owning organization is derived from the authenticated tenant; any `organization_id` in the request body is ignored. A missing or unknown `kind` is answered with 422 (`field` = `kind`); `nas` is the account of the NAS plugin (Synology DSM: username and password). `vault_approle` (role_id, secret_id) and `vault_token` (token) are the logins of vault connections (WP-893); a missing member is 422 (`field` = `secret`), and they are not bound to targets. Database refusals use the sanitized error contract (API-03): a value the store refuses (e.g. a `client_id` that is no UUID, a NUL byte) 400, an unknown `client_id` 422, a `client_id` outside the caller's client scope 403.
+     * @description Stores a credential whose secret is envelope-encrypted at rest. The owning organization is derived from the authenticated tenant; any `organization_id` in the request body is ignored. A missing or unknown `kind` is answered with 422 (`field` = `kind`); `nas` is the account of the NAS plugin (Synology DSM: username and password). `vault_approle` (role_id, secret_id) and `vault_token` (token) are the logins of vault connections (WP-893); a missing member is 422 (`field` = `secret`), and they are not bound to targets and only stored. Instead of `secret` a credential may carry `vault_ref` (WP-894): a vault connection of the credential's client or an org-wide one (else 422 `vault_ref.connection_id`), a path and a `field_map` covering the required fields of the kind (else 422 `field_map`); both or none is 422. Database refusals use the sanitized error contract (API-03): a value the store refuses (e.g. a `client_id` that is no UUID, a NUL byte) 400, an unknown `client_id` 422, a `client_id` outside the caller's client scope 403.
      */
     post: operations['createCredential'];
     delete?: never;
@@ -4543,7 +4543,7 @@ export interface paths {
     head?: never;
     /**
      * Change name and age limit of a credential
-     * @description Changes name and max_age_days (null removes the limit) with credential:manage (WP-889). kind, client_id, scope and secret cannot be changed (422 with the field); the secret is replaced with PUT /credentials/{id}/secret. An id that is no UUID is answered like an unknown one (404).
+     * @description Changes name and max_age_days (null removes the limit) with credential:manage (WP-889). kind, client_id, scope and secret cannot be changed (422 with the field); the secret is replaced with PUT /credentials/{id}/secret. A vault_ref credential changes vault_path, vault_version and field_map (WP-894); each such change raises secret_version, the audit names the fields without values. source and vault_ref cannot be changed. An id that is no UUID is answered like an unknown one (404).
      */
     patch: operations['updateCredential'];
     trace?: never;
@@ -4561,7 +4561,7 @@ export interface paths {
     get?: never;
     /**
      * Replace the secret of a credential
-     * @description CRD-05 (WP-889): encrypts the new secret with the current DEK, raises secret_version and sets rotated_at in one transaction under a lock of the DEK, and appends credential.rotated (source stored) as its last write. The answer carries the metadata, never the old or the new secret. Requires credential:manage. The id stays, so discovery scopes and connectors keep their reference.
+     * @description CRD-05 (WP-889): encrypts the new secret with the current DEK, raises secret_version and sets rotated_at in one transaction under a lock of the DEK, and appends credential.rotated (source stored) as its last write. The answer carries the metadata, never the old or the new secret. Requires credential:manage. The id stays, so discovery scopes and connectors keep their reference. A vault_ref credential has no stored secret: 409 (WP-894).
      */
     put: operations['replaceCredentialSecret'];
     post?: never;
@@ -10322,7 +10322,10 @@ export interface paths {
     get: operations['getVaultConnection'];
     put?: never;
     post?: never;
-    /** Delete a vault connection */
+    /**
+     * Delete a vault connection
+     * @description A connection credentials reference (vault_ref, WP-894) is not deleted (409).
+     */
     delete: operations['deleteVaultConnection'];
     options?: never;
     head?: never;
@@ -19699,6 +19702,12 @@ export interface components {
       rotated_at?: string | null;
       /** @description Age limit of the secret in days; null is none (checked by WP-897). */
       max_age_days?: number | null;
+      /**
+       * @description stored keeps the encrypted secret, vault_ref a reference into a vault connection without secret (CRD-02, WP-894).
+       * @enum {string}
+       */
+      source?: 'stored' | 'vault_ref';
+      vault_ref?: components['schemas']['CredentialVaultRef'];
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -19897,6 +19906,14 @@ export interface components {
       name?: string;
       /** @description Age limit in days; null removes it. */
       max_age_days?: number | null;
+      /** @description New path of a vault_ref credential; raises secret_version (WP-894). */
+      vault_path?: string;
+      /** @description Version of a vault_ref credential; null is the latest. Raises secret_version. */
+      vault_version?: number | null;
+      /** @description New field map of a vault_ref credential; raises secret_version. */
+      field_map?: {
+        [key: string]: string;
+      };
     };
     CredentialSecretReplace: {
       /** @description The new plaintext secret, encrypted at rest; never returned. */
@@ -19907,6 +19924,19 @@ export interface components {
     CredentialListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Credential'][];
     };
+    /** @description Reference into a vault connection (WP-894). field_map maps every required field of the kind (e.g. community for snmp_v2c) to a field of the vault entry. The values are never stored in Reticora. */
+    CredentialVaultRef: {
+      /** Format: uuid */
+      connection_id: string;
+      /** @description Path of the entry below the mount of the connection. */
+      path: string;
+      /** @description Version of the KV v2 entry; absent is the latest. */
+      version?: number;
+      field_map: {
+        [key: string]: string;
+      };
+    };
+    /** @description Exactly one of secret and vault_ref (WP-894); both or none is 422. */
     CreateCredentialRequest: {
       client_id?: string;
       name: string;
@@ -19926,9 +19956,10 @@ export interface components {
         | 'vault_token';
       scope?: string;
       /** @description Plaintext secret data, encrypted at rest before storage. */
-      secret: {
+      secret?: {
         [key: string]: unknown;
       };
+      vault_ref?: components['schemas']['CredentialVaultRef'];
       /** @description Optional age limit of the secret in days (WP-889). */
       max_age_days?: number;
     };
@@ -31590,7 +31621,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      /** @description A member that cannot be changed (kind, client_id, scope, secret), an unknown member, an empty name or max_age_days outside 1–3650 (`field`). */
+      /** @description A member that cannot be changed (kind, client_id, scope, secret, source, vault_ref), an unknown member, an empty name, max_age_days outside 1–3650, a reference member on a stored credential or an invalid one (`field`). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -31630,7 +31661,16 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      /** @description The secret is missing or empty (`field` secret). */
+      /** @description The credential is a vault reference (`field` secret). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The secret is missing or empty, or lacks the members of a vault login (`field` secret). */
       422: {
         headers: {
           [name: string]: unknown;
