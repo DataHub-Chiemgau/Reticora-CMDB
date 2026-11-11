@@ -149,7 +149,7 @@ func (h *Handler) addonChange(r *http.Request, orgID, key, action string,
 			return nil, err
 		}
 		data := events.EntitlementChangedData{ID: orgID, Plan: string(plan), Addon: key, Changed: []string{key}}
-		if emitErr := h.emitEntitlementChanged(ctx, orgID, &data); emitErr != nil {
+		if emitErr := emitEntitlementChanged(ctx, h.pool, orgID, &data); emitErr != nil {
 			return nil, emitErr
 		}
 		details := map[string]any{"remote": r.RemoteAddr, "feature_key": key, "after": after}

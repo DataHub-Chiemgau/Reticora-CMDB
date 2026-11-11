@@ -508,7 +508,7 @@ row: essential / standard / pro / enterprise `max_cis` 500 / 2,500 /
 50,000 / –; on `monitoring` from standard on `max_monitored_targets`
 500 / 5,000 / 25,000, `max_probes_per_minute` 1,000 / 10,000 / 30,000 and
 `min_probe_interval_s` 30 / 30 / 10 (– is unlimited, no entry). The trial
-stores the defaults of the trial plan (with its configured `max_cis`), the
+stores the defaults of the trial plan (with its configured `max_cis`; after the trial the system job `entitlement.trial_end` changes to the fallback plan with `ResetLimits`, recorded in `operator_audit` under the operator kind `system`, migration 000290, and once per trial through `notice_sent`), the
 operator creation (`POST /api/v1/admin/orgs`) the defaults unless
 `limits` passes a value. A quota only gates when it is stored: existing
 organizations keep their rows, so a quota without entry stays unlimited
@@ -1397,7 +1397,7 @@ The server is configured via environment variables:
 - `RETICORA_SMTP_HOST`, `RETICORA_SMTP_PORT` (587), `RETICORA_SMTP_USERNAME`, `RETICORA_SMTP_PASSWORD`, `RETICORA_SMTP_FROM`, `RETICORA_SMTP_TLS` (`starttls` default, `tls`, `none`; a user name needs `starttls` or `tls`, Go `net/smtp` sends no login unencrypted to a host other than `localhost`) — the central SMTP server of the installation (TEC-13): verification e-mails of the self-signup and the `central_smtp` notification channels, which send with the organization as sender name; DKIM and SPF are set up for the sender domain at the relay. Organizations of dedicated, on-premises and air-gapped installations configure their own server as an `smtp` channel; its credentials are stored encrypted (NTF-01).
 - `RETICORA_SIGNUP_CAPTCHA_KEY` — HMAC key (at least 32 characters, the same on every instance) that signs the self-hosted ALTCHA challenges of `GET /api/v1/signup/challenge` (E-33); without it each instance draws a random key, so challenges verify only where they were issued. Signups additionally pass the pre-auth limit, at most 5 signups per client IP in any hour (sliding window in the shared cache, so it holds across replicas; Retry-After names the time until the oldest of them leaves the hour) and the disposable-domain blocklist (`backend/internal/signup/disposable/`, updated monthly by the *Disposable domains* workflow).
 - `RETICORA_SIGNUP_BLOCKED_DOMAINS`, `RETICORA_SIGNUP_ALLOWED_DOMAINS` — comma-separated operator entries that extend the disposable-domain blocklist and allowlist; a domain covers its subdomains, the allowlist wins.
-- `RETICORA_TRIAL_PLAN`, `RETICORA_TRIAL_DAYS`, `RETICORA_TRIAL_MAX_CIS` — trial of a self-signed-up organization (ENT-07, defaults `standard`, `30`, `100`); features the `essential` plan lacks expire at the trial's end.
+- `RETICORA_TRIAL_PLAN`, `RETICORA_TRIAL_DAYS`, `RETICORA_TRIAL_MAX_CIS` — trial of a self-signed-up organization (ENT-07, defaults `standard`, `30`, `100`); features the `essential` plan lacks expire at the trial's end; the daily system job `entitlement.trial_end` then switches the organization to the fallback plan with its default limits (`max_cis` 500, E-157, WP-884), unless an operator changed the plan before.
 - `RETICORA_ENTITLEMENT_ENFORCEMENT` — Set to `false` to disable feature/limit enforcement (default `true`).
 - `RETICORA_SEARCH_BACKEND` — `postgres` (default) or `opensearch`.
 - `RETICORA_OPENSEARCH_URL`, `RETICORA_OPENSEARCH_USERNAME`, `RETICORA_OPENSEARCH_PASSWORD`, `RETICORA_OPENSEARCH_INDEX` — OpenSearch connection settings.

@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -76,30 +77,9 @@ func (h *Handler) ChangePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	op, _ := FromContext(r.Context())
-	var change entitlement.PlanChange
-	var entry *AuditEntry
-	err := h.audit.RecordChange(orgContext(r.Context(), orgID), orgID, func(ctx context.Context) (*AuditEntry, error) {
-		var changeErr error
-		change, changeErr = h.entitlements.ChangePlan(ctx, orgID, entitlement.Plan(req.Plan), entitlement.TransitionOptions{})
-		if changeErr != nil {
-			return nil, changeErr
-		}
-		details := map[string]any{"remote": r.RemoteAddr, "reason": req.Reason,
-			"before": map[string]any{"plan": change.From, "entitlements": change.Before},
-			"after":  map[string]any{"plan": change.To, "entitlements": change.Written}}
-		if change.Unchanged {
-			details["unchanged"] = true
-		} else {
-			details["changed"] = change.Changed
-			if emitErr := h.emitEntitlementChanged(ctx, orgID, &events.EntitlementChangedData{ID: orgID, Plan: string(change.To),
-				PlanBefore: string(change.From), Changed: change.Changed}); emitErr != nil {
-				return nil, emitErr
-			}
-		}
-		entry = &AuditEntry{OperatorID: op.ID, OperatorKind: op.Kind, Action: "plan.change",
-			TargetOrg: orgID, Status: http.StatusOK, Details: details}
-		return entry, nil
-	})
+	change, entry, err := changePlanAudited(orgContext(r.Context(), orgID), h.audit, h.entitlements, h.pool, orgID,
+		entitlement.Plan(req.Plan), entitlement.TransitionOptions{},
+		planChangeActor{ID: op.ID, Kind: op.Kind, Reason: req.Reason, Remote: r.RemoteAddr}, nil)
 	switch {
 	case errors.Is(err, ErrAuditFailed):
 		if entry == nil {
@@ -131,17 +111,67 @@ func (h *Handler) ChangePlan(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// planChangeActor names who changes a plan and why (audit entry).
+type planChangeActor struct {
+	ID, Kind, Reason, Remote string
+}
+
+// changePlanAudited changes the plan of the organization in one
+// transaction with its operator_audit entry plan.change (RecordChange; ctx
+// carries the organization's tenant scope): svc.ChangePlan, inTx (optional,
+// further writes of the caller in the same transaction), and, unless the
+// plan stayed, entitlement.changed as the last write. It returns the change
+// and the entry (nil when the change failed before it).
+func changePlanAudited(ctx context.Context, audit auditLog, svc *entitlement.Service, pool *pgxpool.Pool, orgID string,
+	to entitlement.Plan, opts entitlement.TransitionOptions, actor planChangeActor,
+	inTx func(ctx context.Context) error) (entitlement.PlanChange, *AuditEntry, error) {
+	var change entitlement.PlanChange
+	var entry *AuditEntry
+	err := audit.RecordChange(ctx, orgID, func(ctx context.Context) (*AuditEntry, error) {
+		var changeErr error
+		change, changeErr = svc.ChangePlan(ctx, orgID, to, opts)
+		if changeErr != nil {
+			return nil, changeErr
+		}
+		if inTx != nil {
+			if txErr := inTx(ctx); txErr != nil {
+				return nil, txErr
+			}
+		}
+		details := map[string]any{"reason": actor.Reason,
+			"before": map[string]any{"plan": change.From, "entitlements": change.Before},
+			"after":  map[string]any{"plan": change.To, "entitlements": change.Written}}
+		if actor.Remote != "" {
+			details["remote"] = actor.Remote
+		}
+		if change.Unchanged {
+			details["unchanged"] = true
+		} else {
+			details["changed"] = change.Changed
+			data := events.EntitlementChangedData{ID: orgID, Plan: string(change.To), PlanBefore: string(change.From),
+				Changed: change.Changed}
+			if emitErr := emitEntitlementChanged(ctx, pool, orgID, &data); emitErr != nil {
+				return nil, emitErr
+			}
+		}
+		entry = &AuditEntry{OperatorID: actor.ID, OperatorKind: actor.Kind, Action: "plan.change",
+			TargetOrg: orgID, Status: http.StatusOK, Details: details}
+		return entry, nil
+	})
+	return change, entry, err
+}
+
 // emitEntitlementChanged writes entitlement.changed into the outbox as the
 // last write of the transaction (database.BeforeCommit, Konvention 20),
 // organization-wide without scope; the entity is the organization.
-func (h *Handler) emitEntitlementChanged(ctx context.Context, orgID string, data *events.EntitlementChangedData) error {
-	if h.pool == nil {
+func emitEntitlementChanged(ctx context.Context, pool *pgxpool.Pool, orgID string, data *events.EntitlementChangedData) error {
+	if pool == nil {
 		return nil
 	}
 	if data.Changed == nil {
 		data.Changed = []string{}
 	}
-	return database.WithRequestTenant(ctx, h.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	return database.WithRequestTenant(ctx, pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		return database.BeforeCommit(ctx, func() error {
 			_, err := events.NewOutbox().Append(ctx, tx, &events.Event{OrgID: orgID, Type: events.EntitlementChanged,
 				EntityID: orgID, Data: *data})

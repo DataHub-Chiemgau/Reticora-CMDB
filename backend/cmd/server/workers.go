@@ -30,6 +30,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/operator"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
@@ -492,6 +493,11 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 		// collector certificates (COL-04), each notice once (WP-425).
 		systemJobs = append(systemJobs, jobs.NewEntitlementNotices(pool).Schedule(),
 			jobs.NewCertificateNotices(pool).Schedule())
+		// The trial end switches an ended trial to its fallback plan with the
+		// limits of that plan (ENT-07, E-157, WP-884).
+		if d.entitlements != nil {
+			systemJobs = append(systemJobs, operator.NewTrialEnd(pool, d.entitlements).Schedule())
+		}
 		// Route audit intents no response completed become audit entries
 		// with outcome unknown (AUD-07, WP-504).
 		systemJobs = append(systemJobs, routeIntentsJob(audit.NewPGRouteAuditor(pool)))

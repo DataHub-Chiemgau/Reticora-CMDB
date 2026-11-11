@@ -16,6 +16,9 @@ type TransitionOptions struct {
 	// default of the new plan, overrides included (internal, for the
 	// fallback plan after a trial, WP-884).
 	ResetLimits bool
+	// Source is the source of the rows the transition creates (default
+	// manual; the trial end uses selfsignup, WP-884).
+	Source string
 }
 
 // PlanTransition computes the rows a change of plan from → to writes
@@ -70,8 +73,12 @@ func PlanTransition(from, to Plan, rows []Entitlement, opts TransitionOptions) [
 				limits[quota] = value
 			}
 		}
+		source := opts.Source
+		if source == "" {
+			source = "manual"
+		}
 		out = append(out, Entitlement{FeatureKey: f, Plan: to, Enabled: true, Limits: limits,
-			Source: "manual", Origin: OriginPlan})
+			Source: source, Origin: OriginPlan})
 	}
 	slices.SortFunc(out, func(a, b Entitlement) int { return strings.Compare(a.FeatureKey, b.FeatureKey) })
 	return out
