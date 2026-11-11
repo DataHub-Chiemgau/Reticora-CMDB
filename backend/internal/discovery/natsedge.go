@@ -1374,6 +1374,65 @@ func (g *BundleGate) WithDeviceGroups(groups credential.DeviceGroupSource) *Bund
 	return g
 }
 
+// CollectorsWithCredentials implements credential.BundleCollectorSource
+// (WP-897): the collectors of the organization whose bundle
+// (BundleTarget.CredentialIDs, as VerifyBundleTarget computes it) holds one
+// of credentialIDs, in one organization-wide transaction. Only collectors
+// with an enabled scope have a bundle with credentials.
+func (g *BundleGate) CollectorsWithCredentials(ctx context.Context, orgID string, credentialIDs []string) ([]string, error) {
+	out := []string{}
+	if len(credentialIDs) == 0 {
+		return out, nil
+	}
+	scope := database.OrgWideScope(orgID, "")
+	err := database.WithTenant(ctx, g.authorizer.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT c.id::text, COALESCE(c.client_id::text, '') FROM collector c
+			WHERE c.organization_id = $1 AND EXISTS (SELECT 1 FROM discovery_scope s
+				WHERE s.organization_id = c.organization_id AND s.collector_id = c.id AND s.enabled)
+			ORDER BY c.id`, orgID)
+		if err != nil {
+			return err
+		}
+		type col struct{ id, client string }
+		var cols []col
+		for rows.Next() {
+			var c col
+			if err = rows.Scan(&c.id, &c.client); err != nil {
+				rows.Close()
+				return err
+			}
+			cols = append(cols, c)
+		}
+		rows.Close()
+		if rerr := rows.Err(); rerr != nil {
+			return rerr
+		}
+		for _, c := range cols {
+			target := &credential.BundleTarget{OrganizationID: orgID, CollectorID: c.id, ClientID: c.client}
+			perScope, qerr := scopeCredentials(ctx, tx, orgID, c.id)
+			if qerr != nil {
+				return qerr
+			}
+			for _, scoped := range perScope {
+				target.CredentialIDs = append(target.CredentialIDs, scoped...)
+			}
+			targets, rerr := credential.ResolveCollector(ctx, tx, orgID, c.id, c.client, g.groups)
+			if rerr != nil {
+				return rerr
+			}
+			target.AddTargets(targets)
+			for _, id := range credentialIDs {
+				if slices.Contains(target.CredentialIDs, id) {
+					out = append(out, c.id)
+					break
+				}
+			}
+		}
+		return nil
+	})
+	return out, err
+}
+
 // VerifyBundleTarget implements credential.CollectorVerifier: the
 // certificate must be the collector's own (subject of the request), issued
 // by the collector CA, not revoked, for a collector that is not disabled.

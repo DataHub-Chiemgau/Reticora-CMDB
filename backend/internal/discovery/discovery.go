@@ -1188,9 +1188,18 @@ type CollectorSpoolReport struct {
 	Backpressure   bool  `json:"backpressure"`
 }
 
+// CollectorVaultReport is the vault part of a collector heartbeat
+// (CRD-05, WP-897): the version changes of vault entries without a fixed
+// version the collector read since the last accepted heartbeat; it
+// acknowledges them after that heartbeat's 204.
+type CollectorVaultReport struct {
+	VersionChanges int64 `json:"version_changes"`
+}
+
 // CollectorHeartbeatRequest is the optional body of a collector heartbeat.
 type CollectorHeartbeatRequest struct {
 	Spool *CollectorSpoolReport `json:"spool,omitempty"`
+	Vault *CollectorVaultReport `json:"vault,omitempty"`
 }
 
 // Heartbeat handles POST /api/v1/collectors/{id}/heartbeat. The body is
@@ -1224,6 +1233,7 @@ func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	// (ENT-07).
 	w.Header().Set(CollectorStatusHeader, status)
 	recordSpoolReport(r.Context(), t.OrganizationID, id, req.Spool)
+	recordVaultReport(req.Vault)
 
 	w.WriteHeader(http.StatusNoContent)
 }

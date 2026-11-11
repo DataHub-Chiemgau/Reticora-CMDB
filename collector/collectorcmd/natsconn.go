@@ -352,7 +352,8 @@ func runNATSSession(ctx context.Context, cfg collectorConfig) (renewed bool) {
 		}
 	}()
 	// The credentials of the collector's scopes, encrypted for its key
-	// (COL-02).
+	// (COL-02); fetched again on the reload notices of the session
+	// (bundle.changed, WP-897).
 	syncBundle(sctx, nc, creds)
 	cancel()
 	wg.Wait()

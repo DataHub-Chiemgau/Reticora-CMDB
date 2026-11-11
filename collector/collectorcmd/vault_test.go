@@ -37,6 +37,9 @@ type testVault struct {
 	reads    int
 	logins   int
 	requests int
+	// version is the version of network/rotating (it holds the version
+	// as its value).
+	version int
 }
 
 func newTestVault(t *testing.T) (*testVault, *httptest.Server) {
@@ -75,13 +78,17 @@ func (v *testVault) serve(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusForbidden)
 			return
 		}
+		version := 1
 		data, ok := v.entries[path][1]
+		if path == "network/rotating" {
+			version, data, ok = v.version, map[string]any{"snmp_ro": fmt.Sprint("v", v.version)}, true
+		}
 		if !ok {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
 		v.reads++
-		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"data": data, "metadata": map[string]any{"version": 1}}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"data": data, "metadata": map[string]any{"version": version}}})
 	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	}
@@ -429,4 +436,53 @@ func TestVaultCacheFollowsBundle(t *testing.T) {
 		t.Fatalf("after the reference left: cache %d, clients %d", collectorVault.cache.Len(), len(collectorVault.clients))
 	}
 	_ = tv
+}
+
+// TestVaultVersionChangeCounted covers AK3 of WP-897: an entry without a
+// fixed version read again after its TTL in a new version counts once for
+// collector_vault_version_changes_total; the first read and a read of the
+// same version count nothing. The heartbeat reports the count until the
+// server accepted it.
+func TestVaultVersionChangeCounted(t *testing.T) {
+	useVaultResolver(t)
+	tv, srv := newTestVault(t)
+	tv.version = 1
+	collectorVault.cache = vault.NewCache(time.Nanosecond, nil)
+	previous := vaultVersionChanges.Swap(0)
+	t.Cleanup(func() { vaultVersionChanges.Store(previous) })
+	collectorBundle.set(&bundleContent{Credentials: []bundleCredential{
+		vaultLogin(testSecretID),
+		vaultRefCred("ref", "snmp_v2c", vaultConn(srv), "network/rotating", map[string]string{"community": "snmp_ro"}),
+	}})
+	ctx := context.Background()
+	for i, version := range []int{1, 1, 2} {
+		tv.mu.Lock()
+		tv.version = version
+		tv.mu.Unlock()
+		time.Sleep(time.Millisecond) // past the TTL
+		if out := collectorVault.resolveBundle(ctx, collectorBundle); out["ref"] != vaultResultOK {
+			t.Fatalf("read %d = %v", i, out)
+		}
+		if got := collectorBundle.resolve([]string{"ref"}); got["snmp.community"] != fmt.Sprint("v", version) {
+			t.Fatalf("read %d = %v", i, got)
+		}
+	}
+	if _, reads := tv.counts(); reads != 3 {
+		t.Fatalf("reads = %d, want 3 (one per expired TTL)", reads)
+	}
+	if n := vaultVersionChanges.Load(); n != 1 {
+		t.Fatalf("version changes = %d, want 1", n)
+	}
+	report := currentVaultReport()
+	raw, _ := json.Marshal(heartbeatBody{Vault: report})
+	if string(raw) != `{"vault":{"version_changes":1}}` {
+		t.Fatalf("heartbeat body = %s", raw)
+	}
+	report.ack()
+	if currentVaultReport() != nil {
+		t.Fatal("the acknowledged changes are reported again")
+	}
+	if raw, _ = json.Marshal(heartbeatBody{Vault: currentVaultReport()}); string(raw) != `{}` {
+		t.Fatalf("heartbeat body without changes = %s", raw)
+	}
 }

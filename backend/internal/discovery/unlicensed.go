@@ -67,6 +67,8 @@ func RegisterMetrics(reg prometheus.Registerer) {
 	reg.MustRegister(scopeRuns, discoveryErrors)
 	// Losses and backpressure reported by the collectors (NFR-04, F-234).
 	reg.MustRegister(collectorSpoolDropped, collectorSpoolBackpressure)
+	// Vault version changes reported by the collectors (CRD-05, WP-897).
+	reg.MustRegister(collectorVaultVersionChanges)
 	reg.MustRegister(ingestLanesGauge, laneBacklog, laneRecords, recordRetries, deadLetters, recordsRejected)
 }
 

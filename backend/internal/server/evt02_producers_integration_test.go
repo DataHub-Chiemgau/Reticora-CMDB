@@ -242,7 +242,7 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 		failingJob                         *jobs.Job
 		jobService                         *jobs.Service
 		warned, expired                    string
-		rotatedCredential                  string
+		rotatedCredential, agedCredential  string
 		hookServer                         *httptest.Server
 		hookSubscription, hookDelivery     string
 		hookDispatcher                     *webhook.Dispatcher
@@ -628,6 +628,43 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 				for _, v := range data {
 					if s, ok := v.(string); ok && strings.Contains(s, "evt02-") {
 						t.Errorf("credential.rotated carries a secret value: %v", data)
+					}
+				}
+			}},
+		{typ: events.CredentialRotationDue,
+			// credential.age_check (WP-897): a stored secret beyond its
+			// max_age_days, once per secret_version.
+			setup: func(t *testing.T) {
+				r := call(t, admin, http.MethodPost, "/api/v1/credentials",
+					`{"name":"evt02-aged","kind":"ssh_password","max_age_days":1,"secret":{"username":"u","password":"evt02-aged"}}`)
+				if r.Code != http.StatusCreated {
+					t.Fatalf("create credential: %d %s", r.Code, t6Short(r.Body))
+				}
+				var c struct {
+					ID string `json:"id"`
+				}
+				if err := json.Unmarshal(r.Body, &c); err != nil {
+					t.Fatal(err)
+				}
+				agedCredential = c.ID
+				exec(t, `UPDATE credential SET created_at = now() - interval '3 days' WHERE id = $1`, agedCredential)
+			},
+			act: func(t *testing.T, refused bool) string {
+				_, err := credential.NewAgeCheck(f.App).Run(bg)
+				failed(t, "credential age check", err, refused)
+				if refused {
+					unchanged(t, "notices sent", noticesSent(t, events.CredentialRotationDue, "credential/"+agedCredential), "0")
+				}
+				return agedCredential
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["credential_id"] != entity || data["max_age_days"] != float64(1) || data["secret_version"] != float64(1) ||
+					data["source"] != "stored" || data["due_at"] == nil {
+					t.Errorf("credential.rotation_due data %v", data)
+				}
+				for _, v := range data {
+					if s, ok := v.(string); ok && strings.Contains(s, "evt02-") {
+						t.Errorf("credential.rotation_due carries a secret value: %v", data)
 					}
 				}
 			}},
@@ -1258,7 +1295,6 @@ var plannedProducers = map[string]string{
 	"ipam.subnet.changed":           "WP-904",
 	"ipam.address.state_changed":    "WP-902",
 	"asn.changed":                   "WP-1066",
-	"credential.rotation_due":       "WP-897",
 	"credential.resolution_failed":  "WP-898",
 	"admp.connection.refreshed":     "WP-929",
 }

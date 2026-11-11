@@ -4335,13 +4335,18 @@
     "credential.rotation_due": {
       "description": "Data of credential.rotation_due. entity_id: the credential. Origin: EVT-03 [P3], CRD-05. Producer: WP-897. the credential and its client; never a secret.",
       "type": "object",
-      "required": ["id", "kind"],
+      "required": ["id", "credential_id", "kind"],
       "additionalProperties": true,
       "properties": {
         "id": {
           "type": "string",
           "format": "uuid",
           "description": "The credential."
+        },
+        "credential_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The credential (the same as id; WP-897)."
         },
         "client_id": {
           "type": "string",
@@ -4365,14 +4370,28 @@
           "type": "string",
           "enum": ["stored", "vault"],
           "description": "Where the secret lives: stored in Reticora or referenced in a vault (WP-889, WP-894)."
+        },
+        "max_age_days": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Age limit of the secret in days (WP-897)."
+        },
+        "due_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the secret reached its age limit: COALESCE(rotated_at, created_at) + max_age_days (WP-897)."
         }
       },
       "examples": [
         {
           "id": "11111111-1111-4111-8111-111111111111",
+          "credential_id": "11111111-1111-4111-8111-111111111111",
           "client_id": "33333333-3333-4333-8333-333333333333",
           "kind": "snmp_v3",
-          "reason": "vault_unreachable"
+          "secret_version": 2,
+          "source": "stored",
+          "max_age_days": 90,
+          "due_at": "2026-11-01T08:00:00Z"
         }
       ]
     },

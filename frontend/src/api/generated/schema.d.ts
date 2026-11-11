@@ -13195,6 +13195,12 @@ export interface components {
     };
     CollectorHeartbeatRequest: {
       spool?: components['schemas']['CollectorSpoolReport'];
+      vault?: components['schemas']['CollectorVaultReport'];
+    };
+    /** @description Vault version changes of a collector (CRD-05, WP-897): reads of a vault entry without a fixed version that returned a new version, not yet acknowledged; the collector reduces the count by the reported amount once the heartbeat was answered with 204. Reported changes raise reticora_collector_vault_version_changes_total. */
+    CollectorVaultReport: {
+      /** Format: int64 */
+      version_changes?: number;
     };
     /** @description Offline spool state of a collector. The dropped counters are the losses not yet acknowledged: the collector reduces them by the reported amounts once the heartbeat was answered with 204. Reported losses raise reticora_collector_spool_dropped_total (kind messages or samples), backpressure raises reticora_collector_spool_backpressure_total. */
     CollectorSpoolReport: {

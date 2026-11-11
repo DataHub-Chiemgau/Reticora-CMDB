@@ -432,7 +432,7 @@ func TestHeartbeatReportsSpoolBackpressureAndLoss(t *testing.T) {
 		t.Fatalf("expected ErrSpoolFull, got %v", err)
 	}
 
-	postHeartbeat(context.Background(), up.client, cfg, up.spoolReport(context.Background()))
+	postHeartbeat(context.Background(), up.client, cfg, up.spoolReport(context.Background()), nil)
 	if body.Spool == nil || body.Spool.Messages != 1 || !body.Spool.Backpressure || body.Spool.DroppedMessages != 1 {
 		t.Fatalf("heartbeat spool report = %+v", body.Spool)
 	}
@@ -509,11 +509,11 @@ func TestLicenseExpiryPausesDiscovery(t *testing.T) {
 	}
 
 	// The heartbeat keeps reporting the status; a renewed license resumes.
-	if status, ok := postHeartbeat(ctx, up.client, cfg, nil); status != "expired" || !ok {
+	if status, ok := postHeartbeat(ctx, up.client, cfg, nil, nil); status != "expired" || !ok {
 		t.Fatalf("heartbeat license status %q, accepted %v", status, ok)
 	}
 	license.Store("active")
-	status, _ := postHeartbeat(ctx, up.client, cfg, nil)
+	status, _ := postHeartbeat(ctx, up.client, cfg, nil, nil)
 	up.setLicenseStatus(status)
 	if up.paused.Load() {
 		t.Fatal("collector still paused after the license was renewed")

@@ -658,6 +658,25 @@ type CredentialEventData struct {
 	Source        string `json:"source,omitempty"`
 }
 
+// CredentialRotationDueData is the data of credential.rotation_due
+// (CRD-05, WP-897): a stored secret older than its age limit; never a
+// secret.
+type CredentialRotationDueData struct {
+	ID string `json:"id"`
+	// CredentialID is the credential as AK4 of WP-897 names it; the same
+	// value as ID, which every credential event carries.
+	CredentialID  string `json:"credential_id"`
+	ClientID      string `json:"client_id,omitempty"`
+	Kind          string `json:"kind"`
+	Reason        string `json:"reason,omitempty"`
+	SecretVersion int    `json:"secret_version,omitempty"`
+	Source        string `json:"source,omitempty"`
+	// MaxAgeDays is the age limit of the credential, DueAt the time the
+	// secret reached it (RFC 3339).
+	MaxAgeDays int    `json:"max_age_days,omitempty"`
+	DueAt      string `json:"due_at,omitempty"`
+}
+
 // ADMPConnectionRefreshedData is the data of admp.connection.refreshed
 // (ADM-03): the read-only copy of an ADMP connection was refreshed; never
 // the holder in plain text.
@@ -732,7 +751,7 @@ var Payloads = map[string]any{
 	IPAMAddressStateChanged:     AddressStateChangedData{},
 	ASNChanged:                  ASNChangedData{},
 	CredentialRotated:           CredentialEventData{},
-	CredentialRotationDue:       CredentialEventData{},
+	CredentialRotationDue:       CredentialRotationDueData{},
 	CredentialResolutionFailed:  CredentialEventData{},
 	ADMPConnectionRefreshed:     ADMPConnectionRefreshedData{},
 }

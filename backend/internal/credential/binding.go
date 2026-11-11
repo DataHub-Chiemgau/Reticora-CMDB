@@ -187,10 +187,26 @@ func (b *BindingService) Create(ctx context.Context, orgID string, in *Binding) 
 	if err := b.validate(ctx, orgID, in); err != nil {
 		return nil, err
 	}
-	if err := b.bindings.CreateBinding(ctx, in); err != nil {
+	// The collectors of the bound credential reload after the commit
+	// (WP-897).
+	if err := b.creds.notifyChange(ctx, orgID, func() []string { return []string{in.CredentialID} }, func() error {
+		return b.bindings.CreateBinding(ctx, in)
+	}); err != nil {
 		return nil, err
 	}
 	return in, nil
+}
+
+// Delete removes a binding; the collectors that held its credential
+// reload after the commit (WP-897).
+func (b *BindingService) Delete(ctx context.Context, orgID, id string) error {
+	current, err := b.bindings.GetBinding(ctx, orgID, id)
+	if err != nil {
+		return err
+	}
+	return b.creds.notifyChange(ctx, orgID, func() []string { return []string{current.CredentialID} }, func() error {
+		return b.bindings.DeleteBinding(ctx, orgID, id)
+	})
 }
 
 // Update changes namespace and priority.
@@ -209,7 +225,13 @@ func (b *BindingService) Update(ctx context.Context, orgID, id string, u Binding
 	if validErr := b.validate(ctx, orgID, &next); validErr != nil {
 		return nil, validErr
 	}
-	return b.bindings.UpdateBinding(ctx, orgID, id, BindingUpdate{Namespace: &next.Namespace, Priority: &next.Priority})
+	var out *Binding
+	err = b.creds.notifyChange(ctx, orgID, func() []string { return []string{current.CredentialID} }, func() error {
+		var uerr error
+		out, uerr = b.bindings.UpdateBinding(ctx, orgID, id, BindingUpdate{Namespace: &next.Namespace, Priority: &next.Priority})
+		return uerr
+	})
+	return out, err
 }
 
 // ReplaceCI replaces the bindings of a CI.
@@ -233,7 +255,25 @@ func (b *BindingService) ReplaceCI(ctx context.Context, orgID, ciID string, in [
 			return nil, err
 		}
 	}
-	return b.bindings.ReplaceCIBindings(ctx, orgID, ciID, in)
+	// The credentials bound to the CI before and after the replacement.
+	old, err := b.bindings.ListBindings(ctx, orgID, BindingFilter{TargetKind: TargetCI, TargetID: ciID})
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]string, 0, len(old)+len(in))
+	for i := range old {
+		ids = append(ids, old[i].CredentialID)
+	}
+	for i := range in {
+		ids = append(ids, in[i].CredentialID)
+	}
+	var out []Binding
+	err = b.creds.notifyChange(ctx, orgID, func() []string { return ids }, func() error {
+		var rerr error
+		out, rerr = b.bindings.ReplaceCIBindings(ctx, orgID, ciID, in)
+		return rerr
+	})
+	return out, err
 }
 
 // --- PostgreSQL -----------------------------------------------------------
@@ -708,7 +748,7 @@ func (h *Handler) deleteBinding(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := h.svc.Bindings().bindings.DeleteBinding(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {
+	if err := h.svc.Bindings().Delete(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {
 		writeBindingError(w, err)
 		return
 	}

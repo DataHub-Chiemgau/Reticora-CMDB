@@ -1376,9 +1376,11 @@ func runHeartbeatLoop(ctx context.Context, cfg collectorConfig, up *uploader, on
 // that fails reports the same losses again.
 func (u *uploader) heartbeat(ctx context.Context, cfg collectorConfig) (status string, ok bool) {
 	report := u.spoolReport(ctx)
-	status, ok = postHeartbeat(ctx, u.client, cfg, report)
+	vaultChanges := currentVaultReport()
+	status, ok = postHeartbeat(ctx, u.client, cfg, report, vaultChanges)
 	if ok {
 		u.ackLoss(ctx, report)
+		vaultChanges.ack()
 	}
 	return status, ok
 }
@@ -1416,6 +1418,9 @@ type spoolReport struct {
 
 type heartbeatBody struct {
 	Spool *spoolReport `json:"spool,omitempty"`
+	// Vault carries the vault version changes (WP-897); omitted while
+	// there are none.
+	Vault *vaultReport `json:"vault,omitempty"`
 }
 
 func (u *uploader) spoolReport(ctx context.Context) *spoolReport {
@@ -1460,8 +1465,8 @@ var heartbeatSkipLogged atomic.Bool
 // edge takes organization and collector from the certificate; the HTTP
 // path needs them in cfg. A refused heartbeat is an error with the reason
 // (collector.heartbeat.refused): the server does not see the collector.
-func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig, spool *spoolReport) (status string, ok bool) {
-	body, err := json.Marshal(heartbeatBody{Spool: spool})
+func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig, spool *spoolReport, vaultChanges *vaultReport) (status string, ok bool) {
+	body, err := json.Marshal(heartbeatBody{Spool: spool, Vault: vaultChanges})
 	if err != nil {
 		slog.Error("encode heartbeat failed", "error", err)
 		return "", false

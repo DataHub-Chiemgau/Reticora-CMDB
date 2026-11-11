@@ -7,6 +7,7 @@ import (
 	"maps"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -66,16 +67,63 @@ const vaultResultOK = "ok"
 type vaultResolver struct {
 	cache *vault.Cache
 
-	mu      sync.Mutex
-	clients map[string]*vaultClient         // by connection id
-	failed  map[vault.CacheKey]vaultFailure // failed reads until their retry
-	now     func() time.Time
+	mu       sync.Mutex
+	clients  map[string]*vaultClient         // by connection id
+	failed   map[vault.CacheKey]vaultFailure // failed reads until their retry
+	versions map[vaultEntry]int              // last version read of an entry without a fixed version
+	now      func() time.Time
 }
 
 // vaultFailure is a failed read and when it is tried again.
 type vaultFailure struct {
 	err   error
 	until time.Time
+}
+
+// vaultEntry is an entry of a connection, whatever login reads it.
+type vaultEntry struct{ connection, path string }
+
+// vaultVersionChanges counts for the metric
+// collector_vault_version_changes_total (WP-897) the reads of an entry
+// without a fixed version that returned another version than the read
+// before (a rotation in the vault). The collector has no metrics endpoint
+// of its own: the heartbeat reports the changes not yet acknowledged
+// (vaultReport), the server adds them to
+// reticora_collector_vault_version_changes_total.
+var vaultVersionChanges atomic.Int64
+
+// versionSeen counts a new version of an entry read after the TTL.
+func (r *vaultResolver) versionSeen(key vault.CacheKey, version int) {
+	entry := vaultEntry{connection: key.Connection, path: key.Path}
+	r.mu.Lock()
+	last, seen := r.versions[entry]
+	r.versions[entry] = version
+	r.mu.Unlock()
+	if seen && last != version {
+		vaultVersionChanges.Add(1)
+		slog.Info("vault value read in a new version", "connection_id", key.Connection, "path", key.Path, "version", version)
+	}
+}
+
+// vaultReport is the vault part of the heartbeat: the version changes not
+// yet acknowledged by an accepted heartbeat; nil while there are none, so
+// a server without the field still accepts the heartbeat.
+type vaultReport struct {
+	VersionChanges int64 `json:"version_changes"`
+}
+
+func currentVaultReport() *vaultReport {
+	if n := vaultVersionChanges.Load(); n > 0 {
+		return &vaultReport{VersionChanges: n}
+	}
+	return nil
+}
+
+// ack subtracts the reported changes once the server accepted them.
+func (v *vaultReport) ack() {
+	if v != nil && v.VersionChanges > 0 {
+		vaultVersionChanges.Add(-v.VersionChanges)
+	}
 }
 
 // vaultClient is the logged-in client of a connection and what it was
@@ -90,7 +138,7 @@ var collectorVault = newVaultResolver()
 
 func newVaultResolver() *vaultResolver {
 	return &vaultResolver{cache: vault.NewCache(vault.DefaultTTL, nil), clients: map[string]*vaultClient{},
-		failed: map[vault.CacheKey]vaultFailure{}, now: time.Now}
+		failed: map[vault.CacheKey]vaultFailure{}, versions: map[vaultEntry]int{}, now: time.Now}
 }
 
 // close drops the clients and overwrites the cached values (the collector
@@ -122,9 +170,11 @@ func (job *vaultRefJob) cacheKey() vault.CacheKey {
 func (r *vaultResolver) prune(jobs []vaultRefJob) {
 	live := make(map[vault.CacheKey]bool, len(jobs))
 	conns := map[string]bool{}
+	entries := map[vaultEntry]bool{}
 	for i := range jobs {
 		live[jobs[i].cacheKey()] = true
 		conns[jobs[i].ref.ConnectionID] = true
+		entries[vaultEntry{connection: jobs[i].ref.ConnectionID, path: jobs[i].ref.Path}] = true
 	}
 	r.cache.DeleteFunc(func(k vault.CacheKey) bool { return !live[k] })
 	r.cache.Sweep()
@@ -133,6 +183,11 @@ func (r *vaultResolver) prune(jobs []vaultRefJob) {
 	for k := range r.failed {
 		if !live[k] {
 			delete(r.failed, k)
+		}
+	}
+	for e := range r.versions {
+		if !entries[e] {
+			delete(r.versions, e)
 		}
 	}
 	for id, c := range r.clients {
@@ -335,6 +390,9 @@ func (r *vaultResolver) resolve(ctx context.Context, job *vaultRefJob, logins ma
 			return nil, err
 		}
 		r.cache.Put(key, secret)
+		if key.Version == 0 {
+			r.versionSeen(key, secret.Version)
+		}
 	}
 	return vault.MapFields(secret.Data, job.ref.FieldMap)
 }

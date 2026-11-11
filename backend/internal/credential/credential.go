@@ -214,6 +214,9 @@ type Service struct {
 	// vault resolves references of connections with resolve_at server
 	// (WP-896); nil: Decrypt answers ErrVaultNotConfigured for them.
 	vault *VaultResolver
+	// rotation notifies the collectors of changes and emits vault
+	// rotations (WP-897); nil notifies none.
+	rotation *Rotation
 }
 
 // NewService creates a new credential service.
@@ -389,7 +392,15 @@ func (s *Service) ReplaceSecret(ctx context.Context, orgID, id string, secret ma
 	if err != nil {
 		return nil, err
 	}
-	return replacer.ReplaceSecret(ctx, orgID, id, plaintext, s.encryptor, inTx)
+	// The collectors holding the credential reload their bundle after the
+	// commit (WP-897).
+	var out *Credential
+	err = s.notifyChange(ctx, orgID, func() []string { return []string{id} }, func() error {
+		var rerr error
+		out, rerr = replacer.ReplaceSecret(ctx, orgID, id, plaintext, s.encryptor, inTx)
+		return rerr
+	})
+	return out, err
 }
 
 // UpdateMetadata changes name and age limit (PATCH /credentials/{id}).
@@ -406,6 +417,15 @@ func (s *Service) UpdateMetadata(ctx context.Context, orgID, id string, u Metada
 		if refErr := checkVaultRefUpdate(current, &u.Ref); refErr != nil {
 			return nil, refErr
 		}
+		// A changed reference reaches the collectors with their next
+		// bundle, fetched after the commit (WP-897).
+		var out *Credential
+		err = s.notifyChange(ctx, orgID, func() []string { return []string{id} }, func() error {
+			var uerr error
+			out, uerr = updater.UpdateMetadata(ctx, orgID, id, u)
+			return uerr
+		})
+		return out, err
 	}
 	return updater.UpdateMetadata(ctx, orgID, id, u)
 }

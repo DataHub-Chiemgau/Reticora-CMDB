@@ -341,6 +341,7 @@ func (h *Handler) EdgeHeartbeat(ctx context.Context, orgID, collectorID string, 
 		return EdgeReply{Status: code, Error: err.Error()}
 	}
 	recordSpoolReport(ctx, orgID, collectorID, req.Spool)
+	recordVaultReport(req.Vault)
 	reply := EdgeReply{Status: http.StatusNoContent, CollectorStatus: status}
 	if state, _, lerr := h.edgeLicense(ctx, orgID); lerr == nil && state != LicenseNotEntitled {
 		reply.LicenseStatus = state

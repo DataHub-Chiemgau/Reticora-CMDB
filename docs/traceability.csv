@@ -1659,3 +1659,4 @@ CRD-04;[P3];G3;collector/collectorcmd/vault_test.go;WP-895
 CRD-03;[P3];G3;backend/internal/credential/vault_resolver_test.go;WP-896
 CRD-04;[P3];G3;backend/internal/credential/vault_resolver_test.go;WP-896
 COL-03;[P4];G3;backend/internal/credential/vault_resolver_test.go;WP-896
+CRD-05;[P3];G3;backend/internal/credential/rotation_integration_test.go;WP-897

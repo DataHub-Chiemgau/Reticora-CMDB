@@ -156,6 +156,38 @@ func TestHeartbeatSpoolLossMetrics(t *testing.T) {
 	}
 }
 
+// TestHeartbeatVaultVersionChanges covers AK3 of WP-897: the vault version
+// changes a collector reports with its heartbeat raise
+// reticora_collector_vault_version_changes_total, over the edge and over
+// HTTP; a refused heartbeat and negative values count nothing.
+func TestHeartbeatVaultVersionChanges(t *testing.T) {
+	repo := NewMemoryRepository()
+	h := NewHandler(repo, ci.NewMemoryRepository())
+	ctx := context.Background()
+	c := &Collector{OrganizationID: "org-1", Name: "rotating"}
+	if err := repo.RegisterCollector(ctx, c); err != nil {
+		t.Fatal(err)
+	}
+	mux := chi.NewRouter()
+	h.RegisterRoutes(mux)
+	report := []byte(`{"vault":{"version_changes":2}}`)
+	before := testutil.ToFloat64(collectorVaultVersionChanges)
+	if reply := h.EdgeHeartbeat(ctx, "org-1", c.ID, report); reply.Status != http.StatusNoContent {
+		t.Fatalf("edge heartbeat: %+v", reply)
+	}
+	req := tenantCtx(httptest.NewRequest(http.MethodPost, "/api/v1/collectors/"+c.ID+"/heartbeat", bytes.NewReader(report)))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("http heartbeat: %d %s", w.Code, w.Body.String())
+	}
+	h.EdgeHeartbeat(ctx, "org-1", "unknown", report)
+	h.EdgeHeartbeat(ctx, "org-1", c.ID, []byte(`{"vault":{"version_changes":-3}}`))
+	if got := testutil.ToFloat64(collectorVaultVersionChanges) - before; got != 4 {
+		t.Fatalf("reticora_collector_vault_version_changes_total rose by %v, want 4", got)
+	}
+}
+
 // scopeRecorder resolves every target to ci-<target> and records the
 // tenant scope the samples were assigned in.
 type scopeRecorder struct {

@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"math/rand/v2"
 	"net/netip"
 	"slices"
 	"strings"
@@ -439,7 +440,7 @@ func fetchBundle(ctx context.Context, nc *nats.Conn, creds *keystore.Credentials
 	if err != nil {
 		return nil, err
 	}
-	reqCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	reqCtx, cancel := context.WithTimeout(ctx, bundleFetchTimeout)
 	defer cancel()
 	msg, err := nc.RequestWithContext(reqCtx, subject+".credentials.request", req)
 	if err != nil {
@@ -461,10 +462,21 @@ func fetchBundle(ctx context.Context, nc *nats.Conn, creds *keystore.Credentials
 	return openBundle(resp.Bundle, creds.ClientPrivateKeyPEM)
 }
 
-// syncBundle keeps the in-memory credentials current while ctx lasts.
+// syncBundle keeps the in-memory credentials current while ctx lasts: it
+// fetches the bundle at the start of the session, every bundleRefresh and
+// after a reload notice of the server (bundle.changed, WP-897).
 func syncBundle(ctx context.Context, nc *nats.Conn, creds *keystore.Credentials) {
 	ticker := time.NewTicker(bundleRefresh)
 	defer ticker.Stop()
+	reload := newBundleReloader()
+	defer reload.stop()
+	if subject, err := collectorSubject(creds); err == nil {
+		if sub, serr := subscribeBundleChanged(nc, subject, reload); serr != nil {
+			slog.Warn("bundle reload notices not received; the bundle is fetched every "+bundleRefresh.String(), "error", serr)
+		} else {
+			defer func() { _ = sub.Unsubscribe() }()
+		}
+	}
 	for {
 		if fresh, err := fetchBundle(ctx, nc, creds); err != nil {
 			slog.Warn("credential bundle not updated", "error", err)
@@ -474,16 +486,17 @@ func syncBundle(ctx context.Context, nc *nats.Conn, creds *keystore.Credentials)
 			// The vault references of the bundle, in memory (WP-895).
 			collectorVault.resolveBundle(ctx, collectorBundle)
 		}
-		if !waitBundleRefresh(ctx, ticker.C) {
+		if !waitBundleRefresh(ctx, ticker.C, reload.ch) {
 			return
 		}
 	}
 }
 
-// waitBundleRefresh waits for the next fetch of the bundle and meanwhile
-// resolves the vault references whose values expired (checked every
-// vaultRefreshCheck); it reports false when ctx ended.
-func waitBundleRefresh(ctx context.Context, refresh <-chan time.Time) bool {
+// waitBundleRefresh waits for the next fetch of the bundle (the refresh
+// cycle or a reload notice) and meanwhile resolves the vault references
+// whose values expired (checked every vaultRefreshCheck); it reports false
+// when ctx ended.
+func waitBundleRefresh(ctx context.Context, refresh <-chan time.Time, reload <-chan struct{}) bool {
 	check := time.NewTicker(vaultRefreshCheck)
 	defer check.Stop()
 	for {
@@ -492,8 +505,82 @@ func waitBundleRefresh(ctx context.Context, refresh <-chan time.Time) bool {
 			return false
 		case <-refresh:
 			return true
+		case <-reload:
+			return true
 		case <-check.C:
 			collectorVault.resolveBundle(ctx, collectorBundle)
 		}
 	}
+}
+
+// Reload notices (CRD-05, WP-897): after a change of a secret, a reference
+// or a binding the server sends collector.<org>.<id>.bundle.changed to the
+// collectors whose bundle holds the credential. The collector fetches its
+// bundle after a random delay of up to bundleReloadJitter, so the
+// collectors of a large change do not ask at once; further notices within
+// the delay lead to the same single fetch. Commit to new bundle in memory
+// stays below 60 s: at most the delay plus bundleFetchTimeout. Without the
+// NATS connection the 15-minute cycle applies.
+
+// bundleChangedSuffix is the subject of the reload notice below the
+// collector's subject tree.
+const bundleChangedSuffix = ".bundle.changed"
+
+// bundleFetchTimeout bounds one bundle request.
+const bundleFetchTimeout = 30 * time.Second
+
+// bundleReloadJitter is the longest delay of a reload after a notice
+// (tests shorten it).
+var bundleReloadJitter = 20 * time.Second
+
+// bundleReloadDelay draws the delay of a reload, 0 to bundleReloadJitter
+// (tests replace it).
+var bundleReloadDelay = func() time.Duration {
+	if bundleReloadJitter <= 0 {
+		return 0
+	}
+	return rand.N(bundleReloadJitter + 1)
+}
+
+// bundleReloader coalesces the reload notices into one fetch per delay.
+type bundleReloader struct {
+	ch      chan struct{}
+	mu      sync.Mutex
+	pending *time.Timer
+}
+
+func newBundleReloader() *bundleReloader { return &bundleReloader{ch: make(chan struct{}, 1)} }
+
+// notify schedules a fetch after the random delay unless one is pending.
+func (r *bundleReloader) notify() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.pending != nil {
+		return
+	}
+	r.pending = time.AfterFunc(bundleReloadDelay(), func() {
+		r.mu.Lock()
+		r.pending = nil
+		r.mu.Unlock()
+		select {
+		case r.ch <- struct{}{}:
+		default: // a fetch is already due
+		}
+	})
+}
+
+// stop drops a pending fetch.
+func (r *bundleReloader) stop() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.pending != nil {
+		r.pending.Stop()
+		r.pending = nil
+	}
+}
+
+// subscribeBundleChanged subscribes the reload notices of the collector's
+// subject tree.
+func subscribeBundleChanged(nc *nats.Conn, subject string, reload *bundleReloader) (*nats.Subscription, error) {
+	return nc.Subscribe(subject+bundleChangedSuffix, func(*nats.Msg) { reload.notify() })
 }

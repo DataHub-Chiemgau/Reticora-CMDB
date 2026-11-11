@@ -4,7 +4,12 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	cryptorand "crypto/rand"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -17,6 +22,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/nats-io/nats.go"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/buffer"
@@ -508,5 +515,137 @@ func TestBundleCacheKeepsResolvedReferences(t *testing.T) {
 	collectorBundle.set(content("network/sw1", "rotated-secret-id"))
 	if got := collectorBundle.resolve([]string{"ref"}); len(got) != 0 {
 		t.Fatalf("a changed login kept the values: %v", got)
+	}
+}
+
+// bundleServer answers the bundle requests of the golden collector on a
+// NATS server like the platform and counts them; it returns the
+// collector's credentials (certificate of its subject tree), the
+// connection and the subject tree.
+func bundleServer(t *testing.T) (creds *keystore.Credentials, nc *nats.Conn, subject string, fetches func() int) {
+	t.Helper()
+	b, key := loadGoldenBundle(t)
+	org := fmt.Sprintf("org-%d", time.Now().UnixNano())
+	pub, err := ecdsa.GenerateKey(elliptic.P256(), cryptorand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert := newAuditPKI(t).issue(t, &pub.PublicKey, pkix.Name{Organization: []string{org}, CommonName: b.CollectorID},
+		time.Now().Add(-time.Hour), time.Now().Add(time.Hour), false)
+	creds = &keystore.Credentials{DeviceID: b.CollectorID, ClientCertificatePEM: cert, ClientPrivateKeyPEM: key}
+	if nc, err = nats.Connect(auditNATSURL(t), nats.Timeout(5*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(nc.Close)
+	subject = "collector." + org + "." + b.CollectorID
+	raw, err := json.Marshal(map[string]any{"bundle": b})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	count := 0
+	sub, err := nc.Subscribe(subject+".credentials.request", func(m *nats.Msg) {
+		mu.Lock()
+		count++
+		mu.Unlock()
+		_ = m.Respond(raw)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+	if err = nc.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	return creds, nc, subject, func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return count
+	}
+}
+
+// waitFor polls cond until it holds or the deadline passes.
+func waitFor(t *testing.T, within time.Duration, what string, cond func() bool) time.Duration {
+	t.Helper()
+	start := time.Now()
+	for !cond() {
+		if time.Since(start) > within {
+			t.Fatalf("%s not within %v", what, within)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return time.Since(start)
+}
+
+// TestBundleChangedTriggersReload covers AK2 of WP-897: the collector
+// subscribes bundle.changed in its session; two notices within the random
+// delay lead to one fetch of the bundle, a later notice to another.
+func TestBundleChangedTriggersReload(t *testing.T) {
+	t.Cleanup(func() { collectorBundle.set(nil) })
+	jitter := bundleReloadJitter
+	bundleReloadJitter = 300 * time.Millisecond
+	t.Cleanup(func() { bundleReloadJitter = jitter })
+	creds, nc, subject, fetches := bundleServer(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); syncBundle(ctx, nc, creds) }()
+	t.Cleanup(func() { cancel(); <-done })
+	waitFor(t, 5*time.Second, "the first fetch of the session", func() bool { return fetches() == 1 })
+	// The subscription is set up before the first fetch.
+	for range 2 {
+		if err := nc.Publish(subject+".bundle.changed", []byte(`{}`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := nc.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "the reload", func() bool { return fetches() >= 2 })
+	time.Sleep(2 * bundleReloadJitter)
+	if n := fetches(); n != 2 {
+		t.Fatalf("fetches after two notices = %d, want 2 (one reload)", n)
+	}
+	if err := nc.Publish(subject+".bundle.changed", []byte(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 5*time.Second, "the reload of a later notice", func() bool { return fetches() == 3 })
+	if got := collectorBundle.resolve([]string{"c1"}); got["snmp.community"] != "golden-community" {
+		t.Fatalf("the reloaded bundle is not in memory: %v", got)
+	}
+}
+
+// TestBundleChangedWithinSixtySeconds covers AK2 of WP-897: from the notice
+// to the new bundle in memory it takes at most the reload delay (0–20 s)
+// plus one bundle request (bounded by bundleFetchTimeout), below 60 s;
+// measured with the longest delay drawn, the reload lands within it.
+func TestBundleChangedWithinSixtySeconds(t *testing.T) {
+	if bundleReloadJitter+bundleFetchTimeout >= 60*time.Second {
+		t.Fatalf("reload delay %v plus fetch timeout %v reach 60 s", bundleReloadJitter, bundleFetchTimeout)
+	}
+	for range 100 {
+		if d := bundleReloadDelay(); d < 0 || d > bundleReloadJitter {
+			t.Fatalf("reload delay %v outside 0–%v", d, bundleReloadJitter)
+		}
+	}
+	t.Cleanup(func() { collectorBundle.set(nil) })
+	jitter, delay := bundleReloadJitter, bundleReloadDelay
+	bundleReloadJitter = 500 * time.Millisecond
+	bundleReloadDelay = func() time.Duration { return bundleReloadJitter } // the longest delay
+	t.Cleanup(func() { bundleReloadJitter, bundleReloadDelay = jitter, delay })
+	creds, nc, subject, fetches := bundleServer(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); syncBundle(ctx, nc, creds) }()
+	t.Cleanup(func() { cancel(); <-done })
+	waitFor(t, 5*time.Second, "the first fetch", func() bool { return fetches() == 1 })
+	collectorBundle.set(nil)
+	if err := nc.Publish(subject+".bundle.changed", []byte(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	took := waitFor(t, bundleReloadJitter+5*time.Second, "the new bundle in memory", func() bool {
+		return collectorBundle.resolve([]string{"c1"})["snmp.community"] == "golden-community"
+	})
+	if took < bundleReloadJitter-50*time.Millisecond {
+		t.Fatalf("the reload came after %v, before its delay of %v", took, bundleReloadJitter)
 	}
 }

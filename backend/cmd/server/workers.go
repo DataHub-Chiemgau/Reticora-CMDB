@@ -196,6 +196,14 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 			cycles.Check("database", d.pool.Ping)
 		}
 		gate := discovery.NewBundleGate(d.pool, d.collectorPKI)
+		// A change of a secret, a reference or a binding tells the
+		// collectors holding the credential to reload their bundle after
+		// the commit (bundle.changed); a vault value read in a new version
+		// emits credential.rotated (CRD-05, WP-897). Set before the routes
+		// serve: the service is the one of the API.
+		if d.pool != nil {
+			d.credentials.WithRotation(credential.NewRotation(d.pool, d.coreNATS, gate))
+		}
 		renewal := discovery.NewCertificateRenewal(d.pool, d.collectorPKI).WithCycles(cycles)
 		bundles := d.credentials.WithCycles(cycles)
 		workers = append(workers, server.Worker{Name: config.WorkerCredentialBundles, Run: serving(cycles, d.every(serviceCycle), func(ctx context.Context) {
@@ -398,6 +406,10 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 			return status == entitlement.StatusActive, serr
 		}
 		systemJobs = append(systemJobs, collectorStatus.Schedule())
+		// Credential age: daily each stored secret beyond its max_age_days
+		// once per secret_version as credential.rotation_due (CRD-05,
+		// WP-897).
+		systemJobs = append(systemJobs, credential.NewAgeCheck(pool).Schedule())
 		// SLA breaches: every minute each missed due time once as
 		// ticket.sla_breached, the escalation to assignee and team lead
 		// (TKT-01, WP-769); module ticketing, ticketing_standard only.
