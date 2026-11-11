@@ -560,15 +560,22 @@ func runPass(ctx context.Context, cfg *collectorConfig, up *uploader, pass *disc
 		targets := pass.targetsFor(protocol, hosts)
 		slog.Info("running discovery plugin", "protocol", protocol, "targets", len(targets))
 		creds := plugins.CredentialsFor(protocol, passCreds)
-		hits, err := plug.Probe(ctx, targets, creds)
-		var probeErrs *plugins.ProbeErrors
-		if errors.As(err, &probeErrs) {
+		// Per device: the target credentials of the bundle, otherwise the
+		// scope's (CRD-04, WP-892).
+		credsOf := func(ip string) map[string]string {
+			if collectorBundle.targetKey(pass.scope, ip, "") == "" {
+				return creds
+			}
+			return plugins.CredentialsFor(protocol, credentialsForTarget(cfg, pass.scope, ip, ""))
+		}
+		hits, probeErrs, failed, ok := probeByCredentials(ctx, protocol, plug, pass.scope, targets, creds, credsOf)
+		errs = append(errs, failed...)
+		if probeErrs != nil {
 			// Targets the probe could not check go with protocol, target
 			// and cause into the scope run (DIS-08).
 			errs = append(errs, probeTargetErrors(protocol, probeErrs)...)
-		} else if err != nil {
-			slog.Error("discovery plugin error", "event", "discovery.plugin.failed", "protocol", protocol, "error", err)
-			errs = append(errs, runError{Protocol: protocol, Cause: plugins.ErrorCause(err), Message: err.Error()})
+		}
+		if !ok {
 			continue
 		}
 		if pass.scope != nil && pass.scope.Kind == "host" && ctx.Err() == nil {
@@ -580,17 +587,96 @@ func runPass(ctx context.Context, cfg *collectorConfig, up *uploader, pass *disc
 			uploadSamples(ctx, up, reachabilitySamples(hosts.get(pass.key), reachable))
 			hosts.set(pass.key, reachable)
 		}
-		collected, failed := collectHits(ctx, protocol, plug, hits, creds)
-		errs = append(errs, failed...)
+		collected, collectFailed := collectHits(ctx, protocol, plug, hits, credsOf)
+		errs = append(errs, collectFailed...)
 		if protocol == "power" {
-			// UPS and PDU readings of the power devices (MON-02).
-			uploadSamples(ctx, up, pollPowerValues(ctx, hits, plugins.CredentialsFor("snmp", passCreds)))
+			// UPS and PDU readings of the power devices (MON-02), each
+			// with the SNMP credentials of its device.
+			uploadSamples(ctx, up, pollPowerByTarget(ctx, cfg, pass.scope, hits, plugins.CredentialsFor("snmp", passCreds)))
 		}
 		slog.Info("discovery plugin completed", "protocol", protocol, "probed", len(hits), "records", len(collected))
 		passRecords = append(passRecords, collected...)
 	}
 	tagRecords(passRecords, pass.scope)
 	return passRecords, errs
+}
+
+// probeByCredentials runs the probe of a protocol: the targets without a
+// target credential in one call with the scope's credentials (as before
+// WP-892), every group of targets with the same target credentials in a
+// call of its own with them (CRD-04). It returns the hits, the targets the
+// probe could not check, the run errors of failed calls and false when no
+// call succeeded.
+func probeByCredentials(ctx context.Context, protocol string, plug plugins.Plugin, scope *collectorScope, targets []string,
+	scopeCreds map[string]string, credsOf func(ip string) map[string]string) ([]plugins.Result, *plugins.ProbeErrors, []runError, bool) {
+	var plain []string
+	groups := map[string][]string{}
+	var keys []string
+	for _, tg := range targets {
+		key := collectorBundle.targetKey(scope, tg, "")
+		if key == "" {
+			plain = append(plain, tg)
+			continue
+		}
+		if _, seen := groups[key]; !seen {
+			keys = append(keys, key)
+		}
+		groups[key] = append(groups[key], tg)
+	}
+	type call struct {
+		targets []string
+		creds   map[string]string
+	}
+	var calls []call
+	switch {
+	case len(keys) == 0:
+		// No target credentials: the one call of before.
+		calls = append(calls, call{targets: targets, creds: scopeCreds})
+	case len(plain) > 0:
+		calls = append(calls, call{targets: plain, creds: scopeCreds})
+	}
+	for _, key := range keys {
+		group := groups[key]
+		slog.Info("probing targets with their own credentials", "protocol", protocol, "targets", len(group), "origin", "target")
+		calls = append(calls, call{targets: group, creds: credsOf(group[0])})
+	}
+	var hits []plugins.Result
+	var probeErrs *plugins.ProbeErrors
+	var failed []runError
+	ok := false
+	for _, c := range calls {
+		found, err := plug.Probe(ctx, c.targets, c.creds)
+		var pe *plugins.ProbeErrors
+		switch {
+		case errors.As(err, &pe):
+			if probeErrs == nil {
+				probeErrs = &plugins.ProbeErrors{}
+			}
+			probeErrs.Targets = append(probeErrs.Targets, pe.Targets...)
+		case err != nil:
+			slog.Error("discovery plugin error", "event", "discovery.plugin.failed", "protocol", protocol, "error", err)
+			failed = append(failed, runError{Protocol: protocol, Cause: plugins.ErrorCause(err), Message: err.Error()})
+			continue
+		}
+		ok = true
+		hits = append(hits, found...)
+	}
+	return hits, probeErrs, failed, ok
+}
+
+// pollPowerByTarget polls the UPS and PDU readings of the power hits, each
+// with the SNMP credentials of its device: the target credential of the
+// bundle, otherwise the scope's (CRD-04, WP-892).
+func pollPowerByTarget(ctx context.Context, cfg *collectorConfig, scope *collectorScope, hits []plugins.Result, scopeSNMP map[string]string) []plugins.MetricSample {
+	var samples []plugins.MetricSample
+	for i := range hits {
+		creds := scopeSNMP
+		if collectorBundle.targetKey(scope, hits[i].IP, "") != "" {
+			creds = plugins.CredentialsFor("snmp", credentialsForTarget(cfg, scope, hits[i].IP, ""))
+		}
+		samples = append(samples, pollPowerValues(ctx, hits[i:i+1], creds)...)
+	}
+	return samples
 }
 
 // probeTargetErrors returns the run errors of the targets a probe could not
@@ -704,10 +790,12 @@ func expandCIDR(subnet string) (targets []string, truncated bool) {
 const collectParallelism = 16
 
 // collectHits runs Collect for every target that answered the probe
-// (DIS-03) and returns its DeviceRecords and the targets whose collection
+// (DIS-03), each with the credentials credsOf returns for its address (nil:
+// none; WP-892: the target credentials of the bundle, otherwise the
+// scope's), and returns its DeviceRecords and the targets whose collection
 // failed (DIS-08). When Collect fails, the probe hit is reported instead,
 // so a reachable device is never lost.
-func collectHits(ctx context.Context, protocol string, plug plugins.Plugin, hits []plugins.Result, creds map[string]string) ([]plugins.DeviceRecord, []runError) {
+func collectHits(ctx context.Context, protocol string, plug plugins.Plugin, hits []plugins.Result, credsOf func(ip string) map[string]string) ([]plugins.DeviceRecord, []runError) {
 	out := make([]plugins.DeviceRecord, len(hits))
 	failures := make([]*runError, len(hits))
 	sem := make(chan struct{}, collectParallelism)
@@ -720,6 +808,10 @@ func collectHits(ctx context.Context, protocol string, plug plugins.Plugin, hits
 			defer wg.Done()
 			defer func() { <-sem }()
 			probedAt := time.Now()
+			var creds map[string]string
+			if credsOf != nil {
+				creds = credsOf(hit.IP)
+			}
 			rec, err := plug.Collect(ctx, hit.IP, creds)
 			if err != nil || rec == nil {
 				if err != nil {

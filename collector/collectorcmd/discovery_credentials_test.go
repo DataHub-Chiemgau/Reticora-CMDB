@@ -10,9 +10,11 @@ package collectorcmd
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"maps"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -109,7 +111,116 @@ func TestAuditPerScopeCredentials(t *testing.T) {
 	}
 }
 
+// TestDiscoveryUsesDeviceCredentials covers CRD-04 (WP-892): of two targets
+// of one scope, the one with its own SNMP community in the bundle's targets
+// is probed in a call of its own and collected with it, the other with the
+// scope's community; the SSH plugin keeps the scope's account for both
+// (namespace fallback). Both records are uploaded; no log line carries a
+// credential value, the lines name only namespace and origin.
+func TestDiscoveryUsesDeviceCredentials(t *testing.T) {
+	logs := &lockedBuffer{}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	record := func(_ context.Context, target string) (*plugins.DeviceRecord, error) {
+		return plugins.CollectRecord("snmp", &plugins.Result{CIType: "server", Name: "dev-" + target, IP: target}, nil, time.Now())
+	}
+	snmpSpy := &auditSpy{name: "snmp", alive: answerAll, collect: record}
+	sshSpy := &auditSpy{name: "ssh"}
+	auditUsePlugins(t, snmpSpy, sshSpy)
+	collectorBundle.set(&bundleContent{
+		Credentials: []bundleCredential{
+			{ID: "cred-scope", Kind: "snmp_v2c", Secret: map[string]any{"community": "scope-community"}},
+			{ID: "cred-ssh", Kind: "ssh_password", Secret: map[string]any{"username": "scope-user", "password": "scope-pass"}},
+			{ID: "cred-device", Kind: "snmp_v2c", Secret: map[string]any{"community": "device-community"}},
+		},
+		Targets: []bundleTarget{{CIID: "6f0b6f0e-0000-4000-8000-0000000000f2", ScopeID: "6f0b6f0e-0000-4000-8000-0000000000f1",
+			ManagementIP: "192.0.2.97", Namespace: "snmp",
+			CredentialID: "cred-device", Origin: "ci"}},
+	})
+	collectorScopes.set([]collectorScope{{ID: "6f0b6f0e-0000-4000-8000-0000000000f1", Kind: "cidr", Target: "192.0.2.96/31", Schedule: "24h",
+		CredentialIDs: []string{"cred-scope", "cred-ssh"}, Plugins: []string{"snmp", "ssh"}}}, nil)
+	up, uploaded := auditUploadSink(t)
+	if n := runDueDiscovery(context.Background(), &collectorConfig{}, up, newScheduler(), &hostCache{}, time.Now()); n != 2 {
+		t.Fatalf("records = %d, want one per target", n)
+	}
+
+	for target, want := range map[string]string{"192.0.2.96": "scope-community", "192.0.2.97": "device-community"} {
+		seen := snmpSpy.seen(target)
+		if len(seen) != 2 { // the probe and the collection
+			t.Errorf("%s: the snmp plugin saw %d calls, want probe and collect", target, len(seen))
+		}
+		for _, c := range seen {
+			if !maps.Equal(c, map[string]string{"community": want}) {
+				t.Errorf("%s: the snmp plugin received %v, want only the community %q", target, c, want)
+			}
+		}
+		for _, c := range sshSpy.seen(target) {
+			if !maps.Equal(c, map[string]string{"username": "scope-user", "password": "scope-pass"}) {
+				t.Errorf("%s: the ssh plugin received %v, want the scope's account", target, c)
+			}
+		}
+		if len(sshSpy.seen(target)) == 0 {
+			t.Errorf("%s: the ssh plugin was not run", target)
+		}
+	}
+	snmpSpy.mu.Lock()
+	probes := len(snmpSpy.counts)
+	snmpSpy.mu.Unlock()
+	if probes != 2 {
+		t.Errorf("snmp probe calls = %d, want two (the scope's targets and the device with its own community)", probes)
+	}
+	if len(uploaded()) != 2 {
+		t.Errorf("uploaded records = %d, want 2", len(uploaded()))
+	}
+	out := logs.String()
+	for _, secret := range []string{"scope-community", "device-community", "scope-pass", "scope-user"} {
+		if strings.Contains(out, secret) {
+			t.Errorf("the log carries the credential value %q", secret)
+		}
+	}
+	if !strings.Contains(out, "origin=target") {
+		t.Errorf("control: no log line names the origin target:\n%s", out)
+	}
+}
+
 // answerAll is a probe that finds every target.
+// TestDiscoveryHostScopeByNameUsesDeviceCredentials covers CRD-04
+// (WP-892): a host scope given by name whose CI has its own community in the
+// bundle is probed by name and collected by address, both with the device's
+// community, never the scope's.
+func TestDiscoveryHostScopeByNameUsesDeviceCredentials(t *testing.T) {
+	const scopeID = "6f0b6f0e-0000-4000-8000-0000000000f3"
+	snmpSpy := &auditSpy{name: "snmp",
+		alive: func([]string) []plugins.Result { return []plugins.Result{{IP: "192.0.2.150", Name: "printer"}} },
+		collect: func(_ context.Context, target string) (*plugins.DeviceRecord, error) {
+			return plugins.CollectRecord("snmp", &plugins.Result{CIType: "printer", Name: "printer", IP: target}, nil, time.Now())
+		}}
+	auditUsePlugins(t, snmpSpy)
+	collectorBundle.set(&bundleContent{
+		Credentials: []bundleCredential{
+			{ID: "cred-scope", Kind: "snmp_v2c", Secret: map[string]any{"community": "scope-community"}},
+			{ID: "cred-device", Kind: "snmp_v2c", Secret: map[string]any{"community": "device-community"}},
+		},
+		Targets: []bundleTarget{{CIID: "6f0b6f0e-0000-4000-8000-0000000000f4", ScopeID: scopeID, ManagementIP: "192.0.2.150",
+			Namespace: "snmp", CredentialID: "cred-device", Origin: "ci"}},
+	})
+	collectorScopes.set([]collectorScope{{ID: scopeID, Kind: "host", Target: "printer.example", Schedule: "24h",
+		CredentialIDs: []string{"cred-scope"}, Plugins: []string{"snmp"}}}, nil)
+	up, _ := auditUploadSink(t)
+	if n := runDueDiscovery(context.Background(), &collectorConfig{}, up, newScheduler(), &hostCache{}, time.Now()); n != 1 {
+		t.Fatalf("records = %d, want 1", n)
+	}
+	want := map[string]string{"community": "device-community"}
+	for _, target := range []string{"printer.example", "192.0.2.150"} { // probe by name, collection by address
+		seen := snmpSpy.seen(target)
+		if len(seen) != 1 || !maps.Equal(seen[0], want) {
+			t.Errorf("%s: the snmp plugin received %v, want once the device's community", target, seen)
+		}
+	}
+}
+
 func answerAll(targets []string) []plugins.Result {
 	out := make([]plugins.Result, 0, len(targets))
 	for _, tg := range targets {

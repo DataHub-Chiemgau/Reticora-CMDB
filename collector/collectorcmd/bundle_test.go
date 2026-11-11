@@ -252,3 +252,193 @@ func TestBundlePlaintextOnlyInMemory(t *testing.T) {
 		}
 	}
 }
+
+// deviceBundle is a format 2 bundle: the scope credentials scope-snmp and
+// scope-ssh and the target credentials of two devices (CRD-04, WP-892).
+func deviceBundle() *bundleContent {
+	return &bundleContent{
+		Credentials: []bundleCredential{
+			{ID: "scope-snmp", Kind: "snmp_v2c", Secret: map[string]any{"community": "scope-community"}},
+			{ID: "scope-ssh", Kind: "ssh_password", Secret: map[string]any{"username": "scope", "password": "scope-pass"}},
+			{ID: "dev-snmp", Kind: "snmp_v3", Secret: map[string]any{"username": "dev-v3", "auth_password": "dev-auth"}},
+			{ID: "dev-ssh", Kind: "ssh_key", Secret: map[string]any{"username": "dev", "private_key": "dev-key"}},
+		},
+		Targets: []bundleTarget{
+			{CIID: "ci-1", ScopeID: deviceScopeID, ManagementIP: "192.0.2.91", Namespace: "snmp", CredentialID: "dev-snmp", Origin: "ci"},
+			{CIID: "ci-2", ScopeID: deviceScopeID, ManagementIP: "192.0.2.92", Namespace: "ssh", CredentialID: "dev-ssh", Origin: "subnet"},
+			// A target whose credential is not in the bundle: the scope's.
+			{CIID: "ci-3", ScopeID: deviceScopeID, ManagementIP: "192.0.2.93", Namespace: "snmp", CredentialID: "missing", Origin: "ci"},
+		},
+	}
+}
+
+const deviceScopeID = "6f0b6f0e-0000-4000-8000-0000000000e1"
+
+var deviceScope = &collectorScope{ID: deviceScopeID, Kind: "cidr", Target: "192.0.2.0/24",
+	CredentialIDs: []string{"scope-snmp", "scope-ssh"}}
+
+// TestCredentialsForTargetOverridesScope covers CRD-04 AK1/AK2 (WP-892): a
+// device with a target credential gets it in place of the scope's for its
+// namespace, by management address and by CI id; the scope's other keys of
+// that namespace do not mix in; the pass without server scopes uses only
+// the local settings.
+func TestCredentialsForTargetOverridesScope(t *testing.T) {
+	collectorBundle.set(deviceBundle())
+	t.Cleanup(func() { collectorBundle.set(nil) })
+	cfg := collectorConfig{Credentials: map[string]string{"snmp.community": "local"}}
+	want := map[string]string{"snmp.username": "dev-v3", "snmp.auth_password": "dev-auth",
+		"ssh.username": "scope", "ssh.password": "scope-pass"}
+	if got := credentialsForTarget(&cfg, deviceScope, "192.0.2.91", ""); !maps.Equal(got, want) {
+		t.Errorf("by address: %v, want %v", got, want)
+	}
+	if got := credentialsForTarget(&cfg, deviceScope, "", "ci-1"); !maps.Equal(got, want) {
+		t.Errorf("by CI id: %v, want %v", got, want)
+	}
+	if got := credentialsForTarget(&cfg, nil, "192.0.2.91", "ci-1"); !maps.Equal(got, cfg.Credentials) {
+		t.Errorf("pass without server scopes: %v, want only the local settings", got)
+	}
+	// The scope's list stays as it is (credentialsFor unchanged).
+	if got := credentialsFor(&cfg, deviceScope); got["snmp.community"] != "scope-community" {
+		t.Errorf("credentialsFor = %v, want the scope's", got)
+	}
+}
+
+// TestCredentialsForTargetNamespaceFallback covers CRD-04 AK2 (WP-892):
+// namespaces without a target entry fall back to the scope's list; an SSH
+// target credential does not displace the scope's SNMP credential; a
+// device without entries and one whose target credential is missing from
+// the bundle resolve per scope.
+func TestCredentialsForTargetNamespaceFallback(t *testing.T) {
+	collectorBundle.set(deviceBundle())
+	t.Cleanup(func() { collectorBundle.set(nil) })
+	cfg := collectorConfig{}
+	scopeOnly := map[string]string{"snmp.community": "scope-community", "ssh.username": "scope", "ssh.password": "scope-pass"}
+	want := map[string]string{"snmp.community": "scope-community", "ssh.username": "dev", "ssh.private_key": "dev-key"}
+	if got := credentialsForTarget(&cfg, deviceScope, "192.0.2.92", ""); !maps.Equal(got, want) {
+		t.Errorf("SSH target: %v, want %v", got, want)
+	}
+	for _, ip := range []string{"192.0.2.10", "192.0.2.93"} {
+		if got := credentialsForTarget(&cfg, deviceScope, ip, ""); !maps.Equal(got, scopeOnly) {
+			t.Errorf("%s: %v, want the scope's %v", ip, got, scopeOnly)
+		}
+		if key := collectorBundle.targetKey(deviceScope, ip, ""); key != "" {
+			t.Errorf("%s: resolution key %q, want none", ip, key)
+		}
+	}
+	if a, b := collectorBundle.targetKey(deviceScope, "192.0.2.91", ""), collectorBundle.targetKey(deviceScope, "192.0.2.92", ""); a == "" || a == b {
+		t.Errorf("resolution keys %q and %q: want two different ones", a, b)
+	}
+}
+
+// TestBundleFormat1HasNoTargets covers CRD-04 AK1 (WP-892): a format 1
+// bundle (the golden bundle) gives empty target indexes, every device
+// resolves per scope; a format 2 bundle replaces the indexes in one step,
+// and an address named for two CIs is ambiguous and resolves per scope.
+func TestBundleFormat1HasNoTargets(t *testing.T) {
+	b, key := loadGoldenBundle(t)
+	content, err := openBundle(b, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Version != 1 || content.Targets != nil {
+		t.Fatalf("golden bundle: version %d, targets %v; want format 1 without targets", b.Version, content.Targets)
+	}
+	collectorBundle.set(deviceBundle())
+	t.Cleanup(func() { collectorBundle.set(nil) })
+	collectorBundle.set(content)
+	collectorBundle.mu.RLock()
+	scopes := len(collectorBundle.scopes)
+	collectorBundle.mu.RUnlock()
+	if scopes != 0 {
+		t.Fatalf("after a format 1 bundle the indexes hold targets of %d scopes, want none", scopes)
+	}
+	scope := &collectorScope{CredentialIDs: []string{"c1"}}
+	if got, want := credentialsForTarget(&collectorConfig{}, scope, "192.0.2.91", "ci-1"), credentialsFor(&collectorConfig{}, scope); !maps.Equal(got, want) {
+		t.Errorf("format 1: %v, want the scope's %v", got, want)
+	}
+
+	dup := deviceBundle()
+	dup.Targets = append(dup.Targets, bundleTarget{CIID: "ci-9", ScopeID: deviceScopeID, ManagementIP: "192.0.2.91", Namespace: "snmp", CredentialID: "dev-snmp", Origin: "ci"})
+	collectorBundle.set(dup)
+	if key := collectorBundle.targetKey(deviceScope, "192.0.2.91", ""); key != "" {
+		t.Errorf("an address of two CIs resolves to %q, want per scope", key)
+	}
+	if key := collectorBundle.targetKey(deviceScope, "", "ci-9"); key == "" {
+		t.Error("the CI id index lost ci-9")
+	}
+}
+
+// TestTargetCredentialsStayInTheirScope covers CRD-04 AK2 (WP-892): a
+// target applies only in the pass of the scope the server resolved it in.
+// Two scopes of different clients (and VRFs) hold the same address; the
+// device of client X has a CI binding, the one of client Y none: the pass
+// of client Y's scope uses its scope credentials, never client X's
+// community, by address and by CI id alike. A target without a scope
+// applies nowhere.
+func TestTargetCredentialsStayInTheirScope(t *testing.T) {
+	scopeX := &collectorScope{ID: "6f0b6f0e-0000-4000-8000-0000000000a1", Kind: "cidr", Target: "10.0.0.0/24", ClientID: "client-x",
+		VRFID: "vrf-x", CredentialIDs: []string{"x-scope"}}
+	scopeY := &collectorScope{ID: "6f0b6f0e-0000-4000-8000-0000000000a2", Kind: "cidr", Target: "10.0.0.0/24", ClientID: "client-y",
+		VRFID: "vrf-y", CredentialIDs: []string{"y-scope"}}
+	collectorBundle.set(&bundleContent{
+		Credentials: []bundleCredential{
+			{ID: "x-scope", Kind: "snmp_v2c", Secret: map[string]any{"community": "x-scope-community"}},
+			{ID: "y-scope", Kind: "snmp_v2c", Secret: map[string]any{"community": "y-scope-community"}},
+			{ID: "x-device", Kind: "snmp_v2c", Secret: map[string]any{"community": "x-device-community"}},
+		},
+		Targets: []bundleTarget{
+			{CIID: "ci-x", ScopeID: scopeX.ID, ManagementIP: "10.0.0.5", Namespace: "snmp", CredentialID: "x-device", Origin: "ci"},
+			{CIID: "ci-unscoped", ManagementIP: "10.0.0.6", Namespace: "snmp", CredentialID: "x-device", Origin: "ci"},
+		},
+	})
+	t.Cleanup(func() { collectorBundle.set(nil) })
+	cfg := &collectorConfig{}
+	if got := credentialsForTarget(cfg, scopeX, "10.0.0.5", ""); got["snmp.community"] != "x-device-community" {
+		t.Errorf("pass of scope X: %v, want the target credential of client X's device", got)
+	}
+	for _, c := range []struct{ ip, ci string }{{"10.0.0.5", ""}, {"10.0.0.5", "ci-x"}, {"10.0.0.6", "ci-unscoped"}} {
+		if got := credentialsForTarget(cfg, scopeY, c.ip, c.ci); !maps.Equal(got, map[string]string{"snmp.community": "y-scope-community"}) {
+			t.Errorf("pass of scope Y, %s/%q: %v, want only scope Y's community", c.ip, c.ci, got)
+		}
+		if key := collectorBundle.targetKey(scopeY, c.ip, c.ci); key != "" {
+			t.Errorf("pass of scope Y, %s/%q: resolution key %q, want none", c.ip, c.ci, key)
+		}
+	}
+	if got := credentialsForTarget(cfg, scopeX, "10.0.0.6", ""); got["snmp.community"] != "x-scope-community" {
+		t.Errorf("a target without a scope: %v, want the scope's credentials", got)
+	}
+}
+
+// TestHostScopeByNameUsesTargetCredential covers CRD-04 (WP-892): a host
+// scope given by name covers the CI the server matched by host name; its
+// targets apply to the name of the probe and to the address of the
+// collection alike. With two CIs (an ambiguous name) the scope's
+// credentials apply.
+func TestHostScopeByNameUsesTargetCredential(t *testing.T) {
+	scope := &collectorScope{ID: "6f0b6f0e-0000-4000-8000-0000000000b1", Kind: "host", Target: "printer.example",
+		CredentialIDs: []string{"scope-snmp"}}
+	content := &bundleContent{
+		Credentials: []bundleCredential{
+			{ID: "scope-snmp", Kind: "snmp_v2c", Secret: map[string]any{"community": "scope-community"}},
+			{ID: "dev-snmp", Kind: "snmp_v2c", Secret: map[string]any{"community": "device-community"}},
+		},
+		Targets: []bundleTarget{{CIID: "ci-printer", ScopeID: scope.ID, ManagementIP: "192.0.2.150", Namespace: "snmp",
+			CredentialID: "dev-snmp", Origin: "ci"}},
+	}
+	collectorBundle.set(content)
+	t.Cleanup(func() { collectorBundle.set(nil) })
+	for _, target := range []string{"printer.example", "192.0.2.150", "192.0.2.151"} {
+		if got := credentialsForTarget(&collectorConfig{}, scope, target, ""); got["snmp.community"] != "device-community" {
+			t.Errorf("%s: %v, want the device's community", target, got)
+		}
+	}
+	if a, b := collectorBundle.targetKey(scope, "printer.example", ""), collectorBundle.targetKey(scope, "192.0.2.150", ""); a == "" || a != b {
+		t.Errorf("resolution keys of name %q and address %q: want the same, non-empty", a, b)
+	}
+	content.Targets = append(content.Targets, bundleTarget{CIID: "ci-other", ScopeID: scope.ID, ManagementIP: "192.0.2.151",
+		Namespace: "snmp", CredentialID: "dev-snmp", Origin: "ci"})
+	collectorBundle.set(content)
+	if got := credentialsForTarget(&collectorConfig{}, scope, "printer.example", ""); got["snmp.community"] != "scope-community" {
+		t.Errorf("ambiguous name: %v, want the scope's community", got)
+	}
+}
