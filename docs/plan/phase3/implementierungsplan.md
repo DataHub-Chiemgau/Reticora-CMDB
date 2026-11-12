@@ -2770,7 +2770,7 @@ IPM-01;[P3];G3;backend/internal/ipam/section_integration_test.go;WP-900
 IPM-02;[P3];G3;backend/internal/ipam/hierarchy_integration_test.go;WP-901
 ```
 
-**Entscheidungsbedarf:** [E-210](entscheidungen.md#e-210) Speicherung der Subnetzhierarchie (entschieden 2026-11-09, Option 1; `parent_id` gespeichert und im Schreibpfad unter Advisory-Lock je (Org, VRF) berechnet)
+**Entscheidungsbedarf:** [E-210](entscheidungen.md#e-210) Speicherung der Subnetzhierarchie (entschieden 2026-11-09, Option 1; `parent_id` gespeichert und im Schreibpfad unter Advisory-Lock je (Org, VRF) berechnet); [E-247](entscheidungen.md#e-247) Bedeutung von „Überlappung“ und strict_mode (entschieden 2026-11-12 durch den Auftraggeber, Option 1: echte Schachtelung erlaubt, Überlappung = doppelt genutzter Adressbereich)
 
 **Nicht Bestandteil:** Zuordnung von Adressen zum engsten Subnetz in WP-912 (`p3-ipam-auto-subnet`), Belegung und Freiraum in WP-903 (`p3-ipam-usage`), Lastszenario `subnets_tree` in `tests/load/api.js` in WP-909 (`p3-ipam-search-filter`), Baumansicht in WP-915 (`p3-ipam-ui-tree`).
 

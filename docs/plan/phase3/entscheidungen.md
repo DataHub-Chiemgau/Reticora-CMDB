@@ -4,7 +4,7 @@ Stand: 2026-11-09 (Grundlage main `6d019370`; Anforderungen des Auftraggebers vo
 
 **Geltung der früheren Entscheidungen:** Alle Entscheidungen der Phase 1, des Korrekturplans und der Phase 2 sind entschieden (Beschluss des Auftraggebers vom 2026-10-28) und gelten in Phase 3 unverändert weiter. Diese Datei ändert keine von ihnen. Wo eine Phase-3-Entscheidung eine frühere ergänzt oder einschränkt (zum Beispiel [E-34](../entscheidungen.md#e-34) durch [E-151](#e-151) und [E-153](#e-153), [E-44](../phase2/entscheidungen.md#e-44) durch [E-153](#e-153) und [E-157](#e-157)), nennt sie die frühere ausdrücklich; ohne diese Nennung gilt die frühere Festlegung. Zitiert wird mit relativem Link, der Korrekturplan mit dem Zusatz „(Korrekturplan)“, zum Beispiel [E-59](../g1-korrektur/entscheidungen.md#e-59) (Korrekturplan). Alle Aufgaben A-01 bis A-53 sind erledigt (A-28 am 2026-11-09 mit WP-832).
 
-**Nummern:** E-Nummern sind über alle vier Entscheidungsdateien eindeutig. Phase 1 belegt E-01 bis E-36 und E-56 bis E-58, der Korrekturplan E-59 bis E-102 und E-144, Phase 2 E-37 bis E-55, E-103 bis E-143 und E-145 bis E-147. Diese Datei führt E-148 bis E-244. A-Nummern sind über die Dateien der Phasen 1 bis 3 eindeutig: Phase 1 belegt A-01 bis A-14, Phase 2 A-15 bis A-54, diese Datei A-55 bis A-84. Neue Entscheidungen erhalten die nächste freie Nummer über alle vier Dateien, neue Aufgaben die nächste freie Nummer über die Dateien der Phasen 1 bis 3 (Stand dieser Fassung: **E-247** und **A-86**; E-245 und E-246 vom 2026-11-10 nach Empfehlung, A-85 offen). **Nachtrag vom 2026-11-10:** Phase 2 hat am 2026-11-09 E-146, E-147 und A-54 selbst vergeben. Die Nummern dieser Datei sind deshalb um zwei (E) bzw. eins (A) verschoben; Inhalt und Status bleiben gleich.
+**Nummern:** E-Nummern sind über alle vier Entscheidungsdateien eindeutig. Phase 1 belegt E-01 bis E-36 und E-56 bis E-58, der Korrekturplan E-59 bis E-102 und E-144, Phase 2 E-37 bis E-55, E-103 bis E-143 und E-145 bis E-147. Diese Datei führt E-148 bis E-244. A-Nummern sind über die Dateien der Phasen 1 bis 3 eindeutig: Phase 1 belegt A-01 bis A-14, Phase 2 A-15 bis A-54, diese Datei A-55 bis A-84. Neue Entscheidungen erhalten die nächste freie Nummer über alle vier Dateien, neue Aufgaben die nächste freie Nummer über die Dateien der Phasen 1 bis 3 (Stand dieser Fassung: **E-248** und **A-86**; E-245 und E-246 vom 2026-11-10 nach Empfehlung, E-247 vom 2026-11-12 durch den Auftraggeber, A-85 offen). **Nachtrag vom 2026-11-10:** Phase 2 hat am 2026-11-09 E-146, E-147 und A-54 selbst vergeben. Die Nummern dieser Datei sind deshalb um zwei (E) bzw. eins (A) verschoben; Inhalt und Status bleiben gleich.
 
 **Status:** Alle Entscheidungen dieser Datei sind am 2026-11-09 entschieden. Jede nennt Schlüssel, Status, Kontext, Optionen, Empfehlung, Auswirkung, Quelle sowie betroffene IDs und WPs. Die WP-Blöcke des Plans nennen den Status im Feld „Entscheidungsbedarf“.
 
@@ -2558,3 +2558,23 @@ Mengengerüst (aus [E-222](#e-222)/[E-225](#e-225)): Mit gezielter Auffrischung 
 **Betroffene IDs:** SEC-11 [Q]
 
 **Betroffene WPs:** WP-873 (`p3-sr60-thirdparty-pins`), Folge-WP nach E-246
+
+<a id="e-247"></a>
+## E-247 – Bedeutung von „Überlappung“ und strict_mode in der Subnetzhierarchie (IPM-02)
+
+**Status:** entschieden (2026-11-12, Auftraggeber: Option 1)
+**Kontext:** AK3 von WP-901 und IPM-02 nennen „Überlappung ohne echtes Enthaltensein“ als Fall für 409 in Sections mit `strict_mode`. Zwei CIDR-Präfixe können sich aber nur überschneiden, wenn eines das andere enthält; wörtlich genommen greift die Regel nie. Die erste Umsetzung behandelte jede Schachtelung außerhalb eines Pools als Überlappung und machte damit Master/Nested-Hierarchien in strikten Sections unmöglich.
+**Optionen:**
+
+1. Echte Schachtelung ist in jeder Section erlaubt und ohne Warnung. Als Überlappung gilt ein doppelt genutzter Adressbereich: ein Elternsubnetz, das kein Pool ist, hält eigene Adressen innerhalb eines Kindes, oder ein Subnetz hält eigene Adressen innerhalb eines seiner Kinder (`subnet_overlap_partners`). In einer strikten Section ergibt das 409 `cidr`, sonst eine Warnung `overlap`. Kinder eines Pools sind immer zulässig; ein Subnetz mit Adressen wird kein Pool (409 `is_pool`).
+2. Jede Schachtelung außerhalb von Pools ist Überlappung. Folge: keine Master/Nested-Hierarchie in strikten Sections.
+
+**Empfehlung:** Option 1.
+
+**Auswirkung:** WP-901 setzt Option 1 um (Migration 000300, `hierarchy.go`). Die Klasse „schneidet“ entfällt in AK6 (`Relation` kennt disjoint, equal, contains, within). Die Prüfung läuft beim Schreiben eines Subnetzes (cidr, vrf, is_pool, Section); eine spätere Adresse im Elternsubnetz prüft sie nicht.
+
+**Quelle:** Rückmeldung des Auftraggebers vom 2026-11-12; backend/internal/ipam/hierarchy.go
+
+**Betroffene IDs:** IPM-02
+
+**Betroffene WPs:** WP-901 (`p3-ipam-hierarchy`)
