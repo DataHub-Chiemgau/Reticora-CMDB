@@ -1,10 +1,12 @@
 // Package probe holds the monitoring probe definitions of phase 3 (PRB-01,
 // PRB-03, Epic E): probes, monitoring groups (the device groups of PRB-01
 // and CRD-04, E-178), monitoring profiles with the overrides per level,
-// collector groups with their members and the probe assignments.
+// collector groups with their members and the probe assignments, and the
+// probe state with its history and the ingest cursor (PRB-05, PRB-07).
 //
-// The tables come with the migrations 000307_probe_definition (WP-935) and
-// 000308_collector_group (WP-936); the repository, the resolution of the
+// The tables come with the migrations 000307_probe_definition (WP-935),
+// 000308_collector_group (WP-936) and 000311_probe_state (WP-944, number
+// provisional); the repository, the resolution of the
 // effective values (WP-937), the assignment engine (WP-941) and the REST API
 // (WP-939, WP-946, WP-947) build on these types.
 package probe
@@ -191,4 +193,92 @@ type Assignment struct {
 	CollectorID    string    `json:"collector_id"`
 	Epoch          int64     `json:"epoch"`
 	AssignedAt     time.Time `json:"assigned_at"`
+}
+
+// States of a probe (PRB-05, Konvention 32); the reason tells why, e.g.
+// collector_unreachable or parent_down. Unreachable is no state.
+const (
+	StateUp       = "up"
+	StateDegraded = "degraded"
+	StateDown     = "down"
+	StateUnknown  = "unknown"
+)
+
+// States lists the probe states.
+var States = []string{StateUp, StateDegraded, StateDown, StateUnknown}
+
+// ValidState reports whether s is a probe state.
+func ValidState(s string) bool {
+	for _, v := range States {
+		if s == v {
+			return true
+		}
+	}
+	return false
+}
+
+// State is the current state of a probe (table probe_state, WP-944).
+// Client and site are the probe's. LastSeq and Epoch are those of the last
+// applied state change; CollectorID is the collector that reported it.
+type State struct {
+	ProbeID         string     `json:"probe_id"`
+	OrganizationID  string     `json:"organization_id"`
+	ClientID        string     `json:"client_id,omitempty"`
+	SiteID          string     `json:"site_id,omitempty"`
+	State           string     `json:"state"`
+	Reason          string     `json:"reason"`
+	Since           time.Time  `json:"since"`
+	LastResultAt    *time.Time `json:"last_result_at,omitempty"`
+	LastSeq         int64      `json:"last_seq"`
+	Epoch           int64      `json:"epoch"`
+	CollectorID     string     `json:"collector_id,omitempty"`
+	ConsecutiveFail int        `json:"consecutive_fail"`
+	ConsecutiveOK   int        `json:"consecutive_ok"`
+	UpdatedAt       time.Time  `json:"updated_at"`
+}
+
+// StateChange is one state change of a probe (table probe_state_change,
+// PRB-05, PRB-07). ObservedAt is the business time on the collector
+// (E-175), ReceivedAt the arrival on the server. (ProbeID, CollectorID,
+// Epoch, Seq) is the idempotency key. Late marks a change delivered after
+// the state had already ended, Notify whether it may notify (E-180); the
+// ingest of WP-961 sets both. Client, site and (when empty) the CI are the
+// probe's.
+type StateChange struct {
+	ID             string    `json:"id"`
+	OrganizationID string    `json:"organization_id"`
+	ClientID       string    `json:"client_id,omitempty"`
+	SiteID         string    `json:"site_id,omitempty"`
+	ProbeID        string    `json:"probe_id"`
+	CIID           string    `json:"ci_id,omitempty"`
+	FromState      string    `json:"from_state"`
+	ToState        string    `json:"to_state"`
+	Reason         string    `json:"reason"`
+	ObservedAt     time.Time `json:"observed_at"`
+	ReceivedAt     time.Time `json:"received_at"`
+	Epoch          int64     `json:"epoch"`
+	Seq            int64     `json:"seq"`
+	CollectorID    string    `json:"collector_id,omitempty"`
+	Late           bool      `json:"late"`
+	Notify         bool      `json:"notify"`
+	RootEventID    string    `json:"root_event_id,omitempty"`
+}
+
+// Streams of the ingest cursor: state changes and results.
+const (
+	StreamState   = "state"
+	StreamResults = "results"
+)
+
+// IngestCursor is the position of the ingest per collector and stream
+// (table probe_ingest_cursor): the epoch and the last applied sequence
+// number. No API route reads it; the ingest worker finds cursors across
+// organizations with the system flag (read only).
+type IngestCursor struct {
+	OrganizationID string    `json:"organization_id"`
+	CollectorID    string    `json:"collector_id"`
+	Stream         string    `json:"stream"`
+	Epoch          int64     `json:"epoch"`
+	LastSeq        int64     `json:"last_seq"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }

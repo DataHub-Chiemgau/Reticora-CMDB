@@ -1704,3 +1704,5 @@ ADM-05;[P3];E;backend/internal/admp/sync_integration_test.go;WP-1074
 PRB-01;[P3];E;backend/internal/probe/effective_integration_test.go;WP-937
 PRB-01;[P3];E;backend/internal/server/monitoring_contract_test.go;WP-938
 PRB-03;[P3];E;backend/internal/server/monitoring_contract_test.go;WP-938
+PRB-05;[P3];E;backend/internal/probe/state_schema_integration_test.go;WP-944
+PRB-07;[P3];E;backend/internal/probe/state_schema_integration_test.go;WP-944

@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000310_admp_service_shred
+Stand: Migration 000311_probe_state
 
 ## Prüfung
 
@@ -2013,6 +2013,9 @@ SECURITY`), Policies mit ihrem Kommando.
 | `privacy_retention_policy` | ja | ja | privacy_retention_isolation (ALL) |
 | `probe` | ja | ja | probe_isolation (ALL), probe_scoped_delete (DELETE), probe_scoped_update (UPDATE) |
 | `probe_assignment` | ja | ja | probe_assignment_isolation (ALL), probe_assignment_scoped_delete (DELETE), probe_assignment_scoped_update (UPDATE) |
+| `probe_ingest_cursor` | ja | ja | probe_ingest_cursor_isolation (ALL), probe_ingest_cursor_system_select (SELECT) |
+| `probe_state` | ja | ja | probe_state_isolation (ALL), probe_state_scoped_delete (DELETE), probe_state_scoped_update (UPDATE) |
+| `probe_state_change` | ja | ja | probe_state_change_isolation (ALL), probe_state_change_scoped_delete (DELETE), probe_state_change_scoped_update (UPDATE) |
 | `rack` | ja | ja | rack_isolation (ALL) |
 | `rack_mount` | ja | ja | rack_mount_isolation (ALL), rack_mount_scoped_delete (DELETE), rack_mount_scoped_update (UPDATE) |
 | `relationship_change` | ja | ja | relationship_change_isolation (ALL), relationship_change_scoped_delete (DELETE), relationship_change_scoped_update (UPDATE) |
