@@ -49,6 +49,26 @@ type Repository interface {
 	// DeleteExpired removes the connections and services with expires_at
 	// before the time, the connections with their personal surrogates.
 	DeleteExpired(ctx context.Context, orgID string, before time.Time) (Expired, error)
+
+	// The refresh (WP-929):
+
+	// ConnectionByExternal returns the cached connection of an account by
+	// its external id (ErrCacheNotFound).
+	ConnectionByExternal(ctx context.Context, orgID, accountID, externalID string) (*Connection, error)
+	// ServiceByExternal returns the cached service of an account by its
+	// external id with all its ports (ErrCacheNotFound).
+	ServiceByExternal(ctx context.Context, orgID, accountID, externalID string) (*Service, error)
+	// ListDueLinked returns the services of the account with a port link
+	// (an interface or a CI) and their connections whose expires_at lies
+	// before the time, the earliest first.
+	ListDueLinked(ctx context.Context, orgID, accountID string, before time.Time) ([]DueObject, error)
+}
+
+// DueObject is a cached object the periodic refresh renews.
+type DueObject struct {
+	Kind       string
+	ExternalID string
+	ExpiresAt  time.Time
 }
 
 // checkProperties refuses a personal key at any depth of properties.

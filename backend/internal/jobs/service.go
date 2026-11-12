@@ -672,10 +672,25 @@ func mirrorRetry(job *Job, to Status) bool {
 // dropped and the job stays cancelled (JOB-03, F-162).
 func (s *Service) RunDetached(ctx context.Context, orgID, kind string, params any, createdBy string,
 	run func(ctx context.Context) (any, error)) (*Job, error) {
-	job, _, err := s.Enqueue(ctx, orgID, kind, params, EnqueueOptions{CreatedBy: createdBy})
-	if err != nil {
-		return nil, err
+	job, _, err := s.RunDetachedWith(ctx, orgID, kind, params, EnqueueOptions{CreatedBy: createdBy}, run)
+	return job, err
+}
+
+// RunDetachedWith is RunDetached with the enqueue options: a job whose
+// idempotency key is taken is not run again; the first job is returned
+// with created false (the dedupe of admp.refresh, WP-929).
+func (s *Service) RunDetachedWith(ctx context.Context, orgID, kind string, params any, opts EnqueueOptions,
+	run func(ctx context.Context) (any, error)) (job *Job, created bool, err error) {
+	job, created, err = s.Enqueue(ctx, orgID, kind, params, opts)
+	if err != nil || !created {
+		return job, created, err
 	}
+	s.runDetached(ctx, orgID, kind, job, run)
+	return job, true, nil
+}
+
+// runDetached runs the enqueued job in the background (RunDetached).
+func (s *Service) runDetached(ctx context.Context, orgID, kind string, job *Job, run func(ctx context.Context) (any, error)) {
 	detached := context.WithoutCancel(ctx)
 	go func() {
 		claimed, cerr := s.ClaimJob(detached, orgID, job.ID)
@@ -699,5 +714,4 @@ func (s *Service) RunDetached(ctx context.Context, orgID, kind string, params an
 			slog.ErrorContext(detached, "record detached job", "job", job.ID, "error", serr)
 		}
 	}()
-	return job, nil
 }

@@ -51,6 +51,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/admp"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
@@ -246,6 +247,8 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 		usageCredential, usageCollector    string
 		usageScope, usageCI                string
 		stateAddress, stateSubnet          string
+		admpAccount                        string
+		admpSync                           *admp.Sync
 		hookServer                         *httptest.Server
 		hookSubscription, hookDelivery     string
 		hookDispatcher                     *webhook.Dispatcher
@@ -709,6 +712,41 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 				for _, v := range data {
 					if s, ok := v.(string); ok && strings.Contains(s, "evt02-usage-secret") {
 						t.Errorf("credential.resolution_failed carries a secret value: %v", data)
+					}
+				}
+			}},
+		{typ: events.ADMPConnectionRefreshed,
+			// The refresh admp.refresh of a connection against a fake
+			// source (WP-929): a new connection is a change.
+			setup: func(t *testing.T) {
+				cred := f.ID()
+				exec(t, `INSERT INTO credential (id, organization_id, name, kind, ciphertext) VALUES ($1, $2, 'evt02-admp', 'api_token', '\x00')`,
+					cred, f.OrgA)
+				admpAccount = scalar(t, `INSERT INTO admp_account (organization_id, client_id, name, base_url, credential_id)
+					VALUES ($1, $2, 'evt02-admp', 'https://admp.example.com/api', $3) RETURNING id::text`, f.OrgA, f.Client1, cred)
+				admpSync = admp.NewSync(&admp.SyncOptions{Accounts: e.Repos.ADMPAccounts, Cache: e.Repos.ADMP, Sources: evt02ADMP{},
+					Pool: f.App})
+			},
+			act: func(t *testing.T, refused bool) string {
+				res, err := admpSync.Refresh(f.OrgCtx(f.OrgA), f.OrgA, admp.RefreshParams{AccountID: admpAccount,
+					Kind: admp.KindConnection, ExternalID: "evt02-line"})
+				failed(t, "admp refresh", err, refused)
+				if refused {
+					unchanged(t, "admp connections", count(t, `admp_connection WHERE account_id = $1`, admpAccount), "0")
+					return ""
+				}
+				if res.Result != "ok" {
+					t.Fatalf("admp refresh result %+v", res)
+				}
+				return scalar(t, `SELECT id::text FROM admp_connection WHERE account_id = $1 AND external_id = 'evt02-line'`, admpAccount)
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["account_id"] != admpAccount || data["client_id"] != f.Client1 || data["stale"] != false {
+					t.Errorf("admp.connection.refreshed data %v", data)
+				}
+				for _, v := range data {
+					if s, ok := v.(string); ok && strings.Contains(s, "evt02 carrier") {
+						t.Errorf("admp.connection.refreshed carries connection data: %v", data)
 					}
 				}
 			}},
@@ -1360,7 +1398,22 @@ var plannedProducers = map[string]string{
 	"org.deletion_cancelled":        "WP-1152",
 	"ipam.subnet.changed":           "WP-904",
 	"asn.changed":                   "WP-1066",
-	"admp.connection.refreshed":     "WP-929",
+}
+
+// evt02ADMP is the fake ADMP of the admp.connection.refreshed case: one
+// connection, every account's source.
+type evt02ADMP struct{}
+
+func (evt02ADMP) For(context.Context, *admp.Account) (admp.Source, error) { return evt02ADMP{}, nil }
+func (evt02ADMP) CircuitOpen(*admp.Account) bool                          { return false }
+func (evt02ADMP) FetchConnection(_ context.Context, id string) (*admp.ConnectionData, error) {
+	return &admp.ConnectionData{ExternalID: id, Carrier: "evt02 carrier", ContractID: "V-evt02"}, nil
+}
+func (evt02ADMP) FetchService(context.Context, string) (*admp.ServiceData, error) {
+	return nil, &admp.SourceError{Class: admp.ClassNotImplemented}
+}
+func (evt02ADMP) FetchServicePorts(context.Context, string) ([]admp.PortData, error) {
+	return nil, &admp.SourceError{Class: admp.ClassNotImplemented}
 }
 
 // evt02CoverageProblems checks the producer cases (their types) against

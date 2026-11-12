@@ -701,10 +701,15 @@ type CredentialResolutionFailedData struct {
 // (ADM-03): the read-only copy of an ADMP connection was refreshed; never
 // the holder in plain text.
 type ADMPConnectionRefreshedData struct {
-	ID       string `json:"id"`
-	CIID     string `json:"ci_id,omitempty"`
-	ClientID string `json:"client_id,omitempty"`
-	SiteID   string `json:"site_id,omitempty"`
+	ID string `json:"id"`
+	// AccountID is the ADMP account of the connection (WP-929).
+	AccountID string `json:"account_id,omitempty"`
+	CIID      string `json:"ci_id,omitempty"`
+	ClientID  string `json:"client_id,omitempty"`
+	SiteID    string `json:"site_id,omitempty"`
+	// Stale: the refresh failed and the copy is the last known state
+	// (ADM-03, WP-929).
+	Stale bool `json:"stale"`
 }
 
 // Payloads assigns every phase 2 and phase 3 type the frame of its data.

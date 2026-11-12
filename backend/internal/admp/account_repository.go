@@ -170,6 +170,23 @@ func (r *PGAccountRepository) DeleteAccount(ctx context.Context, orgID, id strin
 	})
 }
 
+// RecordAccountStatus implements AccountRepository. A missing account
+// (deleted meanwhile) is no error: the refresh has nothing to report on.
+func (r *PGAccountRepository) RecordAccountStatus(ctx context.Context, orgID, id string, at time.Time, errorClass string) error {
+	if !api.IsUUID(id) {
+		return ErrAccountNotFound
+	}
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		if errorClass == "" {
+			_, err = tx.Exec(ctx, `UPDATE admp_account SET last_ok_at = $2, last_error_class = NULL WHERE id = $1`, id, at)
+		} else {
+			_, err = tx.Exec(ctx, `UPDATE admp_account SET last_error_class = $2 WHERE id = $1`, id, errorClass)
+		}
+		return err
+	})
+}
+
 var _ AccountRepository = (*PGAccountRepository)(nil)
 
 // --- memory (--no-db) -----------------------------------------------------
@@ -318,6 +335,42 @@ func (m *MemoryAccountRepository) DeleteAccount(ctx context.Context, orgID, id s
 	}
 	delete(m.rows, id)
 	return nil
+}
+
+// RecordAccountStatus implements AccountRepository.
+func (m *MemoryAccountRepository) RecordAccountStatus(ctx context.Context, orgID, id string, at time.Time, errorClass string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a, ok := m.rows[id]
+	if !ok || a.OrganizationID != orgID || !visible(ctx, a.ClientID) {
+		return nil
+	}
+	if errorClass == "" {
+		okAt := at
+		a.LastOKAt, a.LastErrorClass = &okAt, nil
+		return nil
+	}
+	class := errorClass
+	a.LastErrorClass = &class
+	return nil
+}
+
+// OrganizationIDs returns the organizations with an account: the system
+// jobs of --no-db run through them (database.OrganizationIDs on
+// PostgreSQL).
+func (m *MemoryAccountRepository) OrganizationIDs(context.Context) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	seen := map[string]bool{}
+	out := []string{}
+	for _, a := range m.rows {
+		if !seen[a.OrganizationID] {
+			seen[a.OrganizationID] = true
+			out = append(out, a.OrganizationID)
+		}
+	}
+	slices.Sort(out)
+	return out, nil
 }
 
 // clientOf returns the client of an account ("" for an organization-wide

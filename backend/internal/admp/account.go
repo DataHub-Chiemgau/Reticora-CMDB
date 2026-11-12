@@ -90,6 +90,10 @@ type AccountRepository interface {
 	// UpdateAccount stores every member of a but the status fields.
 	UpdateAccount(ctx context.Context, a *Account) error
 	DeleteAccount(ctx context.Context, orgID, id string) error
+	// RecordAccountStatus stores the outcome of a refresh (WP-929): an
+	// empty errorClass sets last_ok_at to at and clears the error class,
+	// else the class is stored.
+	RecordAccountStatus(ctx context.Context, orgID, id string, at time.Time, errorClass string) error
 }
 
 // Credentials is what the accounts read of the credential service: a

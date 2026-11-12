@@ -208,6 +208,11 @@ type Config struct {
 	EventsMaxAge   time.Duration
 	EventsMaxBytes int64
 
+	// ADMPCacheTTLDays is the TTL of a fetched ADMP entry (ADM-03, E-243,
+	// WP-929): admp.expire removes it with its personal surrogates after
+	// it (RETICORA_ADMP_CACHE_TTL_DAYS, 1 to 3650, default 30).
+	ADMPCacheTTLDays int
+
 	// Search
 	SearchBackend      string
 	OpenSearchURL      string
@@ -327,6 +332,7 @@ func Load() *Config {
 		RetentionReviewItemDays: l.integer("RETICORA_RETENTION_REVIEW_ITEM_DAYS", MinRetentionReviewItemDays),
 		EventsMaxAge:            l.duration("RETICORA_EVENTS_MAX_AGE", DefaultEventsMaxAge),
 		EventsMaxBytes:          l.int64("RETICORA_EVENTS_MAX_BYTES", DefaultEventsMaxBytes),
+		ADMPCacheTTLDays:        l.integer("RETICORA_ADMP_CACHE_TTL_DAYS", DefaultADMPCacheTTLDays),
 		EgressAllowPrivate:      l.boolean("RETICORA_EGRESS_ALLOW_PRIVATE", false),
 		PreAuthRateLimitRPM:     l.integer("RETICORA_PREAUTH_RATE_LIMIT_RPM", 20),
 		TrustedProxies:          l.str("RETICORA_TRUSTED_PROXIES", "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"),
@@ -445,6 +451,13 @@ const (
 	MinRetentionHistoryDays    = 3 * 365
 	MinRetentionSoftDeleteDays = 90
 	MinRetentionReviewItemDays = 365
+)
+
+// DefaultADMPCacheTTLDays and MaxADMPCacheTTLDays bound the TTL of the
+// ADMP cache (E-243, WP-929).
+const (
+	DefaultADMPCacheTTLDays = 30
+	MaxADMPCacheTTLDays     = 3650
 )
 
 // Retention of the event stream RETICORA_EVENTS (EVT-01): 30 days and
@@ -654,6 +667,9 @@ func (c *Config) Validate(noDB bool) error {
 	}
 	if c.EventsMaxBytes <= 0 {
 		errs = append(errs, fmt.Errorf("RETICORA_EVENTS_MAX_BYTES must be positive, got %d", c.EventsMaxBytes))
+	}
+	if c.ADMPCacheTTLDays < 1 || c.ADMPCacheTTLDays > MaxADMPCacheTTLDays {
+		errs = append(errs, fmt.Errorf("RETICORA_ADMP_CACHE_TTL_DAYS must be between 1 and %d, got %d", MaxADMPCacheTTLDays, c.ADMPCacheTTLDays))
 	}
 	if c.RateLimitOrgRPM < c.RateLimitRPM {
 		errs = append(errs, fmt.Errorf("RETICORA_RATE_LIMIT_ORG_RPM (%d) must not be below RETICORA_RATE_LIMIT_RPM (%d)", c.RateLimitOrgRPM, c.RateLimitRPM))

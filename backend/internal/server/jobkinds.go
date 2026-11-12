@@ -4,15 +4,21 @@ import (
 	"context"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/admp"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/admp/readonly"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/importer"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/labels"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/metamodel"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 )
 
@@ -82,6 +88,12 @@ var (
 	// only logs in and reads the test entry; it is not repeated and not
 	// cancellable while running. Its result is ok or the error class.
 	vaultTestJobKind = jobs.Kind{Name: credential.VaultTestJobKind, MaxAttempts: 1, Timeout: 60 * time.Second}
+	// admpRefreshJobKind (WP-929, ADM-03, E-225): the refresh of one ADMP
+	// object only reads ADMP and upserts the cache; a transient failure
+	// (network, timeout, 5xx, 429) is retried, every other ends the job
+	// with its class. Its dedupe is the idempotency key per object and
+	// window (admp.RefreshKey).
+	admpRefreshJobKind = jobs.Kind{Name: admp.RefreshJobKind, MaxAttempts: 3, Timeout: 2 * time.Minute}
 )
 
 // jobKind is a submitted kind and the handler that runs its jobs.
@@ -107,14 +119,15 @@ type jobKind struct {
 func applicationJobKinds(ciService *ci.Service, bulkRevert *ci.BulkRevert, historyHandler *history.Handler,
 	templateJobs *ci.TemplateMigrationJobs, draftHandler *metamodel.Handler, importHandler *importer.ImportHandler,
 	scanner *document.Scanner, searchHandler *search.Handler, labelBatch *labels.BatchHandler, assets *asset.Handler,
-	assetRevert *asset.BulkRevert, credentials *credential.Handler) []jobKind {
+	assetRevert *asset.BulkRevert, credentials *credential.Handler, admpSync *admp.Sync) []jobKind {
 	kinds := []jobKind{{kind: snapshotJobKind, handler: historyHandler.RunSnapshotJob},
 		{kind: metamodelTestJobKind, handler: draftHandler.RunTestJob},
 		{kind: importJobKind, handler: importHandler.RunJob},
 		{kind: searchReindexJobKind, handler: searchHandler.RunReindexJob},
 		{kind: labelBatchJobKind, handler: labelBatch.RunJob},
 		{kind: assetBulkJobKind, handler: assets.RunBulkJob},
-		{kind: vaultTestJobKind, handler: credentials.RunVaultTestJob}}
+		{kind: vaultTestJobKind, handler: credentials.RunVaultTestJob},
+		{kind: admpRefreshJobKind, handler: admpSync.RunRefreshJob}}
 	if ciService != nil {
 		kinds = append(kinds, jobKind{kind: bulkJobKind, handler: ciService.RunBulkJob})
 	}
@@ -160,7 +173,8 @@ func applicationJobKinds(ciService *ci.Service, bulkRevert *ci.BulkRevert, histo
 func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Service, bulkRevert *ci.BulkRevert,
 	historyHandler *history.Handler, templateJobs *ci.TemplateMigrationJobs, draftHandler *metamodel.Handler,
 	importHandler *importer.ImportHandler, scanner *document.Scanner, searchHandler *search.Handler,
-	labelBatch *labels.BatchHandler, assets *asset.Handler, assetRevert *asset.BulkRevert, credentials *credential.Handler) {
+	labelBatch *labels.BatchHandler, assets *asset.Handler, assetRevert *asset.BulkRevert, credentials *credential.Handler,
+	admpSync *admp.Sync) {
 	svc.Register(exportJobKind)
 	importHandler.WithJobs(svc)
 	labelBatch.WithJobs(svc)
@@ -173,7 +187,7 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 		ciService.WithBulkJobs(svc)
 	}
 	for _, k := range applicationJobKinds(ciService, bulkRevert, historyHandler, templateJobs, draftHandler, importHandler,
-		scanner, searchHandler, labelBatch, assets, assetRevert, credentials) {
+		scanner, searchHandler, labelBatch, assets, assetRevert, credentials, admpSync) {
 		svc.Register(k.kind)
 		if queue != nil {
 			queue.Handle(k.kind, k.handler)
@@ -187,6 +201,7 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 		labelBatch.WithQueue(queue)
 		assets.WithBulkQueue(queue)
 		credentials.WithQueue(queue)
+		admpSync.WithQueue(queue)
 		if templateJobs != nil {
 			templateJobs.WithQueue(queue)
 		}
@@ -204,4 +219,28 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 	historyHandler.WithJobs(svc)
 	searchHandler.WithJobs(svc)
 	credentials.WithJobs(svc)
+	admpSync.WithJobs(svc)
+}
+
+// NewADMPSync builds the refresh of the ADMP cache (WP-929) on the
+// repositories: one read-only client per account over the egress policy
+// with the credential service as secret source (E-223), the organizations
+// of the periodic jobs from the database or, without one, from the memory
+// accounts. pool is the application pool of the events (nil: --no-db).
+func NewADMPSync(repos *Repositories, creds *credential.Service, policy egress.Options, pool *pgxpool.Pool, ttlDays int) *admp.Sync {
+	var secrets readonly.SecretSource
+	if creds != nil {
+		secrets = creds
+	}
+	opts := admp.SyncOptions{Accounts: repos.ADMPAccounts, Cache: repos.ADMP, Pool: pool,
+		Sources: admp.NewClientSources(secrets, policy), TTL: time.Duration(ttlDays) * 24 * time.Hour}
+	switch {
+	case pool != nil:
+		opts.Organizations = func(ctx context.Context) ([]string, error) { return database.OrganizationIDs(ctx, pool) }
+	default:
+		if mem, ok := repos.ADMPAccounts.(*admp.MemoryAccountRepository); ok {
+			opts.Organizations = mem.OrganizationIDs
+		}
+	}
+	return admp.NewSync(&opts)
 }

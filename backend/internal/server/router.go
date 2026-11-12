@@ -196,6 +196,11 @@ type Options struct {
 	CIService *ci.Service
 	// Credentials is the credential service (envelope encryption).
 	Credentials *credential.Service
+	// ADMPSync refreshes the ADMP cache (WP-929): cmd/server shares it with
+	// the system jobs admp.refresh_linked and admp.expire; nil builds one
+	// on the repositories with Credentials as secret source and Egress
+	// (NewADMPSync). The router queues its job admp.refresh.
+	ADMPSync *admp.Sync
 	// OIDC and Sessions power the authentication endpoints.
 	OIDC     *identity.OIDCProvider
 	Sessions *identity.SessionIssuer
@@ -504,6 +509,13 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// (WP-889); the test of a vault connection is the job vault.test
 	// (WP-896, jobkinds.go).
 	credentialHandler := credential.NewHandler(opts.Credentials).WithEvents(opts.AuditPool)
+	// The refresh of the ADMP cache (WP-929): readonly clients per account
+	// on the egress policy with the credential service as secret source;
+	// its job admp.refresh is registered with the job kinds.
+	admpSync := opts.ADMPSync
+	if admpSync == nil {
+		admpSync = NewADMPSync(&repos, opts.Credentials, opts.Egress, opts.AuditPool, 0)
+	}
 	// The draft handler (WP-260) runs the test run of a draft as a job
 	// (WP-721, metamodel.test) with the job service, like historyHandler.
 	draftHandler := metamodel.NewHandler(repos.MetamodelDraft)
@@ -670,7 +682,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			assetHandler.WithCreatorPolicy(ci.CreatorPolicyOf(fieldResolver, users))
 		}
 		registerJobKinds(jobService, opts.JobQueue, opts.CIService, bulkRevert, historyHandler, templateJobs, draftHandler,
-			importHandler, documentScanner, searchHandler, labelBatch, assetHandler, assetRevert, credentialHandler)
+			importHandler, documentScanner, searchHandler, labelBatch, assetHandler, assetRevert, credentialHandler, admpSync)
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -1246,6 +1258,7 @@ func metricsHandler(version string, includeTenantLabel bool) (handler http.Handl
 	iga.RegisterMetrics(registry)
 	ipam.RegisterMetrics(registry)
 	credential.RegisterMetrics(registry)
+	admp.RegisterMetrics(registry)
 
 	httpMetrics := middleware.RegisterHTTPMetrics(registry, includeTenantLabel)
 

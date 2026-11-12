@@ -10,6 +10,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/admp"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
@@ -34,6 +35,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
@@ -352,6 +354,9 @@ type systemJobDeps struct {
 	dispatcher   *webhook.Dispatcher
 	// jobQueue is the job queue on NATS; nil without NATS.
 	jobQueue *jobs.Queue
+	// admp is the refresh of the ADMP cache the router queues admp.refresh
+	// with (WP-929); nil builds one on the repositories (tests).
+	admp *admp.Sync
 	// notifier bundles the digests (notify.digest); nil: no digest run.
 	notifier *notify.Notifier
 	// blobs holds the document content the soft-delete run deletes with
@@ -382,6 +387,19 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 	var systemJobs []jobs.Schedule
 	if d.modules.Enabled(server.ModuleInventory) {
 		systemJobs = append(systemJobs, reservation.NewSweeper(d.repos.Reservation, d.dispatcher).Schedule())
+	}
+	// The ADMP cache (ADM-03, E-225, WP-929), with the module admp: every
+	// 15 minutes the services linked to a port and their connections that
+	// expire within seven days are queued for admp.refresh within the
+	// rate of their account; hourly the entries past their TTL are removed
+	// with their personal surrogates. Without a database on the memory
+	// repositories.
+	if d.modules.Enabled("admp") {
+		admpSync := d.admp
+		if admpSync == nil {
+			admpSync = server.NewADMPSync(d.repos, nil, egress.Options{}, d.pool, d.cfg.ADMPCacheTTLDays)
+		}
+		systemJobs = append(systemJobs, admpSync.RefreshLinkedSchedule(), admpSync.ExpireSchedule())
 	}
 	// Document versions without a scan result are submitted to the
 	// malware scan again every 15 minutes (SEC-09, E-42, WP-734), with

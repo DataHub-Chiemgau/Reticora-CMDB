@@ -24,6 +24,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/admp"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
@@ -483,6 +484,32 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 	} {
 		if !registered[job.kind] {
 			t.Errorf("JOB-02 %s: kind %s is not registered (registered: %v)", job.requirement, job.kind, registered)
+		}
+	}
+
+	// The ADMP cache (ADM-03, WP-929): admp.refresh_linked every 15
+	// minutes and admp.expire hourly with the module admp, in both profiles
+	// (--no-db on the memory repositories); without the module neither.
+	if registered[admp.RefreshLinkedKind] || registered[admp.ExpireKind] {
+		t.Errorf("without the module admp its system jobs are registered: %v", registered)
+	}
+	admpModules, err := server.ParseModules("admp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, withDB := range []bool{true, false} {
+		deps := systemJobTestDeps(t, cfg, withDB)
+		deps.modules = admpModules
+		specs := map[string]string{}
+		for _, job := range systemJobs(deps) {
+			specs[job.Kind] = job.Spec
+		}
+		if specs[admp.RefreshLinkedKind] != "@every 15m" || specs[admp.ExpireKind] != "@every 1h" {
+			t.Errorf("with the module admp (database %v): refresh_linked %q, expire %q; want @every 15m and @every 1h",
+				withDB, specs[admp.RefreshLinkedKind], specs[admp.ExpireKind])
+		}
+		if kinds := registeredSystemJobs(t, deps); !kinds[admp.RefreshLinkedKind] || !kinds[admp.ExpireKind] {
+			t.Errorf("JOB-02 ADMP cache (database %v): not registered (registered: %v)", withDB, kinds)
 		}
 	}
 

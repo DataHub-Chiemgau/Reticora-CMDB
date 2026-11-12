@@ -297,6 +297,89 @@ func (r *PGRepository) MarkStale(ctx context.Context, orgID, kind, id, errorClas
 	})
 }
 
+// ConnectionByExternal implements Repository.
+func (r *PGRepository) ConnectionByExternal(ctx context.Context, orgID, accountID, externalID string) (*Connection, error) {
+	if !api.IsUUID(accountID) {
+		return nil, ErrCacheNotFound
+	}
+	var out *Connection
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		c, err := scanConnection(tx.QueryRow(ctx, `SELECT `+connectionColumns+` FROM admp_connection c
+			WHERE c.account_id = $1 AND c.external_id = $2`, accountID, externalID))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrCacheNotFound
+		}
+		out = c
+		return err
+	})
+	return out, err
+}
+
+// ServiceByExternal implements Repository.
+func (r *PGRepository) ServiceByExternal(ctx context.Context, orgID, accountID, externalID string) (*Service, error) {
+	if !api.IsUUID(accountID) {
+		return nil, ErrCacheNotFound
+	}
+	var out *Service
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		s, err := scanService(tx.QueryRow(ctx, `SELECT `+serviceColumns+` FROM admp_service s
+			WHERE s.account_id = $1 AND s.external_id = $2`, accountID, externalID))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrCacheNotFound
+		}
+		if err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `SELECT `+portColumns+` FROM admp_service_port p WHERE p.service_id = $1 ORDER BY p.port_key`, s.ID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			p, perr := scanPort(rows)
+			if perr != nil {
+				return perr
+			}
+			s.Ports = append(s.Ports, *p)
+		}
+		out = s
+		return rows.Err()
+	})
+	return out, err
+}
+
+// ListDueLinked implements Repository.
+func (r *PGRepository) ListDueLinked(ctx context.Context, orgID, accountID string, before time.Time) ([]DueObject, error) {
+	out := []DueObject{}
+	if !api.IsUUID(accountID) {
+		return out, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `WITH linked AS (
+				SELECT s.id, s.external_id, s.expires_at, s.connection_id FROM admp_service s
+				WHERE s.account_id = $1 AND EXISTS (SELECT 1 FROM admp_service_port p
+					WHERE p.service_id = s.id AND (p.network_interface_id IS NOT NULL OR p.ci_id IS NOT NULL)))
+			SELECT 'service', l.external_id, l.expires_at FROM linked l WHERE l.expires_at < $2
+			UNION ALL
+			SELECT 'connection', c.external_id, c.expires_at FROM admp_connection c
+			WHERE c.account_id = $1 AND c.expires_at < $2 AND c.id IN (SELECT connection_id FROM linked)
+			ORDER BY 3, 1, 2`, accountID, before)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var d DueObject
+			if err := rows.Scan(&d.Kind, &d.ExternalID, &d.ExpiresAt); err != nil {
+				return err
+			}
+			out = append(out, d)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 // DeleteExpired implements Repository; the trigger of admp_connection
 // deletes the personal surrogates of the removed connections.
 func (r *PGRepository) DeleteExpired(ctx context.Context, orgID string, before time.Time) (Expired, error) {

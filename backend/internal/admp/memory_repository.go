@@ -357,3 +357,65 @@ func (m *MemoryRepository) DeleteExpired(ctx context.Context, orgID string, befo
 	m.refreshClients(ctx)
 	return out, nil
 }
+
+// ConnectionByExternal implements Repository.
+func (m *MemoryRepository) ConnectionByExternal(ctx context.Context, orgID, accountID, externalID string) (*Connection, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.refreshClients(ctx)
+	for _, c := range m.connections {
+		if c.OrganizationID == orgID && c.AccountID == accountID && c.ExternalID == externalID && cacheVisible(ctx, c.ClientID) {
+			out := cloneConnection(c)
+			return &out, nil
+		}
+	}
+	return nil, ErrCacheNotFound
+}
+
+// ServiceByExternal implements Repository.
+func (m *MemoryRepository) ServiceByExternal(ctx context.Context, orgID, accountID, externalID string) (*Service, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.refreshClients(ctx)
+	for id, s := range m.services {
+		if s.OrganizationID == orgID && s.AccountID == accountID && s.ExternalID == externalID && cacheVisible(ctx, s.ClientID) {
+			out := cloneService(s)
+			out.Ports = slices.Clone(m.ports[id])
+			slices.SortFunc(out.Ports, func(a, b ServicePort) int { return cmp.Compare(a.PortKey, b.PortKey) })
+			return &out, nil
+		}
+	}
+	return nil, ErrCacheNotFound
+}
+
+// ListDueLinked implements Repository.
+func (m *MemoryRepository) ListDueLinked(ctx context.Context, orgID, accountID string, before time.Time) ([]DueObject, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.refreshClients(ctx)
+	out := []DueObject{}
+	connections := map[string]bool{}
+	for id, s := range m.services {
+		if s.OrganizationID != orgID || s.AccountID != accountID || !cacheVisible(ctx, s.ClientID) {
+			continue
+		}
+		if !slices.ContainsFunc(m.ports[id], func(p ServicePort) bool { return p.NetworkInterfaceID != "" || p.CIID != "" }) {
+			continue
+		}
+		if s.ConnectionID != "" {
+			connections[s.ConnectionID] = true
+		}
+		if s.ExpiresAt.Before(before) {
+			out = append(out, DueObject{Kind: KindService, ExternalID: s.ExternalID, ExpiresAt: s.ExpiresAt})
+		}
+	}
+	for id := range connections {
+		if c, ok := m.connections[id]; ok && c.ExpiresAt.Before(before) && cacheVisible(ctx, c.ClientID) {
+			out = append(out, DueObject{Kind: KindConnection, ExternalID: c.ExternalID, ExpiresAt: c.ExpiresAt})
+		}
+	}
+	slices.SortFunc(out, func(a, b DueObject) int {
+		return cmp.Or(a.ExpiresAt.Compare(b.ExpiresAt), cmp.Compare(a.Kind, b.Kind), cmp.Compare(a.ExternalID, b.ExternalID))
+	})
+	return out, nil
+}

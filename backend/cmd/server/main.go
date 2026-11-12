@@ -478,6 +478,10 @@ func main() {
 	vaultResolver := credential.NewVaultResolver(egressPolicy, coreNATS)
 	defer vaultResolver.Close()
 	credentialService := credential.NewService(repos.Credential, encryptor).WithVault(vaultResolver)
+	// The refresh of the ADMP cache (WP-929, E-223): read-only clients per
+	// account on the server over the egress policy, shared by the job
+	// admp.refresh of the router and the system jobs.
+	admpSync := server.NewADMPSync(&repos, credentialService, egressPolicy, auditPool, cfg.ADMPCacheTTLDays)
 	// The internal CA of the collector certificates (COL-04) and the
 	// collector NATS endpoint (COL-08).
 	collectorPKI := collectorCA(auditPool, encryptor)
@@ -551,6 +555,7 @@ func main() {
 		Dispatcher:         webhookDispatcher,
 		CIService:          ciService,
 		Credentials:        credentialService,
+		ADMPSync:           admpSync,
 		OIDC:               oidcProvider,
 		Sessions:           sessionIssuer,
 		RefreshSessions:    refreshSessions,
@@ -610,7 +615,7 @@ func main() {
 	}
 	if err = registerSystemJobs(systemScheduler, &systemJobDeps{cfg: cfg, pool: auditPool, encryptor: encryptor,
 		repos: &repos, modules: modules, entitlements: entitlementSvc, dispatcher: webhookDispatcher,
-		jobQueue: jobQueue, notifier: notifier, blobs: blobStore}); err != nil {
+		jobQueue: jobQueue, notifier: notifier, blobs: blobStore, admp: admpSync}); err != nil {
 		slog.Error("failed to register a system job", "error", err)
 		os.Exit(1)
 	}
