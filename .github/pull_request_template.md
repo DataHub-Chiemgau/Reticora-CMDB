@@ -40,5 +40,6 @@ Nicht zutreffende Punkte bitte mit Begründung als „entfällt“ markieren.
 - [ ] **Tests:** Unit-/Integrationstests ergänzt; Migrationen mit `.up.sql` und `.down.sql`, Roundtrip-Test grün
 - [ ] **Lint:** `make lint` bzw. CI-Lint ohne Befunde
 - [ ] **Dokumentation:** betroffene Doku aktualisiert (u. a. `docs/schema-baseline.md` bei Schemaänderungen)
+- [ ] **ADMP-Nur-Lese-Nachweis:** `backend/internal/admp/readonly/readonly*_test.go` nur erweitert, nicht gelockert (ADM-02, E-224)
 - [ ] **Traceability-Eintrag:** Zeilen des WPs in `docs/traceability.csv` mit tatsächlich angelegter Testdatei
 - [ ] **WP-Nummer:** in Titel und Zeile „Arbeitspakete“ angegeben; Voraussetzungen sind gemergt (Planungs-/Dokumentations-PR ohne WP: „Arbeitspakete: keine“)

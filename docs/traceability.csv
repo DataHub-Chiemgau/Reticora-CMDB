@@ -1673,3 +1673,6 @@ CRD-06;[P3];G3;backend/internal/credential/no_plaintext_integration_test.go;WP-8
 COL-02;[B];G3;backend/internal/credential/no_plaintext_integration_test.go;WP-899
 ADM-02;[P3];G3;backend/internal/admp/readonly/transport_test.go;WP-926
 ADM-03;[P3];G3;backend/internal/admp/readonly/client_test.go;WP-926
+ADM-02;[P3];G3;backend/internal/admp/readonly/readonly_test.go;WP-927
+ADM-02;[P3];G3;backend/internal/admp/readonly/readonly_ast_test.go;WP-927
+ADM-02;[P3];G3;backend/internal/admp/readonly/readonly_mock_test.go;WP-927
