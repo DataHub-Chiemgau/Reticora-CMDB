@@ -124,9 +124,32 @@ func RegisterMetrics(reg prometheus.Registerer) {
 //   - Otherwise a value wins with a higher rank than the stored value's
 //     source, or with the same rank and a newer source time (observed_at,
 //     REC-05, GLO-12). Provenance is compared per field.
+//
+// Both ranks are effective ranks (REC-04): the entry of the CI type for the
+// field, else the organization-wide entry, else SourceRanks, when the
+// reader keeps source ranks (rankReader); manual stays 100.
 func DecideAutomatedWrite(ctx context.Context, reader FieldReader, w *Write) Decision {
 	var fv *FieldValue
-	if reader != nil {
+	var ranks *RankTable
+	var ciTypeID string
+	if rt, ok := reader.(rankTabler); ok {
+		var err error
+		if ranks, err = rt.rankTable(ctx, w.OrganizationID); err != nil {
+			decisionFailures.Add(1)
+			slog.WarnContext(ctx, "automated write refused: source ranks unreadable",
+				"ci_id", w.CIID, "field", w.Field, "source", w.Source, "error", err)
+			return Decision{Reason: ReasonError}
+		}
+	}
+	if tr, ok := reader.(typedDecisionReader); ok {
+		var err error
+		if fv, ciTypeID, err = tr.decisionState(ctx, w.OrganizationID, w.CIID, w.Field); err != nil {
+			decisionFailures.Add(1)
+			slog.WarnContext(ctx, "automated write refused: provenance unreadable",
+				"ci_id", w.CIID, "field", w.Field, "source", w.Source, "error", err)
+			return Decision{Reason: ReasonError}
+		}
+	} else if reader != nil {
 		var err error
 		if dr, ok := reader.(decisionReader); ok {
 			fv, err = dr.getForDecision(ctx, w.OrganizationID, w.CIID, w.Field)
@@ -158,18 +181,15 @@ func DecideAutomatedWrite(ctx context.Context, reader FieldReader, w *Write) Dec
 	}
 
 	var currentAt *time.Time
-	currentRank := SourceRank(w.FallbackSource)
+	currentRank := ranks.Rank(ciTypeID, w.Field, w.FallbackSource)
 	if fv != nil && fv.DiscoveredSource != "" {
-		currentRank = fv.DiscoveredRank
-		if currentRank == 0 {
-			currentRank = SourceRank(fv.DiscoveredSource)
-		}
+		currentRank = storedRank(ranks, ciTypeID, w.Field, fv)
 		currentAt = fv.ObservedAt
 		if currentAt == nil {
 			currentAt = fv.DiscoveredAt
 		}
 	}
-	rank := SourceRank(w.Source)
+	rank := ranks.Rank(ciTypeID, w.Field, w.Source)
 	if rank < currentRank {
 		return Decision{Reason: ReasonLowerRank}
 	}
@@ -179,6 +199,23 @@ func DecideAutomatedWrite(ctx context.Context, reader FieldReader, w *Write) Dec
 		return Decision{Reason: ReasonStale}
 	}
 	return Decision{Write: true, Reason: ReasonAllowed}
+}
+
+// storedRank is the rank of the stored value's source: with a rank table
+// the effective rank of a known source now (REC-04: a changed policy
+// applies to stored values as well), else the rank recorded with the value
+// (a source outside REC-03, e.g. computed attributes with 100), else
+// SourceRanks.
+func storedRank(ranks *RankTable, ciTypeID, field string, fv *FieldValue) int {
+	if ranks != nil {
+		if _, known := SourceRanks[fv.DiscoveredSource]; known {
+			return ranks.Rank(ciTypeID, field, fv.DiscoveredSource)
+		}
+	}
+	if fv.DiscoveredRank != 0 {
+		return fv.DiscoveredRank
+	}
+	return SourceRank(fv.DiscoveredSource)
 }
 
 func isEmpty(v any) bool {

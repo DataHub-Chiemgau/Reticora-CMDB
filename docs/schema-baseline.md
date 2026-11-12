@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000318_form_versions
+Stand: Migration 000319_source_rank_policy
 
 ## Prüfung
 
@@ -2047,6 +2047,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `site` | ja | ja | site_isolation (ALL), site_scoped_delete (DELETE), site_scoped_update (UPDATE) |
 | `sla` | ja | ja | sla_scoped_delete (DELETE), sla_scoped_update (UPDATE), sla_tenant_isolation (ALL) |
 | `source_priority_policy` | ja | ja | source_priority_policy_isolation (ALL) |
+| `source_rank_policy` | ja | ja | source_rank_policy_isolation (ALL) |
 | `stock_level` | ja | ja | stock_level_isolation (ALL) |
 | `stock_movement` | ja | ja | stock_movement_isolation (ALL), stock_movement_scoped_delete (DELETE), stock_movement_scoped_update (UPDATE) |
 | `stock_scan` | ja | ja | stock_scan_isolation (ALL), stock_scan_scoped_delete (DELETE), stock_scan_scoped_update (UPDATE) |

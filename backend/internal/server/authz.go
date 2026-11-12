@@ -168,7 +168,8 @@ var readPermissionFor = map[string]identity.Permission{
 	"override":              identity.PermCIRead,
 	"reconciliation":        identity.PermDiscoveryRead,
 	"source-policy":         identity.PermDiscoveryRead,
-	"history":               identity.PermCIRead, // minimum; the handler checks the entity type and audit:read (CI-06, E-78)
+	"source-ranks":          identity.PermDiscoveryRead, // REC-04, WP-1105
+	"history":               identity.PermCIRead,        // minimum; the handler checks the entity type and audit:read (CI-06, E-78)
 	"saved-views":           identity.PermSavedViewRead,
 	"dependencies":          identity.PermTopologyRead,
 	"blast-radius":          identity.PermTopologyRead,
@@ -273,6 +274,7 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"compositions":          identity.PermAssetWrite,
 	"override":              identity.PermOverrideWrite,
 	"source-policy":         identity.PermReconciliationManage,
+	"source-ranks":          identity.PermReconciliationManage, // REC-04, WP-1105
 	"saved-views":           identity.PermSavedViewWrite,
 	// Read-only surfaces: writes (if any) stay on the read permission so no
 	// non-existent derived write permission is required. The state snapshot
@@ -376,6 +378,7 @@ var routeRules = []routeRule{
 	{http.MethodPost, "orders/*/receive", identity.PermStockWrite},
 	// Reconciliation settings (RBA-06); reading them stays discovery:read.
 	{http.MethodPut, "reconciliation/source-policy", identity.PermReconciliationManage},
+	{http.MethodPut, "reconciliation/source-ranks", identity.PermReconciliationManage},
 	// Collectors report with the ingest credential; managing them is
 	// collector:manage (RBA-01). Certificates are renewed over the
 	// collector's NATS channel, not the API (F-012).

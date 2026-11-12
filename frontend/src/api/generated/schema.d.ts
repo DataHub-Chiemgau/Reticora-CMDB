@@ -8071,15 +8071,40 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Read or update the source-priority policy
-     * @description The organization's default policy; without one the built-in priorities: the sources of the REC-03 rank table by descending rank, sources of the same rank by name.
+     * Read the former source-priority list (deprecated)
+     * @deprecated
+     * @description Deprecated since the source ranks per attribute (REC-04, E-233): the built-in priorities, the sources of the REC-03 rank table by descending rank, sources of the same rank by name. No write decision reads it; use GET /api/v1/reconciliation/source-ranks. Requires discovery:read.
      */
     get: operations['listReconciliationSourcePolicy'];
     /**
-     * Read or update the source-priority policy
-     * @description `priorities` must not be empty; `name` and the priorities must not contain NUL characters (400 field error).
+     * Gone; use PUT /api/v1/reconciliation/source-ranks
+     * @description The source-priority list is replaced by the numeric source ranks per attribute (REC-04, E-233); the request is refused with 410 and nothing is stored. Requires reconciliation:manage.
      */
     put: operations['putReconciliationSourcePolicy'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/reconciliation/source-ranks': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Read the source ranks per attribute (REC-04)
+     * @description The stored rank entries of the organization and, per requested attribute_key, the effective rank of every automation source with its origin: `type` (entry of the CI type), `org` (organization-wide entry) or `default` (REC-03 rank table). manual, override and manual_override rank 100 and are not configurable. Requires discovery:read. No list resource: the organization keeps at most 1,000 entries.
+     */
+    get: operations['getReconciliationSourceRanks'];
+    /**
+     * Replace the source ranks per attribute (REC-04)
+     * @description Replaces every entry of the organization (an empty list removes them). At most 1,000 entries; a source outside the automation sources (manual, override, manual_override or unknown), a rank outside 1-99, a duplicate (CI type, attribute, source) or a CI type that is neither a system type nor one of the organization is 422 on the field of the entry. The audit entry reconciliation.source_ranks_updated holds the entries before and after; after the commit the webhook event reconciliation.policy_changed names the changed attribute keys. The write decisions of this instance use the new ranks at once, other instances after at most 30 s. Requires reconciliation:manage.
+     */
+    put: operations['putReconciliationSourceRanks'];
     post?: never;
     delete?: never;
     options?: never;
@@ -19021,6 +19046,50 @@ export interface components {
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    SourceRankEntry: {
+      /**
+       * Format: uuid
+       * @description CI type of the entry; absent for the organization-wide entry.
+       */
+      ci_type_id?: string;
+      attribute_key: string;
+      /** @enum {string} */
+      source:
+        | 'import'
+        | 'workflow'
+        | 'redfish'
+        | 'ipmi'
+        | 'agent'
+        | 'snmp'
+        | 'api'
+        | 'integration'
+        | 'wmi'
+        | 'ssh'
+        | 'nas'
+        | 'sweep';
+      rank: number;
+      readonly updated_by?: string;
+      /** Format: date-time */
+      readonly updated_at?: string;
+    };
+    SourceRankEffective: {
+      /** Format: uuid */
+      ci_type_id?: string;
+      attribute_key: string;
+      ranks: {
+        source: string;
+        rank: number;
+        /** @enum {string} */
+        origin: 'type' | 'org' | 'default';
+      }[];
+    };
+    SourceRanks: {
+      entries: components['schemas']['SourceRankEntry'][];
+      effective: components['schemas']['SourceRankEffective'][];
+    };
+    ReplaceSourceRanksRequest: {
+      entries: components['schemas']['SourceRankEntry'][];
     };
     SetOverrideRequest: {
       /** @description New value; null removes an attribute */
@@ -42924,9 +42993,13 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Read or update the source-priority policy */
+      /** @description The built-in source priorities */
       200: {
         headers: {
+          /** @description RFC 9745 deprecation date (@1794441600 = 2026-11-12). */
+          Deprecation?: string;
+          /** @description The successor-version /api/v1/reconciliation/source-ranks. */
+          Link?: string;
           [name: string]: unknown;
         };
         content?: never;
@@ -42949,14 +43022,6 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Read or update the source-priority policy */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      400: components['responses']['BadRequest'];
       /** @description Unauthorized */
       401: {
         headers: {
@@ -42964,6 +43029,72 @@ export interface operations {
         };
         content?: never;
       };
+      /** @description Gone; the Link header names /api/v1/reconciliation/source-ranks. */
+      410: {
+        headers: {
+          Link?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  getReconciliationSourceRanks: {
+    parameters: {
+      query?: {
+        /** @description Only the entries of this CI type and the organization-wide ones; the effective ranks are resolved for it. */
+        ci_type_id?: string;
+        /** @description Attribute(s) to show; repeatable or comma-separated. Each yields one effective table. */
+        attribute_key?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Stored entries and effective tables */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SourceRanks'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  putReconciliationSourceRanks: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ReplaceSourceRanksRequest'];
+      };
+    };
+    responses: {
+      /** @description The stored entries after the change */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SourceRanks'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      422: components['responses']['UnprocessableEntity'];
+      500: components['responses']['InternalServerError'];
     };
   };
   listRelationshipTypes: {

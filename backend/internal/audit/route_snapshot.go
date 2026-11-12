@@ -585,6 +585,7 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		"POST /api/v1/imports/preview":                 "reads the head of an import file; creates no job and changes no data",
 		"POST /api/v1/maintenance-windows/{id}/notify": "sends notices; the window is unchanged",
 		"POST /api/v1/privacy/erasure":                 "erasure of personal data, which must not enter the audit",
+		"PUT /api/v1/reconciliation/source-ranks":      "replaces every rank entry of the organization; the domain audit reconciliation.source_ranks_updated records before and after (REC-04)",
 		"POST /api/v1/search/reindex":                  "rebuilds the search index; no business data changes",
 		"POST /api/v1/webhooks/{id}/test":              "test delivery; the subscription is unchanged",
 	} {

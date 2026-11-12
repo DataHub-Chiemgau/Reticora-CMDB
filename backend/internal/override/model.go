@@ -5,8 +5,10 @@
 package override
 
 import (
+	"context"
 	"encoding/json"
 	"sort"
+	"sync"
 	"time"
 )
 
@@ -142,4 +144,261 @@ func fmtSprint(v any) string {
 		}
 		return raw
 	}
+}
+
+// ConfigurableSources are the automation sources whose rank an
+// organization may set per attribute (REC-04, CHECK of
+// source_rank_policy). manual, override and manual_override stay 100 and
+// are not configurable: no automation source can rank at or above a
+// manual override.
+var ConfigurableSources = []string{"import", "workflow", "redfish", "ipmi", "agent", "snmp", "api", "integration", "wmi", "ssh", "nas", "sweep"}
+
+// IsConfigurableSource reports whether source is one of ConfigurableSources.
+func IsConfigurableSource(source string) bool {
+	for _, s := range ConfigurableSources {
+		if s == source {
+			return true
+		}
+	}
+	return false
+}
+
+// MaxRankEntries is the number of entries PUT
+// /reconciliation/source-ranks accepts at most.
+const MaxRankEntries = 1000
+
+// Origins of an effective rank.
+const (
+	// OriginType: the entry of the CI type of the CI.
+	OriginType = "type"
+	// OriginOrg: the organization-wide entry (ci_type_id NULL).
+	OriginOrg = "org"
+	// OriginDefault: the REC-03 rank table SourceRanks.
+	OriginDefault = "default"
+)
+
+// RankEntry is one stored rank of a source for an attribute, for a CI
+// type or organization-wide (CITypeID empty).
+type RankEntry struct {
+	CITypeID     string     `json:"ci_type_id,omitempty"`
+	AttributeKey string     `json:"attribute_key"`
+	Source       string     `json:"source"`
+	Rank         int        `json:"rank"`
+	UpdatedBy    string     `json:"updated_by,omitempty"`
+	UpdatedAt    *time.Time `json:"updated_at,omitempty"`
+}
+
+// key identifies the entry: CI type, attribute and source.
+func (e *RankEntry) key() rankKey {
+	return rankKey{ciType: e.CITypeID, attribute: e.AttributeKey, source: e.Source}
+}
+
+type rankKey struct{ ciType, attribute, source string }
+
+// RankTable resolves the effective rank of a source for a field of a CI
+// (REC-04): the entry of the CI's type, else the organization-wide entry,
+// else SourceRanks. A nil table is SourceRanks alone.
+type RankTable struct {
+	ranks map[rankKey]int
+}
+
+// NewRankTable builds the table of the stored entries.
+func NewRankTable(entries []RankEntry) *RankTable {
+	t := &RankTable{ranks: make(map[rankKey]int, len(entries))}
+	for i := range entries {
+		t.ranks[entries[i].key()] = entries[i].Rank
+	}
+	return t
+}
+
+// Effective returns the rank of source for attribute of a CI of type
+// ciTypeID and where it comes from. Sources that are not configurable
+// (manual: 100, unknown: 0) always take SourceRanks.
+func (t *RankTable) Effective(ciTypeID, attribute, source string) (rank int, origin string) {
+	if t != nil && IsConfigurableSource(source) {
+		if ciTypeID != "" {
+			if r, ok := t.ranks[rankKey{ciType: ciTypeID, attribute: attribute, source: source}]; ok {
+				return r, OriginType
+			}
+		}
+		if r, ok := t.ranks[rankKey{attribute: attribute, source: source}]; ok {
+			return r, OriginOrg
+		}
+	}
+	return SourceRank(source), OriginDefault
+}
+
+// empty reports whether the table holds no entry: every rank is the one
+// of SourceRanks.
+func (t *RankTable) empty() bool { return t == nil || len(t.ranks) == 0 }
+
+// Rank is Effective without the origin.
+func (t *RankTable) Rank(ciTypeID, attribute, source string) int {
+	r, _ := t.Effective(ciTypeID, attribute, source)
+	return r
+}
+
+// EffectiveRank is the rank of one automation source with its origin.
+type EffectiveRank struct {
+	Source string `json:"source"`
+	Rank   int    `json:"rank"`
+	Origin string `json:"origin"`
+}
+
+// EffectiveRanks is the effective table of all automation sources for one
+// attribute (and CI type, if asked).
+type EffectiveRanks struct {
+	CITypeID     string          `json:"ci_type_id,omitempty"`
+	AttributeKey string          `json:"attribute_key"`
+	Ranks        []EffectiveRank `json:"ranks"`
+}
+
+// EffectiveFor returns the effective ranks of every configurable source for
+// attribute of a CI of type ciTypeID (empty: organization-wide), highest
+// first, the same rank by name.
+func (t *RankTable) EffectiveFor(ciTypeID, attribute string) EffectiveRanks {
+	out := EffectiveRanks{CITypeID: ciTypeID, AttributeKey: attribute, Ranks: make([]EffectiveRank, 0, len(ConfigurableSources))}
+	for _, source := range ConfigurableSources {
+		rank, origin := t.Effective(ciTypeID, attribute, source)
+		out.Ranks = append(out.Ranks, EffectiveRank{Source: source, Rank: rank, Origin: origin})
+	}
+	sort.SliceStable(out.Ranks, func(i, j int) bool {
+		if out.Ranks[i].Rank != out.Ranks[j].Rank {
+			return out.Ranks[i].Rank > out.Ranks[j].Rank
+		}
+		return out.Ranks[i].Source < out.Ranks[j].Source
+	})
+	return out
+}
+
+// SourceRanksResponse answers GET and PUT /reconciliation/source-ranks:
+// the stored entries and, per requested attribute, the effective table.
+type SourceRanksResponse struct {
+	Entries   []RankEntry      `json:"entries"`
+	Effective []EffectiveRanks `json:"effective"`
+}
+
+// ReplaceSourceRanksRequest is the body of PUT
+// /reconciliation/source-ranks: the complete set of entries of the
+// organization.
+type ReplaceSourceRanksRequest struct {
+	Entries []RankEntry `json:"entries"`
+}
+
+// rankTabler is implemented by the repositories that keep source ranks
+// per attribute (PGRepository, MemoryRepository): the write decision
+// resolves both ranks through the table (REC-04). Without it the decision
+// uses SourceRanks.
+type rankTabler interface {
+	// rankTable returns the organization's rank table (cached).
+	rankTable(ctx context.Context, orgID string) (*RankTable, error)
+}
+
+// typedDecisionReader reads the provenance of the field (nil without a
+// row; ErrNotFound never) and the CI type of the CI in one statement
+// (PGRepository). A reader without it is read through Get, and only the
+// organization-wide entries apply (the memory profile keeps no CI types).
+type typedDecisionReader interface {
+	decisionState(ctx context.Context, orgID, ciID, fieldName string) (fv *FieldValue, ciTypeID string, err error)
+}
+
+// rankCacheTTL is how long a rank table stays cached on an instance;
+// another instance takes a change over after at most this time.
+const rankCacheTTL = 30 * time.Second
+
+// rankCache holds the rank tables per organization for the instance; a
+// write on this instance invalidates its organization at once (REC-04).
+// generations counts the invalidations per organization: a table read
+// before an invalidation is not cached after it (putIfGeneration).
+type rankCache struct {
+	mu          sync.Mutex
+	entries     map[string]rankCacheEntry
+	generations map[string]uint64
+	now         func() time.Time
+}
+
+type rankCacheEntry struct {
+	table   *RankTable
+	expires time.Time
+}
+
+// ranksOfInstance is the cache of the process: every repository of an
+// instance shares it, so a PUT invalidates the decisions of discovery,
+// import and workflow alike.
+var ranksOfInstance = newRankCache(time.Now)
+
+func newRankCache(now func() time.Time) *rankCache {
+	return &rankCache{entries: map[string]rankCacheEntry{}, generations: map[string]uint64{}, now: now}
+}
+
+// get returns the cached table of the organization, or on a miss the
+// generation to pass to putIfGeneration after reading the table.
+func (c *rankCache) get(orgID string) (*RankTable, uint64, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.entries[orgID]
+	if !ok || !c.now().Before(e.expires) {
+		return nil, c.generations[orgID], false
+	}
+	return e.table, 0, true
+}
+
+// putIfGeneration caches table only when no invalidation happened since
+// get returned gen: otherwise the table may predate the latest write.
+func (c *rankCache) putIfGeneration(orgID string, gen uint64, table *RankTable) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.generations[orgID] != gen {
+		return false
+	}
+	c.entries[orgID] = rankCacheEntry{table: table, expires: c.now().Add(rankCacheTTL)}
+	return true
+}
+
+func (c *rankCache) invalidate(orgID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.entries, orgID)
+	c.generations[orgID]++
+}
+
+// changedAttributes returns the attribute keys whose entries differ
+// between before and after, sorted.
+func changedAttributes(before, after []RankEntry) []string {
+	old := map[rankKey]int{}
+	for i := range before {
+		old[before[i].key()] = before[i].Rank
+	}
+	changed := map[string]bool{}
+	for i := range after {
+		k := after[i].key()
+		if r, ok := old[k]; !ok || r != after[i].Rank {
+			changed[k.attribute] = true
+		}
+		delete(old, k)
+	}
+	for k := range old {
+		changed[k.attribute] = true
+	}
+	out := make([]string, 0, len(changed))
+	for k := range changed {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// sortEntries orders entries by attribute, type (organization-wide first)
+// and source.
+func sortEntries(entries []RankEntry) {
+	sort.Slice(entries, func(i, j int) bool {
+		a, b := entries[i], entries[j]
+		if a.AttributeKey != b.AttributeKey {
+			return a.AttributeKey < b.AttributeKey
+		}
+		if a.CITypeID != b.CITypeID {
+			return a.CITypeID < b.CITypeID
+		}
+		return a.Source < b.Source
+	})
 }
