@@ -53,25 +53,30 @@ func originRank(origin string) int {
 func AboveScope(origin string) bool { return originRank(origin) < originRank(OriginScope) }
 
 // DeviceGroupSource yields the memberships of the device-group level (CI →
-// device groups, PRB-01; E-178). Until WP-935 (p3-probe-schema-def) the
-// source is empty (NoDeviceGroups); WP-935 supplies it from
-// monitoring_group_member.
+// device groups, PRB-01; E-178). PGDeviceGroupSource (WP-935) reads them
+// from monitoring_group_member; NoDeviceGroups is the empty source.
+//
+// When a CI is a member of several groups with bindings for one namespace,
+// the group with the higher priority wins, on a tie the lexicographically
+// smaller name (as for the monitoring values, WP-937); the priority of the
+// binding decides only within one group.
 type DeviceGroupSource interface {
-	// MembershipQuery is a SELECT of the pairs (ci_id uuid, group_id uuid)
-	// of the organization $1; the resolution uses it as a CTE of its one
-	// statement (AK5).
+	// MembershipQuery is a SELECT of the rows (ci_id uuid, group_id uuid,
+	// group_rank integer) of the organization $1, group_rank ordering the
+	// groups (1 wins); the resolution uses it as a CTE of its one statement
+	// (AK5).
 	MembershipQuery() string
 	// Memberships returns the groups of the CIs outside the database (memory
-	// store, tests).
+	// store, tests), per CI in rank order (the first wins).
 	Memberships(ctx context.Context, orgID string, ciIDs []string) (map[string][]string, error)
 }
 
-// NoDeviceGroups is the empty membership source (until WP-935).
+// NoDeviceGroups is the empty membership source.
 type NoDeviceGroups struct{}
 
-// MembershipQuery implements DeviceGroupSource: no pairs.
+// MembershipQuery implements DeviceGroupSource: no rows.
 func (NoDeviceGroups) MembershipQuery() string {
-	return `SELECT NULL::uuid AS ci_id, NULL::uuid AS group_id WHERE false`
+	return `SELECT NULL::uuid AS ci_id, NULL::uuid AS group_id, NULL::integer AS group_rank WHERE false`
 }
 
 // Memberships implements DeviceGroupSource: no groups.
@@ -80,9 +85,8 @@ func (NoDeviceGroups) Memberships(context.Context, string, []string) (map[string
 }
 
 // deviceGroupBindingColumn is the column of credential_binding that names
-// the device group of a binding. The column comes with WP-935
-// (device_group_id → monitoring_group); until then no binding has one.
-const deviceGroupBindingColumn = "NULL::uuid"
+// the device group of a binding (device_group_id → monitoring_group, WP-935).
+const deviceGroupBindingColumn = "b.device_group_id"
 
 // CredentialRef names a credential without its secret.
 type CredentialRef struct {
@@ -284,8 +288,10 @@ func Resolve(ctx context.Context, data *ResolveData, groups DeviceGroupSource, c
 					offer(creds[b.CredentialID], OriginCI, b.ID, b.Namespace, &p, 0)
 				}
 			case TargetDeviceGroup:
-				if slices.Contains(members[ci.ID], b.TargetID) {
-					offer(creds[b.CredentialID], OriginDeviceGroup, b.ID, b.Namespace, &p, 0)
+				// The group's rank orders the groups of the CI (the
+				// first wins): a negative specificity.
+				if rank := slices.Index(members[ci.ID], b.TargetID); rank >= 0 {
+					offer(creds[b.CredentialID], OriginDeviceGroup, b.ID, b.Namespace, &p, -rank)
 				}
 			case TargetSubnet:
 				// The subnets of the CI's VRF (that of its scope) that
@@ -380,13 +386,15 @@ const oneCI = `cis AS (
 	WHERE c.organization_id = $1 AND c.id = $2::uuid AND c.deleted_at IS NULL)`
 
 // aboveScopeCandidates are the bindings of the levels ci, device_group and
-// subnet (probe follows with WP-935): the subnets of the CI's VRF that
-// contain its management address, with their prefix length.
+// subnet: the groups of the CI with their rank (negative specificity, the
+// first group wins) and the subnets of the CI's VRF that contain its
+// management address, with their prefix length. The level probe binds the
+// checks of one probe, not a CI; the distribution resolves it (WP-948).
 const aboveScopeCandidates = `
 	SELECT cis.id AS ci_id, cis.scope_id, 'ci'::text AS origin, b.id AS source_id, b.credential_id, b.namespace, b.priority, 0 AS specificity
 	FROM cis JOIN credential_binding b ON b.organization_id = $1 AND b.ci_id = cis.id
 	UNION ALL
-	SELECT cis.id, cis.scope_id, 'device_group', b.id, b.credential_id, b.namespace, b.priority, 0
+	SELECT cis.id, cis.scope_id, 'device_group', b.id, b.credential_id, b.namespace, b.priority, -m.group_rank
 	FROM members m JOIN cis ON cis.id = m.ci_id
 	JOIN credential_binding b ON b.organization_id = $1 AND b.target_kind = 'device_group' AND ` + deviceGroupBindingColumn + ` = m.group_id
 	UNION ALL

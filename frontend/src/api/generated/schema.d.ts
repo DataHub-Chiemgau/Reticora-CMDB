@@ -10493,7 +10493,7 @@ export interface paths {
     put?: never;
     /**
      * Create a credential binding
-     * @description Binds a credential to a CI or subnet for one namespace with a priority (credential:bind). The namespace must be that of the credential's kind (empty: derived). A credential of a client binds only to a target of the same client; a target of another client, outside the caller's scope or unknown is 422 target_id alike. device_group and probe are 422 target_kind until WP-935.
+     * @description Binds a credential to a CI, a subnet, a device group (monitoring group) or a probe for one namespace with a priority (credential:bind). The namespace must be that of the credential's kind (empty: derived). A credential of a client binds only to a target of the same client; a target of another client, outside the caller's scope or unknown is 422 target_id alike.
      */
     post: operations['createCredentialBinding'];
     delete?: never;
@@ -18363,7 +18363,7 @@ export interface components {
       relationship_ids?: string[];
     };
     DependencyProblem: components['schemas']['ProblemDetail'] & {
-      /** @description Kinds of the objects that keep the location: location means child locations; vlan, vlan_domain_site (assignment to a VLAN domain, IPM-06), subnet, collector, discovery_scope, agent_enrollment_token (unexpired), collector_enrollment_code (neither used nor expired) and ci_merge (tombstone within tombstone_until) are bound to a site (E-71). ci_attribute means a visible CI whose reference attribute with target location names the location (MET-12). internal_order means an internal order whose target bin is the location (STK-05). stocktake, stocktake_item and stock_scan mean a stocktake whose area, an item of whose frozen expected stock or a scan whose place found is the location (INV-01). stock_level means stock of a consumable in the bin (STK-03; the kind quantity_item is gone with WP-758). */
+      /** @description Kinds of the objects that keep the location: location means child locations; vlan, vlan_domain_site (assignment to a VLAN domain, IPM-06), subnet, collector, discovery_scope, agent_enrollment_token (unexpired), collector_enrollment_code (neither used nor expired) and ci_merge (tombstone within tombstone_until) are bound to a site (E-71). ci_attribute means a visible CI whose reference attribute with target location names the location (MET-12). internal_order means an internal order whose target bin is the location (STK-05). stocktake, stocktake_item and stock_scan mean a stocktake whose area, an item of whose frozen expected stock or a scan whose place found is the location (INV-01). stock_level means stock of a consumable in the bin (STK-03; the kind quantity_item is gone with WP-758). probe means a monitoring probe at the site, with or without CI (PRB-01). */
       dependencies: (
         | 'location'
         | 'ci'
@@ -18385,6 +18385,7 @@ export interface components {
         | 'stocktake'
         | 'stocktake_item'
         | 'stock_scan'
+        | 'probe'
       )[];
     };
     /** @enum {string} */

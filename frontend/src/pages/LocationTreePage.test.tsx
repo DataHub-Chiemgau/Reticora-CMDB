@@ -581,6 +581,7 @@ describe('LocationTreePage', () => {
         stocktake: true,
         stocktake_item: true,
         stock_scan: true,
+        probe: true,
       };
       for (const lng of ['de-DE', 'en-US']) {
         for (const kind of Object.keys(kinds)) {

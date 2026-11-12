@@ -132,6 +132,11 @@ var matrixOverrides = map[string]map[string]string{
 	// A snapshot row names exactly the object of its item_kind, the first
 	// kind is asset (stocktake_item_object_check, WP-848).
 	"stocktake_item": {"asset_id": "@uuid"},
+	// A probe has a registered type and a CI or a client
+	// (probe_client_required, WP-935); a profile names exactly the target
+	// of its level, client_id is the scope (monitoring_profile_level_target_check).
+	"probe":              {"type": "icmp", "ci_id": "@uuid"},
+	"monitoring_profile": {"level": "group", "group_id": "@uuid", "probe_type": "icmp", "params": "{}"},
 }
 
 var anyArrayCheck = regexp.MustCompile(`^CHECK \(\((\w+) = ANY \(\(?ARRAY\['([^']*)'`)

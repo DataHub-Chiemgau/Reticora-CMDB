@@ -708,7 +708,7 @@ func recordScopeUsage(ctx context.Context, tx pgx.Tx, orgID, collectorID, scopeI
 	for _, id := range perScope[scopeID] {
 		bundle.CredentialIDs[id] = true
 	}
-	targets, err := credential.ResolveCollector(ctx, tx, orgID, collectorID, deref(collectorClient), credential.NoDeviceGroups{})
+	targets, err := credential.ResolveCollector(ctx, tx, orgID, collectorID, deref(collectorClient), credential.NewPGDeviceGroupSource(nil))
 	if err != nil {
 		return credential.UsageOutcome{}, err
 	}

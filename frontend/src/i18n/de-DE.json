@@ -2841,7 +2841,8 @@
       "ci_merge": "CI-Zusammenführungen (Tombstones)",
       "stocktake": "Inventuren (Bereich)",
       "stocktake_item": "Inventur-Sollbestände",
-      "stock_scan": "Inventur-Scans (Fundort)"
+      "stock_scan": "Inventur-Scans (Fundort)",
+      "probe": "Monitoring-Probes"
     }
   },
   "savedviews": {

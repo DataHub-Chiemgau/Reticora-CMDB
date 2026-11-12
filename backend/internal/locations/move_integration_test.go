@@ -705,6 +705,7 @@ func TestLocationDeleteReferencesMapToSpecKinds(t *testing.T) {
 		locations.DependencyCIAttribute, locations.DependencyInternalOrder, "vlan", "vlan_domain_site", "subnet", "collector", "discovery_scope", "agent_enrollment_token", "ci_merge",
 		"collector_enrollment_code",
 		locations.DependencyStocktake, locations.DependencyStocktakeItem, locations.DependencyStockScan,
+		locations.DependencyProbe,
 	}
 	if !slices.Equal(slices.Sorted(slices.Values(spec)), slices.Sorted(slices.Values(kinds))) {
 		t.Errorf("DependencyProblem.dependencies enum %v, want the kinds %v", spec, kinds)

@@ -1357,14 +1357,14 @@ func sysRequestAll(nc *nats.Conn, subject string, data []byte) ([]edgeServerAnsw
 // records the delivery (COL-02).
 type BundleGate struct {
 	authorizer *EdgeAuthorizer
-	// groups is the device-group level of the resolution (empty until
-	// WP-935).
+	// groups is the device-group level of the resolution
+	// (monitoring_group_member, WP-935).
 	groups credential.DeviceGroupSource
 }
 
 // NewBundleGate creates the gate on the collector CA.
 func NewBundleGate(pool *pgxpool.Pool, ca *CA) *BundleGate {
-	return &BundleGate{authorizer: NewEdgeAuthorizer(pool, ca), groups: credential.NoDeviceGroups{}}
+	return &BundleGate{authorizer: NewEdgeAuthorizer(pool, ca), groups: credential.NewPGDeviceGroupSource(pool)}
 }
 
 // WithDeviceGroups sets the membership source of the device-group level

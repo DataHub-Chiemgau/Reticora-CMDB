@@ -54,6 +54,11 @@ const (
 	// DependencyEnrollmentCode is a collector enrollment code bound to the
 	// site (000187), RESTRICT since 000189 (F-430).
 	DependencyEnrollmentCode = "collector_enrollment_code"
+
+	// DependencyProbe is a monitoring probe at the site (PRB-01, WP-935):
+	// a probe of a CI carries the CI's site, a probe without CI (a plain
+	// target address) its own; the kind is the name of the table.
+	DependencyProbe = "probe"
 )
 
 // dependency is a kind of object that keeps the location $1; present is
@@ -82,6 +87,7 @@ var dependencies = []dependency{
 	{DependencyStocktake, `EXISTS (SELECT 1 FROM stocktake st WHERE st.location_id = $1)`},
 	{DependencyStocktakeItem, `EXISTS (SELECT 1 FROM stocktake_item si WHERE si.location_id = $1)`},
 	{DependencyStockScan, `EXISTS (SELECT 1 FROM stock_scan ss WHERE ss.location_id = $1)`},
+	{DependencyProbe, `EXISTS (SELECT 1 FROM probe p WHERE p.site_id = $1)`},
 }
 
 // ciAttributeReference is the condition of DependencyCIAttribute (MET-12,
@@ -153,6 +159,12 @@ var referenceKinds = map[string]string{
 	// 000258, WP-750) and references a site only while its object stands
 	// there; the object is the dependency.
 	"reservation": DependencyAsset,
+	// Monitoring group members and monitoring profiles carry the site of
+	// their CI (000307, WP-935); the CI at the site is the dependency. A
+	// probe is a kind of its own (DependencyProbe): without CI it holds the
+	// site itself.
+	"monitoring_group_member": DependencyCI,
+	"monitoring_profile":      DependencyCI,
 }
 
 // DependencyError reports the kinds of objects that still reference a

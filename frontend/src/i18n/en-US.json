@@ -2841,7 +2841,8 @@
       "ci_merge": "CI merges (tombstones)",
       "stocktake": "stocktakes (area)",
       "stocktake_item": "expected stock of stocktakes",
-      "stock_scan": "stocktake scans (place found)"
+      "stock_scan": "stocktake scans (place found)",
+      "probe": "monitoring probes"
     }
   },
   "savedviews": {

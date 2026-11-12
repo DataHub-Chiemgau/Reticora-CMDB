@@ -24279,12 +24279,12 @@ paths:
       tags: [Credentials]
       summary: Create a credential binding
       description: >-
-        Binds a credential to a CI or subnet for one namespace with a priority
-        (credential:bind). The namespace must be that of the credential's kind
-        (empty: derived). A credential of a client binds only to a target of
-        the same client; a target of another client, outside the caller's
-        scope or unknown is 422 target_id alike. device_group and probe are
-        422 target_kind until WP-935.
+        Binds a credential to a CI, a subnet, a device group (monitoring
+        group) or a probe for one namespace with a priority (credential:bind).
+        The namespace must be that of the credential's kind (empty: derived).
+        A credential of a client binds only to a target of the same client; a
+        target of another client, outside the caller's scope or unknown is 422
+        target_id alike.
       requestBody:
         required: true
         content:
@@ -37694,10 +37694,11 @@ components:
                 whose area, an item of whose frozen expected stock or a scan
                 whose place found is the location (INV-01). stock_level
                 means stock of a consumable in the bin (STK-03; the kind
-                quantity_item is gone with WP-758).
+                quantity_item is gone with WP-758). probe means a
+                monitoring probe at the site, with or without CI (PRB-01).
               items:
                 type: string
-                enum: [location, ci, asset, stock_level, stock_movement, rack_mount, role_assignment, ci_attribute, internal_order, vlan, vlan_domain_site, subnet, collector, discovery_scope, agent_enrollment_token, collector_enrollment_code, ci_merge, stocktake, stocktake_item, stock_scan]
+                enum: [location, ci, asset, stock_level, stock_movement, rack_mount, role_assignment, ci_attribute, internal_order, vlan, vlan_domain_site, subnet, collector, discovery_scope, agent_enrollment_token, collector_enrollment_code, ci_merge, stocktake, stocktake_item, stock_scan, probe]
     LocationKind:
       type: string
       enum: [site, building, room, rack, warehouse, zone, shelf, bin]

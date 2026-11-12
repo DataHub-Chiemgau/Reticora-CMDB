@@ -20,8 +20,9 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
-// Target kinds of a binding (CRD-01). device_group and probe are reserved
-// until WP-935 (p3-probe-schema-def) adds their tables.
+// Target kinds of a binding (CRD-01). device_group is a monitoring group
+// (monitoring_group, E-178 (b)), probe a probe definition; both since WP-935
+// (p3-probe-schema-def). Tags are no target.
 const (
 	TargetCI          = "ci"
 	TargetDeviceGroup = "device_group"
@@ -32,8 +33,10 @@ const (
 // TargetKinds are the target kinds of CRD-01.
 var TargetKinds = []string{TargetCI, TargetDeviceGroup, TargetSubnet, TargetProbe}
 
-// supportedTargets are the target kinds usable now.
-var supportedTargets = []string{TargetCI, TargetSubnet}
+// targetTables are the tables of the target kinds.
+var targetTables = map[string]string{
+	TargetCI: "ci", TargetSubnet: "subnet", TargetDeviceGroup: "monitoring_group", TargetProbe: "probe",
+}
 
 // DefaultBindingPriority is the priority of a binding without one.
 const DefaultBindingPriority = 100
@@ -116,7 +119,7 @@ type BindingService struct {
 	creds    *Service
 	bindings BindingRepository
 	// groups is the membership source of the device-group level of the
-	// resolution (WP-891; empty until WP-935).
+	// resolution (WP-891): monitoring_group_member on PostgreSQL (WP-935).
 	groups DeviceGroupSource
 }
 
@@ -150,9 +153,6 @@ func (b *BindingService) validate(ctx context.Context, orgID string, in *Binding
 	case !slices.Contains(TargetKinds, in.TargetKind):
 		return &api.FieldError{Field: "target_kind", Status: http.StatusUnprocessableEntity,
 			Message: "target_kind must be one of ci, device_group, subnet, probe"}
-	case !slices.Contains(supportedTargets, in.TargetKind):
-		return &api.FieldError{Field: "target_kind", Status: http.StatusUnprocessableEntity,
-			Message: "target kind not supported yet"}
 	case !api.IsUUID(in.TargetID):
 		return &api.FieldError{Field: "target_id", Status: http.StatusUnprocessableEntity, Message: ErrTargetUnknown.Error()}
 	case in.Priority < 0 || in.Priority > maxBindingPriority:
@@ -279,7 +279,7 @@ func (b *BindingService) ReplaceCI(ctx context.Context, orgID, ciID string, in [
 // --- PostgreSQL -----------------------------------------------------------
 
 const bindingColumns = `id::text, organization_id::text, credential_id::text, target_kind,
-	COALESCE(ci_id::text, subnet_id::text, ''), namespace, priority,
+	COALESCE(ci_id::text, subnet_id::text, device_group_id::text, probe_id::text, ''), namespace, priority,
 	COALESCE(client_id::text, ''), COALESCE(site_id::text, ''), created_at, updated_at`
 
 func scanBinding(row pgx.Row) (*Binding, error) {
@@ -289,15 +289,20 @@ func scanBinding(row pgx.Row) (*Binding, error) {
 	return &b, err
 }
 
-// targetColumns returns the ci_id and subnet_id of a binding.
-func targetColumns(b *Binding) (ci, subnet any) {
+// targetColumns returns the ci_id, subnet_id, device_group_id and probe_id
+// of a binding.
+func targetColumns(b *Binding) (ci, subnet, group, probe any) {
 	switch b.TargetKind {
 	case TargetCI:
-		return b.TargetID, nil
+		return b.TargetID, nil, nil, nil
 	case TargetSubnet:
-		return nil, b.TargetID
+		return nil, b.TargetID, nil, nil
+	case TargetDeviceGroup:
+		return nil, nil, b.TargetID, nil
+	case TargetProbe:
+		return nil, nil, nil, b.TargetID
 	}
-	return nil, nil
+	return nil, nil, nil, nil
 }
 
 // bindingError maps the constraints of credential_binding.
@@ -307,11 +312,11 @@ func bindingError(err error) error {
 		return err
 	}
 	switch pgErr.ConstraintName {
-	case "uq_credential_binding_ci", "uq_credential_binding_subnet":
+	case "uq_credential_binding_ci", "uq_credential_binding_subnet", "uq_credential_binding_device_group", "uq_credential_binding_probe":
 		return ErrBindingConflict
 	case "credential_binding_client_rule":
 		return ErrClientRule
-	case "credential_binding_ci_fkey", "credential_binding_subnet_fkey":
+	case "credential_binding_ci_fkey", "credential_binding_subnet_fkey", "credential_binding_device_group_fkey", "credential_binding_probe_fkey":
 		return ErrTargetUnknown
 	case "credential_binding_credential_fkey":
 		return &api.FieldError{Field: "credential_id", Status: http.StatusUnprocessableEntity, Message: "credential not found"}
@@ -321,9 +326,9 @@ func bindingError(err error) error {
 
 // targetVisible checks the target in the caller's scope (RLS).
 func targetVisible(ctx context.Context, tx pgx.Tx, b *Binding) error {
-	table := "ci"
-	if b.TargetKind == TargetSubnet {
-		table = "subnet"
+	table, ok := targetTables[b.TargetKind]
+	if !ok {
+		return ErrTargetUnknown
 	}
 	var exists bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM `+table+` WHERE id = $1)`, b.TargetID).Scan(&exists); err != nil {
@@ -339,11 +344,11 @@ func insertBinding(ctx context.Context, tx pgx.Tx, b *Binding) error {
 	if err := targetVisible(ctx, tx, b); err != nil {
 		return err
 	}
-	ci, subnet := targetColumns(b)
+	ci, subnet, group, probe := targetColumns(b)
 	stored, err := scanBinding(tx.QueryRow(ctx, `INSERT INTO credential_binding
-		(organization_id, credential_id, target_kind, ci_id, subnet_id, namespace, priority)
-		VALUES (current_setting('app.org_id')::uuid, $1, $2, $3, $4, $5, $6) RETURNING `+bindingColumns,
-		b.CredentialID, b.TargetKind, ci, subnet, b.Namespace, b.Priority))
+		(organization_id, credential_id, target_kind, ci_id, subnet_id, device_group_id, probe_id, namespace, priority)
+		VALUES (current_setting('app.org_id')::uuid, $1, $2, $3, $4, $5, $6, $7, $8) RETURNING `+bindingColumns,
+		b.CredentialID, b.TargetKind, ci, subnet, group, probe, b.Namespace, b.Priority))
 	if err != nil {
 		return bindingError(err)
 	}
@@ -369,7 +374,7 @@ func (r *PGRepository) ListBindings(ctx context.Context, orgID string, f Binding
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT `+bindingColumns+` FROM credential_binding
 			WHERE ($1 = '' OR credential_id::text = $1) AND ($2 = '' OR target_kind = $2)
-			  AND ($3 = '' OR ci_id::text = $3 OR subnet_id::text = $3)
+			  AND ($3 = '' OR ci_id::text = $3 OR subnet_id::text = $3 OR device_group_id::text = $3 OR probe_id::text = $3)
 			ORDER BY created_at DESC, id DESC`, f.CredentialID, f.TargetKind, f.TargetID)
 		if err != nil {
 			return fmt.Errorf("list credential bindings: %w", err)

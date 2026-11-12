@@ -229,7 +229,7 @@ func NewService(repo Repository, encryptor *crypto.EnvelopeEncryptor) *Service {
 	if !ok {
 		bindingRepo = newMemoryBindings()
 	}
-	s.bindings = &BindingService{creds: s, bindings: bindingRepo, groups: NoDeviceGroups{}}
+	s.bindings = &BindingService{creds: s, bindings: bindingRepo, groups: deviceGroupsOf(repo)}
 	vaultRepo, ok := repo.(VaultRepository)
 	if !ok {
 		vaultRepo = newMemoryVaults()

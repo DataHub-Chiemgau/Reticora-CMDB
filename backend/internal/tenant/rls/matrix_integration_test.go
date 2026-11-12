@@ -59,7 +59,8 @@ var matrixClientOnlyReads = map[string]string{
 // always NULL): such a principal reads them, its INSERT is refused and its
 // UPDATE and DELETE find no row.
 var matrixSiteWrites = map[string]string{
-	"ipam_section": "IPAM sections, migration 000298 (WP-900): ipam.TestIPAMSectionsOnPostgreSQL",
+	"ipam_section":     "IPAM sections, migration 000298 (WP-900): ipam.TestIPAMSectionsOnPostgreSQL",
+	"monitoring_group": "monitoring groups, migration 000307 (WP-935): probe.TestProbeTablesFollowClientScope",
 }
 
 // matrixSnapshotScoped lists the tables that carry a scope snapshot of their

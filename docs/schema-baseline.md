@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000306_vrf_attributes
+Stand: Migration 000307_probe_definition
 
 ## Prüfung
 
@@ -1988,6 +1988,9 @@ SECURITY`), Policies mit ihrem Kommando.
 | `metamodel_rule` | ja | ja | metamodel_rule_isolation_delete (DELETE), metamodel_rule_isolation_insert (INSERT), metamodel_rule_isolation_select (SELECT), metamodel_rule_isolation_update (UPDATE) |
 | `metric_sample` | nein | nein | – |
 | `migration_quarantine` | ja | ja | migration_quarantine_isolation (ALL) |
+| `monitoring_group` | ja | ja | monitoring_group_isolation (ALL), monitoring_group_scoped_delete (DELETE), monitoring_group_scoped_update (UPDATE) |
+| `monitoring_group_member` | ja | ja | monitoring_group_member_isolation (ALL), monitoring_group_member_scoped_delete (DELETE), monitoring_group_member_scoped_update (UPDATE) |
+| `monitoring_profile` | ja | ja | monitoring_profile_isolation (ALL), monitoring_profile_scoped_delete (DELETE), monitoring_profile_scoped_update (UPDATE) |
 | `nameserver_set` | ja | ja | nameserver_set_isolation (ALL), nameserver_set_scoped_delete (DELETE), nameserver_set_scoped_insert (INSERT), nameserver_set_scoped_update (UPDATE) |
 | `network_interface` | ja | ja | network_interface_scoped_delete (DELETE), network_interface_scoped_update (UPDATE), org_isolation (ALL) |
 | `notice_sent` | ja | ja | notice_sent_isolation (ALL) |
@@ -2005,6 +2008,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `pii_subject` | ja | ja | pii_subject_isolation (ALL) |
 | `platform_secret` | ja | ja | platform_secret_system_insert (INSERT), platform_secret_system_select (SELECT), platform_secret_system_update (UPDATE) |
 | `privacy_retention_policy` | ja | ja | privacy_retention_isolation (ALL) |
+| `probe` | ja | ja | probe_isolation (ALL), probe_scoped_delete (DELETE), probe_scoped_update (UPDATE) |
 | `rack` | ja | ja | rack_isolation (ALL) |
 | `rack_mount` | ja | ja | rack_mount_isolation (ALL), rack_mount_scoped_delete (DELETE), rack_mount_scoped_update (UPDATE) |
 | `relationship_change` | ja | ja | relationship_change_isolation (ALL), relationship_change_scoped_delete (DELETE), relationship_change_scoped_update (UPDATE) |

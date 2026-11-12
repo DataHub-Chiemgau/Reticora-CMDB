@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -242,15 +244,109 @@ func TestBindingUniquePerPriority(t *testing.T) {
 	}
 }
 
-// TestBindingDeviceGroupAndProbeTargetsUnsupported covers AK4.
-func TestBindingDeviceGroupAndProbeTargetsUnsupported(t *testing.T) {
+// group inserts a monitoring group of orgID (clientID empty: org-wide).
+func (e *bindingEnv) group(orgID, clientID, name string, priority int) string {
+	e.t.Helper()
+	var client any
+	if clientID != "" {
+		client = clientID
+	}
+	return e.scalar(`INSERT INTO monitoring_group (organization_id, client_id, name, priority) VALUES ($1, $2, $3, $4) RETURNING id::text`,
+		orgID, client, name, priority)
+}
+
+// member adds the CI to the group.
+func (e *bindingEnv) member(orgID, groupID, ciID string) {
+	e.t.Helper()
+	e.exec(`INSERT INTO monitoring_group_member (organization_id, group_id, ci_id) VALUES ($1, $2, $3)`, orgID, groupID, ciID)
+}
+
+// probe inserts an icmp probe on the CI.
+func (e *bindingEnv) probe(orgID, ciID, target string) string {
+	e.t.Helper()
+	return e.scalar(`INSERT INTO probe (organization_id, ci_id, type, target) VALUES ($1, $2, 'icmp', $3) RETURNING id::text`,
+		orgID, ciID, target)
+}
+
+// TestBindingDeviceGroupAndProbeTargets covers CRD-01 (WP-935 AK7): a
+// credential binds to a monitoring group (device group) and to a probe of
+// the organization (201, scope of the target); a group or probe of another
+// organization is 422 target_id through the API and 23503 in the database;
+// a credential of client 1 does not bind to the group or probe of client 2
+// (422 like an unknown target).
+func TestBindingDeviceGroupAndProbeTargets(t *testing.T) {
 	e := newBindingEnv(t)
-	for _, kind := range []string{"device_group", "probe"} {
-		rec := e.bind(e.credOrg, kind, e.ci1, 100)
-		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), "target kind not supported yet") ||
-			!strings.Contains(rec.Body.String(), `"field":"target_kind"`) {
-			t.Errorf("%s: %d %s", kind, rec.Code, rec.Body.String())
+	ctx := context.Background()
+	group1 := e.group(e.f.OrgA, e.f.Client1, "wp935-group-c1", 0)
+	group2 := e.group(e.f.OrgA, e.f.Client2, "wp935-group-c2", 0)
+	orgGroup := e.group(e.f.OrgA, "", "wp935-group-org", 0)
+	probe1 := e.probe(e.f.OrgA, e.ci1, "10.89.1.10")
+	probe2 := e.probe(e.f.OrgA, e.ci2, "10.89.2.10")
+	ciB := e.f.CI(t, e.f.OrgB, "", "wp935-ci-b")
+	groupB := e.group(e.f.OrgB, "", "wp935-group-b", 0)
+	probeB := e.probe(e.f.OrgB, ciB, "10.89.9.10")
+
+	check := func(rec *httptest.ResponseRecorder, kind, target, client string) {
+		t.Helper()
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("bind to %s %s: %d %s", kind, target, rec.Code, rec.Body.String())
 		}
+		var b credential.Binding
+		if err := json.Unmarshal(rec.Body.Bytes(), &b); err != nil {
+			t.Fatal(err)
+		}
+		if b.TargetKind != kind || b.TargetID != target || b.ClientID != client {
+			t.Errorf("binding %+v, want %s %s of client %q", b, kind, target, client)
+		}
+	}
+	check(e.bind(e.cred1, "device_group", group1, 100), "device_group", group1, e.f.Client1)
+	check(e.bind(e.credOrg, "device_group", orgGroup, 100), "device_group", orgGroup, "")
+	check(e.bind(e.cred1, "probe", probe1, 100), "probe", probe1, e.f.Client1)
+	check(e.bind(e.credOrg, "probe", probe2, 100), "probe", probe2, e.f.Client2)
+	if rec := e.bind(e.cred1, "device_group", group1, 100); rec.Code != http.StatusConflict {
+		t.Errorf("second binding of the group with the same priority: %d %s, want 409", rec.Code, rec.Body.String())
+	}
+
+	// The filter by target finds the probe binding only.
+	rec := e.do(http.MethodGet, "/api/v1/credential-bindings?target_id="+probe1, "", "")
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), probe1) || strings.Contains(rec.Body.String(), group1) {
+		t.Errorf("list by probe: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// Another organization's group or probe: 422 target_id through the API.
+	for kind, target := range map[string]string{"device_group": groupB, "probe": probeB} {
+		rec := e.bind(e.credOrg, kind, target, 100)
+		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"field":"target_id"`) {
+			t.Errorf("%s of organization B: %d %s, want 422 target_id", kind, rec.Code, rec.Body.String())
+		}
+	}
+	// ... and 23503 in the database (composite foreign keys).
+	for _, c := range []struct{ column, kind, target string }{
+		{"device_group_id", "device_group", groupB}, {"probe_id", "probe", probeB},
+	} {
+		_, err := e.f.Admin.Exec(ctx, `INSERT INTO credential_binding (organization_id, credential_id, target_kind, `+c.column+`, namespace)
+			VALUES ($1, $2, $3, $4, 'ssh')`, e.f.OrgA, e.credOrg, c.kind, c.target)
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
+			t.Errorf("%s of organization B in the database: %v, want 23503", c.column, err)
+		}
+	}
+	// A credential of client 1 on the group or probe of client 2: 422.
+	for kind, target := range map[string]string{"device_group": group2, "probe": probe2} {
+		rec := e.bind(e.cred1, kind, target, 50)
+		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"field":"target_id"`) {
+			t.Errorf("credential of client 1 on %s of client 2: %d %s, want 422 target_id", kind, rec.Code, rec.Body.String())
+		}
+	}
+	// The target column must match the kind (CHECK).
+	if _, err := e.f.Admin.Exec(ctx, `INSERT INTO credential_binding (organization_id, credential_id, target_kind, ci_id, namespace)
+		VALUES ($1, $2, 'probe', $3, 'ssh')`, e.f.OrgA, e.credOrg, e.ci1); err == nil || !strings.Contains(err.Error(), "credential_binding_target_check") {
+		t.Errorf("probe binding with ci_id: %v, want credential_binding_target_check", err)
+	}
+	// Deleting the probe removes its bindings.
+	e.exec(`DELETE FROM probe WHERE id = $1`, probe1)
+	if n := e.scalar(`SELECT count(*)::text FROM credential_binding WHERE probe_id = $1`, probe1); n != "0" {
+		t.Errorf("bindings of a deleted probe: %s", n)
 	}
 }
 
