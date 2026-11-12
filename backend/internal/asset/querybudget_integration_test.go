@@ -198,8 +198,9 @@ func TestAssetQueryBudget(t *testing.T) {
 	// The list and the field permissions of the request, each read in a
 	// transaction of its own (begin with the tenant context, reads,
 	// commit): the snapshot of the grants (field grants, object grants,
-	// sensitive fields), the teams of the user and the type chain.
-	const handlerBudget = listBudget + (2 + 3) + 3 + 3
+	// sensitive fields, asset sources of computed attributes, SR-58,
+	// WP-871), the teams of the user and the type chain.
+	const handlerBudget = listBudget + (2 + 4) + 3 + 3
 	if largeHandler > handlerBudget {
 		t.Errorf("GET /api/v1/assets with field projection: %d statements, budget %d", largeHandler, handlerBudget)
 	}
