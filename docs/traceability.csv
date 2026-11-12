@@ -1722,3 +1722,7 @@ ALR-08;[P3];E;backend/internal/alarm/forecast/forecast_test.go;WP-1059
 ALR-01;[P3];E;backend/internal/alarm/pg_store_integration_test.go;WP-981
 MON-04;[P3];E;backend/internal/alarm/alarm_scope_integration_test.go;WP-981
 ALR-07;[P3];E;backend/internal/alarm/configsnap/pg_store_integration_test.go;WP-1052
+SEC-02;[P3];F;backend/internal/security/finding_integration_test.go;WP-1116
+EVT-03;[P2–P3];F;backend/internal/server/evt02_producers_integration_test.go;WP-1116
+RBA-05;[P2–P4], [A];F;backend/internal/security/finding_integration_test.go;WP-1116
+API-06;[P2]/[P3]/[P4]/[A];F;backend/internal/security/finding_integration_test.go;WP-1116

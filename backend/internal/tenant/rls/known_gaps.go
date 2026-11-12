@@ -253,6 +253,11 @@ var LeakyIndexes = map[string]LeakyIndex{
 			"search of the application role stays linear within the budget up to 10,000 objects " +
 			"(E-133 option 3, E-17; TestSearchPlanUnderRLS)",
 	},
+	"idx_security_finding_cve_ids": {
+		Table: "security_finding", Leaky: "operator class array_ops",
+		Reason: "CVE ids of the findings (000315, WP-1116); @> (arraycontains) is not leakproof, the filter cve of " +
+			"GET /security/findings reads the findings of the organization within the caller's scope",
+	},
 	"idx_signup_request_email": {
 		Table: "signup_request", Leaky: "function lower(text)",
 		Reason: "signup requests of the operator path (000103, OperatorTables); lower is not leakproof, the " +

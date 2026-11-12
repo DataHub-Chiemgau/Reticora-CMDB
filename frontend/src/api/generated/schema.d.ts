@@ -2485,7 +2485,10 @@ export interface paths {
     /** List security findings (patch posture / vulnerabilities per CI) */
     get: operations['listSecurityFindings'];
     put?: never;
-    /** Record a security finding (feed-derived) */
+    /**
+     * Record a security finding (source manual)
+     * @description Records a manual finding through the upsert on its fingerprint (SHA-256 over source, CI, kind and advisory_id, else reference, else package and version, else title): the same finding again answers 200 with the existing finding and its last_seen_at renewed; a resolved finding opens again (status_reason reappeared). Writes finding.created or finding.changed in the same transaction (WP-1116). Needs finding:write.
+     */
     post: operations['createSecurityFinding'];
     delete?: never;
     options?: never;
@@ -2527,7 +2530,10 @@ export interface paths {
     delete?: never;
     options?: never;
     head?: never;
-    /** Transition a finding's status (acknowledge/resolve/false positive) */
+    /**
+     * Transition a finding's status (acknowledge/resolve/false positive)
+     * @description Allowed transitions: open to acknowledged, false_positive or resolved; acknowledged to open, false_positive or resolved; false_positive to open; resolved to open. Any other transition is 422 with field status; false_positive requires status_reason (1 to 1,000 characters, else 422 with field status_reason). resolved_at is set only by resolved and cleared otherwise. Writes finding.resolved (to resolved) or finding.changed in the same transaction (WP-1116). Needs finding:write.
+     */
     patch: operations['updateSecurityFinding'];
     trace?: never;
   };
@@ -18139,7 +18145,13 @@ export interface components {
       organization_id: string;
       ci_id?: string;
       /** @enum {string} */
-      kind: 'vulnerability' | 'outdated_software' | 'outdated_firmware' | 'missing_patch';
+      kind:
+        | 'vulnerability'
+        | 'outdated_software'
+        | 'outdated_firmware'
+        | 'missing_patch'
+        | 'unauthorized_change'
+        | 'compliance_violation';
       /** @enum {string} */
       severity: 'low' | 'medium' | 'high' | 'critical';
       title: string;
@@ -18151,8 +18163,28 @@ export interface components {
       reference?: string;
       /** @enum {string} */
       status: 'open' | 'acknowledged' | 'resolved' | 'false_positive';
+      /** @description Reason of the status; reappeared for a resolved finding that was reported again. */
+      status_reason?: string;
+      /**
+       * @description Origin of the finding (SEC-02).
+       * @enum {string}
+       */
+      source: 'cve_feed' | 'agent' | 'compliance' | 'config_change' | 'manual';
+      cve_ids: string[];
+      cvss_score?: number;
+      cvss_vector?: string;
+      /** @description Listed in the CISA Known Exploited Vulnerabilities catalog. */
+      kev: boolean;
+      advisory_id?: string;
+      /** @description Deduplication key, unique per organization. */
+      fingerprint: string;
       /** Format: date-time */
       detected_at: string;
+      /**
+       * Format: date-time
+       * @description Last report of the finding.
+       */
+      last_seen_at: string;
       /** Format: date-time */
       resolved_at?: string;
       /** Format: date-time */
@@ -18163,7 +18195,13 @@ export interface components {
     CreatePatchFindingRequest: {
       ci_id?: string;
       /** @enum {string} */
-      kind: 'vulnerability' | 'outdated_software' | 'outdated_firmware' | 'missing_patch';
+      kind:
+        | 'vulnerability'
+        | 'outdated_software'
+        | 'outdated_firmware'
+        | 'missing_patch'
+        | 'unauthorized_change'
+        | 'compliance_violation';
       /** @enum {string} */
       severity?: 'low' | 'medium' | 'high' | 'critical';
       title: string;
@@ -18175,7 +18213,9 @@ export interface components {
     };
     UpdatePatchFindingRequest: {
       /** @enum {string} */
-      status?: 'open' | 'acknowledged' | 'resolved' | 'false_positive';
+      status: 'open' | 'acknowledged' | 'resolved' | 'false_positive';
+      /** @description Reason of the change; required for false_positive. */
+      status_reason?: string;
     };
     PatchFindingListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['PatchFinding'][];
@@ -27202,6 +27242,10 @@ export interface operations {
         kind?: string;
         severity?: string;
         status?: string;
+        /** @description Origin of the finding (SEC-02, WP-1116). */
+        source?: 'cve_feed' | 'agent' | 'compliance' | 'config_change' | 'manual';
+        /** @description A CVE id the finding names (element of cve_ids). */
+        cve?: string;
       };
       header?: never;
       path?: never;
@@ -27234,6 +27278,15 @@ export interface operations {
       };
     };
     responses: {
+      /** @description The same finding exists and was updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PatchFinding'];
+        };
+      };
       /** @description Finding created */
       201: {
         headers: {
@@ -27245,6 +27298,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   securityFindingsSummary: {
@@ -27319,6 +27373,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   listConsumables: {

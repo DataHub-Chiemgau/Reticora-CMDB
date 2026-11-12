@@ -17800,7 +17800,8 @@ REC-04;[P3];F;frontend/src/pages/SourceRanksPage.test.tsx;WP-1115
 - backend/internal/security/repository.go
 - backend/internal/security/pg_repository.go
 - backend/internal/security/handler.go
-- backend/internal/server/repositories.go
+- backend/internal/server/repositories.go: bleibt unverändert (Stand der Umsetzung 2026-11-12): `PGRepository` schreibt die Outbox selbst in seiner Transaktion, die Verdrahtung von Memory- und PG-Repository ändert sich nicht.
+- backend/internal/tenant/rls/known_gaps.go: `LeakyIndexes` um den GIN-Index `idx_security_finding_cve_ids` (AK6; `array_ops` ist nicht leakproof, wie die Exclusion-Constraint `desk_booking_no_overlap`)
 - backend/internal/agent/handler.go
 - api/openapi.yaml
 - frontend/src/api/generated/schema.d.ts (generiert)

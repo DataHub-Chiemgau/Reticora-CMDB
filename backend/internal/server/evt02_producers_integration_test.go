@@ -247,6 +247,8 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 		usageCredential, usageCollector    string
 		usageScope, usageCI                string
 		stateAddress, stateSubnet          string
+		findingCI, changedFinding          string
+		resolvedFinding                    string
 		admpAccount                        string
 		admpSync                           *admp.Sync
 		allocParent                        string
@@ -771,6 +773,64 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 				if data["id"] != entity || data["subnet_id"] != stateSubnet || data["client_id"] != f.Client1 ||
 					data["from"] != "unknown" || data["to"] != "active" {
 					t.Errorf("ipam.address.state_changed data %v", data)
+				}
+			}},
+		{typ: events.FindingCreated,
+			// POST /security/findings records a manual finding through the
+			// upsert (WP-1116).
+			setup: func(t *testing.T) { findingCI = f.CI(t, f.OrgA, f.Client1, "evt02-finding-ci") },
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/security/findings",
+					`{"ci_id":"`+findingCI+`","kind":"vulnerability","severity":"high","title":"evt02-finding","reference":"CVE-2024-5555"}`)
+				answered(t, "POST /security/findings", r, refused, http.StatusCreated)
+				if refused {
+					unchanged(t, "findings named evt02-finding", count(t, `security_finding WHERE organization_id = $1 AND title = 'evt02-finding'`, f.OrgA), "0")
+					return ""
+				}
+				return t6ID(r.Body)
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["ci_id"] != findingCI || data["client_id"] != f.Client1 || data["severity"] != "high" ||
+					data["status"] != "open" || data["source"] != "manual" || data["cve_ids"] == nil {
+					t.Errorf("finding.created data %v", data)
+				}
+			}},
+		{typ: events.FindingChanged,
+			// PATCH /security/findings/{id} acknowledges a finding (WP-1116).
+			setup: func(t *testing.T) {
+				changedFinding = scalar(t, `INSERT INTO security_finding (organization_id, ci_id, kind, title) VALUES ($1, $2, 'vulnerability', 'evt02-changed')
+					RETURNING id::text`, f.OrgA, f.CI(t, f.OrgA, f.Client1, "evt02-finding-changed"))
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPatch, "/api/v1/security/findings/"+changedFinding, `{"status":"acknowledged"}`)
+				answered(t, "PATCH /security/findings/{id} acknowledged", r, refused, http.StatusOK)
+				if refused {
+					unchanged(t, "finding status", scalar(t, `SELECT status FROM security_finding WHERE id = $1`, changedFinding), "open")
+				}
+				return changedFinding
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["status"] != "acknowledged" || data["client_id"] != f.Client1 || data["source"] != "manual" {
+					t.Errorf("finding.changed data %v", data)
+				}
+			}},
+		{typ: events.FindingResolved,
+			// PATCH /security/findings/{id} resolves a finding (WP-1116).
+			setup: func(t *testing.T) {
+				resolvedFinding = scalar(t, `INSERT INTO security_finding (organization_id, ci_id, kind, title) VALUES ($1, $2, 'missing_patch', 'evt02-resolved')
+					RETURNING id::text`, f.OrgA, f.CI(t, f.OrgA, f.Client1, "evt02-finding-resolved"))
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPatch, "/api/v1/security/findings/"+resolvedFinding, `{"status":"resolved"}`)
+				answered(t, "PATCH /security/findings/{id} resolved", r, refused, http.StatusOK)
+				if refused {
+					unchanged(t, "finding status", scalar(t, `SELECT status FROM security_finding WHERE id = $1`, resolvedFinding), "open")
+				}
+				return resolvedFinding
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["status"] != "resolved" || data["severity"] != "medium" {
+					t.Errorf("finding.resolved data %v", data)
 				}
 			}},
 		{typ: events.IPAMSubnetChanged,
@@ -1410,9 +1470,6 @@ var plannedProducers = map[string]string{
 	"workflow.approval_requested":   "WP-1098",
 	"workflow.approval_decided":     "WP-1098",
 	"workflow.webhook":              "WP-1096",
-	"finding.created":               "WP-1116",
-	"finding.changed":               "WP-1116",
-	"finding.resolved":              "WP-1116",
 	"notification.escalated":        "WP-1146",
 	"notification.acknowledged":     "WP-1146",
 	"org.export_completed":          "WP-1151",

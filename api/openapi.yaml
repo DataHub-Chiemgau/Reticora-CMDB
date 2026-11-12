@@ -5333,6 +5333,14 @@ paths:
         - name: status
           in: query
           schema: { type: string }
+        - name: source
+          in: query
+          description: Origin of the finding (SEC-02, WP-1116).
+          schema: { type: string, enum: [cve_feed, agent, compliance, config_change, manual] }
+        - name: cve
+          in: query
+          description: A CVE id the finding names (element of cve_ids).
+          schema: { type: string }
       responses:
         '200':
           description: Paginated findings
@@ -5345,7 +5353,15 @@ paths:
     post:
       operationId: createSecurityFinding
       tags: [Security]
-      summary: Record a security finding (feed-derived)
+      summary: Record a security finding (source manual)
+      description: >-
+        Records a manual finding through the upsert on its fingerprint
+        (SHA-256 over source, CI, kind and advisory_id, else reference,
+        else package and version, else title): the same finding again
+        answers 200 with the existing finding and its last_seen_at
+        renewed; a resolved finding opens again (status_reason
+        reappeared). Writes finding.created or finding.changed in the same
+        transaction (WP-1116). Needs finding:write.
       requestBody:
         required: true
         content:
@@ -5353,12 +5369,20 @@ paths:
             schema:
               $ref: '#/components/schemas/CreatePatchFindingRequest'
       responses:
+        '200':
+          description: The same finding exists and was updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatchFinding'
         '201':
           description: Finding created
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/PatchFinding'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -5401,6 +5425,15 @@ paths:
       operationId: updateSecurityFinding
       tags: [Security]
       summary: Transition a finding's status (acknowledge/resolve/false positive)
+      description: >-
+        Allowed transitions: open to acknowledged, false_positive or
+        resolved; acknowledged to open, false_positive or resolved;
+        false_positive to open; resolved to open. Any other transition is
+        422 with field status; false_positive requires status_reason (1 to
+        1,000 characters, else 422 with field status_reason). resolved_at
+        is set only by resolved and cleared otherwise. Writes
+        finding.resolved (to resolved) or finding.changed in the same
+        transaction (WP-1116). Needs finding:write.
       requestBody:
         required: true
         content:
@@ -5414,6 +5447,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PatchFinding'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -37240,12 +37275,14 @@ components:
 
     PatchFinding:
       type: object
-      required: [id, organization_id, kind, severity, title, status, detected_at, created_at, updated_at]
+      required: [id, organization_id, kind, severity, title, status, source, cve_ids, kev, fingerprint, detected_at, last_seen_at, created_at, updated_at]
       properties:
         id: { type: string }
         organization_id: { type: string }
         ci_id: { type: string }
-        kind: { type: string, enum: [vulnerability, outdated_software, outdated_firmware, missing_patch] }
+        kind:
+          type: string
+          enum: [vulnerability, outdated_software, outdated_firmware, missing_patch, unauthorized_change, compliance_violation]
         severity: { type: string, enum: [low, medium, high, critical] }
         title: { type: string }
         detail: { type: string }
@@ -37254,7 +37291,24 @@ components:
         fixed_version: { type: string }
         reference: { type: string, description: CVE id or advisory URL. }
         status: { type: string, enum: [open, acknowledged, resolved, false_positive] }
+        status_reason:
+          type: string
+          maxLength: 1000
+          description: Reason of the status; reappeared for a resolved finding that was reported again.
+        source:
+          type: string
+          enum: [cve_feed, agent, compliance, config_change, manual]
+          description: Origin of the finding (SEC-02).
+        cve_ids: { type: array, items: { type: string } }
+        cvss_score: { type: number, minimum: 0, maximum: 10 }
+        cvss_vector: { type: string }
+        kev: { type: boolean, description: Listed in the CISA Known Exploited Vulnerabilities catalog. }
+        advisory_id: { type: string }
+        fingerprint:
+          type: string
+          description: Deduplication key, unique per organization.
         detected_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time, description: Last report of the finding. }
         resolved_at: { type: string, format: date-time }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
@@ -37263,7 +37317,9 @@ components:
       required: [kind, title]
       properties:
         ci_id: { type: string }
-        kind: { type: string, enum: [vulnerability, outdated_software, outdated_firmware, missing_patch] }
+        kind:
+          type: string
+          enum: [vulnerability, outdated_software, outdated_firmware, missing_patch, unauthorized_change, compliance_violation]
         severity: { type: string, enum: [low, medium, high, critical] }
         title: { type: string }
         detail: { type: string }
@@ -37273,8 +37329,13 @@ components:
         reference: { type: string }
     UpdatePatchFindingRequest:
       type: object
+      required: [status]
       properties:
         status: { type: string, enum: [open, acknowledged, resolved, false_positive] }
+        status_reason:
+          type: string
+          maxLength: 1000
+          description: Reason of the change; required for false_positive.
     PatchFindingListResponse:
       allOf:
         - $ref: '#/components/schemas/PaginationEnvelope'

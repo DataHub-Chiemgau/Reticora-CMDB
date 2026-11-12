@@ -222,15 +222,8 @@ export function FindingsPage() {
                           >
                             {t('findings.resolve', 'Lösen')}
                           </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() =>
-                              updateMutation.mutate({ id: f.id, status: 'false_positive' })
-                            }
-                          >
-                            {t('findings.markFalsePositive', 'Fehlalarm')}
-                          </Button>
+                          {/* "Fehlalarm" needs a status_reason (WP-1116); the action
+                              returns with the reason dialog of WP-1134. */}
                         </div>
                       ) : null}
                     </td>
