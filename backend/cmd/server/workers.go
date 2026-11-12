@@ -11,6 +11,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/admp"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
@@ -424,6 +425,12 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 			return status == entitlement.StatusActive, serr
 		}
 		systemJobs = append(systemJobs, collectorStatus.Schedule())
+		// Alarm retention (ALR-01, WP-981): daily the resolved alarms
+		// older than 400 days with their transitions, with the module
+		// monitoring.
+		if d.modules.Enabled(server.ModuleMonitoring) {
+			systemJobs = append(systemJobs, alarm.NewRetention(pool).Schedule())
+		}
 		// Credential age: daily each stored secret beyond its max_age_days
 		// once per secret_version as credential.rotation_due (CRD-05,
 		// WP-897).

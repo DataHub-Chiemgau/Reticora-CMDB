@@ -25,6 +25,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/admp"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
@@ -484,6 +485,31 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 	} {
 		if !registered[job.kind] {
 			t.Errorf("JOB-02 %s: kind %s is not registered (registered: %v)", job.requirement, job.kind, registered)
+		}
+	}
+
+	// The alarm retention (ALR-01, WP-981): alarm.retention daily with the
+	// module monitoring and the database; without the module or the
+	// database not.
+	if registered[alarm.RetentionKind] {
+		t.Errorf("without the module monitoring %s is registered", alarm.RetentionKind)
+	}
+	monitoringModules, err := server.ParseModules(server.ModuleMonitoring)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, withDB := range []bool{true, false} {
+		deps := systemJobTestDeps(t, cfg, withDB)
+		deps.modules = monitoringModules
+		kinds := registeredSystemJobs(t, deps)
+		if kinds[alarm.RetentionKind] != withDB {
+			t.Errorf("JOB-02 alarm retention (ALR-01) with the module monitoring (database %v): registered %v",
+				withDB, kinds[alarm.RetentionKind])
+		}
+		for _, job := range systemJobs(deps) {
+			if job.Kind == alarm.RetentionKind && (job.Spec != "37 4 * * *" || job.MaxCatchUp != 1) {
+				t.Errorf("%s: spec %q, max catch-up %d; want daily 37 4 * * * and 1", job.Kind, job.Spec, job.MaxCatchUp)
+			}
 		}
 	}
 

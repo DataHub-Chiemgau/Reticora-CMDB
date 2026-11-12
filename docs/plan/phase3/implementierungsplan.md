@@ -8151,7 +8151,7 @@ Das Modell folgt [E-196](entscheidungen.md#e-196) Option 2: neue Tabellen `alarm
   - Inhalt: `summary` (höchstens 500 Zeichen), `details jsonb`, `updated_at`
   - `UNIQUE (id, organization_id)` für die Verweise aus `alarm_transition` und später aus `incident`.
 - [ ] **AK2:** Eindeutiger Teilindex `(organization_id, dedup_key) WHERE state <> 'resolved'`. Weitere Indizes: `(organization_id, state, severity, opened_at DESC)` und `(ci_id, state) WHERE ci_id IS NOT NULL`.
-- [ ] **AK3:** Tabelle `alarm_transition` mit `id`, `organization_id`, `client_id`, `site_id`, `alarm_id`, `from_state NULL`, `to_state`, `from_severity NULL`, `to_severity NULL`, `at`, `actor_id NULL` (NULL = System), `reason` und `comment NULL`. Die Tabelle ist append-only: UPDATE wird immer abgewiesen. DELETE ist nur mit `app.alarm_retention = 'on'` und `at < now() - interval '400 days'` erlaubt (Muster `reject_audit_log_mutation`).
+- [ ] **AK3:** Tabelle `alarm_transition` mit `id`, `organization_id`, `client_id`, `site_id`, `alarm_id`, `from_state NULL`, `to_state`, `from_severity NULL`, `to_severity NULL`, `at`, `actor_id NULL` (NULL = System), `reason` und `comment NULL`. Die Tabelle ist append-only: UPDATE wird immer abgewiesen, außer der Weitergabe von `client_id`/`site_id` eines umgezogenen Alarms (Trigger-Kaskade, Werte gleich denen des Alarms). DELETE ist nur mit `app.alarm_retention = 'on'` und `at < now() - interval '400 days'` erlaubt (Muster `reject_audit_log_mutation`) oder als Kaskade eines bereits gelöschten Alarms (Ergänzung 2026-11-12 bei der Umsetzung, nach Empfehlung: sonst scheitert der Hard-Delete eines CIs und die Löschung eines Kunden an jedem Alarm mit Protokoll). Einen Alarm selbst löscht nur die Retention oder eine solche Kaskade (CI, Kunde, Organisation; Trigger `reject_alarm_delete`), sodass das Protokoll nicht über ein direktes DELETE des Alarms verschwindet.
 - [ ] **AK4:** RLS und FORCE RLS auf beiden Tabellen, Scope-Policies und Truncate-Guard, Mandanten-Fremdschlüssel nach Konvention 19; Einzelheiten unter Migration/RLS. `TestRLSCatalog` läuft ohne Ausnahme.
 - [ ] **AK5:** Store-Port `alarm.Store` mit `MemoryStore` und `PGStore`:
   - `Get`, `List` mit Filter (state, severity, ci_id, client_id, site_id, source_kind, incident_id, suppressed, Zeitraum) und Cursor
@@ -8186,7 +8186,8 @@ Das Modell folgt [E-196](entscheidungen.md#e-196) Option 2: neue Tabellen `alarm
   - `(client_id, organization_id) → client (id, organization_id) ON DELETE CASCADE`
   - `(alarm_id, organization_id) → alarm (id, organization_id) ON DELETE CASCADE`
   - Das abgeleitete `site_id` bleibt ohne Fremdschlüssel.
-- Trigger `reject_alarm_transition_mutation` (BEFORE UPDATE OR DELETE) nach AK3; `reticora_truncate_guard` auf beiden Tabellen (Muster 000144); `set_updated_at` auf `alarm`.
+- Trigger `reject_alarm_transition_mutation` (BEFORE UPDATE OR DELETE) und `reject_alarm_delete` (BEFORE DELETE auf `alarm`) nach AK3; `reticora_truncate_guard` auf beiden Tabellen (Muster 000144); `set_updated_at` auf `alarm`.
+- Weitergabe beim Umzug (Muster 000261/000295): `alarm_scope_propagation` (AFTER UPDATE ON ci, wenn sich `client_id` oder `site_id` ändert) leitet den Scope der Alarme des CIs neu ab, `alarm_transition_scope_propagation` (AFTER UPDATE ON alarm, ebenso) setzt ihn an den Transitionen nach; beide unter `app_scope_widen()`/`app_scope_restore()`. Test `TestAlarmScopeFollowsMovedCI`.
 - Down entfernt Tabellen, Trigger und Funktionen.
 - `docs/schema-baseline.md`: Zeile „Stand“ und zwei Tabellenzeilen.
 - `alarm_transition` kommt in `appendOnlyTables` (`scopetest.go:206`), damit die Fixture-Bereinigung unter `session_replication_role = replica` löscht.
@@ -8221,7 +8222,7 @@ MON-04;[P3];E;backend/internal/alarm/alarm_scope_integration_test.go;WP-981
 - REST-Routen: WP-983 (`p3-alr-api`).
 - Tabelle `incident` und Fremdschlüssel `alarm.incident_id`: WP-1027 (`p3-inc-schema`).
 - Setzen von `suppressed_reason`: Unterdrückung bei Flapping WP-1031, Wartung und Symptom in den Alarm-WPs von M3.11.
-- Behandlung von `alarm_transition` bei der Organisationslöschung (Trigger-Ausnahme des Purgers wie bei `audit_log`): WP-1154 (`p3-tlc-delete-purge-db`).
+- Behandlung von `alarm_transition` bei der Organisationslöschung (Trigger-Ausnahme des Purgers wie bei `audit_log`): WP-1154 (`p3-tlc-delete-purge-db`). Die Kaskaden-Ausnahme aus AK3 (Ergänzung 2026-11-12) deckt CI- und Kundenlöschung; ob der Purger der Organisationslöschung darüber hinaus eine Ausnahme braucht (direkte Kaskade über `alarm_transition.organization_id`), klärt WP-1154.
 - Änderungen außerhalb der genannten Dateien und IDs.
 
 ### WP-982 – Alarm-Lebenszyklus: Raise, Clear, Ack, Un-Ack mit Protokoll
