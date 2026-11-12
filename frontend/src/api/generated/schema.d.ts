@@ -4142,6 +4142,75 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/subnets/{id}/usage': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Usage of a subnet
+     * @description Usable host addresses (total; IPv4 without network and broadcast address up to /30, /31 two, /32 one; IPv6 every address), the occupied ones by type and state, free and percent with one decimal (IPM-03). Counts from 2^53 on come as text (total_text, free_text). A pool reports covered, the addresses its children hold. All addresses and children of the subnet count, also those outside the caller's scope; a subnet the caller cannot see is 404. Requires ipam:read.
+     */
+    get: operations['getSubnetUsage'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/subnets/{id}/free-addresses': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Next free addresses of a subnet
+     * @description The free host addresses in ascending order (IPM-03): addresses of the subnet (reserved ones included), its gateway and the ranges of its children count as occupied, also outside the caller's scope. A pool has no host addresses (409 is_pool). Not paged: limit (default 20, at most 200) caps the answer. Requires ipam:read.
+     */
+    get: operations['listSubnetFreeAddresses'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/subnets/{id}/free-subnets': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Next free subnets of a subnet
+     * @description Aligned free prefixes of length prefix_length inside the subnet that intersect neither a child nor an address of the subnet, in ascending order (IPM-03). prefix_length not longer than the subnet's prefix, or longer than 32 (IPv4) or 128 (IPv6), is 422 with field prefix_length. Not paged: limit (default 20, at most 200) caps the answer. Requires ipam:read.
+     */
+    get: operations['listSubnetFreeSubnets'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/subnets/{id}/addresses': {
     parameters: {
       query?: never;
@@ -19524,6 +19593,43 @@ export interface components {
     IPAMSectionListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['IPAMSection'][];
     };
+    /** @description Usage of a subnet (IPM-03). */
+    SubnetUsage: {
+      subnet_id: string;
+      cidr: string;
+      is_pool: boolean;
+      /** @description Usable host addresses (pool - all addresses); absent from 2^53 on. */
+      total?: number;
+      /** @description total as decimal text from 2^53 on. */
+      total_text?: string;
+      /** @description Occupied host addresses (each host once). */
+      used: number;
+      /** @description Occupied hosts by type (discovered, reserved, static, dhcp); absent for a pool. */
+      used_by_type?: {
+        [key: string]: number;
+      };
+      /** @description Occupied hosts by state (active, offline, unknown); absent for a pool. */
+      used_by_state?: {
+        [key: string]: number;
+      };
+      /** @description Free host addresses; absent from 2^53 on. */
+      free?: number;
+      free_text?: string;
+      /** @description Pool only - addresses its children cover; absent from 2^53 on. */
+      covered?: number;
+      covered_text?: string;
+      /** @description Share in use (pool - covered), one decimal. */
+      percent: number;
+    };
+    SubnetFreeAddresses: {
+      subnet_id: string;
+      addresses: string[];
+    };
+    SubnetFreeSubnets: {
+      subnet_id: string;
+      prefix_length: number;
+      subnets: string[];
+    };
     SubnetListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Subnet'][];
     };
@@ -30762,6 +30868,92 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+    };
+  };
+  getSubnetUsage: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Usage of the subnet */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SubnetUsage'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  listSubnetFreeAddresses: {
+    parameters: {
+      query?: {
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Free addresses */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SubnetFreeAddresses'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  listSubnetFreeSubnets: {
+    parameters: {
+      query: {
+        prefix_length: number;
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Free subnets */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SubnetFreeSubnets'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   listSubnetAddresses: {

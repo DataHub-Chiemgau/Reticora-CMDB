@@ -1668,3 +1668,4 @@ ADM-04;[P3];G3;backend/internal/admp/cache_integration_test.go;WP-928
 IPM-01;[P3];G3;backend/internal/ipam/section_integration_test.go;WP-900
 IPM-04;[P3];G3;backend/internal/ipam/state_integration_test.go;WP-902
 IPM-02;[P3];G3;backend/internal/ipam/hierarchy_integration_test.go;WP-901
+IPM-03;[P3];G3;backend/internal/ipam/space_integration_test.go;WP-903

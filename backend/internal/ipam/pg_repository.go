@@ -1463,3 +1463,49 @@ func missAndRemove(ctx context.Context, tx pgx.Tx, countQuery, ciID string, seen
 	}
 	return names, nil
 }
+
+// --- Usage and free space (IPM-03, WP-903) ---
+
+// SubnetOccupancy reads the occupancy of a subnet through
+// ipam_subnet_occupancy (migration 000301), which checks the subnet under
+// the caller's row level security before it widens the scope.
+func (r *PGRepository) SubnetOccupancy(ctx context.Context, orgID, subnetID string) (*Occupancy, error) {
+	if !api.IsUUID(subnetID) {
+		return nil, ErrNotFound
+	}
+	o := &Occupancy{}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `SELECT cidr::text, COALESCE(host(gateway), ''), is_pool FROM subnet
+			WHERE organization_id = $1 AND id = $2`, orgID, subnetID).Scan(&o.CIDR, &o.Gateway, &o.IsPool); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		rows, err := tx.Query(ctx, "SELECT kind, value, COALESCE(ip_type, ''), COALESCE(ip_state, '') FROM ipam_subnet_occupancy($1)", subnetID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var kind, value, ipType, state string
+			if err := rows.Scan(&kind, &value, &ipType, &state); err != nil {
+				return err
+			}
+			if kind == "child" {
+				o.Children = append(o.Children, value)
+			} else {
+				o.Addresses = append(o.Addresses, OccupiedAddress{Host: value, Type: ipType, State: state})
+			}
+		}
+		return rows.Err()
+	})
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "P0002" {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return o, nil
+}

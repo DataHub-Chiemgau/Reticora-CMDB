@@ -542,3 +542,36 @@ func TestStateFromPHPIPAMTag(t *testing.T) {
 		t.Error("unknown tag mapped")
 	}
 }
+
+// TestFreeSpaceDefaultLimit pins the limit of the free-space lists of
+// IPM-03 (WP-903 AK2): without limit an empty /22 answers 20 free
+// addresses and 20 free /31, a larger limit is capped at 200, a malformed
+// one falls back to 20.
+func TestFreeSpaceDefaultLimit(t *testing.T) {
+	_, mux := newMux()
+	w := do(mux, "POST", "/api/v1/subnets", `{"cidr":"10.77.0.0/22"}`, "org-1")
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST subnet: %d %s", w.Code, w.Body.String())
+	}
+	var s Subnet
+	_ = json.Unmarshal(w.Body.Bytes(), &s)
+	for query, want := range map[string]int{"": 20, "?limit=0": 20, "?limit=x": 20, "?limit=5": 5, "?limit=500": 200} {
+		var free FreeAddresses
+		if w = do(mux, "GET", "/api/v1/subnets/"+s.ID+"/free-addresses"+query, "", "org-1"); w.Code != http.StatusOK {
+			t.Fatalf("free-addresses%s: %d %s", query, w.Code, w.Body.String())
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &free); err != nil || len(free.Addresses) != want {
+			t.Errorf("free-addresses%s = %d addresses (%v), want %d", query, len(free.Addresses), err, want)
+		}
+		if query != "" {
+			query = "&" + query[1:]
+		}
+		var subnets FreeSubnets
+		if w = do(mux, "GET", "/api/v1/subnets/"+s.ID+"/free-subnets?prefix_length=31"+query, "", "org-1"); w.Code != http.StatusOK {
+			t.Fatalf("free-subnets%s: %d %s", query, w.Code, w.Body.String())
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &subnets); err != nil || len(subnets.Subnets) != want {
+			t.Errorf("free-subnets%s = %d subnets (%v), want %d", query, len(subnets.Subnets), err, want)
+		}
+	}
+}

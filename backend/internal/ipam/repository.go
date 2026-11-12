@@ -92,6 +92,10 @@ type Repository interface {
 
 	// IPAM sections (IPM-01, section.go).
 	SectionRepository
+
+	// Occupancy of a subnet for usage and free space (IPM-03,
+	// space_handler.go).
+	SpaceRepository
 }
 
 // MemoryRepository is an in-memory implementation of Repository.

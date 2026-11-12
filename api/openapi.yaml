@@ -9640,6 +9640,109 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/subnets/{id}/usage:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getSubnetUsage
+      tags: [IPAM]
+      summary: Usage of a subnet
+      description: >-
+        Usable host addresses (total; IPv4 without network and broadcast
+        address up to /30, /31 two, /32 one; IPv6 every address), the
+        occupied ones by type and state, free and percent with one decimal
+        (IPM-03). Counts from 2^53 on come as text (total_text, free_text).
+        A pool reports covered, the addresses its children hold. All
+        addresses and children of the subnet count, also those outside the
+        caller's scope; a subnet the caller cannot see is 404. Requires
+        ipam:read.
+      responses:
+        '200':
+          description: Usage of the subnet
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubnetUsage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/subnets/{id}/free-addresses:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listSubnetFreeAddresses
+      tags: [IPAM]
+      summary: Next free addresses of a subnet
+      description: >-
+        The free host addresses in ascending order (IPM-03): addresses of
+        the subnet (reserved ones included), its gateway and the ranges of
+        its children count as occupied, also outside the caller's scope. A
+        pool has no host addresses (409 is_pool). Not paged: limit (default 20,
+        at most 200) caps the answer. Requires ipam:read.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 20 }
+      responses:
+        '200':
+          description: Free addresses
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubnetFreeAddresses'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/subnets/{id}/free-subnets:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listSubnetFreeSubnets
+      tags: [IPAM]
+      summary: Next free subnets of a subnet
+      description: >-
+        Aligned free prefixes of length prefix_length inside the subnet that
+        intersect neither a child nor an address of the subnet, in ascending
+        order (IPM-03). prefix_length not longer than the subnet's prefix,
+        or longer than 32 (IPv4) or 128 (IPv6), is 422 with field
+        prefix_length. Not paged: limit (default 20, at most 200) caps the
+        answer. Requires ipam:read.
+      parameters:
+        - name: prefix_length
+          in: query
+          required: true
+          schema: { type: integer, minimum: 1, maximum: 128 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 20 }
+      responses:
+        '200':
+          description: Free subnets
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubnetFreeSubnets'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
   /api/v1/subnets/{id}/addresses:
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -39551,6 +39654,52 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/IPAMSection'
+
+    SubnetUsage:
+      type: object
+      required: [subnet_id, cidr, is_pool, used, percent]
+      description: Usage of a subnet (IPM-03).
+      properties:
+        subnet_id: { type: string }
+        cidr: { type: string }
+        is_pool: { type: boolean }
+        total:
+          type: integer
+          description: Usable host addresses (pool - all addresses); absent from 2^53 on.
+        total_text: { type: string, description: total as decimal text from 2^53 on. }
+        used: { type: integer, description: Occupied host addresses (each host once). }
+        used_by_type:
+          type: object
+          description: Occupied hosts by type (discovered, reserved, static, dhcp); absent for a pool.
+          additionalProperties: { type: integer }
+        used_by_state:
+          type: object
+          description: Occupied hosts by state (active, offline, unknown); absent for a pool.
+          additionalProperties: { type: integer }
+        free: { type: integer, description: Free host addresses; absent from 2^53 on. }
+        free_text: { type: string }
+        covered: { type: integer, description: 'Pool only - addresses its children cover; absent from 2^53 on.' }
+        covered_text: { type: string }
+        percent: { type: number, description: 'Share in use (pool - covered), one decimal.' }
+
+    SubnetFreeAddresses:
+      type: object
+      required: [subnet_id, addresses]
+      properties:
+        subnet_id: { type: string }
+        addresses:
+          type: array
+          items: { type: string }
+
+    SubnetFreeSubnets:
+      type: object
+      required: [subnet_id, prefix_length, subnets]
+      properties:
+        subnet_id: { type: string }
+        prefix_length: { type: integer }
+        subnets:
+          type: array
+          items: { type: string }
 
     SubnetListResponse:
       allOf:
