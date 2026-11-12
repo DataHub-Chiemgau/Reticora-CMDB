@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000316_asn
+Stand: Migration 000317_workflow_versions
 
 ## Prüfung
 
@@ -2080,6 +2080,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `webhook_delivery` | ja | ja | webhook_delivery_isolation (ALL), webhook_delivery_system_select (SELECT) |
 | `webhook_subscription` | ja | ja | webhook_sub_isolation (ALL), webhook_sub_scope_select (SELECT) |
 | `workflow_def` | ja | ja | workflow_def_tenant_isolation (ALL) |
+| `workflow_def_version` | ja | ja | workflow_def_version_tenant_isolation (ALL) |
 | `workflow_run` | ja | ja | workflow_run_tenant_isolation (ALL) |
 | `workflow_step` | ja | ja | workflow_step_tenant_isolation (ALL) |
 

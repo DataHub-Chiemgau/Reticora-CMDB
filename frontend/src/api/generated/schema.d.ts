@@ -5665,8 +5665,59 @@ export interface paths {
     delete: operations['deleteWorkflow'];
     options?: never;
     head?: never;
-    /** Update a workflow definition */
+    /**
+     * Update a workflow definition
+     * @description A change of trigger, conditions or actions stores a new immutable version (n+1) and makes it current; name, description and active change no version (WFL-02, E-228). Runs keep the version they started with. If-Match names the version the change is based on; a different one is 412 (API-07), without the header the change is applied as before.
+     */
     patch: operations['updateWorkflow'];
+    trace?: never;
+  };
+  '/api/v1/workflows/{id}/versions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * List the versions of a workflow definition
+     * @description The immutable versions of trigger, conditions and actions, newest first (WFL-02, API-06). Requires workflow:read. A definition of another organization is 404 (TEN-04).
+     */
+    get: operations['listWorkflowVersions'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/workflows/{id}/versions/{version}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description Version number (1, 2, ...). */
+        version: number;
+      };
+      cookie?: never;
+    };
+    /**
+     * Get one version of a workflow definition
+     * @description Trigger, conditions and actions of the version (WFL-02). Requires workflow:read. An unknown version or a definition of another organization is 404 (TEN-04).
+     */
+    get: operations['getWorkflowVersion'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   '/api/v1/workflows/{id}/runs': {
@@ -19069,10 +19120,28 @@ export interface components {
       conditions: components['schemas']['JSONValue'][];
       actions: components['schemas']['JSONValue'][];
       active: boolean;
+      /** @description Number of the current definition version (WFL-02); the ETag. */
+      version: number;
+      /** @description The stored version that trigger */
+      current_version_id: string;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    /** @description One immutable version of trigger, conditions and actions of a workflow definition (WFL-02, E-228). */
+    WorkflowDefinitionVersion: {
+      id: string;
+      organization_id: string;
+      workflow_id: string;
+      version: number;
+      trigger: components['schemas']['JSONValue'];
+      conditions: components['schemas']['JSONValue'][];
+      actions: components['schemas']['JSONValue'][];
+      /** @description User who stored the version; absent for migrated versions and callers without a user. */
+      created_by?: string;
+      /** Format: date-time */
+      created_at: string;
     };
     CreateWorkflowDefinitionRequest: {
       name: string;
@@ -19109,6 +19178,8 @@ export interface components {
       id: string;
       organization_id: string;
       workflow_id: string;
+      /** @description The definition version the run executes (WFL-02). */
+      definition_version_id: string;
       /** @enum {string} */
       status: 'pending' | 'running' | 'waiting_approval' | 'succeeded' | 'failed' | 'cancelled';
       trigger: string;
@@ -19134,6 +19205,9 @@ export interface components {
     };
     WorkflowDefinitionListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['WorkflowDefinition'][];
+    };
+    WorkflowDefinitionVersionListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['WorkflowDefinitionVersion'][];
     };
     WorkflowRunListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['WorkflowRun'][];
@@ -36057,6 +36131,8 @@ export interface operations {
       /** @description Workflow */
       200: {
         headers: {
+          /** @description The number of the current definition version (WFL-02); send it as If-Match with a PATCH (API-07). */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -36093,7 +36169,10 @@ export interface operations {
   updateWorkflow: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description ETag of the definition version the change is based on, or "*". */
+        'If-Match'?: string;
+      };
       path: {
         /** @description Resource identifier. */
         id: components['parameters']['ResourceID'];
@@ -36109,6 +36188,8 @@ export interface operations {
       /** @description Workflow updated */
       200: {
         headers: {
+          /** @description The number of the current definition version after the change. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -36116,6 +36197,85 @@ export interface operations {
         };
       };
       400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      /** @description If-Match does not name the current version of the workflow definition */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  listWorkflowVersions: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated definition versions */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WorkflowDefinitionVersionListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getWorkflowVersion: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description Version number (1, 2, ...). */
+        version: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Definition version */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WorkflowDefinitionVersion'];
+        };
+      };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
     };

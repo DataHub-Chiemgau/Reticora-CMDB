@@ -14,22 +14,45 @@ type Definition struct {
 	Conditions     []JSONMap `json:"conditions"`
 	Actions        []JSONMap `json:"actions"`
 	Active         bool      `json:"active"`
+	// Version is the number of the current version of trigger, conditions
+	// and actions (WFL-02, E-228); it is the ETag of the definition.
+	Version int `json:"version"`
+	// CurrentVersionID names the stored version the fields above copy.
+	CurrentVersionID string    `json:"current_version_id"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+// DefinitionVersion is one immutable revision of the trigger, conditions
+// and actions of a definition (WFL-02, E-228 option 1). A run executes the
+// version it started with.
+type DefinitionVersion struct {
+	ID             string    `json:"id"`
+	OrganizationID string    `json:"organization_id"`
+	WorkflowID     string    `json:"workflow_id"`
+	Version        int       `json:"version"`
+	Trigger        JSONMap   `json:"trigger"`
+	Conditions     []JSONMap `json:"conditions"`
+	Actions        []JSONMap `json:"actions"`
+	CreatedBy      string    `json:"created_by,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 type Run struct {
-	ID             string     `json:"id"`
-	OrganizationID string     `json:"organization_id"`
-	WorkflowID     string     `json:"workflow_id"`
-	Status         string     `json:"status"`
-	Trigger        string     `json:"trigger"`
-	Context        JSONMap    `json:"context"`
-	StartedAt      time.Time  `json:"started_at"`
-	FinishedAt     *time.Time `json:"finished_at,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
-	Steps          []Step     `json:"steps,omitempty"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	WorkflowID     string `json:"workflow_id"`
+	// DefinitionVersionID is the version of the definition the run
+	// executes (WFL-02); a later change of the definition does not touch it.
+	DefinitionVersionID string     `json:"definition_version_id"`
+	Status              string     `json:"status"`
+	Trigger             string     `json:"trigger"`
+	Context             JSONMap    `json:"context"`
+	StartedAt           time.Time  `json:"started_at"`
+	FinishedAt          *time.Time `json:"finished_at,omitempty"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
+	Steps               []Step     `json:"steps,omitempty"`
 }
 
 type Step struct {
@@ -61,7 +84,13 @@ type UpdateDefinitionRequest struct {
 	Conditions  []JSONMap `json:"conditions,omitempty"`
 	Actions     []JSONMap `json:"actions,omitempty"`
 	Active      *bool     `json:"active,omitempty"`
+	// IfMatch is the version of the If-Match header (API-07); nil without
+	// the header, api.IfMatchAny for "*".
+	IfMatch *int64 `json:"-"`
+	// CreatedBy is the user a new version names (empty: none).
+	CreatedBy string `json:"-"`
 }
+
 type TriggerRequest struct {
 	Trigger string  `json:"trigger"`
 	Context JSONMap `json:"context"`

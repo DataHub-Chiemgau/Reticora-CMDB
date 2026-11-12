@@ -13382,25 +13382,99 @@ paths:
       tags: [Workflows]
       summary: Get a workflow definition
       responses:
-        '200': { description: Workflow, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowDefinition' } } } }
+        '200':
+          description: Workflow
+          headers:
+            ETag:
+              description: The number of the current definition version (WFL-02); send it as If-Match with a PATCH (API-07).
+              schema: { type: string }
+          content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowDefinition' } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
     patch:
       operationId: updateWorkflow
       tags: [Workflows]
       summary: Update a workflow definition
+      description: >-
+        A change of trigger, conditions or actions stores a new immutable
+        version (n+1) and makes it current; name, description and active
+        change no version (WFL-02, E-228). Runs keep the version they
+        started with. If-Match names the version the change is based on; a
+        different one is 412 (API-07), without the header the change is
+        applied as before.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the definition version the change is based on, or "*".
+          schema: { type: string }
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/UpdateWorkflowDefinitionRequest' } } } }
       responses:
-        '200': { description: Workflow updated, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowDefinition' } } } }
+        '200':
+          description: Workflow updated
+          headers:
+            ETag:
+              description: The number of the current definition version after the change.
+              schema: { type: string }
+          content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowDefinition' } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '412':
+          description: If-Match does not name the current version of the workflow definition
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
     delete:
       operationId: deleteWorkflow
       tags: [Workflows]
       summary: Delete a workflow definition
       responses:
         '204': { description: Workflow deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/workflows/{id}/versions:
+    x-phase: P3
+    x-feature: workflows
+    parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
+    get:
+      operationId: listWorkflowVersions
+      tags: [Workflows]
+      summary: List the versions of a workflow definition
+      description: >-
+        The immutable versions of trigger, conditions and actions, newest
+        first (WFL-02, API-06). Requires workflow:read. A definition of
+        another organization is 404 (TEN-04).
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200': { description: Paginated definition versions, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowDefinitionVersionListResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /api/v1/workflows/{id}/versions/{version}:
+    x-phase: P3
+    x-feature: workflows
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - name: version
+        in: path
+        required: true
+        description: Version number (1, 2, ...).
+        schema: { type: integer, minimum: 1 }
+    get:
+      operationId: getWorkflowVersion
+      tags: [Workflows]
+      summary: Get one version of a workflow definition
+      description: >-
+        Trigger, conditions and actions of the version (WFL-02). Requires
+        workflow:read. An unknown version or a definition of another
+        organization is 404 (TEN-04).
+      responses:
+        '200': { description: Definition version, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowDefinitionVersion' } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/workflows/{id}/runs:
@@ -38917,7 +38991,7 @@ components:
           properties: { data: { type: array, items: { $ref: '#/components/schemas/FormSubmission' } } }
     WorkflowDefinition:
       type: object
-      required: [id, organization_id, name, trigger, conditions, actions, active, created_at, updated_at]
+      required: [id, organization_id, name, trigger, conditions, actions, active, version, current_version_id, created_at, updated_at]
       properties:
         id: { type: string }
         organization_id: { type: string }
@@ -38927,8 +39001,24 @@ components:
         conditions: { type: array, items: { $ref: '#/components/schemas/JSONValue' } }
         actions: { type: array, items: { $ref: '#/components/schemas/JSONValue' } }
         active: { type: boolean }
+        version: { type: integer, minimum: 1, description: Number of the current definition version (WFL-02); the ETag. }
+        current_version_id: { type: string, description: The stored version that trigger, conditions and actions copy. }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    WorkflowDefinitionVersion:
+      type: object
+      description: One immutable version of trigger, conditions and actions of a workflow definition (WFL-02, E-228).
+      required: [id, organization_id, workflow_id, version, trigger, conditions, actions, created_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        workflow_id: { type: string }
+        version: { type: integer, minimum: 1 }
+        trigger: { $ref: '#/components/schemas/JSONValue' }
+        conditions: { type: array, items: { $ref: '#/components/schemas/JSONValue' } }
+        actions: { type: array, items: { $ref: '#/components/schemas/JSONValue' } }
+        created_by: { type: string, description: User who stored the version; absent for migrated versions and callers without a user. }
+        created_at: { type: string, format: date-time }
     CreateWorkflowDefinitionRequest:
       type: object
       required: [name, trigger, actions]
@@ -38965,11 +39055,12 @@ components:
         updated_at: { type: string, format: date-time }
     WorkflowRun:
       type: object
-      required: [id, organization_id, workflow_id, status, trigger, context, started_at, created_at, updated_at]
+      required: [id, organization_id, workflow_id, definition_version_id, status, trigger, context, started_at, created_at, updated_at]
       properties:
         id: { type: string }
         organization_id: { type: string }
         workflow_id: { type: string }
+        definition_version_id: { type: string, description: The definition version the run executes (WFL-02). }
         status: { type: string, enum: [pending, running, waiting_approval, succeeded, failed, cancelled] }
         trigger: { type: string }
         context: { $ref: '#/components/schemas/JSONValue' }
@@ -38996,6 +39087,12 @@ components:
         - type: object
           required: [data]
           properties: { data: { type: array, items: { $ref: '#/components/schemas/WorkflowDefinition' } } }
+    WorkflowDefinitionVersionListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties: { data: { type: array, items: { $ref: '#/components/schemas/WorkflowDefinitionVersion' } } }
     WorkflowRunListResponse:
       allOf:
         - $ref: '#/components/schemas/PaginationEnvelope'

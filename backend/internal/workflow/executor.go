@@ -90,16 +90,28 @@ func (e *Executor) Start(ctx context.Context, orgID string, def *Definition, tri
 	if !triggerMatches(def.Trigger, trigger) {
 		return nil, ErrTriggerMismatch
 	}
-	run := &Run{OrganizationID: orgID, WorkflowID: def.ID, Status: StatusPending, Trigger: trigger, Context: payload, StartedAt: time.Now().UTC()}
+	versionID := def.CurrentVersionID
+	if versionID == "" {
+		// A definition the caller built without its stored state: the run
+		// binds the current version (WFL-02).
+		stored, err := e.repo.GetDefinition(ctx, orgID, def.ID)
+		if err != nil {
+			return nil, err
+		}
+		versionID = stored.CurrentVersionID
+	}
+	run := &Run{OrganizationID: orgID, WorkflowID: def.ID, DefinitionVersionID: versionID, Status: StatusPending, Trigger: trigger, Context: payload, StartedAt: time.Now().UTC()}
 	if err := e.repo.CreateRun(ctx, run); err != nil {
 		return nil, err
 	}
 	return run, nil
 }
 
-// Execute runs the actions of a run that Start stored.
-func (e *Executor) Execute(ctx context.Context, orgID string, def *Definition, run *Run) (*Run, error) {
-	return e.resume(ctx, orgID, def, run, "")
+// Execute runs the actions of a run that Start stored: the conditions and
+// actions of the version the run is bound to, not those of def, which may
+// have changed since (WFL-02, E-228).
+func (e *Executor) Execute(ctx context.Context, orgID string, _ *Definition, run *Run) (*Run, error) {
+	return e.resume(ctx, orgID, run)
 }
 
 // TriggerMatches reports whether event starts runs of def under the rule of
@@ -111,10 +123,6 @@ func TriggerMatches(def *Definition, event string) bool {
 
 func (e *Executor) Approve(ctx context.Context, orgID, runID, decision, comment string) (*Run, error) {
 	run, err := e.repo.GetRun(ctx, orgID, runID)
-	if err != nil {
-		return nil, err
-	}
-	def, err := e.repo.GetDefinition(ctx, orgID, run.WorkflowID)
 	if err != nil {
 		return nil, err
 	}
@@ -149,15 +157,23 @@ func (e *Executor) Approve(ctx context.Context, orgID, runID, decision, comment 
 	if _, err := e.repo.UpdateStep(ctx, orgID, waiting.ID, StatusSucceeded, out, ""); err != nil {
 		return nil, fmt.Errorf("complete approval step: %w", err)
 	}
-	return e.resume(ctx, orgID, def, run, waiting.ID)
+	return e.resume(ctx, orgID, run)
 }
 
-func (e *Executor) resume(ctx context.Context, orgID string, def *Definition, run *Run, _ string) (*Run, error) {
+// resume executes the actions of the run's definition version from the
+// first one without a step: a waiting run keeps the version it started
+// with, whatever the definition says now (WFL-02).
+func (e *Executor) resume(ctx context.Context, orgID string, run *Run) (*Run, error) {
+	def, err := e.repo.GetVersionByID(ctx, orgID, run.DefinitionVersionID)
+	if err != nil {
+		e.failRun(ctx, orgID, run, fmt.Errorf("load workflow definition version: %w", err))
+		return nil, fmt.Errorf("load workflow definition version: %w", err)
+	}
 	if !conditionsMet(def.Conditions, run.Context) {
 		now := time.Now().UTC()
 		return e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusCancelled, &now, run.Context)
 	}
-	if _, err := e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusRunning, nil, run.Context); err != nil {
+	if _, err = e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusRunning, nil, run.Context); err != nil {
 		slog.Error("workflow: failed to mark run running", "run_id", run.ID, "error", err)
 	}
 	steps, err := e.repo.ListSteps(ctx, orgID, run.ID)

@@ -871,7 +871,7 @@ func seedRest2(t *testing.T, f *scopetest.Fixture) map[string]rest1Probe {
 		return id
 	}
 	type objects struct {
-		user, ci, ticket, sla, hook, workflow, window, document, order, team string
+		user, ci, ticket, sla, hook, workflow, workflowVersion, window, document, order, team string
 	}
 	var o [2]objects
 	for i, org := range []string{f.OrgA, f.OrgB} {
@@ -883,7 +883,16 @@ func seedRest2(t *testing.T, f *scopetest.Fixture) map[string]rest1Probe {
 			VALUES ($1, 'w877', 'high', 60, 240) RETURNING id::text`, org)
 		x.hook = one(`INSERT INTO webhook_subscription (organization_id, name, url, secret)
 			VALUES ($1, 'w877', 'https://hooks.example.org/w877', 'w877-secret') RETURNING id::text`, org)
-		x.workflow = one(`INSERT INTO workflow_def (organization_id, name) VALUES ($1, 'w877') RETURNING id::text`, org)
+		// A definition names its first version (WP-1086, 000317): both in
+		// one statement, the foreign key current_version_id is deferred.
+		x.workflow = one(`WITH d AS (
+				INSERT INTO workflow_def (organization_id, name, current_version_id) VALUES ($1, 'w877', gen_random_uuid())
+				RETURNING id, organization_id, current_version_id
+			), v AS (
+				INSERT INTO workflow_def_version (id, organization_id, workflow_id, version) SELECT current_version_id, organization_id, id, 1 FROM d
+			)
+			SELECT id::text FROM d`, org)
+		x.workflowVersion = one(`SELECT current_version_id::text FROM workflow_def WHERE id = $1`, x.workflow)
 		x.window = one(`INSERT INTO maintenance_window (organization_id, title, starts_at, ends_at)
 			VALUES ($1, 'w877', now(), now() + interval '1 hour') RETURNING id::text`, org)
 		x.document = one(`INSERT INTO document (organization_id, title, file_name, storage_key, uploaded_by)
@@ -903,7 +912,7 @@ func seedRest2(t *testing.T, f *scopetest.Fixture) map[string]rest1Probe {
 		"webhook_subscription": {table: "webhook_delivery", constraint: "webhook_delivery_subscription_id_fkey", foreign: b.hook, own: a.hook,
 			stmt: `INSERT INTO webhook_delivery (subscription_id, organization_id, event, payload) VALUES ($1, $2, 'ci.changed', '{}')`},
 		"workflow_def": {table: "workflow_run", constraint: "workflow_run_workflow_id_fkey", foreign: b.workflow, own: a.workflow,
-			stmt: `INSERT INTO workflow_run (organization_id, workflow_id, trigger) VALUES ($2, $1, 'manual')`},
+			stmt: `INSERT INTO workflow_run (organization_id, workflow_id, trigger, definition_version_id) VALUES ($2, $1, 'manual', '` + a.workflowVersion + `')`},
 		"maintenance_window": {table: "maintenance_window_ci", constraint: "maintenance_window_ci_maintenance_window_id_fkey",
 			foreign: b.window, own: a.window,
 			stmt: `INSERT INTO maintenance_window_ci (organization_id, maintenance_window_id, ci_id) VALUES ($2, $1, '` + a.ci + `')`,

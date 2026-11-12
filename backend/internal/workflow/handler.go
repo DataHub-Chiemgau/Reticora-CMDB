@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -22,6 +23,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/workflows/{id}", h.GetDefinition)
 	r.Patch("/api/v1/workflows/{id}", h.UpdateDefinition)
 	r.Delete("/api/v1/workflows/{id}", h.DeleteDefinition)
+	r.Get("/api/v1/workflows/{id}/versions", h.ListVersions)
+	r.Get("/api/v1/workflows/{id}/versions/{version}", h.GetVersion)
 	r.Post("/api/v1/workflows/{id}/runs", h.TriggerRun)
 	r.Get("/api/v1/workflow-runs", h.ListRuns)
 	r.Get("/api/v1/workflow-runs/{id}", h.GetRun)
@@ -53,6 +56,10 @@ func writeWorkflowError(w http.ResponseWriter, r *http.Request, err error) {
 		api.WriteError(w, 404, "Not Found", ErrNotFound.Error())
 	case errors.Is(err, ErrRunNotFound):
 		api.WriteError(w, 404, "Not Found", ErrRunNotFound.Error())
+	case errors.Is(err, ErrVersionNotFound):
+		api.WriteError(w, 404, "Not Found", ErrVersionNotFound.Error())
+	case errors.Is(err, ErrPreconditionFailed):
+		api.WritePreconditionFailed(w, ErrPreconditionFailed.Error())
 	case api.WriteFieldError(w, err):
 	default:
 		slog.WarnContext(r.Context(), "workflow request failed", "error", err)
@@ -87,6 +94,7 @@ func (h *Handler) GetDefinition(w http.ResponseWriter, r *http.Request) {
 		writeWorkflowError(w, r, err)
 		return
 	}
+	w.Header().Set("ETag", api.ETag(int64(item.Version)))
 	api.WriteJSON(w, 200, item)
 }
 func (h *Handler) CreateDefinition(w http.ResponseWriter, r *http.Request) {
@@ -123,16 +131,28 @@ func (h *Handler) UpdateDefinition(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// If-Match names the version the change is based on (API-07); the
+	// repository checks it on the locked row.
+	version, sent, parseErr := api.ParseIfMatch(r)
+	if parseErr != nil {
+		api.WritePreconditionFailed(w, parseErr.Error())
+		return
+	}
 	var req UpdateDefinitionRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, 400, "Bad Request", err.Error())
 		return
 	}
+	if sent {
+		req.IfMatch = &version
+	}
+	req.CreatedBy = t.UserID
 	item, err := h.repo.UpdateDefinition(r.Context(), t.OrganizationID, id, &req)
 	if err != nil {
 		writeWorkflowError(w, r, err)
 		return
 	}
+	w.Header().Set("ETag", api.ETag(int64(item.Version)))
 	api.WriteJSON(w, 200, item)
 }
 func (h *Handler) DeleteDefinition(w http.ResponseWriter, r *http.Request) {
@@ -150,6 +170,56 @@ func (h *Handler) DeleteDefinition(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(204)
 }
+
+// ListVersions handles GET /api/v1/workflows/{id}/versions: the stored
+// versions of a definition, newest first (WFL-02, API-06). A definition of
+// another organization is 404 (TEN-04).
+func (h *Handler) ListVersions(w http.ResponseWriter, r *http.Request) {
+	t, ok := org(w, r)
+	if !ok {
+		return
+	}
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
+	if !ok {
+		return
+	}
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
+		return
+	}
+	items, total, err := h.repo.ListVersions(r.Context(), t.OrganizationID, id, page)
+	if err != nil {
+		writeWorkflowError(w, r, err)
+		return
+	}
+	api.WriteJSON(w, 200, api.ListResponse[DefinitionVersion]{Data: items, Total: total, Limit: page.Limit, Offset: page.Offset, HasMore: page.Offset+len(items) < total})
+}
+
+// GetVersion handles GET /api/v1/workflows/{id}/versions/{version}.
+func (h *Handler) GetVersion(w http.ResponseWriter, r *http.Request) {
+	t, ok := org(w, r)
+	if !ok {
+		return
+	}
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
+	if !ok {
+		return
+	}
+	// The version column is an integer: a number outside 1..MaxInt32
+	// names no version (404, not a database error).
+	number, err := strconv.ParseInt(chi.URLParam(r, "version"), 10, 32)
+	if err != nil || number < 1 {
+		api.WriteError(w, 404, "Not Found", ErrVersionNotFound.Error())
+		return
+	}
+	item, err := h.repo.GetVersion(r.Context(), t.OrganizationID, id, int(number))
+	if err != nil {
+		writeWorkflowError(w, r, err)
+		return
+	}
+	api.WriteJSON(w, 200, item)
+}
+
 func (h *Handler) TriggerRun(w http.ResponseWriter, r *http.Request) {
 	t, ok := org(w, r)
 	if !ok {

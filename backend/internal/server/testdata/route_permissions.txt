@@ -393,6 +393,8 @@ GET /api/v1/workflow-runs workflow:read
 GET /api/v1/workflow-runs/{id} workflow:read
 GET /api/v1/workflows workflow:read
 GET /api/v1/workflows/{id} workflow:read
+GET /api/v1/workflows/{id}/versions workflow:read
+GET /api/v1/workflows/{id}/versions/{version} workflow:read
 GET /scim/v2/Groups iga:read
 GET /scim/v2/Groups/{id} iga:read
 GET /scim/v2/ServiceProviderConfig iga:read

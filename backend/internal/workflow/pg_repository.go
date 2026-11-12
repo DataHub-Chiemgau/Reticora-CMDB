@@ -14,8 +14,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const defCols = `id::text, organization_id::text, name, description, trigger, conditions, actions, active, created_at, updated_at`
-const runCols = `id::text, organization_id::text, workflow_id::text, status, trigger, context, started_at, finished_at, created_at, updated_at`
+const defCols = `id::text, organization_id::text, name, description, trigger, conditions, actions, active, version, current_version_id::text, created_at, updated_at`
+const versionCols = `id::text, organization_id::text, workflow_id::text, version, trigger, conditions, actions, COALESCE(created_by::text, ''), created_at`
+const runCols = `id::text, organization_id::text, workflow_id::text, definition_version_id::text, status, trigger, context, started_at, finished_at, created_at, updated_at`
 const stepCols = `id::text, organization_id::text, run_id::text, step_index, action_type, status, input, output, error, created_at, updated_at`
 
 type PGRepository struct{ pool *pgxpool.Pool }
@@ -60,72 +61,136 @@ func (r *PGRepository) GetDefinition(ctx context.Context, orgID, id string) (*De
 	})
 	return d, err
 }
+
+// CreateDefinition stores the definition and its version 1 in one
+// transaction (WFL-02); current_version_id is checked at commit
+// (DEFERRABLE), so the definition can name the version before it exists.
 func (r *PGRepository) CreateDefinition(ctx context.Context, d *Definition) error {
+	normalizeDefinition(d)
 	return database.WithRequestTenant(ctx, r.pool, d.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		if d.Trigger == nil {
-			d.Trigger = JSONMap{}
+		if err := tx.QueryRow(ctx, `INSERT INTO workflow_def (organization_id,name,description,trigger,conditions,actions,active,version,current_version_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,1,gen_random_uuid())
+			RETURNING id::text, version, current_version_id::text, created_at, updated_at`,
+			d.OrganizationID, d.Name, d.Description, d.Trigger, d.Conditions, d.Actions, d.Active).
+			Scan(&d.ID, &d.Version, &d.CurrentVersionID, &d.CreatedAt, &d.UpdatedAt); err != nil {
+			return err
 		}
-		if d.Conditions == nil {
-			d.Conditions = []JSONMap{}
-		}
-		if d.Actions == nil {
-			d.Actions = []JSONMap{}
-		}
-		return tx.QueryRow(ctx, `INSERT INTO workflow_def (organization_id,name,description,trigger,conditions,actions,active) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id::text, created_at, updated_at`, d.OrganizationID, d.Name, d.Description, d.Trigger, d.Conditions, d.Actions, d.Active).Scan(&d.ID, &d.CreatedAt, &d.UpdatedAt)
+		return insertVersion(ctx, tx, d, createdBy(ctx))
 	})
 }
+
+// insertVersion stores the trigger, conditions and actions of d as its
+// version d.Version under the id d.CurrentVersionID. created_by stays NULL
+// for a user that is not one of the organization.
+func insertVersion(ctx context.Context, tx pgx.Tx, d *Definition, user string) error {
+	var by any
+	if api.IsUUID(user) {
+		by = user
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO workflow_def_version (id, organization_id, workflow_id, version, trigger, conditions, actions, created_by)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, (SELECT u.id FROM app_user u WHERE u.id = $8::uuid AND u.organization_id = $2))`,
+		d.CurrentVersionID, d.OrganizationID, d.ID, d.Version, d.Trigger, d.Conditions, d.Actions, by)
+	return err
+}
+
+// UpdateDefinition changes a definition under If-Match (API-07). A change
+// of trigger, conditions or actions stores version n+1 in the same
+// transaction and points the definition at it; name, description and
+// active change no version (WFL-02, E-228).
 func (r *PGRepository) UpdateDefinition(ctx context.Context, orgID, id string, req *UpdateDefinitionRequest) (*Definition, error) {
 	var d *Definition
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		set := []string{}
-		args := []any{id, orgID}
-		pos := 3
-		if req.Name != nil {
-			set = append(set, fmt.Sprintf("name=$%d", pos))
-			args = append(args, *req.Name)
-			pos++
-		}
-		if req.Description != nil {
-			set = append(set, fmt.Sprintf("description=$%d", pos))
-			args = append(args, *req.Description)
-			pos++
-		}
-		if req.Trigger != nil {
-			set = append(set, fmt.Sprintf("trigger=$%d", pos))
-			args = append(args, req.Trigger)
-			pos++
-		}
-		if req.Conditions != nil {
-			set = append(set, fmt.Sprintf("conditions=$%d", pos))
-			args = append(args, req.Conditions)
-			pos++
-		}
-		if req.Actions != nil {
-			set = append(set, fmt.Sprintf("actions=$%d", pos))
-			args = append(args, req.Actions)
-			pos++
-		}
-		if req.Active != nil {
-			set = append(set, fmt.Sprintf("active=$%d", pos))
-			args = append(args, *req.Active)
-		}
-		if len(set) == 0 {
-			var err error
-			d, err = scanDef(tx.QueryRow(ctx, "SELECT "+defCols+" FROM workflow_def WHERE id=$1 AND organization_id=$2", id, orgID))
-			if err == pgx.ErrNoRows {
-				return ErrNotFound
-			}
-			return err
-		}
-		set = append(set, "updated_at=now()")
-		var err error
-		d, err = scanDef(tx.QueryRow(ctx, fmt.Sprintf("UPDATE workflow_def SET %s WHERE id=$1 AND organization_id=$2 RETURNING %s", strings.Join(set, ","), defCols), args...))
+		current, err := scanDef(tx.QueryRow(ctx, "SELECT "+defCols+" FROM workflow_def WHERE id=$1 AND organization_id=$2 FOR UPDATE", id, orgID))
 		if err == pgx.ErrNoRows {
 			return ErrNotFound
 		}
+		if err != nil {
+			return err
+		}
+		if !ifMatches(req.IfMatch, current.Version) {
+			return ErrPreconditionFailed
+		}
+		next := *current
+		applyUpdate(&next, req)
+		newVersion := contentChanged(current, &next)
+		if !newVersion && req.Name == nil && req.Description == nil && req.Active == nil {
+			d = current
+			return nil
+		}
+		if newVersion {
+			next.Version = current.Version + 1
+			err = tx.QueryRow(ctx, "SELECT gen_random_uuid()::text").Scan(&next.CurrentVersionID)
+			if err != nil {
+				return err
+			}
+			err = insertVersion(ctx, tx, &next, req.CreatedBy)
+			if err != nil {
+				return err
+			}
+		}
+		d, err = scanDef(tx.QueryRow(ctx, `UPDATE workflow_def SET name=$3, description=$4, trigger=$5, conditions=$6, actions=$7, active=$8,
+			version=$9, current_version_id=$10, updated_at=now() WHERE id=$1 AND organization_id=$2 RETURNING `+defCols,
+			id, orgID, next.Name, next.Description, next.Trigger, next.Conditions, next.Actions, next.Active, next.Version, next.CurrentVersionID))
 		return err
 	})
 	return d, err
+}
+
+// ListVersions lists the versions of a definition, newest first; an
+// unknown definition or one of another organization is ErrNotFound.
+func (r *PGRepository) ListVersions(ctx context.Context, orgID, workflowID string, page api.PaginationParams) ([]DefinitionVersion, int, error) {
+	out := []DefinitionVersion{}
+	var total int
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var exists bool
+		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM workflow_def WHERE organization_id=$1 AND id=$2)", orgID, workflowID).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return ErrNotFound
+		}
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM workflow_def_version WHERE organization_id=$1 AND workflow_id=$2", orgID, workflowID).Scan(&total); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, "SELECT "+versionCols+" FROM workflow_def_version WHERE organization_id=$1 AND workflow_id=$2 ORDER BY version DESC LIMIT $3 OFFSET $4",
+			orgID, workflowID, page.Limit, page.Offset)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			v, err := scanVersion(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, *v)
+		}
+		return rows.Err()
+	})
+	return out, total, err
+}
+
+// GetVersion returns version number version of a definition.
+func (r *PGRepository) GetVersion(ctx context.Context, orgID, workflowID string, version int) (*DefinitionVersion, error) {
+	return r.getVersion(ctx, orgID, "workflow_id=$2 AND version=$3", workflowID, version)
+}
+
+// GetVersionByID returns the version a run is bound to.
+func (r *PGRepository) GetVersionByID(ctx context.Context, orgID, id string) (*DefinitionVersion, error) {
+	return r.getVersion(ctx, orgID, "id=$2", id)
+}
+
+func (r *PGRepository) getVersion(ctx context.Context, orgID, where string, args ...any) (*DefinitionVersion, error) {
+	var v *DefinitionVersion
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		v, err = scanVersion(tx.QueryRow(ctx, "SELECT "+versionCols+" FROM workflow_def_version WHERE organization_id=$1 AND "+where, append([]any{orgID}, args...)...))
+		if err == pgx.ErrNoRows {
+			return ErrVersionNotFound
+		}
+		return err
+	})
+	return v, err
 }
 func (r *PGRepository) DeleteDefinition(ctx context.Context, orgID, id string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -216,7 +281,7 @@ func (r *PGRepository) CreateRun(ctx context.Context, run *Run) error {
 		if run.StartedAt.IsZero() {
 			run.StartedAt = time.Now().UTC()
 		}
-		return tx.QueryRow(ctx, `INSERT INTO workflow_run (organization_id,workflow_id,status,trigger,context,started_at) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id::text, created_at, updated_at`, run.OrganizationID, run.WorkflowID, run.Status, run.Trigger, run.Context, run.StartedAt).Scan(&run.ID, &run.CreatedAt, &run.UpdatedAt)
+		return tx.QueryRow(ctx, `INSERT INTO workflow_run (organization_id,workflow_id,definition_version_id,status,trigger,context,started_at) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id::text, created_at, updated_at`, run.OrganizationID, run.WorkflowID, run.DefinitionVersionID, run.Status, run.Trigger, run.Context, run.StartedAt).Scan(&run.ID, &run.CreatedAt, &run.UpdatedAt)
 	})
 }
 func (r *PGRepository) UpdateRunStatus(ctx context.Context, orgID, id, status string, finished *time.Time, ctxm JSONMap) (*Run, error) {
@@ -305,7 +370,7 @@ func asSlice(b []byte) []JSONMap {
 func scanDef(s scanner) (*Definition, error) {
 	d := &Definition{}
 	var trig, conds, acts []byte
-	if err := s.Scan(&d.ID, &d.OrganizationID, &d.Name, &d.Description, &trig, &conds, &acts, &d.Active, &d.CreatedAt, &d.UpdatedAt); err != nil {
+	if err := s.Scan(&d.ID, &d.OrganizationID, &d.Name, &d.Description, &trig, &conds, &acts, &d.Active, &d.Version, &d.CurrentVersionID, &d.CreatedAt, &d.UpdatedAt); err != nil {
 		return nil, err
 	}
 	d.Trigger = asMap(trig)
@@ -313,11 +378,22 @@ func scanDef(s scanner) (*Definition, error) {
 	d.Actions = asSlice(acts)
 	return d, nil
 }
+func scanVersion(s scanner) (*DefinitionVersion, error) {
+	v := &DefinitionVersion{}
+	var trig, conds, acts []byte
+	if err := s.Scan(&v.ID, &v.OrganizationID, &v.WorkflowID, &v.Version, &trig, &conds, &acts, &v.CreatedBy, &v.CreatedAt); err != nil {
+		return nil, err
+	}
+	v.Trigger = asMap(trig)
+	v.Conditions = asSlice(conds)
+	v.Actions = asSlice(acts)
+	return v, nil
+}
 func scanRun(s scanner) (*Run, error) {
 	r := &Run{}
 	var ctxb []byte
 	var fin sql.NullTime
-	if err := s.Scan(&r.ID, &r.OrganizationID, &r.WorkflowID, &r.Status, &r.Trigger, &ctxb, &r.StartedAt, &fin, &r.CreatedAt, &r.UpdatedAt); err != nil {
+	if err := s.Scan(&r.ID, &r.OrganizationID, &r.WorkflowID, &r.DefinitionVersionID, &r.Status, &r.Trigger, &ctxb, &r.StartedAt, &fin, &r.CreatedAt, &r.UpdatedAt); err != nil {
 		return nil, err
 	}
 	r.Context = asMap(ctxb)
