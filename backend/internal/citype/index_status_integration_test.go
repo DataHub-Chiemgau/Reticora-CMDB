@@ -187,8 +187,11 @@ func TestAttributeIndexStatus(t *testing.T) {
 	if strings.Contains(s.Error, "T-1") {
 		t.Errorf("the status shows a value of a CI: %q", s.Error)
 	}
+	// Due compares run_after with the clock of the server, not of the
+	// database: a past run_after keeps the job due when the database clock
+	// runs ahead (Docker VM).
 	for range 2 {
-		if _, err = f.Admin.Exec(bg, `UPDATE job SET run_after = now() WHERE id = $1`, s.JobID); err != nil {
+		if _, err = f.Admin.Exec(bg, `UPDATE job SET run_after = now() - interval '1 minute' WHERE id = $1`, s.JobID); err != nil {
 			t.Fatal(err)
 		}
 		runDue()
