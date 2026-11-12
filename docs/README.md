@@ -778,6 +778,30 @@ development mode). Failed jobs keep their error message; expired jobs no longer
 expose a URL. When no blob store is configured the endpoint answers 503 and the
 streaming export remains available.
 
+**Full export of the organization (TLC-05, WP-1149):** the job kind
+`org.export` (3 attempts, 2 h, cancellable) exports every table of the
+organization as JSONL for portability and the data processing agreement.
+`export.OrgTables` reads the catalog from `pg_catalog`: every table and
+hypertable of `public` with `organization_id` plus the organization row, so
+a new table is exported without a code change; only `orgExportExcluded` is
+left out, each with a reason (`org_dek`, `pii_subject` — exported decrypted
+as `pii_subject.jsonl` —, `search_document`, `search_document_field`).
+Secret columns are never selected (suffix `_hash`, `_enc`, `_ciphertext`,
+prefix `encrypted_` or `secret`, plus `orgExportSecretColumns`, e.g. the
+credential ciphertext and the previous webhook secret). The job reads in one
+tenant transaction `REPEATABLE READ, READ ONLY`
+(`database.WithTenantSnapshot`), in batches of 5,000 rows by primary key
+(without one through a cursor by `ctid`; `metric_sample` through its view
+`metric_sample_v`), reveals `$pii` references with `pii.RevealTx` (E-165)
+and writes `org/<org>/org-export/<job>/tables/<table>/part-<nnnn>.jsonl`
+(at most 64 MiB per part) to the bucket `exports`. `manifest.json` next to
+the parts and in the job result lists per table the rows, the parts with
+key, bytes and SHA-256 and the snapshot; progress rises per table. A retry
+after a crash keeps the completed tables and exports the rest in a new
+snapshot; a cancel (JOB-03) stops before the next batch and removes the
+objects of the job. Documents, routes and download follow in WP-1150 and
+WP-1151.
+
 **Privacy / GDPR:** `GET /api/v1/users/{id}/data-export` returns the full set
 of personal data stored about a user (account record plus all contact records
 carrying the user's e-mail address) — the Art. 15 access request.

@@ -691,7 +691,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		}
 		registerJobKinds(jobService, opts.JobQueue, opts.CIService, bulkRevert, historyHandler, templateJobs, draftHandler,
 			importHandler, documentScanner, searchHandler, labelBatch, assetHandler, assetRevert, credentialHandler, admpSync,
-			repos.IPAMManagement)
+			repos.IPAMManagement,
+			// The full export of an organization (WP-1149, TLC-05) reads on
+			// the application pool and writes to the object storage.
+			export.NewOrgExporter(opts.AuditPool, opts.Blobs, jobService))
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker

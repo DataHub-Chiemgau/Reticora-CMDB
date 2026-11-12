@@ -288,6 +288,24 @@ func WithTenant(ctx context.Context, pool *pgxpool.Pool, scope *TenantScope, fn 
 	return runTenantTx(ctx, pool, scope, beginTenantSQL(scope), fn)
 }
 
+// WithTenantSnapshot is WithTenant for a long reader that needs one
+// consistent state of the organization, e.g. the full export of TLC-05
+// (WP-1149): the transaction is REPEATABLE READ and READ ONLY. The options
+// stand in the BEGIN, before the GUCs are set in the same round trip
+// (beginTenantSnapshotSQL): SET TRANSACTION ISOLATION LEVEL is no longer
+// allowed after the first query of the transaction. A context that already
+// carries a transaction is refused (ErrSnapshotInTx), joining it would not
+// give one snapshot.
+func WithTenantSnapshot(ctx context.Context, pool *pgxpool.Pool, scope *TenantScope, fn func(ctx context.Context, tx pgx.Tx) error) error {
+	if err := scope.Validate(); err != nil {
+		return err
+	}
+	if v := ctx.Value(txKey{}); v != nil {
+		return ErrSnapshotInTx
+	}
+	return runTenantTx(ctx, pool, scope, beginTenantSnapshotSQL(scope), fn)
+}
+
 // runTenantTx opens a tenant transaction with begin (the statement that
 // opens it and sets the GUCs of scope), runs fn and commits on success; see
 // WithTenant. scope is validated.

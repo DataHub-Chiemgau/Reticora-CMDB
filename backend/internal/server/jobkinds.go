@@ -13,6 +13,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/importer"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
@@ -101,6 +102,12 @@ var (
 	// previous attempt stopped. A running backfill can be cancelled between
 	// two batches.
 	mgmtBackfillJobKind = jobs.Kind{Name: ipam.MgmtBackfillJobKind, MaxAttempts: 3, Timeout: time.Hour, Cancellable: true}
+	// orgExportJobKind (WP-1149, TLC-05): the full export of an
+	// organization only reads, in one snapshot per attempt; a retry keeps
+	// the tables its manifest lists as complete and exports the rest in a
+	// new snapshot. A running export can be cancelled before its next
+	// batch; its objects are removed.
+	orgExportJobKind = jobs.Kind{Name: export.OrgExportJobKind, MaxAttempts: 3, Timeout: 2 * time.Hour, Cancellable: true}
 )
 
 // jobKind is a submitted kind and the handler that runs its jobs.
@@ -122,11 +129,13 @@ type jobKind struct {
 // before), a bulk on assets on the asset handler (WP-781). The revert jobs
 // of asset bulks run on the asset revert (nil while the module inventory
 // is off or without the change set store, WP-784). The test of a vault
-// connection runs on the credential handler (WP-896).
+// connection runs on the credential handler (WP-896), the full export of
+// an organization on the org exporter (WP-1149; without database or object
+// storage its jobs fail).
 func applicationJobKinds(ciService *ci.Service, bulkRevert *ci.BulkRevert, historyHandler *history.Handler,
 	templateJobs *ci.TemplateMigrationJobs, draftHandler *metamodel.Handler, importHandler *importer.ImportHandler,
 	scanner *document.Scanner, searchHandler *search.Handler, labelBatch *labels.BatchHandler, assets *asset.Handler,
-	assetRevert *asset.BulkRevert, credentials *credential.Handler, admpSync *admp.Sync, management *ipam.ManagementSync) []jobKind {
+	assetRevert *asset.BulkRevert, credentials *credential.Handler, admpSync *admp.Sync, management *ipam.ManagementSync, orgExport *export.OrgExporter) []jobKind {
 	kinds := []jobKind{{kind: snapshotJobKind, handler: historyHandler.RunSnapshotJob},
 		{kind: metamodelTestJobKind, handler: draftHandler.RunTestJob},
 		{kind: importJobKind, handler: importHandler.RunJob},
@@ -134,7 +143,8 @@ func applicationJobKinds(ciService *ci.Service, bulkRevert *ci.BulkRevert, histo
 		{kind: labelBatchJobKind, handler: labelBatch.RunJob},
 		{kind: assetBulkJobKind, handler: assets.RunBulkJob},
 		{kind: vaultTestJobKind, handler: credentials.RunVaultTestJob},
-		{kind: admpRefreshJobKind, handler: admpSync.RunRefreshJob}}
+		{kind: admpRefreshJobKind, handler: admpSync.RunRefreshJob},
+		{kind: orgExportJobKind, handler: orgExport.RunJob}}
 	if ciService != nil {
 		kinds = append(kinds, jobKind{kind: bulkJobKind, handler: ciService.RunBulkJob})
 	}
@@ -184,7 +194,7 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 	historyHandler *history.Handler, templateJobs *ci.TemplateMigrationJobs, draftHandler *metamodel.Handler,
 	importHandler *importer.ImportHandler, scanner *document.Scanner, searchHandler *search.Handler,
 	labelBatch *labels.BatchHandler, assets *asset.Handler, assetRevert *asset.BulkRevert, credentials *credential.Handler,
-	admpSync *admp.Sync, management *ipam.ManagementSync) {
+	admpSync *admp.Sync, management *ipam.ManagementSync, orgExport *export.OrgExporter) {
 	svc.Register(exportJobKind)
 	importHandler.WithJobs(svc)
 	labelBatch.WithJobs(svc)
@@ -197,7 +207,7 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 		ciService.WithBulkJobs(svc)
 	}
 	for _, k := range applicationJobKinds(ciService, bulkRevert, historyHandler, templateJobs, draftHandler, importHandler,
-		scanner, searchHandler, labelBatch, assets, assetRevert, credentials, admpSync, management) {
+		scanner, searchHandler, labelBatch, assets, assetRevert, credentials, admpSync, management, orgExport) {
 		svc.Register(k.kind)
 		if queue != nil {
 			queue.Handle(k.kind, k.handler)

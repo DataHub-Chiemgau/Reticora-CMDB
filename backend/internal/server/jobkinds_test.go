@@ -31,6 +31,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
@@ -260,6 +261,13 @@ func TestEverySubmittedKindHasAHandler(t *testing.T) {
 			t.Errorf("%s submits %s, which has no handler on the job queue", site, kind)
 		}
 	}
+	// Kinds whose routes submit them in a later WP have their handler
+	// already (org.export: WP-1149, routes in WP-1151).
+	for _, kind := range []string{export.OrgExportJobKind} {
+		if !queue.Handles(kind) {
+			t.Errorf("%s has no handler on the job queue", kind)
+		}
+	}
 
 	ids := map[string]string{
 		ci.BulkJobKind:          env.submit(t, "/api/v1/cis/bulk", bulkBody(ci.BulkJobFromIDs)),
@@ -342,6 +350,15 @@ func TestJobKindsDeclareCancellable(t *testing.T) {
 		ci.BulkJobKind:          env.submit(t, "/api/v1/cis/bulk", bulkBody(ci.BulkJobFromIDs)),
 		history.SnapshotJobKind: env.submit(t, "/api/v1/history/snapshots", `{"entity_type":"ci","entity_id":"c0de0503-0000-4000-8000-0000000000c1"}`),
 	}
+	// The full export has no route yet (WP-1151): its job is enqueued (the
+	// runner only needs the name; GET and DELETE use the declaration of
+	// the server).
+	runner.Register(jobs.Kind{Name: export.OrgExportJobKind, MaxAttempts: 3})
+	orgExport, _, err := runner.Enqueue(ctx, jobKindsOrg, export.OrgExportJobKind, map[string]string{}, jobs.EnqueueOptions{CreatedBy: jobKindsUser})
+	if err != nil {
+		t.Fatal(err)
+	}
+	running[export.OrgExportJobKind] = orgExport.ID
 	for kind, id := range running {
 		if job, err := runner.ClaimJob(ctx, jobKindsOrg, id); err != nil || job == nil {
 			t.Fatalf("claim %s: %+v %v", kind, job, err)
@@ -361,7 +378,8 @@ func TestJobKindsDeclareCancellable(t *testing.T) {
 		}
 		running[kind] = job.ID
 	}
-	want := map[string]bool{ci.BulkJobKind: true, history.SnapshotJobKind: true, "export": true, "review.merge": false}
+	want := map[string]bool{ci.BulkJobKind: true, history.SnapshotJobKind: true, "export": true, "review.merge": false,
+		export.OrgExportJobKind: true}
 	for kind, id := range running {
 		code, body := env.call(t, http.MethodGet, "/api/v1/jobs/"+id)
 		var job map[string]any
