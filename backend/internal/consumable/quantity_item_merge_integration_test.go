@@ -392,8 +392,8 @@ func TestInventoryItemsAlias(t *testing.T) {
 		t.Fatalf("transfer through quantity_item_id: %d %v", code, body)
 	}
 	if code, body = a.do(http.MethodPost, "/api/v1/stock-movements", map[string]any{"movement_type": "receipt", "quantity_item_id": f.ID(),
-		"to_location_id": bin, "quantity": 1}); code != http.StatusNotFound || body["detail"] != movement.ErrItemNotFound.Error() {
-		t.Errorf("receipt of an unknown article: %d %v, want 404 %q", code, body, movement.ErrItemNotFound.Error())
+		"to_location_id": bin, "quantity": 1}); code != http.StatusUnprocessableEntity || body["field"] != "consumable_id" {
+		t.Errorf("receipt of an unknown article: %d %v, want 422 on consumable_id (SR-50)", code, body)
 	}
 	_, byAlias := a.do(http.MethodGet, "/api/v1/stock-movements?quantity_item_id="+id, nil)
 	_, byID := a.do(http.MethodGet, "/api/v1/stock-movements?consumable_id="+id, nil)
