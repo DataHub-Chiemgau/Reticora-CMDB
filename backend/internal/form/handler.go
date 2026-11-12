@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -19,6 +20,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/forms/{id}", h.GetDefinition)
 	r.Patch("/api/v1/forms/{id}", h.UpdateDefinition)
 	r.Delete("/api/v1/forms/{id}", h.DeleteDefinition)
+	r.Get("/api/v1/forms/{id}/versions", h.ListVersions)
+	r.Get("/api/v1/forms/{id}/versions/{version}", h.GetVersion)
 	r.Get("/api/v1/forms/{id}/submissions", h.ListFormSubmissions)
 	r.Post("/api/v1/forms/{id}/submissions", h.CreateSubmission)
 	r.Get("/api/v1/form-submissions", h.ListSubmissions)
@@ -47,6 +50,16 @@ func writeFormError(w http.ResponseWriter, r *http.Request, err error) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", ErrNotFound.Error())
 	case errors.Is(err, ErrSubmissionNotFound):
 		api.WriteError(w, http.StatusNotFound, "Not Found", ErrSubmissionNotFound.Error())
+	case errors.Is(err, ErrVersionNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", ErrVersionNotFound.Error())
+	case errors.Is(err, ErrPreconditionFailed):
+		api.WritePreconditionFailed(w, ErrPreconditionFailed.Error())
+	case errors.Is(err, ErrVersionChanged):
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrVersionChanged.Error())
+	case errors.As(err, new(ValidationError)):
+		var ve ValidationError
+		errors.As(err, &ve)
+		writeValidationProblem(w, ve)
 	case api.WriteFieldError(w, err):
 	default:
 		slog.WarnContext(r.Context(), "form request failed", "error", err)
@@ -98,6 +111,7 @@ func (h *Handler) GetDefinition(w http.ResponseWriter, r *http.Request) {
 		writeFormError(w, r, err)
 		return
 	}
+	w.Header().Set("ETag", api.ETag(item.Version))
 	api.WriteJSON(w, 200, item)
 }
 func (h *Handler) CreateDefinition(w http.ResponseWriter, r *http.Request) {
@@ -143,6 +157,14 @@ func (h *Handler) UpdateDefinition(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// If-Match names the version the change is based on (API-07); the
+	// repository checks it on the locked row. Without it the change is
+	// applied as before.
+	version, sent, parseErr := api.ParseIfMatch(r)
+	if parseErr != nil {
+		api.WritePreconditionFailed(w, parseErr.Error())
+		return
+	}
 	var req UpdateDefinitionRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, 400, "Bad Request", err.Error())
@@ -151,11 +173,16 @@ func (h *Handler) UpdateDefinition(w http.ResponseWriter, r *http.Request) {
 	if req.ClientID != nil && !requireUUIDs(w, http.StatusUnprocessableEntity, "client_id", *req.ClientID) {
 		return
 	}
+	if sent {
+		req.IfMatch = &version
+	}
+	req.CreatedBy = t.UserID
 	item, err := h.repo.UpdateDefinition(r.Context(), t.OrganizationID, id, req)
 	if err != nil {
 		writeFormError(w, r, err)
 		return
 	}
+	w.Header().Set("ETag", api.ETag(item.Version))
 	api.WriteJSON(w, 200, item)
 }
 func (h *Handler) DeleteDefinition(w http.ResponseWriter, r *http.Request) {
@@ -173,6 +200,55 @@ func (h *Handler) DeleteDefinition(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(204)
 }
+
+// ListVersions handles GET /api/v1/forms/{id}/versions: the schema
+// versions of a form, newest first (WFL-01, API-06). A form outside the
+// caller's client scope is 404 like an unknown one (TEN-04).
+func (h *Handler) ListVersions(w http.ResponseWriter, r *http.Request) {
+	t, ok := tenantInfo(w, r)
+	if !ok {
+		return
+	}
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
+	if !ok {
+		return
+	}
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
+		return
+	}
+	items, total, err := h.repo.ListVersions(r.Context(), t.OrganizationID, id, page)
+	if err != nil {
+		writeFormError(w, r, err)
+		return
+	}
+	api.WriteJSON(w, 200, api.ListResponse[DefinitionVersion]{Data: items, Total: total, Limit: page.Limit, Offset: page.Offset, HasMore: page.Offset+len(items) < total})
+}
+
+// GetVersion handles GET /api/v1/forms/{id}/versions/{version}: schema and
+// UI hints of one version.
+func (h *Handler) GetVersion(w http.ResponseWriter, r *http.Request) {
+	t, ok := tenantInfo(w, r)
+	if !ok {
+		return
+	}
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
+	if !ok {
+		return
+	}
+	number, err := strconv.Atoi(chi.URLParam(r, "version"))
+	if err != nil || number < 1 {
+		api.WriteError(w, http.StatusNotFound, "Not Found", ErrVersionNotFound.Error())
+		return
+	}
+	item, err := h.repo.GetVersion(r.Context(), t.OrganizationID, id, number)
+	if err != nil {
+		writeFormError(w, r, err)
+		return
+	}
+	api.WriteJSON(w, 200, item)
+}
+
 func (h *Handler) ListFormSubmissions(w http.ResponseWriter, r *http.Request) {
 	t, ok := tenantInfo(w, r)
 	if !ok {
@@ -266,7 +342,11 @@ func (h *Handler) CreateSubmission(w http.ResponseWriter, r *http.Request) {
 	if !requireUUIDs(w, http.StatusUnprocessableEntity, "ci_id", req.CIID, "ticket_id", req.TicketID) {
 		return
 	}
-	sub := &Submission{OrganizationID: t.OrganizationID, FormID: def.ID, Values: req.Values, SubmittedBy: t.UserID, CIID: req.CIID, TicketID: req.TicketID, Status: status}
+	// The values were validated against the schema of the current version;
+	// the repository binds exactly that version or refuses with 409 when
+	// the schema changed meanwhile (WFL-01).
+	sub := &Submission{OrganizationID: t.OrganizationID, FormID: def.ID, Values: req.Values, SubmittedBy: t.UserID, CIID: req.CIID, TicketID: req.TicketID, Status: status,
+		ExpectedVersionID: def.CurrentVersionID}
 	// A CI or ticket outside the caller's scope is 422 on its field like an
 	// unknown one (TEN-04, F-047).
 	if err := h.repo.CreateSubmission(r.Context(), sub); err != nil {

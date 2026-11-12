@@ -5567,8 +5567,59 @@ export interface paths {
     delete: operations['deleteFormDefinition'];
     options?: never;
     head?: never;
-    /** Update a form definition */
+    /**
+     * Update a form definition
+     * @description A changed schema or ui_hints stores a new immutable schema version and makes it current (WFL-01, E-228); an unchanged schema stores none. Name, description, client and active change no schema version but raise the version of the definition (ETag). If-Match names the version the change is based on; a different one is 412 (API-07), without the header the change is applied as before.
+     */
     patch: operations['updateFormDefinition'];
+    trace?: never;
+  };
+  '/api/v1/forms/{id}/versions': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * List the schema versions of a form definition
+     * @description The immutable versions of schema and ui_hints, newest first (WFL-01, API-06). Requires form:read. A form that is unknown, of another organization or outside the caller's client scope is 404 (TEN-04).
+     */
+    get: operations['listFormVersions'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/forms/{id}/versions/{version}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description Schema version number (1, 2, ...). */
+        version: number;
+      };
+      cookie?: never;
+    };
+    /**
+     * Get one schema version of a form definition
+     * @description Schema and ui_hints of the version (WFL-01). Requires form:read. An unknown version or a form outside the caller's scope is 404 (TEN-04).
+     */
+    get: operations['getFormVersion'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   '/api/v1/forms/{id}/submissions': {
@@ -18866,10 +18917,34 @@ export interface components {
       schema: components['schemas']['JSONValue'];
       ui_hints: components['schemas']['JSONValue'];
       active: boolean;
+      /**
+       * Format: int64
+       * @description Counter of every change of the definition; the ETag (API-07).
+       */
+      version?: number;
+      /** @description The stored schema version that schema and ui_hints copy (WFL-01). */
+      current_version_id?: string;
+      /** @description Number of the current schema version. */
+      schema_version?: number;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    /** @description One immutable version of schema and ui_hints of a form definition (WFL-01, E-228). */
+    FormDefinitionVersion: {
+      id: string;
+      organization_id: string;
+      form_id: string;
+      /** @description Client of the form definition. */
+      client_id?: string;
+      version: number;
+      schema: components['schemas']['JSONValue'];
+      ui_hints: components['schemas']['JSONValue'];
+      /** @description User who stored the version; absent for migrated versions and callers without a user. */
+      created_by?: string;
+      /** Format: date-time */
+      created_at: string;
     };
     CreateFormDefinitionRequest: {
       client_id?: string;
@@ -18891,6 +18966,10 @@ export interface components {
       id: string;
       organization_id: string;
       form_id: string;
+      /** @description The schema version the values were captured against (WFL-01). */
+      form_version_id: string;
+      /** @description Number of that schema version. */
+      form_version: number;
       values: components['schemas']['JSONValue'];
       submitted_by?: string;
       ci_id?: string;
@@ -19107,6 +19186,9 @@ export interface components {
     };
     FormDefinitionListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['FormDefinition'][];
+    };
+    FormDefinitionVersionListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['FormDefinitionVersion'][];
     };
     FormSubmissionListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['FormSubmission'][];
@@ -35811,6 +35893,8 @@ export interface operations {
       /** @description Form definition */
       200: {
         headers: {
+          /** @description The version of the form definition (counter of every change); send it as If-Match with a PATCH (API-07). */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -35847,7 +35931,10 @@ export interface operations {
   updateFormDefinition: {
     parameters: {
       query?: never;
-      header?: never;
+      header?: {
+        /** @description ETag of the form definition the change is based on, or "*". */
+        'If-Match'?: string;
+      };
       path: {
         /** @description Resource identifier. */
         id: components['parameters']['ResourceID'];
@@ -35863,6 +35950,8 @@ export interface operations {
       /** @description Form definition updated */
       200: {
         headers: {
+          /** @description The version of the form definition after the change. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -35881,6 +35970,15 @@ export interface operations {
         };
       };
       404: components['responses']['NotFound'];
+      /** @description If-Match does not name the current version of the form definition */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       /** @description client_id is no UUID or names no client of the organization. */
       422: {
         headers: {
@@ -35890,6 +35988,76 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
+    };
+  };
+  listFormVersions: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated form versions */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FormDefinitionVersionListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getFormVersion: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        /** @description Schema version number (1, 2, ...). */
+        version: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Form version */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FormDefinitionVersion'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   listFormSubmissions: {
@@ -35971,6 +36139,15 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      /** @description The schema of the form changed while the values were validated; submit again. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       /** @description ci_id or ticket_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope (all alike, TEN-04). */
       422: {
         headers: {

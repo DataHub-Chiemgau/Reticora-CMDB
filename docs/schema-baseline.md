@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000317_workflow_versions
+Stand: Migration 000318_form_versions
 
 ## Prüfung
 
@@ -1965,6 +1965,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `field_grant` | ja | ja | field_grant_isolation (ALL) |
 | `field_sensitivity` | ja | ja | field_sensitivity_isolation (ALL) |
 | `form_def` | ja | ja | form_def_scoped_delete (DELETE), form_def_scoped_update (UPDATE), form_def_tenant_isolation (ALL) |
+| `form_def_version` | ja | ja | form_def_version_isolation (ALL), form_def_version_scoped_delete (DELETE), form_def_version_scoped_update (UPDATE) |
 | `form_layout` | ja | ja | form_layout_isolation (ALL) |
 | `form_submission` | ja | ja | form_submission_tenant_isolation (ALL) |
 | `iga_access_request` | ja | ja | iga_access_request_tenant_isolation (ALL) |

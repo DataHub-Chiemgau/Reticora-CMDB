@@ -13247,22 +13247,52 @@ paths:
       tags: [Forms]
       summary: Get a form definition
       responses:
-        '200': { description: Form definition, content: { application/json: { schema: { $ref: '#/components/schemas/FormDefinition' } } } }
+        '200':
+          description: Form definition
+          headers:
+            ETag:
+              description: The version of the form definition (counter of every change); send it as If-Match with a PATCH (API-07).
+              schema: { type: string }
+          content: { application/json: { schema: { $ref: '#/components/schemas/FormDefinition' } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
     patch:
       operationId: updateFormDefinition
       tags: [Forms]
       summary: Update a form definition
+      description: >-
+        A changed schema or ui_hints stores a new immutable schema version and
+        makes it current (WFL-01, E-228); an unchanged schema stores none.
+        Name, description, client and active change no schema version but
+        raise the version of the definition (ETag). If-Match names the
+        version the change is based on; a different one is 412 (API-07),
+        without the header the change is applied as before.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: ETag of the form definition the change is based on, or "*".
+          schema: { type: string }
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/UpdateFormDefinitionRequest' } } }
       responses:
-        '200': { description: Form definition updated, content: { application/json: { schema: { $ref: '#/components/schemas/FormDefinition' } } } }
+        '200':
+          description: Form definition updated
+          headers:
+            ETag:
+              description: The version of the form definition after the change.
+              schema: { type: string }
+          content: { application/json: { schema: { $ref: '#/components/schemas/FormDefinition' } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { description: "client_id lies outside the caller's scope.", content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
+        '412':
+          description: If-Match does not name the current version of the form definition
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422': { description: client_id is no UUID or names no client of the organization., content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
     delete:
       operationId: deleteFormDefinition
@@ -13270,6 +13300,50 @@ paths:
       summary: Delete a form definition
       responses:
         '204': { description: Form definition deleted }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/forms/{id}/versions:
+    x-phase: P3
+    x-feature: workflows
+    parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
+    get:
+      operationId: listFormVersions
+      tags: [Forms]
+      summary: List the schema versions of a form definition
+      description: >-
+        The immutable versions of schema and ui_hints, newest first (WFL-01,
+        API-06). Requires form:read. A form that is unknown, of another
+        organization or outside the caller's client scope is 404 (TEN-04).
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200': { description: Paginated form versions, content: { application/json: { schema: { $ref: '#/components/schemas/FormDefinitionVersionListResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /api/v1/forms/{id}/versions/{version}:
+    x-phase: P3
+    x-feature: workflows
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - name: version
+        in: path
+        required: true
+        description: Schema version number (1, 2, ...).
+        schema: { type: integer, minimum: 1 }
+    get:
+      operationId: getFormVersion
+      tags: [Forms]
+      summary: Get one schema version of a form definition
+      description: >-
+        Schema and ui_hints of the version (WFL-01). Requires form:read. An
+        unknown version or a form outside the caller's scope is 404
+        (TEN-04).
+      responses:
+        '200': { description: Form version, content: { application/json: { schema: { $ref: '#/components/schemas/FormDefinitionVersion' } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/forms/{id}/submissions:
@@ -13300,10 +13374,11 @@ paths:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/CreateFormSubmissionRequest' } } }
       responses:
-        '201': { description: Form submission created, content: { application/json: { schema: { $ref: '#/components/schemas/FormSubmission' } } } }
+        '201': { description: Form submission created, bound to the current schema version (form_version_id), content: { application/json: { schema: { $ref: '#/components/schemas/FormSubmission' } } } }
         '400': { description: Bad request or validation problem, content: { application/problem+json: { schema: { $ref: '#/components/schemas/ValidationProblem' } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: The schema of the form changed while the values were validated; submit again., content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
         '422': { description: "ci_id or ticket_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope (all alike, TEN-04).", content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
   /api/v1/form-submissions:
     x-phase: P3
@@ -38645,8 +38720,25 @@ components:
         schema: { $ref: '#/components/schemas/JSONValue' }
         ui_hints: { $ref: '#/components/schemas/JSONValue' }
         active: { type: boolean }
+        version: { type: integer, format: int64, minimum: 1, description: Counter of every change of the definition; the ETag (API-07). }
+        current_version_id: { type: string, description: The stored schema version that schema and ui_hints copy (WFL-01). }
+        schema_version: { type: integer, minimum: 1, description: Number of the current schema version. }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    FormDefinitionVersion:
+      type: object
+      description: One immutable version of schema and ui_hints of a form definition (WFL-01, E-228).
+      required: [id, organization_id, form_id, version, schema, ui_hints, created_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        form_id: { type: string }
+        client_id: { type: string, description: Client of the form definition. }
+        version: { type: integer, minimum: 1 }
+        schema: { $ref: '#/components/schemas/JSONValue' }
+        ui_hints: { $ref: '#/components/schemas/JSONValue' }
+        created_by: { type: string, description: User who stored the version; absent for migrated versions and callers without a user. }
+        created_at: { type: string, format: date-time }
     CreateFormDefinitionRequest:
       type: object
       required: [name, schema]
@@ -38668,11 +38760,13 @@ components:
         active: { type: boolean }
     FormSubmission:
       type: object
-      required: [id, organization_id, form_id, values, status, created_at, updated_at]
+      required: [id, organization_id, form_id, form_version_id, form_version, values, status, created_at, updated_at]
       properties:
         id: { type: string }
         organization_id: { type: string }
         form_id: { type: string }
+        form_version_id: { type: string, description: The schema version the values were captured against (WFL-01). }
+        form_version: { type: integer, minimum: 1, description: Number of that schema version. }
         values: { $ref: '#/components/schemas/JSONValue' }
         submitted_by: { type: string }
         ci_id: { type: string }
@@ -38983,6 +39077,12 @@ components:
         - type: object
           required: [data]
           properties: { data: { type: array, items: { $ref: '#/components/schemas/FormDefinition' } } }
+    FormDefinitionVersionListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties: { data: { type: array, items: { $ref: '#/components/schemas/FormDefinitionVersion' } } }
     FormSubmissionListResponse:
       allOf:
         - $ref: '#/components/schemas/PaginationEnvelope'
