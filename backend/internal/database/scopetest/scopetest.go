@@ -202,9 +202,10 @@ func Seed(t *testing.T, tag string) *Fixture {
 // appendOnlyTables refuse UPDATE and DELETE through a trigger (migrations
 // 000049, 000056, 000242; stock_scan, stocktake_item and stocktake of a
 // completed or cancelled stocktake since 000267; alarm_transition outside
-// the alarm retention since 000313, WP-981). Under replica no cascade
+// the alarm retention since 000313, WP-981; incident_transition likewise
+// since 000326, WP-1027). Under replica no cascade
 // runs, so the scans and items go before their stocktake.
-var appendOnlyTables = []string{"audit_log", "stock_movement", "disposal_record", "stock_scan", "stocktake_item", "stocktake", "alarm_transition"}
+var appendOnlyTables = []string{"audit_log", "stock_movement", "disposal_record", "stock_scan", "stocktake_item", "stocktake", "alarm_transition", "incident_transition"}
 
 // deleteAppendOnly removes the fixture rows of the append-only tables under
 // session_replication_role = replica, which skips their guard triggers.

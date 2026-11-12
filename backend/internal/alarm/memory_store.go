@@ -19,11 +19,14 @@ type MemoryStore struct {
 	alarms      map[string]*Alarm
 	transitions []Transition
 	clock       func() time.Time
+	// incidents and incidentTransitions are the incidents (WP-1027).
+	incidents           map[string]*Incident
+	incidentTransitions []IncidentTransition
 }
 
 // NewMemoryStore returns an empty memory store.
 func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{alarms: map[string]*Alarm{}, clock: now}
+	return &MemoryStore{alarms: map[string]*Alarm{}, incidents: map[string]*Incident{}, clock: now}
 }
 
 var _ Store = (*MemoryStore)(nil)
@@ -239,4 +242,344 @@ func (m *MemoryStore) PurgeResolved(orgID string, cutoff time.Time, limit int) i
 	}
 	m.transitions = slices.DeleteFunc(m.transitions, func(t Transition) bool { return removed[t.AlarmID] })
 	return len(removed)
+}
+
+// PurgeResolvedIncidents removes the resolved incidents of the organization
+// resolved before cutoff, at most limit, with their transitions; their
+// alarms lose the reference (ON DELETE SET NULL). It returns their number.
+func (m *MemoryStore) PurgeResolvedIncidents(orgID string, cutoff time.Time, limit int) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	removed := map[string]bool{}
+	for id, inc := range m.incidents {
+		if len(removed) >= limit {
+			break
+		}
+		if inc.OrganizationID == orgID && inc.State == IncidentResolved && inc.ResolvedAt != nil && inc.ResolvedAt.Before(cutoff) {
+			removed[id] = true
+			delete(m.incidents, id)
+		}
+	}
+	for _, a := range m.alarms {
+		if a.IncidentID != nil && removed[*a.IncidentID] {
+			a.IncidentID = nil
+		}
+	}
+	m.incidentTransitions = slices.DeleteFunc(m.incidentTransitions, func(t IncidentTransition) bool { return removed[t.IncidentID] })
+	return len(removed)
+}
+
+// cloneIncident returns a deep copy of an incident.
+func cloneIncident(inc *Incident) *Incident {
+	c := *inc
+	c.Reasons = slices.Clone(inc.Reasons)
+	c.AffectedCounts = maps.Clone(inc.AffectedCounts)
+	return &c
+}
+
+// incidentOf returns the incident of the organization (lock held).
+func (m *MemoryStore) incidentOf(orgID, id string) (*Incident, error) {
+	inc, ok := m.incidents[id]
+	if !ok || inc.OrganizationID != orgID {
+		return nil, ErrIncidentNotFound
+	}
+	return inc, nil
+}
+
+// appendIncidentTransition appends to the log of inc (lock held).
+func (m *MemoryStore) appendIncidentTransition(inc *Incident, from *string, to string, at time.Time, actor *string,
+	reason string, details map[string]any) {
+	if details == nil {
+		details = map[string]any{}
+	}
+	m.incidentTransitions = append(m.incidentTransitions, IncidentTransition{
+		ID: newID(), OrganizationID: inc.OrganizationID, ClientID: inc.ClientID, SiteID: inc.SiteID, IncidentID: inc.ID,
+		FromState: from, ToState: to, At: at, ActorID: actor, Reason: reason, Details: details})
+}
+
+// UpsertIncident implements Store.
+func (m *MemoryStore) UpsertIncident(_ context.Context, orgID string, in *IncidentInput) (*Incident, bool, error) {
+	if err := ValidateIncident(in); err != nil {
+		return nil, false, err
+	}
+	at := in.At
+	if at.IsZero() {
+		at = m.clock()
+	}
+	reasons := slices.Clone(in.Reasons)
+	if reasons == nil {
+		reasons = []string{}
+	}
+	counts := maps.Clone(in.AffectedCounts)
+	if counts == nil {
+		counts = map[string]int{}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if in.ID == "" {
+		inc := &Incident{ID: newID(), OrganizationID: orgID, ClientID: in.ClientID, SiteID: in.SiteID, RootCIID: in.RootCIID,
+			CauseClass: causeOrUnknown(in.CauseClass), Confidence: in.Confidence, Reasons: reasons, State: IncidentOpen,
+			OpenedAt: at, AffectedCounts: counts, UpdatedAt: m.clock()}
+		m.incidents[inc.ID] = inc
+		m.appendIncidentTransition(inc, nil, IncidentOpen, at, nil, IncidentReasonOpened,
+			map[string]any{"cause_class": inc.CauseClass, "confidence": inc.Confidence})
+		return cloneIncident(inc), true, nil
+	}
+	inc, err := m.incidentOf(orgID, in.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	if inc.State == IncidentResolved {
+		return nil, false, ErrIncidentResolved
+	}
+	inc.CauseClass, inc.Confidence, inc.Reasons, inc.AffectedCounts = causeOrUnknown(in.CauseClass), in.Confidence, reasons, counts
+	inc.UpdatedAt = m.clock()
+	state := inc.State
+	m.appendIncidentTransition(inc, &state, inc.State, at, nil, IncidentReasonUpdated,
+		map[string]any{"cause_class": inc.CauseClass, "confidence": inc.Confidence})
+	return cloneIncident(inc), false, nil
+}
+
+// GetIncident implements Store.
+func (m *MemoryStore) GetIncident(_ context.Context, orgID, id string) (*Incident, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	inc, err := m.incidentOf(orgID, id)
+	if err != nil {
+		return nil, err
+	}
+	return cloneIncident(inc), nil
+}
+
+// ListIncidents implements Store.
+func (m *MemoryStore) ListIncidents(_ context.Context, orgID string, f *IncidentFilter) (IncidentPage, error) {
+	m.mu.Lock()
+	var items []Incident
+	for _, inc := range m.incidents {
+		switch {
+		case inc.OrganizationID != orgID,
+			len(f.States) > 0 && !slices.Contains(f.States, inc.State),
+			len(f.CauseClasses) > 0 && !slices.Contains(f.CauseClasses, inc.CauseClass),
+			f.ClientID != "" && (inc.ClientID == nil || *inc.ClientID != f.ClientID),
+			f.To != nil && !inc.OpenedAt.Before(*f.To),
+			f.From != nil && inc.ResolvedAt != nil && inc.ResolvedAt.Before(*f.From):
+			continue
+		}
+		items = append(items, *cloneIncident(inc))
+	}
+	m.mu.Unlock()
+	slices.SortFunc(items, func(a, b Incident) int {
+		if c := b.OpenedAt.Compare(a.OpenedAt); c != 0 {
+			return c
+		}
+		return strings.Compare(b.ID, a.ID)
+	})
+	if f.After != nil {
+		after := f.After
+		items = slices.DeleteFunc(items, func(inc Incident) bool {
+			c := inc.OpenedAt.Compare(after.OpenedAt)
+			return c > 0 || (c == 0 && inc.ID >= after.ID)
+		})
+	}
+	limit := incidentLimitOf(f)
+	if len(items) > limit+1 {
+		items = items[:limit+1]
+	}
+	return pagedIncidents(items, limit), nil
+}
+
+// attachable reports whether a may be attached to incidentID: it belongs to
+// no incident or to that one.
+func attachable(a *Alarm, incidentID string) bool {
+	return a.IncidentID == nil || *a.IncidentID == incidentID
+}
+
+// attach assigns the alarm to an incident as root or symptom (lock held).
+func attach(a *Alarm, incidentID string, root bool) {
+	id := incidentID
+	a.IncidentID = &id
+	switch {
+	case root && a.SuppressedReason != nil && *a.SuppressedReason == SuppressedSymptom:
+		a.SuppressedReason = nil
+	case !root && a.SuppressedReason == nil:
+		reason := SuppressedSymptom
+		a.SuppressedReason = &reason
+	}
+}
+
+// setRoot makes a (attached already) the root of inc (lock held).
+func (m *MemoryStore) setRoot(inc *Incident, a *Alarm, manual bool, at time.Time) {
+	if inc.RootAlarmID != nil && *inc.RootAlarmID != a.ID {
+		if prev, ok := m.alarms[*inc.RootAlarmID]; ok && prev.IncidentID != nil && *prev.IncidentID == inc.ID && prev.SuppressedReason == nil {
+			reason := SuppressedSymptom
+			prev.SuppressedReason = &reason
+		}
+	}
+	from := deref(inc.RootAlarmID)
+	id := a.ID
+	inc.RootAlarmID, inc.RootCIID, inc.ManualRoot = &id, a.CIID, inc.ManualRoot || manual
+	inc.UpdatedAt = m.clock()
+	state := inc.State
+	m.appendIncidentTransition(inc, &state, inc.State, at, nil, IncidentReasonRootChanged,
+		map[string]any{"from_alarm_id": from, "to_alarm_id": a.ID, "manual": manual})
+}
+
+// AttachAlarms implements Store.
+func (m *MemoryStore) AttachAlarms(_ context.Context, orgID, incidentID string, alarmIDs []string, role string) (*Incident, error) {
+	ids := uniqueIDs(alarmIDs)
+	if err := validateAttach(ids, role); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	inc, err := m.incidentOf(orgID, incidentID)
+	if err != nil {
+		return nil, err
+	}
+	if cerr := checkAttach(inc, role); cerr != nil {
+		return nil, cerr
+	}
+	targets := make([]*Alarm, 0, len(ids))
+	for _, id := range ids {
+		a, ok := m.alarms[id]
+		if !ok || a.OrganizationID != orgID {
+			return nil, fmt.Errorf("alarm: attach: %w", ErrNotFound)
+		}
+		if !attachable(a, incidentID) {
+			return nil, fmt.Errorf("alarm: attach: %w", ErrAlarmInOtherIncident)
+		}
+		targets = append(targets, a)
+	}
+	at := m.clock()
+	for _, a := range targets {
+		attach(a, incidentID, role == RoleRoot)
+	}
+	if role == RoleRoot {
+		m.setRoot(inc, targets[0], false, at)
+	} else {
+		state := inc.State
+		m.appendIncidentTransition(inc, &state, inc.State, at, nil, IncidentReasonAlarmsAttached,
+			map[string]any{"alarm_ids": ids, "role": role})
+	}
+	return cloneIncident(inc), nil
+}
+
+// SetRoot implements Store.
+func (m *MemoryStore) SetRoot(_ context.Context, orgID, incidentID, alarmID string, manual bool) (*Incident, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	inc, err := m.incidentOf(orgID, incidentID)
+	if err != nil {
+		return nil, err
+	}
+	if cerr := checkRoot(inc, manual); cerr != nil {
+		return nil, cerr
+	}
+	a, ok := m.alarms[alarmID]
+	if !ok || a.OrganizationID != orgID {
+		return nil, fmt.Errorf("alarm: set root: %w", ErrNotFound)
+	}
+	if !attachable(a, incidentID) {
+		return nil, fmt.Errorf("alarm: attach: %w", ErrAlarmInOtherIncident)
+	}
+	attach(a, incidentID, true)
+	m.setRoot(inc, a, manual, m.clock())
+	return cloneIncident(inc), nil
+}
+
+// MergeIncidents implements Store.
+func (m *MemoryStore) MergeIncidents(_ context.Context, orgID, keepID, absorbID, rootAlarmID string) (*Incident, error) {
+	if keepID == absorbID {
+		return nil, fmt.Errorf("alarm: merge an incident into itself")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	keep, err := m.incidentOf(orgID, keepID)
+	if err != nil {
+		return nil, err
+	}
+	absorb, err := m.incidentOf(orgID, absorbID)
+	if err != nil {
+		return nil, err
+	}
+	if keep.State == IncidentResolved || absorb.State == IncidentResolved {
+		return nil, ErrIncidentResolved
+	}
+	if keep.ManualRoot || (keep.RootAlarmID != nil && *keep.RootAlarmID == rootAlarmID) {
+		rootAlarmID = ""
+	}
+	var root *Alarm
+	if rootAlarmID != "" {
+		a, ok := m.alarms[rootAlarmID]
+		if !ok || a.OrganizationID != orgID {
+			return nil, fmt.Errorf("alarm: merge root: %w", ErrNotFound)
+		}
+		// The alarms of absorb move to keep first.
+		if !attachable(a, keepID) && !attachable(a, absorbID) {
+			return nil, fmt.Errorf("alarm: attach: %w", ErrAlarmInOtherIncident)
+		}
+		root = a
+	}
+	at := m.clock()
+	moved := 0
+	for _, a := range m.alarms {
+		if a.OrganizationID == orgID && a.IncidentID != nil && *a.IncidentID == absorbID {
+			attach(a, keepID, a.ID == rootAlarmID)
+			moved++
+		}
+	}
+	absorbFrom, absorbRoot := absorb.State, deref(absorb.RootAlarmID)
+	absorb.State, absorb.ResolvedAt, absorb.RootAlarmID, absorb.UpdatedAt = IncidentResolved, &at, nil, m.clock()
+	m.appendIncidentTransition(absorb, &absorbFrom, IncidentResolved, at, nil, IncidentReasonMergedInto,
+		map[string]any{"into": keepID, "alarms": moved, "root_alarm_id": absorbRoot})
+	keepState := keep.State
+	m.appendIncidentTransition(keep, &keepState, keep.State, at, nil, IncidentReasonAbsorbed,
+		map[string]any{"absorbed": absorbID, "alarms": moved})
+	if root != nil {
+		attach(root, keepID, true)
+		m.setRoot(keep, root, false, at)
+	}
+	return cloneIncident(keep), nil
+}
+
+// TransitionIncident implements Store.
+func (m *MemoryStore) TransitionIncident(_ context.Context, orgID, id, to string, actorID *string) (*Incident, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	inc, err := m.incidentOf(orgID, id)
+	if err != nil {
+		return nil, err
+	}
+	if !incidentTransitionAllowed(inc.State, to) {
+		return nil, fmt.Errorf("%w: incident %s to %s", ErrInvalidTransition, inc.State, to)
+	}
+	at := m.clock()
+	from := inc.State
+	switch to {
+	case IncidentAcknowledged:
+		inc.AcknowledgedAt, inc.AcknowledgedBy = &at, actorID
+	case IncidentResolved:
+		inc.ResolvedAt = &at
+	default:
+		inc.AcknowledgedAt, inc.AcknowledgedBy = nil, nil
+	}
+	inc.State, inc.UpdatedAt = to, m.clock()
+	m.appendIncidentTransition(inc, &from, to, at, actorID, incidentReason(from, to), nil)
+	return cloneIncident(inc), nil
+}
+
+// IncidentTransitions implements Store.
+func (m *MemoryStore) IncidentTransitions(_ context.Context, orgID, incidentID string) ([]IncidentTransition, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var out []IncidentTransition
+	for i := range m.incidentTransitions {
+		if t := &m.incidentTransitions[i]; t.OrganizationID == orgID && t.IncidentID == incidentID {
+			c := *t
+			c.Details = maps.Clone(t.Details)
+			out = append(out, c)
+		}
+	}
+	slices.SortStableFunc(out, func(a, b IncidentTransition) int { return a.At.Compare(b.At) })
+	return out, nil
 }

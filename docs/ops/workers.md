@@ -120,7 +120,7 @@ audit entry (`retention.*`).
 | `retention.merge_snapshots` (03:57) | CI merges (`ci_merge`): snapshot, then the row with its tombstone | snapshot 30 days, tombstone 12 months | none: the periods the merge recorded (`snapshot_until`, `tombstone_until`) |
 | `retention.bulk_change_set` (04:07) | `bulk_change_set` (change sets of bulk jobs, the basis of their revert) | 30 days | none: fixed period |
 | `retention.config_snapshot` (04:17) | `config_snapshot` (versions of the device configurations, ALR-07, WP-1052) by `collected_at`, in portions of at most 10,000; the latest version of each CI stays whatever its age | 400 days | none: fixed period |
-| `alarm.retention` (04:37, module `monitoring`) | resolved alarms (`alarm`, by `resolved_at`) with their state log (`alarm_transition`, by cascade); open, pending and acknowledged alarms stay whatever their age; portions of at most 10,000 alarms, one transaction each (ALR-01, WP-981) | 400 days | none: fixed period |
+| `alarm.retention` (04:37, module `monitoring`) | resolved alarms (`alarm`, by `resolved_at`) with their state log (`alarm_transition`, by cascade) and resolved incidents (`incident`, by `resolved_at`) with their log (`incident_transition`, by cascade); open, pending and acknowledged alarms and open or acknowledged incidents stay whatever their age; an alarm of a deleted incident keeps its own period (`incident_id` becomes `NULL`); portions of at most 10,000 alarms and 10,000 incidents, one transaction each (ALR-01, WP-981, WP-1027) | 400 days | none: fixed period |
 
 A value below the minimum stops the start. The audit log keeps its chain
 verifiable: the run removes the oldest entries of a chain (never the newest)
@@ -130,7 +130,9 @@ allows the deletion only for entries older than ten years and only inside a
 retention run (migration 000119). The same holds for the state log of the
 alarms: `alarm_transition` refuses every UPDATE, and a DELETE outside
 `alarm.retention` (`app.alarm_retention`) unless its alarm goes with its CI,
-client or organization (migration 000313). A soft-deleted CI that is still referenced
+client or organization (migration 000313); likewise `incident_transition`
+outside the retention unless its incident goes with its client or
+organization (migration 000326). A soft-deleted CI that is still referenced
 (asset, assignment, ticket) stays. A CI merge (CI-12) keeps a snapshot of
 both CIs and of the moved rows (contacts among them) for the unmerge:
 `retention.merge_snapshots` empties it once the unmerge period passed, and

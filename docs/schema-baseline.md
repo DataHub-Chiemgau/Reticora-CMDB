@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000325_probe_result
+Stand: Migration 000326_incident
 
 ## Prüfung
 
@@ -1977,6 +1977,8 @@ SECURITY`), Policies mit ihrem Kommando.
 | `iga_lifecycle_policy` | ja | ja | iga_lifecycle_tenant_isolation (ALL) |
 | `iga_provisioning_task` | ja | ja | iga_task_tenant_isolation (ALL) |
 | `import_profile` | ja | ja | import_profile_isolation (ALL) |
+| `incident` | ja | ja | incident_isolation (ALL), incident_scoped_delete (DELETE), incident_scoped_update (UPDATE) |
+| `incident_transition` | ja | ja | incident_transition_isolation (ALL), incident_transition_scoped_delete (DELETE), incident_transition_scoped_update (UPDATE) |
 | `ingest_record` | ja | ja | ingest_record_isolation (ALL) |
 | `internal_order` | ja | ja | internal_order_isolation (ALL), internal_order_scoped_delete (DELETE), internal_order_scoped_update (UPDATE) |
 | `internal_order_item` | ja | ja | internal_order_item_isolation (ALL), internal_order_item_scoped_delete (DELETE), internal_order_item_scoped_update (UPDATE) |

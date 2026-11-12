@@ -35,6 +35,40 @@ type Store interface {
 	AppendTransition(ctx context.Context, orgID string, tr *Transition) (*Transition, error)
 	// Transitions returns the state log of an alarm, oldest first.
 	Transitions(ctx context.Context, orgID, alarmID string) ([]Transition, error)
+
+	// Incidents (ALR-03, WP-1027). Every change appends to
+	// incident_transition in the same transaction.
+
+	// UpsertIncident opens an incident (in.ID empty) or updates cause,
+	// confidence, reasons and affected counts of one that is not resolved;
+	// created reports a new incident.
+	UpsertIncident(ctx context.Context, orgID string, in *IncidentInput) (inc *Incident, created bool, err error)
+	// GetIncident returns the incident, or ErrIncidentNotFound.
+	GetIncident(ctx context.Context, orgID, id string) (*Incident, error)
+	// ListIncidents returns one page of incidents newest first on
+	// (opened_at, id).
+	ListIncidents(ctx context.Context, orgID string, f *IncidentFilter) (IncidentPage, error)
+	// AttachAlarms assigns alarms to an incident that is not resolved: as
+	// symptoms (suppressed with reason symptom unless suppressed already)
+	// or one alarm as its root (the automatic root: ErrManualRoot when the
+	// root was set by hand). An alarm of another incident is
+	// ErrAlarmInOtherIncident (also for SetRoot and the root of a merge).
+	AttachAlarms(ctx context.Context, orgID, incidentID string, alarmIDs []string, role string) (*Incident, error)
+	// SetRoot makes the alarm the root of the incident (root CI from the
+	// alarm). manual marks a root set by hand; an automatic change
+	// (manual false) of such an incident is ErrManualRoot.
+	SetRoot(ctx context.Context, orgID, incidentID, alarmID string, manual bool) (*Incident, error)
+	// MergeIncidents moves every alarm of absorb to keep and resolves absorb
+	// (merged_into; absorb loses its root alarm). The root of keep stays
+	// when it was set by hand, otherwise rootAlarmID becomes the root
+	// (empty: the root stays). It needs the organization-wide scope
+	// (ErrMergeScopeRestricted).
+	MergeIncidents(ctx context.Context, orgID, keepID, absorbID, rootAlarmID string) (*Incident, error)
+	// TransitionIncident moves an incident to state to (acknowledge with
+	// actor, un-acknowledge, resolve).
+	TransitionIncident(ctx context.Context, orgID, id, to string, actorID *string) (*Incident, error)
+	// IncidentTransitions returns the log of an incident, oldest first.
+	IncidentTransitions(ctx context.Context, orgID, incidentID string) ([]IncidentTransition, error)
 }
 
 // ValidateUpsert checks the input of UpsertOpen against the value sets of
