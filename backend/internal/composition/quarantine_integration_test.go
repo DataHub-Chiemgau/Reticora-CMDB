@@ -101,8 +101,12 @@ func migrationSection(t *testing.T, file, begin, end string) string {
 // asset references of ticket_link (000230), the asset reference of the
 // ledger stock_movement (000242), asset_tag_link_asset_fkey (000249),
 // barcode_registry_asset_fkey (000255), stocktake_item_asset_fkey
-// (000260) and the endpoint references of relationship_change (000261).
-// The references on ci and asset that migrations 000287 (WP-876) and
+// (000260), the endpoint references of relationship_change (000261) and
+// the CI references of the phase-3 tables credential_binding (000292),
+// credential_usage (000295), probe, monitoring_group_member and
+// monitoring_profile (000307), admp_access_port (000309),
+// admp_service_port (000310), probe_state_change (000311), alarm (000313)
+// and config_snapshot (000314). The references on ci and asset that migrations 000287 (WP-876) and
 // 000288 (WP-877) made composite get their simple form again.
 const dropLaterReferences = `
 	ALTER TABLE compliance_result DROP CONSTRAINT compliance_result_ci_id_fkey,
@@ -160,7 +164,17 @@ const dropLaterReferences = `
 	ALTER TABLE barcode_registry DROP CONSTRAINT barcode_registry_asset_fkey;
 	ALTER TABLE stocktake_item DROP CONSTRAINT stocktake_item_asset_fkey;
 	ALTER TABLE relationship_change DROP CONSTRAINT relationship_change_source_tenant_fkey,
-		DROP CONSTRAINT relationship_change_target_tenant_fkey;`
+		DROP CONSTRAINT relationship_change_target_tenant_fkey;
+	ALTER TABLE credential_binding DROP CONSTRAINT credential_binding_ci_fkey;
+	ALTER TABLE credential_usage DROP CONSTRAINT credential_usage_ci_fkey;
+	ALTER TABLE probe DROP CONSTRAINT probe_ci_fkey;
+	ALTER TABLE monitoring_group_member DROP CONSTRAINT monitoring_group_member_ci_fkey;
+	ALTER TABLE monitoring_profile DROP CONSTRAINT monitoring_profile_ci_fkey;
+	ALTER TABLE admp_access_port DROP CONSTRAINT admp_access_port_ci_fkey;
+	ALTER TABLE admp_service_port DROP CONSTRAINT admp_service_port_ci_fkey;
+	ALTER TABLE probe_state_change DROP CONSTRAINT probe_state_change_ci_fkey;
+	ALTER TABLE alarm DROP CONSTRAINT alarm_ci_fkey;
+	ALTER TABLE config_snapshot DROP CONSTRAINT config_snapshot_ci_fkey;`
 
 func TestMigration56QuarantinesInconsistentRows(t *testing.T) {
 	dsn := os.Getenv("TEST_DATABASE_URL")
