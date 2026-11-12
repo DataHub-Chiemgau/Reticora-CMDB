@@ -1662,3 +1662,6 @@ COL-03;[P4];G3;backend/internal/credential/vault_resolver_test.go;WP-896
 CRD-05;[P3];G3;backend/internal/credential/rotation_integration_test.go;WP-897
 CRD-06;[P3];G3;backend/internal/credential/usage_integration_test.go;WP-898
 ADM-01;[P3];G3;backend/internal/admp/account_integration_test.go;WP-925
+ADM-03;[P3];G3;backend/internal/admp/cache_integration_test.go;WP-928
+ADM-07;[P3];G3;backend/internal/admp/cache_integration_test.go;WP-928
+ADM-04;[P3];G3;backend/internal/admp/cache_integration_test.go;WP-928

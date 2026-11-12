@@ -320,4 +320,17 @@ func (m *MemoryAccountRepository) DeleteAccount(ctx context.Context, orgID, id s
 	return nil
 }
 
+// clientOf returns the client of an account ("" for an organization-wide
+// one) and whether it exists, without the caller's scope: the memory cache
+// derives its scope from it like the triggers of admp_cache.
+func (m *MemoryAccountRepository) clientOf(orgID, id string) (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	a, ok := m.rows[id]
+	if !ok || a.OrganizationID != orgID {
+		return "", false
+	}
+	return a.ClientID, true
+}
+
 var _ AccountRepository = (*MemoryAccountRepository)(nil)

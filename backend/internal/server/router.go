@@ -123,7 +123,10 @@ type Repositories struct {
 	User              user.Repository
 	Credential        credential.Repository
 	// ADMPAccounts are the ADMP accounts (ADM-01, WP-925).
-	ADMPAccounts    admp.AccountRepository
+	ADMPAccounts admp.AccountRepository
+	// ADMP is the read-only cache of ADMP data (ADM-03, WP-928); the
+	// refresh (WP-929) and the read API (WP-930) use it.
+	ADMP            admp.Repository
 	Entitlement     entitlement.Repository
 	TenantHierarchy tenantapi.Repository
 	Rack            rack.Repository
@@ -1164,6 +1167,8 @@ func validate(repos *Repositories, opts *Options) error {
 		return fmt.Errorf("server: credential service is required")
 	case repos.ADMPAccounts == nil:
 		return fmt.Errorf("server: ADMP account repository is required")
+	case repos.ADMP == nil:
+		return fmt.Errorf("server: ADMP cache repository is required")
 	case repos.CIType == nil:
 		return fmt.Errorf("server: CI type repository is required")
 	case repos.RelationshipType == nil:

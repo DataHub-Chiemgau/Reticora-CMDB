@@ -205,6 +205,9 @@ func (s *AccountService) checkCredential(ctx context.Context, orgID string, a *A
 	if a.CredentialID == "" {
 		return nil
 	}
+	if s.creds == nil {
+		return fieldError("credential_id", "credentials are not available")
+	}
 	const message = "credential_id must name a credential of kind api_token of the account's client or org-wide"
 	if !api.IsUUID(a.CredentialID) {
 		return fieldError("credential_id", message)
@@ -292,6 +295,9 @@ func (s *AccountService) List(ctx context.Context, orgID string) ([]Account, err
 	}
 	s.missingCredential(ctx, orgID, list)
 	refs := map[string]*CredentialRef{}
+	if s.creds == nil {
+		return list, nil
+	}
 	if creds, cerr := s.creds.List(ctx, orgID); cerr == nil {
 		for i := range creds {
 			refs[creds[i].ID] = &CredentialRef{ID: creds[i].ID, Name: creds[i].Name, Source: creds[i].Source}
@@ -384,7 +390,7 @@ func (s *AccountService) AccountFor(ctx context.Context, orgID, clientID string)
 // caller sees it.
 func (s *AccountService) withCredential(ctx context.Context, orgID string, a *Account) *Account {
 	a.Credential = nil
-	if a.CredentialID == "" {
+	if a.CredentialID == "" || s.creds == nil {
 		return a
 	}
 	if cred, err := s.creds.Get(ctx, orgID, a.CredentialID); err == nil {

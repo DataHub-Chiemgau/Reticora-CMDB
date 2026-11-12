@@ -89,6 +89,9 @@ func MemoryRepositories() Repositories {
 	// API-01).
 	labelLookup := labels.NewMemoryRepository(assetLabels{repo: assets}, consumableLabels{repo: consumables},
 		locationLabels{repo: locationTree})
+	// The ADMP cache takes the client of an account from the account store
+	// (WP-928).
+	admpAccounts := admp.NewMemoryAccountRepository()
 	return Repositories{
 		CI: cis,
 		// Graph walks pass only through visible, not deleted CIs (IMP-07),
@@ -140,7 +143,8 @@ func MemoryRepositories() Repositories {
 		Ticket:            ticket.NewMemoryRepository(),
 		User:              users,
 		Credential:        credential.NewMemoryRepository(),
-		ADMPAccounts:      admp.NewMemoryAccountRepository(),
+		ADMPAccounts:      admpAccounts,
+		ADMP:              admp.NewMemoryRepository(admpAccounts),
 		Entitlement:       entitlement.NewMemoryRepository(),
 		TenantHierarchy:   tenantapi.NewMemoryRepository(),
 		Rack:              rack.NewMemoryRepository(),
@@ -203,6 +207,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		User:              user.NewPGRepository(pool),
 		Credential:        credential.NewPGRepository(pool),
 		ADMPAccounts:      admp.NewPGAccountRepository(pool),
+		ADMP:              admp.NewPGRepository(pool),
 		Entitlement:       entitlement.NewPGRepository(pool),
 		TenantHierarchy:   tenantapi.NewPGRepository(pool),
 		Rack:              rack.NewPGRepository(pool),

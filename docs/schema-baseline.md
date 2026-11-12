@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000296_admp_account
+Stand: Migration 000297_admp_cache
 
 ## Prüfung
 
@@ -1885,6 +1885,9 @@ SECURITY`), Policies mit ihrem Kommando.
 | Tabelle | RLS | FORCE RLS | Policies (Kommando) |
 |---|---|---|---|
 | `admp_account` | ja | ja | admp_account_isolation (ALL), admp_account_scoped_delete (DELETE), admp_account_scoped_update (UPDATE) |
+| `admp_connection` | ja | ja | admp_connection_isolation (ALL), admp_connection_scoped_delete (DELETE), admp_connection_scoped_update (UPDATE) |
+| `admp_service` | ja | ja | admp_service_isolation (ALL), admp_service_scoped_delete (DELETE), admp_service_scoped_update (UPDATE) |
+| `admp_service_port` | ja | ja | admp_service_port_isolation (ALL), admp_service_port_scoped_delete (DELETE), admp_service_port_scoped_update (UPDATE) |
 | `agent_enrollment_token` | ja | ja | agent_enrollment_token_isolation (ALL), agent_enrollment_token_scoped_delete (DELETE), agent_enrollment_token_scoped_update (UPDATE) |
 | `ai_chunk` | ja | ja | ai_chunk_scoped_delete (DELETE), ai_chunk_scoped_update (UPDATE), ai_chunk_tenant_isolation (ALL) |
 | `ai_conversation` | ja | ja | ai_conversation_tenant_isolation (ALL) |

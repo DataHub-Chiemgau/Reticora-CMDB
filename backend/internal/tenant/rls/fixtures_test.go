@@ -69,7 +69,13 @@ var matrixOverrides = map[string]map[string]string{
 	// One target column per target kind (credential_binding_target_check, WP-890).
 	"credential_binding": {"target_kind": "ci", "ci_id": "@uuid"},
 	// A stored credential carries its ciphertext (credential_source_ciphertext_check, WP-894).
-	"credential":           {"ciphertext": `\x00`},
+	"credential": {"ciphertext": `\x00`},
+	// A port is matched by rule, manually or not at all
+	// (admp_service_port_matched_by_check, WP-928); a connection has a
+	// private address surrogate or a business address, not both
+	// (admp_connection_address_check): the synthesized row has the text.
+	"admp_service_port":    {"matched_by": "none"},
+	"admp_connection":      {"address_text": "@text"},
 	"stock_movement":       {"asset_id": "@uuid"},
 	"disposal_record":      {"asset_id": "@uuid"},
 	"assignment":           {"asset_id": "@uuid"},
