@@ -9262,6 +9262,11 @@ paths:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
+        - name: section_id
+          in: query
+          description: Only the VRFs assigned to this IPAM section (IPM-07).
+          schema:
+            type: string
       responses:
         '200':
           description: Paginated list of VRFs
@@ -9277,7 +9282,12 @@ paths:
       operationId: createVRF
       tags: [IPAM]
       summary: Create a VRF (vrf:manage)
-      description: A VRF is org-wide; a principal restricted to some clients or sites gets 403 (TEN-05, E-09).
+      description: >-
+        A VRF is org-wide; a principal restricted to some clients or sites
+        gets 403 (TEN-05, E-09). A route distinguisher outside RFC 4364 is
+        422 with field route_distinguisher, one taken in the organization
+        409; invalid route target lists 422 import_targets or
+        export_targets; an unknown section 422 section_ids (IPM-07).
       requestBody:
         required: true
         content:
@@ -9299,6 +9309,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/vrfs/{id}:
     parameters:
@@ -9321,8 +9333,15 @@ paths:
     patch:
       operationId: updateVRF
       tags: [IPAM]
-      summary: Rename a VRF or change its description (vrf:manage)
-      description: A VRF is org-wide; for a principal restricted to some clients or sites it answers 404 (TEN-05, E-09).
+      summary: Change name, description, routing attributes or sections of a VRF (vrf:manage)
+      description: >-
+        A VRF is org-wide; for a principal restricted to some clients or
+        sites it answers 404 (TEN-05, E-09). section_ids replaces the IPAM
+        sections of the VRF (an unknown section is 422 section_ids). The
+        default VRF is the global routing table: a route distinguisher or
+        route targets on it are 422; its sections may change (IPM-07). A
+        route distinguisher taken in the organization is 409 with field
+        route_distinguisher.
       requestBody:
         required: true
         content:
@@ -9344,6 +9363,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
     delete:
       operationId: deleteVRF
       tags: [IPAM]
@@ -39930,19 +39951,39 @@ components:
 
     VRF:
       type: object
-      required: [id, organization_id, name, is_default, created_at, updated_at]
+      required: [id, organization_id, name, is_default, import_targets, export_targets, section_ids, created_at, updated_at]
       description: >-
         VRF of the organization (TEN-10, CH10). Every organization has exactly
         one default VRF "global", created with the organization; it cannot be
         deleted. Every principal of the organization reads the VRFs; only
         principals without client or site restriction create, change or
-        delete them (E-09).
+        delete them (E-09). Route distinguisher and route targets follow
+        RFC 4364 (IPM-07); the default VRF keeps them empty.
       properties:
         id: { type: string }
         organization_id: { type: string }
         name: { type: string }
         description: { type: string }
         is_default: { type: boolean, readOnly: true }
+        route_distinguisher:
+          type: string
+          description: >-
+            ASN16:nn32, IPv4:nn16 or ASN32:nn16 (ASN 1–4294967295), unique in
+            the organization; absent without one.
+        import_targets:
+          type: array
+          maxItems: 64
+          items: { type: string }
+          description: Route targets in the format of route_distinguisher, without duplicates.
+        export_targets:
+          type: array
+          maxItems: 64
+          items: { type: string }
+          description: Route targets in the format of route_distinguisher, without duplicates.
+        section_ids:
+          type: array
+          items: { type: string }
+          description: The IPAM sections of the VRF the caller sees.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 
@@ -39952,12 +39993,39 @@ components:
       properties:
         name: { type: string }
         description: { type: string }
+        route_distinguisher: { type: string }
+        import_targets:
+          type: array
+          maxItems: 64
+          items: { type: string }
+        export_targets:
+          type: array
+          maxItems: 64
+          items: { type: string }
+        section_ids:
+          type: array
+          items: { type: string }
 
     UpdateVRFRequest:
       type: object
       properties:
         name: { type: string }
         description: { type: string }
+        route_distinguisher: { type: string, description: An empty string clears it. }
+        import_targets:
+          type: array
+          maxItems: 64
+          items: { type: string }
+          description: Replaces the import targets.
+        export_targets:
+          type: array
+          maxItems: 64
+          items: { type: string }
+          description: Replaces the export targets.
+        section_ids:
+          type: array
+          items: { type: string }
+          description: Replaces the IPAM sections of the VRF.
 
     VRFListResponse:
       allOf:
@@ -40035,7 +40103,7 @@ components:
 
     IPAMSection:
       type: object
-      required: [id, organization_id, name, strict_mode, show_vlan, show_vrf, is_default, created_at, updated_at]
+      required: [id, organization_id, name, strict_mode, show_vlan, show_vrf, is_default, vrf_ids, created_at, updated_at]
       description: >-
         IPAM section (IPM-01, E-209): groups the subnets of the organization
         with settings of its own. Every organization has exactly one org-wide
@@ -40057,6 +40125,11 @@ components:
         show_vlan: { type: boolean }
         show_vrf: { type: boolean }
         is_default: { type: boolean, readOnly: true }
+        vrf_ids:
+          type: array
+          readOnly: true
+          items: { type: string }
+          description: The VRFs assigned to the section (IPM-07; set by PATCH /vrfs/{id} with section_ids).
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
 

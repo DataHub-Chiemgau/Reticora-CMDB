@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -26,17 +27,20 @@ import (
 // the org-wide ones and writes only sections of its clients (E-09).
 // strict_mode is stored here; the overlap check follows with WP-901.
 type Section struct {
-	ID             string    `json:"id"`
-	OrganizationID string    `json:"organization_id"`
-	ClientID       string    `json:"client_id,omitempty"`
-	Name           string    `json:"name"`
-	Description    string    `json:"description,omitempty"`
-	StrictMode     bool      `json:"strict_mode"`
-	ShowVLAN       bool      `json:"show_vlan"`
-	ShowVRF        bool      `json:"show_vrf"`
-	IsDefault      bool      `json:"is_default"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	ClientID       string `json:"client_id,omitempty"`
+	Name           string `json:"name"`
+	Description    string `json:"description,omitempty"`
+	StrictMode     bool   `json:"strict_mode"`
+	ShowVLAN       bool   `json:"show_vlan"`
+	ShowVRF        bool   `json:"show_vrf"`
+	IsDefault      bool   `json:"is_default"`
+	// VRFIDs are the VRFs assigned to the section (IPM-07, read-only here;
+	// PATCH /vrfs/{id} with section_ids sets them).
+	VRFIDs    []string  `json:"vrf_ids"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // CreateSectionRequest is the payload of POST /api/v1/ipam-sections.
@@ -163,13 +167,19 @@ func checkSubnetSection(ctx context.Context, tx pgx.Tx, orgID, id string, req *U
 // --- PostgreSQL ---
 
 const sectionCols = `id::text, organization_id::text, COALESCE(client_id::text, ''), name, COALESCE(description, ''),
-	strict_mode, show_vlan, show_vrf, is_default, created_at, updated_at`
+	strict_mode, show_vlan, show_vrf, is_default,
+	ARRAY(SELECT vs.vrf_id::text FROM vrf_section vs
+		WHERE vs.section_id = ipam_section.id AND vs.organization_id = ipam_section.organization_id ORDER BY vs.vrf_id),
+	created_at, updated_at`
 
 func scanSection(s scanner) (*Section, error) {
 	sec := &Section{}
 	if err := s.Scan(&sec.ID, &sec.OrganizationID, &sec.ClientID, &sec.Name, &sec.Description, &sec.StrictMode,
-		&sec.ShowVLAN, &sec.ShowVRF, &sec.IsDefault, &sec.CreatedAt, &sec.UpdatedAt); err != nil {
+		&sec.ShowVLAN, &sec.ShowVRF, &sec.IsDefault, &sec.VRFIDs, &sec.CreatedAt, &sec.UpdatedAt); err != nil {
 		return nil, err
+	}
+	if sec.VRFIDs == nil {
+		sec.VRFIDs = []string{}
 	}
 	sec.CreatedAt, sec.UpdatedAt = sec.CreatedAt.UTC(), sec.UpdatedAt.UTC()
 	return sec, nil
@@ -320,7 +330,9 @@ func (r *MemoryRepository) ListSections(_ context.Context, orgID string, page ap
 	var out []Section
 	for _, s := range r.sections {
 		if s.OrganizationID == orgID {
-			out = append(out, *s)
+			cp := *s
+			cp.VRFIDs = r.vrfIDsOfSection(s.ID)
+			out = append(out, cp)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -343,6 +355,7 @@ func (r *MemoryRepository) GetSection(_ context.Context, orgID, id string) (*Sec
 		return nil, ErrNotFound
 	}
 	cp := *s
+	cp.VRFIDs = r.vrfIDsOfSection(id)
 	return &cp, nil
 }
 
@@ -357,6 +370,7 @@ func (r *MemoryRepository) CreateSection(_ context.Context, s *Section) error {
 	r.seq++
 	now := time.Now().UTC()
 	s.ID, s.IsDefault, s.CreatedAt, s.UpdatedAt = fmt.Sprintf("section-%d", r.seq), false, now, now
+	s.VRFIDs = []string{}
 	stored := *s
 	r.sections[s.ID] = &stored
 	return nil
@@ -390,6 +404,7 @@ func (r *MemoryRepository) UpdateSection(_ context.Context, orgID, id string, re
 	}
 	s.UpdatedAt = time.Now().UTC()
 	cp := *s
+	cp.VRFIDs = r.vrfIDsOfSection(id)
 	return &cp, nil
 }
 
@@ -410,6 +425,10 @@ func (r *MemoryRepository) DeleteSection(_ context.Context, orgID, id string) er
 		}
 	}
 	delete(r.sections, id)
+	// The assignments of the VRFs go with the section (vrf_section cascade).
+	for _, v := range r.vrfs {
+		v.SectionIDs = slices.DeleteFunc(v.SectionIDs, func(s string) bool { return s == id })
+	}
 	return nil
 }
 

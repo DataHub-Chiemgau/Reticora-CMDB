@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000305_vlan_domain
+Stand: Migration 000306_vrf_attributes
 
 ## Prüfung
 
@@ -2057,6 +2057,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `vlan_domain` | ja | ja | vlan_domain_isolation (ALL), vlan_domain_scoped_delete (DELETE), vlan_domain_scoped_insert (INSERT), vlan_domain_scoped_update (UPDATE) |
 | `vlan_domain_site` | ja | ja | vlan_domain_site_isolation (ALL) |
 | `vrf` | ja | ja | vrf_isolation (ALL), vrf_scoped_delete (DELETE), vrf_scoped_insert (INSERT), vrf_scoped_update (UPDATE) |
+| `vrf_section` | ja | ja | vrf_section_isolation (ALL), vrf_section_scoped_delete (DELETE), vrf_section_scoped_insert (INSERT), vrf_section_scoped_update (UPDATE) |
 | `webhook_dead_letter` | ja | ja | webhook_dead_letter_isolation (ALL), webhook_dead_letter_system_select (SELECT) |
 | `webhook_delivery` | ja | ja | webhook_delivery_isolation (ALL), webhook_delivery_system_select (SELECT) |
 | `webhook_subscription` | ja | ja | webhook_sub_isolation (ALL), webhook_sub_scope_select (SELECT) |

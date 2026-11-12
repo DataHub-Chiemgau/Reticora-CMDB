@@ -94,7 +94,7 @@ type Repository interface {
 	UpdateVLAN(ctx context.Context, orgID, id string, req UpdateVLANRequest) (*VLAN, error)
 	DeleteVLAN(ctx context.Context, orgID, id string) error
 
-	ListVRFs(ctx context.Context, orgID string, page api.PaginationParams) ([]VRF, int, error)
+	ListVRFs(ctx context.Context, orgID string, f VRFFilter, page api.PaginationParams) ([]VRF, int, error)
 	GetVRF(ctx context.Context, orgID, id string) (*VRF, error)
 	CreateVRF(ctx context.Context, v *VRF) error
 	UpdateVRF(ctx context.Context, orgID, id string, req UpdateVRFRequest) (*VRF, error)

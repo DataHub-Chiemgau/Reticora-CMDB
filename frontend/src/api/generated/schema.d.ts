@@ -3993,7 +3993,7 @@ export interface paths {
     put?: never;
     /**
      * Create a VRF (vrf:manage)
-     * @description A VRF is org-wide; a principal restricted to some clients or sites gets 403 (TEN-05, E-09).
+     * @description A VRF is org-wide; a principal restricted to some clients or sites gets 403 (TEN-05, E-09). A route distinguisher outside RFC 4364 is 422 with field route_distinguisher, one taken in the organization 409; invalid route target lists 422 import_targets or export_targets; an unknown section 422 section_ids (IPM-07).
      */
     post: operations['createVRF'];
     delete?: never;
@@ -4024,8 +4024,8 @@ export interface paths {
     options?: never;
     head?: never;
     /**
-     * Rename a VRF or change its description (vrf:manage)
-     * @description A VRF is org-wide; for a principal restricted to some clients or sites it answers 404 (TEN-05, E-09).
+     * Change name, description, routing attributes or sections of a VRF (vrf:manage)
+     * @description A VRF is org-wide; for a principal restricted to some clients or sites it answers 404 (TEN-05, E-09). section_ids replaces the IPAM sections of the VRF (an unknown section is 422 section_ids). The default VRF is the global routing table: a route distinguisher or route targets on it are 422; its sections may change (IPM-07). A route distinguisher taken in the organization is 409 with field route_distinguisher.
      */
     patch: operations['updateVRF'];
     trace?: never;
@@ -19627,13 +19627,21 @@ export interface components {
       /** @description Makes the subnet a container; a subnet with addresses cannot become one (409 is_pool). */
       is_pool?: boolean;
     };
-    /** @description VRF of the organization (TEN-10, CH10). Every organization has exactly one default VRF "global", created with the organization; it cannot be deleted. Every principal of the organization reads the VRFs; only principals without client or site restriction create, change or delete them (E-09). */
+    /** @description VRF of the organization (TEN-10, CH10). Every organization has exactly one default VRF "global", created with the organization; it cannot be deleted. Every principal of the organization reads the VRFs; only principals without client or site restriction create, change or delete them (E-09). Route distinguisher and route targets follow RFC 4364 (IPM-07); the default VRF keeps them empty. */
     VRF: {
       id: string;
       organization_id: string;
       name: string;
       description?: string;
       readonly is_default: boolean;
+      /** @description ASN16:nn32, IPv4:nn16 or ASN32:nn16 (ASN 1–4294967295), unique in the organization; absent without one. */
+      route_distinguisher?: string;
+      /** @description Route targets in the format of route_distinguisher, without duplicates. */
+      import_targets: string[];
+      /** @description Route targets in the format of route_distinguisher, without duplicates. */
+      export_targets: string[];
+      /** @description The IPAM sections of the VRF the caller sees. */
+      section_ids: string[];
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -19642,10 +19650,22 @@ export interface components {
     CreateVRFRequest: {
       name: string;
       description?: string;
+      route_distinguisher?: string;
+      import_targets?: string[];
+      export_targets?: string[];
+      section_ids?: string[];
     };
     UpdateVRFRequest: {
       name?: string;
       description?: string;
+      /** @description An empty string clears it. */
+      route_distinguisher?: string;
+      /** @description Replaces the import targets. */
+      import_targets?: string[];
+      /** @description Replaces the export targets. */
+      export_targets?: string[];
+      /** @description Replaces the IPAM sections of the VRF. */
+      section_ids?: string[];
     };
     VRFListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['VRF'][];
@@ -19699,6 +19719,8 @@ export interface components {
       show_vlan: boolean;
       show_vrf: boolean;
       readonly is_default: boolean;
+      /** @description The VRFs assigned to the section (IPM-07; set by PATCH /vrfs/{id} with section_ids). */
+      readonly vrf_ids: string[];
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -30646,6 +30668,8 @@ export interface operations {
          *     supplied.
          */
         offset?: components['parameters']['Offset'];
+        /** @description Only the VRFs assigned to this IPAM section (IPM-07). */
+        section_id?: string;
       };
       header?: never;
       path?: never;
@@ -30692,6 +30716,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   getVRF: {
@@ -30780,6 +30805,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   listVLANs: {
