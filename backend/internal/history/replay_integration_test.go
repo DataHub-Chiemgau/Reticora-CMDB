@@ -188,8 +188,17 @@ func TestCIAsOfAgainstPostgres(t *testing.T) {
 	hfrExec(t, f, `UPDATE ci_relationship SET created_at = now() - interval '60 days', last_seen_at = now() - interval '60 days',
 		last_confirmed_at = now() - interval '60 days' WHERE id = $1`, stale)
 	t0 := clock()
-	// The weekly snapshot, taken now.
-	if _, err = history.NewWeeklySnapshot(f.App).WithClock(func() time.Time { return time.Now().Add(time.Hour) }).RunOrg(bg, f.OrgA); err != nil {
+	// The weekly snapshot, taken now: the run starts an hour ahead of the
+	// database clock (not the clock of the process, which may lag behind
+	// it), so its cut-off lies after t0.
+	dbAhead := func() time.Time {
+		var now time.Time
+		if qerr := f.Admin.QueryRow(bg, `SELECT clock_timestamp()`).Scan(&now); qerr != nil {
+			t.Fatal(qerr)
+		}
+		return now.Add(time.Hour)
+	}
+	if _, err = history.NewWeeklySnapshot(f.App).WithClock(dbAhead).RunOrg(bg, f.OrgA); err != nil {
 		t.Fatalf("weekly snapshot: %v", err)
 	}
 	var takenAt time.Time

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -174,7 +175,17 @@ func TestStateSnapshotContentAgainstPostgres(t *testing.T) {
 
 	// The job result keeps the surrogate (WP-793): job.result holds no
 	// personal value; the direct read reveals it.
-	now := fields(snapshotJob("ci", created.ID, nil))
+	nowJob := snapshotJob("ci", created.ID, nil)
+	now := fields(nowJob)
+	// Without at the request fixes the database time as at of the job (the
+	// parameters keep at, so an older worker and a retry read the same
+	// state): not before the rename, which committed before the request.
+	var nowParams history.SnapshotRequest
+	if perr := json.Unmarshal(nowJob.Params, &nowParams); perr != nil || nowParams.At == nil || nowParams.At.Before(renamedAt) ||
+		!now.At.Equal(*nowParams.At) {
+		t.Errorf("snapshot job without at: params %s (%v), state at %s, want at of the request after the rename %s",
+			nowJob.Params, perr, now.At, renamedAt)
+	}
 	jobAttrs, _ := now.Fields["attributes"].(map[string]any)
 	if _, sealedRef := pii.RefID(jobAttrs["contact_email"]); now.EntityID != created.ID || now.Fields["name"] != "snap-ci-renamed" || now.Deleted || !sealedRef {
 		t.Errorf("CI snapshot now: %+v, want the new name and contact_email as surrogate", now)
@@ -190,8 +201,14 @@ func TestStateSnapshotContentAgainstPostgres(t *testing.T) {
 	if code, s := state(orgCtx, "/api/v1/cis/"+created.ID+"/state", &mid); code != http.StatusOK || s.Fields["name"] != "snap-ci" {
 		t.Errorf("GET /cis/{id}/state between creation and rename: %d %+v, want the old name", code, s)
 	}
-	if code, s := state(orgCtx, "/api/v1/cis/"+created.ID+"/state", nil); code != http.StatusOK || s.Fields["name"] != "snap-ci-renamed" {
-		t.Errorf("GET /cis/{id}/state: %d %+v, want the new name", code, s)
+	code, current := state(orgCtx, "/api/v1/cis/"+created.ID+"/state", nil)
+	if code != http.StatusOK || current.Fields["name"] != "snap-ci-renamed" || current.At.Before(renamedAt) {
+		t.Errorf("GET /cis/{id}/state: %d %+v, want the new name at the database time after the rename", code, current)
+	}
+	// The at of a state without at reproduces it.
+	if code, again := state(orgCtx, "/api/v1/cis/"+created.ID+"/state", &current.At); code != http.StatusOK ||
+		!again.At.Equal(current.At) || !reflect.DeepEqual(again.Fields, current.Fields) {
+		t.Errorf("GET /cis/{id}/state?at=%s: %d %+v, want the state without at %+v", current.At.Format(time.RFC3339Nano), code, again, current)
 	}
 	// The same unsealed value as the history of the CI.
 	var hist history.ListResponse
@@ -375,6 +392,9 @@ func TestCISnapshotReplayAgainstPostgres(t *testing.T) {
 		}
 		return item
 	}
+	// now is the current state: the whole trail (zero, TrailUpTo), not the
+	// clock of the process, which may lag behind the database.
+	var now time.Time
 	replay := func(id string, at time.Time) (history.StateSnapshot, []history.Change) {
 		t.Helper()
 		trail, terr := hist.TrailUpTo(ctx, f.OrgA, "ci", id, at)
@@ -438,7 +458,7 @@ func TestCISnapshotReplayAgainstPostgres(t *testing.T) {
 	}
 
 	// Snapshot plus replay: the live state before and after a change.
-	s, trail := replay(weekly.ID, time.Now())
+	s, trail := replay(weekly.ID, now)
 	attrs, _ := s.Fields["attributes"].(map[string]any)
 	if len(trail) == 0 || trail[0].Source != history.SourceCISnapshot || s.Fields["name"] != live(weekly.ID).Name || s.Deleted ||
 		attrs["contact_email"] != "snap-weekly@example.invalid" {
@@ -448,7 +468,7 @@ func TestCISnapshotReplayAgainstPostgres(t *testing.T) {
 	if _, err = svc.Update(ctx, f.OrgA, weekly.ID, ci.UpdateRequest{Name: &renamed, Manual: manual}); err != nil {
 		t.Fatal(err)
 	}
-	if s, trail = replay(weekly.ID, time.Now()); trail[0].Source != history.SourceCISnapshot || s.Fields["name"] != renamed ||
+	if s, trail = replay(weekly.ID, now); trail[0].Source != history.SourceCISnapshot || s.Fields["name"] != renamed ||
 		s.Fields["name"] != live(weekly.ID).Name {
 		t.Errorf("replay from the weekly snapshot after a rename: %+v, want the live name %s", s, renamed)
 	}
@@ -507,14 +527,14 @@ func TestCISnapshotReplayAgainstPostgres(t *testing.T) {
 	if a, _ := s.Fields["attributes"].(map[string]any); a["v_only"] != nil {
 		t.Errorf("survivor before the merge carries the victim's attribute: %v", a)
 	}
-	s, _ = replay(survivor.ID, time.Now())
+	s, _ = replay(survivor.ID, now)
 	checkState("survivor now", s, "snap-survivor", "m-victim", "v_only", false, "")
 	if l := live(survivor.ID); s.Fields["model"] != l.Model || s.Fields["name"] != l.Name {
 		t.Errorf("survivor now: %+v, live %+v", s.Fields, l)
 	}
 	s, _ = replay(victim.ID, beforeMerge)
 	checkState("victim before the merge", s, "snap-victim", "m-victim", "v_only", false, "")
-	s, _ = replay(victim.ID, time.Now())
+	s, _ = replay(victim.ID, now)
 	checkState("victim after the merge", s, "snap-victim", "m-victim", "v_only", true, survivor.ID)
 
 	// Unmerge: origin_ci_id back, a snapshot of both.
@@ -532,7 +552,7 @@ func TestCISnapshotReplayAgainstPostgres(t *testing.T) {
 		if n := count(`SELECT count(*) FROM ci_snapshot WHERE reason = 'unmerge' AND ci_id IN ($1, $2)`, survivor.ID, victim.ID); n != want {
 			t.Errorf("%s: %d unmerge snapshots, want %d", label, n, want)
 		}
-		vs, _ := replay(victim.ID, time.Now())
+		vs, _ := replay(victim.ID, now)
 		checkState(label+", victim", vs, "snap-victim", "m-victim", "v_only", false, "")
 		// The row as the unmerge wrote it back (GET overlays the field
 		// overrides of the survivor on it).
@@ -540,7 +560,7 @@ func TestCISnapshotReplayAgainstPostgres(t *testing.T) {
 		if qerr := f.Admin.QueryRow(bg, `SELECT name FROM ci WHERE id = $1`, survivor.ID).Scan(&name); qerr != nil {
 			t.Fatal(qerr)
 		}
-		if ss, _ := replay(survivor.ID, time.Now()); ss.Fields["name"] != name || name != "snap-survivor" || ss.Deleted || ss.Fields["model"] != nil {
+		if ss, _ := replay(survivor.ID, now); ss.Fields["name"] != name || name != "snap-survivor" || ss.Deleted || ss.Fields["model"] != nil {
 			t.Errorf("%s, survivor: %+v, want the row name %s without model", label, ss, name)
 		}
 	}
