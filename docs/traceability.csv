@@ -1714,3 +1714,5 @@ PRT-01;[P3];E;collector/probe/executor_test.go;WP-950
 PRT-22;[P3];E;backend/internal/credential/credential_test.go;WP-967
 COL-02;[B];E;collector/collectorcmd/discovery_credentials_test.go;WP-967
 PRT-21;[P3];E;collector/internal/fakesnmp/walk_test.go;WP-992
+PRT-13;[P3];E;collector/internal/dhcpv4/message_test.go;WP-1011
+PRT-21;[P3];E;collector/internal/fakedhcp/fakedhcp_test.go;WP-1011
