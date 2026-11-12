@@ -170,7 +170,7 @@ feed:
 			if err != nil {
 				return
 			}
-			defer conn.Close()
+			defer func() { _ = conn.Close() }()
 
 			// Send an SNMP v2c GET request for sysObjectID
 			pkt := buildSNMPv2cGet(community, oidSysObjectID)
@@ -245,7 +245,7 @@ func (p *Plugin) collect(ctx context.Context, target string, creds map[string]st
 	if err := g.Connect(); err != nil {
 		return nil, nil, fmt.Errorf("snmp: dial %s: %w", target, err)
 	}
-	defer g.Conn.Close()
+	defer func() { _ = g.Conn.Close() }()
 	if result, err := p.collectSession(g, target, "v2c"); err == nil {
 		return result, walkNeighbors(g, target, result.Interfaces), nil
 	}

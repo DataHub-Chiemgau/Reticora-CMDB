@@ -2,8 +2,6 @@ package snmp
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -113,9 +111,6 @@ const (
 	MetricIfOperState = "if_oper_status"
 )
 
-// errWalkLimit ends a column walk at its row limit.
-var errWalkLimit = errors.New("snmp: walk limit reached")
-
 // PollInterfaces walks the interface counters of target: per interface
 // (at most MaxPollInterfaces, the first by ifIndex) if_in_octets and
 // if_out_octets (ifHCInOctets/ifHCOutOctets, without ifXTable the 32-bit
@@ -126,7 +121,7 @@ var errWalkLimit = errors.New("snmp: walk limit reached")
 func (p *Plugin) PollInterfaces(ctx context.Context, target string, creds map[string]string) ([]plugins.MetricSample, error) {
 	var samples []plugins.MetricSample
 	err := p.request(ctx, target, creds, func(g *gosnmp.GoSNMP) error {
-		samples = nil // v3Request may run this twice (time window resync).
+		samples = nil // the session may run this twice (time window resync).
 		g.MaxRepetitions = pollRepetitions
 		status, err := walkTable(g, oidIfOperSt, MaxPollInterfaces, 0)
 		if err != nil || len(status.order) == 0 {
@@ -162,26 +157,26 @@ func (p *Plugin) PollInterfaces(ctx context.Context, target string, creds map[st
 	return samples, err
 }
 
-// request runs do on a session to target: SNMPv3 authPriv when creds
-// carry a v3 account, otherwise v2c with the community.
+// request runs do on a session to target (Session, WP-993): SNMPv3
+// authPriv when creds carry a v3 account, otherwise v2c with the
+// community, with the plugin's port and timeout; SNMPv3 retries p.Retries
+// times, SNMPv2c not at all (as before the probe sessions).
 func (p *Plugin) request(ctx context.Context, target string, creds map[string]string, do func(g *gosnmp.GoSNMP) error) error {
-	v3, useV3, err := v3FromCreds(creds)
+	s, err := openSession(ctx, target, creds, p.sessionOptions(creds))
 	if err != nil {
 		return err
 	}
-	if useV3 {
-		return p.v3Request(ctx, target, v3, do)
+	defer func() { _ = s.Close() }()
+	return s.run(do)
+}
+
+// sessionOptions are the session parameters of the plugin's own requests.
+func (p *Plugin) sessionOptions(creds map[string]string) Options {
+	retries := 0
+	if _, useV3, _ := v3FromCreds(creds); useV3 {
+		retries = p.Retries
 	}
-	community := creds["community"]
-	if community == "" {
-		community = "public"
-	}
-	g := p.v2cSession(ctx, target, community)
-	if err := g.Connect(); err != nil {
-		return fmt.Errorf("snmp: dial %s: %w", target, err)
-	}
-	defer g.Conn.Close()
-	return do(g)
+	return Options{Port: p.port(), Timeout: p.timeout(), Retries: &retries, MaxRepetitions: defaultMaxRepetitions}
 }
 
 // table is a walked column by ifIndex, in walk order.
@@ -211,17 +206,9 @@ func (t table) text(idx int) string {
 // the walk, the rows read so far stay.
 func walkTable(g *gosnmp.GoSNMP, column string, limit, last int) (table, error) {
 	t := table{values: map[int]gosnmp.SnmpPDU{}}
-	walk := g.BulkWalk
-	if g.Version == gosnmp.Version1 {
-		walk = g.Walk
-	}
-	err := walk(column, func(v gosnmp.SnmpPDU) error {
-		rest, ok := strings.CutPrefix(strings.TrimPrefix(v.Name, "."), column+".")
-		if !ok {
-			return nil
-		}
-		idx, err := strconv.Atoi(rest)
-		if err != nil {
+	err := walkColumn(g, column, func(index []uint32, v gosnmp.SnmpPDU) error {
+		idx, rest, err := IndexInt(index)
+		if err != nil || len(rest) != 0 {
 			return nil
 		}
 		if last > 0 && idx > last {
@@ -236,8 +223,5 @@ func walkTable(g *gosnmp.GoSNMP, column string, limit, last int) (table, error) 
 		}
 		return nil
 	})
-	if errors.Is(err, errWalkLimit) {
-		err = nil
-	}
 	return t, err
 }

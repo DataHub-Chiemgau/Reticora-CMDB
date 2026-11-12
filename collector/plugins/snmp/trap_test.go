@@ -102,7 +102,7 @@ func TestTrapReceiverEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	if _, err := conn.Write(buildV2Trap("public", "1.3.6.1.6.3.1.1.5.3", "1.3.6.1.2.1.1.3.0", "12345")); err != nil {
 		t.Fatalf("write: %v", err)

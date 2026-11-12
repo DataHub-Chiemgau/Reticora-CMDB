@@ -82,7 +82,7 @@ func startSNMPFake(t *testing.T, value string) {
 	if err != nil {
 		t.Skipf("cannot bind udp 127.0.0.1:161: %v", err)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 
 	go func() {
 		buf := make([]byte, 4096)
@@ -98,7 +98,7 @@ func startSNMPFake(t *testing.T, value string) {
 			resp = append(resp, buf[:n]...) // echo the request (contains "public")
 			resp = append(resp, 0x04, byte(len(value)))
 			resp = append(resp, value...)
-			conn.WriteToUDP(resp, addr)
+			_, _ = conn.WriteToUDP(resp, addr)
 		}
 	}()
 }
@@ -327,8 +327,8 @@ func oidLess(a, b string) bool {
 	pa, pb := strings.Split(strings.TrimPrefix(a, "."), "."), strings.Split(strings.TrimPrefix(b, "."), ".")
 	for i := 0; i < len(pa) && i < len(pb); i++ {
 		var x, y int
-		fmt.Sscan(pa[i], &x)
-		fmt.Sscan(pb[i], &y)
+		_, _ = fmt.Sscan(pa[i], &x)
+		_, _ = fmt.Sscan(pb[i], &y)
 		if x != y {
 			return x < y
 		}

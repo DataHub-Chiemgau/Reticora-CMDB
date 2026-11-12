@@ -49,7 +49,7 @@ func startV3Agent(t *testing.T, user, authPass, privPass string, mib []gosnmp.Sn
 	if err = a.params.InitSecurityKeys(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 	go a.serve()
 	return a
 }
@@ -180,7 +180,7 @@ func startRFC3414Agent(t *testing.T, report string, stale int32) *rfc3414Agent {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 	a := &rfc3414Agent{port: conn.LocalAddr().(*net.UDPAddr).Port}
 	a.stale.Store(stale)
 	reportTo := func(req *gosnmp.SnmpPacket, flags gosnmp.SnmpV3MsgFlags, counter string) []byte {

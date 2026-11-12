@@ -1756,3 +1756,5 @@ PRT-21;[P3];E;collector/probe/dns_test.go;WP-1010
 PRB-05;[P3];E;backend/internal/probe/edge_test.go;WP-959
 PRB-07;[P3];E;backend/internal/probe/edge_test.go;WP-959
 NFR-11;[P3];E;backend/internal/probe/edge_test.go;WP-959
+PRT-07;[P3];E;collector/plugins/snmp/table_test.go;WP-993
+PRT-11;[P3];E;collector/plugins/snmp/table_test.go;WP-993
