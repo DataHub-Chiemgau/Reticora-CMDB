@@ -9628,13 +9628,13 @@ export interface paths {
     };
     /**
      * List probes
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Planned (WP-938, E-160); implemented by WP-939. The probes in the caller's client and site scope (PRB-01), ordered by id; filters ci_id, type (a key of api/probe-types.json), collector_group_id, client_id and enabled; total counts the matching probes. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['listProbes'];
     put?: never;
     /**
      * Create a probe
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Planned (WP-938, E-160); implemented by WP-939. The type must be a key of api/probe-types.json with status available (planned → 422 type). params holds the overrides of the level probe; interval, timeout, counts, thresholds and type parameters are checked against the type limits on the effective values (probewire.Validate, timeout_s below interval_s), every violation 422 with field and the list in violations. Unknown or invisible ci_id, parent_probe_id and collector_group_id are 422 alike; a parent chain deeper than 8 levels is 422 parent_probe_id, a cycle 409. Without collector_group_id the only collector group of the probe's client is taken (none or several: 422 collector_group_id). Quota and probe budget (max_monitored_targets, max_probes_per_minute, max_targets_<type>) are 403 entitlement-limit (WP-940). Requires monitoring:write; the feature and module monitoring gate the path.
      */
     post: operations['createProbe'];
     delete?: never;
@@ -9655,21 +9655,21 @@ export interface paths {
     };
     /**
      * Get a probe
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Planned (WP-938, E-160); implemented by WP-939. A probe of another organization or outside the caller's client and site scope is 404. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['getProbe'];
     put?: never;
     post?: never;
     /**
      * Delete a probe
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Planned (WP-938, E-160); implemented by WP-939. Deletes the probe with its state, history and assignment; child probes lose their parent. Requires monitoring:write; the feature and module monitoring gate the path.
      */
     delete: operations['deleteProbe'];
     options?: never;
     head?: never;
     /**
      * Update a probe
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Planned (WP-938, E-160); implemented by WP-939. Changes target, params, enabled, parent_probe_id and collector_group_id with the checks of the creation; the type is fixed. Requires monitoring:write; the feature and module monitoring gate the path.
      */
     patch: operations['updateProbe'];
     trace?: never;
@@ -9686,7 +9686,7 @@ export interface paths {
     };
     /**
      * Get the effective settings of a probe
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Planned (WP-938, E-160); implemented by WP-946. The effective values of the probe (PRB-01, WP-937): every field with value, origin (default, org, client, group, ci, probe), clamped (a stored value moved to the current type limits) and, for origin group, the deciding monitoring group. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['getProbeEffectiveSettings'];
     put?: never;
@@ -9708,8 +9708,8 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Get the current state of a probe
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * Get the state of a probe
+     * @description Planned (WP-938, E-160); implemented by WP-975. The current state from probe_state (PRB-05); without a row state unknown with reason no_result. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['getProbeState'];
     put?: never;
@@ -9732,7 +9732,7 @@ export interface paths {
     };
     /**
      * List the results of a probe
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Planned (WP-938, E-160); implemented by WP-975. The results between from and to at most 400 days apart (else 422). Without step the server picks the finest tier of raw, 5m, 1h and 1d with at most 2,000 points whose retention covers from; step forces a tier (outside its retention or above 2,000 points: 422 step). Not a list: one series with its tier. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['listProbeResults'];
     put?: never;
@@ -9755,7 +9755,7 @@ export interface paths {
     };
     /**
      * List the state changes of a probe
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Planned (WP-938, E-160); implemented by WP-975. The state changes (PRB-05, PRB-07) between from and to, newest observed_at first, cursor-paginated. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['listProbeStateChanges'];
     put?: never;
@@ -9778,7 +9778,7 @@ export interface paths {
     };
     /**
      * Get the availability of a probe
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Planned (WP-938, E-160); implemented by WP-973. The time per state and the availability per day or month from the state intervals (E-181: percent = (up_s + degraded_s) / (sum - unknown_s - collector_unreachable_s - maintenance_s), null without measured time). from more than 400 days back is 422. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['getProbeAvailability'];
     put?: never;
@@ -9797,8 +9797,8 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * List the probe types of the registry
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * List probe types
+     * @description Planned (WP-938, E-160); implemented by WP-939. The probe type register (api/probe-types.json, WP-934): key, status, defaults, limits and the parameter schema of every type, in register order. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['listProbeTypes'];
     put?: never;
@@ -9814,13 +9814,14 @@ export interface paths {
       query?: never;
       header?: never;
       path: {
+        /** @description Key of the probe type (api/probe-types.json). */
         key: string;
       };
       cookie?: never;
     };
     /**
-     * Get a probe type of the registry
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * Get a probe type
+     * @description Planned (WP-938, E-160); implemented by WP-939. One entry of the probe type register; an unknown key is 404. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['getProbeType'];
     put?: never;
@@ -9840,13 +9841,13 @@ export interface paths {
     };
     /**
      * List monitoring profiles
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Planned (WP-938, E-160); implemented by WP-946. The overrides per level (org, client, group, ci) and probe type in the caller's scope; filters level, level_id and probe_type. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['listMonitoringProfiles'];
     put?: never;
     /**
      * Create a monitoring profile
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Planned (WP-938, E-160); implemented by WP-946. Values outside the type limits, timeout not below interval and an unknown or planned type are 422 with field (and the list in violations); an interval below min_probe_interval_s of the plan is 422 interval_s. One profile per level, level_id and probe type (409). A level_id outside the organization or the caller's scope is 404. An increase of the probe budget is 403 entitlement-limit. Requires monitoring:write; the feature and module monitoring gate the path.
      */
     post: operations['createMonitoringProfile'];
     delete?: never;
@@ -9867,21 +9868,21 @@ export interface paths {
     };
     /**
      * Get a monitoring profile
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Planned (WP-938, E-160); implemented by WP-946. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['getMonitoringProfile'];
     put?: never;
     post?: never;
     /**
      * Delete a monitoring profile
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Planned (WP-938, E-160); implemented by WP-946. Requires monitoring:write; the feature and module monitoring gate the path.
      */
     delete: operations['deleteMonitoringProfile'];
     options?: never;
     head?: never;
     /**
      * Update a monitoring profile
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Planned (WP-938, E-160); implemented by WP-946. Replaces the params with the checks of the creation. Requires monitoring:write; the feature and module monitoring gate the path.
      */
     patch: operations['updateMonitoringProfile'];
     trace?: never;
@@ -9895,13 +9896,13 @@ export interface paths {
     };
     /**
      * List monitoring groups
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Planned (WP-938, E-160); implemented by WP-946. The monitoring groups (device groups of PRB-01 and CRD-04, E-178) in the caller's scope: its clients' groups and the org-wide ones. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['listMonitoringGroups'];
     put?: never;
     /**
      * Create a monitoring group
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Planned (WP-938, E-160); implemented by WP-946. A group of a client takes only CIs of that client; without client_id it is org-wide. The name is unique per organization (409). Requires monitoring:write; the feature and module monitoring gate the path.
      */
     post: operations['createMonitoringGroup'];
     delete?: never;
@@ -9922,23 +9923,74 @@ export interface paths {
     };
     /**
      * Get a monitoring group
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Planned (WP-938, E-160); implemented by WP-946. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['getMonitoringGroup'];
     put?: never;
     post?: never;
     /**
      * Delete a monitoring group
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Planned (WP-938, E-160); implemented by WP-946. Deletes the group with its memberships and profiles; the answer names the number of deleted profiles. Requires monitoring:write; the feature and module monitoring gate the path.
      */
     delete: operations['deleteMonitoringGroup'];
     options?: never;
     head?: never;
     /**
      * Update a monitoring group
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Planned (WP-938, E-160); implemented by WP-946. Changes name and priority; of several groups of a CI the higher priority wins per field, on a tie the smaller name. A change of priority or name that raises the probe budget of the member probes is 403 entitlement-limit (WP-940), without partial change. Requires monitoring:write; the feature and module monitoring gate the path.
      */
     patch: operations['updateMonitoringGroup'];
+    trace?: never;
+  };
+  '/api/v1/monitoring/groups/{id}/members': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * List the members of a monitoring group
+     * @description Planned (WP-938, E-160); implemented by WP-946. The member CIs in the caller's scope. Requires monitoring:read; the feature and module monitoring gate the path.
+     */
+    get: operations['listMonitoringGroupMembers'];
+    put?: never;
+    /**
+     * Add CIs to a monitoring group
+     * @description Planned (WP-938, E-160); implemented by WP-946. Adds up to 500 CIs; a CI of another client than the group's is 422 ci_ids, an invisible CI 404. An increase of the probe budget is 403 entitlement-limit. Requires monitoring:write; the feature and module monitoring gate the path.
+     */
+    post: operations['addMonitoringGroupMembers'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/monitoring/groups/{id}/members/{ci_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        ci_id: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Remove a CI from a monitoring group
+     * @description Planned (WP-938, E-160); implemented by WP-946. Requires monitoring:write; the feature and module monitoring gate the path.
+     */
+    delete: operations['removeMonitoringGroupMember'];
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   '/api/v1/monitoring/events': {
@@ -9950,7 +10002,7 @@ export interface paths {
     };
     /**
      * List monitoring events
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Planned (WP-938, E-160); implemented by WP-1079 (EventLister of WP-979). The monitoring events of the table monitoring_event (SNMP traps and others) newest first, cursor-paginated; filters ci_id, probe_id, kind, from and to. The domain events (probe.state_changed, collector_group.* and the others of the event register) are delivered by outbox, webhooks and notifications, not by this list. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['listMonitoringEvents'];
     put?: never;
@@ -10386,13 +10438,13 @@ export interface paths {
     };
     /**
      * List collector groups
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Planned (WP-938, E-160); implemented by WP-947. The collector groups (PRB-03, COL-06, E-160: not below /monitoring) in the caller's scope with their members, member status, last sign of life, clock offset and assigned probes; filters client_id and site_id. Requires monitoring:read (segment collector-groups in readPermissionFor, WP-947); the feature and module monitoring gate the path.
      */
     get: operations['listCollectorGroups'];
     put?: never;
     /**
      * Create a collector group
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Planned (WP-938, E-160); implemented by WP-947. mode distributed or failover, liveness_timeout_s 20–300 (else 422), anchor_probe_id a probe of the same organization and client (else 422). Requires collector:manage (WP-947); the feature and module monitoring gate the path.
      */
     post: operations['createCollectorGroup'];
     delete?: never;
@@ -10413,23 +10465,70 @@ export interface paths {
     };
     /**
      * Get a collector group
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Planned (WP-938, E-160); implemented by WP-947. Requires monitoring:read (segment collector-groups in readPermissionFor, WP-947); the feature and module monitoring gate the path.
      */
     get: operations['getCollectorGroup'];
     put?: never;
     post?: never;
     /**
      * Delete a collector group
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Planned (WP-938, E-160); implemented by WP-947. A group with probes is 409 with their number. Requires collector:manage (WP-947); the feature and module monitoring gate the path.
      */
     delete: operations['deleteCollectorGroup'];
     options?: never;
     head?: never;
     /**
      * Update a collector group
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Planned (WP-938, E-160); implemented by WP-947. Changes name, mode, liveness_timeout_s and anchor_probe_id. Requires collector:manage (WP-947); the feature and module monitoring gate the path.
      */
     patch: operations['updateCollectorGroup'];
+    trace?: never;
+  };
+  '/api/v1/collector-groups/{id}/members': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Add a collector to a collector group
+     * @description Planned (WP-938, E-160); implemented by WP-947. A collector of another client is 422 collector_id; a collector of another group moves in one transaction. Requires collector:manage (WP-947); the feature and module monitoring gate the path.
+     */
+    post: operations['addCollectorGroupMember'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/collector-groups/{id}/members/{collector_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        collector_id: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Remove a collector from a collector group
+     * @description Planned (WP-938, E-160); implemented by WP-947. The last member of a group with assigned probes is 409. Requires collector:manage (WP-947); the feature and module monitoring gate the path.
+     */
+    delete: operations['removeCollectorGroupMember'];
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   '/api/v1/cis/{id}/availability': {
@@ -10444,7 +10543,7 @@ export interface paths {
     };
     /**
      * Get the availability of a CI
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Planned (WP-938, E-160); implemented by WP-973. The availability of the CI from its icmp probes without parent probe; with several or none the probe with the smallest percent per period counts, named per period. Requires monitoring:read (routeRules entry of WP-973); the feature and module monitoring gate the path.
      */
     get: operations['getCIAvailability'];
     put?: never;
@@ -14193,6 +14292,475 @@ export interface components {
       /** @description True when the audit entries of the entity are part of the history: a CI's history read with audit:read (E-78). False for a caller without audit:read and for the other entity types. */
       audit_included?: boolean;
     };
+    /** @description The overrides of one level of a probe (PRB-01, WP-937): interval_s, timeout_s, down_count and up_count (integers, seconds), thresholds and the type parameters of the register entry as flat keys (e.g. count, spacing_ms for icmp). A missing key is resolved from the level below, at last from the type default. Values outside the type limits are 422 with field (interval_s, timeout_s, down_count, up_count, params.<name>, thresholds.<name>). */
+    ProbeOverrides: {
+      interval_s?: number;
+      timeout_s?: number;
+      down_count?: number;
+      up_count?: number;
+      /** @description Threshold values by parameter name of the type (e.g. rtt_warn_ms, loss_warn). */
+      thresholds?: {
+        [key: string]: unknown;
+      };
+    } & {
+      [key: string]: unknown;
+    };
+    /** @description A central probe definition (PRB-01, WP-935): runs in its collector group (PRB-03) on the target with the type of the register. With a CI client and site are those of the CI. */
+    Probe: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      /** Format: uuid */
+      client_id?: string;
+      /** Format: uuid */
+      site_id?: string;
+      /** Format: uuid */
+      ci_id?: string;
+      /** Format: uuid */
+      collector_group_id: string;
+      /** @description Key of the probe type register (api/probe-types.json). */
+      type: string;
+      /** @description IP address or host name, for tcp host and port, for http the URL. */
+      target: string;
+      params: components['schemas']['ProbeOverrides'];
+      enabled: boolean;
+      /** Format: uuid */
+      parent_probe_id?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    ProbeCreateRequest: {
+      /** @description Key of an available probe type (planned → 422 type). */
+      type: string;
+      target: string;
+      /** Format: uuid */
+      ci_id?: string;
+      /**
+       * Format: uuid
+       * @description Required without ci_id; with a CI the CI's client applies.
+       */
+      client_id?: string;
+      /** Format: uuid */
+      site_id?: string;
+      /**
+       * Format: uuid
+       * @description A group of the probe's client or an org-wide one; empty takes the only group of the client.
+       */
+      collector_group_id?: string;
+      params?: components['schemas']['ProbeOverrides'];
+      /** @default true */
+      enabled: boolean;
+      /**
+       * Format: uuid
+       * @description Same organization, no cycle (409), chain at most 8 levels (422).
+       */
+      parent_probe_id?: string;
+    };
+    ProbeUpdateRequest: {
+      target?: string;
+      /** Format: uuid */
+      collector_group_id?: string;
+      params?: components['schemas']['ProbeOverrides'];
+      enabled?: boolean;
+      /**
+       * Format: uuid
+       * @description null removes the parent probe.
+       */
+      parent_probe_id?: string | null;
+    };
+    ProbeListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Probe'][];
+    };
+    /**
+     * @description The level an effective value comes from (PRB-01); default is the type default of the register.
+     * @enum {string}
+     */
+    ProbeValueOrigin: 'default' | 'org' | 'client' | 'group' | 'ci' | 'probe';
+    EffectiveProbeField: {
+      /** @description The effective value; null for a type parameter without default and override. */
+      value: unknown;
+      origin: components['schemas']['ProbeValueOrigin'];
+      /** @description The stored value lay outside the limits of the current register (changed after it was written) and was moved to the limit; a timeout not below the interval is lowered below it. */
+      clamped: boolean;
+      /**
+       * Format: uuid
+       * @description The deciding monitoring group when origin is group (higher priority, on a tie the smaller name).
+       */
+      group_id?: string;
+    };
+    /** @description The effective values of a probe with their origin (PRB-01, WP-937): type default → organization → client → monitoring group → CI → probe. */
+    EffectiveProbe: {
+      /** Format: uuid */
+      probe_id: string;
+      type: string;
+      target: string;
+      /** Format: uuid */
+      parent_probe_id?: string;
+      interval_s: components['schemas']['EffectiveProbeField'];
+      timeout_s: components['schemas']['EffectiveProbeField'];
+      down_count: components['schemas']['EffectiveProbeField'];
+      up_count: components['schemas']['EffectiveProbeField'];
+      /** @description The thresholds set on any level, by name. */
+      thresholds: {
+        [key: string]: components['schemas']['EffectiveProbeField'];
+      };
+      /** @description Every parameter of the type's schema, by name. */
+      params: {
+        [key: string]: components['schemas']['EffectiveProbeField'];
+      };
+    };
+    /**
+     * @description State of a probe (PRB-05).
+     * @enum {string}
+     */
+    ProbeStateValue: 'up' | 'degraded' | 'down' | 'unknown';
+    ProbeState: {
+      /** Format: uuid */
+      probe_id: string;
+      state: components['schemas']['ProbeStateValue'];
+      /** @description Reason code (edgecore/probewire/reason.go, e.g. timeout, collector_unreachable, parent_down; no_result without a state). */
+      reason: string;
+      /** Format: date-time */
+      since?: string;
+      /** Format: date-time */
+      last_result_at?: string;
+      /** Format: uuid */
+      collector_id?: string;
+    };
+    ProbeResultPoint: {
+      /** Format: date-time */
+      t: string;
+      /** @description Number of results; 1 for a raw point. */
+      total: number;
+      ok: number;
+      fail: number;
+      error: number;
+      /** @description Milliseconds. */
+      rtt_avg?: number | null;
+      rtt_min?: number | null;
+      rtt_max?: number | null;
+      /** @description Fraction 0–1. */
+      loss_avg?: number | null;
+      value_avg?: number | null;
+      value_min?: number | null;
+      value_max?: number | null;
+    };
+    ProbeResultSeries: {
+      /**
+       * @description The tier read (raw 14 days, 5m 90 days, 1h and 1d 400 days).
+       * @enum {string}
+       */
+      tier: 'raw' | '5m' | '1h' | '1d';
+      /** Format: date-time */
+      from: string;
+      /** Format: date-time */
+      to: string;
+      points: components['schemas']['ProbeResultPoint'][];
+    };
+    ProbeStateChange: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      probe_id: string;
+      /** Format: uuid */
+      ci_id?: string;
+      from_state: components['schemas']['ProbeStateValue'];
+      to_state: components['schemas']['ProbeStateValue'];
+      reason: string;
+      /**
+       * Format: date-time
+       * @description Business time on the collector (E-175).
+       */
+      observed_at: string;
+      /** Format: date-time */
+      received_at: string;
+      /** @description Delivered after the state had already ended (PRB-07, E-180). */
+      late: boolean;
+      notify: boolean;
+      /** Format: uuid */
+      root_event_id?: string;
+    };
+    ProbeStateChangeListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['ProbeStateChange'][];
+    };
+    AvailabilityPeriod: {
+      /**
+       * Format: date
+       * @description First day of the period (UTC).
+       */
+      start: string;
+      up_s: number;
+      degraded_s: number;
+      down_s: number;
+      unknown_s: number;
+      collector_unreachable_s: number;
+      maintenance_s: number;
+      /** @description (up_s + degraded_s) / (sum − unknown_s − collector_unreachable_s − maintenance_s) × 100; null without measured time (E-181). */
+      percent: number | null;
+      /**
+       * Format: uuid
+       * @description The probe the period of a CI is taken from.
+       */
+      probe_id?: string;
+    };
+    AvailabilityReport: {
+      /** Format: date */
+      from: string;
+      /** Format: date */
+      to: string;
+      /** @enum {string} */
+      granularity: 'day' | 'month';
+      periods: components['schemas']['AvailabilityPeriod'][];
+    };
+    /** @description An entry of the probe type register (api/probe-types.json, WP-934, PRT-01): status, defaults, the system limits (E-154), credential namespaces, collector capabilities and the JSON Schema of the parameters. Times are seconds, the rate is checks per second. */
+    ProbeType: {
+      key: string;
+      /** @enum {string} */
+      status: 'available' | 'planned';
+      min_interval_s: number;
+      default_interval_s: number;
+      max_interval_s: number;
+      min_timeout_s: number;
+      default_timeout_s: number;
+      max_timeout_s: number;
+      default_down_count: number;
+      default_up_count: number;
+      max_parallel_per_target: number;
+      max_parallel_per_collector: number;
+      max_rate_per_collector: number;
+      max_probes_per_target: number;
+      max_payload_bytes: number;
+      max_rows: number;
+      credential_namespaces: string[];
+      capabilities: string[];
+      /** @description JSON Schema (subset of 2020-12) of the type parameters. */
+      params: {
+        [key: string]: unknown;
+      };
+    };
+    ProbeTypeListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['ProbeType'][];
+    };
+    /** @enum {string} */
+    MonitoringProfileLevel: 'org' | 'client' | 'group' | 'ci';
+    /** @description The overrides of one level for one probe type (PRB-01, WP-935). level_id is the client, monitoring group or CI of the level and absent at level org. */
+    MonitoringProfile: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      level: components['schemas']['MonitoringProfileLevel'];
+      /** Format: uuid */
+      level_id?: string | null;
+      probe_type: string;
+      params: components['schemas']['ProbeOverrides'];
+      /**
+       * Format: uuid
+       * @description Scope of the profile (client of the level).
+       */
+      client_id?: string;
+      /** Format: uuid */
+      site_id?: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    MonitoringProfileCreateRequest: {
+      level: components['schemas']['MonitoringProfileLevel'];
+      /**
+       * Format: uuid
+       * @description Required except at level org.
+       */
+      level_id?: string | null;
+      probe_type: string;
+      params: components['schemas']['ProbeOverrides'];
+    };
+    MonitoringProfileUpdateRequest: {
+      params: components['schemas']['ProbeOverrides'];
+    };
+    MonitoringProfileListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['MonitoringProfile'][];
+    };
+    /** @description A static monitoring group of CIs, the device group of PRB-01 and CRD-04 (E-178). Without client_id it is org-wide. */
+    MonitoringGroup: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      /** Format: uuid */
+      client_id?: string;
+      name: string;
+      /** @description Of several groups of a CI the higher priority wins per field, on a tie the smaller name. */
+      priority: number;
+      /** @description Number of member CIs in the caller's client and site scope; members of other clients are not counted (F-414). */
+      member_count?: number;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    MonitoringGroupCreateRequest: {
+      name: string;
+      /** Format: uuid */
+      client_id?: string;
+      /** @default 0 */
+      priority: number;
+    };
+    MonitoringGroupUpdateRequest: {
+      name?: string;
+      priority?: number;
+    };
+    MonitoringGroupDeleteResult: {
+      /** @description Number of profiles deleted with the group. */
+      deleted_profiles: number;
+    };
+    MonitoringGroupListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['MonitoringGroup'][];
+    };
+    MonitoringGroupMember: {
+      /** Format: uuid */
+      group_id: string;
+      /** Format: uuid */
+      ci_id: string;
+      /** Format: uuid */
+      client_id?: string;
+      /** Format: uuid */
+      site_id?: string;
+      /** Format: date-time */
+      created_at?: string;
+    };
+    MonitoringGroupMembersRequest: {
+      ci_ids: string[];
+    };
+    MonitoringGroupMemberSet: {
+      data: components['schemas']['MonitoringGroupMember'][];
+    };
+    MonitoringGroupMemberListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['MonitoringGroupMember'][];
+    };
+    /** @description A collector in its group (a collector is in exactly one group, PRB-03, PRB-10). */
+    CollectorGroupMember: {
+      /** Format: uuid */
+      collector_id: string;
+      /** Format: uuid */
+      group_id: string;
+      /** @description Failover order (the best priority runs the probes in mode failover). */
+      priority: number;
+      weight: number;
+      /** @enum {string} */
+      member_status: 'healthy' | 'degraded' | 'down';
+      /** Format: date-time */
+      last_alive_at?: string;
+      clock_offset_ms?: number;
+      capacity_hint?: number;
+      /**
+       * Format: int64
+       * @description Version of the assignment set the member applied.
+       */
+      config_version: number;
+      /** @description Probes assigned to the member (probe_assignment). */
+      assigned_probes: number;
+    };
+    /** @description A group of collectors in a customer network that share its probes (PRB-03, COL-06, E-174, E-176). Without client_id it is org-wide. */
+    CollectorGroup: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      /** Format: uuid */
+      client_id?: string;
+      /** Format: uuid */
+      site_id?: string;
+      name: string;
+      /** @enum {string} */
+      mode: 'distributed' | 'failover';
+      liveness_timeout_s: number;
+      /** Format: uuid */
+      anchor_probe_id?: string;
+      /** @enum {string} */
+      status: 'reachable' | 'unreachable';
+      /** Format: date-time */
+      status_changed_at: string;
+      members: components['schemas']['CollectorGroupMember'][];
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CollectorGroupCreateRequest: {
+      name: string;
+      /** Format: uuid */
+      client_id?: string;
+      /** Format: uuid */
+      site_id?: string;
+      /**
+       * @default distributed
+       * @enum {string}
+       */
+      mode: 'distributed' | 'failover';
+      /** @default 30 */
+      liveness_timeout_s: number;
+      /** Format: uuid */
+      anchor_probe_id?: string;
+    };
+    CollectorGroupUpdateRequest: {
+      name?: string;
+      /** @enum {string} */
+      mode?: 'distributed' | 'failover';
+      liveness_timeout_s?: number;
+      /**
+       * Format: uuid
+       * @description null removes the anchor probe.
+       */
+      anchor_probe_id?: string | null;
+    };
+    CollectorGroupMemberRequest: {
+      /** Format: uuid */
+      collector_id: string;
+      /** @default 0 */
+      priority: number;
+      /** @default 100 */
+      weight: number;
+    };
+    CollectorGroupListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['CollectorGroup'][];
+    };
+    /**
+     * @description Kind of a monitoring event (WP-979), from snmpTrapOID.0 or the generic SNMPv1 trap type.
+     * @enum {string}
+     */
+    MonitoringEventKind:
+      'link_down' | 'link_up' | 'cold_start' | 'warm_start' | 'auth_failure' | 'other';
+    /** @description A monitoring event of the table monitoring_event (SNMP traps and others, WP-979) with its probe and CI. Not a domain event of the event register. */
+    MonitoringEvent: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      ci_id?: string;
+      /** Format: uuid */
+      probe_id?: string;
+      /** Format: uuid */
+      collector_id: string;
+      /** @description IPv4 or IPv6 address of the sender. */
+      source_ip: string;
+      kind: components['schemas']['MonitoringEventKind'];
+      trap_oid?: string;
+      /** @description At most 64 variable bindings and 16 KiB; the rest is cut off. */
+      varbinds: {
+        oid?: string;
+        type?: string;
+        value?: string;
+      }[];
+      /** Format: date-time */
+      observed_at: string;
+      /** Format: date-time */
+      received_at: string;
+    };
+    MonitoringEventListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['MonitoringEvent'][];
+    };
     /** @description RFC 7807 Problem Details object (API-03). Every error response (4xx/5xx) is `application/problem+json` and carries `trace_id`, the request id also returned in the `X-Request-ID` header. */
     ProblemDetail: {
       /** Format: uri */
@@ -14206,6 +14774,11 @@ export interface components {
       trace_id: string;
       /** @description Request field a 400, 409 or 422 refers to (e.g. the unique `name` of a client, or `key` of an attribute definition that cannot be composed, 422). */
       field?: string;
+      /** @description Every failing field of a validation that checks several fields at once (e.g. the probe and monitoring profile values against the probe type limits, 422); `field` names the first. */
+      violations?: {
+        field: string;
+        detail: string;
+      }[];
       /** @description Machine-readable code of the failing rule, set where one is defined. A composition conflict of attribute definitions (MET-16, 422 with `field` = `key`) carries `datatype-conflict` (data type, reference target or `multi_value` differ), `enum-empty` (no allowed value is left), `range-empty` (`min` > `max`), `length-range-empty` (`min_length` > `max_length`), `computed-conflict` (different expressions of a computed attribute) or `computed-constraint` (a computed attribute made required, given a default or made unique by another layer). */
       code?: string;
     };
@@ -46052,6 +46625,12 @@ export interface operations {
          *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
+        ci_id?: string;
+        /** @description Probe type key of the register. */
+        type?: string;
+        collector_group_id?: string;
+        client_id?: string;
+        enabled?: boolean;
       };
       header?: never;
       path?: never;
@@ -46059,12 +46638,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List probes. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description Probes */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ProbeListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -46079,18 +46660,24 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ProbeCreateRequest'];
+      };
+    };
     responses: {
-      /** @description Created. The schema comes with the implementing work package. */
+      /** @description Probe created */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Probe'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['EntitlementLimit'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
@@ -46108,12 +46695,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get a probe. The schema comes with the implementing work package. */
+      /** @description Probe */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Probe'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -46133,7 +46722,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Done. */
+      /** @description Probe deleted */
       204: {
         headers: {
           [name: string]: unknown;
@@ -46157,18 +46746,24 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ProbeUpdateRequest'];
+      };
+    };
     responses: {
-      /** @description Update a probe. The schema comes with the implementing work package. */
+      /** @description Probe updated */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Probe'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
@@ -46187,12 +46782,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get the effective settings of a probe. The schema comes with the implementing work package. */
+      /** @description Effective settings */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['EffectiveProbe'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -46212,12 +46809,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get the current state of a probe. The schema comes with the implementing work package. */
+      /** @description Probe state */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ProbeState'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -46228,16 +46827,9 @@ export interface operations {
   listProbeResults: {
     parameters: {
       query?: {
-        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
-        limit?: components['parameters']['Limit'];
-        /**
-         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
-         *     are HMAC-signed by the server (API-02); a forged or altered cursor
-         *     yields 400. Keyset cursors are bound to the sort order they were
-         *     issued for; sending one with a different `sort_by`/`sort_dir`
-         *     combination yields 400.
-         */
-        cursor?: components['parameters']['Cursor'];
+        from?: string;
+        to?: string;
+        step?: 'raw' | '5m' | '1h' | '1d';
       };
       header?: never;
       path: {
@@ -46248,16 +46840,20 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the results of a probe. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description Result series */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ProbeResultSeries'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -46274,6 +46870,8 @@ export interface operations {
          *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
+        from?: string;
+        to?: string;
       };
       header?: never;
       path: {
@@ -46284,22 +46882,32 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the state changes of a probe. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description State changes */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ProbeStateChangeListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
   getProbeAvailability: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description First day (UTC) */
+        from?: string;
+        /** @description Last day (UTC). */
+        to?: string;
+        granularity?: 'day' | 'month';
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -46309,16 +46917,20 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get the availability of a probe. The schema comes with the implementing work package. */
+      /** @description Availability */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['AvailabilityReport'];
+        };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -46342,12 +46954,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the probe types of the registry. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description Probe types */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ProbeTypeListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -46360,18 +46974,21 @@ export interface operations {
       query?: never;
       header?: never;
       path: {
+        /** @description Key of the probe type (api/probe-types.json). */
         key: string;
       };
       cookie?: never;
     };
     requestBody?: never;
     responses: {
-      /** @description Get a probe type of the registry. The schema comes with the implementing work package. */
+      /** @description Probe type */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ProbeType'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -46392,6 +47009,9 @@ export interface operations {
          *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
+        level?: 'org' | 'client' | 'group' | 'ci';
+        level_id?: string;
+        probe_type?: string;
       };
       header?: never;
       path?: never;
@@ -46399,12 +47019,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List monitoring profiles. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description Monitoring profiles */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['MonitoringProfileListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -46419,18 +47041,25 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['MonitoringProfileCreateRequest'];
+      };
+    };
     responses: {
-      /** @description Created. The schema comes with the implementing work package. */
+      /** @description Monitoring profile created */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['MonitoringProfile'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['EntitlementLimit'];
+      404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
@@ -46448,12 +47077,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get a monitoring profile. The schema comes with the implementing work package. */
+      /** @description Monitoring profile */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['MonitoringProfile'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -46473,7 +47104,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Done. */
+      /** @description Monitoring profile deleted */
       204: {
         headers: {
           [name: string]: unknown;
@@ -46481,7 +47112,7 @@ export interface operations {
         content?: never;
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
@@ -46497,18 +47128,24 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['MonitoringProfileUpdateRequest'];
+      };
+    };
     responses: {
-      /** @description Update a monitoring profile. The schema comes with the implementing work package. */
+      /** @description Monitoring profile updated */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['MonitoringProfile'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
@@ -46528,6 +47165,7 @@ export interface operations {
          *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
+        client_id?: string;
       };
       header?: never;
       path?: never;
@@ -46535,12 +47173,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List monitoring groups. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description Monitoring groups */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['MonitoringGroupListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -46555,14 +47195,20 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['MonitoringGroupCreateRequest'];
+      };
+    };
     responses: {
-      /** @description Created. The schema comes with the implementing work package. */
+      /** @description Monitoring group created */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['MonitoringGroup'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -46584,12 +47230,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get a monitoring group. The schema comes with the implementing work package. */
+      /** @description Monitoring group */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['MonitoringGroup'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -46609,15 +47257,17 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Done. */
-      204: {
+      /** @description Monitoring group deleted */
+      200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['MonitoringGroupDeleteResult'];
+        };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      403: components['responses']['EntitlementLimit'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
@@ -46633,21 +47283,125 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['MonitoringGroupUpdateRequest'];
+      };
+    };
     responses: {
-      /** @description Update a monitoring group. The schema comes with the implementing work package. */
+      /** @description Monitoring group updated */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['MonitoringGroup'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['EntitlementLimit'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  listMonitoringGroupMembers: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Members */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MonitoringGroupMemberListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  addMonitoringGroupMembers: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['MonitoringGroupMembersRequest'];
+      };
+    };
+    responses: {
+      /** @description Members added */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MonitoringGroupMemberSet'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['EntitlementLimit'];
+      404: components['responses']['NotFound'];
       422: components['responses']['UnprocessableEntity'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  removeMonitoringGroupMember: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        ci_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Member removed */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['EntitlementLimit'];
+      404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -46664,6 +47418,11 @@ export interface operations {
          *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
+        ci_id?: string;
+        probe_id?: string;
+        kind?: components['schemas']['MonitoringEventKind'];
+        from?: string;
+        to?: string;
       };
       header?: never;
       path?: never;
@@ -46671,16 +47430,19 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List monitoring events. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description Monitoring events */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['MonitoringEventListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -47350,6 +48112,8 @@ export interface operations {
          *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
+        client_id?: string;
+        site_id?: string;
       };
       header?: never;
       path?: never;
@@ -47357,12 +48121,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List collector groups. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description Collector groups */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CollectorGroupListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -47377,14 +48143,20 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CollectorGroupCreateRequest'];
+      };
+    };
     responses: {
-      /** @description Created. The schema comes with the implementing work package. */
+      /** @description Collector group created */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CollectorGroup'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -47406,12 +48178,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get a collector group. The schema comes with the implementing work package. */
+      /** @description Collector group */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CollectorGroup'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -47431,7 +48205,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Done. */
+      /** @description Collector group deleted */
       204: {
         headers: {
           [name: string]: unknown;
@@ -47455,14 +48229,20 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CollectorGroupUpdateRequest'];
+      };
+    };
     responses: {
-      /** @description Update a collector group. The schema comes with the implementing work package. */
+      /** @description Collector group updated */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CollectorGroup'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -47473,7 +48253,7 @@ export interface operations {
       500: components['responses']['InternalServerError'];
     };
   };
-  getCIAvailability: {
+  addCollectorGroupMember: {
     parameters: {
       query?: never;
       header?: never;
@@ -47483,10 +48263,45 @@ export interface operations {
       };
       cookie?: never;
     };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CollectorGroupMemberRequest'];
+      };
+    };
+    responses: {
+      /** @description Collector group with the new member */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CollectorGroup'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  removeCollectorGroupMember: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        collector_id: string;
+      };
+      cookie?: never;
+    };
     requestBody?: never;
     responses: {
-      /** @description Get the availability of a CI. The schema comes with the implementing work package. */
-      200: {
+      /** @description Member removed */
+      204: {
         headers: {
           [name: string]: unknown;
         };
@@ -47495,6 +48310,42 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getCIAvailability: {
+    parameters: {
+      query?: {
+        /** @description First day (UTC) */
+        from?: string;
+        /** @description Last day (UTC). */
+        to?: string;
+        granularity?: 'day' | 'month';
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Availability */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AvailabilityReport'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };

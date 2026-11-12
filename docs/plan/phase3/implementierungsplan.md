@@ -5115,10 +5115,11 @@ PRB-01;[P3];E;backend/internal/probe/effective_integration_test.go;WP-937
 - [ ] AK3: `GET /api/v1/monitoring/events` liefert die Monitoring-Ereignisse der Tabelle `monitoring_event` (Traps u. a.). Das Schema `MonitoringEvent` folgt WP-979 (`id`, `ci_id`, `probe_id`, `collector_id`, `source_ip`, `kind` ∈ `link_down|link_up|cold_start|warm_start|auth_failure|other`, `trap_oid`, `varbinds`, `observed_at`, `received_at`); Filter `ci_id`, `probe_id`, `kind`, `from`, `to` mit Cursor wie `probe.EventLister` aus WP-979. Einen Filter auf die Domänenereignisse aus WP-867 (`probe.state_changed`, `collector_group.*` …) gibt es nicht; diese liefern Outbox, Webhooks und Benachrichtigungen.
 - [ ] AK4: `TestRoutesAndSpecificationAreInParity` und `TestPlannedOperationsUseProblemResponses` sind grün; ein Vertragstest prüft die Operationen aus AK1 und AK3, das Fehlen von `/api/v1/monitoring/collector-groups`. Den Test `PermissionForRoute(GET, /api/v1/cis/{id}/availability)` = `monitoring:read` liefert WP-973.
 
-**Dateien (4 Einträge):**
+**Dateien (5 Einträge):**
 
 - api/openapi.yaml
 - frontend/src/api/generated/schema.d.ts (generiert)
+- frontend/src/api/client.ts (`SCOPED_LISTS` um `/monitoring/probes`, `/monitoring/groups` und `/collector-groups`, Konvention 49; sonst schlägt der Spec-Abgleich in `client.test.ts` fehl)
 - backend/internal/server/monitoring_contract_test.go (neu)
 - docs/traceability.csv
 
@@ -5690,7 +5691,7 @@ PRB-07;[P3];E;backend/internal/probe/result_schema_integration_test.go;WP-945
   - Ein Outbox-Ereignis entsteht nicht, weil das Register aus WP-867 für Profile und Gruppen keinen Typ führt.
   - `x-status: planned` entfällt an diesen Operationen. `route_permissions.txt` ist neu erzeugt.
 - [ ] AK6: Mindestintervall: Ein Profil mit `interval_s` unter `min_probe_interval_s` des Pakets ergibt 422 mit Feld `interval_s` über `Service.CheckInterval` (WP-881), auf jeder Ebene.
-- [ ] AK7: Budgetwirkung: Jede schreibende Operation auf Profilen und Gruppen (Profil anlegen, ändern, löschen; Gruppe löschen; Mitglieder hinzufügen oder entfernen) nimmt in der Schreibtransaktion zuerst die Budget-Sperre (`database.LockQuota(ctx, orgID, "probe_budget")`, WP-940) und berechnet danach das Budget aller betroffenen Probes vor und nach der Änderung (`entitlement.BudgetOf` auf den effektiven Werten aus `probe.Resolve`). `Service.AllowProbeChange` (WP-940) weist eine Erhöhung über `max_monitored_targets`, `max_probes_per_minute` oder `max_targets_<typ>` mit 403 `entitlement-limit` ab, ohne Teiländerung; Verringerungen werden nicht geprüft. Erst danach folgen Zeilensperren.
+- [ ] AK7: Budgetwirkung: Jede schreibende Operation auf Profilen und Gruppen (Profil anlegen, ändern, löschen; Gruppe ändern – Priorität und Name entscheiden, welche Gruppe gewinnt –, Gruppe löschen; Mitglieder hinzufügen oder entfernen) nimmt in der Schreibtransaktion zuerst die Budget-Sperre (`database.LockQuota(ctx, orgID, "probe_budget")`, WP-940) und berechnet danach das Budget aller betroffenen Probes vor und nach der Änderung (`entitlement.BudgetOf` auf den effektiven Werten aus `probe.Resolve`). `Service.AllowProbeChange` (WP-940) weist eine Erhöhung über `max_monitored_targets`, `max_probes_per_minute` oder `max_targets_<typ>` mit 403 `entitlement-limit` ab, ohne Teiländerung; Verringerungen werden nicht geprüft. Erst danach folgen Zeilensperren.
 - [ ] AK8: Das Memory-Repository liefert für `--no-db` dieselben Regeln (Eindeutigkeit, Kundenbindung, Grenzen, Mindestintervall und Budget unter einem Mutex).
 
 **Dateien (13 Einträge):**
@@ -5726,6 +5727,8 @@ PRB-07;[P3];E;backend/internal/probe/result_schema_integration_test.go;WP-945
   - `TestProfileChangeBumpsCollectorConfigVersion`
   - `TestProfileChangeRespectsProbeBudget` (Org-Profil halbiert das Intervall über `max_probes_per_minute` → 403 `entitlement-limit`, keine Teiländerung; Verlängerung wird angenommen)
   - `TestGroupMemberAddRespectsProbeBudget` (Gruppenprofil mit kurzem Intervall, neues Mitglied über das Budget → 403)
+  - `TestGroupUpdateRespectsProbeBudget` (CI in zwei Gruppen; Priorität der Gruppe mit kürzerem Intervall angehoben über das Budget → 403 `entitlement-limit`, keine Teiländerung)
+  - `TestGroupMemberCountInCallerScope` (`member_count` einer org-weiten Gruppe zählt für einen kundenbeschränkten Aufrufer nur Mitglieder seines Scopes, F-414)
 - `TestRoutesAndSpecificationAreInParity`, `TestEveryOperationRequiresItsExpectedPermission` (`RETICORA_UPDATE_ROUTE_PERMISSIONS=1`), `TestEveryWriteRouteIsAudited`, `TestEveryWriteRouteHasASnapshotEntry`, `TestEveryAuditedRouteHasAScopeRule`, `TestEveryListIsCursorPaginated`.
 
 **Traceability (`docs/traceability.csv`):**

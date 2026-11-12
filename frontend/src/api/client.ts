@@ -645,6 +645,11 @@ export const SCOPED_LISTS: Record<string, readonly ('client_id' | 'site_id')[]> 
   '/slas': ['client_id'],
   '/business-calendars': ['client_id'],
   '/forms': ['client_id'],
+  // Monitoring P3 (WP-938, E-160): probes, monitoring groups and collector
+  // groups filter by client (collector groups also by site).
+  '/monitoring/probes': ['client_id'],
+  '/monitoring/groups': ['client_id'],
+  '/collector-groups': ['client_id', 'site_id'],
 };
 
 /** withScope adds the selected scope to a GET of a scoped list. */

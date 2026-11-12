@@ -22916,14 +22916,24 @@ paths:
       tags: [Monitoring]
       summary: List probes
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-939. The probes in the caller's client and site
+        scope (PRB-01), ordered by id; filters ci_id, type (a key of
+        api/probe-types.json), collector_group_id, client_id and enabled; total
+        counts the matching probes. Requires monitoring:read; the feature and module monitoring gate the path.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
+        - { name: ci_id, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: type, in: query, required: false, schema: { type: string }, description: Probe type key of the register. }
+        - { name: collector_group_id, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: client_id, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: enabled, in: query, required: false, schema: { type: boolean } }
       responses:
         '200':
-          description: List probes. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+          description: Probes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProbeListResponse' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -22937,17 +22947,35 @@ paths:
       tags: [Monitoring]
       summary: Create a probe
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-939. The type must be a key of
+        api/probe-types.json with status available (planned → 422 type). params
+        holds the overrides of the level probe; interval, timeout, counts,
+        thresholds and type parameters are checked against the type limits on the
+        effective values (probewire.Validate, timeout_s below interval_s), every
+        violation 422 with field and the list in violations. Unknown or invisible
+        ci_id, parent_probe_id and collector_group_id are 422 alike; a parent
+        chain deeper than 8 levels is 422 parent_probe_id, a cycle 409. Without
+        collector_group_id the only collector group of the probe's client is
+        taken (none or several: 422 collector_group_id). Quota and probe budget
+        (max_monitored_targets, max_probes_per_minute, max_targets_<type>) are 403
+        entitlement-limit (WP-940). Requires monitoring:write; the feature and module monitoring gate the path.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProbeCreateRequest' }
       responses:
         '201':
-          description: Created. The schema comes with the implementing work package.
+          description: Probe created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Probe' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/EntitlementLimit'
         '409':
           $ref: '#/components/responses/Conflict'
         '422':
@@ -22966,11 +22994,14 @@ paths:
       tags: [Monitoring]
       summary: Get a probe
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-939. A probe of another organization or outside
+        the caller's client and site scope is 404. Requires monitoring:read; the feature and module monitoring gate the path.
       responses:
         '200':
-          description: Get a probe. The schema comes with the implementing work package.
+          description: Probe
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Probe' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -22984,17 +23015,26 @@ paths:
       tags: [Monitoring]
       summary: Update a probe
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-939. Changes target, params, enabled,
+        parent_probe_id and collector_group_id with the checks of the creation; the
+        type is fixed. Requires monitoring:write; the feature and module monitoring gate the path.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProbeUpdateRequest' }
       responses:
         '200':
-          description: Update a probe. The schema comes with the implementing work package.
+          description: Probe updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Probe' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/EntitlementLimit'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -23008,11 +23048,11 @@ paths:
       tags: [Monitoring]
       summary: Delete a probe
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-939. Deletes the probe with its state, history
+        and assignment; child probes lose their parent. Requires monitoring:write; the feature and module monitoring gate the path.
       responses:
         '204':
-          description: Done.
+          description: Probe deleted
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -23035,11 +23075,16 @@ paths:
       tags: [Monitoring]
       summary: Get the effective settings of a probe
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-946. The effective values of the probe
+        (PRB-01, WP-937): every field with value, origin (default, org, client,
+        group, ci, probe), clamped (a stored value moved to the current type
+        limits) and, for origin group, the deciding monitoring group. Requires monitoring:read; the feature and module monitoring gate the path.
       responses:
         '200':
-          description: Get the effective settings of a probe. The schema comes with the implementing work package.
+          description: Effective settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EffectiveProbe' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -23058,13 +23103,16 @@ paths:
     get:
       operationId: getProbeState
       tags: [Monitoring]
-      summary: Get the current state of a probe
+      summary: Get the state of a probe
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-975. The current state from probe_state
+        (PRB-05); without a row state unknown with reason no_result. Requires monitoring:read; the feature and module monitoring gate the path.
       responses:
         '200':
-          description: Get the current state of a probe. The schema comes with the implementing work package.
+          description: Probe state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProbeState' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -23085,20 +23133,31 @@ paths:
       tags: [Monitoring]
       summary: List the results of a probe
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-975. The results between from and to at most
+        400 days apart (else 422). Without step the server picks the finest tier
+        of raw, 5m, 1h and 1d with at most 2,000 points whose retention covers
+        from; step forces a tier (outside its retention or above 2,000 points: 422
+        step). Not a list: one series with its tier. Requires monitoring:read; the feature and module monitoring gate the path.
       parameters:
-        - $ref: '#/components/parameters/Limit'
-        - $ref: '#/components/parameters/Cursor'
+        - { name: from, in: query, required: false, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: false, schema: { type: string, format: date-time } }
+        - { name: step, in: query, required: false, schema: { type: string, enum: [raw, 5m, 1h, 1d] } }
       responses:
         '200':
-          description: List the results of a probe. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+          description: Result series
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProbeResultSeries' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -23113,20 +23172,29 @@ paths:
       tags: [Monitoring]
       summary: List the state changes of a probe
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-975. The state changes (PRB-05, PRB-07)
+        between from and to, newest observed_at first, cursor-paginated. Requires monitoring:read; the feature and module monitoring gate the path.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
+        - { name: from, in: query, required: false, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: false, schema: { type: string, format: date-time } }
       responses:
         '200':
-          description: List the state changes of a probe. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+          description: State changes
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProbeStateChangeListResponse' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -23141,17 +23209,31 @@ paths:
       tags: [Monitoring]
       summary: Get the availability of a probe
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-973. The time per state and the availability
+        per day or month from the state intervals (E-181: percent = (up_s +
+        degraded_s) / (sum - unknown_s - collector_unreachable_s -
+        maintenance_s), null without measured time). from more than 400 days
+        back is 422. Requires monitoring:read; the feature and module monitoring gate the path.
+      parameters:
+        - { name: from, in: query, required: false, schema: { type: string, format: date }, description: First day (UTC), at most 400 days back. }
+        - { name: to, in: query, required: false, schema: { type: string, format: date }, description: Last day (UTC). }
+        - { name: granularity, in: query, required: false, schema: { type: string, enum: [day, month], default: day } }
       responses:
         '200':
-          description: Get the availability of a probe. The schema comes with the implementing work package.
+          description: Availability
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AvailabilityReport' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -23162,16 +23244,20 @@ paths:
     get:
       operationId: listProbeTypes
       tags: [Monitoring]
-      summary: List the probe types of the registry
+      summary: List probe types
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-939. The probe type register
+        (api/probe-types.json, WP-934): key, status, defaults, limits and the
+        parameter schema of every type, in register order. Requires monitoring:read; the feature and module monitoring gate the path.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: List the probe types of the registry. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+          description: Probe types
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProbeTypeListResponse' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -23189,18 +23275,20 @@ paths:
       - name: key
         in: path
         required: true
-        schema:
-          type: string
+        schema: { type: string }
+        description: Key of the probe type (api/probe-types.json).
     get:
       operationId: getProbeType
       tags: [Monitoring]
-      summary: Get a probe type of the registry
+      summary: Get a probe type
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-939. One entry of the probe type register; an unknown key is 404. Requires monitoring:read; the feature and module monitoring gate the path.
       responses:
         '200':
-          description: Get a probe type of the registry. The schema comes with the implementing work package.
+          description: Probe type
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProbeType' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -23219,14 +23307,21 @@ paths:
       tags: [Monitoring]
       summary: List monitoring profiles
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-946. The overrides per level (org, client,
+        group, ci) and probe type in the caller's scope; filters level, level_id
+        and probe_type. Requires monitoring:read; the feature and module monitoring gate the path.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
+        - { name: level, in: query, required: false, schema: { type: string, enum: [org, client, group, ci] } }
+        - { name: level_id, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: probe_type, in: query, required: false, schema: { type: string } }
       responses:
         '200':
-          description: List monitoring profiles. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+          description: Monitoring profiles
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MonitoringProfileListResponse' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -23240,17 +23335,31 @@ paths:
       tags: [Monitoring]
       summary: Create a monitoring profile
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-946. Values outside the type limits, timeout
+        not below interval and an unknown or planned type are 422 with field (and
+        the list in violations); an interval below min_probe_interval_s of the
+        plan is 422 interval_s. One profile per level, level_id and probe type
+        (409). A level_id outside the organization or the caller's scope is 404.
+        An increase of the probe budget is 403 entitlement-limit. Requires monitoring:write; the feature and module monitoring gate the path.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MonitoringProfileCreateRequest' }
       responses:
         '201':
-          description: Created. The schema comes with the implementing work package.
+          description: Monitoring profile created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MonitoringProfile' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/EntitlementLimit'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
         '422':
@@ -23269,11 +23378,13 @@ paths:
       tags: [Monitoring]
       summary: Get a monitoring profile
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-946. Requires monitoring:read; the feature and module monitoring gate the path.
       responses:
         '200':
-          description: Get a monitoring profile. The schema comes with the implementing work package.
+          description: Monitoring profile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MonitoringProfile' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -23287,17 +23398,24 @@ paths:
       tags: [Monitoring]
       summary: Update a monitoring profile
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-946. Replaces the params with the checks of the creation. Requires monitoring:write; the feature and module monitoring gate the path.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MonitoringProfileUpdateRequest' }
       responses:
         '200':
-          description: Update a monitoring profile. The schema comes with the implementing work package.
+          description: Monitoring profile updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MonitoringProfile' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/EntitlementLimit'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -23311,15 +23429,14 @@ paths:
       tags: [Monitoring]
       summary: Delete a monitoring profile
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-946. Requires monitoring:write; the feature and module monitoring gate the path.
       responses:
         '204':
-          description: Done.
+          description: Monitoring profile deleted
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/EntitlementLimit'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -23336,14 +23453,19 @@ paths:
       tags: [Monitoring]
       summary: List monitoring groups
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-946. The monitoring groups (device groups of
+        PRB-01 and CRD-04, E-178) in the caller's scope: its clients' groups and
+        the org-wide ones. Requires monitoring:read; the feature and module monitoring gate the path.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
+        - { name: client_id, in: query, required: false, schema: { type: string, format: uuid } }
       responses:
         '200':
-          description: List monitoring groups. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+          description: Monitoring groups
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MonitoringGroupListResponse' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -23357,11 +23479,20 @@ paths:
       tags: [Monitoring]
       summary: Create a monitoring group
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-946. A group of a client takes only CIs of that
+        client; without client_id it is org-wide. The name is unique per
+        organization (409). Requires monitoring:write; the feature and module monitoring gate the path.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MonitoringGroupCreateRequest' }
       responses:
         '201':
-          description: Created. The schema comes with the implementing work package.
+          description: Monitoring group created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MonitoringGroup' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -23386,11 +23517,13 @@ paths:
       tags: [Monitoring]
       summary: Get a monitoring group
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-946. Requires monitoring:read; the feature and module monitoring gate the path.
       responses:
         '200':
-          description: Get a monitoring group. The schema comes with the implementing work package.
+          description: Monitoring group
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MonitoringGroup' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -23404,17 +23537,28 @@ paths:
       tags: [Monitoring]
       summary: Update a monitoring group
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-946. Changes name and priority; of several
+        groups of a CI the higher priority wins per field, on a tie the smaller
+        name. A change of priority or name that raises the probe budget of the
+        member probes is 403 entitlement-limit (WP-940), without partial change.
+        Requires monitoring:write; the feature and module monitoring gate the path.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MonitoringGroupUpdateRequest' }
       responses:
         '200':
-          description: Update a monitoring group. The schema comes with the implementing work package.
+          description: Monitoring group updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MonitoringGroup' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          $ref: '#/components/responses/EntitlementLimit'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -23428,19 +23572,110 @@ paths:
       tags: [Monitoring]
       summary: Delete a monitoring group
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-946. Deletes the group with its memberships and
+        profiles; the answer names the number of deleted profiles. Requires monitoring:write; the feature and module monitoring gate the path.
       responses:
-        '204':
-          description: Done.
+        '200':
+          description: Monitoring group deleted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MonitoringGroupDeleteResult' }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/EntitlementLimit'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/groups/{id}/members:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listMonitoringGroupMembers
+      tags: [Monitoring]
+      summary: List the members of a monitoring group
+      description: >-
+        Planned (WP-938, E-160); implemented by WP-946. The member CIs in the caller's scope. Requires monitoring:read; the feature and module monitoring gate the path.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: Members
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MonitoringGroupMemberListResponse' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+    post:
+      operationId: addMonitoringGroupMembers
+      tags: [Monitoring]
+      summary: Add CIs to a monitoring group
+      description: >-
+        Planned (WP-938, E-160); implemented by WP-946. Adds up to 500 CIs; a CI of another
+        client than the group's is 422 ci_ids, an invisible CI 404. An increase
+        of the probe budget is 403 entitlement-limit. Requires monitoring:write; the feature and module monitoring gate the path.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MonitoringGroupMembersRequest' }
+      responses:
+        '200':
+          description: Members added
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MonitoringGroupMemberSet' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/EntitlementLimit'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/monitoring/groups/{id}/members/{ci_id}:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - { name: ci_id, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      operationId: removeMonitoringGroupMember
+      tags: [Monitoring]
+      summary: Remove a CI from a monitoring group
+      description: >-
+        Planned (WP-938, E-160); implemented by WP-946. Requires monitoring:write; the feature and module monitoring gate the path.
+      responses:
+        '204':
+          description: Member removed
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/EntitlementLimit'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -23453,20 +23688,34 @@ paths:
       tags: [Monitoring]
       summary: List monitoring events
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-1079 (EventLister of WP-979). The monitoring
+        events of the table monitoring_event (SNMP traps and others) newest first,
+        cursor-paginated; filters ci_id, probe_id, kind, from and to. The domain
+        events (probe.state_changed, collector_group.* and the others of the event
+        register) are delivered by outbox, webhooks and notifications, not by
+        this list. Requires monitoring:read; the feature and module monitoring gate the path.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
+        - { name: ci_id, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: probe_id, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: kind, in: query, required: false, schema: { $ref: '#/components/schemas/MonitoringEventKind' } }
+        - { name: from, in: query, required: false, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: false, schema: { type: string, format: date-time } }
       responses:
         '200':
-          description: List monitoring events. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+          description: Monitoring events
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MonitoringEventListResponse' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -24079,14 +24328,21 @@ paths:
       tags: [Collectors]
       summary: List collector groups
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-947. The collector groups (PRB-03, COL-06, E-160:
+        not below /monitoring) in the caller's scope with their members, member
+        status, last sign of life, clock offset and assigned probes; filters
+        client_id and site_id. Requires monitoring:read (segment collector-groups in readPermissionFor, WP-947); the feature and module monitoring gate the path.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
+        - { name: client_id, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: site_id, in: query, required: false, schema: { type: string, format: uuid } }
       responses:
         '200':
-          description: List collector groups. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+          description: Collector groups
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CollectorGroupListResponse' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -24100,11 +24356,20 @@ paths:
       tags: [Collectors]
       summary: Create a collector group
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-947. mode distributed or failover,
+        liveness_timeout_s 20–300 (else 422), anchor_probe_id a probe of the same
+        organization and client (else 422). Requires collector:manage (WP-947); the feature and module monitoring gate the path.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CollectorGroupCreateRequest' }
       responses:
         '201':
-          description: Created. The schema comes with the implementing work package.
+          description: Collector group created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CollectorGroup' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -24129,11 +24394,13 @@ paths:
       tags: [Collectors]
       summary: Get a collector group
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-947. Requires monitoring:read (segment collector-groups in readPermissionFor, WP-947); the feature and module monitoring gate the path.
       responses:
         '200':
-          description: Get a collector group. The schema comes with the implementing work package.
+          description: Collector group
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CollectorGroup' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -24147,11 +24414,18 @@ paths:
       tags: [Collectors]
       summary: Update a collector group
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-947. Changes name, mode, liveness_timeout_s and anchor_probe_id. Requires collector:manage (WP-947); the feature and module monitoring gate the path.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CollectorGroupUpdateRequest' }
       responses:
         '200':
-          description: Update a collector group. The schema comes with the implementing work package.
+          description: Collector group updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CollectorGroup' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -24171,11 +24445,76 @@ paths:
       tags: [Collectors]
       summary: Delete a collector group
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-947. A group with probes is 409 with their number. Requires collector:manage (WP-947); the feature and module monitoring gate the path.
       responses:
         '204':
-          description: Done.
+          description: Collector group deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/collector-groups/{id}/members:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: addCollectorGroupMember
+      tags: [Collectors]
+      summary: Add a collector to a collector group
+      description: >-
+        Planned (WP-938, E-160); implemented by WP-947. A collector of another client is 422
+        collector_id; a collector of another group moves in one transaction. Requires collector:manage (WP-947); the feature and module monitoring gate the path.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CollectorGroupMemberRequest' }
+      responses:
+        '200':
+          description: Collector group with the new member
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CollectorGroup' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/collector-groups/{id}/members/{collector_id}:
+    x-phase: P3
+    x-feature: monitoring
+    x-status: planned
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+      - { name: collector_id, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      operationId: removeCollectorGroupMember
+      tags: [Collectors]
+      summary: Remove a collector from a collector group
+      description: >-
+        Planned (WP-938, E-160); implemented by WP-947. The last member of a group with assigned probes is 409. Requires collector:manage (WP-947); the feature and module monitoring gate the path.
+      responses:
+        '204':
+          description: Member removed
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -24198,17 +24537,31 @@ paths:
       tags: [Monitoring]
       summary: Get the availability of a CI
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Planned (WP-938, E-160); implemented by WP-973. The availability of the CI from its icmp
+        probes without parent probe; with several or none the probe with the
+        smallest percent per period counts, named per period. Requires
+        monitoring:read (routeRules entry of WP-973); the feature and module
+        monitoring gate the path.
+      parameters:
+        - { name: from, in: query, required: false, schema: { type: string, format: date }, description: First day (UTC), at most 400 days back. }
+        - { name: to, in: query, required: false, schema: { type: string, format: date }, description: Last day (UTC). }
+        - { name: granularity, in: query, required: false, schema: { type: string, enum: [day, month], default: day } }
       responses:
         '200':
-          description: Get the availability of a CI. The schema comes with the implementing work package.
+          description: Availability
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AvailabilityReport' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -30905,6 +31258,522 @@ components:
             True when the audit entries of the entity are part of the history:
             a CI's history read with audit:read (E-78). False for a caller
             without audit:read and for the other entity types.
+    ProbeOverrides:
+      type: object
+      description: >-
+        The overrides of one level of a probe (PRB-01, WP-937): interval_s,
+        timeout_s, down_count and up_count (integers, seconds), thresholds
+        and the type parameters of the register entry as flat keys (e.g.
+        count, spacing_ms for icmp). A missing key is resolved from the
+        level below, at last from the type default. Values outside the type
+        limits are 422 with field (interval_s, timeout_s, down_count,
+        up_count, params.<name>, thresholds.<name>).
+      properties:
+        interval_s: { type: integer, minimum: 1 }
+        timeout_s: { type: integer, minimum: 1 }
+        down_count: { type: integer, minimum: 1, maximum: 20 }
+        up_count: { type: integer, minimum: 1, maximum: 20 }
+        thresholds:
+          type: object
+          description: Threshold values by parameter name of the type (e.g. rtt_warn_ms, loss_warn).
+          additionalProperties: true
+      additionalProperties: true
+    Probe:
+      type: object
+      description: >-
+        A central probe definition (PRB-01, WP-935): runs in its collector
+        group (PRB-03) on the target with the type of the register. With a CI
+        client and site are those of the CI.
+      required: [id, organization_id, collector_group_id, type, target, params, enabled, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        client_id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid }
+        ci_id: { type: string, format: uuid }
+        collector_group_id: { type: string, format: uuid }
+        type:
+          type: string
+          description: Key of the probe type register (api/probe-types.json).
+        target:
+          type: string
+          description: IP address or host name, for tcp host and port, for http the URL.
+        params: { $ref: '#/components/schemas/ProbeOverrides' }
+        enabled: { type: boolean }
+        parent_probe_id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ProbeCreateRequest:
+      type: object
+      required: [type, target]
+      properties:
+        type:
+          type: string
+          description: Key of an available probe type (planned → 422 type).
+        target: { type: string, minLength: 1, maxLength: 1024 }
+        ci_id: { type: string, format: uuid }
+        client_id:
+          type: string
+          format: uuid
+          description: Required without ci_id; with a CI the CI's client applies.
+        site_id: { type: string, format: uuid }
+        collector_group_id:
+          type: string
+          format: uuid
+          description: A group of the probe's client or an org-wide one; empty takes the only group of the client.
+        params: { $ref: '#/components/schemas/ProbeOverrides' }
+        enabled: { type: boolean, default: true }
+        parent_probe_id:
+          type: string
+          format: uuid
+          description: Same organization, no cycle (409), chain at most 8 levels (422).
+    ProbeUpdateRequest:
+      type: object
+      minProperties: 1
+      properties:
+        target: { type: string, minLength: 1, maxLength: 1024 }
+        collector_group_id: { type: string, format: uuid }
+        params: { $ref: '#/components/schemas/ProbeOverrides' }
+        enabled: { type: boolean }
+        parent_probe_id:
+          type: [string, 'null']
+          format: uuid
+          description: null removes the parent probe.
+    ProbeListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Probe' }
+    ProbeValueOrigin:
+      type: string
+      description: The level an effective value comes from (PRB-01); default is the type default of the register.
+      enum: [default, org, client, group, ci, probe]
+    EffectiveProbeField:
+      type: object
+      required: [value, origin, clamped]
+      properties:
+        value:
+          description: The effective value; null for a type parameter without default and override.
+        origin: { $ref: '#/components/schemas/ProbeValueOrigin' }
+        clamped:
+          type: boolean
+          description: >-
+            The stored value lay outside the limits of the current register
+            (changed after it was written) and was moved to the limit; a
+            timeout not below the interval is lowered below it.
+        group_id:
+          type: string
+          format: uuid
+          description: The deciding monitoring group when origin is group (higher priority, on a tie the smaller name).
+    EffectiveProbe:
+      type: object
+      description: >-
+        The effective values of a probe with their origin (PRB-01, WP-937):
+        type default → organization → client → monitoring group → CI →
+        probe.
+      required: [probe_id, type, target, interval_s, timeout_s, down_count, up_count, thresholds, params]
+      properties:
+        probe_id: { type: string, format: uuid }
+        type: { type: string }
+        target: { type: string }
+        parent_probe_id: { type: string, format: uuid }
+        interval_s: { $ref: '#/components/schemas/EffectiveProbeField' }
+        timeout_s: { $ref: '#/components/schemas/EffectiveProbeField' }
+        down_count: { $ref: '#/components/schemas/EffectiveProbeField' }
+        up_count: { $ref: '#/components/schemas/EffectiveProbeField' }
+        thresholds:
+          type: object
+          description: The thresholds set on any level, by name.
+          additionalProperties: { $ref: '#/components/schemas/EffectiveProbeField' }
+        params:
+          type: object
+          description: Every parameter of the type's schema, by name.
+          additionalProperties: { $ref: '#/components/schemas/EffectiveProbeField' }
+    ProbeStateValue:
+      type: string
+      description: State of a probe (PRB-05).
+      enum: [up, degraded, down, unknown]
+    ProbeState:
+      type: object
+      required: [probe_id, state, reason]
+      properties:
+        probe_id: { type: string, format: uuid }
+        state: { $ref: '#/components/schemas/ProbeStateValue' }
+        reason:
+          type: string
+          description: Reason code (edgecore/probewire/reason.go, e.g. timeout, collector_unreachable, parent_down; no_result without a state).
+        since: { type: string, format: date-time }
+        last_result_at: { type: string, format: date-time }
+        collector_id: { type: string, format: uuid }
+    ProbeResultPoint:
+      type: object
+      required: [t, total, ok, fail, error]
+      properties:
+        t: { type: string, format: date-time }
+        total: { type: integer, description: Number of results; 1 for a raw point. }
+        ok: { type: integer }
+        fail: { type: integer }
+        error: { type: integer }
+        rtt_avg: { type: [number, 'null'], description: Milliseconds. }
+        rtt_min: { type: [number, 'null'] }
+        rtt_max: { type: [number, 'null'] }
+        loss_avg: { type: [number, 'null'], description: Fraction 0–1. }
+        value_avg: { type: [number, 'null'] }
+        value_min: { type: [number, 'null'] }
+        value_max: { type: [number, 'null'] }
+    ProbeResultSeries:
+      type: object
+      required: [tier, from, to, points]
+      properties:
+        tier:
+          type: string
+          description: The tier read (raw 14 days, 5m 90 days, 1h and 1d 400 days).
+          enum: [raw, 5m, 1h, 1d]
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        points:
+          type: array
+          maxItems: 2000
+          items: { $ref: '#/components/schemas/ProbeResultPoint' }
+    ProbeStateChange:
+      type: object
+      required: [id, probe_id, from_state, to_state, reason, observed_at, received_at, late, notify]
+      properties:
+        id: { type: string, format: uuid }
+        probe_id: { type: string, format: uuid }
+        ci_id: { type: string, format: uuid }
+        from_state: { $ref: '#/components/schemas/ProbeStateValue' }
+        to_state: { $ref: '#/components/schemas/ProbeStateValue' }
+        reason: { type: string }
+        observed_at: { type: string, format: date-time, description: Business time on the collector (E-175). }
+        received_at: { type: string, format: date-time }
+        late:
+          type: boolean
+          description: Delivered after the state had already ended (PRB-07, E-180).
+        notify: { type: boolean }
+        root_event_id: { type: string, format: uuid }
+    ProbeStateChangeListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/ProbeStateChange' }
+    AvailabilityPeriod:
+      type: object
+      required: [start, up_s, degraded_s, down_s, unknown_s, collector_unreachable_s, maintenance_s, percent]
+      properties:
+        start: { type: string, format: date, description: First day of the period (UTC). }
+        up_s: { type: integer }
+        degraded_s: { type: integer }
+        down_s: { type: integer }
+        unknown_s: { type: integer }
+        collector_unreachable_s: { type: integer }
+        maintenance_s: { type: integer }
+        percent:
+          type: [number, 'null']
+          description: (up_s + degraded_s) / (sum − unknown_s − collector_unreachable_s − maintenance_s) × 100; null without measured time (E-181).
+        probe_id:
+          type: string
+          format: uuid
+          description: The probe the period of a CI is taken from.
+    AvailabilityReport:
+      type: object
+      required: [from, to, granularity, periods]
+      properties:
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        granularity: { type: string, enum: [day, month] }
+        periods:
+          type: array
+          items: { $ref: '#/components/schemas/AvailabilityPeriod' }
+    ProbeType:
+      type: object
+      description: >-
+        An entry of the probe type register (api/probe-types.json, WP-934,
+        PRT-01): status, defaults, the system limits (E-154), credential
+        namespaces, collector capabilities and the JSON Schema of the
+        parameters. Times are seconds, the rate is checks per second.
+      required: [key, status, min_interval_s, default_interval_s, max_interval_s, min_timeout_s, default_timeout_s,
+        max_timeout_s, default_down_count, default_up_count, max_parallel_per_target, max_parallel_per_collector,
+        max_rate_per_collector, max_probes_per_target, max_payload_bytes, max_rows, credential_namespaces,
+        capabilities, params]
+      properties:
+        key: { type: string }
+        status: { type: string, enum: [available, planned] }
+        min_interval_s: { type: integer }
+        default_interval_s: { type: integer }
+        max_interval_s: { type: integer }
+        min_timeout_s: { type: integer }
+        default_timeout_s: { type: integer }
+        max_timeout_s: { type: integer }
+        default_down_count: { type: integer }
+        default_up_count: { type: integer }
+        max_parallel_per_target: { type: integer }
+        max_parallel_per_collector: { type: integer }
+        max_rate_per_collector: { type: integer }
+        max_probes_per_target: { type: integer }
+        max_payload_bytes: { type: integer }
+        max_rows: { type: integer }
+        credential_namespaces:
+          type: array
+          items: { type: string }
+        capabilities:
+          type: array
+          items: { type: string }
+        params:
+          type: object
+          description: JSON Schema (subset of 2020-12) of the type parameters.
+          additionalProperties: true
+    ProbeTypeListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/ProbeType' }
+    MonitoringProfileLevel:
+      type: string
+      enum: [org, client, group, ci]
+    MonitoringProfile:
+      type: object
+      description: >-
+        The overrides of one level for one probe type (PRB-01, WP-935).
+        level_id is the client, monitoring group or CI of the level and
+        absent at level org.
+      required: [id, organization_id, level, probe_type, params, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        level: { $ref: '#/components/schemas/MonitoringProfileLevel' }
+        level_id: { type: [string, 'null'], format: uuid }
+        probe_type: { type: string }
+        params: { $ref: '#/components/schemas/ProbeOverrides' }
+        client_id: { type: string, format: uuid, description: Scope of the profile (client of the level). }
+        site_id: { type: string, format: uuid }
+        updated_at: { type: string, format: date-time }
+    MonitoringProfileCreateRequest:
+      type: object
+      required: [level, probe_type, params]
+      properties:
+        level: { $ref: '#/components/schemas/MonitoringProfileLevel' }
+        level_id: { type: [string, 'null'], format: uuid, description: Required except at level org. }
+        probe_type: { type: string }
+        params: { $ref: '#/components/schemas/ProbeOverrides' }
+    MonitoringProfileUpdateRequest:
+      type: object
+      required: [params]
+      properties:
+        params: { $ref: '#/components/schemas/ProbeOverrides' }
+    MonitoringProfileListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/MonitoringProfile' }
+    MonitoringGroup:
+      type: object
+      description: >-
+        A static monitoring group of CIs, the device group of PRB-01 and
+        CRD-04 (E-178). Without client_id it is org-wide.
+      required: [id, organization_id, name, priority, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        client_id: { type: string, format: uuid }
+        name: { type: string, maxLength: 200 }
+        priority:
+          type: integer
+          description: Of several groups of a CI the higher priority wins per field, on a tie the smaller name.
+        member_count:
+          type: integer
+          description: >-
+            Number of member CIs in the caller's client and site scope; members
+            of other clients are not counted (F-414).
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    MonitoringGroupCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        client_id: { type: string, format: uuid }
+        priority: { type: integer, default: 0 }
+    MonitoringGroupUpdateRequest:
+      type: object
+      minProperties: 1
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        priority: { type: integer }
+    MonitoringGroupDeleteResult:
+      type: object
+      required: [deleted_profiles]
+      properties:
+        deleted_profiles: { type: integer, description: Number of profiles deleted with the group. }
+    MonitoringGroupListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/MonitoringGroup' }
+    MonitoringGroupMember:
+      type: object
+      required: [group_id, ci_id]
+      properties:
+        group_id: { type: string, format: uuid }
+        ci_id: { type: string, format: uuid }
+        client_id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+    MonitoringGroupMembersRequest:
+      type: object
+      required: [ci_ids]
+      properties:
+        ci_ids:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items: { type: string, format: uuid }
+    MonitoringGroupMemberSet:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items: { $ref: '#/components/schemas/MonitoringGroupMember' }
+    MonitoringGroupMemberListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/MonitoringGroupMember' }
+    CollectorGroupMember:
+      type: object
+      description: A collector in its group (a collector is in exactly one group, PRB-03, PRB-10).
+      required: [collector_id, group_id, priority, weight, member_status, config_version, assigned_probes]
+      properties:
+        collector_id: { type: string, format: uuid }
+        group_id: { type: string, format: uuid }
+        priority: { type: integer, description: Failover order (the best priority runs the probes in mode failover). }
+        weight: { type: integer, minimum: 1 }
+        member_status: { type: string, enum: [healthy, degraded, down] }
+        last_alive_at: { type: string, format: date-time }
+        clock_offset_ms: { type: integer }
+        capacity_hint: { type: integer }
+        config_version: { type: integer, format: int64, description: Version of the assignment set the member applied. }
+        assigned_probes: { type: integer, description: Probes assigned to the member (probe_assignment). }
+    CollectorGroup:
+      type: object
+      description: >-
+        A group of collectors in a customer network that share its probes
+        (PRB-03, COL-06, E-174, E-176). Without client_id it is org-wide.
+      required: [id, organization_id, name, mode, liveness_timeout_s, status, status_changed_at, members, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        client_id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid }
+        name: { type: string, maxLength: 200 }
+        mode: { type: string, enum: [distributed, failover] }
+        liveness_timeout_s: { type: integer, minimum: 20, maximum: 300 }
+        anchor_probe_id: { type: string, format: uuid }
+        status: { type: string, enum: [reachable, unreachable] }
+        status_changed_at: { type: string, format: date-time }
+        members:
+          type: array
+          items: { $ref: '#/components/schemas/CollectorGroupMember' }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CollectorGroupCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        client_id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid }
+        mode: { type: string, enum: [distributed, failover], default: distributed }
+        liveness_timeout_s: { type: integer, minimum: 20, maximum: 300, default: 30 }
+        anchor_probe_id: { type: string, format: uuid }
+    CollectorGroupUpdateRequest:
+      type: object
+      minProperties: 1
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        mode: { type: string, enum: [distributed, failover] }
+        liveness_timeout_s: { type: integer, minimum: 20, maximum: 300 }
+        anchor_probe_id: { type: [string, 'null'], format: uuid, description: null removes the anchor probe. }
+    CollectorGroupMemberRequest:
+      type: object
+      required: [collector_id]
+      properties:
+        collector_id: { type: string, format: uuid }
+        priority: { type: integer, default: 0 }
+        weight: { type: integer, minimum: 1, default: 100 }
+    CollectorGroupListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/CollectorGroup' }
+    MonitoringEventKind:
+      type: string
+      description: Kind of a monitoring event (WP-979), from snmpTrapOID.0 or the generic SNMPv1 trap type.
+      enum: [link_down, link_up, cold_start, warm_start, auth_failure, other]
+    MonitoringEvent:
+      type: object
+      description: >-
+        A monitoring event of the table monitoring_event (SNMP traps and
+        others, WP-979) with its probe and CI. Not a domain event of the
+        event register.
+      required: [id, collector_id, source_ip, kind, varbinds, observed_at, received_at]
+      properties:
+        id: { type: string, format: uuid }
+        ci_id: { type: string, format: uuid }
+        probe_id: { type: string, format: uuid }
+        collector_id: { type: string, format: uuid }
+        source_ip: { type: string, description: IPv4 or IPv6 address of the sender. }
+        kind: { $ref: '#/components/schemas/MonitoringEventKind' }
+        trap_oid: { type: string }
+        varbinds:
+          type: array
+          description: At most 64 variable bindings and 16 KiB; the rest is cut off.
+          items:
+            type: object
+            properties:
+              oid: { type: string }
+              type: { type: string }
+              value: { type: string }
+        observed_at: { type: string, format: date-time }
+        received_at: { type: string, format: date-time }
+    MonitoringEventListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/MonitoringEvent' }
     ProblemDetail:
       type: object
       description: >-
@@ -30934,6 +31803,18 @@ components:
             Request field a 400, 409 or 422 refers to (e.g. the unique `name`
             of a client, or `key` of an attribute definition that cannot be
             composed, 422).
+        violations:
+          type: array
+          description: >-
+            Every failing field of a validation that checks several fields at
+            once (e.g. the probe and monitoring profile values against the
+            probe type limits, 422); `field` names the first.
+          items:
+            type: object
+            required: [field, detail]
+            properties:
+              field: { type: string }
+              detail: { type: string }
         code:
           type: string
           description: >-
