@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000313_alarm
+Stand: Migration 000314_config_snapshot
 
 ## Prüfung
 
@@ -1935,6 +1935,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `collector_group_member` | ja | ja | collector_group_member_isolation (ALL), collector_group_member_scoped_delete (DELETE), collector_group_member_scoped_update (UPDATE) |
 | `compliance_result` | ja | ja | compliance_result_scoped_delete (DELETE), compliance_result_scoped_update (UPDATE), compliance_result_tenant_isolation (ALL) |
 | `compliance_rule` | ja | ja | compliance_rule_tenant_isolation (ALL) |
+| `config_snapshot` | ja | ja | config_snapshot_isolation (ALL), config_snapshot_scoped_delete (DELETE), config_snapshot_scoped_update (UPDATE) |
 | `consumable` | ja | ja | consumable_isolation (ALL), consumable_scoped_delete (DELETE), consumable_scoped_update (UPDATE) |
 | `contact` | ja | ja | contact_scoped_delete (DELETE), contact_scoped_update (UPDATE), org_isolation (ALL) |
 | `contract` | ja | ja | contract_isolation (ALL), contract_scoped_delete (DELETE), contract_scoped_update (UPDATE) |

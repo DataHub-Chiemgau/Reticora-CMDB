@@ -119,6 +119,7 @@ audit entry (`retention.*`).
 | `retention.review_items` (03:47) | resolved review items | 1 year | `RETICORA_RETENTION_REVIEW_ITEM_DAYS` (365) |
 | `retention.merge_snapshots` (03:57) | CI merges (`ci_merge`): snapshot, then the row with its tombstone | snapshot 30 days, tombstone 12 months | none: the periods the merge recorded (`snapshot_until`, `tombstone_until`) |
 | `retention.bulk_change_set` (04:07) | `bulk_change_set` (change sets of bulk jobs, the basis of their revert) | 30 days | none: fixed period |
+| `retention.config_snapshot` (04:17) | `config_snapshot` (versions of the device configurations, ALR-07, WP-1052) by `collected_at`, in portions of at most 10,000; the latest version of each CI stays whatever its age | 400 days | none: fixed period |
 | `alarm.retention` (04:37, module `monitoring`) | resolved alarms (`alarm`, by `resolved_at`) with their state log (`alarm_transition`, by cascade); open, pending and acknowledged alarms stay whatever their age; portions of at most 10,000 alarms, one transaction each (ALR-01, WP-981) | 400 days | none: fixed period |
 
 A value below the minimum stops the start. The audit log keeps its chain

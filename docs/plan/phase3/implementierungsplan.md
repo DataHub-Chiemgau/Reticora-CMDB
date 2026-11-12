@@ -12885,7 +12885,7 @@ ALR-06;[P3];E;frontend/src/components/sla/AvailabilityReport.test.tsx;WP-1051
 **Akzeptanzkriterien:**
 
 - [ ] AK1: Tabelle `config_snapshot` mit `id`, `organization_id`, `client_id`, `site_id`, `ci_id`, `collector_id` (nullable), `collected_at`, `received_at`, `source` ∈ `ssh|gnmi`, `trigger` ∈ `schedule|snmp|trap|gnmi`, `platform`, `sha256` (64 Hex-Zeichen, `CHECK`), `size_bytes` (unkomprimiert, `CHECK size_bytes BETWEEN 1 AND 2097152`), `content` (`bytea`, gzip, `CHECK octet_length(content) <= 2097152`), `masked_count` (Ganzzahl ≥ 0). Eindeutig `(ci_id, collected_at)`; Index `(organization_id, ci_id, collected_at DESC)`.
-- [ ] AK2: Port `configsnap.Store` mit PostgreSQL-Implementierung: `InsertIfChanged(ctx, snap) (stored, previous *Snapshot, created bool, err error)` nimmt in der Transaktion eine Advisory-Sperre je CI, vergleicht `sha256` mit der jüngsten Version und legt nur bei Abweichung eine Zeile an; `Latest(ci)`, `List(ci, cursor)` (ohne `content`), `Get(id)` (mit entpacktem Inhalt). `client_id` und `site_id` übernimmt der Store aus dem CI.
+- [ ] AK2: Port `configsnap.Store` mit PostgreSQL-Implementierung: `InsertIfChanged(ctx, snap) (stored, previous *Snapshot, created bool, err error)` nimmt in der Transaktion eine Advisory-Sperre je CI, vergleicht `sha256` mit der jüngsten Version und legt nur bei Abweichung eine Zeile an; eine abweichende Version mit `collected_at` nicht nach der jüngsten (späte Lieferung) wird nicht gespeichert und ergibt `ErrOutOfOrder` (Ergänzung 2026-11-12 bei der Umsetzung, nach Empfehlung; Test `TestInsertIfChangedLateDeliveryNotStored`); `Latest(ci)`, `List(ci, cursor)` (ohne `content`), `Get(id)` (mit entpacktem Inhalt). `client_id` und `site_id` übernimmt der Store aus dem CI.
 - [ ] AK3: Retention-Lauf `retention.config_snapshot` (täglich 04:17, `MaxCatchUp` 1) in `jobs.Retention`: löscht je Organisation Versionen mit `collected_at` älter als 400 Tage in Portionen von höchstens 10.000, außer der jüngsten Version je CI. `docs/ops/workers.md` führt den Lauf in der Retention-Tabelle.
 
 **Dateien (11 Einträge, Migration = 2):**
@@ -12904,8 +12904,9 @@ ALR-06;[P3];E;frontend/src/components/sla/AvailabilityReport.test.tsx;WP-1051
 **Migration/RLS:** Migration `<nächste Nr.>_config_snapshot`:
 - Neue Mandantentabelle `config_snapshot` mit RLS und FORCE RLS; Policies mit USING und WITH CHECK über `app.org_id`, `app.client_scope` und `app.site_scope` (NULL-Semantik nach E-09).
 - BEFORE-TRUNCATE-Trigger `reticora_truncate_guard` (Muster 000144).
+- Scope aus dem CI (Ergänzung 2026-11-12 bei der Umsetzung, Muster 000295/000307): `config_snapshot_scope` (BEFORE INSERT OR UPDATE OF ci_id, client_id, site_id, organization_id) leitet `client_id`/`site_id` aus dem CI ab, `config_snapshot_scope_propagation` (AFTER UPDATE ON ci, wenn sich `client_id` oder `site_id` ändert) zieht die Versionen eines umgezogenen CIs nach. Test `TestSnapshotScopeFollowsMovedCI`.
 - Zusammengesetzte Fremdschlüssel (Konvention 19): `(ci_id, organization_id) REFERENCES ci (id, organization_id) ON DELETE CASCADE`, `(client_id, organization_id) REFERENCES client (id, organization_id)`; `collector_id` ohne FK (der Collector kann gelöscht werden, die Version bleibt).
-- Down entfernt die Tabelle. `docs/schema-baseline.md`: Zeile „Stand“ und neue Tabellenzeile; `TestRLSCatalog`, `TestTenantReferencesCarryOrganization` und `TestClientReferencesCarryOrganization` ohne neue Ausnahme.
+- Down entfernt die Tabelle samt Triggern und Funktionen. `docs/schema-baseline.md`: Zeile „Stand“ und neue Tabellenzeile; `TestRLSCatalog`, `TestTenantReferencesCarryOrganization` und `TestClientReferencesCarryOrganization` ohne neue Ausnahme.
 
 **Tests:**
 

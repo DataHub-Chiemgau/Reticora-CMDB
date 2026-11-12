@@ -482,6 +482,7 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 		{"notification digests (NTF-04, WP-508)", notify.DigestKind},
 		{"trial end (ENT-07, WP-884)", operator.TrialEndKind},
 		{"credential age check (CRD-05, WP-897)", credential.AgeCheckKind},
+		{"retention of the configuration versions (ALR-07, WP-1052)", jobs.RetentionConfigSnapshot},
 	} {
 		if !registered[job.kind] {
 			t.Errorf("JOB-02 %s: kind %s is not registered (registered: %v)", job.requirement, job.kind, registered)
@@ -542,7 +543,8 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 	// --no-db: the notice runs need the database and are not registered.
 	for kind := range registeredSystemJobs(t, systemJobTestDeps(t, cfg, false)) {
 		if kind == jobs.EntitlementNoticesKind || kind == jobs.CertificateNoticesKind || kind == audit.RouteIntentsKind ||
-			kind == jobs.ReapKind || kind == notify.DigestKind || kind == operator.TrialEndKind || kind == credential.AgeCheckKind {
+			kind == jobs.ReapKind || kind == notify.DigestKind || kind == operator.TrialEndKind || kind == credential.AgeCheckKind ||
+			kind == jobs.RetentionConfigSnapshot {
 			t.Errorf("without a database %s is registered", kind)
 		}
 	}

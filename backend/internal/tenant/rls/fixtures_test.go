@@ -139,6 +139,9 @@ var matrixOverrides = map[string]map[string]string{
 	// of its level, client_id is the scope (monitoring_profile_level_target_check).
 	"probe":              {"type": "icmp", "ci_id": "@uuid"},
 	"monitoring_profile": {"level": "group", "group_id": "@uuid", "probe_type": "icmp", "params": "{}"},
+	// A configuration version names its platform and a SHA-256 in hex
+	// (config_snapshot_platform_check, config_snapshot_sha256_check, WP-1052).
+	"config_snapshot": {"platform": "cisco_ios", "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
 }
 
 var anyArrayCheck = regexp.MustCompile(`^CHECK \(\((\w+) = ANY \(\(?ARRAY\['([^']*)'`)

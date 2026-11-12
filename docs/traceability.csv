@@ -1721,3 +1721,4 @@ ALR-03;[P3];E;backend/internal/topology/analyzer_test.go;WP-1025
 ALR-08;[P3];E;backend/internal/alarm/forecast/forecast_test.go;WP-1059
 ALR-01;[P3];E;backend/internal/alarm/pg_store_integration_test.go;WP-981
 MON-04;[P3];E;backend/internal/alarm/alarm_scope_integration_test.go;WP-981
+ALR-07;[P3];E;backend/internal/alarm/configsnap/pg_store_integration_test.go;WP-1052

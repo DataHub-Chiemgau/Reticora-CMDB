@@ -58,6 +58,15 @@ const (
 	// BulkChangeSetRetention is how long the change set of a bulk job is
 	// kept (WP-135): a fixed period, far beyond the revert window of 24 h.
 	BulkChangeSetRetention = 30 * 24 * time.Hour
+	// RetentionConfigSnapshot ends the versions of the device
+	// configurations (ALR-07, WP-1052).
+	RetentionConfigSnapshot = "retention.config_snapshot"
+	// ConfigSnapshotRetention is how long a configuration version is kept
+	// (ALR-07, E-207: 400 days); the latest version of a CI always stays.
+	ConfigSnapshotRetention = 400 * 24 * time.Hour
+	// ConfigSnapshotBatch is the largest portion of versions one statement
+	// deletes.
+	ConfigSnapshotBatch = 10000
 )
 
 // Retention deletes expired data.
@@ -106,6 +115,7 @@ func (r *Retention) Schedules() []Schedule {
 		{Kind: RetentionReviewItems, Spec: "47 3 * * *", MaxCatchUp: 1, Timeout: time.Hour, Run: r.RunReviewItems},
 		{Kind: RetentionMergeSnapshots, Spec: "57 3 * * *", MaxCatchUp: 1, Timeout: time.Hour, Run: r.RunMergeSnapshots},
 		{Kind: RetentionBulkChangeSet, Spec: "7 4 * * *", MaxCatchUp: 1, Timeout: time.Hour, Run: r.RunBulkChangeSet},
+		{Kind: RetentionConfigSnapshot, Spec: "17 4 * * *", MaxCatchUp: 1, Timeout: time.Hour, Run: r.RunConfigSnapshot},
 	}
 }
 
@@ -399,6 +409,33 @@ func (r *Retention) RunBulkChangeSet(ctx context.Context) error {
 			return 0, fmt.Errorf("delete bulk change sets: %w", err)
 		}
 		return int(tag.RowsAffected()), nil
+	})
+}
+
+// RunConfigSnapshot deletes the configuration versions (config_snapshot,
+// WP-1052) collected more than ConfigSnapshotRetention ago, in portions of
+// at most ConfigSnapshotBatch, except the latest version of each CI, which
+// a later collection compares against (ALR-07).
+func (r *Retention) RunConfigSnapshot(ctx context.Context) error {
+	cutoff := r.now().Add(-ConfigSnapshotRetention)
+	return r.eachOrganization(ctx, RetentionConfigSnapshot, true, func(ctx context.Context, tx pgx.Tx, orgID string) (int, error) {
+		total := 0
+		for {
+			tag, err := tx.Exec(ctx, `DELETE FROM config_snapshot WHERE id IN (
+				SELECT s.id FROM config_snapshot s
+				 WHERE s.organization_id = $1 AND s.collected_at < $2
+				   AND EXISTS (SELECT 1 FROM config_snapshot n
+				                WHERE n.organization_id = s.organization_id AND n.ci_id = s.ci_id
+				                  AND n.collected_at > s.collected_at)
+				 LIMIT $3)`, orgID, cutoff, ConfigSnapshotBatch)
+			if err != nil {
+				return total, fmt.Errorf("delete configuration versions: %w", err)
+			}
+			total += int(tag.RowsAffected())
+			if tag.RowsAffected() < ConfigSnapshotBatch {
+				return total, nil
+			}
+		}
 	})
 }
 

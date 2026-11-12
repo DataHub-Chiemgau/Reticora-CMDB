@@ -809,3 +809,65 @@ func TestRetentionDeletesOldBulkChangeSets(t *testing.T) {
 		t.Errorf("chain of A after the run: %+v %v", result, err)
 	}
 }
+
+// TestRetentionDeletesOldConfigSnapshots covers ALR-07 (WP-1052, E-207):
+// retention.config_snapshot (daily 04:17) deletes the configuration
+// versions collected more than 400 days ago, a version 399 days old stays,
+// and the latest version of a CI stays even at 500 days, because the next
+// collection compares against it. The run is audited.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestRetentionDeletesOldConfigSnapshots(t *testing.T) {
+	f := scopetest.Seed(t, "e9")
+	bg := context.Background()
+	now := time.Now().UTC()
+	day := 24 * time.Hour
+	version := func(ciID string, age time.Duration) string {
+		t.Helper()
+		var id string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO config_snapshot (organization_id, client_id, ci_id, collected_at, source, trigger,
+			platform, sha256, size_bytes, content)
+			VALUES ($1, $2, $3, $4, 'ssh', 'schedule', 'cisco_ios', encode(sha256(gen_random_uuid()::text::bytea), 'hex'), 1, '\x00')
+			RETURNING id::text`, f.OrgA, f.Client1, ciID, now.Add(-age)).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	changing := f.CI(t, f.OrgA, f.Client1, "cfg-retention-changing")
+	quiet := f.CI(t, f.OrgA, f.Client1, "cfg-retention-quiet")
+	old := version(changing, 401*day)
+	young := version(changing, 399*day)
+	latest := version(changing, day)
+	onlyVersion := version(quiet, 500*day)
+
+	r := jobs.NewRetention(f.App, jobs.RetentionFromDays(10, 3*365, 90, 365)).WithClock(func() time.Time { return now })
+	if !slices.ContainsFunc(r.Schedules(), func(s jobs.Schedule) bool {
+		return s.Kind == jobs.RetentionConfigSnapshot && s.Spec == "17 4 * * *" && s.MaxCatchUp == 1
+	}) {
+		t.Fatalf("the schedules lack %s at 04:17", jobs.RetentionConfigSnapshot)
+	}
+	if err := r.RunConfigSnapshot(bg); err != nil {
+		t.Fatal(err)
+	}
+	exists := func(id string) bool {
+		t.Helper()
+		var n int
+		if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM config_snapshot WHERE id = $1`, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n == 1
+	}
+	if exists(old) {
+		t.Error("the version 401 days old stays")
+	}
+	for name, id := range map[string]string{"399 days old": young, "latest": latest, "only version, 500 days old": onlyVersion} {
+		if !exists(id) {
+			t.Errorf("version %s was deleted", name)
+		}
+	}
+	var audited int
+	if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM audit_log WHERE organization_id = $1 AND action = $2 AND changes->>'deleted' = '1'`,
+		f.OrgA, jobs.RetentionConfigSnapshot).Scan(&audited); err != nil || audited != 1 {
+		t.Errorf("audit entries of the run: %d, %v; want one with deleted 1", audited, err)
+	}
+}
