@@ -13651,6 +13651,7 @@ paths:
       responses:
         '201': { description: Workflow created, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowDefinition' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/workflows/{id}:
@@ -13700,6 +13701,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
         '412':
           description: If-Match does not name the current version of the workflow definition
           content:
@@ -39622,8 +39624,27 @@ components:
         organization_id: { type: string }
         name: { type: string }
         description: { type: string }
-        trigger: { $ref: '#/components/schemas/JSONValue' }
-        conditions: { type: array, items: { $ref: '#/components/schemas/JSONValue' } }
+        trigger:
+          $ref: '#/components/schemas/JSONValue'
+          description: >-
+            Trigger contract of phase 3 (WFL-02): {"type": "manual"};
+            {"type": "event", "event": "<event type>", "filter": <one MET-45
+            condition node, optional>, "allow_workflow_origin": <boolean,
+            optional>} (evaluated from WP-1090 on); {"type": "schedule",
+            "cron": "<cron expression>", "timezone": "<IANA zone>"} (evaluated
+            from WP-1091 on). The filter is checked with the MET-45 condition
+            grammar of api/rules.schema.json when the definition is written; a
+            refused filter is 422 on trigger.filter with the path of the error.
+        conditions:
+          type: array
+          items: { $ref: '#/components/schemas/JSONValue' }
+          description: >-
+            MET-45 condition nodes of api/rules.schema.json (eq, ne, in,
+            not_in, gt, gte, lt, lte, contains, empty, not_empty, all, any,
+            not; CH18, E-229) combined with all; an empty list always holds.
+            They are evaluated over the run context flattened to dot paths
+            (event.type, data.<field>, ci.status, ci.attributes.<name>). A
+            refused node is 422 on conditions[i] with the path of the error.
         actions: { type: array, items: { $ref: '#/components/schemas/JSONValue' } }
         active: { type: boolean }
         version: { type: integer, minimum: 1, description: Number of the current definition version (WFL-02); the ETag. }
@@ -39650,8 +39671,27 @@ components:
       properties:
         name: { type: string }
         description: { type: string }
-        trigger: { $ref: '#/components/schemas/JSONValue' }
-        conditions: { type: array, items: { $ref: '#/components/schemas/JSONValue' } }
+        trigger:
+          $ref: '#/components/schemas/JSONValue'
+          description: >-
+            Trigger contract of phase 3 (WFL-02): {"type": "manual"};
+            {"type": "event", "event": "<event type>", "filter": <one MET-45
+            condition node, optional>, "allow_workflow_origin": <boolean,
+            optional>} (evaluated from WP-1090 on); {"type": "schedule",
+            "cron": "<cron expression>", "timezone": "<IANA zone>"} (evaluated
+            from WP-1091 on). The filter is checked with the MET-45 condition
+            grammar of api/rules.schema.json when the definition is written; a
+            refused filter is 422 on trigger.filter with the path of the error.
+        conditions:
+          type: array
+          items: { $ref: '#/components/schemas/JSONValue' }
+          description: >-
+            MET-45 condition nodes of api/rules.schema.json (eq, ne, in,
+            not_in, gt, gte, lt, lte, contains, empty, not_empty, all, any,
+            not; CH18, E-229) combined with all; an empty list always holds.
+            They are evaluated over the run context flattened to dot paths
+            (event.type, data.<field>, ci.status, ci.attributes.<name>). A
+            refused node is 422 on conditions[i] with the path of the error.
         actions: { type: array, items: { $ref: '#/components/schemas/JSONValue' } }
         active: { type: boolean }
     UpdateWorkflowDefinitionRequest:
@@ -39659,8 +39699,27 @@ components:
       properties:
         name: { type: string }
         description: { type: string }
-        trigger: { $ref: '#/components/schemas/JSONValue' }
-        conditions: { type: array, items: { $ref: '#/components/schemas/JSONValue' } }
+        trigger:
+          $ref: '#/components/schemas/JSONValue'
+          description: >-
+            Trigger contract of phase 3 (WFL-02): {"type": "manual"};
+            {"type": "event", "event": "<event type>", "filter": <one MET-45
+            condition node, optional>, "allow_workflow_origin": <boolean,
+            optional>} (evaluated from WP-1090 on); {"type": "schedule",
+            "cron": "<cron expression>", "timezone": "<IANA zone>"} (evaluated
+            from WP-1091 on). The filter is checked with the MET-45 condition
+            grammar of api/rules.schema.json when the definition is written; a
+            refused filter is 422 on trigger.filter with the path of the error.
+        conditions:
+          type: array
+          items: { $ref: '#/components/schemas/JSONValue' }
+          description: >-
+            MET-45 condition nodes of api/rules.schema.json (eq, ne, in,
+            not_in, gt, gte, lt, lte, contains, empty, not_empty, all, any,
+            not; CH18, E-229) combined with all; an empty list always holds.
+            They are evaluated over the run context flattened to dot paths
+            (event.type, data.<field>, ci.status, ci.attributes.<name>). A
+            refused node is 422 on conditions[i] with the path of the error.
         actions: { type: array, items: { $ref: '#/components/schemas/JSONValue' } }
         active: { type: boolean }
     WorkflowStep:

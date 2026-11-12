@@ -111,6 +111,10 @@ func (h *Handler) CreateDefinition(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, 400, "Bad Request", "name, trigger and actions are required")
 		return
 	}
+	if err := ValidateDefinition(req.Trigger, req.Conditions); err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
 	active := true
 	if req.Active != nil {
 		active = *req.Active
@@ -141,6 +145,10 @@ func (h *Handler) UpdateDefinition(w http.ResponseWriter, r *http.Request) {
 	var req UpdateDefinitionRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, 400, "Bad Request", err.Error())
+		return
+	}
+	if err := ValidateDefinition(req.Trigger, req.Conditions); err != nil {
+		api.WriteFieldError(w, err)
 		return
 	}
 	if sent {

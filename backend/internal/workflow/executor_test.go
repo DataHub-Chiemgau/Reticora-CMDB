@@ -1,8 +1,13 @@
 package workflow
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +17,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
+	"github.com/go-chi/chi/v5"
 )
 
 func TestExecutorApprovalFlow(t *testing.T) {
@@ -435,5 +441,114 @@ func TestSetCIFieldRefusesInstanceAttributes(t *testing.T) {
 		if _, err := overrides.Get(ctx, "org-1", item.ID, "contract"); !errors.Is(err, override.ErrNotFound) {
 			t.Errorf("provenance of the refused instance attribute: %v, want none", err)
 		}
+	}
+}
+
+// TestExecutorConditionFalseCancelsRun: a MET-45 condition of the version
+// that does not hold for the run context cancels the run before any step
+// (WP-1087); one that holds runs the actions.
+func TestExecutorConditionFalseCancelsRun(t *testing.T) {
+	ctx := context.Background()
+	repo := NewMemoryRepository()
+	exec := NewExecutor(repo, ticket.NewMemoryRepository(), ci.NewMemoryRepository(), form.NewMemoryRepository(), nil)
+	def := &Definition{OrganizationID: "org-1", Name: "wf", Trigger: JSONMap{"type": "manual"},
+		Conditions: []JSONMap{{"op": "any", "rules": []any{
+			map[string]any{"op": "eq", "field": "data.to_state", "value": "retired"},
+			map[string]any{"op": "gte", "field": "ci.attributes.rack_units", "value": 4},
+		}}},
+		Actions: []JSONMap{{"type": "noop"}}, Active: true}
+	if err := repo.CreateDefinition(ctx, def); err != nil {
+		t.Fatal(err)
+	}
+	run, err := exec.Trigger(ctx, "org-1", def, "manual", JSONMap{"data": map[string]any{"to_state": "active"}, "ci": map[string]any{"attributes": map[string]any{"rack_units": 2}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != StatusCancelled {
+		t.Fatalf("run with a false condition: %s, want cancelled", run.Status)
+	}
+	if steps, _ := repo.ListSteps(ctx, "org-1", run.ID); len(steps) != 0 {
+		t.Fatalf("cancelled run has steps: %+v", steps)
+	}
+	run, err = exec.Trigger(ctx, "org-1", def, "manual", JSONMap{"ci": map[string]any{"attributes": map[string]any{"rack_units": "4"}}})
+	if err != nil || run.Status != StatusSucceeded {
+		t.Fatalf("run with a true condition: %+v %v, want succeeded", run, err)
+	}
+}
+
+// TestCreateDefinitionInvalidCondition422: POST and PATCH refuse a
+// condition that is no MET-45 node with 422 and the field of the path.
+func TestCreateDefinitionInvalidCondition422(t *testing.T) {
+	repo := NewMemoryRepository()
+	router := chi.NewRouter()
+	NewHandler(repo, NewExecutor(repo, nil, nil, nil, nil)).RegisterRoutes(router)
+	tctx := tenant.WithTenant(context.Background(), tenant.TenantInfo{OrganizationID: "org-1", UserID: "u-1"})
+	do := func(method, path string, body any) *httptest.ResponseRecorder {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(method, path, bytes.NewReader(raw)).WithContext(tctx)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+	for _, c := range []struct {
+		name       string
+		conditions []any
+		field      string
+	}{
+		{"unknown operator", []any{map[string]any{"op": "matches", "field": "name", "value": "^sw"}}, "conditions[0].op"},
+		{"value rule pattern", []any{map[string]any{"op": "eq", "field": "a", "value": 1}, map[string]any{"op": "pattern", "pattern": "^a"}}, "conditions[1].op"},
+		{"missing field", []any{map[string]any{"op": "all", "rules": []any{map[string]any{"op": "eq", "value": "x"}}}}, "conditions[0].rules[0].field"},
+	} {
+		rec := do(http.MethodPost, "/api/v1/workflows", map[string]any{"name": "wf", "trigger": map[string]any{"type": "manual"}, "conditions": c.conditions, "actions": []any{map[string]any{"type": "noop"}}})
+		var p api.FieldProblem
+		if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil || rec.Code != http.StatusUnprocessableEntity || p.Field != c.field {
+			t.Errorf("%s: %d %s, want 422 on %s", c.name, rec.Code, rec.Body.String(), c.field)
+		}
+	}
+	rec := do(http.MethodPost, "/api/v1/workflows", map[string]any{"name": "wf", "trigger": map[string]any{"type": "event", "event": "ci.created", "filter": map[string]any{"op": "exists", "field": "x"}}, "actions": []any{map[string]any{"type": "noop"}}})
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"field":"trigger.filter.op"`) {
+		t.Errorf("trigger filter: %d %s, want 422 on trigger.filter.op", rec.Code, rec.Body.String())
+	}
+	rec = do(http.MethodPost, "/api/v1/workflows", map[string]any{"name": "wf", "trigger": map[string]any{"type": "manual"}, "conditions": []any{map[string]any{"op": "eq", "field": "ci.status", "value": "active"}}, "actions": []any{map[string]any{"type": "noop"}}})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("valid definition: %d %s", rec.Code, rec.Body.String())
+	}
+	var d Definition
+	if err := json.Unmarshal(rec.Body.Bytes(), &d); err != nil {
+		t.Fatal(err)
+	}
+	rec = do(http.MethodPatch, "/api/v1/workflows/"+d.ID, map[string]any{"conditions": []any{map[string]any{"op": "gte", "field": "n", "value": "x"}}})
+	if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"field":"conditions[0].value"`) {
+		t.Errorf("PATCH invalid condition: %d %s, want 422 on conditions[0].value", rec.Code, rec.Body.String())
+	}
+	if got, _ := repo.GetDefinition(tctx, "org-1", d.ID); got == nil || got.Version != 1 {
+		t.Errorf("refused PATCH changed the definition: %+v", got)
+	}
+	// A definition migration 000330 deactivated keeps its G1 condition: a
+	// PATCH checks the conditions in effect, so it is neither switched on
+	// again nor carried into a new version; a rename stays possible.
+	legacy := &Definition{OrganizationID: "org-1", Name: "legacy", Trigger: JSONMap{"type": "manual"},
+		Conditions: []JSONMap{{"field": "name", "op": "matches", "value": "^sw"}}, Actions: []JSONMap{{"type": "noop"}}}
+	if err := repo.CreateDefinition(tctx, legacy); err != nil {
+		t.Fatal(err)
+	}
+	for _, patch := range []map[string]any{
+		{"active": true},
+		{"actions": []any{map[string]any{"type": "noop", "n": 2}}},
+	} {
+		rec = do(http.MethodPatch, "/api/v1/workflows/"+legacy.ID, patch)
+		if rec.Code != http.StatusUnprocessableEntity || !strings.Contains(rec.Body.String(), `"field":"conditions[0].op"`) {
+			t.Errorf("PATCH %v of a deactivated legacy definition: %d %s, want 422 on conditions[0].op", patch, rec.Code, rec.Body.String())
+		}
+	}
+	if got, _ := repo.GetDefinition(tctx, "org-1", legacy.ID); got == nil || got.Active || got.Version != 1 {
+		t.Errorf("refused PATCH changed the legacy definition: %+v", got)
+	}
+	if rec = do(http.MethodPatch, "/api/v1/workflows/"+legacy.ID, map[string]any{"name": "legacy-renamed"}); rec.Code != http.StatusOK {
+		t.Errorf("rename of a deactivated legacy definition: %d %s", rec.Code, rec.Body.String())
 	}
 }

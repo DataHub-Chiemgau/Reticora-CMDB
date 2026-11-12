@@ -1772,3 +1772,4 @@ ADM-07;[P3];E;backend/internal/admp/sync_integration_test.go;WP-1075
 ADM-06;[P3];E;backend/internal/admp/holder_integration_test.go;WP-1076
 SEC-05;[B];E;backend/internal/admp/holder_integration_test.go;WP-1076
 IPM-16;[P3];G3;backend/internal/ipam/asn_integration_test.go;WP-1067
+WFL-02;[P3];F;backend/internal/workflow/conditions_test.go;WP-1087

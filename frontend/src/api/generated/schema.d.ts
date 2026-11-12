@@ -19391,7 +19391,9 @@ export interface components {
       organization_id: string;
       name: string;
       description?: string;
+      /** @description Trigger contract of phase 3 (WFL-02): {"type": "manual"}; {"type": "event", "event": "<event type>", "filter": <one MET-45 condition node, optional>, "allow_workflow_origin": <boolean, optional>} (evaluated from WP-1090 on); {"type": "schedule", "cron": "<cron expression>", "timezone": "<IANA zone>"} (evaluated from WP-1091 on). The filter is checked with the MET-45 condition grammar of api/rules.schema.json when the definition is written; a refused filter is 422 on trigger.filter with the path of the error. */
       trigger: components['schemas']['JSONValue'];
+      /** @description MET-45 condition nodes of api/rules.schema.json (eq, ne, in, not_in, gt, gte, lt, lte, contains, empty, not_empty, all, any, not; CH18, E-229) combined with all; an empty list always holds. They are evaluated over the run context flattened to dot paths (event.type, data.<field>, ci.status, ci.attributes.<name>). A refused node is 422 on conditions[i] with the path of the error. */
       conditions: components['schemas']['JSONValue'][];
       actions: components['schemas']['JSONValue'][];
       active: boolean;
@@ -19421,7 +19423,9 @@ export interface components {
     CreateWorkflowDefinitionRequest: {
       name: string;
       description?: string;
+      /** @description Trigger contract of phase 3 (WFL-02): {"type": "manual"}; {"type": "event", "event": "<event type>", "filter": <one MET-45 condition node, optional>, "allow_workflow_origin": <boolean, optional>} (evaluated from WP-1090 on); {"type": "schedule", "cron": "<cron expression>", "timezone": "<IANA zone>"} (evaluated from WP-1091 on). The filter is checked with the MET-45 condition grammar of api/rules.schema.json when the definition is written; a refused filter is 422 on trigger.filter with the path of the error. */
       trigger: components['schemas']['JSONValue'];
+      /** @description MET-45 condition nodes of api/rules.schema.json (eq, ne, in, not_in, gt, gte, lt, lte, contains, empty, not_empty, all, any, not; CH18, E-229) combined with all; an empty list always holds. They are evaluated over the run context flattened to dot paths (event.type, data.<field>, ci.status, ci.attributes.<name>). A refused node is 422 on conditions[i] with the path of the error. */
       conditions?: components['schemas']['JSONValue'][];
       actions: components['schemas']['JSONValue'][];
       active?: boolean;
@@ -19429,7 +19433,9 @@ export interface components {
     UpdateWorkflowDefinitionRequest: {
       name?: string;
       description?: string;
+      /** @description Trigger contract of phase 3 (WFL-02): {"type": "manual"}; {"type": "event", "event": "<event type>", "filter": <one MET-45 condition node, optional>, "allow_workflow_origin": <boolean, optional>} (evaluated from WP-1090 on); {"type": "schedule", "cron": "<cron expression>", "timezone": "<IANA zone>"} (evaluated from WP-1091 on). The filter is checked with the MET-45 condition grammar of api/rules.schema.json when the definition is written; a refused filter is 422 on trigger.filter with the path of the error. */
       trigger?: components['schemas']['JSONValue'];
+      /** @description MET-45 condition nodes of api/rules.schema.json (eq, ne, in, not_in, gt, gte, lt, lte, contains, empty, not_empty, all, any, not; CH18, E-229) combined with all; an empty list always holds. They are evaluated over the run context flattened to dot paths (event.type, data.<field>, ci.status, ci.attributes.<name>). A refused node is 422 on conditions[i] with the path of the error. */
       conditions?: components['schemas']['JSONValue'][];
       actions?: components['schemas']['JSONValue'][];
       active?: boolean;
@@ -36817,6 +36823,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -36912,6 +36919,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   listWorkflowVersions: {

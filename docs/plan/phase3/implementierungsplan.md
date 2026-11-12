@@ -15964,7 +15964,7 @@ API-06;[P2]/[P3]/[P4]/[A];F;backend/internal/workflow/version_integration_test.g
 - [ ] **AK3:** `workflow.EvaluationValues(run.Context)` (`conditions.go`) liefert die flache Map mit Punktpfaden, die `rules.EvaluateCondition` erwartet: `event.type`, `event.entity_id`, `data.<feld>`, `ci.status`, `ci.attributes.<name>` und alle übrigen Schlüssel des Kontexts, verschachtelte Objekte bis Tiefe 4, Listen als Wert.
 - [ ] **AK4:** `resume` bewertet die Bedingungen über `rules.EvaluateCondition`; nicht erfüllt → Run `cancelled` wie bisher (`executor.go:156–159`). `conditionsMet`, `eval` und `lookup` entfallen.
 - [ ] **AK5:** OpenAPI beschreibt an `WorkflowDefinition`, `CreateWorkflowDefinitionRequest` und `UpdateWorkflowDefinitionRequest` die Bedingungsliste und den vollständigen Trigger-Vertrag der Phase 3: `manual`, `event` (`event`, `filter`, `allow_workflow_origin`, ausgewertet ab WP-1090) und `schedule` (`cron`, `timezone`, ausgewertet ab WP-1091). Die Felder bleiben `JSONValue`.
-- [ ] **AK6:** Datenmigration in `workflow_def_version` und in der Kopie in `workflow_def`: `eq`, `ne`, `contains` und `not_empty` werden 1:1 übernommen, `exists` wird `not_empty`, `not_empty` verliert `value`. Definitionen mit `matches` oder unbekanntem Operator werden auf `active = false` gesetzt; die Migration nennt sie per `RAISE NOTICE` mit Organisation, ID und Name. Alle Versionen werden an Ort und Stelle umgestellt, damit wartende Runs ihre Version weiter bewerten können; die Migration setzt dafür den Unveränderlichkeits-Trigger aus WP-1086 nur für ihre Dauer aus (`ALTER TABLE workflow_def_version DISABLE TRIGGER …` / `ENABLE TRIGGER …`).
+- [ ] **AK6:** Datenmigration in `workflow_def_version` und in der Kopie in `workflow_def`: `eq`, `ne`, `contains` und `not_empty` werden 1:1 übernommen, `exists` wird `not_empty`, `not_empty` verliert `value`. Definitionen mit `matches` oder unbekanntem Operator werden auf `active = false` gesetzt; die Migration nennt sie per `RAISE NOTICE` mit Organisation, ID und Name. Ebenso nicht übertragbar und damit deaktiviert ist `eq`, `ne` oder `contains` ohne skalaren Wert (`value` fehlt, ist `null`, Liste oder Objekt): MET-45 kennt dafür keine Form, der Alt-Evaluator verglich gegen den Text `<nil>`. Knoten, die bereits MET-45-Form haben (`all`, `any`, `not`, `in`, `not_in`, `gt`, `gte`, `lt`, `lte`, `empty`), bleiben unverändert, damit ein erneutes Up nach dem No-op-Down nichts deaktiviert. Ein PATCH prüft die danach wirksamen Bedingungen und `trigger.filter` (nicht nur die gesendeten), sobald die Definition aktiv ist oder eine neue Version entsteht; eine so deaktivierte Definition lässt sich daher nicht ohne gültige Bedingungen wieder aktivieren (422). Alle Versionen werden an Ort und Stelle umgestellt, damit wartende Runs ihre Version weiter bewerten können; die Migration setzt dafür den Unveränderlichkeits-Trigger aus WP-1086 nur für ihre Dauer aus (`ALTER TABLE workflow_def_version DISABLE TRIGGER …` / `ENABLE TRIGGER …`).
 
 **Dateien (11 Einträge, Migration = 2):**
 
@@ -15986,10 +15986,11 @@ API-06;[P2]/[P3]/[P4]/[A];F;backend/internal/workflow/version_integration_test.g
 - `backend/internal/workflow/conditions_test.go`:
   - `TestEvaluationValuesFlattensPaths`: `ci.attributes.rack_units`, `data.to_state`, `event.type`
   - `TestConditionsAllAnyNot`
-  - `TestLegacyOperatorsMapping`: `exists` → `not_empty`, `matches` wird abgelehnt
+  - `TestLegacyOperatorsMapping`: `exists` → `not_empty`, `matches` wird abgelehnt, `eq` ohne `value` wird abgelehnt, MET-45-Knoten bleiben unverändert
 - `backend/internal/workflow/executor_test.go`:
   - `TestExecutorConditionFalseCancelsRun`
-  - `TestCreateDefinitionInvalidCondition422`: unbekannter Operator, Wertregel `pattern` als Bedingung, fehlendes `field`
+  - `TestCreateDefinitionInvalidCondition422`: unbekannter Operator, Wertregel `pattern` als Bedingung, fehlendes `field`; PATCH `{active: true}` einer deaktivierten Altdefinition → 422
+- `backend/internal/workflow/version_integration_test.go`: `TestPatchKeepsDeactivatedLegacyCondition422`
 - `TestExecutorApprovalFlow` bleibt grün; `TestMigrationsRoundtrip`, `TestRoutesAndSpecificationAreInParity`.
 
 **Traceability (`docs/traceability.csv`):**

@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"regexp"
-	"strings"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -169,7 +167,12 @@ func (e *Executor) resume(ctx context.Context, orgID string, run *Run) (*Run, er
 		e.failRun(ctx, orgID, run, fmt.Errorf("load workflow definition version: %w", err))
 		return nil, fmt.Errorf("load workflow definition version: %w", err)
 	}
-	if !conditionsMet(def.Conditions, run.Context) {
+	hold, err := conditionsHold(def.Conditions, run.Context)
+	if err != nil {
+		e.failRun(ctx, orgID, run, err)
+		return nil, err
+	}
+	if !hold {
 		now := time.Now().UTC()
 		return e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusCancelled, &now, run.Context)
 	}
@@ -363,48 +366,7 @@ func triggerMatches(trigger JSONMap, event string) bool {
 	}
 	return str(trigger, "event", "") == event
 }
-func conditionsMet(conditions []JSONMap, ctx JSONMap) bool {
-	for _, c := range conditions {
-		if !eval(c, ctx) {
-			return false
-		}
-	}
-	return true
-}
-func eval(cond, ctx JSONMap) bool {
-	field := str(cond, "field", "")
-	op := str(cond, "op", "eq")
-	want := cond["value"]
-	got := lookup(ctx, field)
-	switch op {
-	case "eq":
-		return fmt.Sprint(got) == fmt.Sprint(want)
-	case "ne":
-		return fmt.Sprint(got) != fmt.Sprint(want)
-	case "exists":
-		return got != nil
-	case "not_empty":
-		return fmt.Sprint(got) != ""
-	case "contains":
-		return strings.Contains(fmt.Sprint(got), fmt.Sprint(want))
-	case "matches":
-		re, err := regexp.Compile(fmt.Sprint(want))
-		return err == nil && re.MatchString(fmt.Sprint(got))
-	default:
-		return false
-	}
-}
-func lookup(m map[string]any, path string) any {
-	cur := any(m)
-	for _, p := range strings.Split(path, ".") {
-		mm, ok := cur.(map[string]any)
-		if !ok {
-			return nil
-		}
-		cur = mm[p]
-	}
-	return cur
-}
+
 func str(m map[string]any, key, fallback string) string {
 	if v, ok := m[key].(string); ok && v != "" {
 		return v

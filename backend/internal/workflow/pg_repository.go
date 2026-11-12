@@ -112,6 +112,9 @@ func (r *PGRepository) UpdateDefinition(ctx context.Context, orgID, id string, r
 		}
 		next := *current
 		applyUpdate(&next, req)
+		if verr := validateEffective(current, &next); verr != nil {
+			return verr
+		}
 		newVersion := contentChanged(current, &next)
 		if !newVersion && req.Name == nil && req.Description == nil && req.Active == nil {
 			d = current

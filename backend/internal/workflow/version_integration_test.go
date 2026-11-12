@@ -27,7 +27,7 @@ import (
 //
 // Retest:
 //
-//	cd backend && go test -count=1 -run 'TestPatchActionsCreatesVersion2|TestWaitingRunKeepsVersion1|TestDefinitionVersionsAreImmutable|TestPatchWorkflowIfMatch412|TestWorkflowVersionsOfOtherOrganization404|TestMemoryRepositoryVersions' ./internal/workflow/
+//	cd backend && go test -count=1 -run 'TestPatchActionsCreatesVersion2|TestWaitingRunKeepsVersion1|TestDefinitionVersionsAreImmutable|TestPatchWorkflowIfMatch412|TestPatchKeepsDeactivatedLegacyCondition422|TestWorkflowVersionsOfOtherOrganization404|TestMemoryRepositoryVersions' ./internal/workflow/
 
 // versionEnv is one organization's view of the workflow API over
 // PostgreSQL.
@@ -243,6 +243,29 @@ func TestPatchWorkflowIfMatch412(t *testing.T) {
 	}
 	if rec = e.do(t, ctx, http.MethodPatch, "/api/v1/workflows/"+d.ID, stale, map[string]string{"If-Match": "*"}); rec.Code != http.StatusOK || rec.Header().Get("ETag") != api.ETag(3) {
 		t.Fatalf("PATCH with If-Match *: %d ETag %q", rec.Code, rec.Header().Get("ETag"))
+	}
+}
+
+// TestPatchKeepsDeactivatedLegacyCondition422: a definition migration
+// 000330 deactivated keeps its G1 condition; PATCH {"active": true} checks
+// the conditions in effect and answers 422 on conditions[0].op, the
+// definition stays inactive at version 1 (WP-1087 AK1/AK6).
+func TestPatchKeepsDeactivatedLegacyCondition422(t *testing.T) {
+	e := newVersionEnv(t)
+	ctx := e.ctx(e.f.OrgA, e.user)
+	d := &workflow.Definition{OrganizationID: e.f.OrgA, Name: "wf-legacy", Trigger: workflow.JSONMap{"type": "manual"},
+		Conditions: []workflow.JSONMap{{"field": "name", "op": "matches", "value": "^sw"}}, Actions: []workflow.JSONMap{{"type": "noop"}}}
+	if err := e.repo.CreateDefinition(ctx, d); err != nil {
+		t.Fatal(err)
+	}
+	rec := e.do(t, ctx, http.MethodPatch, "/api/v1/workflows/"+d.ID, map[string]any{"active": true}, nil)
+	var p api.FieldProblem
+	if err := json.Unmarshal(rec.Body.Bytes(), &p); err != nil || rec.Code != http.StatusUnprocessableEntity || p.Field != "conditions[0].op" {
+		t.Fatalf("PATCH active=true: %d %s, want 422 on conditions[0].op", rec.Code, rec.Body.String())
+	}
+	got, err := e.repo.GetDefinition(ctx, e.f.OrgA, d.ID)
+	if err != nil || got.Active || got.Version != 1 {
+		t.Fatalf("definition after the refused PATCH: %+v %v, want inactive version 1", got, err)
 	}
 }
 

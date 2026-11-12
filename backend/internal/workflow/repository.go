@@ -128,6 +128,9 @@ func (r *MemoryRepository) UpdateDefinition(_ context.Context, orgID, id string,
 	}
 	next := *d
 	applyUpdate(&next, req)
+	if err := validateEffective(d, &next); err != nil {
+		return nil, err
+	}
 	now := time.Now().UTC()
 	if contentChanged(d, &next) {
 		next.Version = d.Version + 1
@@ -347,6 +350,19 @@ func applyUpdate(d *Definition, req *UpdateDefinitionRequest) {
 	if req.Active != nil {
 		d.Active = *req.Active
 	}
+}
+
+// validateEffective checks the trigger filter and conditions a PATCH
+// leaves in effect, not only the ones it carries (WP-1087 AK1/AK6): a
+// definition migration 000330 deactivated for a non-convertible G1
+// condition is not switched on again and does not carry that condition
+// into a new version. An inactive definition whose content stays may still
+// be renamed or described.
+func validateEffective(current, next *Definition) error {
+	if !next.Active && !contentChanged(current, next) {
+		return nil
+	}
+	return ValidateDefinition(next.Trigger, next.Conditions)
 }
 
 // contentChanged reports whether trigger, conditions or actions of next
