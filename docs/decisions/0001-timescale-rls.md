@@ -163,3 +163,10 @@ Ausweg.
   Dann ist diese ADR neu zu bewerten.
 - Abfragen auf Metriken müssen über die Views laufen. Für Systemjobs, die über
   alle Orgs aggregieren, gilt der Systempfad (`WithSystem`, E-08).
+- Weitere view-geschützte Hypertable nach demselben Muster: `probe_result`
+  mit der View `probe_result_v` (WP-945, Migration `000325_probe_result`,
+  Nummer vorläufig; Werte nach ADR 0002). Die View prüft Organisation,
+  Kunde und Standort über die Probe (`probe.client_id`, `probe.site_id`)
+  wie Punkt 4 über das CI; die App-Rolle hat nur `SELECT, INSERT` auf die
+  View und kein Recht auf Hypertable, Chunks und `<chunk>_compressed`.
+  `rls.ViewProtectedTables` führt `probe_result` → `probe_result_v`.

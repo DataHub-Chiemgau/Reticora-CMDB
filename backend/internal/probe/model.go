@@ -5,8 +5,8 @@
 // probe state with its history and the ingest cursor (PRB-05, PRB-07).
 //
 // The tables come with the migrations 000307_probe_definition (WP-935),
-// 000308_collector_group (WP-936) and 000311_probe_state (WP-944, number
-// provisional); the repository, the resolution of the
+// 000308_collector_group (WP-936), 000311_probe_state (WP-944) and
+// 000325_probe_result (WP-945, numbers provisional); the repository, the resolution of the
 // effective values (WP-937), the assignment engine (WP-941) and the REST API
 // (WP-939, WP-946, WP-947) build on these types.
 package probe
@@ -14,6 +14,8 @@ package probe
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 )
 
 // Levels of the override hierarchy (PRB-01): organization → client →
@@ -262,6 +264,30 @@ type StateChange struct {
 	Late           bool      `json:"late"`
 	Notify         bool      `json:"notify"`
 	RootEventID    string    `json:"root_event_id,omitempty"`
+}
+
+// Status codes of probe_result.status (WP-945): the encoding of
+// probewire.Result.status in the hypertable. Ingest (WP-960) and the
+// aggregates (WP-972) use only these values; the CHECK of the column admits
+// nothing else.
+const (
+	ResultStatusOK    int16 = 0
+	ResultStatusFail  int16 = 1
+	ResultStatusError int16 = 2
+)
+
+// ResultStatusCode returns the code of a result status of the wire
+// contract; ok false for an unknown status.
+func ResultStatusCode(s probewire.Status) (code int16, ok bool) {
+	switch s {
+	case probewire.StatusOK:
+		return ResultStatusOK, true
+	case probewire.StatusFail:
+		return ResultStatusFail, true
+	case probewire.StatusError:
+		return ResultStatusError, true
+	}
+	return 0, false
 }
 
 // Streams of the ingest cursor: state changes and results.

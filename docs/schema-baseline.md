@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000324_org_deletion
+Stand: Migration 000325_probe_result
 
 ## Prüfung
 
@@ -180,7 +180,8 @@ Start bei jeder Abweichung:
   `reticora_app` zugreifen darf, hat `ENABLE` und `FORCE ROW LEVEL SECURITY`
   und gehört `reticora_owner`; die Policies binden damit auch den Eigentümer.
   `metric_sample` ist für `reticora_app` nicht zugreifbar (View-Barriere,
-  WP-040) und behält ihren Eigentümer.
+  WP-040) und behält ihren Eigentümer; ebenso `probe_result` (View
+  `probe_result_v`, WP-945, ADR 0001).
 - Laufzeit-DDL (DB-04): Die Anwendung wechselt für Index-DDL ausdrücklich in
   `reticora_owner`. Der Event-Trigger `reticora_restrict_app_ddl` erlaubt
   beiden App-Rollen nur `CREATE/ALTER/DROP INDEX`; RLS abschalten, Policies,
@@ -194,7 +195,7 @@ Start bei jeder Abweichung:
   `RoleContractError` mit dem Session-User.
 - TRUNCATE-Guard (Migration 000144, F-192): `TRUNCATE` umgeht RLS, und der
   Eigentümer `reticora_owner` darf es implizit. Jede Mandantentabelle (auch
-  `metric_sample` und die Materialisierungs-Hypertable von
+  `metric_sample`, `probe_result` und die Materialisierungs-Hypertable von
   `metric_sample_1h`) trägt den Statement-Level-Trigger
   `reticora_truncate_guard` (`BEFORE TRUNCATE`), der für `reticora_app` und
   `reticora_owner` mit 42501 abbricht. Entfernen oder Abschalten des Guards ist
@@ -2023,6 +2024,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `probe` | ja | ja | probe_isolation (ALL), probe_scoped_delete (DELETE), probe_scoped_update (UPDATE) |
 | `probe_assignment` | ja | ja | probe_assignment_isolation (ALL), probe_assignment_scoped_delete (DELETE), probe_assignment_scoped_update (UPDATE) |
 | `probe_ingest_cursor` | ja | ja | probe_ingest_cursor_isolation (ALL), probe_ingest_cursor_system_select (SELECT) |
+| `probe_result` | nein | nein | – |
 | `probe_state` | ja | ja | probe_state_isolation (ALL), probe_state_scoped_delete (DELETE), probe_state_scoped_update (UPDATE) |
 | `probe_state_change` | ja | ja | probe_state_change_isolation (ALL), probe_state_change_scoped_delete (DELETE), probe_state_change_scoped_update (UPDATE) |
 | `rack` | ja | ja | rack_isolation (ALL) |

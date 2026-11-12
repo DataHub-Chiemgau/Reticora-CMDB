@@ -121,7 +121,10 @@ var DerivedScopeTables = map[string]DerivedScope{
 // (docs/decisions/0001-timescale-rls.md, WP-040). This is a documented
 // exception to the RLS rules, not a gap: the catalog test checks
 // RuleViewBarrier for these tables instead.
-var ViewProtectedTables = map[string]string{"metric_sample": "metric_sample_v"}
+// probe_result (WP-945, ADR 0002) is protected like metric_sample; its
+// client and site come from the probe inside probe_result_v, it has no
+// column RuleLocatedScope reports and so no DerivedScopeTables entry.
+var ViewProtectedTables = map[string]string{"metric_sample": "metric_sample_v", "probe_result": "probe_result_v"}
 
 // GlobalCatalogTables are global catalogs without organization_id (E-10,
 // WP-024). They are maintained by migrations only; the application role may
