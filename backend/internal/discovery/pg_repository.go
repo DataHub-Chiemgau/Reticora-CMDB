@@ -190,6 +190,11 @@ func collectorError(err error) error {
 		return &api.FieldError{Field: "site_id", Message: "site not found", Status: http.StatusUnprocessableEntity}
 	case "collector_site_client":
 		return &api.FieldError{Field: "site_id", Message: "the site belongs to another client", Status: http.StatusUnprocessableEntity}
+	case "collector_group_member_client_rule", "probe_collector_group_client":
+		// The collector's group follows its move (000308): a shared group
+		// of the old client, or probes of the old client in its own group,
+		// refuse the move to another client.
+		return &api.FieldError{Field: "site_id", Message: "the collector's group or its probes belong to another client", Status: http.StatusUnprocessableEntity}
 	}
 	return err
 }

@@ -28,7 +28,13 @@ type schemaEnv struct {
 
 func newSchemaEnv(t *testing.T) *schemaEnv {
 	t.Helper()
-	return &schemaEnv{t: t, f: scopetest.Seed(t, "93")}
+	e := &schemaEnv{t: t, f: scopetest.Seed(t, "93")}
+	// Every probe runs in a collector group (WP-936): one org-wide group per
+	// organization for the probes of the tests.
+	for _, org := range []string{e.f.OrgA, e.f.OrgB} {
+		e.mustExec(`INSERT INTO collector_group (organization_id, name) VALUES ($1, 'wp935-probes')`, org)
+	}
+	return e
 }
 
 func (e *schemaEnv) scalar(sql string, args ...any) string {
@@ -79,12 +85,12 @@ func (e *schemaEnv) group(orgID, clientID, name string) string {
 }
 
 func (e *schemaEnv) probeOnCI(orgID, ciID, target string) string {
-	return e.scalar(`INSERT INTO probe (organization_id, ci_id, type, target) VALUES ($1, $2, 'icmp', $3) RETURNING id::text`,
+	return e.scalar(`INSERT INTO probe (organization_id, collector_group_id, ci_id, type, target) VALUES ($1, (SELECT g.id FROM collector_group g WHERE g.organization_id = $1 AND g.client_id IS NULL ORDER BY g.id LIMIT 1), $2, 'icmp', $3) RETURNING id::text`,
 		orgID, ciID, target)
 }
 
 func (e *schemaEnv) probeOfClient(orgID, clientID, target string) string {
-	return e.scalar(`INSERT INTO probe (organization_id, client_id, type, target) VALUES ($1, $2, 'tcp', $3) RETURNING id::text`,
+	return e.scalar(`INSERT INTO probe (organization_id, collector_group_id, client_id, type, target) VALUES ($1, (SELECT g.id FROM collector_group g WHERE g.organization_id = $1 AND g.client_id IS NULL ORDER BY g.id LIMIT 1), $2, 'tcp', $3) RETURNING id::text`,
 		orgID, clientID, target)
 }
 
@@ -192,7 +198,7 @@ func TestProbeTablesFollowClientScope(t *testing.T) {
 		"org-wide group":   `INSERT INTO monitoring_group (organization_id, name) VALUES (current_setting('app.org_id')::uuid, 'wp935-org-2')`,
 		"org profile":      `INSERT INTO monitoring_profile (organization_id, level, probe_type, params) VALUES (current_setting('app.org_id')::uuid, 'org', 'tcp', '{}')`,
 		"group of client2": `INSERT INTO monitoring_group (organization_id, client_id, name) VALUES (current_setting('app.org_id')::uuid, '` + e.f.Client2 + `', 'wp935-c2-2')`,
-		"probe of client2": `INSERT INTO probe (organization_id, client_id, type, target) VALUES (current_setting('app.org_id')::uuid, '` + e.f.Client2 + `', 'tcp', 'x:1')`,
+		"probe of client2": `INSERT INTO probe (organization_id, collector_group_id, client_id, type, target) VALUES (current_setting('app.org_id')::uuid, (SELECT g.id FROM collector_group g WHERE g.organization_id = current_setting('app.org_id')::uuid AND g.client_id IS NULL ORDER BY g.id LIMIT 1), '` + e.f.Client2 + `', 'tcp', 'x:1')`,
 	} {
 		err := e.as(c1, e.f.OrgA, func(ctx context.Context, tx pgx.Tx) error {
 			_, err := tx.Exec(ctx, stmt)
@@ -240,10 +246,10 @@ func TestProbeCrossOrgReferenceRejected(t *testing.T) {
 		sql  string
 		args []any
 	}{
-		"probe ci":            {`INSERT INTO probe (organization_id, ci_id, type, target) VALUES ($1, $2, 'icmp', 'x')`, []any{org, ciB}},
-		"probe client":        {`INSERT INTO probe (organization_id, client_id, type, target) VALUES ($1, $2, 'icmp', 'x')`, []any{org, clientB}},
-		"probe site":          {`INSERT INTO probe (organization_id, client_id, site_id, type, target) VALUES ($1, $2, $3, 'icmp', 'x')`, []any{org, e.f.Client1, siteB}},
-		"probe parent":        {`INSERT INTO probe (organization_id, ci_id, type, target, parent_probe_id) VALUES ($1, $2, 'icmp', 'x', $3)`, []any{org, ciA, probeB}},
+		"probe ci":            {`INSERT INTO probe (organization_id, collector_group_id, ci_id, type, target) VALUES ($1, (SELECT g.id FROM collector_group g WHERE g.organization_id = $1 AND g.client_id IS NULL ORDER BY g.id LIMIT 1), $2, 'icmp', 'x')`, []any{org, ciB}},
+		"probe client":        {`INSERT INTO probe (organization_id, collector_group_id, client_id, type, target) VALUES ($1, (SELECT g.id FROM collector_group g WHERE g.organization_id = $1 AND g.client_id IS NULL ORDER BY g.id LIMIT 1), $2, 'icmp', 'x')`, []any{org, clientB}},
+		"probe site":          {`INSERT INTO probe (organization_id, collector_group_id, client_id, site_id, type, target) VALUES ($1, (SELECT g.id FROM collector_group g WHERE g.organization_id = $1 AND g.client_id IS NULL ORDER BY g.id LIMIT 1), $2, $3, 'icmp', 'x')`, []any{org, e.f.Client1, siteB}},
+		"probe parent":        {`INSERT INTO probe (organization_id, collector_group_id, ci_id, type, target, parent_probe_id) VALUES ($1, (SELECT g.id FROM collector_group g WHERE g.organization_id = $1 AND g.client_id IS NULL ORDER BY g.id LIMIT 1), $2, 'icmp', 'x', $3)`, []any{org, ciA, probeB}},
 		"group client":        {`INSERT INTO monitoring_group (organization_id, client_id, name) VALUES ($1, $2, 'x')`, []any{org, clientB}},
 		"member group":        {`INSERT INTO monitoring_group_member (organization_id, group_id, ci_id) VALUES ($1, $2, $3)`, []any{org, groupB, ciA}},
 		"member ci":           {`INSERT INTO monitoring_group_member (organization_id, group_id, ci_id) VALUES ($1, $2, $3)`, []any{org, groupA, ciB}},
@@ -251,7 +257,7 @@ func TestProbeCrossOrgReferenceRejected(t *testing.T) {
 		"profile group":       {`INSERT INTO monitoring_profile (organization_id, level, group_id, probe_type, params) VALUES ($1, 'group', $2, 'icmp', '{}')`, []any{org, groupB}},
 		"profile ci":          {`INSERT INTO monitoring_profile (organization_id, level, ci_id, probe_type, params) VALUES ($1, 'ci', $2, 'icmp', '{}')`, []any{org, ciB}},
 		"binding group":       {`INSERT INTO credential_binding (organization_id, credential_id, target_kind, device_group_id, namespace) VALUES ($1, gen_random_uuid(), 'device_group', $2, 'snmp')`, []any{org, groupB}},
-		"probe unknown ci":    {`INSERT INTO probe (organization_id, ci_id, type, target) VALUES ($1, gen_random_uuid(), 'icmp', 'x')`, []any{org}},
+		"probe unknown ci":    {`INSERT INTO probe (organization_id, collector_group_id, ci_id, type, target) VALUES ($1, (SELECT g.id FROM collector_group g WHERE g.organization_id = $1 AND g.client_id IS NULL ORDER BY g.id LIMIT 1), gen_random_uuid(), 'icmp', 'x')`, []any{org}},
 		"profile unknown grp": {`INSERT INTO monitoring_profile (organization_id, level, group_id, probe_type, params) VALUES ($1, 'group', gen_random_uuid(), 'icmp', '{}')`, []any{org}},
 	} {
 		if err := e.exec(c.sql, c.args...); sqlState(err) != "23503" {
@@ -272,7 +278,7 @@ func TestProbeCrossOrgReferenceRejected(t *testing.T) {
 	// Deleting the parent probe keeps the child (SET NULL), deleting the CI
 	// removes its probes.
 	parent := e.probeOnCI(org, ciA, "192.0.2.30")
-	child := e.scalar(`INSERT INTO probe (organization_id, ci_id, type, target, parent_probe_id) VALUES ($1, $2, 'tcp', '192.0.2.30:22', $3) RETURNING id::text`, org, ciA, parent)
+	child := e.scalar(`INSERT INTO probe (organization_id, collector_group_id, ci_id, type, target, parent_probe_id) VALUES ($1, (SELECT g.id FROM collector_group g WHERE g.organization_id = $1 AND g.client_id IS NULL ORDER BY g.id LIMIT 1), $2, 'tcp', '192.0.2.30:22', $3) RETURNING id::text`, org, ciA, parent)
 	e.mustExec(`DELETE FROM probe WHERE id = $1`, parent)
 	if got := e.scalar(`SELECT COALESCE(parent_probe_id::text, 'null') FROM probe WHERE id = $1`, child); got != "null" {
 		t.Errorf("child after deleting the parent: parent %s", got)
@@ -291,18 +297,18 @@ func TestProbeUniqueTarget(t *testing.T) {
 	e := newSchemaEnv(t)
 	ci := e.f.CI(t, e.f.OrgA, e.f.Client1, "wp935-unique")
 	e.probeOnCI(e.f.OrgA, ci, "192.0.2.40")
-	if err := e.exec(`INSERT INTO probe (organization_id, ci_id, type, target) VALUES ($1, $2, 'icmp', '192.0.2.40')`, e.f.OrgA, ci); sqlState(err) != "23505" {
+	if err := e.exec(`INSERT INTO probe (organization_id, collector_group_id, ci_id, type, target) VALUES ($1, (SELECT g.id FROM collector_group g WHERE g.organization_id = $1 AND g.client_id IS NULL ORDER BY g.id LIMIT 1), $2, 'icmp', '192.0.2.40')`, e.f.OrgA, ci); sqlState(err) != "23505" {
 		t.Errorf("same CI, type and target: %v, want 23505", err)
 	}
 	e.probeOfClient(e.f.OrgA, e.f.Client1, "192.0.2.41:443")
-	if err := e.exec(`INSERT INTO probe (organization_id, client_id, type, target) VALUES ($1, $2, 'tcp', '192.0.2.41:443')`, e.f.OrgA, e.f.Client1); sqlState(err) != "23505" {
+	if err := e.exec(`INSERT INTO probe (organization_id, collector_group_id, client_id, type, target) VALUES ($1, (SELECT g.id FROM collector_group g WHERE g.organization_id = $1 AND g.client_id IS NULL ORDER BY g.id LIMIT 1), $2, 'tcp', '192.0.2.41:443')`, e.f.OrgA, e.f.Client1); sqlState(err) != "23505" {
 		t.Errorf("same client and target without CI: %v, want 23505", err)
 	}
-	if err := e.exec(`INSERT INTO probe (organization_id, client_id, type, target) VALUES ($1, $2, 'tcp', '192.0.2.41:443')`, e.f.OrgA, e.f.Client2); err != nil {
+	if err := e.exec(`INSERT INTO probe (organization_id, collector_group_id, client_id, type, target) VALUES ($1, (SELECT g.id FROM collector_group g WHERE g.organization_id = $1 AND g.client_id IS NULL ORDER BY g.id LIMIT 1), $2, 'tcp', '192.0.2.41:443')`, e.f.OrgA, e.f.Client2); err != nil {
 		t.Errorf("same target without CI for another client: %v, want allowed", err)
 	}
 	// Another type or target is fine.
-	if err := e.exec(`INSERT INTO probe (organization_id, ci_id, type, target) VALUES ($1, $2, 'tcp', '192.0.2.40')`, e.f.OrgA, ci); err != nil {
+	if err := e.exec(`INSERT INTO probe (organization_id, collector_group_id, ci_id, type, target) VALUES ($1, (SELECT g.id FROM collector_group g WHERE g.organization_id = $1 AND g.client_id IS NULL ORDER BY g.id LIMIT 1), $2, 'tcp', '192.0.2.40')`, e.f.OrgA, ci); err != nil {
 		t.Errorf("other type: %v", err)
 	}
 }
@@ -316,7 +322,7 @@ func TestProbeTakesScopeFromCI(t *testing.T) {
 	site2 := e.site(e.f.OrgA, e.f.Client2, "wp935-site-2")
 	ci := e.f.CI(t, e.f.OrgA, e.f.Client1, "wp935-scope")
 	e.place(ci, "", site1)
-	p := e.scalar(`INSERT INTO probe (organization_id, ci_id, client_id, type, target) VALUES ($1, $2, $3, 'icmp', '192.0.2.50') RETURNING id::text`,
+	p := e.scalar(`INSERT INTO probe (organization_id, collector_group_id, ci_id, client_id, type, target) VALUES ($1, (SELECT g.id FROM collector_group g WHERE g.organization_id = $1 AND g.client_id IS NULL ORDER BY g.id LIMIT 1), $2, $3, 'icmp', '192.0.2.50') RETURNING id::text`,
 		e.f.OrgA, ci, e.f.Client2)
 	scope := func() string {
 		return e.scalar(`SELECT COALESCE(client_id::text, '') || '/' || COALESCE(site_id::text, '') FROM probe WHERE id = $1`, p)
@@ -341,10 +347,10 @@ func TestProbeTakesScopeFromCI(t *testing.T) {
 	if got := e.scalar(`SELECT client_id::text FROM monitoring_profile WHERE id = $1`, gprof); got != e.f.Client1 {
 		t.Errorf("profile of the group: client %s, want client 1", got)
 	}
-	if err := e.exec(`INSERT INTO probe (organization_id, type, target) VALUES ($1, 'icmp', '192.0.2.51')`, e.f.OrgA); constraintOf(err) != "probe_client_required" {
+	if err := e.exec(`INSERT INTO probe (organization_id, collector_group_id, type, target) VALUES ($1, (SELECT g.id FROM collector_group g WHERE g.organization_id = $1 AND g.client_id IS NULL ORDER BY g.id LIMIT 1), 'icmp', '192.0.2.51')`, e.f.OrgA); constraintOf(err) != "probe_client_required" {
 		t.Errorf("probe without CI and client: %v", err)
 	}
-	if err := e.exec(`INSERT INTO probe (organization_id, client_id, site_id, type, target) VALUES ($1, $2, $3, 'icmp', '192.0.2.52')`,
+	if err := e.exec(`INSERT INTO probe (organization_id, collector_group_id, client_id, site_id, type, target) VALUES ($1, (SELECT g.id FROM collector_group g WHERE g.organization_id = $1 AND g.client_id IS NULL ORDER BY g.id LIMIT 1), $2, $3, 'icmp', '192.0.2.52')`,
 		e.f.OrgA, e.f.Client1, site2); constraintOf(err) != "probe_site_client" {
 		t.Errorf("probe of client 1 at a site of client 2: %v", err)
 	}
@@ -443,7 +449,7 @@ func TestGroupMemberTakesScopeFromParent(t *testing.T) {
 func TestProbeAtSiteReportsProbeOnSiteDelete(t *testing.T) {
 	e := newSchemaEnv(t)
 	site := e.site(e.f.OrgA, e.f.Client1, "wp935-probe-site")
-	e.mustExec(`INSERT INTO probe (organization_id, client_id, site_id, type, target) VALUES ($1, $2, $3, 'icmp', '192.0.2.60')`,
+	e.mustExec(`INSERT INTO probe (organization_id, collector_group_id, client_id, site_id, type, target) VALUES ($1, (SELECT g.id FROM collector_group g WHERE g.organization_id = $1 AND g.client_id IS NULL ORDER BY g.id LIMIT 1), $2, $3, 'icmp', '192.0.2.60')`,
 		e.f.OrgA, e.f.Client1, site)
 	ctx := context.Background()
 	err := e.as(e.f.OrgCtx(e.f.OrgA), e.f.OrgA, func(ctx context.Context, tx pgx.Tx) error {

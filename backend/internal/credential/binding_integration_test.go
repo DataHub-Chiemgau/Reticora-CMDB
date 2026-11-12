@@ -261,10 +261,13 @@ func (e *bindingEnv) member(orgID, groupID, ciID string) {
 	e.exec(`INSERT INTO monitoring_group_member (organization_id, group_id, ci_id) VALUES ($1, $2, $3)`, orgID, groupID, ciID)
 }
 
-// probe inserts an icmp probe on the CI.
+// probe inserts an icmp probe on the CI in an org-wide collector group of
+// the organization (created on first use).
 func (e *bindingEnv) probe(orgID, ciID, target string) string {
 	e.t.Helper()
-	return e.scalar(`INSERT INTO probe (organization_id, ci_id, type, target) VALUES ($1, $2, 'icmp', $3) RETURNING id::text`,
+	e.exec(`INSERT INTO collector_group (organization_id, name)
+		SELECT $1, 'wp935-probes' WHERE NOT EXISTS (SELECT 1 FROM collector_group WHERE organization_id = $1 AND client_id IS NULL)`, orgID)
+	return e.scalar(`INSERT INTO probe (organization_id, collector_group_id, ci_id, type, target) VALUES ($1, (SELECT g.id FROM collector_group g WHERE g.organization_id = $1 AND g.client_id IS NULL ORDER BY g.id LIMIT 1), $2, 'icmp', $3) RETURNING id::text`,
 		orgID, ciID, target)
 }
 

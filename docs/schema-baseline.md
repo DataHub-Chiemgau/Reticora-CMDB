@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000307_probe_definition
+Stand: Migration 000308_collector_group
 
 ## Prüfung
 
@@ -1928,6 +1928,8 @@ SECURITY`), Policies mit ihrem Kommando.
 | `collector_ca` | ja | ja | collector_ca_operator (ALL) |
 | `collector_certificate` | ja | ja | collector_certificate_isolation (ALL), collector_certificate_system_select (SELECT) |
 | `collector_enrollment_code` | ja | ja | collector_enrollment_code_isolation (ALL), collector_enrollment_code_scope_delete (DELETE), collector_enrollment_code_scope_insert (INSERT), collector_enrollment_code_scope_select (SELECT), collector_enrollment_code_scope_update (UPDATE), collector_enrollment_code_system_select (SELECT) |
+| `collector_group` | ja | ja | collector_group_isolation (ALL), collector_group_scoped_delete (DELETE), collector_group_scoped_update (UPDATE) |
+| `collector_group_member` | ja | ja | collector_group_member_isolation (ALL), collector_group_member_scoped_delete (DELETE), collector_group_member_scoped_update (UPDATE) |
 | `compliance_result` | ja | ja | compliance_result_scoped_delete (DELETE), compliance_result_scoped_update (UPDATE), compliance_result_tenant_isolation (ALL) |
 | `compliance_rule` | ja | ja | compliance_rule_tenant_isolation (ALL) |
 | `consumable` | ja | ja | consumable_isolation (ALL), consumable_scoped_delete (DELETE), consumable_scoped_update (UPDATE) |
@@ -2009,6 +2011,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `platform_secret` | ja | ja | platform_secret_system_insert (INSERT), platform_secret_system_select (SELECT), platform_secret_system_update (UPDATE) |
 | `privacy_retention_policy` | ja | ja | privacy_retention_isolation (ALL) |
 | `probe` | ja | ja | probe_isolation (ALL), probe_scoped_delete (DELETE), probe_scoped_update (UPDATE) |
+| `probe_assignment` | ja | ja | probe_assignment_isolation (ALL), probe_assignment_scoped_delete (DELETE), probe_assignment_scoped_update (UPDATE) |
 | `rack` | ja | ja | rack_isolation (ALL) |
 | `rack_mount` | ja | ja | rack_mount_isolation (ALL), rack_mount_scoped_delete (DELETE), rack_mount_scoped_update (UPDATE) |
 | `relationship_change` | ja | ja | relationship_change_isolation (ALL), relationship_change_scoped_delete (DELETE), relationship_change_scoped_update (UPDATE) |

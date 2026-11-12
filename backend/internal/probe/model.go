@@ -1,10 +1,12 @@
 // Package probe holds the monitoring probe definitions of phase 3 (PRB-01,
-// Epic E): probes, monitoring groups (the device groups of PRB-01 and
-// CRD-04, E-178) and monitoring profiles with the overrides per level.
+// PRB-03, Epic E): probes, monitoring groups (the device groups of PRB-01
+// and CRD-04, E-178), monitoring profiles with the overrides per level,
+// collector groups with their members and the probe assignments.
 //
-// The tables come with migration 000307_probe_definition (WP-935); the
-// repository, the resolution of the effective values (WP-937) and the REST
-// API (WP-939, WP-946) build on these types.
+// The tables come with the migrations 000307_probe_definition (WP-935) and
+// 000308_collector_group (WP-936); the repository, the resolution of the
+// effective values (WP-937), the assignment engine (WP-941) and the REST API
+// (WP-939, WP-946, WP-947) build on these types.
 package probe
 
 import (
@@ -36,16 +38,19 @@ var Levels = []string{LevelOrg, LevelClient, LevelGroup, LevelCI, LevelProbe}
 // Params holds only the overrides of the level probe (interval, timeout,
 // down and up count, thresholds and type parameters).
 type Probe struct {
-	ID             string          `json:"id"`
-	OrganizationID string          `json:"organization_id"`
-	ClientID       string          `json:"client_id,omitempty"`
-	SiteID         string          `json:"site_id,omitempty"`
-	CIID           string          `json:"ci_id,omitempty"`
-	Type           string          `json:"type"`
-	Target         string          `json:"target"`
-	Params         json.RawMessage `json:"params"`
-	Enabled        bool            `json:"enabled"`
-	ParentProbeID  string          `json:"parent_probe_id,omitempty"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	ClientID       string `json:"client_id,omitempty"`
+	SiteID         string `json:"site_id,omitempty"`
+	CIID           string `json:"ci_id,omitempty"`
+	// CollectorGroupID is the collector group that runs the probe: one of
+	// the probe's client or an org-wide group (WP-936).
+	CollectorGroupID string          `json:"collector_group_id"`
+	Type             string          `json:"type"`
+	Target           string          `json:"target"`
+	Params           json.RawMessage `json:"params"`
+	Enabled          bool            `json:"enabled"`
+	ParentProbeID    string          `json:"parent_probe_id,omitempty"`
 	// CreatedBySurrogate is the creator as surrogate (Konvention 16).
 	CreatedBySurrogate string    `json:"-"`
 	CreatedAt          time.Time `json:"created_at"`
@@ -105,4 +110,85 @@ func (p *MonitoringProfile) TargetID() string {
 		return p.CIID
 	}
 	return ""
+}
+
+// Modes of a collector group (E-174): distributed spreads the probes over
+// the healthy members, failover runs them on the member with the best
+// priority.
+const (
+	ModeDistributed = "distributed"
+	ModeFailover    = "failover"
+)
+
+// Statuses of a collector group: unreachable when no member is reachable
+// (network down, PRB-03).
+const (
+	GroupReachable   = "reachable"
+	GroupUnreachable = "unreachable"
+)
+
+// Statuses of a collector group member (PRB-10).
+const (
+	MemberHealthy  = "healthy"
+	MemberDegraded = "degraded"
+	MemberDown     = "down"
+)
+
+// Liveness timeout of a collector group (E-176, PRB-10): default 30 s,
+// configurable from 20 s to 300 s.
+const (
+	DefaultLivenessTimeout = 30 * time.Second
+	MinLivenessTimeout     = 20 * time.Second
+	MaxLivenessTimeout     = 300 * time.Second
+)
+
+// CollectorGroup is a group of collectors in a customer network that share
+// the probes of the group (PRB-03, COL-06). ClientID empty is org-wide; a
+// site belongs to the group's client. Every collector gets a group of its
+// own when it is created.
+type CollectorGroup struct {
+	ID              string        `json:"id"`
+	OrganizationID  string        `json:"organization_id"`
+	ClientID        string        `json:"client_id,omitempty"`
+	SiteID          string        `json:"site_id,omitempty"`
+	Name            string        `json:"name"`
+	Mode            string        `json:"mode"`
+	LivenessTimeout time.Duration `json:"-"`
+	AnchorProbeID   string        `json:"anchor_probe_id,omitempty"`
+	Status          string        `json:"status"`
+	StatusChangedAt time.Time     `json:"status_changed_at"`
+	CreatedAt       time.Time     `json:"created_at"`
+	UpdatedAt       time.Time     `json:"updated_at"`
+}
+
+// CollectorGroupMember is the membership of a collector in its group (a
+// collector is in exactly one group); client and site are the group's.
+// ConfigVersion is the version of the assignment set the member applied
+// (PRB-11).
+type CollectorGroupMember struct {
+	GroupID        string     `json:"group_id"`
+	CollectorID    string     `json:"collector_id"`
+	OrganizationID string     `json:"organization_id"`
+	ClientID       string     `json:"client_id,omitempty"`
+	SiteID         string     `json:"site_id,omitempty"`
+	Priority       int        `json:"priority"`
+	Weight         int        `json:"weight"`
+	MemberStatus   string     `json:"member_status"`
+	LastAliveAt    *time.Time `json:"last_alive_at,omitempty"`
+	ClockOffsetMS  *int       `json:"clock_offset_ms,omitempty"`
+	CapacityHint   *int       `json:"capacity_hint,omitempty"`
+	ConfigVersion  int64      `json:"config_version"`
+}
+
+// Assignment assigns a probe to one member of its collector group under an
+// epoch, the fencing token of PRB-11: a collector checks only probes
+// assigned to it with a valid epoch. Client and site are the probe's.
+type Assignment struct {
+	ProbeID        string    `json:"probe_id"`
+	OrganizationID string    `json:"organization_id"`
+	ClientID       string    `json:"client_id,omitempty"`
+	SiteID         string    `json:"site_id,omitempty"`
+	CollectorID    string    `json:"collector_id"`
+	Epoch          int64     `json:"epoch"`
+	AssignedAt     time.Time `json:"assigned_at"`
 }

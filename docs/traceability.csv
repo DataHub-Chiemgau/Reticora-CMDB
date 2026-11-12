@@ -1692,3 +1692,6 @@ PRT-21;[P3];E;edgecore/probewire/types_test.go;WP-934
 PRB-01;[P3];E;backend/internal/probe/schema_integration_test.go;WP-935
 CRD-01;[P3];E;backend/internal/credential/binding_integration_test.go;WP-935
 CRD-04;[P3];E;backend/internal/credential/device_group_integration_test.go;WP-935
+PRB-03;[P3];E;backend/internal/discovery/collector_group_schema_integration_test.go;WP-936
+COL-06;[B], Air-Gapped [O];E;backend/internal/discovery/collector_group_schema_integration_test.go;WP-936
+PRB-11;[P3];E;backend/internal/discovery/collector_group_schema_integration_test.go;WP-936
