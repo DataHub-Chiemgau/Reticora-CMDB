@@ -112,7 +112,40 @@ func validSpec(typ Type) ProbeSpec {
 		ID: "p", Type: typ.Key, Target: "192.0.2.1",
 		IntervalMS: typ.DefaultIntervalS * 1000, TimeoutMS: typ.DefaultTimeoutS * 1000,
 		DownCount: typ.DefaultDownCount, UpCount: typ.DefaultUpCount,
+		Params: requiredParams(typ),
 	}
+}
+
+// requiredParams returns params with a valid value for every required
+// parameter of the type (nil without required parameters).
+func requiredParams(typ Type) json.RawMessage {
+	var s schema
+	if err := json.Unmarshal(typ.Params, &s); err != nil || len(s.Required) == 0 {
+		return nil
+	}
+	out := map[string]any{}
+	for _, name := range s.Required {
+		p := s.Properties[name]
+		switch {
+		case p == nil:
+		case len(p.Enum) > 0:
+			out[name] = p.Enum[0]
+		case p.Type == "integer" || p.Type == "number":
+			v := 1.0
+			if p.Minimum != nil {
+				v = *p.Minimum
+			}
+			out[name] = v
+		case p.Type == "boolean":
+			out[name] = false
+		case p.Type == "array":
+			out[name] = []any{}
+		default:
+			out[name] = "example.org"
+		}
+	}
+	b, _ := json.Marshal(out)
+	return b
 }
 
 func hasField(errs []FieldError, field string) bool {
@@ -280,5 +313,82 @@ func TestDocsTypeTableMatchesContract(t *testing.T) {
 	}
 	if !slices.Equal(keys, TypeKeys()) {
 		t.Fatalf("doc keys = %v, want %v", keys, TypeKeys())
+	}
+}
+
+// TestTCPLimits covers WP-970 AK1 and AK5 (PRT-03): defaults 60 s / 5 s,
+// interval ≥ 10 s, timeout ≤ 30 s and below the interval, 2 parallel
+// checks per target, the parameter schema with port required, send at
+// most 256 bytes and expect as RE2 expression.
+func TestTCPLimits(t *testing.T) {
+	typ, ok := Lookup("tcp")
+	if !ok || !typ.Available() {
+		t.Fatal("tcp missing or not available")
+	}
+	if typ.DefaultIntervalS != 60 || typ.DefaultTimeoutS != 5 || typ.MinIntervalS != 10 || typ.MaxTimeoutS != 30 || typ.MaxParallelPerTarget != 2 {
+		t.Fatalf("tcp limits = %+v", typ)
+	}
+	if typ.MaxPayloadBytes != 1024 {
+		t.Fatalf("max_payload_bytes = %d, want 1024 (read cap)", typ.MaxPayloadBytes)
+	}
+	if v, ok := typ.ParamDefault("family"); !ok || v != "auto" {
+		t.Fatalf("family default = %v", v)
+	}
+	base := ProbeSpec{ID: "p", Type: "tcp", Target: "192.0.2.1", IntervalMS: 60_000, TimeoutMS: 5_000, DownCount: 3, UpCount: 1}
+	cases := []struct {
+		name   string
+		mutate func(*ProbeSpec)
+		fields []string
+	}{
+		{"valid", func(s *ProbeSpec) {
+			s.Params = json.RawMessage(`{"port":25,"send":"QUIT\\r\\n","expect":"^220 ","family":"v6","rtt_warn_ms":200}`)
+			s.Thresholds = json.RawMessage(`{"rtt_warn_ms":150}`)
+		}, nil},
+		{"port missing", func(s *ProbeSpec) {}, []string{"params.port"}},
+		{"port missing with other params", func(s *ProbeSpec) { s.Params = json.RawMessage(`{"expect":"x"}`) }, []string{"params.port"}},
+		{"port 0", func(s *ProbeSpec) { s.Params = json.RawMessage(`{"port":0}`) }, []string{"params.port"}},
+		{"port 65536", func(s *ProbeSpec) { s.Params = json.RawMessage(`{"port":65536}`) }, []string{"params.port"}},
+		{"interval 9 s", func(s *ProbeSpec) { s.Params = json.RawMessage(`{"port":22}`); s.IntervalMS = 9_000; s.TimeoutMS = 1_000 }, []string{"interval_s"}},
+		{"timeout 31 s", func(s *ProbeSpec) { s.Params = json.RawMessage(`{"port":22}`); s.TimeoutMS = 31_000 }, []string{"timeout_s"}},
+		{"timeout = interval", func(s *ProbeSpec) { s.Params = json.RawMessage(`{"port":22}`); s.IntervalMS = 10_000; s.TimeoutMS = 10_000 }, []string{"timeout_s"}},
+		{"send 257 bytes", func(s *ProbeSpec) {
+			s.Params = json.RawMessage(`{"port":22,"send":"` + strings.Repeat("a", 257) + `"}`)
+		}, []string{"params.send"}},
+		{"send 129 two-byte runes", func(s *ProbeSpec) {
+			s.Params = json.RawMessage(`{"port":22,"send":"` + strings.Repeat("ä", 129) + `"}`)
+		}, []string{"params.send"}},
+		{"send 129 escapes = 129 bytes", func(s *ProbeSpec) {
+			s.Params = json.RawMessage(`{"port":25,"send":"` + strings.Repeat(`\\n`, 129) + `"}`)
+		}, nil},
+		{"send 256 escapes = 256 bytes", func(s *ProbeSpec) {
+			s.Params = json.RawMessage(`{"port":25,"send":"` + strings.Repeat(`\\r`, 256) + `"}`)
+		}, nil},
+		{"send 257 escapes = 257 bytes", func(s *ProbeSpec) {
+			s.Params = json.RawMessage(`{"port":25,"send":"` + strings.Repeat(`\\n`, 257) + `"}`)
+		}, []string{"params.send"}},
+		{"expect no RE2", func(s *ProbeSpec) { s.Params = json.RawMessage(`{"port":22,"expect":"(?<=a)b"}`) }, []string{"params.expect"}},
+		{"expect 1025 characters", func(s *ProbeSpec) {
+			s.Params = json.RawMessage(`{"port":22,"expect":"` + strings.Repeat("a", 1025) + `"}`)
+		}, []string{"params.expect"}},
+		{"family unknown", func(s *ProbeSpec) { s.Params = json.RawMessage(`{"port":22,"family":"v5"}`) }, []string{"params.family"}},
+		{"old parameter connect_warn_ms", func(s *ProbeSpec) { s.Params = json.RawMessage(`{"port":22,"connect_warn_ms":5}`) }, []string{"params.connect_warn_ms"}},
+		{"threshold without port", func(s *ProbeSpec) {
+			s.Params = json.RawMessage(`{"port":22}`)
+			s.Thresholds = json.RawMessage(`{"rtt_warn_ms":0}`)
+		}, []string{"thresholds.rtt_warn_ms"}},
+	}
+	for _, c := range cases {
+		spec := base
+		c.mutate(&spec)
+		var got []string
+		for _, e := range Validate(spec) {
+			got = append(got, e.Field)
+		}
+		if !slices.Equal(got, c.fields) {
+			t.Errorf("%s: fields = %v, want %v", c.name, got, c.fields)
+		}
+	}
+	if got := UnescapeSend(`A\r\n\t\\\x`); got != "A\r\n\t\\\\x" {
+		t.Fatalf("UnescapeSend = %q", got)
 	}
 }

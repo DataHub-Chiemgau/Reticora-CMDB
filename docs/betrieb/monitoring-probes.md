@@ -44,6 +44,33 @@ je Prüfung (1–5), `spacing_ms` 1000, `payload_bytes` 56 (0–1472),
 `rtt_warn_ms` ohne Standard, `loss_warn` 0,5. Mehrere Pakete je Prüfung
 liefern Verlust und RTT-Streuung, ohne die Prüfrate zu erhöhen.
 
+## TCP-Connect (`tcp`)
+
+Standard nach PRT-03: Intervall 60 s (10 s–24 h), Timeout 5 s (1–30 s, je
+Probe unter dem Intervall), Down-Count 3, Up-Count 1, höchstens 2
+gleichzeitige Prüfungen je Ziel. Parameter: `port` 1–65535 (Pflicht),
+`send` (optional, höchstens 256 Byte; `\r`, `\n`, `\t` und `\\` werden
+dekodiert), `expect` (optional, RE2-Ausdruck mit höchstens 1024 Zeichen),
+`family` `auto|v4|v6` (Standard `auto`), Schwelle `rtt_warn_ms` für den
+Verbindungsaufbau ohne Standard.
+
+Ablauf: Verbindungsaufbau; nur bei gesetztem `send` wird dieser String
+gesendet, nur bei gesetztem `expect` wird die Antwort gelesen, höchstens
+1 KiB oder bis zum Timeout. Ohne `send` und `expect` schließt der Collector
+die Verbindung sofort nach dem Aufbau und sendet nichts.
+
+| Ergebnis | Bedeutung | Zustand |
+|---|---|---|
+| `ok` | Aufbau gelungen (und `expect` getroffen) | `up`; `degraded`, wenn die Aufbauzeit `rtt_warn_ms` überschreitet |
+| `fail`/`refused` | Gegenstelle lehnt ab (RST) | zählt auf `down` |
+| `fail`/`timeout` | kein Aufbau bzw. keine Antwort bis zum Timeout | zählt auf `down` |
+| `fail`/`unreachable` | ICMP unreachable (Host oder Netz) | zählt auf `down` |
+| `fail`/`expect_mismatch` | Antwort gelesen, `expect` nicht getroffen | zählt auf `down` (verletzter Sollwert, E-177) |
+| `error`/`config` | ungültige Parameter (Feld im Label `field`) | `unknown` |
+
+Messwert: Die Aufbauzeit steht als `rtt_ms` im Ergebnis und heißt als
+Metrik `probe_tcp_connect_seconds`.
+
 ## Typtabelle
 
 Zeiten in Sekunden, Rate in Prüfungen je Sekunde. Die Werte sind Startwerte

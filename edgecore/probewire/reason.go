@@ -34,6 +34,10 @@ const (
 	// ReasonTLS: TLS handshake failed or the certificate is invalid (base
 	// code, used by WP-1016 and WP-1018).
 	ReasonTLS = "tls"
+	// ReasonExpectMismatch: the target answered, but the answer did not
+	// match the expected pattern (tcp banner, WP-970). A failed check, not
+	// a warning: a violated expected value counts towards down (E-177).
+	ReasonExpectMismatch = "expect_mismatch"
 
 	// WarnThresholdExceeded: the check succeeded but a threshold (RTT,
 	// loss, value) was violated.
@@ -64,6 +68,7 @@ var reasons = map[string]bool{
 	ReasonICMPUnavailable:      true,
 	ReasonUnreachable:          true,
 	ReasonTLS:                  true,
+	ReasonExpectMismatch:       true,
 }
 
 // ValidReason reports whether code is a known reason or warn code.

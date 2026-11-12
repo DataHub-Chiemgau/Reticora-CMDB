@@ -218,27 +218,40 @@
       "params": {
         "type": "object",
         "additionalProperties": false,
+        "required": [
+          "port"
+        ],
         "properties": {
           "port": {
             "type": "integer",
             "minimum": 1,
             "maximum": 65535,
-            "description": "Port when the target has none."
+            "description": "TCP port of the target (required)."
           },
           "send": {
             "type": "string",
-            "maxLength": 256,
-            "description": "String sent after connect."
+            "maxLength": 512,
+            "description": "String sent after connect, at most 256 bytes after the escapes \\r, \\n, \\t and \\\\ are decoded (the escaped form may therefore be up to 512 characters). Without send nothing is sent."
           },
           "expect": {
             "type": "string",
             "maxLength": 1024,
-            "description": "Regex matched against the banner (read at most 1 KiB)."
+            "description": "RE2 regular expression matched against the answer (read at most 1 KiB or until the timeout). Without expect nothing is read."
           },
-          "connect_warn_ms": {
+          "family": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "v4",
+              "v6"
+            ],
+            "default": "auto",
+            "description": "Address family of the connection."
+          },
+          "rtt_warn_ms": {
             "type": "number",
             "minimum": 1,
-            "description": "Connect time threshold for degraded."
+            "description": "Connect time threshold for degraded; no default."
           }
         }
       }

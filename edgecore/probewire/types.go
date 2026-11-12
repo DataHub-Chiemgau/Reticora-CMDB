@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -276,16 +277,103 @@ func Validate(spec ProbeSpec) []FieldError {
 		add("type", "probe type %s has an invalid parameter schema", t.Key)
 		return errs
 	}
-	errs = append(errs, validateObject(&s, spec.Params, "params")...)
-	errs = append(errs, validateObject(&s, spec.Thresholds, "thresholds")...)
+	// Required parameters apply to params only, also when params are
+	// absent; thresholds name a subset of the parameters.
+	errs = append(errs, validateObject(&s, spec.Params, "params", len(s.Required) > 0)...)
+	thresholds := s
+	thresholds.Required = nil
+	errs = append(errs, validateObject(&thresholds, spec.Thresholds, "thresholds", false)...)
+	if check := paramChecks[t.Key]; check != nil {
+		if params, ok := decodeObject(spec.Params); ok {
+			// A field the schema already rejected is reported once.
+			for _, e := range check(params) {
+				if !slices.ContainsFunc(errs, func(x FieldError) bool { return x.Field == e.Field }) {
+					errs = append(errs, e)
+				}
+			}
+		}
+	}
 	return errs
 }
 
+// paramChecks are the checks of a type's parameters that the schema subset
+// cannot express (WP-970: send in bytes, expect as RE2 expression). They
+// run on decodable params and report field errors.
+var paramChecks = map[string]func(params map[string]any) []FieldError{
+	"tcp": checkTCPParams,
+}
+
+// MaxTCPSend is the largest send string of the tcp type in bytes (PRT-03).
+const MaxTCPSend = 256
+
+// checkTCPParams checks send (at most 256 bytes after decoding the
+// escapes) and expect (a valid RE2 regular expression) of the tcp type
+// (PRT-03).
+func checkTCPParams(params map[string]any) []FieldError {
+	var errs []FieldError
+	if send, ok := params["send"].(string); ok && len(UnescapeSend(send)) > MaxTCPSend {
+		errs = append(errs, FieldError{Field: "params.send", Message: fmt.Sprintf("must be at most %d bytes", MaxTCPSend)})
+	}
+	if expect, ok := params["expect"].(string); ok {
+		if _, err := regexp.Compile(expect); err != nil {
+			errs = append(errs, FieldError{Field: "params.expect", Message: "must be a valid RE2 regular expression"})
+		}
+	}
+	return errs
+}
+
+// UnescapeSend decodes the escapes \r, \n, \t and \\ of a send string;
+// any other backslash stays as it is.
+func UnescapeSend(s string) string {
+	if !strings.Contains(s, `\`) {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' && i+1 < len(s) {
+			var c byte
+			switch s[i+1] {
+			case 'r':
+				c = '\r'
+			case 'n':
+				c = '\n'
+			case 't':
+				c = '\t'
+			case '\\':
+				c = '\\'
+			}
+			if c != 0 {
+				b.WriteByte(c)
+				i++
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}
+
+func decodeObject(raw json.RawMessage) (map[string]any, bool) {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil, false
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil || m == nil {
+		return nil, false
+	}
+	return m, true
+}
+
 // validateObject validates params or thresholds (an object or absent)
-// against the parameter schema.
-func validateObject(s *schema, raw json.RawMessage, prefix string) []FieldError {
+// against the parameter schema. With required set, absent params are
+// validated as an empty object, so that a missing required parameter is
+// reported.
+func validateObject(s *schema, raw json.RawMessage, prefix string, required bool) []FieldError {
 	if len(bytes.TrimSpace(raw)) == 0 || string(bytes.TrimSpace(raw)) == "null" {
-		return nil
+		if !required {
+			return nil
+		}
+		raw = json.RawMessage(`{}`)
 	}
 	var v any
 	dec := json.NewDecoder(bytes.NewReader(raw))
