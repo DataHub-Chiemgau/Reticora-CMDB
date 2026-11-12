@@ -489,7 +489,8 @@ func (s *Sync) refreshConnection(ctx context.Context, a *Account, src Source, cl
 	now := s.o.Now().UTC()
 	c := &Connection{OrganizationID: a.OrganizationID, AccountID: a.ID, ExternalID: externalID, Carrier: data.Carrier,
 		ContractID: data.ContractID, AddressText: data.AddressText, PrivateAddress: data.PrivateAddress,
-		Properties: maps.Clone(data.Properties), FetchedAt: now, ExpiresAt: now.Add(s.o.TTL)}
+		Holders: data.Holders, HoldersKnown: data.HoldersKnown, Properties: maps.Clone(data.Properties), FetchedAt: now,
+		ExpiresAt: now.Add(s.o.TTL)}
 	err = s.inTx(ctx, a.OrganizationID, func(ctx context.Context) error {
 		prev, perr := s.o.Cache.ConnectionByExternal(ctx, a.OrganizationID, a.ID, externalID)
 		switch {
@@ -498,10 +499,11 @@ func (s *Sync) refreshConnection(ctx context.Context, a *Account, src Source, cl
 		case perr != nil:
 			return perr
 		default:
-			// The holder stays a surrogate of the vault until the source
-			// names it (WP-1076). The address is the source's: a private one
-			// is sealed by the store (an unchanged one keeps its surrogate),
-			// none clears it (WP-1075).
+			// The holder subject stays unless the source delivered the
+			// holders (WP-1076: the store updates, creates or shreds it).
+			// The address is the source's: a private one is sealed by the
+			// store (an unchanged one keeps its surrogate), none clears it
+			// (WP-1075).
 			c.HolderSubjectID = prev.HolderSubjectID
 		}
 		if uerr := s.o.Cache.UpsertConnection(ctx, c); uerr != nil {

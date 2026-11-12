@@ -104,6 +104,7 @@ GET /api/v1/admin/plans operator
 GET /api/v1/admp/accounts/ admp:manage
 GET /api/v1/admp/accounts/{id} admp:manage
 GET /api/v1/admp/connections/{id} admp:read
+GET /api/v1/admp/connections/{id}/holder admp:holder_read
 GET /api/v1/agents agent:read
 GET /api/v1/ai/conversations ai:read
 GET /api/v1/api-keys apikey:manage

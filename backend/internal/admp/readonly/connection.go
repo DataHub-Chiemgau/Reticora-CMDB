@@ -8,8 +8,8 @@ import (
 	"strconv"
 )
 
-// The connections (Anschluss) of ADMP and their carriers (ADM-07, E-252;
-// WP-1075). No other path of the documentation is read for a connection:
+// The connections (Anschluss) of ADMP with their holders and their
+// carriers (ADM-06, ADM-07, E-252, E-254; WP-1075, WP-1076). No other path of the documentation is read for a connection:
 // the services come over the ports (WP-1073), the holder paginator stays
 // outside the allowlist (E-254).
 
@@ -58,10 +58,24 @@ type Organization struct {
 	Number    *float64
 }
 
-// Holder is an AnschlussInhaber; WP-1075 decodes its typ (Privat,
-// Gewerblich, Genossenschaft) for the address form only.
+// Holder is an AnschlussInhaber (ADM-06, E-254, WP-1076): its typ
+// (Privat, Gewerblich, Genossenschaft), title, first and last name,
+// register court and number and its address; null members are empty.
+// geburtsdatum, id, anschlussId and anschluss are dropped (data
+// minimisation): the holders come ordered by their ADMP id, the id itself
+// is not kept.
 type Holder struct {
-	Type string
+	Type              string
+	Title             string
+	FirstName         string
+	LastName          string
+	RegisterCourt     string
+	RegisterNumber    string
+	Street            string
+	HouseNumber       string
+	HouseNumberSuffix string
+	PostalCode        string
+	City              string
 }
 
 // rawOrganization is the part of Organization a read decodes.
@@ -83,9 +97,27 @@ func (o *rawOrganization) organization() (*Organization, bool) {
 	return out, true
 }
 
-// rawHolder is the part of AnschlussInhaber a read decodes.
+// rawHolder is the part of AnschlussInhaber a read decodes; the id only
+// orders the holders.
 type rawHolder struct {
-	Typ *string `json:"typ"`
+	ID               *docInt `json:"id"`
+	Typ              *string `json:"typ"`
+	Titel            *string `json:"titel"`
+	Vorname          *string `json:"vorname"`
+	Name             *string `json:"name"`
+	Registerinstanz  *string `json:"registerinstanz"`
+	Registernummer   *string `json:"registernummer"`
+	Strasse          *string `json:"strasse"`
+	Hausnummer       *string `json:"hausnummer"`
+	Hausnummerzusatz *string `json:"hausnummerzusatz"`
+	PLZ              *string `json:"plz"`
+	Ort              *string `json:"ort"`
+}
+
+func (h *rawHolder) holder() Holder {
+	return Holder{Type: *h.Typ, Title: text(h.Titel), FirstName: text(h.Vorname), LastName: text(h.Name),
+		RegisterCourt: text(h.Registerinstanz), RegisterNumber: text(h.Registernummer), Street: text(h.Strasse),
+		HouseNumber: text(h.Hausnummer), HouseNumberSuffix: text(h.Hausnummerzusatz), PostalCode: text(h.PLZ), City: text(h.Ort)}
 }
 
 // text returns the value of a string-or-null member.
@@ -143,12 +175,22 @@ func (c *Client) GetConnection(ctx context.Context, id int64) (*Connection, erro
 		out.Carrier = org
 	}
 	if raw.Inhaber != nil {
-		out.Holders = make([]Holder, 0, len(*raw.Inhaber))
-		for _, h := range *raw.Inhaber {
-			if h.Typ == nil {
+		holders := *raw.Inhaber
+		for i := range holders {
+			if holders[i].ID == nil || holders[i].Typ == nil {
 				return nil, classErr(ClassDecode, 0, nil)
 			}
-			out.Holders = append(out.Holders, Holder{Type: *h.Typ})
+		}
+		// Ordered by the ADMP id (stable insertion sort: a connection has
+		// few holders).
+		for i := 1; i < len(holders); i++ {
+			for j := i; j > 0 && *holders[j].ID < *holders[j-1].ID; j-- {
+				holders[j], holders[j-1] = holders[j-1], holders[j]
+			}
+		}
+		out.Holders = make([]Holder, 0, len(holders))
+		for i := range holders {
+			out.Holders = append(out.Holders, holders[i].holder())
 		}
 	}
 	return out, nil

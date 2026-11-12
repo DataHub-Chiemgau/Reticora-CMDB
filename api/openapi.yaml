@@ -27207,7 +27207,6 @@ paths:
   /api/v1/admp/connections/{id}/holder:
     x-phase: P3
     x-feature: admp
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -27215,11 +27214,23 @@ paths:
       tags: [ADMP]
       summary: Get the holder of an ADMP connection
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        ADM-06, SEC-05 (WP-1076, E-243, E-254): resolves the holders of a
+        cached ADMP connection from the PII vault (one pii_subject of the
+        kind person per connection, taken from the relation inhaber of GET
+        /V1/anschluss/{id} of ADMP; the birth date is never stored). Every
+        successful read writes an audit entry in the same transaction
+        (action admp.holder.read, resource_type admp_holder, resource_id
+        the connection, no personal value in changes). An unknown
+        connection, one outside the caller's scope and a connection without
+        holder (none delivered, shredded, or no vault) are 404. No other
+        route, event or log carries the holder in plain text. Reads only the
+        cache, never ADMP. Requires admp:holder_read.
       responses:
         '200':
-          description: Get the holder of an ADMP connection. The schema comes with the implementing work package.
+          description: The holders of the connection
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ADMPHolderList' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -43362,7 +43373,7 @@ components:
         line of street, number, postal code and city) from GET
         /V1/anschluss/{id} of ADMP (E-252); properties carry carrier_id,
         carrier_short_name, carrier_number, created_at and removed_at.
-      required: [id, account_id, external_id, address_form, holder_present, properties, fetched_at, expires_at, stale]
+      required: [id, account_id, external_id, address_form, holder_present, holder_count, properties, fetched_at, expires_at, stale]
       properties:
         id: { type: string, format: uuid, description: The Reticora id of the cache entry. }
         account_id: { type: string, format: uuid }
@@ -43385,12 +43396,42 @@ components:
           description: The time ADMP reports the connection as removed (removed, A-86); missing when not removed.
         holder_subject_id: { type: string, format: uuid, description: Surrogate of the holder. }
         holder_present: { type: boolean }
+        holder_count:
+          type: integer
+          description: >-
+            The number of holders kept in the holder surrogate (WP-1076); 0
+            without holder. The holders themselves only through GET
+            /api/v1/admp/connections/{id}/holder with admp:holder_read.
         properties: { type: object, additionalProperties: true }
         fetched_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time }
         stale: { type: boolean }
         last_error_class: { type: string }
         client_id: { type: string, format: uuid }
+    ADMPHolder:
+      type: object
+      description: >-
+        A holder of an ADMP connection (AnschlussInhaber, WP-1076, E-254):
+        type, title, names, register court and number and the address as one
+        line; members ADMP sends as null are left out. Personal data.
+      required: [type]
+      properties:
+        type: { type: string, enum: [Privat, Gewerblich, Genossenschaft], description: AnschlussInhaber.typ of ADMP. }
+        title: { type: string }
+        first_name: { type: string }
+        last_name: { type: string, description: The name of ADMP (a company name for a business holder). }
+        register_court: { type: string }
+        register_number: { type: string }
+        address: { type: string, description: '<street> <number><suffix>, <postal code> <city>' }
+    ADMPHolderList:
+      type: object
+      required: [connection_id, holders]
+      properties:
+        connection_id: { type: string, format: uuid }
+        holders:
+          type: array
+          description: The holders in the order of ADMP.
+          items: { $ref: '#/components/schemas/ADMPHolder' }
     ADMPServicePort:
       type: object
       description: A port of an ADMP service (ADM-04); the CI only by its id.

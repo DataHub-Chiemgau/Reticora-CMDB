@@ -33,6 +33,11 @@ type Repository interface {
 	// keys of the properties are sealed as with a service (WP-1075). The
 	// memory store keeps neither.
 	UpsertConnection(ctx context.Context, c *Connection) error
+	// ResolveHolders resolves the holders of a visible connection from the
+	// PII vault and records the read in the audit log in the same
+	// transaction (ADM-06, WP-1076). Unknown or invisible: ErrCacheNotFound;
+	// without a holder: ErrHolderNotFound.
+	ResolveHolders(ctx context.Context, orgID, connectionID string) ([]Holder, error)
 	// DeleteConnection removes a connection with its personal surrogates
 	// (ADMP answered 404, WP-1075); its services keep their row without
 	// connection. Unknown or invisible: ErrCacheNotFound.

@@ -88,12 +88,13 @@ func TestClientSourceMapsConnection(t *testing.T) {
 	d := connectionData(&readonly.Connection{ID: 4711, CarrierID: 9, ContractID: "V-1", Street: "Weg", HouseNumber: "1",
 		Holders: h("Gewerblich")}, &readonly.Organization{ID: 9, Name: "Netz AG", ShortName: "NA", Number: &number})
 	want := &ConnectionData{ExternalID: "4711", Carrier: "Netz AG", ContractID: "V-1", AddressText: "Weg 1",
-		Properties: map[string]any{"carrier_id": int64(9), "carrier_short_name": "NA", "carrier_number": 4711.0}}
+		Properties: map[string]any{"carrier_id": int64(9), "carrier_short_name": "NA", "carrier_number": 4711.0},
+		Holders:    []Holder{{Type: "Gewerblich"}}, HoldersKnown: true}
 	if !reflect.DeepEqual(d, want) {
 		t.Errorf("business %+v, want %+v", d, want)
 	}
 	if d = connectionData(&readonly.Connection{ID: 1, CarrierID: 9, Street: "Weg"}, nil); d.AddressText != "" ||
-		d.PrivateAddress != "Weg" || d.Carrier != "" {
+		d.PrivateAddress != "Weg" || d.Carrier != "" || d.HoldersKnown || d.Holders != nil {
 		t.Errorf("private without carrier %+v", d)
 	}
 }

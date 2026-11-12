@@ -152,7 +152,9 @@ func (m *MemoryRepository) UpsertConnection(ctx context.Context, c *Connection) 
 	if err := checkConnection(c); err != nil {
 		return err
 	}
-	c.PrivateAddress = ""
+	// No vault without a database: neither the private address nor a
+	// holder is stored (WP-1075, WP-1076).
+	c.PrivateAddress, c.Holders, c.HoldersKnown = "", nil, false
 	if err := sealProperties(c.Properties, redactedRef, noKeptRefs); err != nil {
 		return err
 	}
@@ -607,6 +609,15 @@ func (m *MemoryRepository) ConnectionsByID(ctx context.Context, orgID string, id
 		return cmp.Or(cmp.Compare(a.ExternalID, b.ExternalID), cmp.Compare(a.ID, b.ID))
 	})
 	return out, nil
+}
+
+// ResolveHolders implements Repository: without a vault no connection has
+// a holder.
+func (m *MemoryRepository) ResolveHolders(ctx context.Context, orgID, connectionID string) ([]Holder, error) {
+	if _, err := m.GetConnection(ctx, orgID, connectionID); err != nil {
+		return nil, err
+	}
+	return nil, ErrHolderNotFound
 }
 
 // DeleteConnection implements Repository: its services keep their entry

@@ -21,7 +21,8 @@ import (
 // route only reads the cache; refresh=true queues admp.refresh at most
 // once per object and minute and answers 202 with the cached state. The
 // holder and the address of a private connection appear only as their
-// surrogates (E-243). CIs are named by their id only, so no field of a CI
+// surrogates (E-243); the holder route (WP-1076) alone resolves the holder,
+// with admp:holder_read and an audit entry per read. CIs are named by their id only, so no field of a CI
 // passes the field filter of WP-265.
 
 // ErrTargetNotFound: the network interface or CI of a route does not
@@ -82,6 +83,7 @@ type connectionFields struct {
 	RemovedAt        string         `json:"removed_at,omitempty"`
 	HolderSubjectID  string         `json:"holder_subject_id,omitempty"`
 	HolderPresent    bool           `json:"holder_present"`
+	HolderCount      int            `json:"holder_count"`
 	Properties       map[string]any `json:"properties"`
 	FetchedAt        time.Time      `json:"fetched_at"`
 	ExpiresAt        time.Time      `json:"expires_at"`
@@ -99,7 +101,7 @@ func connectionFieldsOf(c *Connection) connectionFields {
 	return connectionFields{ID: c.ID, AccountID: c.AccountID, ExternalID: c.ExternalID, Carrier: c.Carrier,
 		ContractID: c.ContractID, AddressText: c.AddressText, AddressSubjectID: c.AddressSubjectID,
 		AddressForm: addressForm(c), RemovedAt: removed,
-		HolderSubjectID: c.HolderSubjectID, HolderPresent: c.HolderSubjectID != "", Properties: props,
+		HolderSubjectID: c.HolderSubjectID, HolderPresent: c.HolderSubjectID != "", HolderCount: holderCountOf(c), Properties: props,
 		FetchedAt: c.FetchedAt, ExpiresAt: c.ExpiresAt, Stale: c.Stale, LastErrorClass: c.LastErrorClass, ClientID: c.ClientID}
 }
 
@@ -332,6 +334,7 @@ func NewDataHandler(cache Repository, targets Targets, accounts *AccountService,
 // refresh is a job.
 func (h *DataHandler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/admp/connections/{id}", h.getConnection)
+	r.Get("/api/v1/admp/connections/{id}/holder", h.getHolder)
 	r.Get("/api/v1/network-interfaces/{id}/admp", h.listInterface)
 	r.Get("/api/v1/cis/{id}/admp-connections", h.listCI)
 }
@@ -341,6 +344,8 @@ func writeDataError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, ErrCacheNotFound):
 		api.WriteError(w, http.StatusNotFound, "Not Found", "admp connection not found")
+	case errors.Is(err, ErrHolderNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", "admp holder not found")
 	case errors.Is(err, ErrTargetNotFound):
 		api.WriteError(w, http.StatusNotFound, "Not Found", "network interface or ci not found")
 	case errors.Is(err, ErrNoRefreshJobs):
@@ -415,6 +420,30 @@ func (h *DataHandler) getConnection(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	api.WriteJSON(w, status(view.RefreshJobID), view)
+}
+
+// holderView is GET /admp/connections/{id}/holder.
+type holderView struct {
+	ConnectionID string       `json:"connection_id"`
+	Holders      []HolderView `json:"holders"`
+}
+
+// getHolder resolves the holders of a connection (ADM-06, WP-1076):
+// admp:holder_read (routeRules), every answer audited in the transaction of
+// the read; no holder is 404. Only this route answers personal data of
+// the holder.
+func (h *DataHandler) getHolder(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := organizationID(w, r)
+	if !ok {
+		return
+	}
+	id := chi.URLParam(r, "id")
+	holders, err := h.cache.ResolveHolders(r.Context(), orgID, id)
+	if err != nil {
+		writeDataError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, holderView{ConnectionID: id, Holders: holderViews(holders)})
 }
 
 func (h *DataHandler) listInterface(w http.ResponseWriter, r *http.Request) {

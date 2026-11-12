@@ -49,6 +49,10 @@ type ConnectionData struct {
 	AddressText    string
 	PrivateAddress string
 	Properties     map[string]any
+	// Holders are the holders when HoldersKnown (the answer carried the
+	// relation inhaber, WP-1076); personal data, kept only as a surrogate.
+	Holders      []Holder
+	HoldersKnown bool
 }
 
 // ServiceData is a service as the source returns it.
@@ -219,6 +223,7 @@ func connectionData(d *readonly.Connection, carrier *readonly.Organization) *Con
 	if t, ok := DocTime(d.Removed); ok {
 		out.Properties["removed_at"] = t.Format(time.RFC3339)
 	}
+	out.Holders, out.HoldersKnown = holdersOf(d.Holders), d.Holders != nil
 	address := AddressLine(d.Street, d.HouseNumber, d.HouseNumberSuffix, d.PostalCode, d.City)
 	if AddressFormOf(d.Holders) == AddressFormBusiness {
 		out.AddressText = address
@@ -260,8 +265,8 @@ func AddressFormOf(holders []readonly.Holder) string {
 	if len(holders) == 0 {
 		return AddressFormPrivate
 	}
-	for _, h := range holders {
-		if h.Type != holderBusiness && h.Type != holderCooperative {
+	for i := range holders {
+		if t := holders[i].Type; t != holderBusiness && t != holderCooperative {
 			return AddressFormPrivate
 		}
 	}

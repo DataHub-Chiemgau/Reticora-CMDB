@@ -112,6 +112,10 @@ func (r *PGRepository) UpsertConnection(ctx context.Context, c *Connection) erro
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return cacheError(err)
 		}
+		// The holders first: the private address is anchored at them.
+		if herr := storeHolders(ctx, tx, c, &previous); herr != nil {
+			return herr
+		}
 		if serr := sealConnection(ctx, tx, c, &previous); serr != nil {
 			return serr
 		}
@@ -209,6 +213,21 @@ func sealConnection(ctx context.Context, tx pgx.Tx, c *Connection, previous *con
 		c.AddressSubjectID = id
 	}
 	return nil
+}
+
+// ResolveHolders implements Repository: in one transaction of the caller's
+// scope, with the audit entry of the read (ADM-06, WP-1076).
+func (r *PGRepository) ResolveHolders(ctx context.Context, orgID, connectionID string) ([]Holder, error) {
+	if !api.IsUUID(connectionID) {
+		return nil, ErrCacheNotFound
+	}
+	var out []Holder
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var rerr error
+		out, rerr = resolveHolders(ctx, tx, orgID, connectionID)
+		return rerr
+	})
+	return out, err
 }
 
 // DeleteConnection implements Repository: the triggers of admp_connection

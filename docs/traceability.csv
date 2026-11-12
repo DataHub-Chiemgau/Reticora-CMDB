@@ -1769,3 +1769,5 @@ MGT-04;[P3];E;backend/internal/maintenance/recipients_integration_test.go;WP-103
 NTF-05;[B], Zusätze [P2], [P3];E;backend/internal/maintenance/recipients_integration_test.go;WP-1034
 ADM-07;[P3];E;backend/internal/admp/api_integration_test.go;WP-1075
 ADM-07;[P3];E;backend/internal/admp/sync_integration_test.go;WP-1075
+ADM-06;[P3];E;backend/internal/admp/holder_integration_test.go;WP-1076
+SEC-05;[B];E;backend/internal/admp/holder_integration_test.go;WP-1076

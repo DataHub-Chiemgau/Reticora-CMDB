@@ -3,6 +3,7 @@ package readonly
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"reflect"
 	"strings"
@@ -31,8 +32,10 @@ func TestGetConnectionDecodesBusinessFixture(t *testing.T) {
 	want := &Connection{ID: 4711, CarrierID: 9, ContractID: "V-2024-0815", Created: ptr(1690000000.0), Street: "Bahnhofstraße",
 		HouseNumber: "12", HouseNumberSuffix: "a", PostalCode: "83278", City: "Traunstein",
 		Carrier: &Organization{ID: 9, Name: "Netz Chiemgau GmbH", ShortName: "NCG", Number: ptr(4711.0)},
-		Holders: []Holder{{Type: "Gewerblich"}}}
-	if !reflect.DeepEqual(got.Holders[:1], want.Holders) {
+		Holders: []Holder{{Type: "Gewerblich", LastName: "Muster Bau GmbH", RegisterCourt: "Amtsgericht Traunstein",
+			RegisterNumber: "HRB 1234", Street: "Bahnhofstraße", HouseNumber: "12", HouseNumberSuffix: "a", PostalCode: "83278",
+			City: "Traunstein"}}}
+	if !reflect.DeepEqual(got.Holders, want.Holders) {
 		t.Errorf("holders %+v", got.Holders)
 	}
 	got.Holders, want.Holders = nil, nil
@@ -190,5 +193,62 @@ func TestGetOrganizationSendsSingleID(t *testing.T) {
 	}
 	if n := m.count("GET " + fixtureBase + organizationsPath); n != 3 {
 		t.Errorf("byIds reads %d, want 3", n)
+	}
+}
+
+// TestGetConnectionDecodesHolders: every holder of inhaber[] decodes with
+// typ, titel, vorname, name, registerinstanz, registernummer and its
+// address, null members empty, ordered by the ADMP id (31 before 32,
+// although ADMP sends 32 first); the id itself is not kept (WP-1076).
+func TestGetConnectionDecodesHolders(t *testing.T) {
+	m := newFixtureADMP(t)
+	got, err := docClient(t, m, "", validLogin, nil).GetConnection(context.Background(), 4712)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Holder{
+		{Type: "Privat", Title: "Dr.", FirstName: "Erika", LastName: "Musterfrau", Street: "Hauptstraße", HouseNumber: "3",
+			PostalCode: "83313", City: "Siegsdorf"},
+		{Type: "Privat", FirstName: "Max", LastName: "Mustermann", Street: "Hauptstraße", HouseNumber: "3", PostalCode: "83313",
+			City: "Siegsdorf"},
+	}
+	if !reflect.DeepEqual(got.Holders, want) {
+		t.Errorf("holders %+v, want %+v", got.Holders, want)
+	}
+	m.set("getV1Anschluss:id#4713", fixture{Status: 200, Body: []byte(`{"id":4713,"netzbetreiberId":9,"vertragId":null,"created":1,
+		"removed":null,"strasse":null,"hausnummer":null,"hausnummerzusatz":null,"plz":null,"ort":null,
+		"inhaber":[{"typ":"Privat","name":"x"}]}`)})
+	if _, err = docClient(t, m, "", validLogin, nil).GetConnection(context.Background(), 4713); ClassOf(err) != ClassDecode {
+		t.Errorf("holder without id: %v, want decode", err)
+	}
+}
+
+// TestGetConnectionDropsBirthDate: geburtsdatum, the holder's id,
+// anschlussId and the embedded anschluss never reach the result; Holder
+// has no member for them (E-254).
+func TestGetConnectionDropsBirthDate(t *testing.T) {
+	m := newFixtureADMP(t)
+	c := docClient(t, m, "", validLogin, nil)
+	for _, id := range []int64{4711, 4712} {
+		got, err := c.GetConnection(context.Background(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := fmt.Sprintf("%+v %#v", got.Holders, got.Holders)
+		for _, dropped := range []string{"315532800", "-123456789", "holder-anschluss-canary"} {
+			if strings.Contains(text, dropped) {
+				t.Errorf("connection %d: the holders carry %s: %s", id, dropped, text)
+			}
+		}
+		noCanary(t, "the holders", got.Holders)
+	}
+	typ := reflect.TypeFor[Holder]()
+	for i := range typ.NumField() {
+		name := strings.ToLower(typ.Field(i).Name)
+		for _, dropped := range []string{"birth", "geburt", "id", "connection", "anschluss"} {
+			if strings.Contains(name, dropped) {
+				t.Errorf("Holder has the member %s", typ.Field(i).Name)
+			}
+		}
 	}
 }

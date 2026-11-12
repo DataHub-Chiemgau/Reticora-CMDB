@@ -47,6 +47,13 @@ type Connection struct {
 	// value subject; without a vault none) and clears it. It is never
 	// read back, marshalled or logged.
 	PrivateAddress string `json:"-"`
+	// Holders are the holders on their way into the store (WP-1076) when
+	// HoldersKnown: UpsertConnection keeps them as one person subject
+	// (HolderSubjectID) and clears them; an empty list shreds the subject.
+	// Without HoldersKnown (ADMP did not deliver the relation) the subject
+	// stays as HolderSubjectID names it.
+	Holders      []Holder `json:"-"`
+	HoldersKnown bool     `json:"-"`
 }
 
 // Service is a service of ADMP on a connection.

@@ -11730,7 +11730,7 @@ export interface paths {
     };
     /**
      * Get the holder of an ADMP connection
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description ADM-06, SEC-05 (WP-1076, E-243, E-254): resolves the holders of a cached ADMP connection from the PII vault (one pii_subject of the kind person per connection, taken from the relation inhaber of GET /V1/anschluss/{id} of ADMP; the birth date is never stored). Every successful read writes an audit entry in the same transaction (action admp.holder.read, resource_type admp_holder, resource_id the connection, no personal value in changes). An unknown connection, one outside the caller's scope and a connection without holder (none delivered, shredded, or no vault) are 404. No other route, event or log carries the holder in plain text. Reads only the cache, never ADMP. Requires admp:holder_read.
      */
     get: operations['getADMPConnectionHolder'];
     put?: never;
@@ -21781,6 +21781,8 @@ export interface components {
        */
       holder_subject_id?: string;
       holder_present: boolean;
+      /** @description The number of holders kept in the holder surrogate (WP-1076); 0 without holder. The holders themselves only through GET /api/v1/admp/connections/{id}/holder with admp:holder_read. */
+      holder_count: number;
       properties: {
         [key: string]: unknown;
       };
@@ -21792,6 +21794,28 @@ export interface components {
       last_error_class?: string;
       /** Format: uuid */
       client_id?: string;
+    };
+    /** @description A holder of an ADMP connection (AnschlussInhaber, WP-1076, E-254): type, title, names, register court and number and the address as one line; members ADMP sends as null are left out. Personal data. */
+    ADMPHolder: {
+      /**
+       * @description AnschlussInhaber.typ of ADMP.
+       * @enum {string}
+       */
+      type: 'Privat' | 'Gewerblich' | 'Genossenschaft';
+      title?: string;
+      first_name?: string;
+      /** @description The name of ADMP (a company name for a business holder). */
+      last_name?: string;
+      register_court?: string;
+      register_number?: string;
+      /** @description <street> <number><suffix>, <postal code> <city> */
+      address?: string;
+    };
+    ADMPHolderList: {
+      /** Format: uuid */
+      connection_id: string;
+      /** @description The holders in the order of ADMP. */
+      holders: components['schemas']['ADMPHolder'][];
     };
     /** @description A port of an ADMP service (ADM-04); the CI only by its id. */
     ADMPServicePort: {
@@ -51724,12 +51748,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get the holder of an ADMP connection. The schema comes with the implementing work package. */
+      /** @description The holders of the connection */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ADMPHolderList'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];

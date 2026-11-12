@@ -75,8 +75,11 @@ var resourceTables = map[string][]string{
 	// Rights per IPAM section (WP-910): the entry is visible where the
 	// row is under the team scope of its policy.
 	"ipam_section_permission": {"ipam_section_permission"},
-	"document":                {"document"},
-	"ticket":                  {"ticket"},
+	// Reads of the holder of an ADMP connection (WP-1076): resource_id is
+	// the connection.
+	"admp_holder": {"admp_connection"},
+	"document":    {"document"},
+	"ticket":      {"ticket"},
 
 	// Route audit (the first route segment): the route's resource_id is
 	// its first id parameter or the id of the created row, so the tables

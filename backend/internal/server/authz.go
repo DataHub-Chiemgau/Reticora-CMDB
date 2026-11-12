@@ -320,6 +320,9 @@ var routeRules = []routeRule{
 	// admp:read (WP-866).
 	{"*", "admp/accounts", identity.PermADMPManage},
 	{"*", "admp/accounts/*", identity.PermADMPManage},
+	// The holder of a connection is personal data: its own right, every
+	// read audited in the handler's transaction (ADM-06, WP-1076).
+	{http.MethodGet, "admp/connections/*/holder", identity.PermADMPHolderRead},
 	// The ADMP data at an interface and a CI read with admp:read, not with
 	// the ipam:read and ci:read of their first segments (WP-930).
 	{http.MethodGet, "network-interfaces/*/admp", identity.PermADMPRead},
