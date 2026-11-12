@@ -28,6 +28,48 @@ documents, backups before off-site transfer) and the container images.
 Metric samples (monitoring) grow with the number of polled CIs and the
 retention; plan an extra 1 GB per 1,000 polled CIs and 30 days of retention.
 
+## Monitoring
+
+Probe monitoring (Epic E) adds to the rows of the central cloud. The figures
+follow ADR 0002 (`docs/decisions/0002-probe-storage.md`): probe results in
+the hypertable `probe_result` with 3-hour chunks, compression after one day,
+raw results 14 days, aggregates 5 min (90 days), 1 h and 1 d (400 days),
+state changes and daily availability 400 days (PRB-06, E-172). The design
+load of an instance is NFR-11: 353 results/s permanently (30.5 million a
+day), sized with reserve factor 3 (ingest ≥ 1,060 results/s), and a
+resynchronisation peak of 5,000 results/s after an outage (PRB-07).
+
+| Load | vCPU | RAM | Disk (SSD) | IOPS (write) | Notes |
+|---|---:|---:|---:|---:|---|
+| 353 results/s (NFR-11) | +2 vCPU | +8 GB, `shared_buffers` ≥ 4 GB | +60 GB | ≥ 1,000 | Active 3-hour chunk 0.81–0.96 GB, below 25 % of `shared_buffers` |
+| 1,060 results/s (reserve factor 3) | +4 vCPU | +24 GB, `shared_buffers` ≥ 12 GB | +150 GB | ≥ 3,000 | Active 3-hour chunk 2.4–2.9 GB |
+| 5,000 results/s (resynchronisation peak) | burst of the row above | as above | as above | ≥ 3,000 | Minutes, not permanent; WAL 2.3–2.9 MB/s |
+
+- **CPU:** the ingest worker and the database writing in blocks of 1,000
+  rows; the spike wrote about 100,000 rows/s in one session (ADR 0002,
+  result 1), so writing is no CPU bottleneck. The vCPUs are for the ingest,
+  state and alarm workers, the compression and aggregate refresh jobs and
+  the queries of the monitoring pages.
+- **RAM:** the active chunk with its indexes stays within 25 % of
+  `shared_buffers` (TimescaleDB guidance). The resident set of the
+  monitoring workers is measured with the load test (WP-1084).
+- **Disk:** steady state about 15–40 GB at 353/s (raw results 10.7–18.6 GB,
+  aggregates compressed about 3.5–5 GB, state changes up to 16 GB, daily
+  availability below 1 GB), 45–120 GB at 1,060/s; the rows add headroom for
+  the uncompressed aggregates of the first refresh, vacuum and a day of
+  growth.
+- **WAL and IOPS:** 459–575 bytes of WAL per result: 584–731 MB/h (14–17.5
+  GB a day) at 353/s, 1.75–2.2 GB/h at 1,060/s and 8.3–10.4 GB/h during the
+  resynchronisation peak. The WAL archive (PITR) and its retention grow by
+  the same amount. Writes arrive in a few blocks per second; the IOPS
+  figures cover WAL, checkpoints and the compression job with headroom
+  (estimate, measured with the load test WP-1084).
+- The figures are a local measurement of the spike (TimescaleDB 2.31,
+  developer machine) plus calculation; the load test before G3 (WP-1083,
+  WP-1084, NFR-11) confirms or corrects them. The metric samples of metric
+  probes (SNMP, Redfish, optics) stay in `metric_sample` (MON-01) and are
+  sized with the line above.
+
 ## Document uploads and malware scan (SEC-09, E-42)
 
 Only with the module `documents` (off by default) and its clamd (compose

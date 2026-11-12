@@ -1706,3 +1706,7 @@ PRB-01;[P3];E;backend/internal/server/monitoring_contract_test.go;WP-938
 PRB-03;[P3];E;backend/internal/server/monitoring_contract_test.go;WP-938
 PRB-05;[P3];E;backend/internal/probe/state_schema_integration_test.go;WP-944
 PRB-07;[P3];E;backend/internal/probe/state_schema_integration_test.go;WP-944
+PRB-06;[P3];E;backend/internal/monitoring/probe_storage_spike_integration_test.go;WP-943
+NFR-11;[P3];E;backend/internal/monitoring/probe_storage_spike_integration_test.go;WP-943
+MON-01;[B];E;backend/internal/monitoring/probe_storage_spike_integration_test.go;WP-943
+NFR-06;[B];E;backend/internal/monitoring/probe_storage_spike_integration_test.go;WP-943
