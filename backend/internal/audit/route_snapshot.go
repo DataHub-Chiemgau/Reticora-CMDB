@@ -359,7 +359,7 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		"compliance/rules": "compliance_rule", "consumables": "consumable",
 		"contacts": "contact", "contracts": "contract", "desks": "desk", "discovery-scopes": "discovery_scope",
 		"forms": "form_def", "iga/connectors": "iga_connector", "inventory/items": "consumable",
-		"ip-addresses": "ip_address", "ips": "ip_address", "keys": "key_item", "maintenance-windows": "maintenance_window",
+		"ip-addresses": "ip_address", "ips": "ip_address", "ipam-sections": "ipam_section", "keys": "key_item", "maintenance-windows": "maintenance_window",
 		"monitoring/alerts": "alert_rule", "notification-channels": "notification_channel", "orders": "internal_order",
 		"racks": "rack", "relationships": "ci_relationship", "roles": "custom_role", "rooms": "room",
 		"saved-views": "saved_view", "sites": "site", "slas": "sla", "business-calendars": "business_calendar", "stocktakes": "stocktake", "subnets": "subnet",

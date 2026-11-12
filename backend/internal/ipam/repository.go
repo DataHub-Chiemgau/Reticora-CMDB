@@ -84,6 +84,9 @@ type Repository interface {
 	CreateVRF(ctx context.Context, v *VRF) error
 	UpdateVRF(ctx context.Context, orgID, id string, req UpdateVRFRequest) (*VRF, error)
 	DeleteVRF(ctx context.Context, orgID, id string) error
+
+	// IPAM sections (IPM-01, section.go).
+	SectionRepository
 }
 
 // MemoryRepository is an in-memory implementation of Repository.
@@ -94,6 +97,7 @@ type MemoryRepository struct {
 	interfaces map[string]*NetworkInterface
 	vlans      map[string]*VLAN
 	vrfs       map[string]*VRF
+	sections   map[string]*Section
 	seq        int
 }
 
@@ -105,6 +109,7 @@ func NewMemoryRepository() *MemoryRepository {
 		interfaces: make(map[string]*NetworkInterface),
 		vlans:      make(map[string]*VLAN),
 		vrfs:       make(map[string]*VRF),
+		sections:   make(map[string]*Section),
 	}
 }
 
@@ -161,6 +166,11 @@ func (r *MemoryRepository) CreateSubnet(_ context.Context, s *Subnet) error {
 	if s.VRFID == "" {
 		s.VRFID = r.defaultVRF(s.OrganizationID).ID
 	}
+	sectionID, err := r.sectionFor(s.OrganizationID, s.SectionID, s.ClientID)
+	if err != nil {
+		return err
+	}
+	s.SectionID = sectionID
 	for _, e := range r.subnets {
 		if e.OrganizationID == s.OrganizationID && e.VRFID == s.VRFID && e.CIDR == s.CIDR {
 			return fmt.Errorf("%w: duplicate cidr", ErrValidation)
@@ -181,6 +191,20 @@ func (r *MemoryRepository) UpdateSubnet(_ context.Context, orgID, id string, req
 	s, ok := r.subnets[id]
 	if !ok || s.OrganizationID != orgID {
 		return nil, ErrNotFound
+	}
+	if req.ClientID != nil || req.SectionID != nil {
+		clientID, sectionID := s.ClientID, s.SectionID
+		if req.ClientID != nil {
+			clientID = *req.ClientID
+		}
+		if req.SectionID != nil {
+			sectionID = *req.SectionID
+		}
+		resolved, err := r.sectionFor(orgID, sectionID, clientID)
+		if err != nil {
+			return nil, err
+		}
+		s.SectionID = resolved
 	}
 	if req.ClientID != nil {
 		s.ClientID = *req.ClientID

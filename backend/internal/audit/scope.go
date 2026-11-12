@@ -120,6 +120,7 @@ var resourceTables = map[string][]string{
 	"invitations":               {"user_invitation"},
 	"ip-addresses":              {"ip_address"},
 	"ips":                       {"ip_address"},
+	"ipam-sections":             {"ipam_section"}, // IPAM sections (WP-900)
 	"jobs":                      {"job"},
 	"layouts":                   {"form_layout"},
 	"keys":                      {"key_item"},

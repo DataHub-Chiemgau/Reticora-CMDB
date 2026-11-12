@@ -42,6 +42,15 @@ var matrixClientOnlyReads = map[string]string{
 		"a principal restricted to clients sees only its clients' accounts (WP-925 AK6): admp.TestAdmpAccountClientScope",
 }
 
+// matrixSiteWrites lists the tables with a client but without a site column
+// whose rows no principal with a site restriction writes (E-09, pattern
+// vlan_scoped_update/vlan_scoped_delete of migration 000091 with site_id
+// always NULL): such a principal reads them, its INSERT is refused and its
+// UPDATE and DELETE find no row.
+var matrixSiteWrites = map[string]string{
+	"ipam_section": "IPAM sections, migration 000298 (WP-900): ipam.TestIPAMSectionsOnPostgreSQL",
+}
+
 // matrixSnapshotScoped lists the tables that carry a scope snapshot of their
 // creator (uuid arrays) instead of client, site and team columns. A
 // synthesized row has no snapshot and belongs to the whole organization, so
@@ -112,6 +121,9 @@ func (p *matrixPrincipal) write(tbl *matrixTable, r scopeRow) bool {
 	if _, orgWide := matrixOrgWideWrites[tbl.name]; orgWide && (p.scope["client"] != nil || p.scope["site"] != nil) {
 		return false
 	}
+	if _, siteless := matrixSiteWrites[tbl.name]; siteless && p.scope["site"] != nil {
+		return false
+	}
 	if _, snapshot := matrixSnapshotScoped[tbl.name]; snapshot && p.restricted() {
 		return false
 	}
@@ -146,7 +158,8 @@ func scopeDenied(err error) bool {
 // principal's scope and to claim an org-wide row. Reads are pinned exactly
 // (TEN-05): org-wide rows are visible to scoped principals, global rows to
 // everyone except in matrixHiddenGlobalRows. The tables of
-// matrixOrgWideWrites are written by org-wide principals only (E-09); the
+// matrixOrgWideWrites are written by org-wide principals only (E-09), those
+// of matrixSiteWrites by no principal with a site restriction; the
 // rows of matrixSnapshotScoped, which carry no scope snapshot, are read and
 // written by principals without any scope restriction only.
 //

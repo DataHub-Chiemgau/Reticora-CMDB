@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000297_admp_cache
+Stand: Migration 000298_ipam_section
 
 ## Prüfung
 
@@ -1969,6 +1969,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `internal_order` | ja | ja | internal_order_isolation (ALL), internal_order_scoped_delete (DELETE), internal_order_scoped_update (UPDATE) |
 | `internal_order_item` | ja | ja | internal_order_item_isolation (ALL), internal_order_item_scoped_delete (DELETE), internal_order_item_scoped_update (UPDATE) |
 | `ip_address` | ja | ja | ip_address_scoped_delete (DELETE), ip_address_scoped_update (UPDATE), org_isolation (ALL) |
+| `ipam_section` | ja | ja | ipam_section_isolation (ALL), ipam_section_scoped_delete (DELETE), ipam_section_scoped_update (UPDATE) |
 | `job` | ja | ja | job_isolation (ALL), job_scope_select (SELECT), job_system_select (SELECT) |
 | `key_assignment` | ja | ja | key_assignment_isolation (ALL), key_assignment_scoped_delete (DELETE), key_assignment_scoped_update (UPDATE) |
 | `key_item` | ja | ja | key_item_isolation (ALL), key_item_scoped_delete (DELETE), key_item_scoped_update (UPDATE) |

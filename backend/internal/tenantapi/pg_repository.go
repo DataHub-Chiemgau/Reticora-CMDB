@@ -16,6 +16,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/locations"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -430,9 +431,22 @@ func (r *PGRepository) SetHiddenCITypes(ctx context.Context, orgID, clientID str
 	return after, nil
 }
 
+// DeleteClient deletes a client; a client that rows still reference
+// without cascade (IPAM sections, CIs and other objects of the client;
+// foreign key violation 23503) stays and is reported as *api.ConflictError
+// (409 id) instead of not found.
 func (r *PGRepository) DeleteClient(ctx context.Context, orgID, id string) error {
-	return r.deleteByID(ctx, orgID, "client", "true", id)
+	err := r.deleteByID(ctx, orgID, "client", "true", id)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+		return errClientReferenced
+	}
+	return err
 }
+
+// errClientReferenced answers the delete of a client that is still in use.
+var errClientReferenced = &api.ConflictError{Field: "id",
+	Message: "the client is still referenced (for example by IPAM sections or configuration items); remove or reassign them first"}
 
 // deleteByID deletes a row of table that is visible under visible.
 func (r *PGRepository) deleteByID(ctx context.Context, orgID, table, visible, id string) error {

@@ -13,7 +13,10 @@ type Subnet struct {
 	// VRFID is the VRF of the subnet; the organization's default VRF when
 	// none is given (CH10). The CIDR is unique per VRF.
 	VRFID string `json:"vrf_id"`
-	Name  string `json:"name,omitempty"`
+	// SectionID is the IPAM section of the subnet (IPM-01); the
+	// organization's default section when none is given.
+	SectionID string `json:"section_id"`
+	Name      string `json:"name,omitempty"`
 	// VLANID references the VLAN catalog (NET-02, NET-08).
 	VLANID       string    `json:"vlan_id,omitempty"`
 	Gateway      string    `json:"gateway,omitempty"`
@@ -30,6 +33,7 @@ type CreateSubnetRequest struct {
 	SiteID       string   `json:"site_id,omitempty"`
 	CIDR         string   `json:"cidr"`
 	VRFID        string   `json:"vrf_id,omitempty"`
+	SectionID    string   `json:"section_id,omitempty"`
 	Name         string   `json:"name,omitempty"`
 	VLANID       string   `json:"vlan_id,omitempty"`
 	Gateway      string   `json:"gateway,omitempty"`
@@ -44,7 +48,10 @@ type UpdateSubnetRequest struct {
 	SiteID   *string `json:"site_id,omitempty"`
 	// VRFID moves the subnet to another VRF ("" = default VRF).
 	VRFID *string `json:"vrf_id,omitempty"`
-	Name  *string `json:"name,omitempty"`
+	// SectionID moves the subnet to another IPAM section ("" = default
+	// section, IPM-01).
+	SectionID *string `json:"section_id,omitempty"`
+	Name      *string `json:"name,omitempty"`
 	// VLANID sets ("" clears) the VLAN of the subnet.
 	VLANID       *string  `json:"vlan_id,omitempty"`
 	Gateway      *string  `json:"gateway,omitempty"`

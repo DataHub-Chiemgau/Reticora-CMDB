@@ -275,6 +275,10 @@ func (h *Handler) DeleteClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.repo.DeleteClient(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {
+		// A client still in use is 409 id; anything else not found.
+		if api.WriteFieldError(w, err) {
+			return
+		}
 		api.WriteError(w, http.StatusNotFound, "Not Found", "client not found")
 		return
 	}

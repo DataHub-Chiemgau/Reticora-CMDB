@@ -1665,3 +1665,4 @@ ADM-01;[P3];G3;backend/internal/admp/account_integration_test.go;WP-925
 ADM-03;[P3];G3;backend/internal/admp/cache_integration_test.go;WP-928
 ADM-07;[P3];G3;backend/internal/admp/cache_integration_test.go;WP-928
 ADM-04;[P3];G3;backend/internal/admp/cache_integration_test.go;WP-928
+IPM-01;[P3];G3;backend/internal/ipam/section_integration_test.go;WP-900

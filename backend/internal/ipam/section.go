@@ -1,0 +1,540 @@
+package ipam
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+)
+
+// Section is an IPAM section (IPM-01, WP-900, E-209): it groups the subnets
+// of an organization with settings of its own, as the sections of phpIPAM
+// do. Every organization has exactly one org-wide default section
+// "default" (is_default), which cannot be deleted; subnets written without
+// a section land there. A section of a client holds only subnets of that
+// client; an org-wide section (no client) holds subnets of every client.
+// A principal restricted to clients reads the sections of its clients and
+// the org-wide ones and writes only sections of its clients (E-09).
+// strict_mode is stored here; the overlap check follows with WP-901.
+type Section struct {
+	ID             string    `json:"id"`
+	OrganizationID string    `json:"organization_id"`
+	ClientID       string    `json:"client_id,omitempty"`
+	Name           string    `json:"name"`
+	Description    string    `json:"description,omitempty"`
+	StrictMode     bool      `json:"strict_mode"`
+	ShowVLAN       bool      `json:"show_vlan"`
+	ShowVRF        bool      `json:"show_vrf"`
+	IsDefault      bool      `json:"is_default"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// CreateSectionRequest is the payload of POST /api/v1/ipam-sections.
+// show_vlan and show_vrf default to true, strict_mode to false.
+type CreateSectionRequest struct {
+	ClientID    string `json:"client_id,omitempty"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	StrictMode  *bool  `json:"strict_mode,omitempty"`
+	ShowVLAN    *bool  `json:"show_vlan,omitempty"`
+	ShowVRF     *bool  `json:"show_vrf,omitempty"`
+}
+
+// UpdateSectionRequest is the payload of PATCH /api/v1/ipam-sections/{id};
+// the client of a section does not change.
+type UpdateSectionRequest struct {
+	Name        *string `json:"name,omitempty"`
+	Description *string `json:"description,omitempty"`
+	StrictMode  *bool   `json:"strict_mode,omitempty"`
+	ShowVLAN    *bool   `json:"show_vlan,omitempty"`
+	ShowVRF     *bool   `json:"show_vrf,omitempty"`
+}
+
+// SectionRepository persists IPAM sections.
+type SectionRepository interface {
+	ListSections(ctx context.Context, orgID string, page api.PaginationParams) ([]Section, int, error)
+	GetSection(ctx context.Context, orgID, id string) (*Section, error)
+	CreateSection(ctx context.Context, s *Section) error
+	UpdateSection(ctx context.Context, orgID, id string, req UpdateSectionRequest) (*Section, error)
+	DeleteSection(ctx context.Context, orgID, id string) error
+}
+
+// Fixed answers of the section rules.
+var (
+	errSectionNameTaken = &api.ConflictError{Field: "name", Message: "an IPAM section with this name already exists"}
+	errSectionDefault   = &api.ConflictError{Field: "id", Message: "the default IPAM section cannot be deleted"}
+	errSectionInUse     = &api.ConflictError{Field: "id", Message: "the IPAM section still holds subnets"}
+	errSectionNotFound  = &api.FieldError{Field: "section_id", Message: "IPAM section not found",
+		Status: http.StatusUnprocessableEntity}
+	errSectionOfAnotherClient = &api.FieldError{Field: "section_id",
+		Message: "the IPAM section belongs to another client", Status: http.StatusUnprocessableEntity}
+	errSectionClientNotFound = &api.FieldError{Field: "client_id", Message: "client not found",
+		Status: http.StatusUnprocessableEntity}
+)
+
+// sectionError maps the constraint violations of ipam_section onto the
+// fixed answers: a duplicate name, the protected default section, a section
+// that subnets still reference (409) and an unknown client (422).
+func sectionError(err error) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return err
+	}
+	switch {
+	case pgErr.Code == "23505" && pgErr.ConstraintName == "ipam_section_name_key":
+		return errSectionNameTaken
+	case pgErr.Code == "23514" && pgErr.ConstraintName == "ipam_section_default_required":
+		return errSectionDefault
+	case pgErr.Code == "23503" && pgErr.ConstraintName == "subnet_section_fkey":
+		return errSectionInUse
+	case pgErr.Code == "23503" && pgErr.ConstraintName == "ipam_section_client_fkey":
+		return errSectionClientNotFound
+	}
+	return err
+}
+
+// checkSection keeps the section of a subnet within its client (IPM-01,
+// AK4). The composite foreign key of section_id checks only the
+// organization and bypasses row level security, so the section is read
+// here, in the writing transaction under the principal's row level security
+// and before section_id is written (pattern of checkVLAN): a section the
+// principal cannot see is "IPAM section not found"; a section of another
+// client than clientID (empty: the subnet is org-wide) is refused; a
+// section of that client or an org-wide section is accepted. Without a
+// section (the default section) it costs no statement.
+func checkSection(ctx context.Context, tx pgx.Tx, orgID, sectionID, clientID string) error {
+	if strings.TrimSpace(sectionID) == "" {
+		return nil
+	}
+	if !api.IsUUID(sectionID) {
+		return errSectionNotFound
+	}
+	var visible, sameClient bool
+	if err := tx.QueryRow(ctx, `SELECT count(*) > 0, COALESCE(bool_and(client_id IS NULL OR client_id = $3::uuid), false)
+		FROM ipam_section WHERE organization_id = $1 AND id = $2::uuid`, orgID, sectionID, nilIfEmpty(clientID)).Scan(&visible, &sameClient); err != nil {
+		return fmt.Errorf("read ipam section: %w", err)
+	}
+	switch {
+	case !visible:
+		return errSectionNotFound
+	case !sameClient:
+		return errSectionOfAnotherClient
+	}
+	return nil
+}
+
+// checkSubnetSection applies checkSection to an update of subnet id: to a
+// new section and to the section of a subnet that moves to another client,
+// against the client the subnet has after the update. The subnet row is
+// locked (FOR UPDATE) until the commit, so a concurrent update of its
+// client or section waits and checks the committed pair; the client of a
+// section cannot change.
+func checkSubnetSection(ctx context.Context, tx pgx.Tx, orgID, id string, req *UpdateSubnetRequest) error {
+	if req.ClientID == nil && (req.SectionID == nil || strings.TrimSpace(*req.SectionID) == "") {
+		return nil
+	}
+	var clientID, sectionID string
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(client_id::text, ''), section_id::text FROM subnet
+		WHERE organization_id = $1 AND id = $2 FOR UPDATE`, orgID, id).Scan(&clientID, &sectionID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("read subnet: %w", err)
+	}
+	if req.ClientID != nil {
+		clientID = *req.ClientID
+	}
+	if req.SectionID != nil {
+		sectionID = *req.SectionID
+	}
+	return checkSection(ctx, tx, orgID, sectionID, clientID)
+}
+
+// --- PostgreSQL ---
+
+const sectionCols = `id::text, organization_id::text, COALESCE(client_id::text, ''), name, COALESCE(description, ''),
+	strict_mode, show_vlan, show_vrf, is_default, created_at, updated_at`
+
+func scanSection(s scanner) (*Section, error) {
+	sec := &Section{}
+	if err := s.Scan(&sec.ID, &sec.OrganizationID, &sec.ClientID, &sec.Name, &sec.Description, &sec.StrictMode,
+		&sec.ShowVLAN, &sec.ShowVRF, &sec.IsDefault, &sec.CreatedAt, &sec.UpdatedAt); err != nil {
+		return nil, err
+	}
+	sec.CreatedAt, sec.UpdatedAt = sec.CreatedAt.UTC(), sec.UpdatedAt.UTC()
+	return sec, nil
+}
+
+// ListSections lists the sections the caller sees, the default first.
+func (r *PGRepository) ListSections(ctx context.Context, orgID string, page api.PaginationParams) ([]Section, int, error) {
+	var out []Section
+	var total int
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM ipam_section WHERE organization_id = $1", orgID).Scan(&total); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, "SELECT "+sectionCols+` FROM ipam_section WHERE organization_id = $1
+			ORDER BY is_default DESC, name, id LIMIT $2 OFFSET $3`, orgID, page.Limit, page.Offset)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			sec, err := scanSection(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, *sec)
+		}
+		return rows.Err()
+	})
+	return out, total, err
+}
+
+// GetSection returns a section the caller sees.
+func (r *PGRepository) GetSection(ctx context.Context, orgID, id string) (*Section, error) {
+	if !api.IsUUID(id) {
+		return nil, ErrNotFound
+	}
+	var sec *Section
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		sec, err = scanSection(tx.QueryRow(ctx, "SELECT "+sectionCols+" FROM ipam_section WHERE organization_id = $1 AND id = $2", orgID, id))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return err
+	})
+	return sec, err
+}
+
+// CreateSection stores a section; only the database creates the default
+// section. An org-wide section created by a principal restricted to
+// clients, or a section of a client outside its scope, fails with the row
+// level security error 42501 (403 at the API).
+func (r *PGRepository) CreateSection(ctx context.Context, s *Section) error {
+	return database.WithRequestTenant(ctx, r.pool, s.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		created, err := scanSection(tx.QueryRow(ctx, `INSERT INTO ipam_section
+			(organization_id, client_id, name, description, strict_mode, show_vlan, show_vrf)
+			VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING `+sectionCols,
+			s.OrganizationID, nilIfEmpty(s.ClientID), s.Name, nilIfEmpty(s.Description), s.StrictMode, s.ShowVLAN, s.ShowVRF))
+		if err != nil {
+			return sectionError(err)
+		}
+		*s = *created
+		return nil
+	})
+}
+
+// UpdateSection changes name, description and settings of a section. A
+// principal restricted to clients changes no org-wide section: ErrNotFound.
+func (r *PGRepository) UpdateSection(ctx context.Context, orgID, id string, req UpdateSectionRequest) (*Section, error) {
+	if !api.IsUUID(id) {
+		return nil, ErrNotFound
+	}
+	var sec *Section
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		sec, err = scanSection(tx.QueryRow(ctx, `UPDATE ipam_section SET name = COALESCE($3, name),
+			description = CASE WHEN $4::text IS NULL THEN description ELSE NULLIF($4, '') END,
+			strict_mode = COALESCE($5, strict_mode), show_vlan = COALESCE($6, show_vlan), show_vrf = COALESCE($7, show_vrf)
+			WHERE organization_id = $1 AND id = $2 RETURNING `+sectionCols,
+			orgID, id, req.Name, req.Description, req.StrictMode, req.ShowVLAN, req.ShowVRF))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return sectionError(err)
+	})
+	return sec, err
+}
+
+// DeleteSection removes a section; the default section and sections with
+// subnets stay (409). A principal restricted to clients deletes no
+// org-wide section: ErrNotFound.
+func (r *PGRepository) DeleteSection(ctx context.Context, orgID, id string) error {
+	if !api.IsUUID(id) {
+		return ErrNotFound
+	}
+	return sectionError(r.deleteByID(ctx, orgID, "ipam_section", "true", id))
+}
+
+// --- Memory ---
+
+// defaultSection returns the default section of the organization and
+// creates it on first use, as the database does with the organization.
+func (r *MemoryRepository) defaultSection(orgID string) *Section {
+	for _, s := range r.sections {
+		if s.OrganizationID == orgID && s.IsDefault {
+			return s
+		}
+	}
+	r.seq++
+	now := time.Now().UTC()
+	s := &Section{ID: fmt.Sprintf("section-%d", r.seq), OrganizationID: orgID, Name: "default",
+		Description: "Default section", ShowVLAN: true, ShowVRF: true, IsDefault: true, CreatedAt: now, UpdatedAt: now}
+	r.sections[s.ID] = s
+	return s
+}
+
+// sectionFor resolves the section of a subnet of client clientID: the
+// default section for an empty id, else the section, which must exist and
+// be org-wide or of that client.
+func (r *MemoryRepository) sectionFor(orgID, sectionID, clientID string) (string, error) {
+	if sectionID == "" {
+		return r.defaultSection(orgID).ID, nil
+	}
+	s, ok := r.sections[sectionID]
+	switch {
+	case !ok || s.OrganizationID != orgID:
+		return "", errSectionNotFound
+	case s.ClientID != "" && s.ClientID != clientID:
+		return "", errSectionOfAnotherClient
+	}
+	return s.ID, nil
+}
+
+func (r *MemoryRepository) sectionNameTaken(orgID, name, exceptID string) bool {
+	for _, s := range r.sections {
+		if s.ID != exceptID && s.OrganizationID == orgID && s.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// ListSections implements SectionRepository.
+func (r *MemoryRepository) ListSections(_ context.Context, orgID string, page api.PaginationParams) ([]Section, int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.defaultSection(orgID)
+	var out []Section
+	for _, s := range r.sections {
+		if s.OrganizationID == orgID {
+			out = append(out, *s)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].IsDefault != out[j].IsDefault {
+			return out[i].IsDefault
+		}
+		return out[i].Name < out[j].Name
+	})
+	items, total := pageSlice(out, page)
+	return items, total, nil
+}
+
+// GetSection implements SectionRepository.
+func (r *MemoryRepository) GetSection(_ context.Context, orgID, id string) (*Section, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.defaultSection(orgID)
+	s, ok := r.sections[id]
+	if !ok || s.OrganizationID != orgID {
+		return nil, ErrNotFound
+	}
+	cp := *s
+	return &cp, nil
+}
+
+// CreateSection implements SectionRepository.
+func (r *MemoryRepository) CreateSection(_ context.Context, s *Section) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.defaultSection(s.OrganizationID)
+	if r.sectionNameTaken(s.OrganizationID, s.Name, "") {
+		return errSectionNameTaken
+	}
+	r.seq++
+	now := time.Now().UTC()
+	s.ID, s.IsDefault, s.CreatedAt, s.UpdatedAt = fmt.Sprintf("section-%d", r.seq), false, now, now
+	stored := *s
+	r.sections[s.ID] = &stored
+	return nil
+}
+
+// UpdateSection implements SectionRepository.
+func (r *MemoryRepository) UpdateSection(_ context.Context, orgID, id string, req UpdateSectionRequest) (*Section, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.sections[id]
+	if !ok || s.OrganizationID != orgID {
+		return nil, ErrNotFound
+	}
+	if req.Name != nil {
+		if r.sectionNameTaken(orgID, *req.Name, id) {
+			return nil, errSectionNameTaken
+		}
+		s.Name = *req.Name
+	}
+	if req.Description != nil {
+		s.Description = *req.Description
+	}
+	if req.StrictMode != nil {
+		s.StrictMode = *req.StrictMode
+	}
+	if req.ShowVLAN != nil {
+		s.ShowVLAN = *req.ShowVLAN
+	}
+	if req.ShowVRF != nil {
+		s.ShowVRF = *req.ShowVRF
+	}
+	s.UpdatedAt = time.Now().UTC()
+	cp := *s
+	return &cp, nil
+}
+
+// DeleteSection implements SectionRepository.
+func (r *MemoryRepository) DeleteSection(_ context.Context, orgID, id string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	s, ok := r.sections[id]
+	if !ok || s.OrganizationID != orgID {
+		return ErrNotFound
+	}
+	if s.IsDefault {
+		return errSectionDefault
+	}
+	for _, sn := range r.subnets {
+		if sn.SectionID == id {
+			return errSectionInUse
+		}
+	}
+	delete(r.sections, id)
+	return nil
+}
+
+// --- HTTP ---
+
+// HTTP handlers of the IPAM sections (IPM-01): /api/v1/ipam-sections; reads
+// need ipam:read, writes ipam:write.
+
+// ListSections handles GET /api/v1/ipam-sections
+func (h *Handler) ListSections(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := org(w, r)
+	if !ok {
+		return
+	}
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
+		return
+	}
+	items, total, err := h.repo.ListSections(r.Context(), orgID, page)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[Section]{
+		Data: items, Total: total, Limit: page.Limit, Offset: page.Offset, HasMore: page.Offset+page.Limit < total,
+	})
+}
+
+// CreateSection handles POST /api/v1/ipam-sections
+func (h *Handler) CreateSection(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := org(w, r)
+	if !ok {
+		return
+	}
+	var req CreateSectionRequest
+	if err := api.ReadJSON(r, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		api.WriteFieldError(w, &api.FieldError{Field: "name", Message: "name is required", Status: http.StatusUnprocessableEntity})
+		return
+	}
+	if req.ClientID != "" && !api.IsUUID(req.ClientID) {
+		api.WriteFieldError(w, errSectionClientNotFound)
+		return
+	}
+	s := &Section{OrganizationID: orgID, ClientID: req.ClientID, Name: name, Description: req.Description,
+		StrictMode: boolOr(req.StrictMode, false), ShowVLAN: boolOr(req.ShowVLAN, true), ShowVRF: boolOr(req.ShowVRF, true)}
+	if err := h.repo.CreateSection(r.Context(), s); err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusCreated, s)
+}
+
+// GetSection handles GET /api/v1/ipam-sections/{id}
+func (h *Handler) GetSection(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := org(w, r)
+	if !ok {
+		return
+	}
+	s, err := h.repo.GetSection(r.Context(), orgID, chi.URLParam(r, "id"))
+	if err != nil {
+		writeSectionError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, s)
+}
+
+// UpdateSection handles PATCH /api/v1/ipam-sections/{id}
+func (h *Handler) UpdateSection(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := org(w, r)
+	if !ok {
+		return
+	}
+	var req UpdateSectionRequest
+	if err := api.ReadJSON(r, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" {
+			api.WriteFieldError(w, &api.FieldError{Field: "name", Message: "name must not be empty", Status: http.StatusUnprocessableEntity})
+			return
+		}
+		req.Name = &name
+	}
+	s, err := h.repo.UpdateSection(r.Context(), orgID, chi.URLParam(r, "id"), req)
+	if err != nil {
+		writeSectionError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, s)
+}
+
+// DeleteSection handles DELETE /api/v1/ipam-sections/{id}: 409 for the
+// default section and for a section with subnets.
+func (h *Handler) DeleteSection(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := org(w, r)
+	if !ok {
+		return
+	}
+	if err := h.repo.DeleteSection(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {
+		writeSectionError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeSectionError answers a failed section request: 404 for an unknown
+// or invisible section, else the repository error.
+func writeSectionError(w http.ResponseWriter, err error) {
+	if errors.Is(err, ErrNotFound) {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "IPAM section not found")
+		return
+	}
+	api.WriteRepoError(w, err)
+}
+
+func boolOr(v *bool, def bool) bool {
+	if v == nil {
+		return def
+	}
+	return *v
+}

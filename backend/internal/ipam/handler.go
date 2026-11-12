@@ -91,6 +91,12 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/vrfs/{id}", h.GetVRF)
 	r.Patch("/api/v1/vrfs/{id}", h.UpdateVRF)
 	r.Delete("/api/v1/vrfs/{id}", h.DeleteVRF)
+
+	r.Get("/api/v1/ipam-sections", h.ListSections)
+	r.Post("/api/v1/ipam-sections", h.CreateSection)
+	r.Get("/api/v1/ipam-sections/{id}", h.GetSection)
+	r.Patch("/api/v1/ipam-sections/{id}", h.UpdateSection)
+	r.Delete("/api/v1/ipam-sections/{id}", h.DeleteSection)
 }
 
 func org(w http.ResponseWriter, r *http.Request) (string, bool) {
@@ -183,6 +189,7 @@ func (h *Handler) CreateSubnet(w http.ResponseWriter, r *http.Request) {
 		SiteID:         req.SiteID,
 		CIDR:           normalized,
 		VRFID:          req.VRFID,
+		SectionID:      req.SectionID,
 		Name:           req.Name,
 		VLANID:         req.VLANID,
 		Gateway:        req.Gateway,

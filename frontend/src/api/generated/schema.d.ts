@@ -3347,7 +3347,10 @@ export interface paths {
     get: operations['getClient'];
     put?: never;
     post?: never;
-    /** Delete a client */
+    /**
+     * Delete a client
+     * @description A client that is still referenced (for example by IPAM sections or configuration items) is not deleted (409, field `id`).
+     */
     delete: operations['deleteClient'];
     options?: never;
     head?: never;
@@ -10480,14 +10483,14 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * List IPAM sections
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * List the IPAM sections, the default first
+     * @description The sections the caller sees (IPM-01, WP-900): a principal restricted to clients sees the sections of its clients and the org-wide ones. Every organization has the org-wide default section "default". Paged by limit and the signed cursor of next_cursor. Requires ipam:read.
      */
     get: operations['listIPAMSections'];
     put?: never;
     /**
-     * Create a IPAM section
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * Create an IPAM section
+     * @description Creates a section of a client (client_id) or an org-wide one (IPM-01). A principal restricted to clients creates sections of its clients only; an org-wide section or one of another client is 403 (E-09). A name taken in the organization is 409 with field name, an unknown client 422 with field client_id. strict_mode is stored here; the overlap check of subnets follows with WP-901. Requires ipam:write.
      */
     post: operations['createIpamSection'];
     delete?: never;
@@ -10507,22 +10510,22 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Get a IPAM section
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * Get an IPAM section
+     * @description A section outside the caller's scope is 404. Requires ipam:read.
      */
     get: operations['getIpamSection'];
     put?: never;
     post?: never;
     /**
-     * Delete a IPAM section
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * Delete an IPAM section
+     * @description The default section and a section that still holds subnets (also subnets outside the caller's scope) are 409. For a principal restricted to clients an org-wide section answers 404 (E-09). Requires ipam:write.
      */
     delete: operations['deleteIpamSection'];
     options?: never;
     head?: never;
     /**
-     * Update a IPAM section
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * Update an IPAM section
+     * @description Changes name, description, strict_mode, show_vlan and show_vrf; the client of a section does not change. For a principal restricted to clients an org-wide section answers 404 (E-09). A name taken in the organization is 409 with field name. Requires ipam:write.
      */
     patch: operations['updateIpamSection'];
     trace?: never;
@@ -19332,6 +19335,8 @@ export interface components {
       cidr: string;
       /** @description VRF of the subnet (CH10); the CIDR is unique per VRF. */
       vrf_id?: string;
+      /** @description IPAM section of the subnet (IPM-01); the organization's default section when omitted (an empty string on update moves it there). The section is one the caller can see, org-wide or of the subnet's client; otherwise 422 with field section_id. */
+      section_id?: string;
       name?: string;
       /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. The VLAN is one the caller can see, of the subnet's client or org-wide (TEN-05); otherwise 422 with field vlan_id. */
       vlan_id?: string;
@@ -19350,6 +19355,8 @@ export interface components {
       cidr: string;
       /** @description VRF of the subnet; the organization's default VRF when omitted. */
       vrf_id?: string;
+      /** @description IPAM section of the subnet (IPM-01); the organization's default section when omitted (an empty string on update moves it there). The section is one the caller can see, org-wide or of the subnet's client; otherwise 422 with field section_id. */
+      section_id?: string;
       name?: string;
       /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. The VLAN is one the caller can see, of the subnet's client or org-wide (TEN-05); otherwise 422 with field vlan_id. */
       vlan_id?: string;
@@ -19364,6 +19371,8 @@ export interface components {
       name?: string;
       /** @description Moves the subnet and its addresses to another VRF (empty string = default VRF). */
       vrf_id?: string;
+      /** @description IPAM section of the subnet (IPM-01); the organization's default section when omitted (an empty string on update moves it there). The section is one the caller can see, org-wide or of the subnet's client; otherwise 422 with field section_id. */
+      section_id?: string;
       /** @description VLAN of the VLAN catalog (NET-02, NET-08); an empty string clears it on update. The VLAN is one the caller can see, of the subnet's client or org-wide (TEN-05); otherwise 422 with field vlan_id. */
       vlan_id?: string;
       gateway?: string;
@@ -19422,6 +19431,48 @@ export interface components {
     };
     VLANListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['VLAN'][];
+    };
+    /** @description IPAM section (IPM-01, E-209): groups the subnets of the organization with settings of its own. Every organization has exactly one org-wide default section "default" (is_default), which cannot be deleted; subnets without section land there. A section of a client holds only subnets of that client, an org-wide section (no client_id) subnets of every client. */
+    IPAMSection: {
+      id: string;
+      organization_id: string;
+      /** @description Client of the section; absent for an org-wide section. */
+      client_id?: string;
+      /** @description Unique in the organization. */
+      name: string;
+      description?: string;
+      /** @description Subnets of the section must not overlap without containment (checked from WP-901). */
+      strict_mode: boolean;
+      show_vlan: boolean;
+      show_vrf: boolean;
+      readonly is_default: boolean;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateIPAMSectionRequest: {
+      /** @description Client of the section; omitted for an org-wide section. */
+      client_id?: string;
+      name: string;
+      description?: string;
+      /** @default false */
+      strict_mode: boolean;
+      /** @default true */
+      show_vlan: boolean;
+      /** @default true */
+      show_vrf: boolean;
+    };
+    UpdateIPAMSectionRequest: {
+      name?: string;
+      /** @description An empty string clears it. */
+      description?: string;
+      strict_mode?: boolean;
+      show_vlan?: boolean;
+      show_vrf?: boolean;
+    };
+    IPAMSectionListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['IPAMSection'][];
     };
     SubnetListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Subnet'][];
@@ -28248,6 +28299,7 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   updateClient: {
@@ -47056,6 +47108,11 @@ export interface operations {
          *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
       };
       header?: never;
       path?: never;
@@ -47063,12 +47120,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List IPAM sections. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description A page of IPAM sections */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['IPAMSectionListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -47083,14 +47142,20 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateIPAMSectionRequest'];
+      };
+    };
     responses: {
-      /** @description Created. The schema comes with the implementing work package. */
+      /** @description IPAM section created */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['IPAMSection'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -47112,12 +47177,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get a IPAM section. The schema comes with the implementing work package. */
+      /** @description IPAM section */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['IPAMSection'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -47137,7 +47204,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Done. */
+      /** @description IPAM section deleted */
       204: {
         headers: {
           [name: string]: unknown;
@@ -47161,14 +47228,20 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateIPAMSectionRequest'];
+      };
+    };
     responses: {
-      /** @description Update a IPAM section. The schema comes with the implementing work package. */
+      /** @description IPAM section updated */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['IPAMSection'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];

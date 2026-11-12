@@ -7665,6 +7665,7 @@ paths:
       operationId: deleteClient
       tags: [Clients]
       summary: Delete a client
+      description: A client that is still referenced (for example by IPAM sections or configuration items) is not deleted (409, field `id`).
       responses:
         '204':
           description: Client deleted
@@ -7672,6 +7673,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /api/v1/clients/{id}/hidden-ci-types:
     parameters:
@@ -24216,20 +24219,27 @@ paths:
   /api/v1/ipam-sections:
     x-phase: P3
     x-feature: ipam
-    x-status: planned
     get:
       operationId: listIPAMSections
       tags: [IPAM]
-      summary: List IPAM sections
+      summary: List the IPAM sections, the default first
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        The sections the caller sees (IPM-01, WP-900): a principal restricted
+        to clients sees the sections of its clients and the org-wide ones.
+        Every organization has the org-wide default section "default".
+        Paged by limit and the signed cursor of next_cursor. Requires
+        ipam:read.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: List IPAM sections. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+          description: A page of IPAM sections
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IPAMSectionListResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -24241,13 +24251,28 @@ paths:
     post:
       operationId: createIpamSection
       tags: [IPAM]
-      summary: Create a IPAM section
+      summary: Create an IPAM section
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Creates a section of a client (client_id) or an org-wide one
+        (IPM-01). A principal restricted to clients creates sections of its
+        clients only; an org-wide section or one of another client is 403
+        (E-09). A name taken in the organization is 409 with field name, an
+        unknown client 422 with field client_id. strict_mode is stored here;
+        the overlap check of subnets follows with WP-901. Requires
+        ipam:write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIPAMSectionRequest'
       responses:
         '201':
-          description: Created. The schema comes with the implementing work package.
+          description: IPAM section created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IPAMSection'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -24264,19 +24289,20 @@ paths:
   /api/v1/ipam-sections/{id}:
     x-phase: P3
     x-feature: ipam
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: getIpamSection
       tags: [IPAM]
-      summary: Get a IPAM section
-      description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+      summary: Get an IPAM section
+      description: A section outside the caller's scope is 404. Requires ipam:read.
       responses:
         '200':
-          description: Get a IPAM section. The schema comes with the implementing work package.
+          description: IPAM section
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IPAMSection'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -24288,13 +24314,25 @@ paths:
     patch:
       operationId: updateIpamSection
       tags: [IPAM]
-      summary: Update a IPAM section
+      summary: Update an IPAM section
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Changes name, description, strict_mode, show_vlan and show_vrf; the
+        client of a section does not change. For a principal restricted to
+        clients an org-wide section answers 404 (E-09). A name taken in the
+        organization is 409 with field name. Requires ipam:write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateIPAMSectionRequest'
       responses:
         '200':
-          description: Update a IPAM section. The schema comes with the implementing work package.
+          description: IPAM section updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IPAMSection'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -24312,13 +24350,15 @@ paths:
     delete:
       operationId: deleteIpamSection
       tags: [IPAM]
-      summary: Delete a IPAM section
+      summary: Delete an IPAM section
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        The default section and a section that still holds subnets (also
+        subnets outside the caller's scope) are 409. For a principal
+        restricted to clients an org-wide section answers 404 (E-09).
+        Requires ipam:write.
       responses:
         '204':
-          description: Done.
+          description: IPAM section deleted
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -39117,6 +39157,13 @@ components:
         vrf_id:
           type: string
           description: VRF of the subnet (CH10); the CIDR is unique per VRF.
+        section_id:
+          type: string
+          description: >-
+            IPAM section of the subnet (IPM-01); the organization's default
+            section when omitted (an empty string on update moves it there).
+            The section is one the caller can see, org-wide or of the
+            subnet's client; otherwise 422 with field section_id.
         name:
           type: string
         vlan_id:
@@ -39155,6 +39202,13 @@ components:
         vrf_id:
           type: string
           description: VRF of the subnet; the organization's default VRF when omitted.
+        section_id:
+          type: string
+          description: >-
+            IPAM section of the subnet (IPM-01); the organization's default
+            section when omitted (an empty string on update moves it there).
+            The section is one the caller can see, org-wide or of the
+            subnet's client; otherwise 422 with field section_id.
         name:
           type: string
         vlan_id:
@@ -39186,6 +39240,13 @@ components:
         vrf_id:
           type: string
           description: Moves the subnet and its addresses to another VRF (empty string = default VRF).
+        section_id:
+          type: string
+          description: >-
+            IPAM section of the subnet (IPM-01); the organization's default
+            section when omitted (an empty string on update moves it there).
+            The section is one the caller can see, org-wide or of the
+            subnet's client; otherwise 422 with field section_id.
         vlan_id:
           type: string
           description: >-
@@ -39291,6 +39352,66 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/VLAN'
+
+    IPAMSection:
+      type: object
+      required: [id, organization_id, name, strict_mode, show_vlan, show_vrf, is_default, created_at, updated_at]
+      description: >-
+        IPAM section (IPM-01, E-209): groups the subnets of the organization
+        with settings of its own. Every organization has exactly one org-wide
+        default section "default" (is_default), which cannot be deleted;
+        subnets without section land there. A section of a client holds only
+        subnets of that client, an org-wide section (no client_id) subnets of
+        every client.
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        client_id:
+          type: string
+          description: Client of the section; absent for an org-wide section.
+        name: { type: string, description: Unique in the organization. }
+        description: { type: string }
+        strict_mode:
+          type: boolean
+          description: Subnets of the section must not overlap without containment (checked from WP-901).
+        show_vlan: { type: boolean }
+        show_vrf: { type: boolean }
+        is_default: { type: boolean, readOnly: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CreateIPAMSectionRequest:
+      type: object
+      required: [name]
+      properties:
+        client_id:
+          type: string
+          description: Client of the section; omitted for an org-wide section.
+        name: { type: string }
+        description: { type: string }
+        strict_mode: { type: boolean, default: false }
+        show_vlan: { type: boolean, default: true }
+        show_vrf: { type: boolean, default: true }
+
+    UpdateIPAMSectionRequest:
+      type: object
+      properties:
+        name: { type: string }
+        description: { type: string, description: An empty string clears it. }
+        strict_mode: { type: boolean }
+        show_vlan: { type: boolean }
+        show_vrf: { type: boolean }
+
+    IPAMSectionListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/IPAMSection'
 
     SubnetListResponse:
       allOf:

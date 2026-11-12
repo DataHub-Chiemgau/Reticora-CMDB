@@ -36,12 +36,12 @@ type scanner interface {
 // --- Subnets ---
 
 const subnetCols = `id::text, organization_id::text, COALESCE(client_id::text,''), COALESCE(site_id::text,''),
-	cidr::text, vrf_id::text, COALESCE(name,''), COALESCE(vlan_id::text,''), COALESCE(gateway::text,''), COALESCE(dns_servers::text[], '{}'),
+	cidr::text, vrf_id::text, section_id::text, COALESCE(name,''), COALESCE(vlan_id::text,''), COALESCE(gateway::text,''), COALESCE(dns_servers::text[], '{}'),
 	COALESCE(description,''), is_management, created_at, updated_at`
 
 func scanSubnet(s scanner) (*Subnet, error) {
 	sn := &Subnet{}
-	if err := s.Scan(&sn.ID, &sn.OrganizationID, &sn.ClientID, &sn.SiteID, &sn.CIDR, &sn.VRFID, &sn.Name,
+	if err := s.Scan(&sn.ID, &sn.OrganizationID, &sn.ClientID, &sn.SiteID, &sn.CIDR, &sn.VRFID, &sn.SectionID, &sn.Name,
 		&sn.VLANID, &sn.Gateway, &sn.DNSServers, &sn.Description, &sn.IsManagement, &sn.CreatedAt, &sn.UpdatedAt); err != nil {
 		return nil, err
 	}
@@ -121,8 +121,10 @@ func checkSubnetVLAN(ctx context.Context, tx pgx.Tx, orgID, id string, req *Upda
 		return nil
 	}
 	var clientID, vlanID string
+	// Locked until the commit (FOR UPDATE): a concurrent update of client or
+	// VLAN waits and checks the committed pair.
 	if err := tx.QueryRow(ctx, `SELECT COALESCE(client_id::text, ''), COALESCE(vlan_id::text, '') FROM subnet
-		WHERE organization_id = $1 AND id = $2`, orgID, id).Scan(&clientID, &vlanID); err != nil {
+		WHERE organization_id = $1 AND id = $2 FOR UPDATE`, orgID, id).Scan(&clientID, &vlanID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -194,13 +196,16 @@ func (r *PGRepository) CreateSubnet(ctx context.Context, s *Subnet) error {
 		if err := checkVLAN(ctx, tx, s.OrganizationID, s.VLANID, s.ClientID); err != nil {
 			return err
 		}
+		if err := checkSection(ctx, tx, s.OrganizationID, s.SectionID, s.ClientID); err != nil {
+			return err
+		}
 		return tx.QueryRow(ctx,
-			`INSERT INTO subnet (organization_id, client_id, site_id, cidr, name, vlan_id, gateway, dns_servers, description, is_management, vrf_id)
-			 VALUES ($1,$2,$3,$4::cidr,$5,$6,$7::inet,$8::inet[],$9,$10,$11) RETURNING id::text, vrf_id::text, created_at, updated_at`,
+			`INSERT INTO subnet (organization_id, client_id, site_id, cidr, name, vlan_id, gateway, dns_servers, description, is_management, vrf_id, section_id)
+			 VALUES ($1,$2,$3,$4::cidr,$5,$6,$7::inet,$8::inet[],$9,$10,$11,$12) RETURNING id::text, vrf_id::text, section_id::text, created_at, updated_at`,
 			s.OrganizationID, nilIfEmpty(s.ClientID), nilIfEmpty(s.SiteID), s.CIDR, nilIfEmpty(s.Name),
 			nilIfEmpty(s.VLANID), nilIfEmpty(s.Gateway), dnsServersArg(s.DNSServers), nilIfEmpty(s.Description), s.IsManagement,
-			nilIfEmpty(s.VRFID),
-		).Scan(&s.ID, &s.VRFID, &s.CreatedAt, &s.UpdatedAt)
+			nilIfEmpty(s.VRFID), nilIfEmpty(s.SectionID),
+		).Scan(&s.ID, &s.VRFID, &s.SectionID, &s.CreatedAt, &s.UpdatedAt)
 	})
 }
 
@@ -208,6 +213,9 @@ func (r *PGRepository) UpdateSubnet(ctx context.Context, orgID, id string, req *
 	var sn *Subnet
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := checkSubnetVLAN(ctx, tx, orgID, id, req); err != nil {
+			return err
+		}
+		if err := checkSubnetSection(ctx, tx, orgID, id, req); err != nil {
 			return err
 		}
 		sets := []string{}
@@ -237,6 +245,12 @@ func (r *PGRepository) UpdateSubnet(ctx context.Context, orgID, id string, req *
 		if req.VLANID != nil {
 			sets = append(sets, fmt.Sprintf("vlan_id = $%d", pos))
 			args = append(args, nilIfEmpty(*req.VLANID))
+			pos++
+		}
+		if req.SectionID != nil {
+			// An empty section falls back to the default section (trigger).
+			sets = append(sets, fmt.Sprintf("section_id = $%d", pos))
+			args = append(args, nilIfEmpty(*req.SectionID))
 			pos++
 		}
 		if req.Gateway != nil {
