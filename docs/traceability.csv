@@ -1776,3 +1776,4 @@ WFL-02;[P3];F;backend/internal/workflow/conditions_test.go;WP-1087
 WFL-02;[P3];F;backend/internal/workflow/worker_integration_test.go;WP-1088
 SEC-03;[P3];F;backend/internal/compliance/evaluator_test.go;WP-1125
 CMP-02;[P3];F;backend/internal/compliance/evaluator_test.go;WP-1125
+SEC-02;[P3];F;backend/internal/vulnfeed/repository_integration_test.go;WP-1117

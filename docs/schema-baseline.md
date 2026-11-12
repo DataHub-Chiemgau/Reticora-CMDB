@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000332_compliance_rule_ast
+Stand: Migration 000333_vuln_catalog
 
 ## Prüfung
 
@@ -659,6 +659,7 @@ des Assets (`source_id` = Asset); `search_index_asset` und sein Trigger
 | `idx_search_document_fts` | `search_document` | operator class tsvector_ops |
 | `idx_security_finding_cve_ids` | `security_finding` | operator class array_ops |
 | `idx_signup_request_email` | `signup_request` | function lower(text) |
+| `idx_vuln_advisory_cve_ids` | `vuln_advisory` | operator class array_ops |
 | `location_path_key` | `location` | operator class ltree_ops |
 | `rack_mount_no_overlap` | `rack_mount` | function int4pl(integer,integer), function int4range(integer,integer), function rack_face_range(text), operator class range_ops |
 | `review_item_open_override_conflict` | `review_item` | function jsonb_object_field_text(jsonb,text) |
@@ -2100,6 +2101,9 @@ SECURITY`), Policies mit ihrem Kommando.
 | `vlan_domain_site` | ja | ja | vlan_domain_site_isolation (ALL) |
 | `vrf` | ja | ja | vrf_isolation (ALL), vrf_scoped_delete (DELETE), vrf_scoped_insert (INSERT), vrf_scoped_update (UPDATE) |
 | `vrf_section` | ja | ja | vrf_section_isolation (ALL), vrf_section_scoped_delete (DELETE), vrf_section_scoped_insert (INSERT), vrf_section_scoped_update (UPDATE) |
+| `vuln_advisory` | ja | ja | vuln_advisory_read (SELECT), vuln_advisory_system_delete (DELETE), vuln_advisory_system_insert (INSERT), vuln_advisory_system_update (UPDATE) |
+| `vuln_affected` | ja | ja | vuln_affected_read (SELECT), vuln_affected_system_delete (DELETE), vuln_affected_system_insert (INSERT), vuln_affected_system_update (UPDATE) |
+| `vuln_source` | ja | ja | vuln_source_read (SELECT), vuln_source_system_delete (DELETE), vuln_source_system_insert (INSERT), vuln_source_system_update (UPDATE) |
 | `webhook_dead_letter` | ja | ja | webhook_dead_letter_isolation (ALL), webhook_dead_letter_system_select (SELECT) |
 | `webhook_delivery` | ja | ja | webhook_delivery_isolation (ALL), webhook_delivery_system_select (SELECT) |
 | `webhook_subscription` | ja | ja | webhook_sub_isolation (ALL), webhook_sub_scope_select (SELECT) |

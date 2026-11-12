@@ -199,7 +199,7 @@ func TestKnownGapsList(t *testing.T) {
 		rls.RuleSystemWrite: true, rls.RuleGlobalRows: true, rls.RuleClientScope: true,
 		rls.RuleSiteScope: true, rls.RuleTeamScope: true, rls.RuleOrgColumn: true,
 		rls.RuleReadOnlyCatalog: true, rls.RuleViewBarrier: true, rls.RuleOperatorOnly: true,
-		rls.RuleLocatedScope: true, rls.RuleSystemOnly: true,
+		rls.RuleLocatedScope: true, rls.RuleSystemOnly: true, rls.RuleSystemCatalog: true,
 	}
 	plan, err := os.ReadFile(planPath)
 	if err != nil {
@@ -325,6 +325,15 @@ func violations(tbl *catalogTable) []rls.Rule {
 		}
 		return nil
 	}
+	if slices.Contains(rls.SystemCatalogTables, tbl.name) {
+		// Documented exception (SEC-02, WP-1117): a global catalog of the
+		// installation every context reads and only the system context
+		// writes.
+		if !systemCatalog(tbl) {
+			return []rls.Rule{rls.RuleSystemCatalog}
+		}
+		return nil
+	}
 	if !tbl.org && tbl.name != "organization" {
 		return []rls.Rule{rls.RuleOrgColumn}
 	}
@@ -369,6 +378,39 @@ func violations(tbl *catalogTable) []rls.Rule {
 		out = append(out, rls.RuleTeamScope)
 	}
 	return out
+}
+
+// systemCatalog checks RuleSystemCatalog: no organization_id, ENABLE and
+// FORCE row level security, the TRUNCATE guard, one unconditional SELECT
+// policy, and INSERT, UPDATE and DELETE each covered by policies of their
+// own command that require the system flag in USING and WITH CHECK.
+func systemCatalog(tbl *catalogTable) bool {
+	if tbl.org || !tbl.rls || !tbl.force || !tbl.truncateGuard {
+		return false
+	}
+	read := false
+	covered := map[string]bool{}
+	for i := range tbl.policies {
+		p := &tbl.policies[i]
+		if !p.permissive {
+			continue
+		}
+		switch p.cmd {
+		case "SELECT":
+			if strings.TrimSpace(p.using) != "true" {
+				return false
+			}
+			read = true
+		case "INSERT", "UPDATE", "DELETE":
+			if (p.cmd != "INSERT" && !usesGUC(p.using, rls.SystemGUC)) || (p.cmd != "DELETE" && !usesGUC(p.check, rls.SystemGUC)) {
+				return false
+			}
+			covered[p.cmd] = true
+		default:
+			return false
+		}
+	}
+	return read && covered["INSERT"] && covered["UPDATE"] && covered["DELETE"]
 }
 
 func (tbl *catalogTable) applicable(cmd string, permissive bool) []*catalogPolicy {

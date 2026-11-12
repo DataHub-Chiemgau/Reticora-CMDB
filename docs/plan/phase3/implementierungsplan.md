@@ -17884,7 +17884,7 @@ Der im Entwurf genannte Wartungs-Pool scheidet aus: `database.NewMaintenancePool
   - `vuln_advisory` (`id` text PK, `source_id` → `vuln_source`, `cve_ids text[]`, `title`, `severity` ∈ `low|medium|high|critical`, `cvss_score numeric(3,1)`, `cvss_vector`, `kev boolean`, `published_at`, `modified_at`, `url`, `withdrawn boolean`),
   - `vuln_affected` (`id` bigint, `advisory_id` → `vuln_advisory` ON DELETE CASCADE, `vendor`, `product` (beide normalisiert: klein, Leerraum → `_`), `version_scheme`, `version_exact`, `version_start`, `version_start_inclusive`, `version_end`, `version_end_inclusive`, `fixed_version`, `cpe`).
 - [ ] **AK2:** Neue Ausnahmeliste `rls.SystemCatalogTables` (`vuln_source`, `vuln_advisory`, `vuln_affected`) mit Regel `RuleSystemCatalog`: ENABLE und FORCE RLS, eine SELECT-Policy ohne Bedingung (jeder Kontext liest), INSERT-, UPDATE- und DELETE-Policies nur mit `app.system = 'on'` (USING und WITH CHECK), Truncate-Guard. `RuleSystemWrite` (`known_gaps.go:28–30`) gilt für Mandantentabellen weiter und nimmt nur diese Liste aus, wie `platform_secret`. `TestRLSCatalog` prüft die Regel; eine Tabelle der Liste mit `organization_id` oder ohne eine dieser Policies ist ein Fehler.
-- [ ] **AK3:** `vulnfeed.PGRepository`: `ReplaceAdvisory(ctx, adv, affected)` ersetzt Advisory und Bereiche in einer Transaktion über `database.WithSystemWrite`; `UpdateSource` schreibt Stand, ETag, Cursor und Zähler; `ByProducts(ctx, vendor, products)` und `SearchProducts(ctx, q, limit)` lesen in jedem Kontext. Die Datei steht in `systemWriteCallers`.
+- [ ] **AK3:** `vulnfeed.PGRepository`: `ReplaceAdvisory(ctx, adv, affected)` ersetzt Advisory und Bereiche in einer Transaktion über `database.WithSystemWrite`; ein Advisory gehört seiner Quelle, ein Schreiben unter derselben ID mit anderer `source_id` wird mit `ErrAdvisoryOwnedByOtherSource` abgelehnt (keine stille Übernahme von Zeile und Bereichen); `UpdateSource` schreibt Stand, ETag, Cursor und Zähler; `ByProducts(ctx, vendor, products)` und `SearchProducts(ctx, q, limit)` lesen in jedem Kontext. Die Datei steht in `systemWriteCallers`.
 - [ ] **AK4:** Index `(vendor, product)` auf `vuln_affected`, GIN-Index auf `vuln_advisory.cve_ids`; `ByProducts` nutzt den Index (Planprüfung im Test).
 - [ ] **AK5:** Im Mandantenkontext (`WithTenant`) schlägt jedes INSERT, UPDATE und DELETE auf die drei Tabellen mit einem RLS-Fehler fehl, SELECT liefert alle Zeilen.
 
@@ -17905,13 +17905,14 @@ Der im Entwurf genannte Wartungs-Pool scheidet aus: `database.NewMaintenancePool
 - Drei Tabellen nach AK1 ohne `organization_id` (globaler Katalog, Ausnahme von Konvention 5 und 19 mit eigener Regel nach AK2; keine Verweise auf Mandantentabellen).
 - ENABLE und FORCE RLS; Policies `vuln_*_read` (SELECT, `USING (true)`) und `vuln_*_system_write` (INSERT, UPDATE, DELETE mit `current_setting('app.system', true) = 'on'` in USING und WITH CHECK).
 - BEFORE-TRUNCATE-Trigger `reticora_truncate_guard` (Muster 000144).
+- Statement-Trigger `reticora_vuln_catalog_write_guard` (BEFORE UPDATE OR DELETE): Für `reticora_app` ohne `app.system` bricht er mit 42501 ab, damit UPDATE und DELETE im Mandantenkontext wie INSERT abgewiesen werden und nicht nur keine Zeile ändern (AK5).
 - Indizes nach AK4.
 - Down entfernt die Tabellen.
 - `docs/schema-baseline.md`: Zeile „Stand“, drei Tabellenzeilen und Abschnitt der Ausnahmeliste.
 
 **Tests:**
 
-- `backend/internal/vulnfeed/repository_integration_test.go` (PostgreSQL): `TestVulnReplaceAdvisoryIsAtomic` (Fehler im zweiten Bereich hinterlässt nichts), `TestVulnReplaceAdvisoryDropsOldRanges`, `TestVulnByProductsUsesIndex` (EXPLAIN nennt den Index), `TestVulnTenantContextCannotWrite` (INSERT, UPDATE, DELETE im Mandantenkontext abgelehnt, SELECT erlaubt), `TestVulnSearchProducts`.
+- `backend/internal/vulnfeed/repository_integration_test.go` (PostgreSQL): `TestVulnReplaceAdvisoryIsAtomic` (Fehler im zweiten Bereich hinterlässt nichts), `TestVulnReplaceAdvisoryDropsOldRanges`, `TestVulnReplaceAdvisoryOfOtherSourceRefused` (zweite Quelle mit gleicher Advisory-ID abgelehnt, Bereiche der ersten unverändert), `TestVulnByProductsUsesIndex` (EXPLAIN nennt den Index), `TestVulnTenantContextCannotWrite` (INSERT, UPDATE, DELETE im Mandantenkontext mit 42501 abgelehnt, SELECT erlaubt), `TestVulnSearchProducts`.
 - `backend/internal/tenant/rls/catalog_integration_test.go`: `TestRLSCatalog` mit `RuleSystemCatalog`.
 - Bestehend grün: `TestSystemWriteCallersAreListed`, `TestMigrationsRoundtrip`, `TestSchemaBaselineMatchesMigratedSchema`.
 

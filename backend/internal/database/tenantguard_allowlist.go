@@ -43,6 +43,11 @@ var tenantGuardAllowlist = map[string]string{
 // TestWithSystemCallersAreListed fails for every other caller, for entries
 // that match no call any more and for entries without a reason.
 var withSystemCallers = map[string]string{
+	// Global vulnerability catalog (SEC-02, WP-1117): importers and jobs
+	// without a tenant scope read the catalog (vuln_*), which belongs to no
+	// organization; a request reads it in its tenant transaction.
+	"internal/vulnfeed/pg_repository.go": "global vulnerability catalog read without a tenant scope",
+
 	// Offline audit chain verification (AUD-04): lists every organization
 	// to verify each chain in its tenant transaction.
 	"cmd/audit-verify/main.go": "organizations whose audit chain the operator tool verifies",
@@ -176,6 +181,11 @@ var systemWriteCallers = map[string]string{
 	// The derivation root of the installation (SEC-06, WP-459): created at
 	// the first start, rewrapped by rotation.master_key (platform_secret).
 	"internal/platform/crypto/derivation_store.go": "derivation root in platform_secret",
+	// The global vulnerability catalog (SEC-02, WP-1117): the importers
+	// replace advisories with their ranges and store the sync state of the
+	// feeds (vuln_source, vuln_advisory, vuln_affected,
+	// rls.SystemCatalogTables).
+	"internal/vulnfeed/pg_repository.go": "global vulnerability catalog (vuln_*)",
 }
 
 // adminPoolCallers lists the files that may call NewAdminPool, the pool

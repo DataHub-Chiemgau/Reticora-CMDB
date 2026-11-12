@@ -26,7 +26,9 @@ const (
 	// RuleOrgPredicate: USING and WITH CHECK of every command use OrgGUC.
 	RuleOrgPredicate Rule = "org-predicate"
 	// RuleSystemWrite: no policy lets the system flag SystemGUC write
-	// (INSERT, UPDATE, DELETE); it may only widen SELECT for claiming.
+	// (INSERT, UPDATE, DELETE); it may only widen SELECT for claiming. It
+	// applies to the tenant tables; the tables of SystemTables and
+	// SystemCatalogTables are written with the system flag by design.
 	RuleSystemWrite Rule = "system-write"
 	// RuleGlobalRows: no policy lets INSERT, UPDATE or DELETE reach global
 	// catalog rows (organization_id IS NULL).
@@ -61,6 +63,13 @@ const (
 	// (database.WithSystem) and writes (database.WithSystemWrite) them, and
 	// no one deletes their rows.
 	RuleSystemOnly Rule = "system-only"
+	// RuleSystemCatalog: tables of SystemCatalogTables have no
+	// organization_id, ENABLE and FORCE ROW LEVEL SECURITY and the TRUNCATE
+	// guard; one SELECT policy without condition lets every context read,
+	// INSERT, UPDATE and DELETE are each covered, and every policy for them
+	// (no ALL policy) requires SystemGUC in USING and WITH CHECK: only the
+	// system context (database.WithSystemWrite) writes them.
+	RuleSystemCatalog Rule = "system-catalog"
 	// RuleLocatedScope: every tenant table with a location or CI reference
 	// (a column location_id, room_id, rack_id or ci_id, also with a prefix
 	// such as from_location_id or child_ci_id, or a node of the location
@@ -149,6 +158,19 @@ var OperatorTables = []string{"operator_audit", "signup_request", "scheduler_run
 // database.WithSystemWrite. This is a documented exception to RuleOrgColumn,
 // not a gap: the catalog test checks RuleSystemOnly for them instead.
 var SystemTables = []string{"platform_secret"}
+
+// SystemCatalogTables are the global catalogs of the installation that a
+// job of the server maintains (SEC-02, WP-1117): the vulnerability catalog
+// of the feeds (vuln_source, vuln_advisory, vuln_affected). They have no
+// organization_id, every context reads them (the version match of an
+// organization reads them in its tenant transaction), and only the system
+// context writes them (database.WithSystemWrite), deletes replaced ranges
+// included. Neither GlobalCatalogTables (maintained by migrations only,
+// RuleReadOnlyCatalog) nor SystemTables (read only with the system flag,
+// no DELETE, RuleSystemOnly) fit. This is a documented exception to
+// RuleOrgColumn and RuleSystemWrite, not a gap: the catalog test checks
+// RuleSystemCatalog for them instead.
+var SystemCatalogTables = []string{"vuln_source", "vuln_advisory", "vuln_affected"}
 
 // Session variables (GUCs) the policies are expected to reference. Site and
 // team scope do not exist yet; WP-027 and WP-029 introduce them under these
@@ -269,6 +291,11 @@ var LeakyIndexes = map[string]LeakyIndex{
 		Table: "security_finding", Leaky: "operator class array_ops",
 		Reason: "CVE ids of the findings (000315, WP-1116); @> (arraycontains) is not leakproof, the filter cve of " +
 			"GET /security/findings reads the findings of the organization within the caller's scope",
+	},
+	"idx_vuln_advisory_cve_ids": {
+		Table: "vuln_advisory", Leaky: "operator class array_ops",
+		Reason: "CVE ids of the global vulnerability catalog (000333, WP-1117); the catalog belongs to no organization and " +
+			"its SELECT policy is USING (true), so no row hides behind a policy the operator could leak",
 	},
 	"idx_signup_request_email": {
 		Table: "signup_request", Leaky: "function lower(text)",
