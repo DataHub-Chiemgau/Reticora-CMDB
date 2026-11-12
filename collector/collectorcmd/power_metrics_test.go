@@ -27,7 +27,6 @@ package collectorcmd
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -44,45 +43,20 @@ import (
 
 const powerFakeCommunity = "power-fake-4711"
 
-// loadWalks reads fixture walks (snmpwalk -On: "OID = TYPE: value",
-// STRING, INTEGER and Gauge32) as the variables of an SNMP fake; the
-// system group is left out, the fake serves its own.
+// loadWalks reads fixture walks (snmpwalk -On) as the variables of an
+// SNMP fake; the system group is left out, the fake serves its own. A thin
+// wrapper around fakesnmp.LoadWalkFile (WP-992).
 func loadWalks(t *testing.T, paths ...string) []gosnmp.SnmpPDU {
 	t.Helper()
 	var mib []gosnmp.SnmpPDU
 	for _, path := range paths {
-		raw, err := os.ReadFile(path)
+		pdus, err := fakesnmp.LoadWalkFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for n, line := range strings.Split(string(raw), "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" || strings.HasPrefix(line, "#") {
-				continue
-			}
-			oid, typed, ok := strings.Cut(line, " = ")
-			kind, value, ok2 := strings.Cut(typed, ": ")
-			if !ok || !ok2 {
-				t.Fatalf("%s:%d: %q is no walk line", path, n+1, line)
-			}
-			if strings.HasPrefix(oid, ".1.3.6.1.2.1.1.") {
-				continue
-			}
-			switch kind {
-			case "STRING":
-				mib = append(mib, gosnmp.SnmpPDU{Name: oid, Type: gosnmp.OctetString, Value: []byte(strings.Trim(value, `"`))})
-			case "INTEGER", "Gauge32":
-				v, err := strconv.Atoi(value)
-				if err != nil {
-					t.Fatalf("%s:%d: %v", path, n+1, err)
-				}
-				if kind == "INTEGER" {
-					mib = append(mib, gosnmp.SnmpPDU{Name: oid, Type: gosnmp.Integer, Value: v})
-				} else {
-					mib = append(mib, gosnmp.SnmpPDU{Name: oid, Type: gosnmp.Gauge32, Value: uint(v)})
-				}
-			default:
-				t.Fatalf("%s:%d: type %s not supported", path, n+1, kind)
+		for _, pdu := range pdus {
+			if !strings.HasPrefix(pdu.Name, ".1.3.6.1.2.1.1.") {
+				mib = append(mib, pdu)
 			}
 		}
 	}
