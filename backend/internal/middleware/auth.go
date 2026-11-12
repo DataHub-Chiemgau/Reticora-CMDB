@@ -292,18 +292,26 @@ func TenantMiddleware(next http.Handler) http.Handler {
 // assignments (RBA-03, WP-009): it is taken over dimension by dimension, so a
 // user with client assignments only is never org-wide. Credentials without a
 // resolved scope (API keys, development tokens) are restricted by their client
-// scope only.
+// scope only. An API key carries its kind (database.PrincipalTypeAPIKey):
+// the rights per IPAM section count the teams of its team scope like team
+// memberships (WP-910, E-214).
 func TenantScopeFor(p *identity.Principal) database.TenantScope {
+	principalType := ""
+	if p.Type == identity.PrincipalTypeAPIKey {
+		principalType = database.PrincipalTypeAPIKey
+	}
 	if p.Scope != nil {
 		return database.TenantScope{
-			OrgID:   p.OrganizationID,
-			UserID:  p.Subject,
-			Clients: scopeSet(p.Scope.Clients),
-			Sites:   scopeSet(p.Scope.Sites),
-			Teams:   scopeSet(p.Scope.Teams),
+			OrgID:         p.OrganizationID,
+			UserID:        p.Subject,
+			Clients:       scopeSet(p.Scope.Clients),
+			Sites:         scopeSet(p.Scope.Sites),
+			Teams:         scopeSet(p.Scope.Teams),
+			PrincipalType: principalType,
 		}
 	}
 	scope := database.OrgWideScope(p.OrganizationID, p.Subject)
+	scope.PrincipalType = principalType
 	if clients := strings.TrimSpace(p.ClientScope); clients != "" {
 		var ids []string
 		for _, id := range strings.Split(clients, ",") {

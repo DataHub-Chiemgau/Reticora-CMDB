@@ -530,6 +530,12 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	// The released IP reservation of the subnet (NET-09, WP-299).
 	m["DELETE /api/v1/subnets/{id}/reservations/{ip_id}"] = RouteSnapshot{Table: "ip_address",
 		Keys: []SnapshotKey{{"id", "ip_id"}, {"subnet_id", "id"}}}
+	// The rights per IPAM section (IPM-10, WP-910): the entry of the team.
+	m["POST /api/v1/ipam-sections/{id}/permissions"] = created("ipam_section_permission")
+	for _, method := range []string{"PATCH", "DELETE"} {
+		m[method+" /api/v1/ipam-sections/{id}/permissions/{permission_id}"] = RouteSnapshot{Table: "ipam_section_permission",
+			Keys: []SnapshotKey{{"id", "permission_id"}, {"section_id", "id"}}}
+	}
 	// The removed object link of the ticket (WP-764).
 	m["DELETE /api/v1/tickets/{id}/links/{link_id}"] = RouteSnapshot{Table: "ticket_link",
 		Keys: []SnapshotKey{{"id", "link_id"}, {"ticket_id", "id"}}}

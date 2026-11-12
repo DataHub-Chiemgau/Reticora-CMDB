@@ -557,3 +557,371 @@ func boolOr(v *bool, def bool) bool {
 	}
 	return *v
 }
+
+// --- Rights per section (IPM-10, WP-910, E-214) ---
+
+// Levels of a section permission: write includes read.
+const (
+	SectionLevelRead  = "read"
+	SectionLevelWrite = "write"
+)
+
+// SectionPermission grants a team read or write access to the subnets and
+// addresses of a section (ipam_section_permission). A section with entries
+// is read only by principals of a team with an entry and written only by
+// principals of a team with level write, in addition to ipam:read and
+// ipam:write; a section without entries is open to every principal as
+// before. The database enforces it (row level security, migration 000320).
+type SectionPermission struct {
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	SectionID      string `json:"section_id"`
+	TeamID         string `json:"team_id"`
+	// TeamName is the name of the team when the caller sees it.
+	TeamName  string    `json:"team_name,omitempty"`
+	Level     string    `json:"level"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// CreateSectionPermissionRequest is the payload of
+// POST /api/v1/ipam-sections/{id}/permissions.
+type CreateSectionPermissionRequest struct {
+	TeamID string `json:"team_id"`
+	Level  string `json:"level"`
+}
+
+// UpdateSectionPermissionRequest is the payload of
+// PATCH /api/v1/ipam-sections/{id}/permissions/{permission_id}: only the
+// level changes.
+type UpdateSectionPermissionRequest struct {
+	Level *string `json:"level,omitempty"`
+}
+
+// SectionPermissionRepository persists the rights per section. Only the
+// PostgreSQL repository has them; without a database the routes answer
+// 501.
+type SectionPermissionRepository interface {
+	ListSectionPermissions(ctx context.Context, orgID, sectionID string, page api.PaginationParams) ([]SectionPermission, int, error)
+	CreateSectionPermission(ctx context.Context, p *SectionPermission) error
+	UpdateSectionPermission(ctx context.Context, orgID, sectionID, id, level string) (*SectionPermission, error)
+	DeleteSectionPermission(ctx context.Context, orgID, sectionID, id string) error
+}
+
+// Fixed answers of the section permissions.
+var (
+	errSectionPermissionTeam = &api.FieldError{Field: "team_id", Message: "team not found",
+		Status: http.StatusUnprocessableEntity}
+	errSectionPermissionLevel = &api.FieldError{Field: "level", Message: "level must be read or write",
+		Status: http.StatusUnprocessableEntity}
+	errSectionPermissionTaken = &api.ConflictError{Field: "team_id",
+		Message: "the team already has a permission on this IPAM section"}
+	// errSectionNotWritable: the caller sees the section but may not write
+	// it (level read, 403).
+	errSectionNotWritable = errors.New("the IPAM section may not be written")
+)
+
+const sectionPermissionCols = `p.id::text, p.organization_id::text, p.section_id::text, p.team_id::text,
+	COALESCE((SELECT t.name FROM team t WHERE t.id = p.team_id AND t.organization_id = p.organization_id), ''),
+	p.level, p.created_at`
+
+func scanSectionPermission(s scanner) (*SectionPermission, error) {
+	p := &SectionPermission{}
+	if err := s.Scan(&p.ID, &p.OrganizationID, &p.SectionID, &p.TeamID, &p.TeamName, &p.Level, &p.CreatedAt); err != nil {
+		return nil, err
+	}
+	p.CreatedAt = p.CreatedAt.UTC()
+	return p, nil
+}
+
+// sectionWritable checks, in the writing transaction under the caller's
+// row level security, that the caller sees the section (ErrNotFound
+// otherwise) and may write it (errSectionNotWritable for level read): the
+// rights of a section are changed only by a principal that may write it.
+func sectionWritable(ctx context.Context, tx pgx.Tx, orgID, sectionID string) error {
+	if !api.IsUUID(sectionID) {
+		return ErrNotFound
+	}
+	var writable bool
+	err := tx.QueryRow(ctx, `SELECT NOT (id = ANY (ipam_section_denied('write'))) FROM ipam_section
+		WHERE organization_id = $1 AND id = $2`, orgID, sectionID).Scan(&writable)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return ErrNotFound
+	case err != nil:
+		return fmt.Errorf("read ipam section: %w", err)
+	case !writable:
+		return errSectionNotWritable
+	}
+	return nil
+}
+
+// sectionPermissionError maps the constraint violations of
+// ipam_section_permission: a second entry of the team (409) and a team
+// deleted meanwhile (422 team_id).
+func sectionPermissionError(err error) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return err
+	}
+	switch {
+	case pgErr.Code == "23505" && pgErr.ConstraintName == "ipam_section_permission_section_team_key":
+		return errSectionPermissionTaken
+	case pgErr.Code == "23503" && pgErr.ConstraintName == "ipam_section_permission_team_fkey":
+		return errSectionPermissionTeam
+	}
+	return err
+}
+
+// ListSectionPermissions lists the entries of a section the caller sees
+// (the team scope applies to team_id), oldest first.
+func (r *PGRepository) ListSectionPermissions(ctx context.Context, orgID, sectionID string, page api.PaginationParams) ([]SectionPermission, int, error) {
+	if !api.IsUUID(sectionID) {
+		return nil, 0, ErrNotFound
+	}
+	out := []SectionPermission{}
+	var total int
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var visible bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ipam_section WHERE organization_id = $1 AND id = $2),
+			(SELECT count(*) FROM ipam_section_permission WHERE organization_id = $1 AND section_id = $2)`,
+			orgID, sectionID).Scan(&visible, &total); err != nil {
+			return err
+		}
+		if !visible {
+			return ErrNotFound
+		}
+		rows, err := tx.Query(ctx, "SELECT "+sectionPermissionCols+` FROM ipam_section_permission p
+			WHERE p.organization_id = $1 AND p.section_id = $2 ORDER BY p.created_at, p.id LIMIT $3 OFFSET $4`,
+			orgID, sectionID, page.Limit, page.Offset)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			p, err := scanSectionPermission(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, *p)
+		}
+		return rows.Err()
+	})
+	return out, total, err
+}
+
+// CreateSectionPermission stores an entry. The team must be one of the
+// organization the caller sees (422 team_id otherwise); a principal
+// restricted to clients or sites fails with the row level security error
+// 42501 (403).
+func (r *PGRepository) CreateSectionPermission(ctx context.Context, p *SectionPermission) error {
+	return database.WithRequestTenant(ctx, r.pool, p.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := sectionWritable(ctx, tx, p.OrganizationID, p.SectionID); err != nil {
+			return err
+		}
+		if !api.IsUUID(p.TeamID) {
+			return errSectionPermissionTeam
+		}
+		var team bool
+		if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM team WHERE organization_id = $1 AND id = $2)",
+			p.OrganizationID, p.TeamID).Scan(&team); err != nil {
+			return fmt.Errorf("read team: %w", err)
+		}
+		if !team {
+			return errSectionPermissionTeam
+		}
+		var id string
+		if err := tx.QueryRow(ctx, `INSERT INTO ipam_section_permission (organization_id, section_id, team_id, level)
+			VALUES ($1, $2, $3, $4) RETURNING id::text`, p.OrganizationID, p.SectionID, p.TeamID, p.Level).Scan(&id); err != nil {
+			return sectionPermissionError(err)
+		}
+		created, err := scanSectionPermission(tx.QueryRow(ctx, "SELECT "+sectionPermissionCols+
+			" FROM ipam_section_permission p WHERE p.organization_id = $1 AND p.id = $2", p.OrganizationID, id))
+		if err != nil {
+			return err
+		}
+		*p = *created
+		return nil
+	})
+}
+
+// UpdateSectionPermission changes the level of an entry of the section.
+func (r *PGRepository) UpdateSectionPermission(ctx context.Context, orgID, sectionID, id, level string) (*SectionPermission, error) {
+	if !api.IsUUID(id) {
+		return nil, ErrNotFound
+	}
+	var p *SectionPermission
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := sectionWritable(ctx, tx, orgID, sectionID); err != nil {
+			return err
+		}
+		var updated string
+		err := tx.QueryRow(ctx, `UPDATE ipam_section_permission SET level = $4
+			WHERE organization_id = $1 AND section_id = $2 AND id = $3 RETURNING id::text`, orgID, sectionID, id, level).Scan(&updated)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		p, err = scanSectionPermission(tx.QueryRow(ctx, "SELECT "+sectionPermissionCols+
+			" FROM ipam_section_permission p WHERE p.organization_id = $1 AND p.id = $2", orgID, id))
+		return err
+	})
+	return p, err
+}
+
+// DeleteSectionPermission removes an entry of the section; the last entry
+// opens the section to every principal again.
+func (r *PGRepository) DeleteSectionPermission(ctx context.Context, orgID, sectionID, id string) error {
+	if !api.IsUUID(id) {
+		return ErrNotFound
+	}
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := sectionWritable(ctx, tx, orgID, sectionID); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, "DELETE FROM ipam_section_permission WHERE organization_id = $1 AND section_id = $2 AND id = $3",
+			orgID, sectionID, id)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
+}
+
+// sectionPermissionRepo returns the repository of the section rights, or
+// answers 501 without a database.
+func (h *Handler) sectionPermissionRepo(w http.ResponseWriter) (SectionPermissionRepository, bool) {
+	repo, ok := h.repo.(SectionPermissionRepository)
+	if !ok {
+		api.WriteError(w, http.StatusNotImplemented, "Not Implemented", "IPAM section permissions are not available")
+	}
+	return repo, ok
+}
+
+// orgWideWriter answers 403 for a principal restricted to clients or sites:
+// the rights of a section are written only by principals of the whole
+// organization (E-09), as the policies of ipam_section_permission require.
+func orgWideWriter(w http.ResponseWriter, r *http.Request) bool {
+	if scope, ok := database.TenantScopeFromContext(r.Context()); ok && (!scope.Clients.IsAll() || !scope.Sites.IsAll()) {
+		api.WriteError(w, http.StatusForbidden, "Forbidden",
+			"IPAM section permissions are written only by principals without client and site restriction")
+		return false
+	}
+	return true
+}
+
+// writeSectionPermissionError answers a failed permission request: 404 for
+// an unknown or invisible section or entry, 403 for a section the caller
+// may only read, else the field rule or the repository error.
+func writeSectionPermissionError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, ErrNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", "IPAM section or permission not found")
+	case errors.Is(err, errSectionNotWritable):
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "the IPAM section may only be read")
+	case api.WriteFieldError(w, err):
+	default:
+		api.WriteRepoError(w, err)
+	}
+}
+
+// ListSectionPermissions handles GET /api/v1/ipam-sections/{id}/permissions
+func (h *Handler) ListSectionPermissions(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := org(w, r)
+	if !ok {
+		return
+	}
+	repo, ok := h.sectionPermissionRepo(w)
+	if !ok {
+		return
+	}
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
+		return
+	}
+	items, total, err := repo.ListSectionPermissions(r.Context(), orgID, chi.URLParam(r, "id"), page)
+	if err != nil {
+		writeSectionPermissionError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[SectionPermission]{
+		Data: items, Total: total, Limit: page.Limit, Offset: page.Offset, HasMore: page.Offset+page.Limit < total,
+	})
+}
+
+// CreateSectionPermission handles POST /api/v1/ipam-sections/{id}/permissions
+func (h *Handler) CreateSectionPermission(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := org(w, r)
+	if !ok {
+		return
+	}
+	repo, ok := h.sectionPermissionRepo(w)
+	if !ok || !orgWideWriter(w, r) {
+		return
+	}
+	var req CreateSectionPermissionRequest
+	if err := api.ReadJSON(r, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	if req.Level != SectionLevelRead && req.Level != SectionLevelWrite {
+		api.WriteFieldError(w, errSectionPermissionLevel)
+		return
+	}
+	p := &SectionPermission{OrganizationID: orgID, SectionID: chi.URLParam(r, "id"), TeamID: strings.TrimSpace(req.TeamID), Level: req.Level}
+	if err := repo.CreateSectionPermission(r.Context(), p); err != nil {
+		writeSectionPermissionError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusCreated, p)
+}
+
+// UpdateSectionPermission handles
+// PATCH /api/v1/ipam-sections/{id}/permissions/{permission_id}
+func (h *Handler) UpdateSectionPermission(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := org(w, r)
+	if !ok {
+		return
+	}
+	repo, ok := h.sectionPermissionRepo(w)
+	if !ok || !orgWideWriter(w, r) {
+		return
+	}
+	var req UpdateSectionPermissionRequest
+	if err := api.ReadJSON(r, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	if req.Level == nil || (*req.Level != SectionLevelRead && *req.Level != SectionLevelWrite) {
+		api.WriteFieldError(w, errSectionPermissionLevel)
+		return
+	}
+	p, err := repo.UpdateSectionPermission(r.Context(), orgID, chi.URLParam(r, "id"), chi.URLParam(r, "permission_id"), *req.Level)
+	if err != nil {
+		writeSectionPermissionError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, p)
+}
+
+// DeleteSectionPermission handles
+// DELETE /api/v1/ipam-sections/{id}/permissions/{permission_id}
+func (h *Handler) DeleteSectionPermission(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := org(w, r)
+	if !ok {
+		return
+	}
+	repo, ok := h.sectionPermissionRepo(w)
+	if !ok || !orgWideWriter(w, r) {
+		return
+	}
+	if err := repo.DeleteSectionPermission(r.Context(), orgID, chi.URLParam(r, "id"), chi.URLParam(r, "permission_id")); err != nil {
+		writeSectionPermissionError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

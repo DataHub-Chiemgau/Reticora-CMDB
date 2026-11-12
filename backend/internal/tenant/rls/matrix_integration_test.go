@@ -29,10 +29,11 @@ var matrixHiddenGlobalRows = map[string]string{
 // scoped principal reads them, its INSERT is refused and its UPDATE and
 // DELETE find no row.
 var matrixOrgWideWrites = map[string]string{
-	"vrf":            "routing domains of the whole organization (TEN-10, WP-372, F-089)",
-	"nameserver_set": "nameserver sets of the whole organization (IPM-05, WP-905): ipam.TestNameserverSetsOnPostgreSQL",
-	"vlan_domain":    "VLAN domains of the whole organization (IPM-06, WP-906): ipam.TestVLANDomainsOnPostgreSQL",
-	"vrf_section":    "IPAM sections of the VRFs (IPM-07, WP-907): ipam.TestVRFAttributesOnPostgreSQL",
+	"vrf":                     "routing domains of the whole organization (TEN-10, WP-372, F-089)",
+	"nameserver_set":          "nameserver sets of the whole organization (IPM-05, WP-905): ipam.TestNameserverSetsOnPostgreSQL",
+	"vlan_domain":             "VLAN domains of the whole organization (IPM-06, WP-906): ipam.TestVLANDomainsOnPostgreSQL",
+	"vrf_section":             "IPAM sections of the VRFs (IPM-07, WP-907): ipam.TestVRFAttributesOnPostgreSQL",
+	"ipam_section_permission": "rights per IPAM section (IPM-10, WP-910): ipam.TestSectionACLReadWrite",
 }
 
 // matrixOrgWideDeletes lists the append-only tables whose rows only

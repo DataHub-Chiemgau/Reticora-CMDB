@@ -340,14 +340,16 @@ func beginTenantSnapshotSQL(scope *TenantScope) string {
 	return "BEGIN ISOLATION LEVEL REPEATABLE READ, READ ONLY; SELECT " + tenantGUCsSQL(scope)
 }
 
-// tenantGUCsSQL is the select list that sets the five GUCs of scope
-// transaction-locally.
+// tenantGUCsSQL is the select list that sets the six GUCs of scope
+// transaction-locally: organization, user, client, site and team scope and
+// the kind of principal (WP-910).
 func tenantGUCsSQL(scope *TenantScope) string {
 	return "set_config('" + OrgGUC + "', " + quoteLiteral(scope.OrgID) + ", true), " +
 		"set_config('" + UserGUC + "', " + quoteLiteral(scope.UserID) + ", true), " +
 		"set_config('" + ClientScopeGUC + "', " + quoteLiteral(scope.Clients.gucValue()) + ", true), " +
 		"set_config('" + SiteScopeGUC + "', " + quoteLiteral(scope.Sites.gucValue()) + ", true), " +
-		"set_config('" + TeamScopeGUC + "', " + quoteLiteral(scope.Teams.gucValue()) + ", true)"
+		"set_config('" + TeamScopeGUC + "', " + quoteLiteral(scope.Teams.gucValue()) + ", true), " +
+		"set_config('" + PrincipalTypeGUC + "', " + quoteLiteral(scope.PrincipalType) + ", true)"
 }
 
 // quoteLiteral renders s as an escape string constant: backslashes and

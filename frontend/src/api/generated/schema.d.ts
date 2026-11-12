@@ -10994,13 +10994,13 @@ export interface paths {
     };
     /**
      * List the permissions of an IPAM section
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description The entries of the section the caller sees (IPM-10, WP-910); the team scope of the caller applies to team_id. A section the caller cannot read (outside its scope, or with entries but none for a team of the caller) is 404. Without a database 501. Paged by limit and the signed cursor of next_cursor. Requires ipam:read.
      */
     get: operations['listIPAMSectionPermissions'];
     put?: never;
     /**
      * Grant a permission on an IPAM section
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Grants a team read or write on the section (IPM-10). With the first entry the section is closed to every principal without a team with an entry (fail-closed). Only principals without client and site restriction write (403 otherwise), and only on a section they may write (403 for level read, 404 for a section they cannot read). An unknown team or one of another organization is 422 with field team_id, a second entry of the team 409, an invalid level 422 with field level. Requires ipam:write.
      */
     post: operations['createIPAMSectionPermission'];
     delete?: never;
@@ -11025,14 +11025,14 @@ export interface paths {
     post?: never;
     /**
      * Revoke a permission on an IPAM section
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Removes the entry (IPM-10); without entries the section is open to every principal again. Principals restricted to clients or sites and principals that may only read the section are 403; an unknown entry or section 404. Requires ipam:write.
      */
     delete: operations['deleteIPAMSectionPermission'];
     options?: never;
     head?: never;
     /**
      * Update a permission on an IPAM section
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Changes the level of the entry (IPM-10). Principals restricted to clients or sites and principals that may only read the section are 403; an unknown entry or section 404; an invalid level 422 with field level. Requires ipam:write.
      */
     patch: operations['updateIPAMSectionPermission'];
     trace?: never;
@@ -20745,6 +20745,34 @@ export interface components {
     };
     IPAMSectionListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['IPAMSection'][];
+    };
+    /** @description Right of a team on an IPAM section (IPM-10, E-214). A section with entries is read only by principals of a team with an entry and written only by principals of a team with level write, in addition to ipam:read and ipam:write; a section without entries is open as before. Row level security enforces it on every channel (REST, GraphQL, search, export, jobs). */
+    IPAMSectionPermission: {
+      id: string;
+      organization_id: string;
+      section_id: string;
+      team_id: string;
+      /** @description Name of the team; absent when the caller does not see the team. */
+      team_name?: string;
+      /**
+       * @description write includes read.
+       * @enum {string}
+       */
+      level: 'read' | 'write';
+      /** Format: date-time */
+      created_at: string;
+    };
+    CreateIPAMSectionPermissionRequest: {
+      team_id: string;
+      /** @enum {string} */
+      level: 'read' | 'write';
+    };
+    UpdateIPAMSectionPermissionRequest: {
+      /** @enum {string} */
+      level: 'read' | 'write';
+    };
+    IPAMSectionPermissionListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['IPAMSectionPermission'][];
     };
     /** @description Usage of a subnet (IPM-03). */
     SubnetUsage: {
@@ -49777,6 +49805,11 @@ export interface operations {
          *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
       };
       header?: never;
       path: {
@@ -49787,17 +49820,21 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the permissions of an IPAM section. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description A page of permissions of the section */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['IPAMSectionPermissionListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   createIPAMSectionPermission: {
@@ -49810,21 +49847,29 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateIPAMSectionPermissionRequest'];
+      };
+    };
     responses: {
-      /** @description Created. The schema comes with the implementing work package. */
+      /** @description Permission granted */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['IPAMSectionPermission'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   deleteIPAMSectionPermission: {
@@ -49840,7 +49885,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Done. */
+      /** @description Permission revoked */
       204: {
         headers: {
           [name: string]: unknown;
@@ -49850,8 +49895,8 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   updateIPAMSectionPermission: {
@@ -49865,22 +49910,28 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateIPAMSectionPermissionRequest'];
+      };
+    };
     responses: {
-      /** @description Update a permission on an IPAM section. The schema comes with the implementing work package. */
+      /** @description Permission updated */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['IPAMSectionPermission'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   listASNs: {

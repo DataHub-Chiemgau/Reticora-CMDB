@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -88,6 +89,8 @@ type p2Scenario struct {
 	// for client 2) and one of organization B hidden for its client
 	// (WP-858).
 	hiddenTypes [2]string
+	// ipam is the scenario of the rights per IPAM section (WP-910).
+	ipam *ipamSectionScenario
 }
 
 // p2Prefix starts every name of the P2 scenario.
@@ -271,6 +274,9 @@ func newP2Scenario(t *testing.T, m *channelMatrix, blobs blob.Store) *p2Scenario
 			t.Fatalf("setup: rebuild of the search index: %v", err)
 		}
 	}
+	// The rights per IPAM section (WP-910), after the rebuild: the
+	// triggers index subnets and addresses as they are written.
+	s.ipam = newIPAMSectionScenario(t, m)
 	return s
 }
 
@@ -914,6 +920,8 @@ func (m *channelMatrix) p2Rows(rows map[string]matrixRow) {
 	// type of A; multi: client 2 does not), an org-wide one sees all.
 	clientSeen := [3]seen{m.allA, m.allA.without("client"), m.onlyB}
 	hiddenOf := [3][]string{{s.hiddenTypes[0]}, {}, {s.hiddenTypes[1]}}
+	rows["ipam-section"] = m.ipamSectionRow()
+
 	rows["client-hidden-ci-types"] = matrixRow{
 		read: func(p *channelPrincipal) []matrixProbe {
 			var out []matrixProbe
@@ -1111,4 +1119,155 @@ func bodyRef(status int) int {
 		return http.StatusUnprocessableEntity
 	}
 	return status
+}
+
+// ipamSectionScenario is the scenario of the channel ipam-section (IPM-10,
+// WP-910, E-214). Organization A has the teams A (the user of the scope
+// principals is its member) and B (the other user is its member) and
+// three sections, each with a subnet of client 1 at site 1 and an address:
+// X with an entry of team A (write), Y with entries of team A (read) and
+// team B (write), Z without entries. Organization B has its section with
+// a subnet and an address. CI ci1 has an interface with an address in the
+// subnets of X and Y (network projection of the topology). Index 0 is X,
+// 1 Y, 2 Z, 3 the section of organization B.
+type ipamSectionScenario struct {
+	teamA, teamB string
+	sections     [4]string
+	cidrs        [4]string
+	orgs         [4]string
+	clients      [4]string
+	sites        [4]string
+	// subnets and addresses carry the principals that read them; writers
+	// are the principals that write the subnets and addresses of a section.
+	subnets, addresses [4]object
+	writers            [4]seen
+	seq                int
+}
+
+// newIPAMSectionScenario writes the sections, subnets and addresses
+// through the API, then the entries: the section writes take the rights
+// as they are when the request comes.
+func newIPAMSectionScenario(t *testing.T, m *channelMatrix) *ipamSectionScenario {
+	t.Helper()
+	f := m.f
+	s := &ipamSectionScenario{
+		orgs:    [4]string{f.OrgA, f.OrgA, f.OrgA, f.OrgB},
+		clients: [4]string{f.Client1, f.Client1, f.Client1, m.clientB},
+		sites:   [4]string{m.site1, m.site1, m.site1, m.siteB},
+	}
+	s.teamA = m.scalar(t, `INSERT INTO team (organization_id, name) VALUES ($1, 'chmp2 ipam team a') RETURNING id::text`, f.OrgA)
+	s.teamB = m.scalar(t, `INSERT INTO team (organization_id, name) VALUES ($1, 'chmp2 ipam team b') RETURNING id::text`, f.OrgA)
+	m.exec(t, `INSERT INTO team_member (organization_id, team_id, user_id) VALUES ($1, $2, $3), ($1, $4, $5)`,
+		f.OrgA, s.teamA, m.userA, s.teamB, m.otherA)
+	owners := [4]*channelPrincipal{m.org, m.org, m.org, m.orgB}
+	names := [4]string{"x", "y", "z", "b"}
+	onlyTeamA := m.one.without("other-user")
+	read := [4]seen{onlyTeamA, m.one, m.one, m.onlyB}
+	s.writers = [4]seen{onlyTeamA, seenBy("other-user"), m.one, m.onlyB}
+	for i := range 4 {
+		p := owners[i]
+		s.sections[i] = m.create(t, p, "/api/v1/ipam-sections", map[string]any{"name": p2Prefix + "-section-" + names[i]})
+		s.cidrs[i] = fmt.Sprintf("10.250.%d.0/24", i+1)
+		subnet := m.create(t, p, "/api/v1/subnets", map[string]any{"cidr": s.cidrs[i], "client_id": s.clients[i], "site_id": s.sites[i],
+			"section_id": s.sections[i], "name": p2Prefix + "-subnet-" + names[i]})
+		s.subnets[i] = object{subnet, read[i]}
+		s.addresses[i] = object{m.create(t, p, "/api/v1/ips", map[string]any{"address": fmt.Sprintf("10.250.%d.10", i+1),
+			"subnet_id": subnet}), read[i]}
+	}
+	nic := m.create(t, m.org, "/api/v1/cis/"+m.ci1.id+"/interfaces", map[string]any{"name": p2Prefix + "-ipam0"})
+	for i := range 2 {
+		m.create(t, m.org, "/api/v1/ips", map[string]any{"address": fmt.Sprintf("10.250.%d.20", i+1), "subnet_id": s.subnets[i].id,
+			"interface_id": nic})
+	}
+	grant := func(p *channelPrincipal, section int, team, level string) {
+		m.create(t, p, "/api/v1/ipam-sections/"+s.sections[section]+"/permissions", map[string]any{"team_id": team, "level": level})
+	}
+	grant(m.org, 0, s.teamA, "write")
+	grant(m.otherUserP, 1, s.teamB, "write")
+	grant(m.otherUserP, 1, s.teamA, "read")
+	return s
+}
+
+// ipamSectionRow is the channel ipam-section: the subnets and addresses of
+// a section with entries are read by the principals of a team with an
+// entry and written by those of a team with level write, on every channel
+// (lists, details, addresses of a subnet, search, GraphQL search, network
+// projection of the topology); a section without entries behaves as
+// before. A write the principal may read but not write is 404 (PATCH,
+// DELETE) or 403 (POST of an address, row level security); a subnet it
+// cannot read is 400 for POST /ips (subnet not found) and 404 otherwise.
+func (m *channelMatrix) ipamSectionRow() matrixRow {
+	s := m.p2.ipam
+	get := func(path string, want int) matrixProbe {
+		return matrixProbe{method: http.MethodGet, path: path, want: want}
+	}
+	list := func(p *channelPrincipal, path string, objs ...object) matrixProbe {
+		show, hide := listed(p, objs...)
+		return matrixProbe{method: http.MethodGet, path: path, want: http.StatusOK, show: show, hide: hide}
+	}
+	return matrixRow{
+		read: func(p *channelPrincipal) []matrixProbe {
+			out := []matrixProbe{list(p, "/api/v1/subnets?limit=200", s.subnets[:]...), list(p, "/api/v1/ips?limit=200", s.addresses[:]...)}
+			for i := range 4 {
+				sub, addr := s.subnets[i], s.addresses[i]
+				out = append(out, get("/api/v1/subnets/"+sub.id, sub.seen.status(p, http.StatusOK)),
+					get("/api/v1/ips/"+addr.id, addr.seen.status(p, http.StatusOK)))
+				addrs := get("/api/v1/subnets/"+sub.id+"/addresses", sub.seen.status(p, http.StatusOK))
+				if sub.seen[p.kind] {
+					addrs.show = []string{addr.id}
+				}
+				out = append(out, addrs, list(p, "/api/v1/search?limit=100&q="+url.QueryEscape(s.cidrs[i]), sub))
+				show, hide := listed(p, sub)
+				out = append(out, matrixProbe{name: "searchEverything", method: http.MethodPost, path: "/bff/graphql",
+					body: map[string]any{"query": `{ searchEverything(q: "` + s.cidrs[i] + `", first: 100) { total hits { entityId } } }`},
+					want: http.StatusOK, show: show, hide: append(hide, `"errors"`)})
+			}
+			// The network projection of ci1: the subnets of X and Y it
+			// hangs off, each only where it is readable.
+			topo := get("/api/v1/topology?root_ci_id="+m.ci1.id+"&include=network", m.ci1.seen.status(p, http.StatusOK))
+			if m.ci1.seen[p.kind] {
+				for i := range 2 {
+					if s.subnets[i].seen[p.kind] {
+						topo.show = append(topo.show, "subnet:"+s.subnets[i].id)
+					} else {
+						topo.hide = append(topo.hide, s.subnets[i].id)
+					}
+				}
+			}
+			return append(out, topo, get("/api/v1/subnets/"+unknownID, http.StatusNotFound))
+		},
+		write: func(t *testing.T, p *channelPrincipal) []matrixProbe {
+			var out []matrixProbe
+			for i := range 4 {
+				sub := s.subnets[i]
+				written := object{sub.id, s.writers[i]}
+				note := m.name(p2Prefix + "-ipam")
+				out = append(out, matrixProbe{name: "section " + fmt.Sprint(i), method: http.MethodPatch, path: "/api/v1/subnets/" + sub.id,
+					body: map[string]any{"description": note}, want: s.writers[i].status(p, http.StatusOK),
+					after: m.unchanged(written, p, `SELECT COALESCE(description, '') <> $2 FROM subnet WHERE id = $1`, note)})
+
+				s.seq++
+				fresh := m.scalar(t, `INSERT INTO subnet (organization_id, client_id, site_id, cidr, section_id, name)
+					VALUES ($1, $2, $3, $4::cidr, $5, $6) RETURNING id::text`, s.orgs[i], s.clients[i], s.sites[i],
+					fmt.Sprintf("10.251.%d.0/24", s.seq), s.sections[i], m.name(p2Prefix+"-ipam-del"))
+				deleted := s.writers[i].status(p, http.StatusNoContent)
+				out = append(out, matrixProbe{name: "section " + fmt.Sprint(i), method: http.MethodDelete, path: "/api/v1/subnets/" + fresh,
+					want: deleted, after: m.count(deleted != http.StatusNoContent, `SELECT count(*) FROM subnet WHERE id = $1`, fresh)})
+
+				address := fmt.Sprintf("10.250.%d.%d", i+1, 100+s.seq)
+				created := http.StatusBadRequest
+				switch {
+				case s.writers[i][p.kind]:
+					created = http.StatusCreated
+				case sub.seen[p.kind]:
+					created = http.StatusForbidden
+				}
+				out = append(out, matrixProbe{name: "section " + fmt.Sprint(i), method: http.MethodPost, path: "/api/v1/ips",
+					body: map[string]any{"address": address, "subnet_id": sub.id}, want: created,
+					after: m.count(created == http.StatusCreated, `SELECT count(*) FROM ip_address WHERE subnet_id = $1 AND address = $2::inet`,
+						sub.id, address)})
+			}
+			return out
+		},
+	}
 }

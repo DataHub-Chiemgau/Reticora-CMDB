@@ -38,6 +38,7 @@ DELETE /api/v1/inventory/items/{id} stock:write
 DELETE /api/v1/invitations/{id} user:manage
 DELETE /api/v1/ip-addresses/{id} ipam:write
 DELETE /api/v1/ipam-sections/{id} ipam:write
+DELETE /api/v1/ipam-sections/{id}/permissions/{permission_id} ipam:write
 DELETE /api/v1/ips/{id} ipam:write
 DELETE /api/v1/jobs/{id} job:read
 DELETE /api/v1/keys/{id} key:write
@@ -247,6 +248,7 @@ GET /api/v1/ip-addresses/{id} ipam:read
 GET /api/v1/ip-addresses/{id}/history ipam:read
 GET /api/v1/ipam-sections ipam:read
 GET /api/v1/ipam-sections/{id} ipam:read
+GET /api/v1/ipam-sections/{id}/permissions ipam:read
 GET /api/v1/ips ipam:read
 GET /api/v1/ips/{id} ipam:read
 GET /api/v1/ips/{id}/history ipam:read
@@ -433,6 +435,7 @@ PATCH /api/v1/import-profiles/{id} import:manage
 PATCH /api/v1/inventory/items/{id} stock:write
 PATCH /api/v1/ip-addresses/{id} ipam:write
 PATCH /api/v1/ipam-sections/{id} ipam:write
+PATCH /api/v1/ipam-sections/{id}/permissions/{permission_id} ipam:write
 PATCH /api/v1/ips/{id} ipam:write
 PATCH /api/v1/keys/{id} key:write
 PATCH /api/v1/layouts/{id} citype:manage
@@ -584,6 +587,7 @@ POST /api/v1/invitations/accept public
 POST /api/v1/invitations/{id}/renew user:manage
 POST /api/v1/ip-addresses ipam:write
 POST /api/v1/ipam-sections ipam:write
+POST /api/v1/ipam-sections/{id}/permissions ipam:write
 POST /api/v1/ips ipam:write
 POST /api/v1/jobs/{id}/revert job:read
 POST /api/v1/keys key:write

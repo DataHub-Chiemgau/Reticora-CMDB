@@ -72,8 +72,11 @@ var resourceTables = map[string][]string{
 	"vault_connection": {"vault_connection"},
 	// ADMP accounts (WP-925).
 	"admp_account": {"admp_account"},
-	"document":     {"document"},
-	"ticket":       {"ticket"},
+	// Rights per IPAM section (WP-910): the entry is visible where the
+	// row is under the team scope of its policy.
+	"ipam_section_permission": {"ipam_section_permission"},
+	"document":                {"document"},
+	"ticket":                  {"ticket"},
 
 	// Route audit (the first route segment): the route's resource_id is
 	// its first id parameter or the id of the created row, so the tables
@@ -120,11 +123,11 @@ var resourceTables = map[string][]string{
 	"invitations":               {"user_invitation"},
 	"ip-addresses":              {"ip_address"},
 	"ips":                       {"ip_address"},
-	"ipam-sections":             {"ipam_section"},   // IPAM sections (WP-900)
-	"nameserver-sets":           {"nameserver_set"}, // nameserver sets (WP-905)
-	"vlan-domains":              {"vlan_domain"},    // VLAN domains (WP-906)
-	"asns":                      {"asn"},            // AS numbers (WP-1066)
-	"asn-ranges":                {"asn_range"},      // AS number ranges (WP-1066)
+	"ipam-sections":             {"ipam_section", "ipam_section_permission"}, // IPAM sections (WP-900) and their rights (WP-910)
+	"nameserver-sets":           {"nameserver_set"},                          // nameserver sets (WP-905)
+	"vlan-domains":              {"vlan_domain"},                             // VLAN domains (WP-906)
+	"asns":                      {"asn"},                                     // AS numbers (WP-1066)
+	"asn-ranges":                {"asn_range"},                               // AS number ranges (WP-1066)
 	"jobs":                      {"job"},
 	"layouts":                   {"form_layout"},
 	"keys":                      {"key_item"},

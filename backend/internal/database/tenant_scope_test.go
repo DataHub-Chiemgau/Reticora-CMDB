@@ -165,7 +165,7 @@ func unquoteLiteral(t *testing.T, s string) (value, rest string) {
 }
 
 // TestBeginTenantSQLQuotesValues covers the one round trip of WithTenant
-// (NFR-03): BEGIN and the five GUCs in one statement. A hostile user id stays
+// (NFR-03): BEGIN and the six GUCs in one statement. A hostile user id stays
 // inside its literal, whatever quotes, backslashes or statement separators
 // it carries; a backslash quote is never produced (backslash_quote).
 func TestBeginTenantSQLQuotesValues(t *testing.T) {
@@ -180,14 +180,18 @@ func TestBeginTenantSnapshotSQL(t *testing.T) {
 }
 
 // checkBeginTenantSQL checks that begin opens the transaction with prefix
-// and then sets exactly the five GUCs transaction-locally, whatever the
+// and then sets exactly the six GUCs transaction-locally (the sixth,
+// app.principal_type, since WP-910), whatever the
 // user id carries.
 func checkBeginTenantSQL(t *testing.T, begin func(*TenantScope) string, prefix string) {
 	t.Helper()
-	for _, user := range []string{"", "user-1", `'`, `\`, `;`, `--`, `\'`, "line\nbreak", `x'); SELECT set_config('app.org_id', '', true); --`} {
+	for i, user := range []string{"", "user-1", `'`, `\`, `;`, `--`, `\'`, "line\nbreak", `x'); SELECT set_config('app.org_id', '', true); --`} {
 		scope := OrgWideScope(testOrg, user)
 		scope.Clients = ScopeIDs(testClientA, testClientB)
 		scope.Sites = ScopeIDs()
+		if i%2 == 1 {
+			scope.PrincipalType = PrincipalTypeAPIKey
+		}
 		if err := scope.Validate(); err != nil {
 			t.Fatalf("%q: Validate() = %v", user, err)
 		}
@@ -197,7 +201,7 @@ func checkBeginTenantSQL(t *testing.T, begin func(*TenantScope) string, prefix s
 			t.Fatalf("%q: %s does not open the transaction first", user, sql)
 		}
 		got := map[string]string{}
-		for _, name := range []string{OrgGUC, UserGUC, ClientScopeGUC, SiteScopeGUC, TeamScopeGUC} {
+		for _, name := range []string{OrgGUC, UserGUC, ClientScopeGUC, SiteScopeGUC, TeamScopeGUC, PrincipalTypeGUC} {
 			rest, ok = strings.CutPrefix(rest, "set_config('"+name+"', ")
 			if !ok {
 				t.Fatalf("%q: set_config of %s expected at %q", user, name, rest)
@@ -213,7 +217,7 @@ func checkBeginTenantSQL(t *testing.T, begin func(*TenantScope) string, prefix s
 		}
 		want := map[string]string{
 			OrgGUC: testOrg, UserGUC: user, ClientScopeGUC: scope.Clients.gucValue(),
-			SiteScopeGUC: noAccessScope, TeamScopeGUC: "",
+			SiteScopeGUC: noAccessScope, TeamScopeGUC: "", PrincipalTypeGUC: scope.PrincipalType,
 		}
 		for name, w := range want {
 			if got[name] != w {

@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000319_source_rank_policy
+Stand: Migration 000320_ipam_section_permission
 
 ## Prüfung
 
@@ -1979,9 +1979,10 @@ SECURITY`), Policies mit ihrem Kommando.
 | `ingest_record` | ja | ja | ingest_record_isolation (ALL) |
 | `internal_order` | ja | ja | internal_order_isolation (ALL), internal_order_scoped_delete (DELETE), internal_order_scoped_update (UPDATE) |
 | `internal_order_item` | ja | ja | internal_order_item_isolation (ALL), internal_order_item_scoped_delete (DELETE), internal_order_item_scoped_update (UPDATE) |
-| `ip_address` | ja | ja | ip_address_scoped_delete (DELETE), ip_address_scoped_update (UPDATE), org_isolation (ALL) |
+| `ip_address` | ja | ja | ip_address_scoped_delete (DELETE), ip_address_scoped_update (UPDATE), ip_address_section_acl_delete (DELETE), ip_address_section_acl_insert (INSERT), ip_address_section_acl_read (SELECT), ip_address_section_acl_update (UPDATE), org_isolation (ALL) |
 | `ipam_change` | ja | ja | ipam_change_isolation (ALL), ipam_change_scoped_delete (DELETE) |
-| `ipam_section` | ja | ja | ipam_section_isolation (ALL), ipam_section_scoped_delete (DELETE), ipam_section_scoped_update (UPDATE) |
+| `ipam_section` | ja | ja | ipam_section_acl_read (SELECT), ipam_section_isolation (ALL), ipam_section_scoped_delete (DELETE), ipam_section_scoped_update (UPDATE) |
+| `ipam_section_permission` | ja | ja | ipam_section_permission_isolation (ALL), ipam_section_permission_scoped_delete (DELETE), ipam_section_permission_scoped_insert (INSERT), ipam_section_permission_scoped_update (UPDATE) |
 | `job` | ja | ja | job_isolation (ALL), job_scope_select (SELECT), job_system_select (SELECT) |
 | `key_assignment` | ja | ja | key_assignment_isolation (ALL), key_assignment_scoped_delete (DELETE), key_assignment_scoped_update (UPDATE) |
 | `key_item` | ja | ja | key_item_isolation (ALL), key_item_scoped_delete (DELETE), key_item_scoped_update (UPDATE) |
@@ -2037,7 +2038,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `room` | ja | ja | room_isolation (ALL) |
 | `saved_view` | ja | ja | saved_view_isolation (ALL) |
 | `scheduler_run` | ja | ja | scheduler_run_operator (ALL) |
-| `search_document` | ja | ja | search_document_scoped_delete (DELETE), search_document_scoped_update (UPDATE), search_document_tenant_isolation (ALL) |
+| `search_document` | ja | ja | search_document_scoped_delete (DELETE), search_document_scoped_update (UPDATE), search_document_section_acl (SELECT), search_document_tenant_isolation (ALL) |
 | `search_document_field` | ja | ja | search_document_field_scoped_delete (DELETE), search_document_field_scoped_update (UPDATE), search_document_field_tenant_isolation (ALL) |
 | `search_identifier` | ja | ja | search_identifier_tenant_isolation (ALL) |
 | `security_finding` | ja | ja | security_finding_isolation (ALL), security_finding_scoped_delete (DELETE), security_finding_scoped_update (UPDATE) |
@@ -2053,7 +2054,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `stock_scan` | ja | ja | stock_scan_isolation (ALL), stock_scan_scoped_delete (DELETE), stock_scan_scoped_update (UPDATE) |
 | `stocktake` | ja | ja | stocktake_isolation (ALL), stocktake_scoped_delete (DELETE), stocktake_scoped_update (UPDATE) |
 | `stocktake_item` | ja | ja | stocktake_item_isolation (ALL) |
-| `subnet` | ja | ja | org_isolation (ALL), subnet_scoped_delete (DELETE), subnet_scoped_update (UPDATE) |
+| `subnet` | ja | ja | org_isolation (ALL), subnet_scoped_delete (DELETE), subnet_scoped_update (UPDATE), subnet_section_acl_delete (DELETE), subnet_section_acl_insert (INSERT), subnet_section_acl_read (SELECT), subnet_section_acl_update (UPDATE) |
 | `supplier` | ja | ja | supplier_isolation (ALL), supplier_scoped_delete (DELETE), supplier_scoped_update (UPDATE) |
 | `tag` | ja | ja | tag_isolation (ALL) |
 | `team` | ja | ja | team_tenant_isolation (ALL) |

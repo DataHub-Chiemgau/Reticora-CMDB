@@ -84,22 +84,36 @@ var historyObjectVisible = map[string]string{
 // that subnet is; its interface is visible with its CI, or the interface no
 // longer exists (network_interface has no client scope of its own; the rows
 // then carry the scope the interface gave them).
+//
+// The rights per section (IPM-10, WP-910, E-214) apply to the deleted
+// object as well: ipam_change carries no section policy, so the section the
+// deletion row names (old_value section_id; for an address also the one of
+// its deleted subnet, which covers rows written before ip_address had a
+// section) must not be denied for reading (ipam_section_denied, evaluated
+// once per statement).
 var historyDeletedVisible = map[string]string{
-	ChangeKindSubnet: "SELECT EXISTS (SELECT 1 FROM ipam_change WHERE " + historyWhere + " AND change_type = 'delete')",
+	ChangeKindSubnet: "SELECT EXISTS (SELECT 1 FROM ipam_change WHERE " + historyWhere + " AND change_type = 'delete'" +
+		" AND COALESCE(old_value->>'section_id', '') <> ALL (" + sectionReadDenied + "))",
 	ChangeKindIPAddress: `SELECT EXISTS (SELECT 1 FROM ipam_change d
 		CROSS JOIN LATERAL (SELECT (d.old_value->>'subnet_id')::uuid AS subnet_id,
 		                           (d.old_value->>'interface_id')::uuid AS interface_id) o
 		WHERE d.organization_id = $1 AND d.object_kind = $2 AND d.object_id = $3 AND d.change_type = 'delete'
+		  AND COALESCE(d.old_value->>'section_id', '') <> ALL (` + sectionReadDenied + `)
 		  AND (o.subnet_id IS NULL
 		       OR EXISTS (SELECT 1 FROM subnet WHERE subnet.organization_id = $1 AND subnet.id = o.subnet_id)
 		       OR EXISTS (SELECT 1 FROM ipam_change s WHERE s.organization_id = $1 AND s.object_kind = 'subnet'
-		                  AND s.object_id = o.subnet_id AND s.change_type = 'delete'))
+		                  AND s.object_id = o.subnet_id AND s.change_type = 'delete'
+		                  AND COALESCE(s.old_value->>'section_id', '') <> ALL (` + sectionReadDenied + `)))
 		  AND (o.interface_id IS NULL
 		       OR NOT EXISTS (SELECT 1 FROM network_interface WHERE network_interface.organization_id = $1
 		                      AND network_interface.id = o.interface_id)
 		       OR EXISTS (SELECT 1 FROM network_interface JOIN ci ON ci.id = network_interface.ci_id
 		                  WHERE network_interface.organization_id = $1 AND network_interface.id = o.interface_id)))`,
 }
+
+// sectionReadDenied is the set of sections the caller may not read, as text
+// (ipam_section_denied, migration 000320).
+const sectionReadDenied = "(SELECT ipam_section_denied('read'))::text[]"
 
 // historyWhere selects the visible history rows of one object
 // (idx_ipam_change_object).

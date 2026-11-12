@@ -152,7 +152,10 @@ var anyArrayCheck = regexp.MustCompile(`^CHECK \(\((\w+) = ANY \(\(?ARRAY\['([^'
 
 // loadMatrixTables returns every tenant table the application role can
 // access: tables of schema public with RLS and an organization column (plus
-// organization itself), without the view-protected hypertables.
+// organization itself), without the view-protected hypertables. The
+// sub-select of the rights per IPAM section (SELECT ipam_section_denied(…),
+// WP-910) reads no other row of the table's scope: without entries it is
+// empty, so it does not make a table inherited.
 func loadMatrixTables(ctx context.Context, t *testing.T, pool *pgxpool.Pool) []*matrixTable {
 	t.Helper()
 	rows, err := pool.Query(ctx, `
@@ -162,7 +165,8 @@ func loadMatrixTables(ctx context.Context, t *testing.T, pool *pgxpool.Pool) []*
 		       has_table_privilege('reticora_app', c.oid, 'UPDATE'),
 		       has_table_privilege('reticora_app', c.oid, 'DELETE'),
 		       EXISTS (SELECT 1 FROM pg_policies p WHERE p.schemaname = 'public' AND p.tablename = c.relname
-		                  AND (COALESCE(p.qual, '') || COALESCE(p.with_check, '')) ~ '\mSELECT\M')
+		                  AND regexp_replace(COALESCE(p.qual, '') || COALESCE(p.with_check, ''),
+		                                     'SELECT ipam_section_denied\(', '', 'g') ~ '\mSELECT\M')
 		  FROM pg_class c
 		 WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'p') AND c.relrowsecurity
 		   AND (c.relname = 'organization' OR EXISTS (SELECT 1 FROM pg_attribute a

@@ -23,7 +23,15 @@ const (
 	ClientScopeGUC = "app.client_scope"
 	SiteScopeGUC   = "app.site_scope"
 	TeamScopeGUC   = "app.team_scope"
+	// PrincipalTypeGUC is the kind of principal: PrincipalTypeAPIKey for an
+	// API key, empty otherwise. ipam_section_denied (WP-910, E-214) counts
+	// the team scope of an API key like team memberships.
+	PrincipalTypeGUC = "app.principal_type"
 )
+
+// PrincipalTypeAPIKey is the value of PrincipalTypeGUC for an API key
+// (identity.PrincipalTypeAPIKey).
+const PrincipalTypeAPIKey = "api_key"
 
 // OrgWideScopeSQL is the SQL condition "the transaction is not restricted in
 // the client or site scope" (both GUCs empty, as WithTenant sets them for
@@ -112,7 +120,8 @@ func (s ScopeSet) gucValue() string {
 }
 
 // TenantScope is the complete RLS context of one transaction (TEN-04): the
-// organization, the acting user and the client, site and team scope.
+// organization, the acting user, the client, site and team scope and the
+// kind of principal.
 type TenantScope struct {
 	OrgID string
 	// UserID is the acting user; empty for system jobs.
@@ -120,6 +129,9 @@ type TenantScope struct {
 	Clients ScopeSet
 	Sites   ScopeSet
 	Teams   ScopeSet
+	// PrincipalType is PrincipalTypeAPIKey for an API key and empty for
+	// every other principal and for system jobs (PrincipalTypeGUC, WP-910).
+	PrincipalType string
 }
 
 // OrgWideScope returns the scope of an org-wide principal or of a system job
@@ -147,6 +159,9 @@ func (s *TenantScope) Validate() error {
 	}
 	if strings.IndexByte(s.UserID, 0) >= 0 || !utf8.ValidString(s.UserID) {
 		return fmt.Errorf("invalid user id %q: NUL byte or invalid UTF-8", s.UserID)
+	}
+	if s.PrincipalType != "" && s.PrincipalType != PrincipalTypeAPIKey {
+		return fmt.Errorf("invalid principal type %q", s.PrincipalType)
 	}
 	if err := s.Clients.validate("client"); err != nil {
 		return err
@@ -353,7 +368,7 @@ var ErrSnapshotInTx = errors.New("a snapshot transaction cannot join the context
 
 // WithRequestTenantSnapshot is WithRequestTenantTx for readers that need one
 // consistent state (WP-262): the transaction is REPEATABLE READ and READ
-// ONLY, opened in the same round trip as the five GUCs
+// ONLY, opened in the same round trip as the six GUCs
 // (beginTenantSnapshotSQL, NFR-03). The repository calls fn makes with its
 // context join it, so they all read the snapshot of its first statement and
 // a write fails. A context that already carries a transaction is refused
@@ -537,7 +552,7 @@ func AfterCommitBatch(ctx context.Context, key, item any, fn func(ctx context.Co
 func (s *TenantScope) sameAs(o *TenantScope) bool {
 	return strings.EqualFold(s.OrgID, o.OrgID) && s.UserID == o.UserID &&
 		s.Clients.gucValue() == o.Clients.gucValue() && s.Sites.gucValue() == o.Sites.gucValue() &&
-		s.Teams.gucValue() == o.Teams.gucValue()
+		s.Teams.gucValue() == o.Teams.gucValue() && s.PrincipalType == o.PrincipalType
 }
 
 // joinTx runs fn in the context transaction v when scope is its scope. fn's

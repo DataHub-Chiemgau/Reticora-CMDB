@@ -106,6 +106,11 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/ipam-sections/{id}", h.GetSection)
 	r.Patch("/api/v1/ipam-sections/{id}", h.UpdateSection)
 	r.Delete("/api/v1/ipam-sections/{id}", h.DeleteSection)
+	// Rights per section (IPM-10, WP-910): only with PostgreSQL, else 501.
+	r.Get("/api/v1/ipam-sections/{id}/permissions", h.ListSectionPermissions)
+	r.Post("/api/v1/ipam-sections/{id}/permissions", h.CreateSectionPermission)
+	r.Patch("/api/v1/ipam-sections/{id}/permissions/{permission_id}", h.UpdateSectionPermission)
+	r.Delete("/api/v1/ipam-sections/{id}/permissions/{permission_id}", h.DeleteSectionPermission)
 
 	// Nameserver sets (IPM-05, nameserver.go): only with PostgreSQL, else
 	// 501.
