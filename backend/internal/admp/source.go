@@ -52,6 +52,10 @@ type ServiceData struct {
 	ConnectionExternalID string
 	Kind                 string
 	Properties           map[string]any
+	// ValuesClass is the class of a failed read of the properties
+	// (WP-1074): the service is stored stale with it and keeps its last
+	// properties.values.
+	ValuesClass string
 }
 
 // PortData is a port of a service as the source returns it; the match to
@@ -139,7 +143,32 @@ func (s clientSource) FetchService(ctx context.Context, externalID string) (*Ser
 	if err != nil {
 		return nil, err
 	}
-	return serviceData(d), nil
+	out := serviceData(d)
+	props, err := s.c.ListServiceProperties(ctx, id)
+	if err != nil {
+		out.ValuesClass = classOf(err)
+		return out, nil
+	}
+	out.Properties["values"] = serviceValues(props)
+	return out, nil
+}
+
+// serviceValues stores the public properties as <key> → {value, label,
+// order} (E-253); a property with isPublic false is dropped.
+func serviceValues(props []readonly.ServiceProperty) map[string]any {
+	values := map[string]any{}
+	for i := range props {
+		p := &props[i]
+		if !p.Public {
+			continue
+		}
+		entry := map[string]any{"value": p.Value, "label": p.Label}
+		if p.Order != nil {
+			entry["order"] = *p.Order
+		}
+		values[p.Key] = entry
+	}
+	return values
 }
 
 // serviceData maps a Dienst of the documentation (WP-1073, E-253).

@@ -188,9 +188,13 @@ func (m *MemoryRepository) UpsertConnection(ctx context.Context, c *Connection) 
 	return nil
 }
 
-// UpsertService implements Repository.
+// UpsertService implements Repository; personal values are redacted (no
+// vault without a database).
 func (m *MemoryRepository) UpsertService(ctx context.Context, s *Service) error {
 	if err := checkService(s); err != nil {
+		return err
+	}
+	if err := sealProperties(s.Properties, redactedRef, noKeptRefs); err != nil {
 		return err
 	}
 	// The account must exist and its rows be writable by the caller (the

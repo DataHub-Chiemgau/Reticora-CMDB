@@ -20560,7 +20560,13 @@ export interface components {
       /** @enum {string} */
       matched_by: 'rule' | 'manual' | 'none';
     };
-    /** @description A cached ADMP service with its ports (WP-930). */
+    /** @description A public property of an ADMP service (ADM-05, WP-1074, E-253): key, label (label, else title of ADMP) and value (null, boolean, string, number, object or array). A value kept in the PII vault and a missing value leave value out. */
+    ADMPServiceProperty: {
+      key: string;
+      label?: string;
+      value?: unknown;
+    };
+    /** @description A cached ADMP service with its ports (WP-930). WP-1074 adds the status derived from the life cycle (E-253: terminated when shut down and not in the future, else cancelled, active, ordered or unknown), the times of the life cycle, template_id and the public properties ordered by their order. A missing value leaves its field out. */
     ADMPService: {
       /** Format: uuid */
       id: string;
@@ -20569,10 +20575,25 @@ export interface components {
       external_id: string;
       /** Format: uuid */
       connection_id?: string;
+      /** @description The template name of the service */
       kind: string;
-      properties: {
-        [key: string]: unknown;
-      };
+      /** @enum {string} */
+      status: 'ordered' | 'active' | 'cancelled' | 'terminated' | 'unknown';
+      /** Format: date-time */
+      booked_at?: string;
+      /** Format: date-time */
+      provisioning_planned_at?: string;
+      /** Format: date-time */
+      provisioned_at?: string;
+      /** Format: date-time */
+      cancelled_at?: string;
+      /** Format: date-time */
+      shutdown_planned_at?: string;
+      /** Format: date-time */
+      shut_down_at?: string;
+      /** Format: int64 */
+      template_id?: number;
+      properties: components['schemas']['ADMPServiceProperty'][];
       /** Format: date-time */
       fetched_at: string;
       /** Format: date-time */

@@ -2,6 +2,7 @@ package admp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -33,6 +34,8 @@ type Repository interface {
 	UpsertConnection(ctx context.Context, c *Connection) error
 	// UpsertService stores a service by account and external id; its
 	// connection must belong to the same account (ErrInvalidCacheEntry).
+	// Personal values of its properties go into the PII vault in the same
+	// transaction (WP-1074); the row holds only surrogate references.
 	UpsertService(ctx context.Context, s *Service) error
 	// ReplaceServicePorts replaces the ports of a service.
 	ReplaceServicePorts(ctx context.Context, orgID, serviceID string, ports []ServicePort) ([]ServicePort, error)
@@ -167,7 +170,133 @@ func checkConnection(c *Connection) error {
 	return checkProperties(c.Properties)
 }
 
-// checkService validates a service before it is stored.
+// sealProperties replaces every value below a personal key
+// (pii.IsPersonalKey) of props with the reference seal returns (WP-1074,
+// Konvention 16); of a property entry {value, label, order} only the
+// value. A string is sealed as it is, a number or boolean as its JSON
+// text, so no personal scalar stays in plaintext. A surrogate reference
+// already in props stays only when kept reports it (a reference the row
+// carried before, kept with the last state); any other reference (one a
+// source delivered) is neutralised to a redacted one, so a row never
+// points to, reveals or shreds a subject of another object.
+func sealProperties(props map[string]any, seal func(value string) (any, error), kept func(id string) bool) error {
+	var walk func(v any, personal bool) (any, error)
+	walk = func(v any, personal bool) (any, error) {
+		switch t := v.(type) {
+		case map[string]any:
+			if id, ok := pii.RefID(t); ok {
+				if id == "" || kept(id) {
+					return t, nil
+				}
+				return redactedRef("")
+			}
+			if _, isRef := t[pii.RefKey]; isRef {
+				// A malformed reference (more keys, no string) is no
+				// value of the service either.
+				return redactedRef("")
+			}
+			for k, inner := range t {
+				// A property entry {value, label, order} of a personal key
+				// seals its value; label and order describe the property.
+				if entry, isEntry := inner.(map[string]any); isEntry && !personal && pii.IsPersonalKey(k) {
+					if value, hasValue := entry["value"]; hasValue {
+						out, err := walk(value, true)
+						if err != nil {
+							return nil, err
+						}
+						entry["value"] = out
+						continue
+					}
+				}
+				out, err := walk(inner, personal || pii.IsPersonalKey(k))
+				if err != nil {
+					return nil, err
+				}
+				t[k] = out
+			}
+			return t, nil
+		case []any:
+			for i, inner := range t {
+				out, err := walk(inner, personal)
+				if err != nil {
+					return nil, err
+				}
+				t[i] = out
+			}
+			return t, nil
+		case string:
+			if personal && t != "" {
+				return seal(t)
+			}
+		case float64, bool, json.Number:
+			if personal {
+				text, err := json.Marshal(t)
+				if err != nil {
+					return nil, err
+				}
+				return seal(string(text))
+			}
+		}
+		return v, nil
+	}
+	_, err := walk(props, false)
+	return err
+}
+
+// refIDs returns the surrogate ids referenced in v at any depth.
+func refIDs(v any) []string {
+	var out []string
+	var walk func(v any)
+	walk = func(v any) {
+		if id, ok := pii.RefID(v); ok {
+			if id != "" {
+				out = append(out, id)
+			}
+			return
+		}
+		switch t := v.(type) {
+		case map[string]any:
+			for _, inner := range t {
+				walk(inner)
+			}
+		case []any:
+			for _, inner := range t {
+				walk(inner)
+			}
+		}
+	}
+	walk(v)
+	return out
+}
+
+// containsRef reports whether v holds a surrogate reference at any depth
+// (also a redacted one).
+func containsRef(v any) bool {
+	switch t := v.(type) {
+	case map[string]any:
+		if _, ok := t[pii.RefKey]; ok {
+			return true
+		}
+		for _, inner := range t {
+			if containsRef(inner) {
+				return true
+			}
+		}
+	case []any:
+		return slices.ContainsFunc(t, containsRef)
+	}
+	return false
+}
+
+// redactedRef is a sealed value without a vault (pii.SealTx without a
+// default vault, the memory store).
+func redactedRef(string) (any, error) { return map[string]any{pii.RefKey: ""}, nil }
+
+// noKeptRefs keeps no reference (the memory store has no vault).
+func noKeptRefs(string) bool { return false }
+
+// checkService validates a service before it is stored; its personal
+// values are sealed by the store (sealProperties).
 func checkService(s *Service) error {
 	s.ExternalID = strings.TrimSpace(s.ExternalID)
 	s.Kind = strings.TrimSpace(s.Kind)
@@ -181,7 +310,16 @@ func checkService(s *Service) error {
 	if s.FetchedAt.IsZero() {
 		s.FetchedAt = time.Now().UTC()
 	}
-	return checkProperties(s.Properties)
+	generic, err := pii.Generic(s.Properties)
+	if err != nil {
+		return ErrInvalidCacheEntry
+	}
+	props, ok := generic.(map[string]any)
+	if !ok {
+		return ErrInvalidCacheEntry
+	}
+	s.Properties = props
+	return nil
 }
 
 // checkPorts validates the ports of a service: unique keys, a known

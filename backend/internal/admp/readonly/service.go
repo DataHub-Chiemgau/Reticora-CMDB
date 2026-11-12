@@ -2,14 +2,20 @@ package readonly
 
 import (
 	"context"
+	"encoding/json"
 )
 
-// The services (Dienst) of ADMP (ADM-04, ADM-05, E-253; WP-1073).
+// The services (Dienst) of ADMP (ADM-04, ADM-05, E-253; WP-1073, WP-1074).
 
-// servicePath is getV1Dienst:id.
-const servicePath = "/V1/dienst/{id}"
+// servicePath is getV1Dienst:id, servicePropertiesPath
+// getV1Dienst:idPropertiesPublic. GET /V1/dienst/{id}/properties (all
+// properties) is not used (E-253).
+const (
+	servicePath           = "/V1/dienst/{id}"
+	servicePropertiesPath = "/V1/dienst/{id}/properties/public"
+)
 
-var _ = allowGets(getRoute{path: servicePath})
+var _ = allowGets(getRoute{path: servicePath}, getRoute{path: servicePropertiesPath})
 
 // Service is a Dienst of ADMP: its id, its connection (anschlussId), its
 // template (templateId and, when the answer embeds it, the template name)
@@ -66,4 +72,68 @@ func (c *Client) GetService(ctx context.Context, id int64) (*Service, error) {
 		s.TemplateName = raw.Template.Name
 	}
 	return s, nil
+}
+
+// ServiceProperty is a public property of a Dienst (DienstProperty of
+// /properties/public): key, value (SerializeableData: null, boolean,
+// string, number, object or array), label (label, else title), order,
+// public flag and timestamp as sent. description, input and dienst are
+// dropped.
+type ServiceProperty struct {
+	Key       string
+	Value     any
+	Label     string
+	Order     *int64
+	Public    bool
+	Timestamp *int64
+}
+
+// ListServiceProperties reads the public properties of a service: GET
+// /V1/dienst/{id}/properties/public.
+func (c *Client) ListServiceProperties(ctx context.Context, serviceID int64) ([]ServiceProperty, error) {
+	p, err := docPath(servicePropertiesPath, serviceID)
+	if err != nil {
+		return nil, err
+	}
+	var raw []struct {
+		Key        *string          `json:"key"`
+		Value      *json.RawMessage `json:"value"`
+		Label      *string          `json:"label"`
+		Title      *string          `json:"title"`
+		OrderIndex *docInt          `json:"orderIndex"`
+		IsPublic   *bool            `json:"isPublic"`
+		Timestamp  *docInt          `json:"timestamp"`
+	}
+	if gerr := c.getJSON(ctx, p, nil, &raw); gerr != nil {
+		return nil, gerr
+	}
+	out := make([]ServiceProperty, 0, len(raw))
+	for i := range raw {
+		r := &raw[i]
+		if r.Key == nil || *r.Key == "" {
+			return nil, classErr(ClassDecode, 0, nil)
+		}
+		prop := ServiceProperty{Key: *r.Key, Public: r.IsPublic == nil || *r.IsPublic}
+		if r.Value != nil {
+			if derr := json.Unmarshal(*r.Value, &prop.Value); derr != nil {
+				return nil, classErr(ClassDecode, 0, nil)
+			}
+		}
+		switch {
+		case r.Label != nil && *r.Label != "":
+			prop.Label = *r.Label
+		case r.Title != nil:
+			prop.Label = *r.Title
+		}
+		if r.OrderIndex != nil {
+			v := int64(*r.OrderIndex)
+			prop.Order = &v
+		}
+		if r.Timestamp != nil {
+			v := int64(*r.Timestamp)
+			prop.Timestamp = &v
+		}
+		out = append(out, prop)
+	}
+	return out, nil
 }

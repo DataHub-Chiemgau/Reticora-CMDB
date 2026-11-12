@@ -604,6 +604,21 @@ func (s *Sync) storeService(ctx context.Context, a *Account, src Source, externa
 	now := s.o.Now().UTC()
 	sv := &Service{OrganizationID: a.OrganizationID, AccountID: a.ID, ExternalID: externalID,
 		ConnectionID: connectionID, Kind: data.Kind, Properties: maps.Clone(data.Properties), FetchedAt: now, ExpiresAt: now.Add(s.o.TTL)}
+	if data.ValuesClass != "" {
+		// The properties failed (WP-1074): the service is stale with the
+		// class and keeps the values it had.
+		sv.Stale, sv.LastErrorClass = true, data.ValuesClass
+		res.Result = data.ValuesClass
+		if sv.Properties == nil {
+			sv.Properties = map[string]any{}
+		}
+		delete(sv.Properties, "values")
+		if prev, perr := s.o.Cache.ServiceByExternal(ctx, a.OrganizationID, a.ID, externalID); perr == nil {
+			if values, ok := prev.Properties["values"]; ok {
+				sv.Properties["values"] = values
+			}
+		}
+	}
 	if err := s.inTx(ctx, a.OrganizationID, func(ctx context.Context) error {
 		return s.o.Cache.UpsertService(ctx, sv)
 	}); err != nil {

@@ -41356,17 +41356,44 @@ components:
         network_interface_id: { type: string, format: uuid }
         ci_id: { type: string, format: uuid }
         matched_by: { type: string, enum: [rule, manual, none] }
+    ADMPServiceProperty:
+      type: object
+      description: >-
+        A public property of an ADMP service (ADM-05, WP-1074, E-253): key,
+        label (label, else title of ADMP) and value (null, boolean, string,
+        number, object or array). A value kept in the PII vault and a missing
+        value leave value out.
+      required: [key]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        value: {}
     ADMPService:
       type: object
-      description: A cached ADMP service with its ports (WP-930).
-      required: [id, account_id, external_id, kind, properties, fetched_at, expires_at, stale, ports]
+      description: >-
+        A cached ADMP service with its ports (WP-930). WP-1074 adds the
+        status derived from the life cycle (E-253: terminated when shut down
+        and not in the future, else cancelled, active, ordered or unknown),
+        the times of the life cycle, template_id and the public properties
+        ordered by their order. A missing value leaves its field out.
+      required: [id, account_id, external_id, kind, status, properties, fetched_at, expires_at, stale, ports]
       properties:
         id: { type: string, format: uuid }
         account_id: { type: string, format: uuid }
         external_id: { type: string }
         connection_id: { type: string, format: uuid }
-        kind: { type: string }
-        properties: { type: object, additionalProperties: true }
+        kind: { type: string, description: The template name of the service, else template:<id>, else unknown. }
+        status: { type: string, enum: [ordered, active, cancelled, terminated, unknown] }
+        booked_at: { type: string, format: date-time }
+        provisioning_planned_at: { type: string, format: date-time }
+        provisioned_at: { type: string, format: date-time }
+        cancelled_at: { type: string, format: date-time }
+        shutdown_planned_at: { type: string, format: date-time }
+        shut_down_at: { type: string, format: date-time }
+        template_id: { type: integer, format: int64 }
+        properties:
+          type: array
+          items: { $ref: '#/components/schemas/ADMPServiceProperty' }
         fetched_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time }
         stale: { type: boolean }

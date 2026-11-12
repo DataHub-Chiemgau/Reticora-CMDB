@@ -14819,6 +14819,11 @@ ADM-05;[P3];E;backend/internal/admp/sync_integration_test.go;WP-1074
 
 **Entscheidungsbedarf:** [E-253](entscheidungen.md#e-253) Diensteigenschaften und Lebenszyklus (entschieden 2026-11-12, nach Empfehlung: Option 1); Aufgabe A-86 offen (Schlüsselkatalog der Eigenschaften; liegen benötigte Werte nur in den nicht öffentlichen Eigenschaften, wechselt dieses WP vor Beginn auf `/properties`)
 
+**Nachtrag 2026-11-12 (Umsetzung):**
+- Entscheidung zu AK3 („additiv“ gegenüber `properties` als Liste): `ADMPService.properties` wechselt vom freien Objekt (WP-930) zur geordneten Liste `ADMPServiceProperty {key, label, value}`. Das Objekt aus WP-930 ist nur in diesem Strang entstanden und nie ausgeliefert worden; außer `lifecycle`, `template_id` und `values` führt `admp_service.properties` keine Schlüssel, die die typisierten Felder nicht abdecken. WP-1077 (Vertragstest) und WP-1078 (Darstellung) bauen auf der Liste auf.
+- Personenbezogene Werte: `sealProperties` versiegelt unter einem personenbezogenen Schlüssel jeden Skalar (Zeichenkette, Zahl und Wahrheitswert als JSON-Text), auch in Objekten und Listen. Die API gibt für einen personenbezogenen Schlüssel und für jeden Wert, der irgendwo einen Surrogat-Verweis enthält, keinen `value` aus. Ein von der Quelle gelieferter Verweis (`{"$pii": …}`) wird neutralisiert; nur Verweise, die die Zeile schon trägt (zuletzt gespeicherter Stand), bleiben.
+- Crypto-Shredding: Migration `000421_admp_service_shred` (Trigger auf `admp_service`): Verweise, die nach einem Upsert nicht mehr vorkommen, und alle Verweise einer gelöschten Zeile (Ablauf, Kaskade) löschen ihre `pii_subject`-Zeilen. `docs/schema-baseline.md` (Stand) wird nachgezogen. Test zusätzlich: `TestAdmpServicePersonalPropertyShredded`.
+
 **Nicht Bestandteil:**
 - Darstellung der Eigenschaften: WP-1078.
 - Vertragstest über alle Endpunkte: WP-1077.

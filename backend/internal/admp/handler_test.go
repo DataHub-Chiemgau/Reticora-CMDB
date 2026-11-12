@@ -309,3 +309,98 @@ func TestAdmpHandlerNoPersonalData(t *testing.T) {
 		t.Error("a personal property was stored")
 	}
 }
+
+// TestAdmpHandlerTypedServiceFields: every service of the connection and
+// of the interface carries status, the times of its life cycle,
+// template_id and the public properties ordered by order as {key, label,
+// value}; a missing value leaves its field out, a sealed value its value.
+func TestAdmpHandlerTypedServiceFields(t *testing.T) {
+	e := newHandlerEnv(t)
+	c := e.seed()
+	exp := e.now.Add(30 * 24 * time.Hour)
+	s := &admp.Service{OrganizationID: handlerOrg, AccountID: e.account, ExternalID: "815", ConnectionID: c.ID, Kind: "FTTH 1000",
+		FetchedAt: e.now, ExpiresAt: exp, Properties: map[string]any{
+			"template_id": 3,
+			"lifecycle":   map[string]any{"booked_at": "2023-11-14T22:13:20Z", "provisioned_at": "2023-11-20T08:00:00Z"},
+			"values": map[string]any{
+				"technology": map[string]any{"value": "FTTH", "label": "Technologie", "order": 1},
+				"bandwidth":  map[string]any{"value": 1000, "label": "Bandbreite", "order": 2},
+				"note":       map[string]any{"value": nil, "label": "Notiz"},
+				"email":      map[string]any{"value": "erika@example.org", "label": "E-Mail", "order": 3},
+				// A personal object, a personal number and a source value
+				// shaped like a reference give no value either.
+				"contact_name": map[string]any{"value": map[string]any{"first": "Erika", "last": "Musterfrau"}, "order": 4},
+				"phone":        map[string]any{"value": 4917012345678, "order": 5},
+				"ticket":       map[string]any{"value": map[string]any{"$pii": "6f0b6f0e-0000-4000-8000-000001074001"}, "order": 6},
+			}}}
+	if err := e.cache.UpsertService(e.ctx(), s); err != nil {
+		t.Fatal(err)
+	}
+	type serviceJSON struct {
+		ExternalID    string `json:"external_id"`
+		Status        string `json:"status"`
+		BookedAt      string `json:"booked_at"`
+		ProvisionedAt string `json:"provisioned_at"`
+		TemplateID    *int64 `json:"template_id"`
+		Properties    []struct {
+			Key   string `json:"key"`
+			Label string `json:"label"`
+			Value any    `json:"value"`
+		} `json:"properties"`
+	}
+	check := func(what string, svc serviceJSON, raw string) {
+		t.Helper()
+		if svc.Status != admp.ServiceStatusActive || svc.BookedAt != "2023-11-14T22:13:20Z" ||
+			svc.ProvisionedAt != "2023-11-20T08:00:00Z" || svc.TemplateID == nil || *svc.TemplateID != 3 {
+			t.Errorf("%s: %+v", what, svc)
+		}
+		keys := []string{}
+		for _, p := range svc.Properties {
+			keys = append(keys, p.Key)
+		}
+		if strings.Join(keys, ",") != "technology,bandwidth,email,contact_name,phone,ticket,note" || svc.Properties[0].Value != "FTTH" ||
+			svc.Properties[1].Value != float64(1000) {
+			t.Errorf("%s properties: %+v", what, svc.Properties)
+		}
+		for _, p := range svc.Properties[2:] {
+			if p.Value != nil {
+				t.Errorf("%s: property %s carries the value %v", what, p.Key, p.Value)
+			}
+		}
+		for _, absent := range []string{`"cancelled_at"`, `"shut_down_at"`, `"shutdown_planned_at"`, "erika", "Erika", "Musterfrau",
+			"4917012345678", "$pii", "6f0b6f0e-0000-4000-8000-000001074001"} {
+			if strings.Contains(raw, absent) {
+				t.Errorf("%s carries %s: %s", what, absent, raw)
+			}
+		}
+	}
+	rec := e.get("/api/v1/admp/connections/" + c.ID)
+	var conn struct {
+		Services []serviceJSON `json:"services"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &conn); err != nil {
+		t.Fatal(err)
+	}
+	if len(conn.Services) != 1 {
+		t.Fatalf("services %s", rec.Body.String())
+	}
+	check("connection", conn.Services[0], rec.Body.String())
+	rec = e.get("/api/v1/network-interfaces/" + handlerIface + "/admp")
+	var list struct {
+		Data []serviceJSON `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil || len(list.Data) != 1 {
+		t.Fatalf("interface %s", rec.Body.String())
+	}
+	check("interface", list.Data[0], rec.Body.String())
+	// A service without life cycle and values: unknown, no fields.
+	bare := &admp.Service{OrganizationID: handlerOrg, AccountID: e.account, ExternalID: "999", ConnectionID: c.ID, Kind: "unknown",
+		FetchedAt: e.now, ExpiresAt: exp}
+	if err := e.cache.UpsertService(e.ctx(), bare); err != nil {
+		t.Fatal(err)
+	}
+	rec = e.get("/api/v1/admp/connections/" + c.ID)
+	if !strings.Contains(rec.Body.String(), `"external_id":"999","connection_id":"`+c.ID+`","kind":"unknown","status":"unknown","properties":[]`) {
+		t.Errorf("bare service: %s", rec.Body.String())
+	}
+}

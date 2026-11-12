@@ -83,7 +83,7 @@ func TestMockServerSeesNoWriteRequests(t *testing.T) {
 
 	called := callExported(t, c)
 	t.Logf("exported methods called: %v", called)
-	for _, want := range []string{"GetSession", "ListAccessPorts", "ListPortServiceIDs", "GetService"} {
+	for _, want := range []string{"GetSession", "ListAccessPorts", "ListPortServiceIDs", "GetService", "ListServiceProperties"} {
 		found := false
 		for _, n := range called {
 			found = found || n == want
@@ -94,6 +94,9 @@ func TestMockServerSeesNoWriteRequests(t *testing.T) {
 	}
 	if _, err := c.GetService(ctx, 815); err != nil && ClassOf(err) != ClassDecode {
 		t.Fatalf("read: %v", err)
+	}
+	if _, err := c.ListServiceProperties(ctx, 815); err != nil && ClassOf(err) != ClassDecode {
+		t.Fatalf("read of the properties: %v", err)
 	}
 
 	writes := []string{http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete}
@@ -110,7 +113,7 @@ func TestMockServerSeesNoWriteRequests(t *testing.T) {
 	}
 	for _, method := range writes {
 		for _, target := range []string{baseURL + "/V1/dienst/1", baseURL + "/V1/anschluss", baseURL + "/V1/query/execute/x",
-			baseURL, loginURL} {
+			baseURL + "/V1/dienst/1/properties", baseURL + "/V1/dienst/1/properties/public", baseURL, loginURL} {
 			if err := try(c.http, method, target); err == nil {
 				t.Errorf("%s %s over the client went through", method, target)
 			}
@@ -168,7 +171,8 @@ func TestMockServerSeesNoWriteRequests(t *testing.T) {
 	if n := hits["DELETE "+mockLogin]; n != 0 {
 		t.Errorf("the mock saw %d logouts", n)
 	}
-	if hits["GET /api/v1/V1/dienst/815"] != 1 || hits["GET /api/v1"+sessionPath] != 1 || hits["GET /api/v1"+accessNodePickerPath] != 1 {
+	if hits["GET /api/v1/V1/dienst/815"] != 1 || hits["GET /api/v1/V1/dienst/815/properties/public"] != 1 ||
+		hits["GET /api/v1"+sessionPath] != 1 || hits["GET /api/v1"+accessNodePickerPath] != 1 {
 		t.Errorf("reads at the base URL = %v", hits)
 	}
 	if n := foreign.total(""); n != 0 {

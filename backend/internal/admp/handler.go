@@ -1,15 +1,18 @@
 package admp
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 )
 
 // The read API of the ADMP cache (ADM-07, ADM-08; WP-930): a connection
@@ -104,29 +107,139 @@ type portView struct {
 	MatchedBy          string `json:"matched_by"`
 }
 
-// serviceView is a service with its ports.
+// Status of a service derived from its life cycle (E-253, WP-1074).
+const (
+	ServiceStatusOrdered    = "ordered"
+	ServiceStatusActive     = "active"
+	ServiceStatusCancelled  = "cancelled"
+	ServiceStatusTerminated = "terminated"
+	ServiceStatusUnknown    = "unknown"
+)
+
+// propertyView is a public property of a service (WP-1074): a value that
+// is a surrogate reference of the PII vault is left out.
+type propertyView struct {
+	Key   string `json:"key"`
+	Label string `json:"label,omitempty"`
+	Value any    `json:"value,omitempty"`
+}
+
+// serviceView is a service with its ports, the typed fields of its life
+// cycle and template (WP-1074) and its public properties by order. A
+// missing value leaves its field out.
 type serviceView struct {
-	ID             string         `json:"id"`
-	AccountID      string         `json:"account_id"`
-	ExternalID     string         `json:"external_id"`
-	ConnectionID   string         `json:"connection_id,omitempty"`
-	Kind           string         `json:"kind"`
-	Properties     map[string]any `json:"properties"`
-	FetchedAt      time.Time      `json:"fetched_at"`
-	ExpiresAt      time.Time      `json:"expires_at"`
-	Stale          bool           `json:"stale"`
-	LastErrorClass string         `json:"last_error_class,omitempty"`
-	Ports          []portView     `json:"ports"`
+	ID                    string         `json:"id"`
+	AccountID             string         `json:"account_id"`
+	ExternalID            string         `json:"external_id"`
+	ConnectionID          string         `json:"connection_id,omitempty"`
+	Kind                  string         `json:"kind"`
+	Status                string         `json:"status"`
+	BookedAt              string         `json:"booked_at,omitempty"`
+	ProvisioningPlannedAt string         `json:"provisioning_planned_at,omitempty"`
+	ProvisionedAt         string         `json:"provisioned_at,omitempty"`
+	CancelledAt           string         `json:"cancelled_at,omitempty"`
+	ShutdownPlannedAt     string         `json:"shutdown_planned_at,omitempty"`
+	ShutDownAt            string         `json:"shut_down_at,omitempty"`
+	TemplateID            *int64         `json:"template_id,omitempty"`
+	Properties            []propertyView `json:"properties"`
+	FetchedAt             time.Time      `json:"fetched_at"`
+	ExpiresAt             time.Time      `json:"expires_at"`
+	Stale                 bool           `json:"stale"`
+	LastErrorClass        string         `json:"last_error_class,omitempty"`
+	Ports                 []portView     `json:"ports"`
+}
+
+// lifecycleTime reads a time of properties.lifecycle (RFC 3339).
+func lifecycleTime(lc map[string]any, key string) (string, *time.Time) {
+	raw, _ := lc[key].(string)
+	if raw == "" {
+		return "", nil
+	}
+	t, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return "", nil
+	}
+	return raw, &t
+}
+
+// ServiceStatus derives the status of a service from its life cycle
+// (E-253): terminated when shut down and not in the future, else cancelled
+// when cancelled, active when provisioned, ordered when booked, else
+// unknown.
+func ServiceStatus(shutDown, cancelled, provisioned, booked *time.Time, now time.Time) string {
+	switch {
+	case shutDown != nil && !shutDown.After(now):
+		return ServiceStatusTerminated
+	case cancelled != nil:
+		return ServiceStatusCancelled
+	case provisioned != nil:
+		return ServiceStatusActive
+	case booked != nil:
+		return ServiceStatusOrdered
+	}
+	return ServiceStatusUnknown
+}
+
+// typedService fills the typed fields of a service view from its
+// properties (template_id, lifecycle, values).
+func typedService(v *serviceView, props map[string]any, now time.Time) {
+	lc, _ := props["lifecycle"].(map[string]any)
+	var booked, provisioned, cancelled, shutDown *time.Time
+	v.BookedAt, booked = lifecycleTime(lc, "booked_at")
+	v.ProvisioningPlannedAt, _ = lifecycleTime(lc, "provisioning_planned_at")
+	v.ProvisionedAt, provisioned = lifecycleTime(lc, "provisioned_at")
+	v.CancelledAt, cancelled = lifecycleTime(lc, "cancelled_at")
+	v.ShutdownPlannedAt, _ = lifecycleTime(lc, "shutdown_planned_at")
+	v.ShutDownAt, shutDown = lifecycleTime(lc, "shut_down_at")
+	v.Status = ServiceStatus(shutDown, cancelled, provisioned, booked, now)
+	if id, ok := props["template_id"].(float64); ok && id == float64(int64(id)) {
+		n := int64(id)
+		v.TemplateID = &n
+	}
+	type ordered struct {
+		view  propertyView
+		order float64
+		has   bool
+	}
+	values, _ := props["values"].(map[string]any)
+	list := make([]ordered, 0, len(values))
+	for key, raw := range values {
+		entry, _ := raw.(map[string]any)
+		o := ordered{view: propertyView{Key: key}}
+		o.view.Label, _ = entry["label"].(string)
+		// A personal property and a value holding a surrogate reference
+		// anywhere (sealed or redacted) give no value: neither the
+		// personal value nor an id of the PII vault leaves the API.
+		if !pii.IsPersonalKey(key) && !containsRef(entry["value"]) {
+			o.view.Value = entry["value"]
+		}
+		o.order, o.has = entry["order"].(float64)
+		list = append(list, o)
+	}
+	slices.SortFunc(list, func(a, b ordered) int {
+		switch {
+		case a.has && !b.has:
+			return -1
+		case !a.has && b.has:
+			return 1
+		case a.order != b.order:
+			return cmp.Compare(a.order, b.order)
+		}
+		return cmp.Compare(a.view.Key, b.view.Key)
+	})
+	v.Properties = make([]propertyView, 0, len(list))
+	for i := range list {
+		v.Properties = append(v.Properties, list[i].view)
+	}
 }
 
 func serviceViewOf(s *Service) serviceView {
-	props := s.Properties
-	if props == nil {
-		props = map[string]any{}
-	}
 	v := serviceView{ID: s.ID, AccountID: s.AccountID, ExternalID: s.ExternalID, ConnectionID: s.ConnectionID, Kind: s.Kind,
-		Properties: props, FetchedAt: s.FetchedAt, ExpiresAt: s.ExpiresAt, Stale: s.Stale,
+		FetchedAt: s.FetchedAt, ExpiresAt: s.ExpiresAt, Stale: s.Stale,
 		LastErrorClass: s.LastErrorClass, Ports: make([]portView, 0, len(s.Ports))}
+	props, _ := pii.Generic(s.Properties)
+	asMap, _ := props.(map[string]any)
+	typedService(&v, asMap, time.Now())
 	for i := range s.Ports {
 		p := &s.Ports[i]
 		v.Ports = append(v.Ports, portView{PortKey: p.PortKey, NetworkInterfaceID: p.NetworkInterfaceID, CIID: p.CIID,

@@ -87,6 +87,19 @@
     "headers": {"Content-Type": "application/json"},
     "body": [815, 816]
   },
+  "getV1Dienst:idPropertiesPublic": {
+    "status": 200,
+    "headers": {"Content-Type": "application/json"},
+    "body": [
+      {"id": 11, "dienstId": 815, "timestamp": 1700000000, "isPublic": true, "key": "bandwidth_down", "orderIndex": 2, "title": "Downstream", "description": "description-canary", "value": 1000, "input": {"dataType": "number", "type": "input-canary", "options": []}, "label": "Bandbreite down"},
+      {"id": 12, "dienstId": 815, "timestamp": 1700000001, "isPublic": true, "key": "technology", "orderIndex": 1, "title": "Technologie", "description": null, "value": "FTTH", "input": null, "label": ""},
+      {"id": 13, "dienstId": 815, "timestamp": 1700000002, "isPublic": true, "key": "static_ip", "orderIndex": null, "title": null, "description": null, "value": true, "input": null, "label": "Feste IP"},
+      {"id": 14, "dienstId": 815, "timestamp": 1700000003, "isPublic": true, "key": "note", "orderIndex": 4, "title": "Notiz", "description": null, "value": null, "input": null, "label": "Notiz"},
+      {"id": 15, "dienstId": 815, "timestamp": 1700000004, "isPublic": true, "key": "vlan", "orderIndex": 5, "title": "VLAN", "description": null, "value": {"outer": 7, "inner": 100}, "input": null, "label": "VLAN"},
+      {"id": 16, "dienstId": 815, "timestamp": 1700000005, "isPublic": true, "key": "ports", "orderIndex": 6, "title": "Ports", "description": null, "value": [1, "two", false], "input": null, "label": "Ports"},
+      {"id": 17, "dienstId": 815, "timestamp": 1700000006, "isPublic": false, "key": "internal", "orderIndex": 7, "title": "Intern", "description": null, "value": "internal-canary", "input": null, "label": "Intern"}
+    ]
+  },
   "getV1Dienst:id": {
     "status": 200,
     "headers": {"Content-Type": "application/json"},

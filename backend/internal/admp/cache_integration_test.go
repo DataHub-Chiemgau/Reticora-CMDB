@@ -328,11 +328,9 @@ func TestAdmpUpsertRejectsPersonalProperties(t *testing.T) {
 			if err := repo.UpsertConnection(ctx, c); !errors.Is(err, admp.ErrPersonalProperty) {
 				t.Errorf("connection with %v: %v, want ErrPersonalProperty", props, err)
 			}
-			s := &admp.Service{OrganizationID: orgID, AccountID: account, ExternalID: "wp928-pii", Kind: "voice", Properties: props,
-				ExpiresAt: time.Now().Add(time.Hour)}
-			if err := repo.UpsertService(ctx, s); !errors.Is(err, admp.ErrPersonalProperty) {
-				t.Errorf("service with %v: %v, want ErrPersonalProperty", props, err)
-			}
+			// A service seals its personal values since WP-1074
+			// (TestAdmpServicePersonalPropertySealed); the refusal holds for
+			// connections until WP-1075.
 		}
 	}
 	t.Run("memory", func(t *testing.T) {

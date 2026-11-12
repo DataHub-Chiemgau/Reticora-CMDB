@@ -1700,3 +1700,4 @@ ADM-08;[P3];G3;backend/internal/admp/api_integration_test.go;WP-930
 ADM-08;[P3];G3;backend/internal/admp/impact_integration_test.go;WP-931
 ADM-04;[P3];E;backend/internal/admp/sync_integration_test.go;WP-1073
 ADM-04;[P3];E;backend/internal/admp/readonly/ports_test.go;WP-1073
+ADM-05;[P3];E;backend/internal/admp/sync_integration_test.go;WP-1074

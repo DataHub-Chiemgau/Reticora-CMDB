@@ -15,6 +15,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 )
 
 // PGRepository is the ADMP cache in PostgreSQL under row level security
@@ -131,11 +132,36 @@ func (r *PGRepository) UpsertService(ctx context.Context, s *Service) error {
 	if err := checkService(s); err != nil {
 		return err
 	}
-	props, err := json.Marshal(s.Properties)
-	if err != nil {
-		return err
-	}
 	return database.WithRequestTenant(ctx, r.pool, s.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		// Personal values go into the vault in this transaction (WP-1074).
+		// Only the references the row carries already may stay (the last
+		// state kept after a failed fetch); the trigger of migration 000310
+		// shreds those the new properties no longer carry.
+		var previous []byte
+		err := tx.QueryRow(ctx, `SELECT properties FROM admp_service WHERE account_id = $1 AND external_id = $2 FOR UPDATE`,
+			s.AccountID, s.ExternalID).Scan(&previous)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return cacheError(err)
+		}
+		kept := map[string]bool{}
+		if len(previous) > 0 {
+			var old any
+			if uerr := json.Unmarshal(previous, &old); uerr != nil {
+				return uerr
+			}
+			for _, id := range refIDs(old) {
+				kept[id] = true
+			}
+		}
+		if serr := sealProperties(s.Properties, func(v string) (any, error) {
+			return pii.SealValueTx(ctx, tx, s.OrganizationID, v)
+		}, func(id string) bool { return kept[id] }); serr != nil {
+			return serr
+		}
+		props, err := json.Marshal(s.Properties)
+		if err != nil {
+			return err
+		}
 		stored, err := scanService(tx.QueryRow(ctx, `INSERT INTO admp_service AS s (organization_id, account_id, external_id,
 				connection_id, kind, properties, fetched_at, expires_at, stale, last_error_class)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)

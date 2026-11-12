@@ -51,6 +51,8 @@ var (
 		"Session":    reflect.TypeFor[Session](),
 		"AccessPort": reflect.TypeFor[AccessPort](),
 		"Service":    reflect.TypeFor[Service](),
+		// WP-1074.
+		"ServiceProperty": reflect.TypeFor[ServiceProperty](),
 	}
 	exportedFuncs = map[string]any{
 		"New":             New,

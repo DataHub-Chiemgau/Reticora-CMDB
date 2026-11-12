@@ -1459,3 +1459,266 @@ func TestAdmpRefreshLinkedChecksSessionAndInventory(t *testing.T) {
 		t.Fatalf("account class %q, want auth", class)
 	}
 }
+
+// --- The properties of a service (ADM-05, E-253, WP-1074).
+
+// serviceProps reads properties, fetched_at, stale and class of a cached
+// service.
+func (e *syncEnv) serviceProps(account, external string) (props map[string]any, raw string, fetched time.Time, stale bool, class string) {
+	e.t.Helper()
+	var c *string
+	var b []byte
+	if err := e.f.Admin.QueryRow(context.Background(), `SELECT properties, properties::text, fetched_at, stale, last_error_class
+		FROM admp_service WHERE account_id = $1 AND external_id = $2`, account, external).Scan(&b, &raw, &fetched, &stale, &c); err != nil {
+		e.t.Fatalf("service %s: %v", external, err)
+	}
+	if err := json.Unmarshal(b, &props); err != nil {
+		e.t.Fatal(err)
+	}
+	if c != nil {
+		class = *c
+	}
+	return props, raw, fetched, stale, class
+}
+
+// TestAdmpServicePropertiesCachedWithFetchedAt: a refresh stores the
+// public properties as values.<key> = {value, label, order} with the
+// fetched_at of the refresh.
+func TestAdmpServicePropertiesCachedWithFetchedAt(t *testing.T) {
+	e := newSyncEnv(t)
+	values := map[string]any{"bandwidth_down": map[string]any{"value": 1000, "label": "Bandbreite", "order": 1},
+		"technology": map[string]any{"value": "FTTH", "label": "Technologie"}}
+	e.fake.set(func() {
+		e.fake.services["815"] = admp.ServiceData{ExternalID: "815", Kind: "FTTH 1000", Properties: map[string]any{"values": values}}
+	})
+	if res := e.refreshKind(e.account1, admp.KindService, "815"); res.Result != "ok" {
+		t.Fatalf("refresh: %+v", res)
+	}
+	props, _, fetched, stale, _ := e.serviceProps(e.account1, "815")
+	got, _ := props["values"].(map[string]any)
+	bw, _ := got["bandwidth_down"].(map[string]any)
+	if len(got) != 2 || bw["value"] != float64(1000) || bw["label"] != "Bandbreite" || bw["order"] != float64(1) || stale ||
+		!fetched.Equal(e.now) {
+		t.Errorf("properties %v, fetched %v, stale %v", props, fetched, stale)
+	}
+}
+
+// TestAdmpServicePropertiesFailureKeepsLastState: a failed read of the
+// properties stores the service stale with the class and keeps the values
+// it had; the account records the class.
+func TestAdmpServicePropertiesFailureKeepsLastState(t *testing.T) {
+	e := newSyncEnv(t)
+	e.fake.set(func() {
+		e.fake.services["815"] = admp.ServiceData{ExternalID: "815", Kind: "internet",
+			Properties: map[string]any{"values": map[string]any{"technology": map[string]any{"value": "FTTH", "label": "T"}}}}
+	})
+	e.refreshKind(e.account1, admp.KindService, "815")
+	e.now = e.now.Add(time.Hour)
+	e.fake.set(func() {
+		e.fake.services["815"] = admp.ServiceData{ExternalID: "815", Kind: "internet",
+			Properties: map[string]any{"template_id": 4}, ValuesClass: readonly.ClassServer}
+	})
+	if res := e.refreshKind(e.account1, admp.KindService, "815"); res.Result != readonly.ClassServer {
+		t.Fatalf("refresh with failing properties: %+v", res)
+	}
+	props, _, _, stale, class := e.serviceProps(e.account1, "815")
+	values, _ := props["values"].(map[string]any)
+	if !stale || class != readonly.ClassServer || values["technology"] == nil || props["template_id"] != float64(4) {
+		t.Errorf("after the failure: %v stale %v class %q", props, stale, class)
+	}
+	if _, accountClass := e.accountStatus(e.account1); accountClass != readonly.ClassServer {
+		t.Errorf("account class %q", accountClass)
+	}
+	// Success again clears stale.
+	e.fake.set(func() {
+		e.fake.services["815"] = admp.ServiceData{ExternalID: "815", Kind: "internet",
+			Properties: map[string]any{"values": map[string]any{}}}
+	})
+	e.refreshKind(e.account1, admp.KindService, "815")
+	if props, _, _, stale, _ = e.serviceProps(e.account1, "815"); stale || len(props["values"].(map[string]any)) != 0 {
+		t.Errorf("after recovery: %v stale %v", props, stale)
+	}
+}
+
+// TestAdmpServicePersonalPropertySealed: a property with a personal key
+// goes into the PII vault in the transaction of the upsert: the row of
+// admp_service holds a surrogate reference, the vault resolves it; the
+// memory store redacts it.
+func TestAdmpServicePersonalPropertySealed(t *testing.T) {
+	e := newSyncEnv(t)
+	prev := pii.Default()
+	pii.SetDefault(e.vault)
+	t.Cleanup(func() { pii.SetDefault(prev) })
+	const plain = "erika.wp1074@example.org"
+	e.fake.set(func() {
+		e.fake.services["815"] = admp.ServiceData{ExternalID: "815", Kind: "voice", Properties: map[string]any{"values": map[string]any{
+			"email":      map[string]any{"value": plain, "label": "E-Mail"},
+			"technology": map[string]any{"value": "FTTH", "label": "Technologie"}}}}
+	})
+	if res := e.refreshKind(e.account1, admp.KindService, "815"); res.Result != "ok" {
+		t.Fatalf("refresh: %+v", res)
+	}
+	props, raw, _, _, _ := e.serviceProps(e.account1, "815")
+	if strings.Contains(raw, "erika") {
+		t.Fatalf("admp_service holds the value in plain text: %s", raw)
+	}
+	email := props["values"].(map[string]any)["email"].(map[string]any)
+	id, ok := pii.RefID(email["value"])
+	if !ok || id == "" || email["label"] != "E-Mail" {
+		t.Fatalf("email entry %v, want a surrogate reference", email)
+	}
+	subject, err := e.vault.Resolve(e.org(), e.f.OrgA, id)
+	if err != nil || subject.Data["v"] != plain {
+		t.Fatalf("surrogate: %+v %v", subject, err)
+	}
+	if props["values"].(map[string]any)["technology"].(map[string]any)["value"] != "FTTH" {
+		t.Errorf("a property without personal key was sealed: %v", props)
+	}
+	// --no-db: the memory store redacts.
+	m := newMemoryCache(t)
+	s := &admp.Service{OrganizationID: m.org, AccountID: m.accountOrg, ExternalID: "815", Kind: "voice", ExpiresAt: e.now.Add(time.Hour),
+		Properties: map[string]any{"values": map[string]any{"email": map[string]any{"value": plain}}}}
+	if err = m.repo.UpsertService(m.ctx, s); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := m.repo.ServiceByExternal(m.ctx, m.org, m.accountOrg, "815")
+	raw2, _ := json.Marshal(stored)
+	if err != nil || strings.Contains(string(raw2), "erika") {
+		t.Fatalf("memory store: %s %v", raw2, err)
+	}
+}
+
+// TestAdmpServicePersonalPropertyShredded: a refresh of a service with a
+// personal property replaces its surrogate and shreds the old one (the
+// vault keeps one subject per value, not one per refresh); a failed
+// properties fetch keeps the last surrogate; a personal number is sealed;
+// a reference delivered by the source is neutralised and shreds nothing;
+// the expiry of the service shreds its surrogates.
+func TestAdmpServicePersonalPropertyShredded(t *testing.T) {
+	e := newSyncEnv(t)
+	prev := pii.Default()
+	pii.SetDefault(e.vault)
+	t.Cleanup(func() { pii.SetDefault(prev) })
+	// victim is a subject of another object the source names.
+	victim, err := e.vault.Create(e.org(), e.f.OrgA, pii.KindValue, pii.Data{"v": "fremd"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	subjects := func() string {
+		return e.scalar(`SELECT count(*)::text FROM pii_subject WHERE organization_id = $1 AND kind = $2`, e.f.OrgA, pii.KindValue)
+	}
+	before := subjects()
+	e.fake.set(func() {
+		e.fake.services["815"] = admp.ServiceData{ExternalID: "815", Kind: "voice", Properties: map[string]any{"values": map[string]any{
+			"contact_email": map[string]any{"value": "erika.wp1074@example.org"},
+			"phone":         map[string]any{"value": 4917012345678},
+			"ticket":        map[string]any{"value": map[string]any{"$pii": victim}}}}}
+	})
+	refs := func() []string {
+		props, raw, _, _, _ := e.serviceProps(e.account1, "815")
+		if strings.Contains(raw, "erika") || strings.Contains(raw, "4917012345678") || strings.Contains(raw, victim) {
+			t.Fatalf("admp_service holds a personal value or a foreign reference: %s", raw)
+		}
+		values := props["values"].(map[string]any)
+		out := []string{}
+		for _, key := range []string{"contact_email", "phone"} {
+			id, ok := pii.RefID(values[key].(map[string]any)["value"])
+			if !ok || id == "" {
+				t.Fatalf("%s: %v, want a surrogate", key, values[key])
+			}
+			out = append(out, id)
+		}
+		return out
+	}
+	e.refreshKind(e.account1, admp.KindService, "815")
+	first := refs()
+	if phone, rerr := e.vault.Resolve(e.org(), e.f.OrgA, first[1]); rerr != nil || phone.Data["v"] != "4917012345678" {
+		t.Fatalf("phone surrogate: %+v %v", phone, rerr)
+	}
+	after := subjects()
+	e.now = e.now.Add(time.Hour)
+	e.refreshKind(e.account1, admp.KindService, "815")
+	second := refs()
+	if got := subjects(); got != after {
+		t.Errorf("subjects after the second refresh: %s, want %s (before %s)", got, after, before)
+	}
+	for _, id := range first {
+		if _, rerr := e.vault.Resolve(e.org(), e.f.OrgA, id); !errors.Is(rerr, pii.ErrNotFound) {
+			t.Errorf("replaced surrogate %s still resolves (%v)", id, rerr)
+		}
+	}
+	// A failed properties fetch keeps the last surrogates.
+	e.fake.set(func() {
+		sv := e.fake.services["815"]
+		sv.ValuesClass = readonly.ClassTimeout
+		e.fake.services["815"] = sv
+	})
+	e.refreshKind(e.account1, admp.KindService, "815")
+	if kept := refs(); !reflect.DeepEqual(kept, second) {
+		t.Errorf("surrogates after a failed fetch %v, want %v", kept, second)
+	}
+	if _, rerr := e.vault.Resolve(e.org(), e.f.OrgA, victim); rerr != nil {
+		t.Fatalf("the foreign subject was shredded: %v", rerr)
+	}
+	// The expiry deletes the service and its surrogates.
+	e.now = e.now.Add(60 * 24 * time.Hour)
+	if _, err = e.sync.Expire(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if n := e.scalar(`SELECT count(*)::text FROM admp_service WHERE account_id = $1 AND external_id = '815'`, e.account1); n != "0" {
+		t.Fatalf("service not expired: %s", n)
+	}
+	for _, id := range second {
+		if _, rerr := e.vault.Resolve(e.org(), e.f.OrgA, id); !errors.Is(rerr, pii.ErrNotFound) {
+			t.Errorf("surrogate %s of the expired service still resolves (%v)", id, rerr)
+		}
+	}
+	if _, rerr := e.vault.Resolve(e.org(), e.f.OrgA, victim); rerr != nil {
+		t.Errorf("the foreign subject was shredded by the expiry: %v", rerr)
+	}
+}
+
+// TestAdmpServiceStatusFromLifecycle: the times of the documentation are
+// seconds below 10^11, milliseconds above (E-253); the status is
+// terminated when shut down and not in the future, else cancelled,
+// active, ordered or unknown.
+func TestAdmpServiceStatusFromLifecycle(t *testing.T) {
+	sec, ms := 1700000000.0, 1700000000000.0
+	ts, _ := admp.DocTime(&sec)
+	tm, _ := admp.DocTime(&ms)
+	if !ts.Equal(tm) || ts.Format(time.RFC3339) != "2023-11-14T22:13:20Z" {
+		t.Errorf("seconds %v, milliseconds %v", ts, tm)
+	}
+	if _, ok := admp.DocTime(nil); ok {
+		t.Error("nil is a time")
+	}
+	now := time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC)
+	past, future := now.Add(-time.Hour), now.Add(time.Hour)
+	for _, tc := range []struct {
+		shutDown, cancelled, provisioned, booked *time.Time
+		want                                     string
+	}{
+		{&past, &past, &past, &past, admp.ServiceStatusTerminated},
+		{&future, &past, &past, &past, admp.ServiceStatusCancelled},
+		{nil, nil, &past, &past, admp.ServiceStatusActive},
+		{nil, nil, nil, &past, admp.ServiceStatusOrdered},
+		{nil, nil, nil, nil, admp.ServiceStatusUnknown},
+		{&future, nil, &past, nil, admp.ServiceStatusActive},
+	} {
+		if got := admp.ServiceStatus(tc.shutDown, tc.cancelled, tc.provisioned, tc.booked, now); got != tc.want {
+			t.Errorf("%+v: %s, want %s", tc, got, tc.want)
+		}
+	}
+	// Stored through the cache, the status reaches the API.
+	e := newSyncEnv(t)
+	e.fake.set(func() {
+		e.fake.services["815"] = admp.ServiceData{ExternalID: "815", Kind: "internet", Properties: map[string]any{
+			"lifecycle": map[string]any{"booked_at": "2023-11-14T22:13:20Z", "provisioned_at": "2023-11-20T08:00:00Z"}}}
+	})
+	e.refreshKind(e.account1, admp.KindService, "815")
+	props, _, _, _, _ := e.serviceProps(e.account1, "815")
+	lc, _ := props["lifecycle"].(map[string]any)
+	if lc["provisioned_at"] != "2023-11-20T08:00:00Z" {
+		t.Errorf("life cycle %v", props)
+	}
+}
