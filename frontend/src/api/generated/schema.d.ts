@@ -5852,7 +5852,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Trigger a workflow run */
+    /**
+     * Trigger a workflow run
+     * @description Stores the run and queues it as the job workflow.run (WFL-02, E-226): the answer is the run in the state pending; the worker executes its steps with up to five attempts, a succeeded step never twice. Without a job queue (no NATS) the run is executed in the request and answered in its resulting state. A repeated POST with the same Idempotency-Key answers the same run (API-04).
+     */
     post: operations['triggerWorkflowRun'];
     delete?: never;
     options?: never;
@@ -19469,6 +19472,17 @@ export interface components {
       started_at: string;
       /** Format: date-time */
       finished_at?: string;
+      /** @description Attempts of the job workflow.run that executes the run (WFL-02); 0 for a run executed in the request. */
+      attempts: number;
+      /**
+       * Format: date-time
+       * @description When the job retries the run after a failed attempt; absent otherwise.
+       */
+      next_attempt_at?: string;
+      /** @description Sanitized error of the last failed attempt. */
+      last_error?: string;
+      /** @description User who started the run; the worker executes the run as this user. Absent without a user. */
+      initiated_by?: string;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -37008,7 +37022,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Workflow run */
+      /** @description The run */
       201: {
         headers: {
           [name: string]: unknown;

@@ -13767,9 +13767,16 @@ paths:
       operationId: triggerWorkflowRun
       tags: [Workflows]
       summary: Trigger a workflow run
+      description: >-
+        Stores the run and queues it as the job workflow.run (WFL-02,
+        E-226): the answer is the run in the state pending; the worker
+        executes its steps with up to five attempts, a succeeded step never
+        twice. Without a job queue (no NATS) the run is executed in the
+        request and answered in its resulting state. A repeated POST with
+        the same Idempotency-Key answers the same run (API-04).
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/TriggerWorkflowRequest' } } } }
       responses:
-        '201': { description: Workflow run, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowRun' } } } }
+        '201': { description: The run, pending while the job workflow.run executes it, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowRun' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -39739,7 +39746,7 @@ components:
         updated_at: { type: string, format: date-time }
     WorkflowRun:
       type: object
-      required: [id, organization_id, workflow_id, definition_version_id, status, trigger, context, started_at, created_at, updated_at]
+      required: [id, organization_id, workflow_id, definition_version_id, status, trigger, context, started_at, attempts, created_at, updated_at]
       properties:
         id: { type: string }
         organization_id: { type: string }
@@ -39750,6 +39757,10 @@ components:
         context: { $ref: '#/components/schemas/JSONValue' }
         started_at: { type: string, format: date-time }
         finished_at: { type: string, format: date-time }
+        attempts: { type: integer, minimum: 0, description: Attempts of the job workflow.run that executes the run (WFL-02); 0 for a run executed in the request. }
+        next_attempt_at: { type: string, format: date-time, description: When the job retries the run after a failed attempt; absent otherwise. }
+        last_error: { type: string, description: Sanitized error of the last failed attempt. }
+        initiated_by: { type: string, description: User who started the run; the worker executes the run as this user. Absent without a user. }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         steps: { type: array, items: { $ref: '#/components/schemas/WorkflowStep' } }

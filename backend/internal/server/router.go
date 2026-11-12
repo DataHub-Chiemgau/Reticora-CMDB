@@ -611,6 +611,11 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	if revocations := opts.Sessions.Revocations(); revocations != nil {
 		subjectService.WithSessionRevoker(revocations)
 	}
+	// One executor runs the runs of the workflow API and the run an IGA
+	// access request starts (WFL-04); with the job queue as the job
+	// workflow.run (WP-1088, registerJobKinds).
+	workflowRuns := workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher).
+		WithFieldGuard(override.NewGuard(repos.Override))
 	if repos.Jobs != nil {
 		jobService := jobs.NewService(repos.Jobs)
 		jobTracker = jobService
@@ -718,7 +723,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			repos.IPAMManagement,
 			// The full export of an organization (WP-1149, TLC-05) reads on
 			// the application pool and writes to the object storage.
-			export.NewOrgExporter(opts.AuditPool, opts.Blobs, jobService), subjectService)
+			export.NewOrgExporter(opts.AuditPool, opts.Blobs, jobService), subjectService, workflowRuns)
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -881,10 +886,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		discoveryHandler.WithReviewTickets(reviewTickets{svc: tickets, cis: repos.CI, features: opts.Entitlements})
 	}
 	conflictReviews := discoveryHandler.ReviewService()
-	// One executor runs the runs of the workflow API and the run an IGA
-	// access request starts (WFL-04).
-	workflowRuns := workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher).
-		WithFieldGuard(override.NewGuard(repos.Override)).WithConflictReviews(conflictReviews)
+	// The review queue of set_ci_field conflicts (REC-12).
+	workflowRuns.WithConflictReviews(conflictReviews)
 	// The one writer of the ledger stock_movement (WP-274): the route and
 	// the disposal in its transaction (WP-278) lock, check and write
 	// stock.movement to the outbox; assignments book through

@@ -50,9 +50,27 @@ type Run struct {
 	Context             JSONMap    `json:"context"`
 	StartedAt           time.Time  `json:"started_at"`
 	FinishedAt          *time.Time `json:"finished_at,omitempty"`
-	CreatedAt           time.Time  `json:"created_at"`
-	UpdatedAt           time.Time  `json:"updated_at"`
-	Steps               []Step     `json:"steps,omitempty"`
+	// Attempts counts the attempts of the job workflow.run that executed
+	// the run (WFL-02, WP-1088); 0 for a run executed in the request.
+	Attempts int `json:"attempts"`
+	// NextAttemptAt is when the job retries the run after a failed
+	// attempt; absent otherwise.
+	NextAttemptAt *time.Time `json:"next_attempt_at,omitempty"`
+	// LastError is the sanitized error of the last failed attempt.
+	LastError string `json:"last_error,omitempty"`
+	// InitiatedBy is the user who started the run; the worker executes
+	// the run as this user (submitted_by, reporter). Empty without one.
+	InitiatedBy string    `json:"initiated_by,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	Steps       []Step    `json:"steps,omitempty"`
+}
+
+// RunAttempt is the state of the job attempt a worker records on a run.
+type RunAttempt struct {
+	Attempts      int
+	NextAttemptAt *time.Time
+	LastError     string
 }
 
 type Step struct {

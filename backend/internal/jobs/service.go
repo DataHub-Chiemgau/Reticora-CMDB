@@ -254,6 +254,9 @@ func (s *Service) fail(ctx context.Context, orgID, id string, cause error, retry
 		&Update{Status: StatusFailed, Error: &msg, FinishedAt: &now, ReportFailed: true})
 	if err == nil {
 		observeEnd(failed)
+		if k, kerr := s.kind(job.Kind); kerr == nil && k.Failed != nil {
+			k.Failed(ctx, failed)
+		}
 	}
 	return failed, err
 }

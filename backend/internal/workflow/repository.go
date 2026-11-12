@@ -45,6 +45,9 @@ type Repository interface {
 	GetRun(ctx context.Context, orgID, id string) (*Run, error)
 	CreateRun(ctx context.Context, run *Run) error
 	UpdateRunStatus(ctx context.Context, orgID, id, status string, finished *time.Time, runCtx JSONMap) (*Run, error)
+	// RecordAttempt stores attempts, next_attempt_at and last_error of the
+	// job attempt that executes the run (WP-1088).
+	RecordAttempt(ctx context.Context, orgID, id string, a RunAttempt) error
 	AppendStep(ctx context.Context, step *Step) error
 	UpdateStep(ctx context.Context, orgID, id, status string, output JSONMap, errText string) (*Step, error)
 	ListSteps(ctx context.Context, orgID, runID string) ([]Step, error)
@@ -262,6 +265,17 @@ func (r *MemoryRepository) UpdateRunStatus(_ context.Context, orgID, id, status 
 	cp := *run
 	cp.Steps = r.stepsForLocked(orgID, id)
 	return &cp, nil
+}
+func (r *MemoryRepository) RecordAttempt(_ context.Context, orgID, id string, a RunAttempt) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	run := r.runs[id]
+	if run == nil || run.OrganizationID != orgID {
+		return ErrRunNotFound
+	}
+	run.Attempts, run.NextAttemptAt, run.LastError = a.Attempts, a.NextAttemptAt, a.LastError
+	run.UpdatedAt = time.Now().UTC()
+	return nil
 }
 func (r *MemoryRepository) AppendStep(_ context.Context, step *Step) error {
 	r.mu.Lock()

@@ -16026,7 +16026,7 @@ WFL-02;[P3];F;backend/internal/workflow/conditions_test.go;WP-1087
 - [ ] **AK2:** `Executor.Execute` reiht den Run ein, wenn eine Queue gesetzt ist (`WithQueue`), und gibt ihn im Zustand `pending` zurück. Ohne Queue (`--no-db`, Tests ohne NATS) läuft er synchron wie bisher (Parität). `POST /api/v1/workflows/{id}/runs` antwortet weiter 201 mit dem Run, jetzt im Zustand `pending`; OpenAPI dokumentiert das. Der IGA-Starter (`iga/handler.go:534`) bleibt unverändert und übergibt damit nach dem Commit an die Queue.
 - [ ] **AK3:** Schritt-Idempotenz über den Schlüssel `(run_id, step_index)` (`UNIQUE (organization_id, run_id, step_index)` aus `000027:87`): Ein Schritt `succeeded` wird bei einem Retry nie erneut ausgeführt. Ein Schritt `running` aus einem abgebrochenen Versuch wird nur erneut ausgeführt, wenn seine Aktionsart in `idempotentActions` steht (`noop`, `set_ci_field`, `require_approval`); sonst wird er `failed` mit dem festen Text „step interrupted, not repeated“ und der Run `failed`. Ein Schritt `failed` wird bei einem Retry des Jobs (Fehler mit `jobs`-Retry) auf `running` zurückgesetzt und erneut ausgeführt; der Run bleibt bis zum letzten Versuch `running`.
 - [ ] **AK4:** Spalten `workflow_run.attempts`, `next_attempt_at`, `last_error` und `initiated_by` (Fremdschlüssel mit Organisation auf `app_user`, ON DELETE SET NULL (`initiated_by`)). `Start` setzt `initiated_by` aus dem Benutzer des Kontexts. Der Worker führt den Run unter dem Scope-Snapshot des Jobs aus (TEN-09, `jobs.ScopeOf`) und setzt den Benutzer auf `initiated_by`; `submit_form` nutzt ihn als `submitted_by`, `create_ticket` bis WP-1094 als Reporter (danach gilt die Reporter-Regel aus WP-1094 AK5).
-- [ ] **AK5:** `last_error` enthält nur den bereinigten Text (`stepErrorText`, `executor.go:207–217`). Nach dem letzten Versuch ist der Run `failed`.
+- [ ] **AK5:** `last_error` enthält nur den bereinigten Text (`stepErrorText`, `executor.go:207–217`). Nach dem letzten Versuch ist der Run `failed`. Das gilt auch, wenn der Versuch nicht an einem Schritt scheitert: Ein Fehler außerhalb eines Schritts (Datenbank, Zeitüberschreitung) wird wie ein fehlgeschlagener Schritt wiederholt und schließt den Run erst im letzten Versuch (fester Text „the run could not be continued“); eine ungültige gespeicherte Bedingung oder Aktion beendet ihn sofort. Stirbt der Worker des letzten Versuchs, schließt der Hook `jobs.Kind.Failed` (`Worker.JobFailed`) den Run beim endgültigen Fehlschlag des Jobs (Reaper oder Übernahme) mit „the run was interrupted on its last attempt“.
 - [ ] **AK6:** Ein doppelter POST mit gleichem `Idempotency-Key` liefert über die API-04-Middleware denselben Run (keine eigene Spalte).
 
 **Dateien (14 Einträge, Migration = 2):**
@@ -16056,6 +16056,10 @@ WFL-02;[P3];F;backend/internal/workflow/conditions_test.go;WP-1087
   - `TestRunFailsAfterMaxAttempts`
   - `TestWorkerUsesInitiatorAndScope`: `submit_form` schreibt `submitted_by` = Initiator, ein client-gebundener Initiator sieht keine CIs eines anderen Clients
   - `TestTriggerRunReturnsPendingRun`
+  - `TestRunRetriesAfterInfrastructureError`: `ListSteps` scheitert im Versuch 1, Erfolg im Versuch 2
+  - `TestRunFailsWhenLastAttemptAborts`: `MaxAttempts = 1`, Abbruch nach Schritt 1 → Run `failed`
+  - `TestJobFailedClosesLostRun`
+- `backend/internal/jobs/service_test.go`: `TestKindFailedHookOnFinalFailure` (Hook nur beim endgültigen Fehlschlag; `backend/internal/jobs/model.go`, `service.go`)
 - `TestExecutorStartThenExecute` (synchroner Pfad ohne Queue) und `TestAccessRequestStartsWorkflowRun` (`backend/internal/iga/access_request_workflow_integration_test.go:36`) bleiben grün.
 - `TestEverySubmittedKindHasAHandler` (`backend/internal/server/jobkinds_test.go:248`), `TestRoutesAndSpecificationAreInParity`, `TestMigrationsRoundtrip`.
 

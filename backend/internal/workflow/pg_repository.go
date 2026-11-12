@@ -16,7 +16,7 @@ import (
 
 const defCols = `id::text, organization_id::text, name, description, trigger, conditions, actions, active, version, current_version_id::text, created_at, updated_at`
 const versionCols = `id::text, organization_id::text, workflow_id::text, version, trigger, conditions, actions, COALESCE(created_by::text, ''), created_at`
-const runCols = `id::text, organization_id::text, workflow_id::text, definition_version_id::text, status, trigger, context, started_at, finished_at, created_at, updated_at`
+const runCols = `id::text, organization_id::text, workflow_id::text, definition_version_id::text, status, trigger, context, started_at, finished_at, attempts, next_attempt_at, COALESCE(last_error, ''), COALESCE(initiated_by::text, ''), created_at, updated_at`
 const stepCols = `id::text, organization_id::text, run_id::text, step_index, action_type, status, input, output, error, created_at, updated_at`
 
 type PGRepository struct{ pool *pgxpool.Pool }
@@ -276,6 +276,10 @@ func (r *PGRepository) GetRun(ctx context.Context, orgID, id string) (*Run, erro
 	})
 	return run, err
 }
+
+// CreateRun stores a run. initiated_by is set only for a user of the
+// organization; a principal without user row (a system or test identity)
+// starts a run without initiator.
 func (r *PGRepository) CreateRun(ctx context.Context, run *Run) error {
 	return database.WithRequestTenant(ctx, r.pool, run.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if run.Context == nil {
@@ -284,7 +288,7 @@ func (r *PGRepository) CreateRun(ctx context.Context, run *Run) error {
 		if run.StartedAt.IsZero() {
 			run.StartedAt = time.Now().UTC()
 		}
-		return tx.QueryRow(ctx, `INSERT INTO workflow_run (organization_id,workflow_id,definition_version_id,status,trigger,context,started_at) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id::text, created_at, updated_at`, run.OrganizationID, run.WorkflowID, run.DefinitionVersionID, run.Status, run.Trigger, run.Context, run.StartedAt).Scan(&run.ID, &run.CreatedAt, &run.UpdatedAt)
+		return tx.QueryRow(ctx, `INSERT INTO workflow_run (organization_id,workflow_id,definition_version_id,status,trigger,context,started_at,initiated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,(SELECT u.id FROM app_user u WHERE u.organization_id=$1 AND u.id::text=NULLIF($8,''))) RETURNING id::text, COALESCE(initiated_by::text, ''), created_at, updated_at`, run.OrganizationID, run.WorkflowID, run.DefinitionVersionID, run.Status, run.Trigger, run.Context, run.StartedAt, run.InitiatedBy).Scan(&run.ID, &run.InitiatedBy, &run.CreatedAt, &run.UpdatedAt)
 	})
 }
 func (r *PGRepository) UpdateRunStatus(ctx context.Context, orgID, id, status string, finished *time.Time, ctxm JSONMap) (*Run, error) {
@@ -299,6 +303,19 @@ func (r *PGRepository) UpdateRunStatus(ctx context.Context, orgID, id, status st
 		return err
 	})
 	return run, err
+}
+func (r *PGRepository) RecordAttempt(ctx context.Context, orgID, id string, a RunAttempt) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, "UPDATE workflow_run SET attempts=$3, next_attempt_at=$4, last_error=NULLIF($5,''), updated_at=now() WHERE organization_id=$1 AND id=$2",
+			orgID, id, a.Attempts, a.NextAttemptAt, a.LastError)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrRunNotFound
+		}
+		return nil
+	})
 }
 func (r *PGRepository) AppendStep(ctx context.Context, s *Step) error {
 	return database.WithRequestTenant(ctx, r.pool, s.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
@@ -395,9 +412,14 @@ func scanVersion(s scanner) (*DefinitionVersion, error) {
 func scanRun(s scanner) (*Run, error) {
 	r := &Run{}
 	var ctxb []byte
-	var fin sql.NullTime
-	if err := s.Scan(&r.ID, &r.OrganizationID, &r.WorkflowID, &r.DefinitionVersionID, &r.Status, &r.Trigger, &ctxb, &r.StartedAt, &fin, &r.CreatedAt, &r.UpdatedAt); err != nil {
+	var fin, next sql.NullTime
+	if err := s.Scan(&r.ID, &r.OrganizationID, &r.WorkflowID, &r.DefinitionVersionID, &r.Status, &r.Trigger, &ctxb, &r.StartedAt, &fin,
+		&r.Attempts, &next, &r.LastError, &r.InitiatedBy, &r.CreatedAt, &r.UpdatedAt); err != nil {
 		return nil, err
+	}
+	if next.Valid {
+		v := next.Time.UTC()
+		r.NextAttemptAt = &v
 	}
 	r.Context = asMap(ctxb)
 	if fin.Valid {

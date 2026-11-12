@@ -10,6 +10,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -40,6 +41,23 @@ type Executor struct {
 	dispatcher *webhook.Dispatcher
 	guard      *override.Guard
 	conflicts  ConflictReviews
+	queue      RunQueue
+	// afterStep is a test hook called after each succeeded step; an error
+	// ends the attempt there like a worker that dies.
+	afterStep func(index int) error
+}
+
+// RunQueue submits the job workflow.run (jobs.Queue).
+type RunQueue interface {
+	Submit(ctx context.Context, orgID, kind string, params any, opts jobs.EnqueueOptions) (*jobs.Job, bool, error)
+}
+
+// WithQueue makes Execute submit the run as the job workflow.run instead
+// of executing it in the request (WFL-02, WP-1088, E-226): Execute
+// returns the run pending, the worker executes it with retries.
+func (e *Executor) WithQueue(q RunQueue) *Executor {
+	e.queue = q
+	return e
 }
 
 // ConflictReviews opens the override_conflict review of a field
@@ -98,7 +116,8 @@ func (e *Executor) Start(ctx context.Context, orgID string, def *Definition, tri
 		}
 		versionID = stored.CurrentVersionID
 	}
-	run := &Run{OrganizationID: orgID, WorkflowID: def.ID, DefinitionVersionID: versionID, Status: StatusPending, Trigger: trigger, Context: payload, StartedAt: time.Now().UTC()}
+	run := &Run{OrganizationID: orgID, WorkflowID: def.ID, DefinitionVersionID: versionID, Status: StatusPending, Trigger: trigger, Context: payload,
+		StartedAt: time.Now().UTC(), InitiatedBy: tenant.FromContext(ctx).UserID}
 	if err := e.repo.CreateRun(ctx, run); err != nil {
 		return nil, err
 	}
@@ -109,7 +128,17 @@ func (e *Executor) Start(ctx context.Context, orgID string, def *Definition, tri
 // actions of the version the run is bound to, not those of def, which may
 // have changed since (WFL-02, E-228).
 func (e *Executor) Execute(ctx context.Context, orgID string, _ *Definition, run *Run) (*Run, error) {
-	return e.resume(ctx, orgID, run)
+	if e.queue == nil {
+		// Without a job queue (--no-db, tests without NATS) the run is
+		// executed in the request, as before (parity).
+		return e.resume(ctx, orgID, run, attempt{})
+	}
+	if _, _, err := e.queue.Submit(ctx, orgID, RunJobKind, RunJobParams{RunID: run.ID},
+		jobs.EnqueueOptions{IdempotencyKey: RunJobKey(run.ID), CreatedBy: run.InitiatedBy}); err != nil {
+		e.failRun(ctx, orgID, run, err)
+		return nil, fmt.Errorf("queue workflow run: %w", err)
+	}
+	return run, nil
 }
 
 // TriggerMatches reports whether event starts runs of def under the rule of
@@ -155,22 +184,26 @@ func (e *Executor) Approve(ctx context.Context, orgID, runID, decision, comment 
 	if _, err := e.repo.UpdateStep(ctx, orgID, waiting.ID, StatusSucceeded, out, ""); err != nil {
 		return nil, fmt.Errorf("complete approval step: %w", err)
 	}
-	return e.resume(ctx, orgID, run)
+	return e.resume(ctx, orgID, run, attempt{})
 }
 
-// resume executes the actions of the run's definition version from the
-// first one without a step: a waiting run keeps the version it started
-// with, whatever the definition says now (WFL-02).
-func (e *Executor) resume(ctx context.Context, orgID string, run *Run) (*Run, error) {
+// resume executes the actions of the run's definition version (WFL-02): a
+// waiting run keeps the version it started with, whatever the definition
+// says now. Steps are idempotent by (run_id, step_index) (WP-1088): a
+// succeeded step is never executed again; a step still running from an
+// interrupted attempt is repeated only when its action is idempotent
+// (idempotentActions), otherwise it fails with stepInterruptedText and so
+// does the run; a step that failed in an earlier attempt of the job is set
+// back to running and executed again. at is the job attempt that executes
+// the run; its zero value is the run in the request, which is not retried.
+func (e *Executor) resume(ctx context.Context, orgID string, run *Run, at attempt) (*Run, error) {
 	def, err := e.repo.GetVersionByID(ctx, orgID, run.DefinitionVersionID)
 	if err != nil {
-		e.failRun(ctx, orgID, run, fmt.Errorf("load workflow definition version: %w", err))
-		return nil, fmt.Errorf("load workflow definition version: %w", err)
+		return e.abort(ctx, orgID, run, at, fmt.Errorf("load workflow definition version: %w", err))
 	}
 	hold, err := conditionsHold(def.Conditions, run.Context)
 	if err != nil {
-		e.failRun(ctx, orgID, run, err)
-		return nil, err
+		return e.abort(ctx, orgID, run, at, err)
 	}
 	if !hold {
 		now := time.Now().UTC()
@@ -181,42 +214,125 @@ func (e *Executor) resume(ctx context.Context, orgID string, run *Run) (*Run, er
 	}
 	steps, err := e.repo.ListSteps(ctx, orgID, run.ID)
 	if err != nil {
-		e.failRun(ctx, orgID, run, fmt.Errorf("list workflow steps: %w", err))
-		return nil, fmt.Errorf("list workflow steps: %w", err)
+		return e.abort(ctx, orgID, run, at, fmt.Errorf("list workflow steps: %w", err))
 	}
-	start := len(steps)
-	for i := start; i < len(def.Actions); i++ {
+	stored := make(map[int]Step, len(steps))
+	for i := range steps {
+		stored[steps[i].StepIndex] = steps[i]
+	}
+	for i := range def.Actions {
 		action := def.Actions[i]
 		typ, err := actionType(action)
 		if err != nil {
-			e.failRun(ctx, orgID, run, err)
-			return nil, err
+			return e.abort(ctx, orgID, run, at, err)
 		}
-		step := &Step{OrganizationID: orgID, RunID: run.ID, StepIndex: i, ActionType: typ, Status: StatusRunning, Input: action, Output: JSONMap{}}
-		if appendErr := e.repo.AppendStep(ctx, step); appendErr != nil {
-			return nil, appendErr
+		if prev, ok := stored[i]; ok && prev.Status == StatusSucceeded {
+			continue
 		}
-		out, wait, err := e.executeAction(ctx, orgID, run, action)
+		step, end, out, err := e.prepareStep(ctx, orgID, run, at, i, typ, action, stored)
+		if err != nil || end {
+			return out, err
+		}
+		output, wait, err := e.executeAction(ctx, orgID, run, action)
 		if wait {
-			if _, markErr := e.repo.UpdateStep(ctx, orgID, step.ID, StatusWaitingApproval, out, ""); markErr != nil {
+			if _, markErr := e.repo.UpdateStep(ctx, orgID, step.ID, StatusWaitingApproval, output, ""); markErr != nil {
 				slog.Error("workflow: failed to mark step waiting for approval", "step_id", step.ID, "error", markErr)
 			}
 			return e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusWaitingApproval, nil, run.Context)
 		}
 		if err != nil {
-			if _, uerr := e.repo.UpdateStep(ctx, orgID, step.ID, StatusFailed, out, stepErrorText(step.ID, err)); uerr != nil {
+			text := stepErrorText(step.ID, err)
+			if _, uerr := e.repo.UpdateStep(ctx, orgID, step.ID, StatusFailed, output, text); uerr != nil {
 				slog.Error("workflow: failed to mark step failed", "step_id", step.ID, "error", uerr)
 			}
-			now := time.Now().UTC()
-			return e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusFailed, &now, run.Context)
+			return e.failAttempt(ctx, orgID, run, at, text)
 		}
-		if _, err := e.repo.UpdateStep(ctx, orgID, step.ID, StatusSucceeded, out, ""); err != nil {
-			e.failRun(ctx, orgID, run, fmt.Errorf("update step %s: %w", step.ID, err))
-			return nil, fmt.Errorf("update workflow step: %w", err)
+		if _, err := e.repo.UpdateStep(ctx, orgID, step.ID, StatusSucceeded, output, ""); err != nil {
+			return e.abort(ctx, orgID, run, at, fmt.Errorf("update workflow step: %w", err))
+		}
+		if e.afterStep != nil {
+			// Test hook: the attempt ends after step i like a worker that
+			// dies (WP-1088).
+			if herr := e.afterStep(i); herr != nil {
+				return nil, herr
+			}
 		}
 	}
 	now := time.Now().UTC()
 	return e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusSucceeded, &now, run.Context)
+}
+
+// prepareStep returns the step that executes action i, which has not
+// succeeded: a new one, or the stored one of an earlier attempt set back
+// to running. end reports that resume ends here with out and err: the
+// step still waits for its approval, was cancelled or was interrupted.
+func (e *Executor) prepareStep(ctx context.Context, orgID string, run *Run, at attempt, i int, typ string, action JSONMap, stored map[int]Step) (*Step, bool, *Run, error) {
+	prev, ok := stored[i]
+	if !ok {
+		step := &Step{OrganizationID: orgID, RunID: run.ID, StepIndex: i, ActionType: typ, Status: StatusRunning, Input: action, Output: JSONMap{}}
+		if err := e.repo.AppendStep(ctx, step); err != nil {
+			return nil, true, nil, err
+		}
+		return step, false, nil, nil
+	}
+	switch prev.Status {
+	case StatusWaitingApproval:
+		r, err := e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusWaitingApproval, nil, run.Context)
+		return nil, true, r, err
+	case StatusCancelled:
+		now := time.Now().UTC()
+		r, err := e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusCancelled, &now, run.Context)
+		return nil, true, r, err
+	case StatusRunning:
+		if !idempotentActions[prev.ActionType] {
+			// Whether the action took effect before the interruption is
+			// unknown: it is not repeated, the run fails for good.
+			if _, err := e.repo.UpdateStep(ctx, orgID, prev.ID, StatusFailed, prev.Output, stepInterruptedText); err != nil {
+				slog.Error("workflow: failed to mark interrupted step failed", "step_id", prev.ID, "error", err)
+			}
+			r, err := e.finishFailed(ctx, orgID, run, at, stepInterruptedText)
+			return nil, true, r, err
+		}
+	default:
+		// failed in an earlier attempt of the job: executed again.
+		if _, err := e.repo.UpdateStep(ctx, orgID, prev.ID, StatusRunning, JSONMap{}, ""); err != nil {
+			return nil, true, nil, fmt.Errorf("reset workflow step: %w", err)
+		}
+	}
+	step := prev
+	step.Status = StatusRunning
+	return &step, false, nil, nil
+}
+
+// failAttempt ends an attempt whose step failed with text: the job retries
+// it while attempts remain (the run stays running, last_error and
+// next_attempt_at are recorded, RunRetryError tells the job), otherwise
+// the run fails for good (in a job with RunFailedError).
+func (e *Executor) failAttempt(ctx context.Context, orgID string, run *Run, at attempt, text string) (*Run, error) {
+	if at.retries() {
+		next := time.Now().UTC().Add(at.backoff(at.number))
+		if err := e.repo.RecordAttempt(ctx, orgID, run.ID, RunAttempt{Attempts: at.number, NextAttemptAt: &next, LastError: text}); err != nil {
+			slog.Error("workflow: failed to record the attempt", "run_id", run.ID, "error", err)
+		}
+		return nil, &RunRetryError{Text: text}
+	}
+	r, err := e.finishFailed(ctx, orgID, run, at, text)
+	if err != nil || !at.job {
+		return r, err
+	}
+	// The last attempt of the job: the job fails as well.
+	return r, &RunFailedError{Text: text}
+}
+
+// finishFailed marks the run failed for good with last_error text.
+func (e *Executor) finishFailed(ctx context.Context, orgID string, run *Run, at attempt, text string) (*Run, error) {
+	if at.job {
+		if err := e.repo.RecordAttempt(ctx, orgID, run.ID, RunAttempt{Attempts: at.number, LastError: text}); err != nil {
+			slog.Error("workflow: failed to record the attempt", "run_id", run.ID, "error", err)
+		}
+	}
+	now := time.Now().UTC()
+	return e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusFailed, &now, run.Context)
 }
 
 // stepErrorText is the error text a failed step stores, which the run API
@@ -233,6 +349,85 @@ func stepErrorText(stepID string, err error) string {
 		return detail
 	}
 	return "the action could not be completed"
+}
+
+// abort ends resume on an error that is not a failed step. In the request
+// (no job) the run fails at once, as before. In a job the run is left as it
+// is: Worker.Run decides with endAttempt whether the job retries the run or
+// it fails for good, so a passing database error does not end a run that
+// has attempts left.
+func (e *Executor) abort(ctx context.Context, orgID string, run *Run, at attempt, cause error) (*Run, error) {
+	if !at.job {
+		e.failRun(ctx, orgID, run, cause)
+	}
+	return nil, cause
+}
+
+// runInterruptedText is the last_error of an attempt that ended with an
+// error that is neither a failed step nor one of the workflow's own: its
+// text (network, database, timeout) is logged, not shown.
+const runInterruptedText = "the run could not be continued"
+
+// runLostText is the last_error of a run whose job failed for good without
+// the worker closing the run (the worker of the last attempt was lost or
+// timed out).
+const runLostText = "the run was interrupted on its last attempt"
+
+// permanentRunError reports whether err fails the run whatever attempts
+// remain: a stored condition or action that is invalid, or a version that
+// is gone, do not heal by a retry.
+func permanentRunError(err error) bool {
+	return errors.Is(err, errConditionInvalid) || errors.Is(err, ErrInvalidAction) || errors.Is(err, ErrVersionNotFound)
+}
+
+// runErrorText is the sanitized last_error of an attempt that ended with
+// err outside a step (AK5): the workflow's own errors keep their fixed
+// text, a database error its classification (stepErrorText), any other
+// error the fixed runInterruptedText.
+func runErrorText(err error) string {
+	for _, known := range []error{errConditionInvalid, ErrInvalidAction, ErrVersionNotFound} {
+		if errors.Is(err, known) {
+			return known.Error()
+		}
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return stepErrorText("", err)
+	}
+	slog.Warn("workflow: attempt ended with an error", "error", err)
+	return runInterruptedText
+}
+
+// endAttempt decides about a job attempt that ended with err (WP-1088
+// AK3/AK5). RunRetryError and RunFailedError were decided by failAttempt.
+// Any other error is no failed step: a database or worker error, also the
+// timeout of the attempt, is retried while attempts remain with the
+// sanitized text in last_error; a permanent error (permanentRunError) and
+// the last attempt fail the run for good (RunFailedError). The writes use
+// a context without the attempt's deadline, so a timed-out attempt still
+// closes its run.
+func (e *Executor) endAttempt(ctx context.Context, orgID string, run *Run, at attempt, err error) error {
+	var retry *RunRetryError
+	var failed *RunFailedError
+	if errors.As(err, &retry) || errors.As(err, &failed) {
+		return err
+	}
+	text := runErrorText(err)
+	ctx = context.WithoutCancel(ctx)
+	if at.retries() && !permanentRunError(err) {
+		next := time.Now().UTC().Add(at.backoff(at.number))
+		if rerr := e.repo.RecordAttempt(ctx, orgID, run.ID, RunAttempt{Attempts: at.number, NextAttemptAt: &next, LastError: text}); rerr != nil {
+			slog.Error("workflow: failed to record the attempt", "run_id", run.ID, "error", rerr)
+		}
+		return &RunRetryError{Text: text}
+	}
+	if _, ferr := e.finishFailed(ctx, orgID, run, at, text); ferr != nil {
+		// The run stays open; the job fails or retries with this error,
+		// and Worker.JobFailed closes the run once the job failed for good.
+		slog.Error("workflow: failed to mark run failed", "run_id", run.ID, "error", ferr)
+		return &RunRetryError{Text: text}
+	}
+	return &RunFailedError{Text: text}
 }
 
 // failRun best-effort marks the run failed; the original error is returned to
