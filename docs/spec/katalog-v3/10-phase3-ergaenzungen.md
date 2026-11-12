@@ -184,7 +184,7 @@ CRD-07 [P3] Oberfläche: CI-Detail „Zugangsdaten“ mit Auswahl gerätespezifi
 
 ADMP (ADM, Anschlussdaten, nur lesend)
 
-Die konkreten ADMP-Endpunkte (ADM-04 bis ADM-07) werden erst nach Vorlage der ADMP-API-Dokumentation durch den Auftraggeber festgelegt; bis dahin werden keine Endpunkte angenommen.
+Die konkreten ADMP-Endpunkte (ADM-04 bis ADM-07) werden erst nach Vorlage der ADMP-API-Dokumentation durch den Auftraggeber festgelegt; bis dahin werden keine Endpunkte angenommen. Stand 2026-11-12: Die Dokumentation liegt vor (`docs/plan/phase3/ADMP-API`, OpenAPI 3.1.0, ADMP API 9.14.0). Die verwendeten Endpunkte, die Anmeldung (`POST /V1/user/authentication`, Cookie `AuthToken`) und die Feldabbildung legt `docs/plan/phase3/implementierungsplan.md`, Meilenstein M3.14 (WP-1073 bis WP-1078), fest, die Auslegung `docs/plan/phase3/entscheidungen.md` E-248 bis E-255. Was die Dokumentation offenlässt, ist dort Aufgabe A-86.
 
 ADM-01 [P3] admp_account(org, client nullable, name, base_url, credential_id, rate_limit_rps, timeout_ms, enabled, last_ok_at, last_error_class); CRUD /api/v1/admp/accounts mit admp:manage. Die Zugangsdaten liegen ausschließlich als credential nach CRD-02 vor (stored mit Envelope-Verschlüsselung nach COL-02 oder vault_ref), nie im Konto selbst; keine Antwort, kein Log und kein Audit-Eintrag enthält sie.
 

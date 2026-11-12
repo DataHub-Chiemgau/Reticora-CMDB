@@ -1,12 +1,12 @@
 # Entscheidungen – Phase 3 (Monitoring, Netz und Automation, G3)
 
-Stand: 2026-11-09 (Grundlage main `6d019370`; Anforderungen des Auftraggebers vom 2026-11-09). Gehört zu [`implementierungsplan.md`](implementierungsplan.md) und [`abdeckung.csv`](abdeckung.csv) und setzt [`../entscheidungen.md`](../entscheidungen.md) (Phase 1), [`../g1-korrektur/entscheidungen.md`](../g1-korrektur/entscheidungen.md) (Korrekturplan) und [`../phase2/entscheidungen.md`](../phase2/entscheidungen.md) (Phase 2) fort. Die Empfehlung ist ein Vorschlag des Plans und keine neue Anforderung.
+Stand: 2026-11-12 (Grundlage main `6d019370`; Anforderungen des Auftraggebers vom 2026-11-09; ADMP-API-Doku `docs/plan/phase3/ADMP-API` 9.14.0 vom 2026-11-12). Gehört zu [`implementierungsplan.md`](implementierungsplan.md) und [`abdeckung.csv`](abdeckung.csv) und setzt [`../entscheidungen.md`](../entscheidungen.md) (Phase 1), [`../g1-korrektur/entscheidungen.md`](../g1-korrektur/entscheidungen.md) (Korrekturplan) und [`../phase2/entscheidungen.md`](../phase2/entscheidungen.md) (Phase 2) fort. Die Empfehlung ist ein Vorschlag des Plans und keine neue Anforderung.
 
 **Geltung der früheren Entscheidungen:** Alle Entscheidungen der Phase 1, des Korrekturplans und der Phase 2 sind entschieden (Beschluss des Auftraggebers vom 2026-10-28) und gelten in Phase 3 unverändert weiter. Diese Datei ändert keine von ihnen. Wo eine Phase-3-Entscheidung eine frühere ergänzt oder einschränkt (zum Beispiel [E-34](../entscheidungen.md#e-34) durch [E-151](#e-151) und [E-153](#e-153), [E-44](../phase2/entscheidungen.md#e-44) durch [E-153](#e-153) und [E-157](#e-157)), nennt sie die frühere ausdrücklich; ohne diese Nennung gilt die frühere Festlegung. Zitiert wird mit relativem Link, der Korrekturplan mit dem Zusatz „(Korrekturplan)“, zum Beispiel [E-59](../g1-korrektur/entscheidungen.md#e-59) (Korrekturplan). Alle Aufgaben A-01 bis A-53 sind erledigt (A-28 am 2026-11-09 mit WP-832).
 
-**Nummern:** E-Nummern sind über alle vier Entscheidungsdateien eindeutig. Phase 1 belegt E-01 bis E-36 und E-56 bis E-58, der Korrekturplan E-59 bis E-102 und E-144, Phase 2 E-37 bis E-55, E-103 bis E-143 und E-145 bis E-147. Diese Datei führt E-148 bis E-244. A-Nummern sind über die Dateien der Phasen 1 bis 3 eindeutig: Phase 1 belegt A-01 bis A-14, Phase 2 A-15 bis A-54, diese Datei A-55 bis A-84. Neue Entscheidungen erhalten die nächste freie Nummer über alle vier Dateien, neue Aufgaben die nächste freie Nummer über die Dateien der Phasen 1 bis 3 (Stand dieser Fassung: **E-248** und **A-86**; E-245 und E-246 vom 2026-11-10 nach Empfehlung, E-247 vom 2026-11-12 durch den Auftraggeber, A-85 offen). **Nachtrag vom 2026-11-10:** Phase 2 hat am 2026-11-09 E-146, E-147 und A-54 selbst vergeben. Die Nummern dieser Datei sind deshalb um zwei (E) bzw. eins (A) verschoben; Inhalt und Status bleiben gleich.
+**Nummern:** E-Nummern sind über alle vier Entscheidungsdateien eindeutig. Phase 1 belegt E-01 bis E-36 und E-56 bis E-58, der Korrekturplan E-59 bis E-102 und E-144, Phase 2 E-37 bis E-55, E-103 bis E-143 und E-145 bis E-147. Diese Datei führt E-148 bis E-255. A-Nummern sind über die Dateien der Phasen 1 bis 3 eindeutig: Phase 1 belegt A-01 bis A-14, Phase 2 A-15 bis A-54, diese Datei A-55 bis A-86. Neue Entscheidungen erhalten die nächste freie Nummer über alle vier Dateien, neue Aufgaben die nächste freie Nummer über die Dateien der Phasen 1 bis 3 (Stand dieser Fassung: **E-256** und **A-87**; E-245 und E-246 vom 2026-11-10 nach Empfehlung, E-247 vom 2026-11-12 durch den Auftraggeber, E-248 bis E-255 vom 2026-11-12 nach Empfehlung (ADMP-API-Doku), A-85 und A-86 offen). **Nachtrag vom 2026-11-10:** Phase 2 hat am 2026-11-09 E-146, E-147 und A-54 selbst vergeben. Die Nummern dieser Datei sind deshalb um zwei (E) bzw. eins (A) verschoben; Inhalt und Status bleiben gleich.
 
-**Status:** Alle Entscheidungen dieser Datei sind am 2026-11-09 entschieden. Jede nennt Schlüssel, Status, Kontext, Optionen, Empfehlung, Auswirkung, Quelle sowie betroffene IDs und WPs. Die WP-Blöcke des Plans nennen den Status im Feld „Entscheidungsbedarf“.
+**Status:** Alle Entscheidungen dieser Datei sind entschieden, E-148 bis E-244 am 2026-11-09, die späteren an dem Datum in ihrem Statusfeld. Jede nennt Schlüssel, Status, Kontext, Optionen, Empfehlung, Auswirkung, Quelle sowie betroffene IDs und WPs. Die WP-Blöcke des Plans nennen den Status im Feld „Entscheidungsbedarf“.
 
 **Beschluss des Auftraggebers vom 2026-11-09:**
 
@@ -16,6 +16,8 @@ Stand: 2026-11-09 (Grundlage main `6d019370`; Anforderungen des Auftraggebers vo
 4. Die Datenhaltung folgt der fachlich sinnvollsten Lösung, [E-172](#e-172) Option 1.
 5. Die ADMP-API-Dokumentation wird nachgeliefert. A-55 bleibt offen, bis dahin gilt A-84.
 6. Fehlt eine Entscheidung, gilt immer die Empfehlung. Alle übrigen Entscheidungen sind danach entschieden; die Aufgaben sind im Abschnitt „Aufgaben“ entsprechend erledigt.
+
+**Nachtrag vom 2026-11-12 (zu Punkt 5):** Die ADMP-API-Dokumentation liegt vor (`docs/plan/phase3/ADMP-API`, OpenAPI 3.1.0, „ADMP API“ 9.14.0). A-55 ist damit erledigt, A-84 gilt nur noch als Rückfallregel, falls M3.14 bis zum Gate nicht abgeschlossen ist. Die Auslegungsfragen der Doku sind als [E-248](#e-248) bis [E-255](#e-255) nach Empfehlung entschieden (Punkt 6). Fachfragen, die nur der Auftraggeber bzw. der ADMP-Betreiber beantworten kann, bündelt [A-86](#aufgaben); bis zur Antwort gelten die Empfehlungen. Vorgabe des Auftraggebers zur Anbindung: strikt nur lesend; der Client kennt ausschließlich die GET-Endpunkte und die Anmeldung; ein Test stellt sicher, dass POST, PATCH und DELETE technisch nicht erreichbar sind ([E-248](#e-248)).
 
 ## Aufgaben
 
@@ -28,8 +30,8 @@ Die Frist bezieht sich auf den Meilenstein des ersten betroffenen WPs. Eine übe
 
 | Nr. | Entscheidung | Gegenstand | Verantwortlich | Blockierte WPs | Frist | Status |
 |---|---|---|---|---|---|---|
-| A-55 | [E-222](#e-222), [E-224](#e-224), [E-225](#e-225) | **ADMP-API-Dokumentation liefern.** System (Betreiber, Produkt, Version); Anmeldeverfahren (OAuth2 Client Credentials, Basic, API-Key oder mTLS) mit Methode und URL der Anmeldung; die GET-Endpunkte für Dienst ↔ Port, Diensteigenschaften, Anschluss und Anschlussinhaber mit Feldern; Ratenlimits, Paginierung, Fehlercodes; Merkmale, die einen Port eindeutig bezeichnen (Gerätename, Portbezeichnung, Line-ID, Zugangsnummer); fachliche Bedeutung von „Anschluss“ und sein Schlüssel zu den Topologie-CIs (Port-ID, Line-ID oder Vertrags-ID). Bis zur Lieferung bleiben die ADMP-Pfade auf `x-status: planned`, und das Gerüst aus M3.5 läuft gegen die Fake-Quelle aus WP-929. | Auftraggeber | gesperrt: WP-1073, WP-1074, WP-1075, WP-1076, WP-1077, WP-1078 (M3.14); vorläufig: WP-1176 (ABN-04-Schritt „betroffene Anschlüsse“ mit neutralem Ersatztext) | vor Beginn von M3.14 (WP-1073); spätestens vor Beginn von M3.20 (WP-1176), sonst steht ADMP in `docs/acceptance/g3-gate.md` (neu) als bekannte Einschränkung (WP-1177) | offen: Lieferung durch den Auftraggeber folgt (Beschluss vom 2026-11-09, Punkt 5); bis dahin gilt A-84 |
-| A-56 | [E-223](#e-223) | **ADMP-Zugang und Betrieb.** Ist ADMP aus dem Internet erreichbar (Abruf durch den Server) oder nur aus dem Kundennetz, über feste Quell-IP oder VPN (Abruf durch den Collector oder IP-Freigabe)? Gibt es ein Konto je Reticora-Organisation oder je Endkunde? Gibt es eine Testumgebung mit Testzugang für den Vertragstest? | Auftraggeber | vorläufig: WP-925, WP-926; gesperrt: Smoke-Test gegen die Testumgebung in WP-1077 | vor Beginn von M3.5 (WP-925); Testzugang vor Beginn von M3.14 (WP-1077) | teilweise erledigt (2026-11-09): Empfehlung gilt für WP-925 und WP-926; offen ist nur der Testzugang für den Smoke-Test in WP-1077, er kommt mit A-55 |
+| A-55 | [E-222](#e-222), [E-224](#e-224), [E-225](#e-225) | **ADMP-API-Dokumentation liefern.** System (Betreiber, Produkt, Version); Anmeldeverfahren (OAuth2 Client Credentials, Basic, API-Key oder mTLS) mit Methode und URL der Anmeldung; die GET-Endpunkte für Dienst ↔ Port, Diensteigenschaften, Anschluss und Anschlussinhaber mit Feldern; Ratenlimits, Paginierung, Fehlercodes; Merkmale, die einen Port eindeutig bezeichnen (Gerätename, Portbezeichnung, Line-ID, Zugangsnummer); fachliche Bedeutung von „Anschluss“ und sein Schlüssel zu den Topologie-CIs (Port-ID, Line-ID oder Vertrags-ID). Bis zur Lieferung bleiben die ADMP-Pfade auf `x-status: planned`, und das Gerüst aus M3.5 läuft gegen die Fake-Quelle aus WP-929. | Auftraggeber | gesperrt: WP-1073, WP-1074, WP-1075, WP-1076, WP-1077, WP-1078 (M3.14); vorläufig: WP-1176 (ABN-04-Schritt „betroffene Anschlüsse“ mit neutralem Ersatztext) | vor Beginn von M3.14 (WP-1073); spätestens vor Beginn von M3.20 (WP-1176), sonst steht ADMP in `docs/acceptance/g3-gate.md` (neu) als bekannte Einschränkung (WP-1177) | erledigt (2026-11-12): geliefert als `docs/plan/phase3/ADMP-API` (OpenAPI 3.1.0, ADMP API 9.14.0); Auslegung in [E-248](#e-248) bis [E-255](#e-255), M3.14 konkretisiert. Nicht in der Doku enthalten und offen als A-86: Ratenlimits, Fehlercodes außer 404, Token-Laufzeit, Antwortschemas von `accessnodepicker` und `dienstIds`, Port-Benennung, fachliche Bedeutung von „Anschluss“ über die Schemas hinaus |
+| A-56 | [E-223](#e-223) | **ADMP-Zugang und Betrieb.** Ist ADMP aus dem Internet erreichbar (Abruf durch den Server) oder nur aus dem Kundennetz, über feste Quell-IP oder VPN (Abruf durch den Collector oder IP-Freigabe)? Gibt es ein Konto je Reticora-Organisation oder je Endkunde? Gibt es eine Testumgebung mit Testzugang für den Vertragstest? | Auftraggeber | vorläufig: WP-925, WP-926; gesperrt: Smoke-Test gegen die Testumgebung in WP-1077 | vor Beginn von M3.5 (WP-925); Testzugang vor Beginn von M3.14 (WP-1077) | teilweise erledigt (2026-11-09): Empfehlung gilt für WP-925 und WP-926; offen ist nur der Testzugang für den Smoke-Test in WP-1077. Nachtrag 2026-11-12: Die Doku (A-55) enthält weder Basis-URL (`servers`) noch Testzugang; beides bleibt offen |
 | A-57 | [E-243](#e-243) | **ADMP-Datenschutz.** Aufbewahrungsdauer für Anschlussinhaber und Anschlussadresse im Zwischenspeicher (Vorschlag 30 Tage); gilt die Adresse eines Geschäftsanschlusses als personenbezogen; wer darf den Inhaber sehen (Vorschlag: nur mit `admp:holder_read`); dürfen Inhaber in Benachrichtigungen und Webhooks erscheinen oder nur in der Störungsansicht; ist der AVV mit dem ADMP-Betreiber geschlossen. | Auftraggeber/Datenschutz | vorläufig: WP-928, WP-930, WP-1044; gesperrt: WP-1075, WP-1076 (zusätzlich zu A-55) | vor Beginn von M3.5 (WP-928); AVV vor Beginn von M3.14 | erledigt (2026-11-09): Empfehlung von E-243 gilt (Punkt 6); WP-1075 und WP-1076 warten nur noch auf A-55 |
 | A-58 | [E-151](#e-151) | **Paketmatrix der Phase 3 bestätigen (ENT-06, PKG-08).** Monitoring nur in Pro/Enterprise (`backend/internal/entitlement/entitlement.go:172`) oder schon ab Essential bzw. Standard (Ping-Monitoring); ADMP als Add-on oder Paketbestandteil; Probetypen je Paket; Paketzuordnung von Alarmierung, Root-Cause-Korrelation und Handlungsempfehlung, SLA-Monitoring, Konfigurationsänderungserkennung und Kapazitätsprognose (Paket oder Add-on); Paketzuordnung der IPAM-Erweiterungen unter dem bestehenden Merkmal `ipam` (Empfehlung: ab Standard, kein eigener Schlüssel), IPAM-Grundfunktion weiter in allen Paketen; Workflows in Standard oder erst ab Pro. | Auftraggeber/Vertrieb | vorläufig: WP-862, WP-865, WP-870, WP-883, WP-886, WP-915, WP-1062, WP-1160 | vor dem Merge von WP-862 (M3.0) | erledigt (2026-11-09): Monitoring ab Standard mit den Kernfunktionen, erweiterte Funktionen ab Pro bzw. Enterprise (Beschluss Punkt 2, siehe E-151) |
 | A-59 | [E-153](#e-153), [E-154](#e-154) | **Kontingente und Limits je Paket und Probetyp.** Werte `max_monitored_targets`, `max_probes_per_minute` und `min_probe_interval_s` je Paket; Standardlimits `max_cis`, `max_collectors`, `max_users` aus ENT-06 für Bestandskunden; Systemgrenzen je Probetyp (Vorschlag ICMP-Mindestintervall 10 s, PON 120 s, TR-069 300 s; Timeout-Obergrenze, Parallelität und Rate je Collector, Vorschlagswerte in `docs/betrieb/monitoring-probes.md` (Typtabelle aus WP-934)) und ob Pakete sie weiter einschränken; Vorgaben aus Netzbetrieb oder Herstellern (Rate-Limits für SNMP/gNMI auf Routern); Workflow-Limits nach WFL-08 (aktive Definitionen, Runs je Stunde) für Pro und Enterprise. | Auftraggeber/Vertrieb, Netzbetrieb | vorläufig: WP-881, WP-885, WP-940, WP-969, WP-1022, WP-1023, WP-1112 | vor Beginn von M3.2 (WP-881); Typgrenzen vor Beginn von M3.6 (WP-940); Workflow-Limits vor Beginn von M3.16 (WP-1112) | erledigt (2026-11-09): Empfehlung der genannten Entscheidungen gilt (Beschluss des Auftraggebers vom 2026-11-09, Punkt 6) |
@@ -59,6 +61,7 @@ Die Frist bezieht sich auf den Meilenstein des ersten betroffenen WPs. Eine übe
 | A-83 | [E-169](#e-169) | **Abnahmeszenario ABN-04 bestätigen.** Referenztopologie, erwartete Handlungsempfehlungen und Akzeptanzschwellen (z. B. Zeit bis zum Root-Cause-Alarm). | Auftraggeber/Netzbetrieb | vorläufig: WP-1161, WP-1176, WP-1177 | vor Beginn von M3.20 (WP-1161) | erledigt (2026-11-09): Empfehlung der genannten Entscheidungen gilt (Beschluss des Auftraggebers vom 2026-11-09, Punkt 6) |
 | A-84 | [E-169](#e-169), [E-223](#e-223) | **G3 ohne ADMP-API-Dokumentation.** Ist G3 bestanden, wenn A-55 bis zum Gate nicht erledigt ist (ADMP-Endpunkte WP-1073–WP-1078 als bekannte Einschränkung nach GATE-02 bzw. Eintrag in `docs/acceptance/g3-ausnahmen.csv` (neu, analog `docs/acceptance/g1-ausnahmen.csv`)), und darf WP-1159 SEC-05 dann ohne WP-1076 schließen? Bis zur Antwort gilt: G3 ist nicht blockiert, die ADMP-Endpunkte stehen als bekannte Einschränkung, WP-1159 schließt SEC-05 und WP-1076 bleibt Teil. | Auftraggeber | vorläufig: WP-1159, WP-1166, WP-1176, WP-1177 | vor Beginn von M3.19 (WP-1159) | erledigt (2026-11-09): Empfehlung gilt (Punkt 5 und 6); G3 kann ohne ADMP-Endpunkte bestehen, M3.14 folgt nach Lieferung von A-55 |
 | A-85 | [E-246](#e-246) | **Risikoakzeptanz für Critical-Befunde in Fremdimages ohne Hersteller-Fix.** Der Scan aller Fremdimages (WP-873, SR-60) findet Critical-Befunde in `pgsty/minio` (amqp091-go, 3×), `opensearchproject/opensearch` (Bouncy Castle, 2×) und `postgres:16.15-alpine` von keycloak-db (Go-Standardbibliothek in `gosu`, 1×; eine Umstellung auf das eigene Postgres-Image braucht Install- und Upgrade-Tests mit lauffähiger CI, Nachtrag 2026-11-10), für die es am 2026-11-10 kein neueres Image gibt. Ihre Ausnahmen in `security/scan-exceptions-thirdparty.txt` enden nach SEC-11 am 2026-11-17 und lassen sich nicht verlängern. Darf der Betrieb diese Images über die SLA hinaus mit den kompensierenden Maßnahmen (MinIO nur über den Lese-Proxy, OpenSearch optional und nur intern) weiterführen, bis der Hersteller liefert, oder sollen sie ersetzt werden (externer S3-Speicher, PostgreSQL-Suche als einziges Such-Backend)? Bis zur Antwort gilt die Empfehlung von E-246. | Auftraggeber | vorläufig: WP-873 (Ausnahmen), Folge-WP nach E-246 | vor 2026-11-17 | offen |
+| A-86 | [E-248](#e-248), [E-250](#e-250), [E-251](#e-251), [E-252](#e-252), [E-253](#e-253), [E-254](#e-254), [E-255](#e-255) | **Offene Fachfragen zur ADMP-API-Doku 9.14.0.** (1) Antwortschema von `GET /V1/infrastructure/accessnodepicker` (Annahme: `AccessNode[]` mit `modules[].ports[]`; enthält es `password`, `iv`, `username`?) und von `GET /V1/infrastructure/port/{portId}/dienstIds` (Annahme: Array von Zahlen; Antwort bei unbekanntem Port). (2) Port-Benennung: Entspricht `AccessNode.name` dem Hostnamen des Geräts, und wie heißen Interfaces bei `KEYMILE_SSH` und `ZYXEL_SNMP` aus `unitIndex` und `portIndex` (Vorschlag: Name endet auf `<unitIndex>/<portIndex>`, ohne Versatz)? (3) Liefert `GET /V1/anschluss/{id}` die Relationen `netzbetreiber` und `inhaber` mit, und liefert `GET /V1/dienst/{id}` `template`? Wenn nicht: Aufbau von `filters` und Element-Schema der Paginatoren (die Doku nennt `ChangeLog`). (4) Einheit der Zeitwerte (`created`, `removed`, `gebucht` … `abgeschaltet`; Vorschlag: Erkennung Sekunden/Millisekunden nach Betrag) und Bedeutung von `removed`. (5) Schlüsselkatalog der Diensteigenschaften; reichen die öffentlichen (`/properties/public`) für Bandbreite, Technologie und Status? (6) Token-Laufzeit, Cookie-Attribute und Status bei falschen Zugangsdaten bzw. abgelaufenem Cookie (Vorschlag: 401); Ratenlimits je Konto. (7) Technisches ADMP-Konto nur mit GET-Rechten (prüfbar über `AuthAuthorization.method`) und Basis-URL der Instanz (die Doku hat keinen `servers`-Eintrag). Bis zur Antwort gelten die Empfehlungen der genannten Entscheidungen; der Smoke-Test von WP-1077 liefert Teilantworten zu (1), (3), (4) und (6). | Auftraggeber/ADMP-Betreiber | vorläufig: WP-1073, WP-1074, WP-1075, WP-1076, WP-1077 | (1), (2) und (7) vor dem Merge von WP-1073; (3) bis (6) vor dem Merge von WP-1077 | offen |
 <a id="e-148"></a>
 ## E-148 – Startfreigabe der Phase 3 gegenüber Gate G2
 
@@ -2580,3 +2583,179 @@ Mengengerüst (aus [E-222](#e-222)/[E-225](#e-225)): Mit gezielter Auffrischung 
 **Betroffene IDs:** IPM-02
 
 **Betroffene WPs:** WP-901 (`p3-ipam-hierarchy`)
+
+<a id="e-248"></a>
+## E-248 – Nur-Lese-Umfang des ADMP-Clients: Allowlist der Pfade, kein Logout, keine benannten Abfragen
+
+**Status:** entschieden (2026-11-12, nach Empfehlung: Option 1)
+**Kontext:** Die ADMP-API-Doku liegt vor (A-55, `docs/plan/phase3/ADMP-API`, OpenAPI 3.1.0, ADMP API 9.14.0). Sie enthält 46 Operationen: 23 GET, 10 POST, 8 PATCH und 5 DELETE. Die Vorgabe des Auftraggebers lautet: „Alles nur lesend niemals schreibend) strikt nur lesend: Der Client kennt ausschließlich die GET-Endpunkte und die Anmeldung. Ein Test stellt sicher, dass POST, PATCH und DELETE technisch nicht erreichbar sind.“ Die Anmeldung ist `POST /V1/user/authentication`. Zwei Nicht-GET-Operationen könnten als zulässig gelten. `DELETE /V1/user/authentication` beendet die Sitzung („Logout – deletes your authentication cookie“). `POST /V1/query/execute/{name}` führt eine benannte Abfrage mit freien Argumenten aus (`{argumentz: SerializeableData[]}`); welche Abfragen es gibt und ob sie schreiben, steht nicht in der Doku. Der Transport aus WP-926 lässt jeden GET unterhalb der `base_url` zu. Für ADM-04 bis ADM-07 genügen sieben GET-Pfade. Mehrere andere GETs liefern Daten ohne fachlichen Bezug: Admin-Logs, Prozess-Engine, Aktionskatalog, Berechtigungsbaum mit eingebetteten `AccessNode`-Zugangsdaten und `AuthUser`-LDAP-Daten.
+
+**Optionen:**
+
+1. Feste Allowlist im Transport: `POST /V1/user/authentication` und genau sieben GET-Pfadvorlagen (`GET /V1/user/authentication`, `/V1/infrastructure/accessnodepicker`, `/V1/infrastructure/port/{portId}/dienstIds`, `/V1/dienst/{id}`, `/V1/dienst/{id}/properties/public`, `/V1/anschluss/{id}`, `/V1/organization/byIds`). Alles andere wird vor dem Versand abgewiesen, auch Logout und `query/execute` und die 16 übrigen GETs. Folge: kleinste Angriffsfläche und Datensparsamkeit; ein neuer Endpunkt braucht einen Planeintrag und eine Erweiterung des Spec-Tests.
+2. Jeder GET unterhalb der `base_url` plus Anmeldung (Stand WP-926). Folge: erfüllt den Wortlaut, aber der Client könnte Admin-Logs, Berechtigungen und Zugangsdaten der Netzelemente lesen, ohne dass ein Test das bemerkt.
+3. Wie 2, zusätzlich Logout beim Herunterfahren und `query/execute` für lesende Abfragen. Folge: widerspricht der Vorgabe („ausschließlich die GET-Endpunkte und die Anmeldung“); der Charakter benannter Abfragen ist nicht prüfbar.
+
+**Empfehlung:** Option 1. Sie setzt die Vorgabe wörtlich um und geht beim Lesen nicht über den Bedarf hinaus. Die Sitzung endet ohne Logout, indem das Token verworfen wird ([E-250](#e-250)). `GET /V1/user/authorization` (Selbstauskunft der Rechte) bleibt ebenfalls draußen. Dass das Dienstkonto nur GET-Rechte hat, stellt der Auftraggeber sicher (A-86).
+
+**Auswirkung:** WP-1073 ergänzt den `readOnlyTransport` um die Pfad-Allowlist (`allowedGets` je Methodendatei, Fehlerklasse `path_not_allowed`) und beschränkt den `authTransport` auf `POST` an genau `base_url` + `/V1/user/authentication`; Methode und Pfad sind Konstanten in `auth.go`, `Config.AuthMethod` entfällt. WP-1074 und WP-1075 tragen ihre Pfade ein. WP-1077 prüft gegen eine Kopie der Doku, dass jede Nicht-GET-Methode auf jedem Doku-Pfad außer `POST /V1/user/authentication` (darunter die 22 tabu gesetzten Nicht-GET-Operationen und PUT) und die 16 GET außerhalb der Allowlist null Treffer am Mock erzeugen, und dass die Allowlist genau der Planliste entspricht.
+
+**Quelle:** docs/plan/phase3/ADMP-API (paths, components.securitySchemes); docs/spec/katalog-v3/10-phase3-ergaenzungen.md:191 (ADM-02, neu); Vorgabe des Auftraggebers (WP-927, Problem)
+
+**Betroffene IDs:** ADM-02, ADM-04, ADM-05, ADM-06, ADM-07
+
+**Betroffene WPs:** WP-926 (`p3-admp-client-frame`, Nachtrag), WP-927 (`p3-admp-readonly-proof`, Nachtrag), WP-1073 (`p3-admp-ep-port-service`), WP-1074 (`p3-admp-ep-service-props`), WP-1075 (`p3-admp-ep-connection`), WP-1077 (`p3-admp-contract-test`)
+
+<a id="e-249"></a>
+## E-249 – Credential für die ADMP-Anmeldung: Benutzername und Passwort
+
+**Status:** entschieden (2026-11-12, nach Empfehlung: Option 1)
+**Kontext:** `POST /V1/user/authentication` verlangt `{username: string, password: string}` (beide Pflicht, `additionalProperties: false`). Nach WP-925 und Konvention 33 referenziert ein ADMP-Konto nur ein Credential der Art `api_token` mit Quelle `stored` oder `vault_ref`; eine Art `admp` gibt es nicht. `api_token` hat als einziges Pflichtfeld `token` (`KindFields`, `backend/internal/credential/vault_ref.go:61`). `checkFieldMap` lehnt in der Tresor-Feldabbildung jedes andere Feld ab (`vault_ref.go:80–97`). Die Oberfläche kennt für `api_token` nur `token` (`frontend/src/components/discovery/CredentialsSection.tsx:100`). Ein gespeichertes `api_token` nimmt dagegen beliebige Felder an, weil `credential.Service.Create` sie nicht prüft (WP-925, Problem). Arten mit `username` und `password` gibt es (`ssh_password`, `redfish`, `ipmi`, `wmi`, `nut`, `nas`), alle für Geräteprotokolle und an die Collector-Plugins gebunden (`binding.go:53`, `collector/collectorcmd/testdata/credential-kinds.json`).
+
+**Optionen:**
+
+1. `api_token` mit dem zusätzlichen optionalen Feld `username`, `token` trägt das Passwort. `KindOptionalFields` erlaubt `username` in der `field_map`, die Oberfläche zeigt das Feld optional. Folge: keine Migration, keine neue Art, WP-925 und WP-932 bleiben gültig. Die Benennung `token` für ein Passwort ist ungenau und wird in der Oberfläche erklärt.
+2. Neue allgemeine Art `http_login` (`username`, `password`) mit Migration der CHECK `credential_kind_check`, Eintrag im Kind-Vertrag des Collectors, Oberfläche und Kontoprüfung in WP-925. Folge: sauber benannt, aber rund ein zusätzliches WP und Eingriffe in bereits gemergte bzw. laufende WPs (WP-925, WP-932).
+3. Benutzername als Spalte am Konto, Passwort als `token`. Folge: Zugangsdaten lägen teilweise im Konto; das widerspricht ADM-01 („nie im Konto selbst“).
+
+**Empfehlung:** Option 1. Sie hält die Zugangsdaten vollständig im Secret-Store (CRD-02), braucht keine Migration und keinen Neuzuschnitt. Bis WP-1078 lässt sich ein gespeichertes Credential mit `username` und `token` über die API anlegen.
+
+**Auswirkung:** WP-1073 liest im `Authenticator` `username` und `token`; fehlt eines, gilt die Fehlerklasse `credential`. WP-1078 ergänzt `KindOptionalFields` in `vault_ref.go` und das optionale Feld in `CredentialsSection`. WP-1077 nutzt für den Smoke-Test ein solches Credential. Konvention 33 bleibt bestehen (Nachtrag im Plan).
+
+**Quelle:** docs/plan/phase3/ADMP-API (`postV1UserAuthentication`); backend/internal/credential/vault_ref.go:53–64, :80–97; frontend/src/components/discovery/CredentialsSection.tsx:100
+
+**Betroffene IDs:** ADM-01, ADM-02, CRD-02
+
+**Betroffene WPs:** WP-925 (`p3-admp-account`, Nachtrag), WP-932 (`p3-admp-ui-accounts`, Nachtrag), WP-1073 (`p3-admp-ep-port-service`), WP-1077 (`p3-admp-contract-test`), WP-1078 (`p3-admp-ui-connections`)
+
+<a id="e-250"></a>
+## E-250 – ADMP-Sitzung: Cookie AuthToken, Ablauf, Erneuerung und Anmeldestatus
+
+**Status:** entschieden (2026-11-12, nach Empfehlung: Option 1)
+**Kontext:** Laut `components.securitySchemes.cookie` ist das Token ein JWT im Cookie `AuthToken`, „Obtained by logging in“. Die Anmeldung antwortet 200 `{message}` mit `Set-Cookie`. Nicht dokumentiert sind: Laufzeit des Tokens, Cookie-Attribute (`Max-Age`, `Expires`, `Path`, `Secure`, `HttpOnly`), ein Refresh-Endpunkt, der Status bei falschen Zugangsdaten oder abgelaufenem Cookie (in der ganzen Doku kommen nur 200, 204 und 404 vor) und ein globales oder operationsbezogenes `security`. Den Anmeldestatus liefert `GET /V1/user/authentication` (200 `AuthUser` mit LDAP-Daten des Dienstkontos). Die Doku hat keinen `servers`-Eintrag. WP-926 sieht `Authenticator.Token(ctx)` mit Cache bis Ablauf minus 60 s und einmaliger Erneuerung bei 401 vor.
+
+**Optionen:**
+
+1. Ablauf aus `Max-Age`/`Expires` des Cookies, sonst aus dem Claim `exp` des JWT (nur gelesen), sonst 10 min. Das Cookie wird ohne `CookieJar` nur an die `base_url` gesendet. 401 löst genau eine Neuanmeldung und eine Wiederholung aus, 403 gilt als `auth` ohne Neuanmeldung. Kein Logout. `GET /V1/user/authentication` dient als Statusprüfung je Konto zu Beginn von `admp.refresh_linked` (Erfolg setzt `last_ok_at`); nur `id` und `organizationId` werden dekodiert. `auth_url` leer bedeutet `base_url` + `/V1/user/authentication`; ein gesetztes `auth_url` muss genau gleich diesem Wert sein (gleiches Schema, gleicher Host, gleicher Port, gleiches Pfadpräfix ohne zusätzliche Segmente), sonst bricht die Anmeldung ohne Netzwerkzugriff ab, und die Konto-API weist den Wert mit 422 ab. So gehen Benutzername und Passwort nie an einen anderen Host. Folge: robust gegenüber fehlenden Angaben, wenige Anmeldungen.
+2. Vor jedem Abruf neu anmelden. Folge: kein Ablaufproblem, aber doppelte Last und viele Anmeldungen im ADMP-Protokoll.
+3. Vor jedem Abruf den Status per `GET /V1/user/authentication` prüfen. Folge: doppelte Anfragen; dass ADMP ungültige Cookies mit 401 beantwortet, bleibt trotzdem ungeprüft.
+
+**Empfehlung:** Option 1. Sie nutzt nur dokumentierte Pfade, kommt ohne Logout aus und macht aus den fehlenden Angaben sichere Annahmen. Ein kurzer Ersatzablauf von 10 min begrenzt den Schaden, falls ADMP abgelaufene Cookies nicht mit 401 meldet. Der Smoke-Test (WP-1077) und A-86 bestätigen das Fehlerverhalten.
+
+**Auswirkung:** WP-1073 setzt den `Authenticator` (mit Prüfung des Ursprungs von `auth_url` und den Konstanten `authMethod`/`authPath` in `auth.go`), die Cookie-Übergabe in `getJSON` und `GetSession` um; WP-1078 ergänzt die Prüfung von `auth_url` in der Konto-API; WP-1077 simuliert im Mock ein abgelaufenes Cookie (401) und prüft genau eine Neuanmeldung. Nachträge in WP-925, WP-926 und WP-932.
+
+**Quelle:** docs/plan/phase3/ADMP-API (`components.securitySchemes.cookie`, `/V1/user/authentication`)
+
+**Betroffene IDs:** ADM-02, ADM-03
+
+**Betroffene WPs:** WP-925, WP-926, WP-932 (Nachträge), WP-1073 (`p3-admp-ep-port-service`), WP-1077 (`p3-admp-contract-test`), WP-1078 (`p3-admp-ui-connections`)
+
+<a id="e-251"></a>
+## E-251 – ADMP-Port-Kennung und Zuordnung zum network_interface (ADM-04)
+
+**Status:** entschieden (2026-11-12, nach Empfehlung: Option 1); Port-Benennung offen als [A-86](#aufgaben)
+**Kontext:** ADM-04 verlangt die Speicherung als `admp_service_port` mit Verweis auf `network_interface` und CI. Die Doku kennt die Zuordnung nur in Richtung Port → Dienste: `GET /V1/infrastructure/port/{portId}/dienstIds` („Returns all dienstIds“, ohne Antwortschema). `Dienst` und `DienstProperty` haben keinen Port-Verweis. Ein Port ist `AccessPort {id, moduleId, portIndex, extra}` unter `AccessModule {id, nodeId, unitIndex, technologiesAvailable}` unter `AccessNode {id, name, url, typeId}`; `AccessNodeType.protocol` ist `KEYMILE_SSH` oder `ZYXEL_SNMP`. Einen Interface-Namen, `ifIndex` oder eine MAC gibt es nicht. Das Inventar ist nur über `GET /V1/infrastructure/accessnodepicker` erreichbar (Antwort `200: {}` ohne Schema). Es enthält nach dem Schema auch `url`, `username`, `password` und `iv` der Netzelemente. In Reticora ist ein Interface je CI über `name` eindeutig; das Gerät hat `ci.hostname_lc` (nicht eindeutig).
+
+**Optionen:**
+
+1. `port_key` = `AccessPort.id`. Eine neue Tabelle `admp_access_port` (Port-Inventar je Konto) wird über `accessnodepicker` gefüllt, höchstens alle 24 h und bei Bedarf. Die Zuordnung: Gerät über `lower(AccessNode.name)` = `ci.hostname_lc`, sonst über das erste Hostnamen-Label, jeweils nur bei genau einem Treffer. Port über ein Interface dieses CIs, dessen Name auf `<unitIndex>/<portIndex>` endet. Mehrdeutig ergibt `none`, manuell bleibt manuell. Zugangsdaten der Netzelemente werden nicht dekodiert. Folge: Abruf je Interface ohne erneutes Inventar und ein Ergebnis auch für Ports ohne Dienst; dafür eine Migration in WP-1073.
+2. Kein Inventar im Cache: Bei jedem Abruf eines Interfaces das ganze Inventar laden und im Speicher abgleichen. Folge: keine Migration, aber je Abruf ein großer GET mit Zugangsdaten der Netzelemente im Antwortkörper, und Ports ohne Dienst werden immer wieder abgefragt.
+3. Nur manuelle Zuordnung (`matched_by = manual`) über eine neue Route. Folge: kein Regelrisiko, aber hoher Pflegeaufwand bei zehntausenden Ports, und ADM-08 bleibt ohne Pflege leer.
+
+**Empfehlung:** Option 1. Sie nutzt nur dokumentierte Kennungen, hält das Inventar mit einem GET je Tag und Konto aktuell und macht ADM-08 auch für Ports ohne vorherigen Abruf möglich. Wie Interfaces der Hersteller (Keymile, Zyxel) heißen und ob die Indizes 0- oder 1-basiert sind, klärt A-86. Bis dahin gilt die Endungsregel ohne Versatz; nicht zugeordnete Ports stehen im Job-Ergebnis.
+
+**Auswirkung:** WP-1073 legt `admp_access_port` (Migration, RLS wie `admp_service_port`) an, implementiert `ListAccessPorts`, `ListPortServiceIDs`, `match.go`, die Objektarten `inventory` und `port` sowie `ReplacePortServices`. WP-928 und WP-929 erhalten Nachträge. Eine Route für die manuelle Zuordnung ist nicht eingeplant.
+
+**Quelle:** docs/plan/phase3/ADMP-API (`/V1/infrastructure/port/{portId}/dienstIds`, `/V1/infrastructure/accessnodepicker`, Schemas `AccessNode`, `AccessModule`, `AccessPort`, `Dienst`); backend/internal/ipam/model.go:102–125; backend/migrations/000110_interface_net01.up.sql:39; backend/migrations/000134_ci_identity_lowercase.up.sql:9–12
+
+**Betroffene IDs:** ADM-04, ADM-08
+
+**Betroffene WPs:** WP-928, WP-929, WP-931 (Nachträge), WP-1073 (`p3-admp-ep-port-service`), WP-1077 (`p3-admp-contract-test`)
+
+<a id="e-252"></a>
+## E-252 – Herkunft von Netzbetreiber, Vertrags-ID, Adresse und Adressform (ADM-07)
+
+**Status:** entschieden (2026-11-12, nach Empfehlung: Option 1)
+**Kontext:** ADM-07 verlangt Netzbetreiber, Vertrags-ID und Adresse. `Anschluss` (`GET /V1/anschluss/{id}`) hat `netzbetreiberId` (number), `vertragId` (string oder null), `strasse`, `hausnummer`, `hausnummerzusatz`, `plz` und `ort` (je string oder null), `created`, `removed` und die optionalen Relationen `netzbetreiber` (`Organization`), `inhaber[]`, `dienste[]` und `actions[]`. Einen Netzbetreibernamen hat der Anschluss nicht. Er steht in `Organization.name` (dazu `shortName`, `netzbetreiberNummer`) und ist über die eingebettete Relation oder `GET /V1/organization/byIds?id=…` erreichbar. `Organization` kann ihrerseits `authUsers` und `accessNodes` mit Zugangsdaten einbetten. Ob ADMP Relationen mitliefert, ist nicht dokumentiert. Geschäfts- und Privatanschluss unterscheidet nur `AnschlussInhaber.typ` (`Privat`, `Gewerblich`, `Genossenschaft`). Nach [E-243](#e-243) gilt eine Adresse ohne Unterscheidung als privat. Bei fehlendem Anschluss antwortet ADMP 404 `NamedError`.
+
+**Optionen:**
+
+1. `carrier` = `Organization.name`, aus `netzbetreiber` oder, wenn nicht eingebettet, aus `GET /V1/organization/byIds` mit genau einem `id` (je Job-Lauf zwischengespeichert). `shortName`, `netzbetreiberNummer` und `netzbetreiberId` kommen in `properties`. `contract_id` = `vertragId`. Die Adresse ist eine Zeile aus Straße, Hausnummer mit Zusatz, PLZ und Ort. Adressform: `Privat` bei einem Inhaber ergibt `private`, nur `Gewerblich`/`Genossenschaft` ergibt `business`, ohne Inhaberangabe gilt `private`. `created`/`removed` gehen als `created_at`/`removed_at` in `properties`. 404 löscht den Cache-Eintrag samt Subjects. Folge: alle Felder aus dokumentierten Pfaden, höchstens ein Zusatzabruf je Netzbetreiber.
+2. Nur `netzbetreiberId` speichern, keinen Namen. Folge: ein Abruf weniger, aber die Handlungsempfehlung zeigt eine Zahl statt eines Netzbetreibers; ADM-07 wäre nur formal erfüllt.
+3. `shortName` statt `name` als `carrier`. Folge: kürzer in Tabellen, aber nicht garantiert sprechend; der volle Name fehlte im Export.
+
+**Empfehlung:** Option 1. Sie erfüllt ADM-07 vollständig und bleibt bei Personenbezug und Zugangsdaten datensparsam: Aus `Organization` werden nur vier Felder dekodiert. Bei 404 wird gelöscht statt `stale` markiert, weil ein gelöschter Anschluss keine PII im Cache rechtfertigt. Ein Anschluss mit `removed` ungleich null bleibt mit `removed_at` sichtbar, bis A-86 die Bedeutung klärt.
+
+**Auswirkung:** WP-1075 setzt `GetConnection`, `GetOrganization`, die Abbildung und das Löschen bei 404 um und beschreibt `address_form` und `removed_at` additiv in `api/openapi.yaml`. WP-928, WP-930 und WP-931 erhalten Nachträge.
+
+**Quelle:** docs/plan/phase3/ADMP-API (Schemas `Anschluss`, `Organization`, `AnschlussInhaber`, `NamedError`; `/V1/anschluss/{id}`, `/V1/organization/byIds`); [E-243](#e-243)
+
+**Betroffene IDs:** ADM-07, ADM-08, SEC-05
+
+**Betroffene WPs:** WP-928, WP-930, WP-931 (Nachträge), WP-1075 (`p3-admp-ep-connection`)
+
+<a id="e-253"></a>
+## E-253 – Diensteigenschaften, Lebenszyklus und Zeitwerte (ADM-05)
+
+**Status:** entschieden (2026-11-12, nach Empfehlung: Option 1)
+**Kontext:** `GET /V1/dienst/{id}/properties` und `GET /V1/dienst/{id}/properties/public` haben ein identisches Antwortschema: ein Array eines Inline-Schemas, das `DienstProperty` (`key`, `value`, `isPublic`, `title`, `description`, `orderIndex`, `timestamp`, `input`) entspricht und zusätzlich das Pflichtfeld `label` hat (nicht in `components.schemas.DienstProperty`, dort gilt `additionalProperties: false`). Dass `/public` nur Eigenschaften mit `isPublic = true` liefert, folgt nur aus dem Pfadnamen. Welche Schlüssel es gibt, ist nicht dokumentiert; typisierte Felder wie Bandbreite oder Technologie lassen sich daher nicht festlegen. `Dienst` hat feste Zeitfelder `gebucht`, `bereitstellung`, `bereitgestellt`, `gekuendigt`, `abschaltung` und `abgeschaltet`, jeweils `number` oder null, dazu `templateId` und optional `template`. Einen Status-Enum gibt es nicht. Alle Zeitwerte der Doku (auch `Anschluss.created`/`removed`) sind `number` ohne Einheit.
+
+**Optionen:**
+
+1. Nur `/properties/public`; Speicherung als `values.<key> = {value, label, order}`. Typisiert werden nur die Lebenszyklusdaten und `template_id`; der Status wird abgeleitet: `terminated`, wenn `abgeschaltet` gesetzt ist und nicht in der Zukunft liegt, sonst `cancelled` bei `gekuendigt`, `active` bei `bereitgestellt`, `ordered` bei `gebucht`, sonst `unknown`. Zeitwerte mit Betrag ab 10^11 gelten als Millisekunden, kleinere als Sekunden (eindeutig für alle Daten nach 1973), umgerechnet nach RFC 3339 UTC. Folge: datensparsam, keine erfundenen Felder.
+2. `/properties` (alle Eigenschaften). Folge: mehr Information, aber interne Werte mit möglichem Personenbezug im Cache; Bedarf unbelegt.
+3. Wie 1, aber feste Typfelder für vermutete Schlüssel (`bandwidth`, `technology`). Folge: Felder ohne Grundlage in der Doku.
+
+**Empfehlung:** Option 1. Die öffentliche Variante genügt dem Wortlaut von ADM-05 und minimiert Personenbezug (SEC-05). Zeigt der Schlüsselkatalog (A-86), dass benötigte technische Werte nur intern vorliegen, wechselt WP-1074 vor Beginn auf `/properties`; dafür ändert sich nur ein Pfad der Allowlist. Die Zeitregel vermeidet eine Festlegung ohne Doku und ist für reale Daten eindeutig.
+
+**Auswirkung:** WP-1073 speichert Lebenszyklus und Template in `admp_service.properties`, WP-1074 die Eigenschaften und die typisierten API-Felder (`status`, `booked_at`, `provisioning_planned_at`, `provisioned_at`, `cancelled_at`, `shutdown_planned_at`, `shut_down_at`, `template_id`, `properties`), WP-1075 `created_at`/`removed_at`, WP-1078 die Darstellung.
+
+**Quelle:** docs/plan/phase3/ADMP-API (`getV1Dienst:idProperties`, `getV1Dienst:idPropertiesPublic`, Schemas `Dienst`, `DienstProperty`, `SerializeableData`)
+
+**Betroffene IDs:** ADM-05, ADM-07, ADM-09, SEC-05
+
+**Betroffene WPs:** WP-1073 (`p3-admp-ep-port-service`), WP-1074 (`p3-admp-ep-service-props`), WP-1075 (`p3-admp-ep-connection`), WP-1078 (`p3-admp-ui-connections`)
+
+<a id="e-254"></a>
+## E-254 – Anschlussinhaber aus ADMP: Quelle, mehrere Inhaber und Feldauswahl (ADM-06)
+
+**Status:** entschieden (2026-11-12, nach Empfehlung: Option 1)
+**Kontext:** Die Doku hat keinen Einzelabruf des Inhabers. Er steht als optionale Relation `inhaber[]` (`AnschlussInhaber`) in `GET /V1/anschluss/{id}`. Daneben gibt es `GET /V1/anschluss/inhaber/paginator` mit `rows`, `skip`, `first` (je Pflicht), `filters` (JSON-String), `sortField` und `sortOrder`. Der Aufbau von `filters` ist nicht dokumentiert, das Element-Schema ist als `ChangeLog` angegeben. `AnschlussInhaber` hat `typ`, `titel`, `name`, `vorname`, `geburtsdatum`, `registerinstanz`, `registernummer` und eine eigene Anschrift. Ein Anschluss kann mehrere Inhaber haben. [E-243](#e-243) legt die Vault-Speicherung als `person` fest; `admp_connection.holder_subject_id` verweist auf genau ein Subject, und `pii.Data` ist eine flache Abbildung von Zeichenketten.
+
+**Optionen:**
+
+1. Inhaber nur aus `inhaber[]` von `GET /V1/anschluss/{id}`, ohne Paginator. Alle Inhaber eines Anschlusses liegen in einem Subject der Art `person` mit den Schlüsseln `count` und `<n>.<feld>`. Gespeichert werden `typ`, `titel`, `vorname`, `name`, `registerinstanz`, `registernummer` und die Anschrift; `geburtsdatum` nicht. Fehlt die Relation, bleibt das Subject unverändert; eine leere Liste löscht es. Folge: kein zusätzlicher Pfad, ein Subject je Anschluss, Suchtoken über alle Werte (Auskunft findet jeden Inhaber).
+2. Inhaber über den Paginator mit einem angenommenen Filter auf `anschlussId`. Folge: unabhängig von eingebetteten Relationen, aber Filtersyntax und Element-Schema wären erfunden.
+3. Je Inhaber ein eigenes Subject (Kind-Subjects des ersten). Folge: feinere Löschung je Person, aber die Auflösung braucht mehrere Subjects und die Verankerung der Adresse ist mehrdeutig.
+
+**Empfehlung:** Option 1. Sie nutzt nur dokumentierte Felder und keinen zusätzlichen Pfad. Das Geburtsdatum wird für die Störungsbearbeitung nicht gebraucht und entfällt (Datenminimierung). Mehrere Inhaber bleiben vollständig auffindbar. Liefert ADMP `inhaber` nicht eingebettet (A-86), folgt ein Nachtrags-WP für den Paginator, sobald dessen Filtersyntax bekannt ist.
+
+**Auswirkung:** WP-1075 dekodiert `inhaber[].typ` für die Adressform, WP-1076 die übrigen Felder, speichert das Subject, liefert `holders` an der Holder-Route und `holder_count` an der Anschlussroute. WP-1078 zeigt mehrere Inhaber.
+
+**Quelle:** docs/plan/phase3/ADMP-API (Schema `AnschlussInhaber`, `/V1/anschluss/{id}`, `/V1/anschluss/inhaber/paginator`); backend/internal/pii/vault.go:31, :130, :207; backend/internal/pii/tokens.go:60; [E-243](#e-243)
+
+**Betroffene IDs:** ADM-06, SEC-05
+
+**Betroffene WPs:** WP-1075 (`p3-admp-ep-connection`), WP-1076 (`p3-admp-ep-holder`), WP-1078 (`p3-admp-ui-connections`)
+
+<a id="e-255"></a>
+## E-255 – Vertragstest ohne Beispiele in der ADMP-Doku: Fixtures aus den Schemas
+
+**Status:** entschieden (2026-11-12, nach Empfehlung: Option 1)
+**Kontext:** WP-1077 sah einen Mock „aus den Doku-Beispielen“ vor. Die Doku enthält keine Beispiele; das einzige `example` ist `""` am Parameter `filters`. Zwei verwendete Antworten haben kein Schema (`accessnodepicker`, `port/{portId}/dienstIds`). Die Schemas nutzen nur `type` (einschließlich `null` und `integer`), `required`, `properties`, `additionalProperties`, `items`, `enum`, `anyOf` und `$ref` (auf `components.schemas` und eingebettete `$defs`). Daneben kommen die Annotationen `description`, `title`, `example` und `contentMediaType` vor, die nichts validieren. Einer der Verweise ist defekt (`#/components/schemas//schemas/object` zeigt auf das Schema mit dem Namen `/schemas/object`). `backend/go.mod` enthält keine JSON-Schema-Bibliothek.
+
+**Optionen:**
+
+1. Fixtures je `operationId` aus den Schemas von Hand bauen. Ein kleiner Prüfer im Testcode (`specschema_test.go`) prüft genau die genannten Validierungs-Schlüsselwörter, ignoriert die Annotationen und löst `$defs` als Verweisziel auf; ein unbekanntes Validierungs-Schlüsselwort lässt ihn scheitern. Eine unveränderte Kopie der Doku liegt in `readonly/testdata`, abgesichert über die SHA-256. Antworten ohne Schema werden gegen die angenommene Form geprüft und mit `assumed: A-86` gekennzeichnet. Folge: keine neue Abhängigkeit; eine geänderte Doku bricht den Test sichtbar.
+2. Eine JSON-Schema-Bibliothek (Draft 2020-12) als Testabhängigkeit. Folge: vollständige Prüfung, aber eine neue Abhängigkeit mit Lizenz- und Scan-Aufwand für einen kleinen Schlüsselwortumfang.
+3. Fixtures ohne Schemaprüfung. Folge: Abweichungen zwischen Mock und Doku blieben unbemerkt; der Vertragstest prüfte nur sich selbst.
+
+**Empfehlung:** Option 1. Sie bindet den Mock nachweisbar an genau diese Doku, ohne neue Abhängigkeit. Die angenommenen Formen sind sichtbar gekennzeichnet und werden mit dem Smoke-Test bzw. A-86 bestätigt.
+
+**Auswirkung:** WP-1073 bis WP-1076 legen ihre Fixtures in `readonly/testdata/admp_fixtures.json` an, WP-1077 liefert Kopie, Prüfer, Spec-Negativtest und Gesamtablauf.
+
+**Quelle:** docs/plan/phase3/ADMP-API; backend/go.mod
+
+**Betroffene IDs:** ADM-02
+
+**Betroffene WPs:** WP-1073 (`p3-admp-ep-port-service`), WP-1074, WP-1075, WP-1076, WP-1077 (`p3-admp-contract-test`)
