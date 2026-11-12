@@ -2,6 +2,7 @@ package topology
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -93,23 +94,15 @@ func (h *Handler) GetDependencies(w http.ResponseWriter, r *http.Request) {
 		api.WriteFieldError(w, err)
 		return
 	}
-	root, err := h.ciRepo.GetByID(r.Context(), t.OrganizationID, id)
-	if err != nil {
+	nodes, err := h.dependencies(r.Context(), t.OrganizationID, id, depth, direction == "upstream")
+	var missing *NotFoundError
+	switch {
+	case errors.As(err, &missing):
 		api.WriteError(w, http.StatusNotFound, "Not Found", "ci not found")
 		return
-	}
-	g, err := h.graphFrom(r.Context(), t.OrganizationID, root, depth)
-	if err != nil {
+	case err != nil:
 		api.WriteRepoError(w, err)
 		return
-	}
-	reached := dependenciesOf(g, g.stepRules(h.impactRules(r.Context(), t.OrganizationID), impactQuery{}),
-		direction == "upstream", depth)
-	nodes := make([]Node, 0)
-	for n := range g.ids {
-		if reached[n] {
-			nodes = append(nodes, g.nodes[n])
-		}
 	}
 	api.WriteJSON(w, http.StatusOK, DependencyResult{
 		CIID: id, Direction: direction, Depth: depth, Nodes: nodes, Count: len(nodes),
@@ -124,19 +117,15 @@ func (h *Handler) GetBlastRadius(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := chi.URLParam(r, "id")
-	root, err := h.ciRepo.GetByID(r.Context(), t.OrganizationID, id)
-	if err != nil {
+	q := impactQuery{depth: maxDepth}
+	an, err := h.analyze(r.Context(), t.OrganizationID, []string{id}, q)
+	var missing *NotFoundError
+	switch {
+	case errors.As(err, &missing):
 		api.WriteError(w, http.StatusNotFound, "Not Found", "ci not found")
 		return
-	}
-	g, err := h.graphFrom(r.Context(), t.OrganizationID, root, maxDepth)
-	if err != nil {
+	case err != nil:
 		api.WriteRepoError(w, err)
-		return
-	}
-	rules := h.impactRules(r.Context(), t.OrganizationID)
-	if feedErr := h.readFeeds(r.Context(), t.OrganizationID, g, []int32{0}, maxDepth, rules); feedErr != nil {
-		api.WriteRepoError(w, feedErr)
 		return
 	}
 	isService, err := h.serviceTypes(r.Context(), t.OrganizationID)
@@ -144,9 +133,7 @@ func (h *Handler) GetBlastRadius(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
-	q := impactQuery{depth: maxDepth}
-	impacted := impactOf(g, []int32{0}, q, rules)
-	order := impactOrder(g, impacted)
+	g, rules, impacted, order := an.g, an.rules, an.impacted, an.order
 	result := BlastRadius{CIID: id, AffectedCIs: []BlastRadiusCI{}, Truncated: g.truncated}
 	// Certain hits first, then by name, as in /impact; a heuristic hit is
 	// listed with its mark but neither counted as affected nor does it
@@ -253,7 +240,7 @@ type Via struct {
 // WithRelationshipTypes makes the impact follow the impact_direction of the
 // organization's relationship types, custom types included (IMP-01).
 func (h *Handler) WithRelationshipTypes(types relationshiptype.Repository) *Handler {
-	h.types = types
+	h.Analyzer.WithRelationshipTypes(types)
 	return h
 }
 
@@ -271,16 +258,16 @@ type impactRule struct {
 // the organization sees, read in one statement without a bound and
 // resolved per key as List does, the organization's row before the system
 // row (REL-06, IMP-10).
-func (h *Handler) impactRules(ctx context.Context, orgID string) map[string]impactRule {
+func (a *Analyzer) impactRules(ctx context.Context, orgID string) map[string]impactRule {
 	rules := map[string]impactRule{}
 	catalogue := relationshiptype.Catalogue()
 	for i := range catalogue {
 		rules[catalogue[i].Key] = impactRule{catalogue[i].ImpactDirection, catalogue[i].Category, catalogue[i].Redundant}
 	}
-	if h.types == nil {
+	if a.types == nil {
 		return rules
 	}
-	types, err := h.types.ListAll(ctx, orgID)
+	types, err := a.types.ListAll(ctx, orgID)
 	if err != nil {
 		slog.WarnContext(ctx, "relationship types unavailable; impact uses the built-in catalogue", "error", err)
 		return rules
@@ -701,14 +688,19 @@ func mergeGraphs(graphs []*ciGraph) (merged *ciGraph, roots []int32) {
 // first id the caller does not see (unknown, deleted, of another
 // organization or outside the scope, or no UUID); the answer is then 404
 // for it alike (WP-403).
-func (h *Handler) readFailed(ctx context.Context, orgID string, ids []string) (items []ci.Item, missing string, err error) {
-	reader, ok := h.ciRepo.(ci.BatchReader)
+func (a *Analyzer) readFailed(ctx context.Context, orgID string, ids []string) (items []ci.Item, missing string, err error) {
+	reader, ok := a.ciRepo.(ci.BatchReader)
 	if !ok || len(ids) == 1 {
 		items = make([]ci.Item, 0, len(ids))
 		for _, id := range ids {
-			item, gerr := h.ciRepo.GetByID(ctx, orgID, id)
+			item, gerr := a.ciRepo.GetByID(ctx, orgID, id)
 			if gerr != nil {
-				return nil, id, nil
+				if ciMissing(id, gerr) {
+					return nil, id, nil
+				}
+				// A database or context error is no statement about the
+				// CI: the worker retries instead of dropping it.
+				return nil, "", gerr
 			}
 			items = append(items, *item)
 		}
@@ -737,6 +729,14 @@ func (h *Handler) readFailed(ctx context.Context, orgID string, ids []string) (i
 		items = append(items, found[i])
 	}
 	return items, "", nil
+}
+
+// ciMissing reports whether err of GetByID(id) means the CI does not exist
+// or is not visible: the repository's not-found, or any error for an id
+// that is no UUID (PostgreSQL refuses it as invalid input, no such CI can
+// exist). Every other error is passed on.
+func ciMissing(id string, err error) bool {
+	return errors.Is(err, api.ErrNotFound) || errors.Is(err, ci.ErrNotFound) || err.Error() == "not found" || !api.IsUUID(id)
 }
 
 // impactOrder returns the numbers of the impacted, known CIs: certain
@@ -810,64 +810,22 @@ func (h *Handler) writeImpact(w http.ResponseWriter, r *http.Request, orgID stri
 		}
 	}
 	withPaths := fields == nil || fields["path"]
-	items, missing, err := h.readFailed(ctx, orgID, ids)
-	if err != nil {
-		api.WriteRepoError(w, err)
-		return
-	}
-	if missing != "" {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "ci not found: "+missing)
-		return
-	}
-	// The failed CIs as roots, each CI once.
-	failed := make([]Node, len(items))
-	var distinct []ci.Item
-	seen := map[string]bool{}
-	for i := range items {
-		failed[i] = nodeFromItem(ctx, &items[i])
-		if !seen[items[i].ID] {
-			seen[items[i].ID] = true
-			distinct = append(distinct, items[i])
-		}
-	}
-	g, roots, err := h.graphFromRoots(ctx, orgID, distinct, depth)
-	if err != nil {
-		api.WriteRepoError(w, err)
-		return
-	}
-
-	// The providers of a redundant type beyond the depth keep their
-	// dependents up (IMP-04, F-160).
-	rules := h.impactRules(ctx, orgID)
-	if feedErr := h.readFeeds(ctx, orgID, g, roots, depth, rules); feedErr != nil {
-		api.WriteRepoError(w, feedErr)
-		return
-	}
+	// One read of the failed CIs, one walk, the redundancy feeds and the
+	// impact: the analyzer (WP-1025).
 	relType := q.Get("rel_type")
 	query := impactQuery{relType: relType, categories: categories, depth: depth}
-	impacted := impactOf(g, roots, query, rules)
-	order := impactOrder(g, impacted)
-	impactedNodes := make([]ImpactNode, 0, len(order))
-	summary := ImpactSummary{Failed: len(failed), ByCategory: map[string]int{}}
-	for _, n := range order {
-		hit := &impacted[n]
-		entry := ImpactNode{Node: g.nodes[n], Heuristic: hit.heuristic, Hops: hit.hops, Via: g.via(&hit.via)}
-		if hit.relay != nil {
-			relay := g.via(hit.relay)
-			entry.Relay = &relay
-		}
-		if withPaths {
-			entry.Path = g.path(impacted, n)
-		}
-		impactedNodes = append(impactedNodes, entry)
-		if hit.heuristic {
-			summary.Heuristic++
-		} else {
-			summary.Certain++
-		}
-		summary.ByCategory[hit.via.category]++
+	an, err := h.analyze(ctx, orgID, ids, query)
+	var missing *NotFoundError
+	switch {
+	case errors.As(err, &missing):
+		api.WriteError(w, http.StatusNotFound, "Not Found", "ci not found: "+missing.ID)
+		return
+	case err != nil:
+		api.WriteRepoError(w, err)
+		return
 	}
-	summary.Impacted = len(impactedNodes)
+	failed, g, roots, rules, impacted, order := an.failed, an.g, an.roots, an.rules, an.impacted, an.order
+	impactedNodes, summary := an.impactNodes(withPaths)
 	count := len(impactedNodes)
 	// include=network (IMP-11): the subnets and VLANs of the failed and
 	// impacted CIs as leaves after the CIs, read in one call; only when

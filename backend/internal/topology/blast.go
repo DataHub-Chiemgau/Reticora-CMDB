@@ -99,11 +99,11 @@ func parseImpactInclude(raw string) (impactInclude, error) {
 // services: business_service, application and every type inheriting from
 // one of them (WP-248), deactivated types included. One read of the
 // types per analysis; nil without a CI type repository.
-func (h *Handler) serviceTypes(ctx context.Context, orgID string) (map[string]bool, error) {
-	if h.ciTypes == nil {
+func (a *Analyzer) serviceTypes(ctx context.Context, orgID string) (map[string]bool, error) {
+	if a.ciTypes == nil {
 		return nil, nil
 	}
-	types, _, err := h.ciTypes.List(ctx, orgID, citype.FilterParams{IncludeInactive: true},
+	types, _, err := a.ciTypes.List(ctx, orgID, citype.FilterParams{IncludeInactive: true},
 		api.PaginationParams{Limit: maxCITypes})
 	if err != nil {
 		return nil, err
