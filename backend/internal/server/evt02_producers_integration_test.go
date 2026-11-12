@@ -1436,6 +1436,15 @@ func (evt02ADMP) FetchService(context.Context, string) (*admp.ServiceData, error
 func (evt02ADMP) FetchServicePorts(context.Context, string) ([]admp.PortData, error) {
 	return nil, &admp.SourceError{Class: admp.ClassNotImplemented}
 }
+func (evt02ADMP) FetchInventory(context.Context) ([]admp.InventoryPort, error) {
+	return nil, &admp.SourceError{Class: admp.ClassNotImplemented}
+}
+func (evt02ADMP) FetchPortServices(context.Context, string) ([]string, error) {
+	return nil, &admp.SourceError{Class: admp.ClassNotImplemented}
+}
+func (evt02ADMP) CheckSession(context.Context) error {
+	return &admp.SourceError{Class: admp.ClassNotImplemented}
+}
 
 // evt02CoverageProblems checks the producer cases (their types) against
 // the register (WP-246): every type of events.Types without a frame in

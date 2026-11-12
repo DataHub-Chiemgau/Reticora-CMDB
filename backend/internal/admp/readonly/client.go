@@ -1,15 +1,18 @@
 // Package readonly is the strictly reading ADMP client (ADM-02, ADM-03,
-// E-223, E-224, WP-926). It knows only GET reads on the base URL of an
-// account and the one login request on its auth URL:
+// E-223, E-224, E-248, WP-926, WP-1073). It knows only the GET reads of the
+// allowlist on the base URL of an account and the one login request
+// (POST /V1/user/authentication of the ADMP documentation 9.14.0):
 //
-//   - readOnlyTransport passes only GET without a body to the origin of
-//     the base URL below its path prefix, authTransport only the
-//     configured login request to the auth URL; everything else is
-//     refused before the network (transport.go). Client and login use
-//     egress clients of their own and never share a transport.
+//   - readOnlyTransport passes only GET without a body on a path template
+//     of the allowlist (allowGets in the file of each method) below the
+//     base URL, authTransport only the login request to base URL +
+//     /V1/user/authentication; everything else is refused before the
+//     network (transport.go). Client and login use egress clients of their
+//     own and never share a transport. There is no logout.
 //   - The only raw read, getJSON, is unexported and builds its requests
 //     with http.MethodGet only; the exported methods of Client begin with
-//     Get, List or Lookup (none before the documentation, A-55).
+//     Get, List or Lookup and read through getJSON only (client.go,
+//     ports.go, service.go).
 //   - A token bucket (rate_limit_rps, burst 1), a timeout per request
 //     (timeout_ms), retries with backoff for GET on 429 and 5xx only, and
 //     a circuit breaker per account guard ADMP; metrics per account and
@@ -18,9 +21,10 @@
 // Secrets, tokens and answers never reach a log, an error text or a metric
 // label: errors carry the class and the HTTP status only.
 //
-// The concrete endpoints and the login procedure follow the documentation
-// (A-55) in WP-1073 to WP-1076. readonly*_test.go prove the guarantee
-// (WP-927).
+// Every method decodes only the members it names into Go types of its
+// own; credentials of the network elements, LDAP data of the service
+// account and every other member of an answer are dropped while decoding.
+// readonly*_test.go prove the guarantee (WP-927).
 package readonly
 
 import (
@@ -54,8 +58,9 @@ const (
 	retryBase = 250 * time.Millisecond
 	// maxRetryWait caps a backoff and a Retry-After.
 	maxRetryWait = 30 * time.Second
-	// maxBody bounds an answer that is read.
-	maxBody = 8 << 20
+	// maxBody bounds an answer that is read; a longer one is the class
+	// decode (the inventory of WP-1073 is the largest answer).
+	maxBody = 16 << 20
 )
 
 // Metrics per account and error class (ADM-03). The account label is the
@@ -74,11 +79,17 @@ var (
 		Name: "reticora_admp_circuit_open",
 		Help: "1 while the circuit breaker of an ADMP account is open.",
 	}, []string{"account"})
+	// undocumentedShape counts the answers without schema in the
+	// documentation (A-86) whose form differs from the assumed one.
+	undocumentedShape = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "reticora_admp_undocumented_shape_total",
+		Help: "ADMP answers without documented schema that did not have the assumed form, by operation.",
+	}, []string{"operation"})
 )
 
 // RegisterMetrics registers the ADMP client metrics on reg.
 func RegisterMetrics(reg prometheus.Registerer) {
-	reg.MustRegister(requestsTotal, requestDuration, circuitOpen)
+	reg.MustRegister(requestsTotal, requestDuration, circuitOpen, undocumentedShape)
 }
 
 // Config holds the values of an account (admp_account, WP-925) the client
@@ -87,11 +98,13 @@ type Config struct {
 	AccountID      string
 	OrganizationID string
 	CredentialID   string
-	BaseURL        string
-	// AuthURL is the login URL; empty: no login request is allowed.
-	AuthURL string
-	// AuthMethod is the method of the login request (default POST).
-	AuthMethod   string
+	// BaseURL is the root of the ADMP instance without /V1 (the
+	// documentation has no servers entry).
+	BaseURL string
+	// AuthURL is the login URL: empty is BaseURL + /V1/user/authentication,
+	// any other value must be exactly that URL, else every login is
+	// refused (class auth) without a network access (E-250).
+	AuthURL      string
 	RateLimitRPS float64
 	TimeoutMS    int
 }
@@ -103,9 +116,8 @@ type SecretSource interface {
 	Decrypt(ctx context.Context, orgID, id string) (map[string]any, error)
 }
 
-// Client reads ADMP for one account. It has no exported method before the
-// endpoints of the documentation (A-55); those begin with Get, List or
-// Lookup and read through getJSON only.
+// Client reads ADMP for one account. Its exported methods begin with Get,
+// List or Lookup and read through getJSON only.
 type Client struct {
 	cfg     Config
 	base    *url.URL
@@ -133,8 +145,9 @@ func parseURL(raw string) (*url.URL, bool) {
 
 // New creates the client of an account. opts is the egress policy of the
 // server (SEC-08); the client and the login get egress clients of their
-// own, each wrapped in its guarding transport. The configuration error
-// names no value.
+// own, each wrapped in its guarding transport. A nil auth is the login of
+// the documentation (POST /V1/user/authentication, cookie AuthToken). The
+// configuration error names no value.
 func New(cfg Config, secrets SecretSource, auth Authenticator, opts egress.Options) (*Client, error) { //nolint:gocritic // the signature of WP-926 (AK1): the account values by value
 	if cfg.AccountID == "" || cfg.OrganizationID == "" {
 		return nil, ErrInvalidConfig
@@ -143,15 +156,16 @@ func New(cfg Config, secrets SecretSource, auth Authenticator, opts egress.Optio
 	if !ok {
 		return nil, ErrInvalidConfig
 	}
-	var authURL *url.URL
 	if cfg.AuthURL != "" {
-		if authURL, ok = parseURL(cfg.AuthURL); !ok {
+		if _, ok = parseURL(cfg.AuthURL); !ok {
 			return nil, ErrInvalidConfig
 		}
 	}
-	method, ok := authMethod(&cfg)
-	if !ok {
-		return nil, ErrInvalidConfig
+	// A configured auth URL other than the documented one leaves the
+	// login without a URL: it is refused before the network (E-250).
+	authURL, _ := authURLFor(base, cfg.AuthURL)
+	if auth == nil {
+		auth = &sessionAuth{}
 	}
 	if cfg.RateLimitRPS <= 0 || cfg.RateLimitRPS > maxRateLimitRPS {
 		cfg.RateLimitRPS = defaultRateLimitRPS
@@ -172,9 +186,9 @@ func New(cfg Config, secrets SecretSource, auth Authenticator, opts egress.Optio
 	hc := egress.NewClient(opts)
 	hc.Transport = newReadOnlyTransport(hc.Transport, base)
 	c.http = hc
-	c.login = newLogin(authURL, method, opts, func(ctx context.Context) (map[string]any, error) {
+	c.login = newLogin(authURL, opts, func(ctx context.Context) (map[string]any, error) {
 		return c.secret(ctx, secrets)
-	})
+	}, func() time.Time { return c.clock.now() })
 	if b, isBinder := auth.(loginBinder); isBinder {
 		b.bindLogin(c.login)
 	}
@@ -397,15 +411,20 @@ func (c *Client) send(ctx context.Context, u *url.URL, token string) (status int
 		return 0, nil, nil, classErr(ClassClient, 0, nil)
 	}
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
+	// The session cookie of ADMP, set by hand (no cookie jar): only the
+	// readOnlyTransport, which passes nothing but the base URL, carries it.
+	req.Header.Set("Cookie", authCookie+"="+token)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return 0, nil, nil, transportErr(ctx, actx, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	body, err = io.ReadAll(io.LimitReader(resp.Body, maxBody))
+	body, err = io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
 	if err != nil {
 		return 0, nil, nil, transportErr(ctx, actx, err)
+	}
+	if len(body) > maxBody {
+		return 0, nil, nil, classErr(ClassDecode, resp.StatusCode, nil)
 	}
 	return resp.StatusCode, resp.Header, body, nil
 }
@@ -417,6 +436,8 @@ func (c *Client) send(ctx context.Context, u *url.URL, token string) (status int
 func transportErr(parent, actx context.Context, err error) error {
 	var netErr net.Error
 	switch {
+	case errors.Is(err, ErrPathNotAllowed):
+		return classErr(ClassPathNotAllowed, 0, ErrPathNotAllowed)
 	case errors.Is(err, ErrMethodNotAllowed):
 		return classErr(ClassMethodNotAllowed, 0, ErrMethodNotAllowed)
 	case errors.Is(err, ErrDestinationNotAllowed):
@@ -428,4 +449,88 @@ func transportErr(parent, actx context.Context, err error) error {
 	default:
 		return classErr(ClassNetwork, 0, nil)
 	}
+}
+
+// sessionPath is getV1UserAuthentication, the state of the login.
+const sessionPath = "/V1/user/authentication"
+
+var _ = allowGets(getRoute{path: sessionPath})
+
+// Session is the service account ADMP logged in (getV1UserAuthentication):
+// its id and organization only; the ldap* members are dropped.
+type Session struct {
+	UserID         int64
+	OrganizationID int64
+}
+
+// GetSession reads the state of the login: GET /V1/user/authentication.
+// It logs in first when no token is cached (E-250).
+func (c *Client) GetSession(ctx context.Context) (*Session, error) {
+	var raw struct {
+		ID             *docInt `json:"id"`
+		OrganizationID *docInt `json:"organizationId"`
+	}
+	if err := c.getJSON(ctx, sessionPath, nil, &raw); err != nil {
+		return nil, err
+	}
+	if raw.ID == nil || raw.OrganizationID == nil {
+		return nil, classErr(ClassDecode, 0, nil)
+	}
+	return &Session{UserID: int64(*raw.ID), OrganizationID: int64(*raw.OrganizationID)}, nil
+}
+
+// maxDocInt is the largest whole number a JSON number of ADMP carries
+// exactly (2^53).
+const maxDocInt = 1 << 53
+
+// docInt is a whole JSON number of the documentation (an id, an index):
+// a fraction, a string or a value beyond 2^53 fails decoding.
+type docInt int64
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (n *docInt) UnmarshalJSON(b []byte) error {
+	s := strings.TrimSpace(string(b))
+	if v, err := strconv.ParseInt(s, 10, 64); err == nil {
+		if v > maxDocInt || v < -maxDocInt {
+			return errDocInt
+		}
+		*n = docInt(v)
+		return nil
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil || f != float64(int64(f)) || f > maxDocInt || f < -maxDocInt {
+		return errDocInt
+	}
+	*n = docInt(int64(f))
+	return nil
+}
+
+// errDocInt names no value of the answer.
+var errDocInt = errors.New("admp: not a whole number")
+
+// docPath builds a read path from a template of the allowlist and its
+// ids; an id below 1 is refused before the network (class client).
+func docPath(template string, ids ...int64) (string, error) {
+	out := template
+	for _, id := range ids {
+		if id < 1 || id > maxDocInt {
+			return "", classErr(ClassClient, 0, ErrInvalidPath)
+		}
+		start := strings.Index(out, "{")
+		end := strings.Index(out, "}")
+		if start < 0 || end < start {
+			return "", classErr(ClassClient, 0, ErrInvalidPath)
+		}
+		out = out[:start] + strconv.FormatInt(id, 10) + out[end+1:]
+	}
+	return out, nil
+}
+
+// undocumented counts a decode failure of an answer without documented
+// schema (A-86) and returns err unchanged.
+func undocumented(operation string, err error) error {
+	if ClassOf(err) == ClassDecode {
+		undocumentedShape.WithLabelValues(operation).Inc()
+	}
+	return err
 }

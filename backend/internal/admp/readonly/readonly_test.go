@@ -47,6 +47,10 @@ var (
 		"Error":         reflect.TypeFor[Error](),
 		"SecretSource":  reflect.TypeFor[SecretSource](),
 		"Authenticator": reflect.TypeFor[Authenticator](),
+		// The decoded answers of the endpoints (WP-1073 ff.).
+		"Session":    reflect.TypeFor[Session](),
+		"AccessPort": reflect.TypeFor[AccessPort](),
+		"Service":    reflect.TypeFor[Service](),
 	}
 	exportedFuncs = map[string]any{
 		"New":             New,
@@ -61,7 +65,7 @@ var (
 		"ErrInvalidPath":           reflect.TypeOf(&ErrInvalidPath).Elem(),
 		"ErrCircuitOpen":           reflect.TypeOf(&ErrCircuitOpen).Elem(),
 		"ErrInvalidConfig":         reflect.TypeOf(&ErrInvalidConfig).Elem(),
-		"ErrNoAuthenticator":       reflect.TypeOf(&ErrNoAuthenticator).Elem(),
+		"ErrPathNotAllowed":        reflect.TypeOf(&ErrPathNotAllowed).Elem(),
 	}
 )
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -76,7 +77,7 @@ var (
 // RegisterMetrics registers the refresh metrics and those of the read-only
 // client on reg.
 func RegisterMetrics(reg prometheus.Registerer) {
-	reg.MustRegister(refreshTotal, expiredTotal)
+	reg.MustRegister(refreshTotal, expiredTotal, portMatchTotal)
 	readonly.RegisterMetrics(reg)
 }
 
@@ -92,8 +93,11 @@ type RefreshParams struct {
 
 // target is the id the dedupe key names.
 func (p *RefreshParams) target() string {
-	if p.Kind == KindInterface {
+	switch p.Kind {
+	case KindInterface:
 		return p.NetworkInterfaceID
+	case KindInventory:
+		return ""
 	}
 	return p.ExternalID
 }
@@ -103,26 +107,31 @@ func (p *RefreshParams) validate() error {
 	switch {
 	case !api.IsUUID(p.AccountID):
 		return fieldError("account_id", "must be a uuid")
-	case p.Kind == KindConnection || p.Kind == KindService:
+	case p.Kind == KindConnection || p.Kind == KindService || p.Kind == KindPort:
 		if p.ExternalID == "" || len(p.ExternalID) > 200 {
 			return fieldError("external_id", "is required")
 		}
+	case p.Kind == KindInventory:
+		p.ExternalID, p.NetworkInterfaceID = "", ""
 	case p.Kind == KindInterface:
 		if !api.IsUUID(p.NetworkInterfaceID) {
 			return fieldError("network_interface_id", "must be a uuid")
 		}
 	default:
-		return fieldError("kind", "must be connection, service or interface")
+		return fieldError("kind", "must be connection, service, interface, inventory or port")
 	}
 	return nil
 }
 
 // RefreshResult is the result of a refresh: ok or the error class, and
-// how many objects were refreshed or marked stale.
+// how many objects were refreshed or marked stale. A refresh of the
+// inventory adds matched, unmatched and the first 100 unmatched ports
+// (WP-1073, readable through GET /api/v1/jobs/{id}).
 type RefreshResult struct {
 	Result    string `json:"result"`
 	Refreshed int    `json:"refreshed"`
 	Stale     int    `json:"stale"`
+	*MatchResult
 }
 
 // Submitter queues a job (jobs.Queue.Submit, or the in-process runner of
@@ -325,6 +334,10 @@ func (s *Sync) Refresh(ctx context.Context, orgID string, p RefreshParams) (Refr
 		res, err = s.refreshService(ctx, a, src, class, p.ExternalID)
 	case KindInterface:
 		res, err = s.refreshInterface(ctx, a, src, class, p.NetworkInterfaceID)
+	case KindInventory:
+		res, err = s.refreshInventory(ctx, a, src, class)
+	case KindPort:
+		res, err = s.refreshPort(ctx, a, src, class, p.ExternalID)
 	}
 	if err != nil {
 		return RefreshResult{}, err
@@ -501,8 +514,12 @@ func (s *Sync) refreshConnection(ctx context.Context, a *Account, src Source, cl
 }
 
 // refreshService fetches a service and its ports and stores them; the
-// links of a port to an interface and a CI are kept by its key. A
-// connection of the service that is not cached yet is fetched first.
+// links of a port to an interface and a CI are kept by its key. A source
+// without the direction service → ports (ClassNotSupported, the ADMP
+// documentation, E-251) keeps the ports as they are: they come from the
+// ports (refreshPort). A connection of the service that is not cached yet
+// is fetched first; a source that cannot fetch connections yet
+// (ClassNotImplemented, until WP-1075) leaves a stub of it.
 func (s *Sync) refreshService(ctx context.Context, a *Account, src Source, class, externalID string) (RefreshResult, error) {
 	if class != "" {
 		return s.fail(ctx, a, KindService, externalID, class)
@@ -512,9 +529,48 @@ func (s *Sync) refreshService(ctx context.Context, a *Account, src Source, class
 		return s.fail(ctx, a, KindService, externalID, classOf(err))
 	}
 	ports, err := src.FetchServicePorts(ctx, externalID)
-	if err != nil {
+	keepPorts := false
+	switch {
+	case err != nil && classOf(err) == ClassNotSupported:
+		keepPorts = true
+	case err != nil:
 		return s.fail(ctx, a, KindService, externalID, classOf(err))
 	}
+	res, sv, err := s.storeService(ctx, a, src, externalID, data)
+	if err != nil {
+		return RefreshResult{}, err
+	}
+	if !keepPorts {
+		if err = s.inTx(ctx, a.OrganizationID, func(ctx context.Context) error {
+			kept := map[string]ServicePort{}
+			if prev, perr := s.o.Cache.ServiceByExternal(ctx, a.OrganizationID, a.ID, externalID); perr == nil {
+				for i := range prev.Ports {
+					kept[prev.Ports[i].PortKey] = prev.Ports[i]
+				}
+			} else if !errors.Is(perr, ErrCacheNotFound) {
+				return perr
+			}
+			next := make([]ServicePort, 0, len(ports))
+			for _, p := range ports {
+				port := ServicePort{PortKey: p.PortKey, MatchedBy: MatchedByNone}
+				if old, ok := kept[strings.TrimSpace(p.PortKey)]; ok {
+					port.NetworkInterfaceID, port.CIID, port.MatchedBy = old.NetworkInterfaceID, old.CIID, old.MatchedBy
+					port.ClientID, port.SiteID = old.ClientID, old.SiteID
+				}
+				next = append(next, port)
+			}
+			_, rerr := s.o.Cache.ReplaceServicePorts(ctx, a.OrganizationID, sv.ID, next)
+			return rerr
+		}); err != nil {
+			return RefreshResult{}, fmt.Errorf("admp: store service ports: %w", err)
+		}
+	}
+	return res, nil
+}
+
+// storeService stores a fetched service with its connection (fetched
+// first when not cached) and returns the stored row.
+func (s *Sync) storeService(ctx context.Context, a *Account, src Source, externalID string, data *ServiceData) (RefreshResult, *Service, error) {
 	res := RefreshResult{Result: resultOK}
 	connectionID := ""
 	if data.ConnectionExternalID != "" {
@@ -522,13 +578,21 @@ func (s *Sync) refreshService(ctx context.Context, a *Account, src Source, class
 		if errors.Is(cerr, ErrCacheNotFound) {
 			sub, serr := s.refreshConnection(ctx, a, src, "", data.ConnectionExternalID)
 			if serr != nil {
-				return RefreshResult{}, serr
+				return RefreshResult{}, nil, serr
 			}
 			res.Refreshed += sub.Refreshed
-			// A failed fetch of the connection is the result of the
-			// refresh: a transient class retries the job, the account
-			// records it; the service is stored without its connection.
-			if sub.Result != resultOK {
+			switch sub.Result {
+			case resultOK:
+			case ClassNotImplemented:
+				// The source fetches no connection yet (until WP-1075):
+				// a stub without fields keeps the link of the service.
+				if stubErr := s.stubConnection(ctx, a, data.ConnectionExternalID, sub.Result); stubErr != nil {
+					return RefreshResult{}, nil, stubErr
+				}
+			default:
+				// A failed fetch of the connection is the result of the
+				// refresh: a transient class retries the job, the account
+				// records it; the service is stored without its connection.
 				res.Result = sub.Result
 			}
 			c, cerr = s.o.Cache.ConnectionByExternal(ctx, a.OrganizationID, a.ID, data.ConnectionExternalID)
@@ -540,57 +604,91 @@ func (s *Sync) refreshService(ctx context.Context, a *Account, src Source, class
 	now := s.o.Now().UTC()
 	sv := &Service{OrganizationID: a.OrganizationID, AccountID: a.ID, ExternalID: externalID,
 		ConnectionID: connectionID, Kind: data.Kind, Properties: maps.Clone(data.Properties), FetchedAt: now, ExpiresAt: now.Add(s.o.TTL)}
-	err = s.inTx(ctx, a.OrganizationID, func(ctx context.Context) error {
-		kept := map[string]ServicePort{}
-		if prev, perr := s.o.Cache.ServiceByExternal(ctx, a.OrganizationID, a.ID, externalID); perr == nil {
-			for i := range prev.Ports {
-				kept[prev.Ports[i].PortKey] = prev.Ports[i]
-			}
-		} else if !errors.Is(perr, ErrCacheNotFound) {
-			return perr
-		}
-		if uerr := s.o.Cache.UpsertService(ctx, sv); uerr != nil {
-			return uerr
-		}
-		next := make([]ServicePort, 0, len(ports))
-		for _, p := range ports {
-			port := ServicePort{PortKey: p.PortKey, MatchedBy: MatchedByNone}
-			if old, ok := kept[strings.TrimSpace(p.PortKey)]; ok {
-				port.NetworkInterfaceID, port.CIID, port.MatchedBy = old.NetworkInterfaceID, old.CIID, old.MatchedBy
-				port.ClientID, port.SiteID = old.ClientID, old.SiteID
-			}
-			next = append(next, port)
-		}
-		_, rerr := s.o.Cache.ReplaceServicePorts(ctx, a.OrganizationID, sv.ID, next)
-		return rerr
-	})
-	if err != nil {
-		return RefreshResult{}, fmt.Errorf("admp: store service: %w", err)
+	if err := s.inTx(ctx, a.OrganizationID, func(ctx context.Context) error {
+		return s.o.Cache.UpsertService(ctx, sv)
+	}); err != nil {
+		return RefreshResult{}, nil, fmt.Errorf("admp: store service: %w", err)
 	}
 	s.count(KindService, resultOK)
 	res.Refreshed++
-	return res, nil
+	return res, sv, nil
 }
 
-// refreshInterface refreshes the services of the account linked to the
-// interface and their connections.
-func (s *Sync) refreshInterface(ctx context.Context, a *Account, src Source, class, interfaceID string) (RefreshResult, error) {
-	services, err := s.o.Cache.ListByInterface(ctx, a.OrganizationID, interfaceID)
-	if err != nil {
-		return RefreshResult{}, err
+// stubConnection stores a connection the source cannot fetch yet: its
+// external id only, stale with the class (WP-1073).
+func (s *Sync) stubConnection(ctx context.Context, a *Account, externalID, class string) error {
+	now := s.o.Now().UTC()
+	c := &Connection{OrganizationID: a.OrganizationID, AccountID: a.ID, ExternalID: externalID, FetchedAt: now,
+		ExpiresAt: now.Add(s.o.TTL), Stale: true, LastErrorClass: class}
+	return s.inTx(ctx, a.OrganizationID, func(ctx context.Context) error {
+		return s.o.Cache.UpsertConnection(ctx, c)
+	})
+}
+
+// merger folds the results of the parts of a refresh; ClassNotImplemented
+// of a part (a connection until WP-1075) is no failure of the whole.
+type merger struct{ res RefreshResult }
+
+func (m *merger) add(r RefreshResult) {
+	m.res.Refreshed += r.Refreshed
+	m.res.Stale += r.Stale
+	if r.Result != resultOK && r.Result != ClassNotImplemented {
+		m.res.Result = r.Result
 	}
-	res := RefreshResult{Result: resultOK}
+}
+
+// inventoryStale is how old an inventory may be before a refresh of an
+// interface without matched port loads it again (WP-1073).
+const inventoryStale = time.Hour
+
+// refreshInterface refreshes what is linked to the interface: the ports
+// of the account's inventory matched to it (refreshPort; without one the
+// inventory is loaded first when it is older than an hour), the services
+// linked to it otherwise and their connections.
+func (s *Sync) refreshInterface(ctx context.Context, a *Account, src Source, class, interfaceID string) (RefreshResult, error) {
+	m := merger{res: RefreshResult{Result: resultOK}}
 	if class != "" {
 		// A class that forbids the fetch is the result even when the
 		// interface has no service of the account to mark stale.
-		res.Result = class
+		m.res.Result = class
 	}
-	merge := func(r RefreshResult) {
-		res.Refreshed += r.Refreshed
-		res.Stale += r.Stale
-		if r.Result != resultOK {
-			res.Result = r.Result
+	done := map[string]bool{}
+	if class == "" {
+		ports, err := s.o.Cache.AccessPortsByInterface(ctx, a.OrganizationID, a.ID, interfaceID)
+		if err != nil {
+			return RefreshResult{}, err
 		}
+		if len(ports) == 0 {
+			fetched, ferr := s.o.Cache.InventoryFetchedAt(ctx, a.OrganizationID, a.ID)
+			if ferr != nil {
+				return RefreshResult{}, ferr
+			}
+			if fetched.IsZero() || s.o.Now().Sub(fetched) > inventoryStale {
+				r, rerr := s.refreshInventory(ctx, a, src, "")
+				if rerr != nil {
+					return RefreshResult{}, rerr
+				}
+				r.MatchResult = nil
+				m.add(r)
+				if ports, err = s.o.Cache.AccessPortsByInterface(ctx, a.OrganizationID, a.ID, interfaceID); err != nil {
+					return RefreshResult{}, err
+				}
+			}
+		}
+		for i := range ports {
+			r, services, perr := s.portRefresh(ctx, a, src, "", ports[i].ExternalID)
+			if perr != nil {
+				return RefreshResult{}, perr
+			}
+			m.add(r)
+			for _, ext := range services {
+				done[ext] = true
+			}
+		}
+	}
+	services, err := s.o.Cache.ListByInterface(ctx, a.OrganizationID, interfaceID)
+	if err != nil {
+		return RefreshResult{}, err
 	}
 	connections := map[string]bool{}
 	for i := range services {
@@ -598,27 +696,123 @@ func (s *Sync) refreshInterface(ctx context.Context, a *Account, src Source, cla
 		if sv.AccountID != a.ID {
 			continue
 		}
+		if sv.ConnectionID != "" {
+			connections[sv.ConnectionID] = true
+		}
+		if done[sv.ExternalID] {
+			continue
+		}
 		r, err := s.refreshService(ctx, a, src, class, sv.ExternalID)
 		if err != nil {
 			return RefreshResult{}, err
 		}
-		merge(r)
-		if sv.ConnectionID != "" {
-			connections[sv.ConnectionID] = true
-		}
+		m.add(r)
 	}
 	for id := range connections {
 		c, cerr := s.o.Cache.GetConnection(ctx, a.OrganizationID, id)
 		if cerr != nil {
 			continue
 		}
+		if class == "" && c.Stale && c.LastErrorClass == ClassNotImplemented {
+			// A stub the source cannot fetch yet: nothing to refresh.
+			continue
+		}
 		r, err := s.refreshConnection(ctx, a, src, class, c.ExternalID)
 		if err != nil {
 			return RefreshResult{}, err
 		}
-		merge(r)
+		m.add(r)
 	}
-	return res, nil
+	return m.res, nil
+}
+
+// refreshInventory loads the port inventory of the account, replaces the
+// stored one and matches its ports to network interfaces (WP-1073, E-251).
+func (s *Sync) refreshInventory(ctx context.Context, a *Account, src Source, class string) (RefreshResult, error) {
+	if class != "" {
+		s.count(KindInventory, class)
+		return RefreshResult{Result: class}, nil
+	}
+	inv, err := src.FetchInventory(ctx)
+	if err != nil {
+		class = classOf(err)
+		s.count(KindInventory, class)
+		return RefreshResult{Result: class}, nil
+	}
+	now := s.o.Now().UTC()
+	ports := make([]AccessPort, 0, len(inv))
+	for _, p := range inv {
+		ports = append(ports, AccessPort{ExternalID: p.PortKey, NodeExternalID: p.NodeExternalID, NodeName: p.NodeName,
+			Protocol: p.Protocol, UnitIndex: p.UnitIndex, PortIndex: p.PortIndex})
+	}
+	if err = s.o.Cache.ReplaceAccessPorts(ctx, a.OrganizationID, a.ID, ports, now); err != nil {
+		return RefreshResult{}, fmt.Errorf("admp: store inventory: %w", err)
+	}
+	match, err := s.o.Cache.MatchAccessPorts(ctx, a.OrganizationID, a.ID)
+	if err != nil {
+		return RefreshResult{}, fmt.Errorf("admp: match inventory: %w", err)
+	}
+	countMatch(&match)
+	s.count(KindInventory, resultOK)
+	return RefreshResult{Result: resultOK, Refreshed: 1, MatchResult: &match}, nil
+}
+
+// refreshPort fetches the services of a port and each service, stores
+// them and replaces the services of the port (WP-1073).
+func (s *Sync) refreshPort(ctx context.Context, a *Account, src Source, class, portKey string) (RefreshResult, error) {
+	res, _, err := s.portRefresh(ctx, a, src, class, portKey)
+	return res, err
+}
+
+// portRefresh is refreshPort; it also returns the external ids of the
+// services it refreshed.
+func (s *Sync) portRefresh(ctx context.Context, a *Account, src Source, class, portKey string) (RefreshResult, []string, error) {
+	if class != "" {
+		s.count(KindPort, class)
+		return RefreshResult{Result: class}, nil, nil
+	}
+	ids, err := src.FetchPortServices(ctx, portKey)
+	if err != nil {
+		class = classOf(err)
+		s.count(KindPort, class)
+		if !transient(class) {
+			// A lasting failure (a port deleted in ADMP since the last
+			// inventory, an undecodable answer) moves the port to its next
+			// turn, so it does not lead every run of admp.refresh_linked and
+			// spend the account's budget first; its services stay.
+			if terr := s.o.Cache.TouchAccessPort(ctx, a.OrganizationID, a.ID, portKey, s.o.Now().UTC().Add(s.o.TTL)); terr != nil {
+				return RefreshResult{}, nil, fmt.Errorf("admp: postpone port: %w", terr)
+			}
+		}
+		return RefreshResult{Result: class}, nil, nil
+	}
+	m := merger{res: RefreshResult{Result: resultOK}}
+	stored := make([]string, 0, len(ids))
+	for _, ext := range ids {
+		data, ferr := src.FetchService(ctx, ext)
+		if ferr != nil {
+			r, merr := s.fail(ctx, a, KindService, ext, classOf(ferr))
+			if merr != nil {
+				return RefreshResult{}, nil, merr
+			}
+			m.add(r)
+		} else {
+			r, _, serr := s.storeService(ctx, a, src, ext, data)
+			if serr != nil {
+				return RefreshResult{}, nil, serr
+			}
+			m.add(r)
+		}
+		// A service cached from before keeps its link to the port.
+		if sv, cerr := s.o.Cache.ServiceByExternal(ctx, a.OrganizationID, a.ID, ext); cerr == nil {
+			stored = append(stored, sv.ID)
+		}
+	}
+	if err = s.o.Cache.ReplacePortServices(ctx, a.OrganizationID, a.ID, portKey, stored, s.o.Now().UTC().Add(s.o.TTL)); err != nil {
+		return RefreshResult{}, nil, fmt.Errorf("admp: store the services of port: %w", err)
+	}
+	s.count(KindPort, m.res.Result)
+	return m.res, ids, nil
 }
 
 // maxFetchCost is the most fetches one due object takes (a service).
@@ -649,8 +843,11 @@ func (s *Sync) keepCredit(accountID string, perRun, unused float64) {
 
 // fetchCost is the number of fetches a refresh of a due object takes.
 func fetchCost(kind string) int {
-	if kind == KindService {
+	switch kind {
+	case KindService:
 		return maxFetchCost // the service and its ports
+	case KindPort:
+		return maxFetchCost // the services of the port and at least one service
 	}
 	return 1
 }
@@ -692,9 +889,21 @@ func (s *Sync) RefreshLinked(ctx context.Context) (LinkedRun, error) {
 			if !a.Enabled {
 				continue
 			}
-			if _, class := s.sourceOf(octx, a); class != "" {
+			src, class := s.sourceOf(octx, a)
+			if class != "" {
 				out.Skipped[a.ID] = class
 				s.count("linked", class)
+				continue
+			}
+			ports, inventory, err := s.linkedPorts(octx, a, src, start)
+			if err != nil {
+				var skip *skipError
+				if errors.As(err, &skip) {
+					out.Skipped[a.ID] = skip.class
+					s.count("linked", skip.class)
+					continue
+				}
+				errs = append(errs, fmt.Errorf("%s: ports of %s: %w", RefreshLinkedKind, a.ID, err))
 				continue
 			}
 			due, err := s.o.Cache.ListDueLinked(octx, orgID, a.ID, start.Add(linkedHorizon))
@@ -702,6 +911,11 @@ func (s *Sync) RefreshLinked(ctx context.Context) (LinkedRun, error) {
 				errs = append(errs, fmt.Errorf("%s: due entries of %s: %w", RefreshLinkedKind, a.ID, err))
 				continue
 			}
+			if inventory {
+				// With an inventory the services come with their ports.
+				due = slices.DeleteFunc(due, func(d DueObject) bool { return d.Kind == KindService })
+			}
+			due = append(ports, due...)
 			perRun := a.RateLimitRPS * s.o.LinkedRunTime.Seconds()
 			budget := perRun + s.credit(a.ID)
 			used := 0
@@ -723,6 +937,49 @@ func (s *Sync) RefreshLinked(ctx context.Context) (LinkedRun, error) {
 		}
 	}
 	return out, errors.Join(errs...)
+}
+
+// skipError makes admp.refresh_linked skip an account with a class.
+type skipError struct{ class string }
+
+func (e *skipError) Error() string { return "admp: account skipped (class " + e.class + ")" }
+
+// inventoryMaxAge: admp.refresh_linked loads the inventory of an account
+// once a day (E-251).
+const inventoryMaxAge = 24 * time.Hour
+
+// linkedPorts runs the steps of WP-1073 for one account of
+// admp.refresh_linked: the login state (GET /V1/user/authentication; a
+// success sets last_ok_at, a failure skips the account with its class),
+// the inventory when it is older than a day (queued first) and the matched
+// ports due within the horizon. A source without these reads
+// (ClassNotImplemented) skips the steps. inventory reports whether the
+// account has an inventory.
+func (s *Sync) linkedPorts(ctx context.Context, a *Account, src Source, start time.Time) (due []DueObject, inventory bool, err error) {
+	if cerr := src.CheckSession(ctx); cerr != nil {
+		class := classOf(cerr)
+		if class == ClassNotImplemented {
+			return nil, false, nil
+		}
+		s.recordAccount(ctx, a, class)
+		return nil, false, &skipError{class: class}
+	}
+	s.recordAccount(ctx, a, resultOK)
+	fetched, err := s.o.Cache.InventoryFetchedAt(ctx, a.OrganizationID, a.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	if fetched.IsZero() || start.Sub(fetched) > inventoryMaxAge {
+		due = append(due, DueObject{Kind: KindInventory, ExpiresAt: fetched})
+	}
+	ports, err := s.o.Cache.ListDuePorts(ctx, a.OrganizationID, a.ID, start.Add(linkedHorizon))
+	if err != nil {
+		return nil, false, err
+	}
+	for i := range ports {
+		due = append(due, DueObject{Kind: KindPort, ExternalID: ports[i].ExternalID, ExpiresAt: ports[i].ExpiresAt})
+	}
+	return due, !fetched.IsZero(), nil
 }
 
 // Expire removes the entries past their TTL in every organization and

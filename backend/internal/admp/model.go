@@ -76,6 +76,37 @@ type ServicePort struct {
 	SiteID             string `json:"site_id,omitempty"`
 }
 
+// Object kinds of the port inventory (WP-1073): the inventory of an
+// account and one port with its services.
+const (
+	KindInventory = "inventory"
+	KindPort      = "port"
+)
+
+// AccessPort is a port of the ADMP inventory of an account (E-251):
+// ExternalID is AccessPort.id, the port_key of admp_service_port; node,
+// unit and port index locate it; the match names the interface and CI.
+// FetchedAt is the time of the inventory, ExpiresAt when the services of
+// the port are due again.
+type AccessPort struct {
+	ID                 string    `json:"id"`
+	OrganizationID     string    `json:"organization_id"`
+	AccountID          string    `json:"account_id"`
+	ExternalID         string    `json:"external_id"`
+	NodeExternalID     string    `json:"node_external_id"`
+	NodeName           string    `json:"node_name"`
+	UnitIndex          int64     `json:"unit_index"`
+	PortIndex          int64     `json:"port_index"`
+	Protocol           string    `json:"protocol,omitempty"`
+	NetworkInterfaceID string    `json:"network_interface_id,omitempty"`
+	CIID               string    `json:"ci_id,omitempty"`
+	MatchedBy          string    `json:"matched_by"`
+	ClientID           string    `json:"client_id,omitempty"`
+	SiteID             string    `json:"site_id,omitempty"`
+	FetchedAt          time.Time `json:"fetched_at"`
+	ExpiresAt          time.Time `json:"expires_at"`
+}
+
 // Expired counts the rows DeleteExpired removed.
 type Expired struct {
 	Connections int

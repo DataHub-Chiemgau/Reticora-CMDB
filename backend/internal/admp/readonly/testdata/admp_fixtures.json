@@ -1,0 +1,122 @@
+{
+  "_comment": "Answers of ADMP API 9.14.0 per operationId (docs/plan/phase3/ADMP-API). The documentation has no examples; the bodies are built from components.schemas (E-255). Answers without schema in the documentation are marked assumed: A-86. Values named *canary* must never appear in a decoded result, a cache row, a log or an error.",
+  "postV1UserAuthentication": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "Set-Cookie": "AuthToken=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiZXhwIjoxOTI0OTkyMDAwfQ.c2lnbmF0dXJlLWNhbmFyeQ; Path=/; HttpOnly"
+    },
+    "body": {"message": "Login successful"}
+  },
+  "getV1UserAuthentication": {
+    "status": 200,
+    "headers": {"Content-Type": "application/json"},
+    "body": {
+      "id": 42,
+      "organizationId": 7,
+      "ldapDN": "CN=ldap-dn-canary,OU=Service,DC=example,DC=net",
+      "ldapCN": "ldap-cn-canary",
+      "ldapEmail": "ldap-email-canary@example.net",
+      "ldapUsername": "ldap-username-canary",
+      "anwUser": false
+    }
+  },
+  "getV1InfrastructureAccessnodepicker": {
+    "assumed": "A-86: the documentation answers 200 without schema; assumed AccessNode[] with modules[].ports[] after components.schemas",
+    "status": 200,
+    "headers": {"Content-Type": "application/json"},
+    "body": [
+      {
+        "id": 3,
+        "organizationId": 7,
+        "typeId": 1,
+        "name": "olt-traunstein-01",
+        "url": "ssh://url-canary.example.net:22",
+        "username": "node-username-canary",
+        "password": "node-password-canary",
+        "iv": "node-iv-canary",
+        "snmpVersion": null,
+        "organization": {"id": 7, "name": "organization-canary", "netzbetreiberNummer": "N-1", "shortName": "ORG", "groupName": null},
+        "type": {"id": 1, "name": "Keymile MileGate", "protocol": "KEYMILE_SSH", "vendorId": 1},
+        "modules": [
+          {
+            "id": 30,
+            "nodeId": 3,
+            "unitIndex": 2,
+            "typeId": 4,
+            "gponMaxONTs": null,
+            "technologiesAvailable": ["VDSL"],
+            "extra": {"extra": "module-extra-canary"},
+            "ports": [
+              {"id": 301, "moduleId": 30, "portIndex": 1, "extra": {"note": "port-extra-canary"}},
+              {"id": 302, "moduleId": 30, "portIndex": 2, "extra": null}
+            ]
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "organizationId": 7,
+        "typeId": 2,
+        "name": "dslam-siegsdorf",
+        "url": "udp://url-canary-2.example.net:161",
+        "username": null,
+        "password": "node-password-canary-2",
+        "iv": "node-iv-canary-2",
+        "snmpVersion": "V2C",
+        "modules": [
+          {
+            "id": 40,
+            "nodeId": 4,
+            "unitIndex": 1,
+            "typeId": 5,
+            "gponMaxONTs": null,
+            "technologiesAvailable": null,
+            "extra": null,
+            "ports": [
+              {"id": 401, "moduleId": 40, "portIndex": 7, "extra": null}
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "getV1InfrastructurePort:portIdDienstIds": {
+    "assumed": "A-86: the documentation has responses {} (\"Returns all dienstIds\"); assumed a JSON array of whole numbers",
+    "status": 200,
+    "headers": {"Content-Type": "application/json"},
+    "body": [815, 816]
+  },
+  "getV1Dienst:id": {
+    "status": 200,
+    "headers": {"Content-Type": "application/json"},
+    "body": {
+      "id": 815,
+      "anschlussId": 4711,
+      "templateId": 3,
+      "template": {"id": 3, "name": "FTTH 1000", "organizationId": 7},
+      "gebucht": 1700000000000,
+      "bereitstellung": 1700100000,
+      "bereitgestellt": 1700200000,
+      "gekuendigt": null,
+      "abschaltung": null,
+      "abgeschaltet": null,
+      "anschluss": {
+        "id": 4711,
+        "netzbetreiberId": 9,
+        "vertragId": "V-contract-canary",
+        "created": 1690000000,
+        "removed": null,
+        "strasse": "street-canary",
+        "hausnummer": "1",
+        "hausnummerzusatz": null,
+        "plz": "83278",
+        "ort": "town-canary"
+      },
+      "properties": [
+        {"id": 1, "dienstId": 815, "timestamp": 1700000000, "isPublic": true, "key": "bandwidth", "orderIndex": 1, "title": "Bandbreite", "description": null, "value": "property-canary", "input": null}
+      ],
+      "actions": []
+    }
+  }
+}

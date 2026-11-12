@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -529,6 +531,230 @@ func (r *PGRepository) AffectedConnections(ctx context.Context, orgID string, ci
 	})
 	sortAffected(out)
 	return out, err
+}
+
+const accessPortColumns = `a.id::text, a.organization_id::text, a.account_id::text, a.external_id, a.node_external_id, a.node_name,
+	a.unit_index, a.port_index, COALESCE(a.protocol, ''), COALESCE(a.network_interface_id::text, ''), COALESCE(a.ci_id::text, ''),
+	a.matched_by, COALESCE(a.client_id::text, ''), COALESCE(a.site_id::text, ''), a.fetched_at, a.expires_at`
+
+func scanAccessPort(row pgx.Row) (*AccessPort, error) {
+	var p AccessPort
+	err := row.Scan(&p.ID, &p.OrganizationID, &p.AccountID, &p.ExternalID, &p.NodeExternalID, &p.NodeName, &p.UnitIndex,
+		&p.PortIndex, &p.Protocol, &p.NetworkInterfaceID, &p.CIID, &p.MatchedBy, &p.ClientID, &p.SiteID, &p.FetchedAt, &p.ExpiresAt)
+	return &p, err
+}
+
+// checkAccessPorts validates an inventory: a key per port, unique.
+func checkAccessPorts(ports []AccessPort) error {
+	seen := map[string]bool{}
+	for i := range ports {
+		p := &ports[i]
+		p.ExternalID = strings.TrimSpace(p.ExternalID)
+		if p.ExternalID == "" || seen[p.ExternalID] || strings.TrimSpace(p.NodeExternalID) == "" {
+			return ErrInvalidCacheEntry
+		}
+		seen[p.ExternalID] = true
+	}
+	return nil
+}
+
+// ReplaceAccessPorts implements Repository: one upsert from arrays and one
+// delete of the ports no longer delivered.
+func (r *PGRepository) ReplaceAccessPorts(ctx context.Context, orgID, accountID string, ports []AccessPort, fetchedAt time.Time) error {
+	if !api.IsUUID(accountID) {
+		return ErrInvalidCacheEntry
+	}
+	if err := checkAccessPorts(ports); err != nil {
+		return err
+	}
+	n := len(ports)
+	keys, nodes, names, protocols := make([]string, n), make([]string, n), make([]string, n), make([]string, n)
+	units, indexes := make([]int64, n), make([]int64, n)
+	for i := range ports {
+		p := &ports[i]
+		keys[i], nodes[i], names[i], protocols[i], units[i], indexes[i] = p.ExternalID, p.NodeExternalID, p.NodeName, p.Protocol,
+			p.UnitIndex, p.PortIndex
+	}
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `INSERT INTO admp_access_port AS a (organization_id, account_id, external_id, node_external_id,
+				node_name, unit_index, port_index, protocol, fetched_at, expires_at)
+			SELECT $1, $2, k, nd, nm, u, ix, NULLIF(pr, ''), $9, $9
+			FROM unnest($3::text[], $4::text[], $5::text[], $6::bigint[], $7::bigint[], $8::text[]) AS t(k, nd, nm, u, ix, pr)
+			ON CONFLICT (account_id, external_id) DO UPDATE SET node_external_id = EXCLUDED.node_external_id,
+				node_name = EXCLUDED.node_name, unit_index = EXCLUDED.unit_index, port_index = EXCLUDED.port_index,
+				protocol = EXCLUDED.protocol, fetched_at = EXCLUDED.fetched_at`,
+			orgID, accountID, keys, nodes, names, units, indexes, protocols, fetchedAt); err != nil {
+			return cacheError(err)
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM admp_access_port WHERE account_id = $1 AND organization_id = $2
+			AND NOT (external_id = ANY ($3::text[]))`, accountID, orgID, keys); err != nil {
+			return err
+		}
+		// The inventory time lives at the account: an empty inventory has
+		// no port row to carry it.
+		_, err := tx.Exec(ctx, `UPDATE admp_account SET inventory_fetched_at = $3 WHERE id = $1 AND organization_id = $2`,
+			accountID, orgID, fetchedAt)
+		return err
+	})
+}
+
+// MatchAccessPorts implements Repository: the match statement of match.go
+// and a count of the manual matches.
+func (r *PGRepository) MatchAccessPorts(ctx context.Context, orgID, accountID string) (MatchResult, error) {
+	out := MatchResult{UnmatchedPorts: []UnmatchedPort{}, Rules: map[string]int{}}
+	if !api.IsUUID(accountID) {
+		return out, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, matchStatement, accountID, orgID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var u UnmatchedPort
+			var rule string
+			if err := rows.Scan(&u.PortKey, &rule, &u.NodeName, &u.UnitIndex, &u.PortIndex); err != nil {
+				return err
+			}
+			out.Rules[rule]++
+			if rule != MatchRuleNone {
+				out.Matched++
+				continue
+			}
+			out.Unmatched++
+			out.UnmatchedPorts = append(out.UnmatchedPorts, u)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		var manual int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM admp_access_port WHERE account_id = $1 AND organization_id = $2
+			AND matched_by = 'manual' AND network_interface_id IS NOT NULL`, accountID, orgID).Scan(&manual); err != nil {
+			return err
+		}
+		out.Matched += manual
+		return nil
+	})
+	finishMatch(&out)
+	return out, err
+}
+
+// finishMatch orders the unmatched ports by key and keeps the first
+// maxUnmatchedPorts.
+func finishMatch(r *MatchResult) {
+	slices.SortFunc(r.UnmatchedPorts, func(a, b UnmatchedPort) int { return strings.Compare(a.PortKey, b.PortKey) })
+	if len(r.UnmatchedPorts) > maxUnmatchedPorts {
+		r.UnmatchedPorts = r.UnmatchedPorts[:maxUnmatchedPorts]
+	}
+}
+
+// AccessPortsByInterface implements Repository.
+func (r *PGRepository) AccessPortsByInterface(ctx context.Context, orgID, accountID, interfaceID string) ([]AccessPort, error) {
+	if !api.IsUUID(accountID) || !api.IsUUID(interfaceID) {
+		return []AccessPort{}, nil
+	}
+	return r.accessPorts(ctx, orgID, `a.account_id = $1 AND a.network_interface_id = $2 ORDER BY a.external_id`, accountID, interfaceID)
+}
+
+// ListDuePorts implements Repository.
+func (r *PGRepository) ListDuePorts(ctx context.Context, orgID, accountID string, before time.Time) ([]AccessPort, error) {
+	if !api.IsUUID(accountID) {
+		return []AccessPort{}, nil
+	}
+	return r.accessPorts(ctx, orgID, `a.account_id = $1 AND a.network_interface_id IS NOT NULL AND a.expires_at < $2
+		ORDER BY a.expires_at, a.external_id`, accountID, before)
+}
+
+func (r *PGRepository) accessPorts(ctx context.Context, orgID, where string, args ...any) ([]AccessPort, error) {
+	out := []AccessPort{}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT `+accessPortColumns+` FROM admp_access_port a WHERE `+where, args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			p, err := scanAccessPort(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, *p)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// InventoryFetchedAt implements Repository.
+func (r *PGRepository) InventoryFetchedAt(ctx context.Context, orgID, accountID string) (time.Time, error) {
+	var at *time.Time
+	if !api.IsUUID(accountID) {
+		return time.Time{}, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `SELECT inventory_fetched_at FROM admp_account WHERE id = $1`, accountID).Scan(&at)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return err
+	})
+	if err != nil || at == nil {
+		return time.Time{}, err
+	}
+	return *at, nil
+}
+
+// TouchAccessPort implements Repository.
+func (r *PGRepository) TouchAccessPort(ctx context.Context, orgID, accountID, portKey string, expiresAt time.Time) error {
+	if !api.IsUUID(accountID) {
+		return nil
+	}
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE admp_access_port SET expires_at = $3 WHERE account_id = $1 AND external_id = $2`,
+			accountID, strings.TrimSpace(portKey), expiresAt)
+		return err
+	})
+}
+
+// ReplacePortServices implements Repository: three set-based statements
+// in one transaction.
+func (r *PGRepository) ReplacePortServices(ctx context.Context, orgID, accountID, portKey string, serviceIDs []string,
+	expiresAt time.Time) error {
+	portKey = strings.TrimSpace(portKey)
+	if !api.IsUUID(accountID) || portKey == "" {
+		return ErrInvalidCacheEntry
+	}
+	for _, id := range serviceIDs {
+		if !api.IsUUID(id) {
+			return ErrInvalidCacheEntry
+		}
+	}
+	if serviceIDs == nil {
+		serviceIDs = []string{}
+	}
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `DELETE FROM admp_service_port p USING admp_service s
+			WHERE s.id = p.service_id AND s.organization_id = p.organization_id AND s.account_id = $1
+				AND p.port_key = $2 AND p.matched_by <> 'manual' AND NOT (p.service_id = ANY ($3::uuid[]))`,
+			accountID, portKey, serviceIDs); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO admp_service_port AS p (organization_id, service_id, port_key, network_interface_id,
+				matched_by)
+			SELECT $1, s.id, $3, a.network_interface_id, COALESCE(CASE WHEN a.network_interface_id IS NULL THEN 'none' ELSE a.matched_by END, 'none')
+			FROM admp_service s
+			LEFT JOIN admp_access_port a ON a.account_id = s.account_id AND a.organization_id = s.organization_id AND a.external_id = $3
+			WHERE s.account_id = $2 AND s.id = ANY ($4::uuid[])
+			ON CONFLICT (service_id, port_key) DO UPDATE SET network_interface_id = EXCLUDED.network_interface_id,
+				ci_id = NULL, matched_by = EXCLUDED.matched_by
+			WHERE p.matched_by <> 'manual'`, orgID, accountID, portKey, serviceIDs); err != nil {
+			return cacheError(err)
+		}
+		_, err := tx.Exec(ctx, `UPDATE admp_access_port SET expires_at = $3 WHERE account_id = $1 AND external_id = $2`,
+			accountID, portKey, expiresAt)
+		return err
+	})
 }
 
 var _ Targets = (*PGRepository)(nil)

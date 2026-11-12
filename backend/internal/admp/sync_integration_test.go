@@ -5,11 +5,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/admp"
@@ -21,6 +27,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
 // The refresh of the ADMP cache (ADM-03, E-225, WP-929) on PostgreSQL
@@ -45,11 +52,22 @@ type fakeADMP struct {
 	connFailClass string
 	open          bool
 	fetches       map[string]int // account → fetches
+	// inventory and portServices are the port inventory and the services
+	// of a port (WP-1073); nil: the source has no such read
+	// (not_implemented), as the sources of WP-929.
+	inventory    []admp.InventoryPort
+	portServices map[string][]string
+	// portFailClass fails the services read of single ports.
+	portFailClass map[string]string
+	// sessionClass fails CheckSession of a source with an inventory.
+	sessionClass string
+	// sessions counts the login checks per account.
+	sessions map[string]int
 }
 
 func newFakeADMP() *fakeADMP {
 	return &fakeADMP{connections: map[string]admp.ConnectionData{}, services: map[string]admp.ServiceData{},
-		ports: map[string][]admp.PortData{}, fetches: map[string]int{}}
+		ports: map[string][]admp.PortData{}, fetches: map[string]int{}, sessions: map[string]int{}}
 }
 
 // sourceOf is the source of one account.
@@ -126,6 +144,50 @@ func (s sourceOf) FetchServicePorts(_ context.Context, id string) ([]admp.PortDa
 	s.f.mu.Lock()
 	defer s.f.mu.Unlock()
 	return s.f.ports[id], nil
+}
+
+func (s sourceOf) FetchInventory(context.Context) ([]admp.InventoryPort, error) {
+	s.f.mu.Lock()
+	inv := s.f.inventory
+	s.f.mu.Unlock()
+	if inv == nil {
+		return nil, &admp.SourceError{Class: admp.ClassNotImplemented}
+	}
+	if err := s.fetch(); err != nil {
+		return nil, err
+	}
+	return inv, nil
+}
+
+func (s sourceOf) FetchPortServices(_ context.Context, key string) ([]string, error) {
+	s.f.mu.Lock()
+	known := s.f.portServices != nil
+	s.f.mu.Unlock()
+	if !known {
+		return nil, &admp.SourceError{Class: admp.ClassNotImplemented}
+	}
+	if err := s.fetch(); err != nil {
+		return nil, err
+	}
+	s.f.mu.Lock()
+	defer s.f.mu.Unlock()
+	if class := s.f.portFailClass[key]; class != "" {
+		return nil, &admp.SourceError{Class: class}
+	}
+	return s.f.portServices[key], nil
+}
+
+func (s sourceOf) CheckSession(context.Context) error {
+	s.f.mu.Lock()
+	defer s.f.mu.Unlock()
+	if s.f.inventory == nil {
+		return &admp.SourceError{Class: admp.ClassNotImplemented}
+	}
+	s.f.sessions[s.account]++
+	if s.f.sessionClass != "" {
+		return &admp.SourceError{Class: s.f.sessionClass}
+	}
+	return nil
 }
 
 // syncSubmitter queues on a job service and runs a created job at once
@@ -373,7 +435,8 @@ func TestAdmpRefreshDedupesPerObject(t *testing.T) {
 	}
 	// Invalid parameters are refused before a job exists.
 	for _, bad := range []admp.RefreshParams{{AccountID: "x", Kind: admp.KindConnection, ExternalID: "a"},
-		{AccountID: e.account1, Kind: "port", ExternalID: "a"}, {AccountID: e.account1, Kind: admp.KindService},
+		{AccountID: e.account1, Kind: "nope", ExternalID: "a"}, {AccountID: e.account1, Kind: admp.KindService},
+		{AccountID: e.account1, Kind: admp.KindPort},
 		{AccountID: e.account1, Kind: admp.KindInterface, NetworkInterfaceID: "nope"}} {
 		if _, _, err = e.sync.Submit(ctx, e.f.OrgA, bad, minute); err == nil {
 			t.Errorf("submit %+v accepted", bad)
@@ -616,7 +679,8 @@ func TestAdmpRefreshFailureKeepsCacheStale(t *testing.T) {
 		t.Fatalf("account without credential: %+v", res)
 	}
 
-	// The productive source until WP-1073: not_implemented, cache as is.
+	// The productive source fetches no connection until WP-1075:
+	// not_implemented, cache as is.
 	productive := admp.NewSync(&admp.SyncOptions{Accounts: e.accounts, Cache: e.cache, Pool: e.f.App,
 		Sources: admp.NewClientSources(nil, egress.Options{})})
 	got, err := productive.Refresh(e.org(), e.f.OrgA, admp.RefreshParams{AccountID: e.account1, Kind: admp.KindConnection,
@@ -811,4 +875,587 @@ func expiredCount(t *testing.T, kind string) float64 {
 		}
 	}
 	return 0
+}
+
+// --- The port inventory, the match and the services of a port (ADM-04,
+// E-251, WP-1073) against the fake source.
+
+// device inserts a CI of client with hostname and its interfaces and
+// returns the CI and the interface ids by name.
+func (e *syncEnv) device(clientID, hostname string, interfaces ...string) (string, map[string]string) {
+	e.t.Helper()
+	ci := e.f.CI(e.t, e.f.OrgA, clientID, "wp1073-"+hostname)
+	e.exec(`UPDATE ci SET hostname = $2 WHERE id = $1`, ci, hostname)
+	ifaces := map[string]string{}
+	for _, name := range interfaces {
+		ifaces[name] = e.scalar(`INSERT INTO network_interface (organization_id, ci_id, name) VALUES ($1, $2, $3) RETURNING id::text`,
+			e.f.OrgA, ci, name)
+	}
+	return ci, ifaces
+}
+
+// setInventory gives the fake source an inventory (and with it the
+// session and port reads).
+func (e *syncEnv) setInventory(ports ...admp.InventoryPort) {
+	e.fake.set(func() {
+		e.fake.inventory = append([]admp.InventoryPort{}, ports...)
+		if e.fake.portServices == nil {
+			e.fake.portServices = map[string][]string{}
+		}
+	})
+}
+
+func invPort(key, node string, unit, port int64) admp.InventoryPort {
+	return admp.InventoryPort{PortKey: key, NodeExternalID: "n-" + node, NodeName: node, Protocol: "KEYMILE_SSH", UnitIndex: unit,
+		PortIndex: port}
+}
+
+// refreshKind runs admp.refresh of kind for the account.
+func (e *syncEnv) refreshKind(account, kind, external string) admp.RefreshResult {
+	e.t.Helper()
+	res, err := e.sync.Refresh(e.org(), e.f.OrgA, admp.RefreshParams{AccountID: account, Kind: kind, ExternalID: external})
+	if err != nil {
+		e.t.Fatalf("refresh %s %s: %v", kind, external, err)
+	}
+	return res
+}
+
+// accessPortRow reads a port of the inventory: interface, CI, client and
+// match.
+type accessPortRow struct {
+	Interface, CI, Client, MatchedBy string
+}
+
+func (e *syncEnv) accessPort(account, key string) (accessPortRow, bool) {
+	e.t.Helper()
+	var r accessPortRow
+	err := e.f.Admin.QueryRow(context.Background(), `SELECT COALESCE(network_interface_id::text, ''), COALESCE(ci_id::text, ''),
+		COALESCE(client_id::text, ''), matched_by FROM admp_access_port WHERE account_id = $1 AND external_id = $2`, account, key).
+		Scan(&r.Interface, &r.CI, &r.Client, &r.MatchedBy)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return r, false
+	}
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return r, true
+}
+
+// TestAdmpInventoryMatchByHostname: a port matches the interface of the
+// CI whose hostname equals the node name (case-insensitive) and whose
+// name ends with <unit>/<port> after a non-digit; a longer index (12/1 for
+// 2/1) does not match; the trigger sets CI and client; a port without such
+// an interface stays none. The job result counts both.
+func TestAdmpInventoryMatchByHostname(t *testing.T) {
+	e := newSyncEnv(t)
+	ci, ifs := e.device(e.f.Client1, "OLT-Traunstein-01", "ge-2/1", "ge-12/1", "Gi 2/2")
+	e.setInventory(invPort("301", "olt-traunstein-01", 2, 1), invPort("302", "OLT-TRAUNSTEIN-01", 2, 2),
+		invPort("303", "olt-traunstein-01", 2, 9))
+	res := e.refreshKind(e.accountOr, admp.KindInventory, "")
+	if res.Result != "ok" || res.MatchResult == nil || res.Matched != 2 || res.Unmatched != 1 {
+		t.Fatalf("inventory: %+v", res)
+	}
+	for key, want := range map[string]accessPortRow{
+		"301": {Interface: ifs["ge-2/1"], CI: ci, Client: e.f.Client1, MatchedBy: admp.MatchedByRule},
+		"302": {Interface: ifs["Gi 2/2"], CI: ci, Client: e.f.Client1, MatchedBy: admp.MatchedByRule},
+		"303": {MatchedBy: admp.MatchedByNone},
+	} {
+		if got, ok := e.accessPort(e.accountOr, key); !ok || got != want {
+			t.Errorf("port %s: %+v, want %+v", key, got, want)
+		}
+	}
+}
+
+// TestAdmpInventoryMatchByHostnameLabel: without a CI of the full hostname
+// the first label of the hostname matches the node name.
+func TestAdmpInventoryMatchByHostnameLabel(t *testing.T) {
+	e := newSyncEnv(t)
+	ci, ifs := e.device(e.f.Client1, "dslam-siegsdorf.net.example", "port 1/7")
+	e.setInventory(invPort("401", "DSLAM-Siegsdorf", 1, 7))
+	if res := e.refreshKind(e.account1, admp.KindInventory, ""); res.Matched != 1 {
+		t.Fatalf("inventory: %+v", res)
+	}
+	if got, _ := e.accessPort(e.account1, "401"); got.Interface != ifs["port 1/7"] || got.CI != ci || got.MatchedBy != admp.MatchedByRule {
+		t.Errorf("port 401: %+v", got)
+	}
+}
+
+// TestAdmpInventoryAmbiguousIsNone: two CIs of the node name, or two
+// interfaces of the same ending on one CI, leave the port unmatched.
+func TestAdmpInventoryAmbiguousIsNone(t *testing.T) {
+	e := newSyncEnv(t)
+	e.device(e.f.Client1, "dup-node", "ge-1/1")
+	e.device(e.f.Client1, "DUP-NODE", "ge-1/1")
+	e.device(e.f.Client1, "twin-iface", "eth1/1", "port1/1")
+	e.setInventory(invPort("501", "dup-node", 1, 1), invPort("502", "twin-iface", 1, 1))
+	if res := e.refreshKind(e.account1, admp.KindInventory, ""); res.Matched != 0 || res.Unmatched != 2 {
+		t.Fatalf("inventory: %+v", res)
+	}
+	for _, key := range []string{"501", "502"} {
+		if got, _ := e.accessPort(e.account1, key); got.MatchedBy != admp.MatchedByNone || got.Interface != "" || got.CI != "" {
+			t.Errorf("port %s: %+v, want none", key, got)
+		}
+	}
+}
+
+// TestAdmpInventoryKeepsManualMatch: a manual match survives a new
+// inventory and its match; a port no longer delivered is deleted.
+func TestAdmpInventoryKeepsManualMatch(t *testing.T) {
+	e := newSyncEnv(t)
+	_, ifs := e.device(e.f.Client1, "olt-manual", "ge-1/1", "ge-9/9")
+	e.setInventory(invPort("601", "olt-manual", 1, 1), invPort("602", "olt-manual", 3, 3))
+	e.refreshKind(e.account1, admp.KindInventory, "")
+	e.exec(`UPDATE admp_access_port SET network_interface_id = $2, matched_by = 'manual' WHERE account_id = $1 AND external_id = '601'`,
+		e.account1, ifs["ge-9/9"])
+	e.setInventory(invPort("601", "olt-manual", 1, 1))
+	res := e.refreshKind(e.account1, admp.KindInventory, "")
+	if res.Matched != 1 || res.Unmatched != 0 {
+		t.Fatalf("second inventory: %+v", res)
+	}
+	if got, _ := e.accessPort(e.account1, "601"); got.Interface != ifs["ge-9/9"] || got.MatchedBy != admp.MatchedByManual {
+		t.Errorf("manual port: %+v", got)
+	}
+	if _, ok := e.accessPort(e.account1, "602"); ok {
+		t.Error("a port no longer delivered is still stored")
+	}
+}
+
+// servicePortRows reads the rows of admp_service_port of a port key:
+// service external id → interface/matched_by.
+func (e *syncEnv) servicePortRows(account, key string) map[string]string {
+	e.t.Helper()
+	rows, err := e.f.Admin.Query(context.Background(), `SELECT s.external_id, COALESCE(p.network_interface_id::text, ''), p.matched_by,
+		COALESCE(p.ci_id::text, '') FROM admp_service_port p JOIN admp_service s ON s.id = p.service_id
+		WHERE s.account_id = $1 AND p.port_key = $2`, account, key)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var ext, iface, by, ci string
+		if err := rows.Scan(&ext, &iface, &by, &ci); err != nil {
+			e.t.Fatal(err)
+		}
+		out[ext] = iface + "/" + by + "/" + ci
+	}
+	return out
+}
+
+// TestAdmpPortRefreshStoresServicesAndPorts: the refresh of a port reads
+// its services and each service; admp_service holds kind and life cycle,
+// the connection by its external id, admp_service_port the port with the
+// interface and CI of the inventory. A connection the source cannot fetch
+// yet (not_implemented) is a stale stub.
+func TestAdmpPortRefreshStoresServicesAndPorts(t *testing.T) {
+	e := newSyncEnv(t)
+	ci, ifs := e.device(e.f.Client1, "olt-ports", "ge-2/1")
+	e.setInventory(invPort("301", "olt-ports", 2, 1))
+	e.refreshKind(e.accountOr, admp.KindInventory, "")
+	e.fake.set(func() {
+		e.fake.portServices["301"] = []string{"815", "816"}
+		e.fake.services["815"] = admp.ServiceData{ExternalID: "815", ConnectionExternalID: "4711", Kind: "FTTH 1000",
+			Properties: map[string]any{"template_id": 3, "lifecycle": map[string]any{"booked_at": "2023-11-14T22:13:20Z"}}}
+		e.fake.services["816"] = admp.ServiceData{ExternalID: "816", ConnectionExternalID: "4711", Kind: "template:4"}
+		e.fake.connections["4711"] = admp.ConnectionData{ExternalID: "4711", Carrier: "Netz AG"}
+	})
+	res := e.refreshKind(e.accountOr, admp.KindPort, "301")
+	if res.Result != "ok" {
+		t.Fatalf("port refresh: %+v", res)
+	}
+	want := map[string]string{"815": ifs["ge-2/1"] + "/rule/" + ci, "816": ifs["ge-2/1"] + "/rule/" + ci}
+	if got := e.servicePortRows(e.accountOr, "301"); !reflect.DeepEqual(got, want) {
+		t.Errorf("service ports %v, want %v", got, want)
+	}
+	sv, err := e.cache.ServiceByExternal(e.org(), e.f.OrgA, e.accountOr, "815")
+	if err != nil || sv.Kind != "FTTH 1000" || sv.ConnectionID == "" {
+		t.Fatalf("service 815: %+v %v", sv, err)
+	}
+	if lc, _ := sv.Properties["lifecycle"].(map[string]any); lc["booked_at"] != "2023-11-14T22:13:20Z" {
+		t.Errorf("life cycle %v", sv.Properties)
+	}
+	if c := e.connectionRow(e.accountOr, "4711"); c.Carrier != "Netz AG" || c.Stale {
+		t.Errorf("connection 4711: %+v", c)
+	}
+	// 4712 is no connection of the fake: with a source that cannot fetch
+	// connections yet it becomes a stale stub.
+	e.fake.set(func() {
+		e.fake.connFailClass = admp.ClassNotImplemented
+		e.fake.services["816"] = admp.ServiceData{ExternalID: "816", ConnectionExternalID: "4712", Kind: "template:4"}
+	})
+	e.exec(`DELETE FROM admp_service WHERE account_id = $1 AND external_id = '816'`, e.accountOr)
+	if res = e.refreshKind(e.accountOr, admp.KindPort, "301"); res.Result != "ok" {
+		t.Fatalf("port refresh with a stub: %+v", res)
+	}
+	if c := e.connectionRow(e.accountOr, "4712"); !c.Stale || c.ErrorClass != admp.ClassNotImplemented || c.Carrier != "" {
+		t.Errorf("stub 4712: %+v", c)
+	}
+	if sv, err = e.cache.ServiceByExternal(e.org(), e.f.OrgA, e.accountOr, "816"); err != nil || sv.ConnectionID == "" {
+		t.Errorf("service 816 without its stub: %+v %v", sv, err)
+	}
+}
+
+// TestAdmpPortRefreshRemovesVanishedService: a service the port no longer
+// names loses its row of the port; a manual row stays.
+func TestAdmpPortRefreshRemovesVanishedService(t *testing.T) {
+	e := newSyncEnv(t)
+	_, ifs := e.device(e.f.Client1, "olt-vanish", "ge-2/1")
+	e.setInventory(invPort("301", "olt-vanish", 2, 1))
+	e.refreshKind(e.account1, admp.KindInventory, "")
+	e.fake.set(func() {
+		e.fake.portServices["301"] = []string{"815", "816", "817"}
+		for _, id := range []string{"815", "816", "817"} {
+			e.fake.services[id] = admp.ServiceData{ExternalID: id, Kind: "internet"}
+		}
+	})
+	e.refreshKind(e.account1, admp.KindPort, "301")
+	e.exec(`UPDATE admp_service_port p SET matched_by = 'manual' FROM admp_service s
+		WHERE s.id = p.service_id AND s.external_id = '817' AND p.port_key = '301'`)
+	e.fake.set(func() { e.fake.portServices["301"] = []string{"815"} })
+	e.refreshKind(e.account1, admp.KindPort, "301")
+	got := e.servicePortRows(e.account1, "301")
+	if _, ok := got["816"]; ok || len(got) != 2 || got["817"] != ifs["ge-2/1"]+"/manual/"+strings.Split(got["815"], "/")[2] {
+		t.Errorf("service ports after 816 vanished: %v", got)
+	}
+}
+
+// TestAdmpInterfaceRefreshUsesInventory: the refresh of an interface
+// without a matched port loads the inventory first, then refreshes the
+// ports matched to it; within an hour an interface without port loads no
+// inventory again.
+func TestAdmpInterfaceRefreshUsesInventory(t *testing.T) {
+	e := newSyncEnv(t)
+	_, ifs := e.device(e.f.Client1, "olt-iface", "ge-2/1", "ge-3/1")
+	e.setInventory(invPort("301", "olt-iface", 2, 1))
+	e.fake.set(func() {
+		e.fake.portServices["301"] = []string{"815"}
+		e.fake.services["815"] = admp.ServiceData{ExternalID: "815", Kind: "internet"}
+	})
+	interfaceRefresh := func(iface string) admp.RefreshResult {
+		res, err := e.sync.Refresh(e.org(), e.f.OrgA, admp.RefreshParams{AccountID: e.account1, Kind: admp.KindInterface,
+			NetworkInterfaceID: iface})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	if res := interfaceRefresh(ifs["ge-2/1"]); res.Result != "ok" || res.Refreshed != 2 {
+		t.Fatalf("interface refresh: %+v, want the inventory and the service", res)
+	}
+	if got := e.servicePortRows(e.account1, "301"); len(got) != 1 {
+		t.Fatalf("service ports %v", got)
+	}
+	fetches := e.fake.fetched(e.account1)
+	e.now = e.now.Add(30 * time.Minute)
+	if res := interfaceRefresh(ifs["ge-3/1"]); res.Refreshed != 0 || e.fake.fetched(e.account1) != fetches {
+		t.Fatalf("interface without port within the hour: %+v, %d fetches", res, e.fake.fetched(e.account1)-fetches)
+	}
+	e.now = e.now.Add(time.Hour)
+	interfaceRefresh(ifs["ge-3/1"])
+	if e.fake.fetched(e.account1) != fetches+1 {
+		t.Fatalf("interface without port after an hour: %d fetches, want the inventory", e.fake.fetched(e.account1)-fetches)
+	}
+}
+
+// TestAdmpUnmatchedPortsInJobResult: the job admp.refresh of kind
+// inventory, queued and run like the job queue does, names matched,
+// unmatched and the first 100 unmatched ports (port_key, node_name,
+// unit_index, port_index) in its result, read through GET
+// /api/v1/jobs/{id}. An unmatched port with a service appears in GET
+// /api/v1/admp/connections/{id} with matched_by none and no interface.
+func TestAdmpUnmatchedPortsInJobResult(t *testing.T) {
+	e := newSyncEnv(t)
+	e.device(e.f.Client1, "olt-job", "ge-1/1")
+	ports := []admp.InventoryPort{invPort("1", "olt-job", 1, 1)}
+	for i := range 150 {
+		ports = append(ports, invPort(fmt.Sprintf("9%03d", i), "unknown-node", 4, int64(i)))
+	}
+	e.setInventory(ports...)
+	svc := jobs.NewService(jobs.NewPGRepository(e.f.App))
+	svc.Register(jobs.Kind{Name: admp.RefreshJobKind, MaxAttempts: 3, Timeout: 2 * time.Minute})
+	mux := chi.NewRouter()
+	jobs.NewAPIHandler(svc).RegisterRoutes(mux)
+	admp.NewDataHandler(e.cache, e.cache, admp.NewAccountService(e.accounts, nil, egress.Options{}), e.sync).RegisterRoutes(mux)
+	get := func(path string) *httptest.ResponseRecorder {
+		t.Helper()
+		ctx := tenant.WithTenant(e.org(), tenant.TenantInfo{OrganizationID: e.f.OrgA, UserID: e.f.User})
+		rec := httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil).WithContext(ctx))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s: %d %s", path, rec.Code, rec.Body.String())
+		}
+		return rec
+	}
+	// runJob queues admp.refresh, claims and runs it and stores its
+	// result, the steps of jobs.Queue.Process.
+	runJob := func(p admp.RefreshParams) string {
+		t.Helper()
+		job, _, err := svc.Enqueue(e.org(), e.f.OrgA, admp.RefreshJobKind, p, jobs.EnqueueOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		claimed, err := svc.ClaimJob(e.org(), e.f.OrgA, job.ID)
+		if err != nil || claimed == nil {
+			t.Fatalf("claim: %v %v", claimed, err)
+		}
+		out, err := e.sync.RunRefreshJob(e.org(), claimed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = svc.Succeed(e.org(), e.f.OrgA, job.ID, out); err != nil {
+			t.Fatal(err)
+		}
+		return job.ID
+	}
+	id := runJob(admp.RefreshParams{AccountID: e.account1, Kind: admp.KindInventory})
+	rec := get("/api/v1/jobs/" + id)
+	var job struct {
+		Status string `json:"status"`
+		Result struct {
+			Result         string `json:"result"`
+			Matched        int    `json:"matched"`
+			Unmatched      int    `json:"unmatched"`
+			UnmatchedPorts []struct {
+				PortKey   string `json:"port_key"`
+				NodeName  string `json:"node_name"`
+				UnitIndex *int64 `json:"unit_index"`
+				PortIndex *int64 `json:"port_index"`
+			} `json:"unmatched_ports"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &job); err != nil {
+		t.Fatal(err)
+	}
+	result := job.Result
+	if job.Status != "succeeded" || result.Result != "ok" || result.Matched != 1 || result.Unmatched != 150 ||
+		len(result.UnmatchedPorts) != 100 {
+		t.Fatalf("job %s", rec.Body.String())
+	}
+	for i, p := range result.UnmatchedPorts {
+		if p.PortKey != fmt.Sprintf("9%03d", i) || p.NodeName != "unknown-node" || p.UnitIndex == nil || *p.UnitIndex != 4 ||
+			p.PortIndex == nil || *p.PortIndex != int64(i) {
+			t.Fatalf("unmatched port %d: %+v", i, p)
+		}
+	}
+	// A port refresh names no inventory members.
+	id = runJob(admp.RefreshParams{AccountID: e.account1, Kind: admp.KindPort, ExternalID: "1"})
+	if body := get("/api/v1/jobs/" + id).Body.String(); strings.Contains(body, "unmatched") {
+		t.Errorf("port job %s", body)
+	}
+	// The unmatched port 9000 carries a service: its connection lists the
+	// port with matched_by none and no interface.
+	e.fake.set(func() {
+		e.fake.portServices["9000"] = []string{"815"}
+		e.fake.services["815"] = admp.ServiceData{ExternalID: "815", ConnectionExternalID: "4711", Kind: "internet"}
+		e.fake.connections["4711"] = admp.ConnectionData{ExternalID: "4711", Carrier: "Netz AG"}
+	})
+	runJob(admp.RefreshParams{AccountID: e.account1, Kind: admp.KindPort, ExternalID: "9000"})
+	c, err := e.cache.ConnectionByExternal(e.org(), e.f.OrgA, e.account1, "4711")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var conn struct {
+		Services []struct {
+			ExternalID string `json:"external_id"`
+			Ports      []struct {
+				PortKey            string  `json:"port_key"`
+				MatchedBy          string  `json:"matched_by"`
+				NetworkInterfaceID *string `json:"network_interface_id"`
+			} `json:"ports"`
+		} `json:"services"`
+	}
+	rec = get("/api/v1/admp/connections/" + c.ID)
+	if err = json.Unmarshal(rec.Body.Bytes(), &conn); err != nil {
+		t.Fatal(err)
+	}
+	if len(conn.Services) != 1 || len(conn.Services[0].Ports) != 1 {
+		t.Fatalf("connection %s", rec.Body.String())
+	}
+	if p := conn.Services[0].Ports[0]; p.PortKey != "9000" || p.MatchedBy != admp.MatchedByNone || p.NetworkInterfaceID != nil {
+		t.Errorf("unmatched port in the connection: %+v", p)
+	}
+}
+
+// TestAdmpPortLastingFailurePostponed: a port whose services fail with a
+// lasting class (client: deleted in ADMP since the inventory) moves to its
+// next turn and no longer leads the due ports; a transient class (timeout)
+// keeps it due for the retry.
+func TestAdmpPortLastingFailurePostponed(t *testing.T) {
+	e := newSyncEnv(t)
+	e.device(e.f.Client1, "olt-gone", "ge-2/1", "ge-2/2", "ge-2/3")
+	e.setInventory(invPort("301", "olt-gone", 2, 1), invPort("302", "olt-gone", 2, 2), invPort("303", "olt-gone", 2, 3))
+	e.refreshKind(e.account1, admp.KindInventory, "")
+	e.fake.set(func() {
+		e.fake.portFailClass = map[string]string{"301": readonly.ClassClient, "302": readonly.ClassTimeout}
+	})
+	if res := e.refreshKind(e.account1, admp.KindPort, "301"); res.Result != readonly.ClassClient {
+		t.Fatalf("port 301: %+v", res)
+	}
+	if res := e.refreshKind(e.account1, admp.KindPort, "302"); res.Result != readonly.ClassTimeout {
+		t.Fatalf("port 302: %+v", res)
+	}
+	due, err := e.cache.ListDuePorts(e.org(), e.f.OrgA, e.account1, e.now.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := []string{}
+	for _, p := range due {
+		keys = append(keys, p.ExternalID)
+	}
+	if !reflect.DeepEqual(keys, []string{"302", "303"}) {
+		t.Errorf("due ports %v, want [302 303] (301 postponed)", keys)
+	}
+}
+
+// TestAdmpEmptyInventoryKeepsFetchedAt: an empty inventory still records
+// its time at the account: an interface refresh within the hour loads no
+// new inventory, admp.refresh_linked within the day queues none.
+func TestAdmpEmptyInventoryKeepsFetchedAt(t *testing.T) {
+	e := newSyncEnv(t)
+	_, ifs := e.device(e.f.Client1, "olt-empty", "ge-2/1")
+	e.setInventory()
+	if res := e.refreshKind(e.account1, admp.KindInventory, ""); res.Result != "ok" || res.Matched != 0 || res.Unmatched != 0 {
+		t.Fatalf("empty inventory: %+v", res)
+	}
+	if at, err := e.cache.InventoryFetchedAt(e.org(), e.f.OrgA, e.account1); err != nil || !at.Equal(e.now) {
+		t.Fatalf("inventory time %v (%v), want %v", at, err, e.now)
+	}
+	fetches := e.fake.fetched(e.account1)
+	e.now = e.now.Add(30 * time.Minute)
+	if _, err := e.sync.Refresh(e.org(), e.f.OrgA, admp.RefreshParams{AccountID: e.account1, Kind: admp.KindInterface,
+		NetworkInterfaceID: ifs["ge-2/1"]}); err != nil {
+		t.Fatal(err)
+	}
+	if n := e.fake.fetched(e.account1) - fetches; n != 0 {
+		t.Errorf("interface refresh within the hour: %d fetches, want no inventory", n)
+	}
+	if _, err := e.sync.RefreshLinked(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range e.submitter.keys {
+		if strings.Contains(k, e.account1) && strings.Contains(k, ":inventory:") {
+			t.Errorf("inventory queued within the day: %v", e.submitter.keys)
+		}
+	}
+}
+
+// TestAdmpMatchAccessPortsStatementBudget: the match of an inventory costs
+// at most two statements besides the tenant frame, the same for 300 ports
+// as for 2.
+func TestAdmpMatchAccessPortsStatementBudget(t *testing.T) {
+	e := newSyncEnv(t)
+	e.device(e.f.Client1, "olt-budget", "ge-1/1", "ge-1/2")
+	trace := scopetest.NewQueryTrace(t, e.f.App)
+	cache := admp.NewPGRepository(trace.Pool)
+	count := func(n int) int {
+		t.Helper()
+		ports := make([]admp.AccessPort, 0, n)
+		for i := range n {
+			ports = append(ports, admp.AccessPort{ExternalID: strconv.Itoa(i + 1), NodeExternalID: "n", NodeName: "olt-budget",
+				UnitIndex: 1, PortIndex: int64(i + 1)})
+		}
+		if err := cache.ReplaceAccessPorts(e.org(), e.f.OrgA, e.account1, ports, e.now); err != nil {
+			t.Fatal(err)
+		}
+		stmts := trace.Run(t, func() error {
+			res, err := cache.MatchAccessPorts(e.org(), e.f.OrgA, e.account1)
+			if err == nil && res.Matched != 2 {
+				t.Errorf("%d ports: %d matched, want 2", n, res.Matched)
+			}
+			return err
+		})
+		k := 0
+		for _, s := range stmts {
+			if !frameStatement(s.SQL) {
+				k++
+			}
+		}
+		return k
+	}
+	count(2) // warms the connection
+	small := count(2)
+	large := count(300)
+	if large > 2 || large != small {
+		t.Errorf("statements: %d for 300 ports, %d for 2; want the same and at most 2", large, small)
+	}
+}
+
+// TestAdmpAccessPortClientScope: a port matched to a CI of client 1 takes
+// that client; a principal of client 2 does not see it, one of client 1
+// does; a port of client 1's account without match carries client 1.
+func TestAdmpAccessPortClientScope(t *testing.T) {
+	e := newSyncEnv(t)
+	_, ifs := e.device(e.f.Client1, "olt-scope", "ge-1/1")
+	e.setInventory(invPort("701", "olt-scope", 1, 1))
+	e.refreshKind(e.accountOr, admp.KindInventory, "")
+	e.setInventory(invPort("702", "olt-scope", 5, 5))
+	e.refreshKind(e.account1, admp.KindInventory, "")
+	if got, _ := e.accessPort(e.accountOr, "701"); got.Client != e.f.Client1 {
+		t.Errorf("matched port of the organization's account: client %q, want client 1", got.Client)
+	}
+	if got, _ := e.accessPort(e.account1, "702"); got.Client != e.f.Client1 || got.MatchedBy != admp.MatchedByNone {
+		t.Errorf("unmatched port of client 1's account: %+v", got)
+	}
+	for client, want := range map[string]int{e.f.Client1: 1, e.f.Client2: 0} {
+		ports, err := e.cache.AccessPortsByInterface(e.f.ClientCtx(client), e.f.OrgA, e.accountOr, ifs["ge-1/1"])
+		if err != nil || len(ports) != want {
+			t.Errorf("client %s: %d ports (%v), want %d", client, len(ports), err, want)
+		}
+		due, err := e.cache.ListDuePorts(e.f.ClientCtx(client), e.f.OrgA, e.accountOr, e.now.Add(time.Hour))
+		if err != nil || len(due) != want {
+			t.Errorf("client %s: %d due ports (%v), want %d", client, len(due), err, want)
+		}
+	}
+}
+
+// TestAdmpRefreshLinkedChecksSessionAndInventory: admp.refresh_linked
+// reads the login state of an account first (a success sets last_ok_at, a
+// failure skips the account), loads the inventory when it is older than a
+// day and refreshes the matched ports that are due.
+func TestAdmpRefreshLinkedChecksSessionAndInventory(t *testing.T) {
+	e := newSyncEnv(t)
+	e.sync = e.newSync(time.Minute)
+	e.device(e.f.Client1, "olt-linked", "ge-2/1")
+	e.setInventory(invPort("301", "olt-linked", 2, 1))
+	e.fake.set(func() {
+		e.fake.portServices["301"] = []string{"815"}
+		e.fake.services["815"] = admp.ServiceData{ExternalID: "815", Kind: "internet"}
+	})
+	keys := func(part string) int {
+		n := 0
+		for _, k := range e.submitter.keys {
+			if strings.Contains(k, e.account1) && strings.Contains(k, part) {
+				n++
+			}
+		}
+		return n
+	}
+	if _, err := e.sync.RefreshLinked(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if okAt, class := e.accountStatus(e.account1); okAt == nil || class != "" || e.fake.sessions[e.account1] != 1 {
+		t.Fatalf("after the session check: ok %v class %q sessions %d", okAt, class, e.fake.sessions[e.account1])
+	}
+	if keys(":inventory:") != 1 {
+		t.Fatalf("inventory not queued: %v", e.submitter.keys)
+	}
+	e.now = e.now.Add(15 * time.Minute)
+	if _, err := e.sync.RefreshLinked(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if keys(":inventory:") != 1 || keys(":port:301:") != 1 {
+		t.Fatalf("second run: %v, want the due port and no new inventory", e.submitter.keys)
+	}
+	if got := e.servicePortRows(e.account1, "301"); len(got) != 1 {
+		t.Fatalf("service ports after the linked refresh: %v", got)
+	}
+	e.fake.set(func() { e.fake.sessionClass = readonly.ClassAuth })
+	e.now = e.now.Add(15 * time.Minute)
+	run, err := e.sync.RefreshLinked(context.Background())
+	if err != nil || run.Skipped[e.account1] != readonly.ClassAuth {
+		t.Fatalf("failing session: %+v %v", run, err)
+	}
+	if _, class := e.accountStatus(e.account1); class != readonly.ClassAuth {
+		t.Fatalf("account class %q, want auth", class)
+	}
 }

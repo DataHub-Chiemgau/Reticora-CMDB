@@ -14751,6 +14751,12 @@ ADM-04;[P3];E;backend/internal/admp/readonly/ports_test.go;WP-1073
 
 **Entscheidungsbedarf:** [E-248](entscheidungen.md#e-248) Nur-Lese-Umfang und Pfad-Allowlist, [E-249](entscheidungen.md#e-249) Credential für die ADMP-Anmeldung, [E-250](entscheidungen.md#e-250) Sitzung mit Cookie `AuthToken`, [E-251](entscheidungen.md#e-251) Port-Kennung und Zuordnung zum Interface, [E-253](entscheidungen.md#e-253) Diensteigenschaften und Lebenszyklus, [E-255](entscheidungen.md#e-255) Fixtures aus den Schemas (alle entschieden 2026-11-12, nach Empfehlung); [E-222](entscheidungen.md#e-222) Datenmodell der ADMP-Daten (entschieden 2026-11-09, Option 1). Aufgabe A-86 (offene Fachfragen zur ADMP-Doku) offen: vorläufig nach den Empfehlungen; weicht die Antwort zu Port-Benennung oder Antwortformen ab, werden `match.go` bzw. `ports.go` angepasst.
 
+**Nachtrag 2026-11-12 (Umsetzung):**
+- AK8 präzisiert: Das Export-Register von `readonly_test.go` (`TestClientExportsOnlyReadMethods`) wird um die neuen Antworttypen (`Session`, `AccessPort`, `Service`) und `ErrPathNotAllowed` ergänzt, `ErrNoAuthenticator` entfällt mit dem konkreten `Authenticator`; die Prüfungen selbst bleiben unverändert. `readonly_ast_test.go` bleibt unverändert.
+- Zusätzlich geänderte Dateien: `backend/internal/admp/readonly/readonly_test.go` (Export-Register), `backend/internal/admp/readonly/errors.go` (Klasse `path_not_allowed`), `backend/internal/admp/readonly/client_test.go`, `backend/internal/admp/model.go` (Typen des Port-Inventars), `backend/internal/server/evt02_producers_integration_test.go`.
+- Migration ergänzt: Teilindizes `idx_admp_access_port_ni (network_interface_id)` und `idx_admp_access_port_ci (ci_id)` für Folge-Trigger und `ON DELETE SET NULL`; Spalte `admp_account.inventory_fetched_at` als Zeitpunkt der letzten Inventur je Konto (auch bei leerem Inventar), gesetzt von `ReplaceAccessPorts`, gelesen von `InventoryFetchedAt`.
+- Ein Port, dessen Dienstabruf mit einer nicht transienten Klasse scheitert, erhält über `TouchAccessPort` ein neues `expires_at` (jetzt + TTL) und belegt so nicht in jedem Lauf von `admp.refresh_linked` das Budget des Kontos. Tests zusätzlich: `TestAdmpPortLastingFailurePostponed`, `TestAdmpEmptyInventoryKeepsFetchedAt`; `TestAdmpUnmatchedPortsInJobResult` liest das Ergebnis über `GET /api/v1/jobs/{id}` und den Port mit `matched_by = none` über `GET /api/v1/admp/connections/{id}`.
+
 **Nicht Bestandteil:**
 - Diensteigenschaften: WP-1074.
 - Anschluss einzeln (`FetchConnection`): WP-1075.

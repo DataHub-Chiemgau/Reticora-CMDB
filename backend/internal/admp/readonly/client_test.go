@@ -75,7 +75,8 @@ func (s fakeSecrets) Decrypt(_ context.Context, orgID, id string) (map[string]an
 	if s.fail {
 		return nil, fmt.Errorf("decrypt %s/%s failed with password %s", orgID, id, testPassword)
 	}
-	return map[string]any{"username": testUser, "password": testPassword}, nil
+	// password for fakeAuth, token for the documented login (E-249).
+	return map[string]any{"username": testUser, "password": testPassword, "token": testPassword}, nil
 }
 
 // fakeAuth logs in with the bound login request: it sends the secret to
@@ -94,7 +95,7 @@ func (a *fakeAuth) Token(ctx context.Context) (string, time.Time, error) {
 		return "", time.Time{}, err
 	}
 	body, _ := json.Marshal(map[string]any{"user": secret["username"], "password": secret["password"]})
-	status, raw, err := a.l.do(ctx, http.Header{"Content-Type": {"application/json"}}, body)
+	status, _, raw, err := a.l.do(ctx, http.Header{"Content-Type": {"application/json"}}, body)
 	if err != nil {
 		return "", time.Time{}, err
 	}
@@ -120,7 +121,10 @@ func (a *fakeAuth) count() int {
 	return a.logins
 }
 
-// mockADMP is an httptest ADMP: the login at /auth/token and the reads
+// mockLogin is the login path of the mock: base URL /api/v1 + authPath.
+const mockLogin = "/api/v1" + authPath
+
+// mockADMP is an httptest ADMP: the login at mockLogin and the reads
 // below /api/v1, counting requests by method and path.
 type mockADMP struct {
 	mu     sync.Mutex
@@ -147,7 +151,7 @@ func (m *mockADMP) serve(w http.ResponseWriter, r *http.Request) {
 	m.hits[key]++
 	n := m.hits[key]
 	m.mu.Unlock()
-	if r.URL.Path == "/auth/token" {
+	if r.URL.Path == mockLogin && r.Method == http.MethodPost {
 		var body map[string]string
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		if body["password"] != testPassword {
@@ -159,7 +163,10 @@ func (m *mockADMP) serve(w http.ResponseWriter, r *http.Request) {
 		tok := fmt.Sprintf("tok-%d-canary-%s", m.tokens, strings.Repeat("x", 8))
 		ttl := m.tokenTTL
 		m.mu.Unlock()
-		_ = json.NewEncoder(w).Encode(map[string]any{"token": tok, "expires_in": ttl})
+		// The documented login sets the cookie AuthToken; fakeAuth reads
+		// the body.
+		http.SetCookie(w, &http.Cookie{Name: authCookie, Value: tok, MaxAge: ttl, Path: "/", HttpOnly: true})
+		_ = json.NewEncoder(w).Encode(map[string]any{"token": tok, "expires_in": ttl, "message": "ok"})
 		return
 	}
 	if m.read != nil {
@@ -194,11 +201,12 @@ func newTestClient(t *testing.T, m *mockADMP, account string, rps float64, fc *f
 	t.Helper()
 	auth := &fakeAuth{}
 	c, err := New(Config{AccountID: account, OrganizationID: "org-1", CredentialID: "cred-1",
-		BaseURL: m.srv.URL + "/api/v1", AuthURL: m.srv.URL + "/auth/token", RateLimitRPS: rps, TimeoutMS: 5000},
+		BaseURL: m.srv.URL + "/api/v1", RateLimitRPS: rps, TimeoutMS: 5000},
 		fakeSecrets{}, auth, egress.Options{AllowPrivate: true})
 	if err != nil {
 		t.Fatal(err)
 	}
+	allowTestRoutes(c)
 	if fc != nil {
 		c.clock = fc.clock()
 	}
@@ -508,8 +516,8 @@ func TestClientTokenCacheAndRenewOn401(t *testing.T) {
 	m.read = func(w http.ResponseWriter, r *http.Request, _ int) {
 		mu.Lock()
 		defer mu.Unlock()
-		auth := r.Header.Get("Authorization")
-		if !strings.HasPrefix(auth, "Bearer tok-") || (reject != "" && strings.Contains(auth, reject)) {
+		auth := r.Header.Get("Cookie")
+		if !strings.HasPrefix(auth, authCookie+"=tok-") || (reject != "" && strings.Contains(auth, reject)) {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
@@ -524,7 +532,7 @@ func TestClientTokenCacheAndRenewOn401(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if auth.count() != 1 || m.count("POST /auth/token") != 1 {
+	if auth.count() != 1 || m.count("POST "+mockLogin) != 1 {
 		t.Fatalf("logins for three reads = %d, want 1", auth.count())
 	}
 	// Within 60 s of the expiry the token is renewed.
@@ -553,20 +561,24 @@ func TestClientTokenCacheAndRenewOn401(t *testing.T) {
 	}
 	// A failing login is the class auth, a failing secret credential.
 	failing, err := New(Config{AccountID: "acc-token-2", OrganizationID: "org-1", CredentialID: "c",
-		BaseURL: m.srv.URL + "/api/v1", AuthURL: m.srv.URL + "/auth/token"}, fakeSecrets{fail: true}, &fakeAuth{}, egress.Options{AllowPrivate: true})
+		BaseURL: m.srv.URL + "/api/v1"}, fakeSecrets{fail: true}, &fakeAuth{}, egress.Options{AllowPrivate: true})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err = failing.getJSON(ctx, "x", nil, nil); ClassOf(err) != ClassCredential {
 		t.Fatalf("failing secret: %v", err)
 	}
+	// Without an authenticator the client logs in as documented; without
+	// a credential that is the class credential, before any request.
 	noAuth, err := New(Config{AccountID: "acc-token-3", OrganizationID: "org-1", BaseURL: m.srv.URL + "/api/v1"},
 		nil, nil, egress.Options{AllowPrivate: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = noAuth.getJSON(ctx, "x", nil, nil); ClassOf(err) != ClassAuth || !errors.Is(err, ErrNoAuthenticator) {
-		t.Fatalf("without authenticator: %v", err)
+	allowTestRoutes(noAuth)
+	before := m.total("")
+	if err = noAuth.getJSON(ctx, "x", nil, nil); ClassOf(err) != ClassCredential || m.total("") != before {
+		t.Fatalf("documented login without credential: %v", err)
 	}
 }
 
@@ -585,12 +597,12 @@ func TestClientErrorsCarryNoSecret(t *testing.T) {
 			http.Redirect(w, r, "http://other.invalid/"+marker, http.StatusFound)
 			return
 		}
-		_, _ = fmt.Fprintf(w, `{"error":"%s","echo":"%s"} trailing`, marker, r.Header.Get("Authorization"))
+		_, _ = fmt.Fprintf(w, `{"error":"%s","echo":"%s"} trailing`, marker, r.Header.Get("Cookie"))
 	}
 	fc := newFakeClock()
 	c, _ := newTestClient(t, m, "acc-secret", 50, fc)
 	failing, err := New(Config{AccountID: "acc-secret-2", OrganizationID: "org-1", CredentialID: "c",
-		BaseURL: m.srv.URL + "/api/v1", AuthURL: m.srv.URL + "/auth/token"}, fakeSecrets{fail: true}, &fakeAuth{}, egress.Options{AllowPrivate: true})
+		BaseURL: m.srv.URL + "/api/v1"}, fakeSecrets{fail: true}, &fakeAuth{}, egress.Options{AllowPrivate: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -622,10 +634,28 @@ func TestClientErrorsCarryNoSecret(t *testing.T) {
 		}
 	}
 	for _, text := range texts {
-		for _, secret := range []string{testPassword, "tok-", marker, "Bearer", m.srv.URL} {
+		for _, secret := range []string{testPassword, "tok-", marker, authCookie, m.srv.URL} {
 			if strings.Contains(text, secret) {
 				t.Errorf("%q carries %q", text, secret)
 			}
 		}
 	}
+}
+
+// testRoutes are the read paths of the operational tests (rate, retries,
+// breaker, tokens, transport) below the mock's base URL; the proof tests
+// (readonly*_test.go) use the allowlist alone.
+var testRoutes = []getRoute{
+	{path: "/services/{id}", query: []string{"q"}}, {path: "/x"}, {path: "/flaky"}, {path: "/down"}, {path: "/limited"},
+	{path: "/missing"}, {path: "/bad"}, {path: "/garbage"}, {path: "/server"}, {path: "/client"}, {path: "/redirect"},
+	{path: "/decode"}, {path: "/inside"}, {path: "/target"}, {path: "/away"}, {path: "/outside"},
+}
+
+// allowTestRoutes adds testRoutes to the allowlist of one client.
+func allowTestRoutes(c *Client) {
+	rt, ok := c.http.Transport.(*readOnlyTransport)
+	if !ok {
+		panic("the client has no read-only transport")
+	}
+	rt.routes = append(rt.routes, testRoutes...)
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,13 +26,18 @@ type MemoryRepository struct {
 	connections map[string]*Connection
 	services    map[string]*Service
 	ports       map[string][]ServicePort
+	// inventory holds the ports of the inventory by account and key.
+	inventory map[string]map[string]*AccessPort
+	// inventoryAt holds the time of the last inventory by account.
+	inventoryAt map[string]time.Time
 }
 
 // NewMemoryRepository creates the in-memory cache; accounts gives the
 // client of an account.
 func NewMemoryRepository(accounts AccountRepository) *MemoryRepository {
 	return &MemoryRepository{accounts: accounts, connections: map[string]*Connection{}, services: map[string]*Service{},
-		ports: map[string][]ServicePort{}}
+		ports: map[string][]ServicePort{}, inventory: map[string]map[string]*AccessPort{},
+		inventoryAt: map[string]time.Time{}}
 }
 
 var _ Repository = (*MemoryRepository)(nil)
@@ -74,6 +80,15 @@ func (m *MemoryRepository) dropOrphans(ctx context.Context) {
 	for id, c := range m.connections {
 		if _, ok := m.accountClient(ctx, c.OrganizationID, c.AccountID); !ok {
 			delete(m.connections, id)
+		}
+	}
+	for account, ports := range m.inventory {
+		for _, p := range ports {
+			if _, ok := m.accountClient(ctx, p.OrganizationID, account); !ok {
+				delete(m.inventory, account)
+				delete(m.inventoryAt, account)
+			}
+			break
 		}
 	}
 }
@@ -401,6 +416,169 @@ func (m *MemoryRepository) AffectedConnections(ctx context.Context, orgID string
 	}
 	sortAffected(out)
 	return out, nil
+}
+
+// ReplaceAccessPorts implements Repository.
+func (m *MemoryRepository) ReplaceAccessPorts(ctx context.Context, orgID, accountID string, ports []AccessPort, fetchedAt time.Time) error {
+	if err := checkAccessPorts(ports); err != nil {
+		return err
+	}
+	client, ok := m.accountClient(ctx, orgID, accountID)
+	if !ok || !inScope(ctx, client) {
+		return ErrInvalidCacheEntry
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	prev := m.inventory[accountID]
+	next := map[string]*AccessPort{}
+	for i := range ports {
+		p := ports[i]
+		if old, found := prev[p.ExternalID]; found {
+			p.ID, p.NetworkInterfaceID, p.CIID, p.MatchedBy, p.ExpiresAt = old.ID, old.NetworkInterfaceID, old.CIID, old.MatchedBy, old.ExpiresAt
+			p.ClientID, p.SiteID = old.ClientID, old.SiteID
+		} else {
+			id, err := newID()
+			if err != nil {
+				return err
+			}
+			p.ID, p.MatchedBy, p.ExpiresAt, p.ClientID = id, MatchedByNone, fetchedAt, client
+			p.NetworkInterfaceID, p.CIID, p.SiteID = "", "", ""
+		}
+		p.OrganizationID, p.AccountID, p.FetchedAt = orgID, accountID, fetchedAt
+		next[p.ExternalID] = &p
+	}
+	m.inventory[accountID] = next
+	m.inventoryAt[accountID] = fetchedAt
+	return nil
+}
+
+// MatchAccessPorts implements Repository. The memory store knows no CIs
+// and interfaces: every non-manual port is unmatched.
+func (m *MemoryRepository) MatchAccessPorts(_ context.Context, _, accountID string) (MatchResult, error) {
+	out := MatchResult{UnmatchedPorts: []UnmatchedPort{}, Rules: map[string]int{}}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, p := range m.inventory[accountID] {
+		if p.MatchedBy == MatchedByManual && p.NetworkInterfaceID != "" {
+			out.Matched++
+			continue
+		}
+		if p.MatchedBy == MatchedByManual {
+			continue
+		}
+		p.MatchedBy, p.NetworkInterfaceID, p.CIID = MatchedByNone, "", ""
+		out.Rules[MatchRuleNone]++
+		out.Unmatched++
+		out.UnmatchedPorts = append(out.UnmatchedPorts, UnmatchedPort{PortKey: p.ExternalID, NodeName: p.NodeName,
+			UnitIndex: p.UnitIndex, PortIndex: p.PortIndex})
+	}
+	finishMatch(&out)
+	return out, nil
+}
+
+// accessPorts returns the visible ports of an account that keep holds,
+// ordered by order.
+func (m *MemoryRepository) accessPorts(ctx context.Context, accountID string, keep func(p *AccessPort) bool,
+	order func(a, b AccessPort) int) []AccessPort {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []AccessPort{}
+	for _, p := range m.inventory[accountID] {
+		if keep(p) && cacheVisible(ctx, p.ClientID) {
+			out = append(out, *p)
+		}
+	}
+	slices.SortFunc(out, order)
+	return out
+}
+
+var byExternalID = func(a, b AccessPort) int { return cmp.Compare(a.ExternalID, b.ExternalID) }
+
+// AccessPortsByInterface implements Repository.
+func (m *MemoryRepository) AccessPortsByInterface(ctx context.Context, _, accountID, interfaceID string) ([]AccessPort, error) {
+	return m.accessPorts(ctx, accountID, func(p *AccessPort) bool { return p.NetworkInterfaceID == interfaceID && interfaceID != "" },
+		byExternalID), nil
+}
+
+// ListDuePorts implements Repository.
+func (m *MemoryRepository) ListDuePorts(ctx context.Context, _, accountID string, before time.Time) ([]AccessPort, error) {
+	return m.accessPorts(ctx, accountID, func(p *AccessPort) bool { return p.NetworkInterfaceID != "" && p.ExpiresAt.Before(before) },
+		func(a, b AccessPort) int { return cmp.Or(a.ExpiresAt.Compare(b.ExpiresAt), byExternalID(a, b)) }), nil
+}
+
+// InventoryFetchedAt implements Repository.
+func (m *MemoryRepository) InventoryFetchedAt(_ context.Context, _, accountID string) (time.Time, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.inventoryAt[accountID], nil
+}
+
+// TouchAccessPort implements Repository.
+func (m *MemoryRepository) TouchAccessPort(_ context.Context, _, accountID, portKey string, expiresAt time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if p := m.inventory[accountID][strings.TrimSpace(portKey)]; p != nil {
+		p.ExpiresAt = expiresAt
+	}
+	return nil
+}
+
+// ReplacePortServices implements Repository.
+func (m *MemoryRepository) ReplacePortServices(ctx context.Context, orgID, accountID, portKey string, serviceIDs []string,
+	expiresAt time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.refreshClients(ctx)
+	port := m.inventory[accountID][portKey]
+	for id, s := range m.services {
+		if s.OrganizationID != orgID || s.AccountID != accountID {
+			continue
+		}
+		wanted := slices.Contains(serviceIDs, id)
+		kept := m.ports[id][:0:0]
+		found := false
+		for i := range m.ports[id] {
+			p := &m.ports[id][i]
+			if p.PortKey != portKey {
+				kept = append(kept, *p)
+				continue
+			}
+			found = true
+			switch {
+			case p.MatchedBy == MatchedByManual:
+				kept = append(kept, *p)
+			case wanted:
+				kept = append(kept, portRow(p, port))
+			}
+		}
+		if wanted && !found {
+			rowID, err := newID()
+			if err != nil {
+				return err
+			}
+			kept = append(kept, portRow(&ServicePort{ID: rowID, OrganizationID: orgID, ServiceID: id, PortKey: portKey}, port))
+		}
+		m.ports[id] = kept
+	}
+	if port != nil {
+		port.ExpiresAt = expiresAt
+	}
+	m.refreshClients(ctx)
+	return nil
+}
+
+// portRow takes interface, CI, match and scope of the inventory port into
+// a row of admp_service_port.
+func portRow(row *ServicePort, port *AccessPort) ServicePort {
+	p := *row
+	p.NetworkInterfaceID, p.CIID, p.MatchedBy, p.ClientID, p.SiteID = "", "", MatchedByNone, "", ""
+	if port != nil {
+		p.ClientID = port.ClientID
+		if port.NetworkInterfaceID != "" {
+			p.NetworkInterfaceID, p.CIID, p.MatchedBy, p.SiteID = port.NetworkInterfaceID, port.CIID, port.MatchedBy, port.SiteID
+		}
+	}
+	return p
 }
 
 // ConnectionsByID implements Repository.

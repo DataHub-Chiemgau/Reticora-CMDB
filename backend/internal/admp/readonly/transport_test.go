@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 )
@@ -126,7 +127,7 @@ func TestReadOnlyPathStaysBelowBaseURL(t *testing.T) {
 	if n := m.total(""); n != 0 {
 		t.Fatalf("refused paths reached the server: %v", m.hits)
 	}
-	if err := c.getJSON(ctx, "services/42", map[string][]string{"q": {"a b"}}, nil); err != nil {
+	if err := c.getJSON(ctx, "services/42", map[string][]string{"q": {"7"}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.getJSON(ctx, "/services/43", nil, nil); err != nil {
@@ -149,14 +150,14 @@ func TestReadOnlyPathStaysBelowBaseURL(t *testing.T) {
 }
 
 // TestAuthTransportAllowsOnlyTheLoginRequest: the login transport passes
-// exactly the configured method on exactly the auth URL; another method,
-// another path, query or origin is refused. The login method is POST by
-// default, may be GET, and nothing else.
+// exactly POST on exactly base URL + /V1/user/authentication; another
+// method, another path, query or origin is refused. A configured auth URL
+// other than that one leaves the login without a URL.
 func TestAuthTransportAllowsOnlyTheLoginRequest(t *testing.T) {
 	m := newMockADMP(t)
 	c, _ := newTestClient(t, m, "acc-auth", 50, nil)
-	if c.login.method != http.MethodPost {
-		t.Fatalf("default login method %s", c.login.method)
+	if c.login.method != http.MethodPost || c.login.url.String() != m.srv.URL+mockLogin {
+		t.Fatalf("login %s %v", c.login.method, c.login.url)
 	}
 	ctx := context.Background()
 	try := func(method, raw string) error {
@@ -167,17 +168,15 @@ func TestAuthTransportAllowsOnlyTheLoginRequest(t *testing.T) {
 		}
 		return err
 	}
+	login := m.srv.URL + mockLogin
 	for _, tc := range []struct {
 		method, url string
 		want        error
 	}{
-		{http.MethodGet, m.srv.URL + "/auth/token", ErrMethodNotAllowed},
-		{http.MethodPut, m.srv.URL + "/auth/token", ErrMethodNotAllowed},
-		{http.MethodPatch, m.srv.URL + "/auth/token", ErrMethodNotAllowed},
-		{http.MethodDelete, m.srv.URL + "/auth/token", ErrMethodNotAllowed},
 		{http.MethodPost, m.srv.URL + "/api/v1/services/1", ErrDestinationNotAllowed},
-		{http.MethodPost, m.srv.URL + "/auth/token?x=1", ErrDestinationNotAllowed},
-		{http.MethodPost, m.srv.URL + "/auth/token/", ErrDestinationNotAllowed},
+		{http.MethodPost, login + "?x=1", ErrDestinationNotAllowed},
+		{http.MethodPost, login + "/", ErrDestinationNotAllowed},
+		{http.MethodPost, m.srv.URL + authPath, ErrDestinationNotAllowed},
 	} {
 		if err := try(tc.method, tc.url); !errors.Is(err, tc.want) {
 			t.Errorf("%s %s: %v, want %v", tc.method, tc.url, err, tc.want)
@@ -187,13 +186,13 @@ func TestAuthTransportAllowsOnlyTheLoginRequest(t *testing.T) {
 		t.Error("the login reached another origin")
 	}))
 	defer other.Close()
-	if err := try(http.MethodPost, other.URL+"/auth/token"); !errors.Is(err, ErrDestinationNotAllowed) {
+	if err := try(http.MethodPost, other.URL+mockLogin); !errors.Is(err, ErrDestinationNotAllowed) {
 		t.Errorf("POST to another origin: %v", err)
 	}
 	if n := m.total(""); n != 0 {
 		t.Fatalf("refused logins reached the server: %v", m.hits)
 	}
-	if err := try(http.MethodPost, m.srv.URL+"/auth/token"); err != nil || m.count("POST /auth/token") != 1 {
+	if err := try(http.MethodPost, login); err != nil || m.count("POST "+mockLogin) != 1 {
 		t.Fatalf("the login request: %v", err)
 	}
 	// The data transport refuses the login request: the two never share
@@ -201,36 +200,143 @@ func TestAuthTransportAllowsOnlyTheLoginRequest(t *testing.T) {
 	if c.http.Transport == c.login.client.Transport {
 		t.Fatal("client and login share a transport")
 	}
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, m.srv.URL+"/auth/token", http.NoBody)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, login, http.NoBody)
 	if _, err := c.http.Transport.RoundTrip(req); !errors.Is(err, ErrMethodNotAllowed) {
 		t.Fatalf("login over the data transport: %v", err)
 	}
-
-	// GET as login method; any other method is no valid configuration.
-	g, err := New(Config{AccountID: "acc-auth-get", OrganizationID: "org-1", BaseURL: m.srv.URL + "/api/v1",
-		AuthURL: m.srv.URL + "/auth/token", AuthMethod: "get"}, nil, nil, egress.Options{AllowPrivate: true})
-	if err != nil || g.login.method != http.MethodGet {
-		t.Fatalf("login method get: %v", err)
+	// A configured auth URL is used only when it is exactly the login URL.
+	same, err := New(Config{AccountID: "acc-auth-same", OrganizationID: "org-1", BaseURL: m.srv.URL + "/api/v1/",
+		AuthURL: login}, nil, nil, egress.Options{AllowPrivate: true})
+	if err != nil || same.login.client == nil || same.login.url.String() != login {
+		t.Fatalf("auth URL equal to the login URL: %v", err)
 	}
-	for _, method := range []string{http.MethodPut, http.MethodPatch, http.MethodDelete, "TRACE"} {
-		if _, err = New(Config{AccountID: "acc-auth-x", OrganizationID: "org-1", BaseURL: m.srv.URL,
-			AuthURL: m.srv.URL + "/auth/token", AuthMethod: method}, nil, nil, egress.Options{AllowPrivate: true}); !errors.Is(err, ErrInvalidConfig) {
-			t.Errorf("login method %s accepted: %v", method, err)
-		}
-	}
-	// Without an auth URL no login request is possible at all.
-	none, err := New(Config{AccountID: "acc-auth-none", OrganizationID: "org-1", BaseURL: m.srv.URL + "/api/v1"},
-		nil, nil, egress.Options{AllowPrivate: true})
+	foreign, err := New(Config{AccountID: "acc-auth-foreign", OrganizationID: "org-1", BaseURL: m.srv.URL + "/api/v1",
+		AuthURL: other.URL + mockLogin}, nil, nil, egress.Options{AllowPrivate: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = none.login.do(ctx, nil, nil); !errors.Is(err, ErrDestinationNotAllowed) {
-		t.Fatalf("login without auth URL: %v", err)
+	if _, _, _, err = foreign.login.do(ctx, nil, nil); !errors.Is(err, ErrDestinationNotAllowed) || ClassOf(err) != ClassAuth {
+		t.Fatalf("login with a foreign auth URL: %v", err)
 	}
 	// Invalid URLs are no configuration.
 	for _, base := range []string{"", "ftp://x", "https://user:pw@x", "https://x/?q=1", "https://x/#f", "/relative"} {
 		if _, err = New(Config{AccountID: "a", OrganizationID: "o", BaseURL: base}, nil, nil, egress.Options{}); !errors.Is(err, ErrInvalidConfig) {
 			t.Errorf("base URL %q accepted", base)
 		}
+	}
+}
+
+// TestAuthTransportRejectsNonPostOnAuthPath: DELETE (the logout of the
+// documentation), PATCH, PUT, GET, HEAD and OPTIONS on
+// /V1/user/authentication over the login transport are refused before the
+// network; the mock counts no hit.
+func TestAuthTransportRejectsNonPostOnAuthPath(t *testing.T) {
+	m := newMockADMP(t)
+	c, _ := newTestClient(t, m, "acc-auth-methods", 50, nil)
+	ctx := context.Background()
+	for _, method := range []string{http.MethodDelete, http.MethodPatch, http.MethodPut, http.MethodGet, http.MethodHead,
+		http.MethodOptions} {
+		req, _ := http.NewRequestWithContext(ctx, method, m.srv.URL+mockLogin, http.NoBody)
+		resp, err := c.login.client.Do(req)
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+		if !errors.Is(err, ErrMethodNotAllowed) {
+			t.Errorf("%s on the login path: %v, want ErrMethodNotAllowed", method, err)
+		}
+		inner, _ := http.NewRequestWithContext(ctx, method, m.srv.URL+mockLogin, http.NoBody)
+		if _, err = c.login.client.Transport.RoundTrip(inner); !errors.Is(err, ErrMethodNotAllowed) {
+			t.Errorf("%s on the login path over the inner transport: %v", method, err)
+		}
+	}
+	if n := m.total(""); n != 0 {
+		t.Fatalf("the mock saw %v", m.hits)
+	}
+}
+
+// proofClient builds a client on the mock with the allowlist alone (no
+// test routes) and the given authenticator (nil: the documented login).
+func proofClient(t *testing.T, m *mockADMP, account string, auth Authenticator) *Client {
+	t.Helper()
+	c, err := New(Config{AccountID: account, OrganizationID: "org-1", CredentialID: "cred-1", BaseURL: m.srv.URL + "/api/v1",
+		RateLimitRPS: 50, TimeoutMS: 5000}, fakeSecrets{}, auth, egress.Options{AllowPrivate: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.jitter = func(time.Duration) time.Duration { return 0 }
+	return c
+}
+
+// unlistedGets are the GETs of the documentation outside the allowlist
+// (E-248, introduction of M3.14).
+var unlistedGets = []string{
+	"/V1/admin/logs/paginator", "/V1/user/authorization", "/V1/user/authorization/groups", "/V1/user/authorization/nodes",
+	"/V1/anschluss/paginator", "/V1/anschluss/inhaber/paginator", "/V1/anschluss/7/actions", "/V1/dienst/paginator",
+	"/V1/dienst/7/properties", "/V1/dienst/7/actions", "/V1/dienst/template/picker", "/V1/action/all",
+	"/V1/processor/procedure/schema", "/V1/processor/process/paginator", "/V1/processor/definition/step/paginator",
+	"/V1/changelog/paginator",
+}
+
+// TestReadOnlyTransportAllowsOnlyListedPaths: the 16 GETs of the
+// documentation outside the allowlist, an unknown path, a query the
+// allowlist does not name (also on the picker) and the paths of the
+// allowlist with a suffix end with ErrPathNotAllowed (class
+// path_not_allowed) before the network; the listed paths pass.
+func TestReadOnlyTransportAllowsOnlyListedPaths(t *testing.T) {
+	m := newMockADMP(t)
+	auth := &fakeAuth{}
+	c := proofClient(t, m, "acc-allowlist", auth)
+	ctx := context.Background()
+	refused := append([]string{"/V1/unknown", "/V1/dienst/7/properties/public/x", "/V1/dienst", "/V1/infrastructure/port/7",
+		"/V1/user/authentication/x", "/V1"}, unlistedGets...)
+	for _, p := range refused {
+		err := c.getJSON(ctx, p, nil, nil)
+		if !errors.Is(err, ErrPathNotAllowed) || ClassOf(err) != ClassPathNotAllowed {
+			t.Errorf("GET %s: %v, want ErrPathNotAllowed", p, err)
+		}
+	}
+	for _, q := range []map[string][]string{{"technology": {"DSL"}}, {"organizationId": {"1"}}} {
+		if err := c.getJSON(ctx, accessNodePickerPath, q, nil); !errors.Is(err, ErrPathNotAllowed) {
+			t.Errorf("picker with query %v: %v", q, err)
+		}
+	}
+	for _, p := range []string{sessionPath, accessNodePickerPath, "/V1/infrastructure/port/12/dienstIds", "/V1/dienst/815"} {
+		if err := c.getJSON(ctx, p, nil, nil); err != nil {
+			t.Errorf("GET %s: %v", p, err)
+		}
+	}
+	for key, n := range m.hits {
+		method, path, _ := strings.Cut(key, " ")
+		if method == http.MethodGet && !strings.HasPrefix(path, "/api/v1/V1/user/authentication") &&
+			!strings.HasPrefix(path, "/api/v1/V1/infrastructure/") && !strings.HasPrefix(path, "/api/v1/V1/dienst/815") {
+			t.Errorf("the mock saw %d × %s", n, key)
+		}
+	}
+	if m.total(http.MethodGet) != 4 {
+		t.Errorf("GETs at the mock: %v, want the 4 listed", m.hits)
+	}
+}
+
+// TestReadOnlyTransportRejectsNonNumericIDs: a path id must be a decimal
+// id of 1 to 16 digits without a leading zero; anything else (also
+// encoded) ends with ErrPathNotAllowed before the network.
+func TestReadOnlyTransportRejectsNonNumericIDs(t *testing.T) {
+	m := newMockADMP(t)
+	c := proofClient(t, m, "acc-ids", &fakeAuth{})
+	ctx := context.Background()
+	for _, id := range []string{"abc", "0", "007", "-1", "1.5", "1e3", "12345678901234567", "%31", "1%2F2", "1;x", " 1"} {
+		err := c.getJSON(ctx, "/V1/dienst/"+id, nil, nil)
+		if err == nil || (!errors.Is(err, ErrPathNotAllowed) && !errors.Is(err, ErrInvalidPath)) {
+			t.Errorf("id %q: %v, want a refusal", id, err)
+		}
+	}
+	if n := m.total(http.MethodGet); n != 0 {
+		t.Fatalf("refused ids reached the mock: %v", m.hits)
+	}
+	if err := c.getJSON(ctx, "/V1/dienst/1234567890123456", nil, nil); err != nil {
+		t.Fatalf("16 digits: %v", err)
+	}
+	if _, err := c.GetService(ctx, 0); err == nil || m.total(http.MethodGet) != 1 {
+		t.Fatalf("GetService(0): %v, %v", err, m.hits)
 	}
 }

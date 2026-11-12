@@ -18,6 +18,9 @@ const (
 	ClassCircuitOpen      = "circuit_open"
 	ClassMethodNotAllowed = "method_not_allowed"
 	ClassCredential       = "credential"
+	// ClassPathNotAllowed: a GET on a path outside the allowlist (E-248),
+	// refused before the network.
+	ClassPathNotAllowed = "path_not_allowed"
 	// ClassCanceled: the caller ended the read (its context was canceled
 	// or passed its own deadline); no outcome of ADMP, the circuit breaker
 	// does not count it.
@@ -29,18 +32,18 @@ const classOK = "ok"
 
 // Classes are the error classes in a fixed order.
 var Classes = []string{ClassNetwork, ClassTimeout, ClassAuth, ClassRateLimited, ClassServer, ClassClient,
-	ClassDecode, ClassCircuitOpen, ClassMethodNotAllowed, ClassCredential, ClassCanceled}
+	ClassDecode, ClassCircuitOpen, ClassMethodNotAllowed, ClassCredential, ClassCanceled, ClassPathNotAllowed}
 
 // Sentinels of the read-only guard and of the client. Their texts name no
 // URL, token, secret or answer.
 var (
 	// ErrMethodNotAllowed: a request with another method than GET (on the
-	// base URL) or the configured login method (on the auth URL), or a
-	// GET with a body; refused before the network.
+	// base URL) or the login method POST (on the login URL), or a GET with
+	// a body; refused before the network.
 	ErrMethodNotAllowed = errors.New("admp: method not allowed by the read-only transport")
 	// ErrDestinationNotAllowed: a request outside the base URL (another
 	// scheme, host or port, a path outside its prefix, also a redirect
-	// hop) or another URL than the auth URL; refused before the network.
+	// hop) or another URL than the login URL; refused before the network.
 	ErrDestinationNotAllowed = errors.New("admp: destination not allowed by the read-only transport")
 	// ErrInvalidPath: a path of a read that is absolute, holds a dot
 	// segment or leaves the prefix of the base URL.
@@ -49,9 +52,10 @@ var (
 	ErrCircuitOpen = errors.New("admp: circuit open")
 	// ErrInvalidConfig: New was given an unusable configuration.
 	ErrInvalidConfig = errors.New("admp: invalid client configuration")
-	// ErrNoAuthenticator: a login without an authenticator (the concrete
-	// login procedure follows the documentation, A-55).
-	ErrNoAuthenticator = errors.New("admp: no authenticator")
+	// ErrPathNotAllowed: a GET on a path or with a query outside the
+	// allowlist of the documented reads (E-248); refused before the
+	// network.
+	ErrPathNotAllowed = errors.New("admp: path not allowed by the read-only transport")
 )
 
 // Error is the failure of a request: its class and, when ADMP answered,
@@ -82,6 +86,8 @@ func ClassOf(err error) string {
 		return ""
 	case errors.As(err, &e):
 		return e.Class
+	case errors.Is(err, ErrPathNotAllowed):
+		return ClassPathNotAllowed
 	case errors.Is(err, ErrMethodNotAllowed), errors.Is(err, ErrDestinationNotAllowed), errors.Is(err, ErrInvalidPath):
 		return ClassMethodNotAllowed
 	case errors.Is(err, ErrCircuitOpen):

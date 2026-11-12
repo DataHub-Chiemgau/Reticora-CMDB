@@ -73,6 +73,36 @@ type Repository interface {
 	// (an interface or a CI) and their connections whose expires_at lies
 	// before the time, the earliest first.
 	ListDueLinked(ctx context.Context, orgID, accountID string, before time.Time) ([]DueObject, error)
+
+	// The port inventory (WP-1073, E-251):
+
+	// ReplaceAccessPorts replaces the inventory of an account set-based:
+	// a delivered port is stored with fetchedAt (a new one due at once),
+	// its match kept; a port no longer delivered is deleted. fetchedAt is
+	// the account's inventory time, also for an empty inventory.
+	ReplaceAccessPorts(ctx context.Context, orgID, accountID string, ports []AccessPort, fetchedAt time.Time) error
+	// MatchAccessPorts matches the non-manual ports of an account to
+	// network interfaces (match.go); at most two statements.
+	MatchAccessPorts(ctx context.Context, orgID, accountID string) (MatchResult, error)
+	// AccessPortsByInterface returns the ports of an account matched to
+	// the interface.
+	AccessPortsByInterface(ctx context.Context, orgID, accountID, interfaceID string) ([]AccessPort, error)
+	// InventoryFetchedAt returns the time of the account's last inventory
+	// (an empty one too); zero without one.
+	InventoryFetchedAt(ctx context.Context, orgID, accountID string) (time.Time, error)
+	// TouchAccessPort sets expires_at of an inventory port without
+	// changing its services: a port whose services fail with a lasting
+	// class waits for its next turn instead of leading every run.
+	TouchAccessPort(ctx context.Context, orgID, accountID, portKey string, expiresAt time.Time) error
+	// ListDuePorts returns the matched ports of an account whose
+	// expires_at lies before the time, the earliest first.
+	ListDuePorts(ctx context.Context, orgID, accountID string, before time.Time) ([]AccessPort, error)
+	// ReplacePortServices replaces the services of a port: the rows of
+	// admp_service_port with the port key for the given services (ids of
+	// admp_service of the account) take interface and match of the
+	// inventory port, the rows of other services are deleted; a manual row
+	// stays. The port's expires_at becomes expiresAt.
+	ReplacePortServices(ctx context.Context, orgID, accountID, portKey string, serviceIDs []string, expiresAt time.Time) error
 }
 
 // DueObject is a cached object the periodic refresh renews.
