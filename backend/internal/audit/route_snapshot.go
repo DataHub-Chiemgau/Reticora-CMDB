@@ -363,7 +363,7 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		"monitoring/alerts": "alert_rule", "nameserver-sets": "nameserver_set", "notification-channels": "notification_channel", "orders": "internal_order",
 		"racks": "rack", "relationships": "ci_relationship", "roles": "custom_role", "rooms": "room",
 		"saved-views": "saved_view", "sites": "site", "slas": "sla", "business-calendars": "business_calendar", "stocktakes": "stocktake", "subnets": "subnet",
-		"suppliers": "supplier", "teams": "team", "tickets": "ticket", "trainings": "training", "vlans": "vlan", "vrfs": "vrf",
+		"suppliers": "supplier", "teams": "team", "tickets": "ticket", "trainings": "training", "vlans": "vlan", "vlan-domains": "vlan_domain", "vrfs": "vrf",
 		"workflows": "workflow_def",
 	} {
 		crud(m, v1+collection, table, all...)

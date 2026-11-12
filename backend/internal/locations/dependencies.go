@@ -47,6 +47,9 @@ const (
 	DependencyDiscoveryScope  = "discovery_scope"
 	DependencyEnrollmentToken = "agent_enrollment_token"
 	DependencyCIMerge         = "ci_merge"
+	// DependencyVLANDomain is the assignment of the site to a VLAN domain
+	// (IPM-06, WP-906, RESTRICT).
+	DependencyVLANDomain = "vlan_domain_site"
 
 	// DependencyEnrollmentCode is a collector enrollment code bound to the
 	// site (000187), RESTRICT since 000189 (F-430).
@@ -124,6 +127,7 @@ type siteObject struct {
 // follow-up migration.
 var siteObjects = []siteObject{
 	{DependencyVLAN, ""},
+	{DependencyVLANDomain, ""},
 	{DependencySubnet, ""},
 	{DependencyCollector, ""},
 	{DependencyDiscoveryScope, ""},

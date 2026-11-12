@@ -25710,20 +25710,27 @@ paths:
   /api/v1/vlan-domains:
     x-phase: P3
     x-feature: ipam
-    x-status: planned
     get:
       operationId: listVLANDomains
       tags: [IPAM]
-      summary: List VLAN domains
+      summary: List the VLAN domains by name
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        The VLAN domains of the organization (IPM-06, WP-906, E-212); every
+        principal of the organization reads them, site_ids names the sites
+        of the domain the caller sees. Paged by limit and the signed cursor
+        of next_cursor. Only with PostgreSQL; without a database 501.
+        Requires ipam:read.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: List VLAN domains. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+          description: A page of VLAN domains
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VLANDomainListResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -25732,16 +25739,30 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
     post:
       operationId: createVlanDomain
       tags: [IPAM]
       summary: Create a VLAN domain
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Creates a domain with its sites (IPM-06). Only principals without
+        client and site restriction write domains; a scoped principal gets
+        403 (E-09). A name taken in the organization is 409 with field name,
+        an unknown site 422 with field site_ids. Requires ipam:write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateVLANDomainRequest'
       responses:
         '201':
-          description: Created. The schema comes with the implementing work package.
+          description: VLAN domain created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VLANDomain'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -25754,23 +25775,26 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
 
   /api/v1/vlan-domains/{id}:
     x-phase: P3
     x-feature: ipam
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: getVlanDomain
       tags: [IPAM]
       summary: Get a VLAN domain
-      description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+      description: Requires ipam:read; without a database 501.
       responses:
         '200':
-          description: Get a VLAN domain. The schema comes with the implementing work package.
+          description: VLAN domain
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VLANDomain'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -25779,16 +25803,32 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
     patch:
       operationId: updateVlanDomain
       tags: [IPAM]
       summary: Update a VLAN domain
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Changes name and description; site_ids replaces the sites of the
+        domain. A site at which VLANs of the domain remain cannot leave it
+        (409 with field site_ids). For a principal with client or site
+        restriction the domain answers 404 (E-09). A name taken is 409 with
+        field name, an unknown site 422 with field site_ids. Requires
+        ipam:write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateVLANDomainRequest'
       responses:
         '200':
-          description: Update a VLAN domain. The schema comes with the implementing work package.
+          description: VLAN domain updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VLANDomain'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -25803,16 +25843,20 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
     delete:
       operationId: deleteVlanDomain
       tags: [IPAM]
       summary: Delete a VLAN domain
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Removes the domain and its site assignments. A domain with VLANs
+        (also VLANs outside the caller's scope) is 409. For a principal with
+        client or site restriction the domain answers 404 (E-09). Requires
+        ipam:write.
       responses:
         '204':
-          description: Done.
+          description: VLAN domain deleted
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -25823,11 +25867,12 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
 
   /api/v1/vlan-domains/{id}/vlans:
     x-phase: P3
     x-feature: ipam
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -25835,22 +25880,32 @@ paths:
       tags: [IPAM]
       summary: List the VLANs of a VLAN domain
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        The VLANs of the domain the caller sees, by site and number. Paged by
+        limit and the signed cursor of next_cursor. An unknown domain is
+        404; without a database 501. Requires ipam:read.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: List the VLANs of a VLAN domain. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+          description: A page of VLANs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VLANListResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
 
   /api/v1/cis/{id}/addresses:
     x-phase: P3
@@ -37606,7 +37661,8 @@ components:
               type: array
               description: >-
                 Kinds of the objects that keep the location: location means
-                child locations; vlan, subnet, collector, discovery_scope,
+                child locations; vlan, vlan_domain_site (assignment to a VLAN
+                domain, IPM-06), subnet, collector, discovery_scope,
                 agent_enrollment_token (unexpired), collector_enrollment_code
                 (neither used nor expired) and ci_merge (tombstone within
                 tombstone_until) are bound to a site (E-71). ci_attribute
@@ -37620,7 +37676,7 @@ components:
                 quantity_item is gone with WP-758).
               items:
                 type: string
-                enum: [location, ci, asset, stock_level, stock_movement, rack_mount, role_assignment, ci_attribute, internal_order, vlan, subnet, collector, discovery_scope, agent_enrollment_token, collector_enrollment_code, ci_merge, stocktake, stocktake_item, stock_scan]
+                enum: [location, ci, asset, stock_level, stock_movement, rack_mount, role_assignment, ci_attribute, internal_order, vlan, vlan_domain_site, subnet, collector, discovery_scope, agent_enrollment_token, collector_enrollment_code, ci_merge, stocktake, stocktake_item, stock_scan]
     LocationKind:
       type: string
       enum: [site, building, room, rack, warehouse, zone, shelf, bin]
@@ -39919,7 +39975,8 @@ components:
       required: [id, organization_id, vlan_id, name, created_at, updated_at]
       description: >-
         Entry of the VLAN catalog (NET-08). The number is unique per site, or
-        per organization for VLANs without site (E-24).
+        per organization for VLANs without site (E-24); a VLAN of a VLAN
+        domain is unique per domain instead (IPM-06, E-212).
       properties:
         id: { type: string }
         organization_id: { type: string }
@@ -39928,6 +39985,9 @@ components:
           readOnly: true
           description: Client of the site.
         site_id: { type: string }
+        domain_id:
+          type: string
+          description: VLAN domain (IPM-06); absent without one.
         vlan_id: { type: integer, minimum: 1, maximum: 4094 }
         name: { type: string }
         description: { type: string }
@@ -39939,6 +39999,12 @@ components:
       required: [vlan_id, name]
       properties:
         site_id: { type: string }
+        domain_id:
+          type: string
+          description: >-
+            VLAN domain of the organization (IPM-06); an unknown domain is 422
+            with field domain_id. With a site, the site must belong to the
+            domain (422 site_id). An empty string clears it on update.
         vlan_id: { type: integer, minimum: 1, maximum: 4094 }
         name: { type: string }
         description: { type: string }
@@ -39946,6 +40012,12 @@ components:
     UpdateVLANRequest:
       type: object
       properties:
+        domain_id:
+          type: string
+          description: >-
+            VLAN domain of the organization (IPM-06); an unknown domain is 422
+            with field domain_id. With a site, the site must belong to the
+            domain (422 site_id). An empty string clears it on update.
         vlan_id: { type: integer, minimum: 1, maximum: 4094 }
         name: { type: string }
         description: { type: string }
@@ -40065,6 +40137,57 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/NameserverSet'
+
+    VLANDomain:
+      type: object
+      required: [id, organization_id, name, site_ids, created_at, updated_at]
+      description: >-
+        VLAN domain (IPM-06, E-212): a layer-2 domain that spans sites. A
+        VLAN of the domain is unique per (domain, vlan_id). Every principal
+        of the organization reads the domains; only principals without
+        client and site restriction write them (E-09).
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        name: { type: string, description: Unique in the organization. }
+        description: { type: string }
+        site_ids:
+          type: array
+          items: { type: string }
+          description: The sites of the domain the caller sees.
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CreateVLANDomainRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        site_ids:
+          type: array
+          items: { type: string }
+
+    UpdateVLANDomainRequest:
+      type: object
+      properties:
+        name: { type: string }
+        description: { type: string, description: An empty string clears it. }
+        site_ids:
+          type: array
+          items: { type: string }
+          description: Replaces the sites of the domain.
+
+    VLANDomainListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/VLANDomain'
 
     IPAMSectionListResponse:
       allOf:

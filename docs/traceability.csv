@@ -1681,3 +1681,4 @@ IPM-03;[P3];G3;backend/internal/ipam/allocate_integration_test.go;WP-904
 IPM-08;[P3];G3;backend/internal/ipam/history_integration_test.go;WP-908
 IPM-20;[P3];G3;backend/internal/ipam/filter_integration_test.go;WP-909
 IPM-05;[P3];G3;backend/internal/ipam/nameserver_integration_test.go;WP-905
+IPM-06;[P3];G3;backend/internal/ipam/vlan_domain_integration_test.go;WP-906

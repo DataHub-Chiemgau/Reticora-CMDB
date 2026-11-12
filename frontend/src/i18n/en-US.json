@@ -2832,6 +2832,7 @@
       "ci_attribute": "CI attributes referencing the location",
       "internal_order": "internal orders (target bin)",
       "vlan": "VLANs",
+      "vlan_domain_site": "VLAN domains (site assignment)",
       "subnet": "subnets",
       "collector": "collectors",
       "discovery_scope": "discovery scopes",

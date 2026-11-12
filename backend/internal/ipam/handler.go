@@ -114,6 +114,14 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/nameserver-sets/{id}", h.GetNameserverSet)
 	r.Patch("/api/v1/nameserver-sets/{id}", h.UpdateNameserverSet)
 	r.Delete("/api/v1/nameserver-sets/{id}", h.DeleteNameserverSet)
+
+	// VLAN domains (IPM-06, vlan_domain.go): only with PostgreSQL, else 501.
+	r.Get("/api/v1/vlan-domains", h.ListVLANDomains)
+	r.Post("/api/v1/vlan-domains", h.CreateVLANDomain)
+	r.Get("/api/v1/vlan-domains/{id}", h.GetVLANDomain)
+	r.Patch("/api/v1/vlan-domains/{id}", h.UpdateVLANDomain)
+	r.Delete("/api/v1/vlan-domains/{id}", h.DeleteVLANDomain)
+	r.Get("/api/v1/vlan-domains/{id}/vlans", h.ListVLANDomainVLANs)
 }
 
 func org(w http.ResponseWriter, r *http.Request) (string, bool) {

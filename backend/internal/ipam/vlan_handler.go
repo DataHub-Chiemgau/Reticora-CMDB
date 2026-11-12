@@ -45,8 +45,8 @@ func (h *Handler) CreateVLAN(w http.ResponseWriter, r *http.Request) {
 		writeRepoError(w, err, "")
 		return
 	}
-	v := &VLAN{OrganizationID: orgID, SiteID: req.SiteID, VLANID: req.VLANID, Name: strings.TrimSpace(req.Name),
-		Description: req.Description}
+	v := &VLAN{OrganizationID: orgID, SiteID: req.SiteID, DomainID: req.DomainID, VLANID: req.VLANID,
+		Name: strings.TrimSpace(req.Name), Description: req.Description}
 	if err := h.repo.CreateVLAN(r.Context(), v); err != nil {
 		writeRepoError(w, err, "vlan not found")
 		return
@@ -78,6 +78,12 @@ func (h *Handler) UpdateVLAN(w http.ResponseWriter, r *http.Request) {
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
+	}
+	if req.DomainID != nil {
+		// A blank domain clears it, as on create; the repositories see
+		// the trimmed id ("" or the uuid).
+		d := strings.TrimSpace(*req.DomainID)
+		req.DomainID = &d
 	}
 	number, name := 1, "x"
 	if req.VLANID != nil {

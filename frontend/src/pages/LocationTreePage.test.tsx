@@ -571,6 +571,7 @@ describe('LocationTreePage', () => {
         ci_attribute: true,
         internal_order: true,
         vlan: true,
+        vlan_domain_site: true,
         subnet: true,
         collector: true,
         discovery_scope: true,

@@ -11180,14 +11180,14 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * List VLAN domains
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * List the VLAN domains by name
+     * @description The VLAN domains of the organization (IPM-06, WP-906, E-212); every principal of the organization reads them, site_ids names the sites of the domain the caller sees. Paged by limit and the signed cursor of next_cursor. Only with PostgreSQL; without a database 501. Requires ipam:read.
      */
     get: operations['listVLANDomains'];
     put?: never;
     /**
      * Create a VLAN domain
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Creates a domain with its sites (IPM-06). Only principals without client and site restriction write domains; a scoped principal gets 403 (E-09). A name taken in the organization is 409 with field name, an unknown site 422 with field site_ids. Requires ipam:write.
      */
     post: operations['createVlanDomain'];
     delete?: never;
@@ -11208,21 +11208,21 @@ export interface paths {
     };
     /**
      * Get a VLAN domain
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Requires ipam:read; without a database 501.
      */
     get: operations['getVlanDomain'];
     put?: never;
     post?: never;
     /**
      * Delete a VLAN domain
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Removes the domain and its site assignments. A domain with VLANs (also VLANs outside the caller's scope) is 409. For a principal with client or site restriction the domain answers 404 (E-09). Requires ipam:write.
      */
     delete: operations['deleteVlanDomain'];
     options?: never;
     head?: never;
     /**
      * Update a VLAN domain
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Changes name and description; site_ids replaces the sites of the domain. A site at which VLANs of the domain remain cannot leave it (409 with field site_ids). For a principal with client or site restriction the domain answers 404 (E-09). A name taken is 409 with field name, an unknown site 422 with field site_ids. Requires ipam:write.
      */
     patch: operations['updateVlanDomain'];
     trace?: never;
@@ -11239,7 +11239,7 @@ export interface paths {
     };
     /**
      * List the VLANs of a VLAN domain
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description The VLANs of the domain the caller sees, by site and number. Paged by limit and the signed cursor of next_cursor. An unknown domain is 404; without a database 501. Requires ipam:read.
      */
     get: operations['listVLANDomainVLANs'];
     put?: never;
@@ -18363,7 +18363,7 @@ export interface components {
       relationship_ids?: string[];
     };
     DependencyProblem: components['schemas']['ProblemDetail'] & {
-      /** @description Kinds of the objects that keep the location: location means child locations; vlan, subnet, collector, discovery_scope, agent_enrollment_token (unexpired), collector_enrollment_code (neither used nor expired) and ci_merge (tombstone within tombstone_until) are bound to a site (E-71). ci_attribute means a visible CI whose reference attribute with target location names the location (MET-12). internal_order means an internal order whose target bin is the location (STK-05). stocktake, stocktake_item and stock_scan mean a stocktake whose area, an item of whose frozen expected stock or a scan whose place found is the location (INV-01). stock_level means stock of a consumable in the bin (STK-03; the kind quantity_item is gone with WP-758). */
+      /** @description Kinds of the objects that keep the location: location means child locations; vlan, vlan_domain_site (assignment to a VLAN domain, IPM-06), subnet, collector, discovery_scope, agent_enrollment_token (unexpired), collector_enrollment_code (neither used nor expired) and ci_merge (tombstone within tombstone_until) are bound to a site (E-71). ci_attribute means a visible CI whose reference attribute with target location names the location (MET-12). internal_order means an internal order whose target bin is the location (STK-05). stocktake, stocktake_item and stock_scan mean a stocktake whose area, an item of whose frozen expected stock or a scan whose place found is the location (INV-01). stock_level means stock of a consumable in the bin (STK-03; the kind quantity_item is gone with WP-758). */
       dependencies: (
         | 'location'
         | 'ci'
@@ -18375,6 +18375,7 @@ export interface components {
         | 'ci_attribute'
         | 'internal_order'
         | 'vlan'
+        | 'vlan_domain_site'
         | 'subnet'
         | 'collector'
         | 'discovery_scope'
@@ -19649,13 +19650,15 @@ export interface components {
     VRFListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['VRF'][];
     };
-    /** @description Entry of the VLAN catalog (NET-08). The number is unique per site, or per organization for VLANs without site (E-24). */
+    /** @description Entry of the VLAN catalog (NET-08). The number is unique per site, or per organization for VLANs without site (E-24); a VLAN of a VLAN domain is unique per domain instead (IPM-06, E-212). */
     VLAN: {
       id: string;
       organization_id: string;
       /** @description Client of the site. */
       readonly client_id?: string;
       site_id?: string;
+      /** @description VLAN domain (IPM-06); absent without one. */
+      domain_id?: string;
       vlan_id: number;
       name: string;
       description?: string;
@@ -19666,11 +19669,15 @@ export interface components {
     };
     CreateVLANRequest: {
       site_id?: string;
+      /** @description VLAN domain of the organization (IPM-06); an unknown domain is 422 with field domain_id. With a site, the site must belong to the domain (422 site_id). An empty string clears it on update. */
+      domain_id?: string;
       vlan_id: number;
       name: string;
       description?: string;
     };
     UpdateVLANRequest: {
+      /** @description VLAN domain of the organization (IPM-06); an unknown domain is 422 with field domain_id. With a site, the site must belong to the domain (422 site_id). An empty string clears it on update. */
+      domain_id?: string;
       vlan_id?: number;
       name?: string;
       description?: string;
@@ -19744,6 +19751,35 @@ export interface components {
     };
     NameserverSetListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['NameserverSet'][];
+    };
+    /** @description VLAN domain (IPM-06, E-212): a layer-2 domain that spans sites. A VLAN of the domain is unique per (domain, vlan_id). Every principal of the organization reads the domains; only principals without client and site restriction write them (E-09). */
+    VLANDomain: {
+      id: string;
+      organization_id: string;
+      /** @description Unique in the organization. */
+      name: string;
+      description?: string;
+      /** @description The sites of the domain the caller sees. */
+      site_ids: string[];
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateVLANDomainRequest: {
+      name: string;
+      description?: string;
+      site_ids?: string[];
+    };
+    UpdateVLANDomainRequest: {
+      name?: string;
+      /** @description An empty string clears it. */
+      description?: string;
+      /** @description Replaces the sites of the domain. */
+      site_ids?: string[];
+    };
+    VLANDomainListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['VLANDomain'][];
     };
     IPAMSectionListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['IPAMSection'][];
@@ -48984,6 +49020,11 @@ export interface operations {
          *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
       };
       header?: never;
       path?: never;
@@ -48991,17 +49032,20 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List VLAN domains. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description A page of VLAN domains */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['VLANDomainListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   createVlanDomain: {
@@ -49011,14 +49055,20 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateVLANDomainRequest'];
+      };
+    };
     responses: {
-      /** @description Created. The schema comes with the implementing work package. */
+      /** @description VLAN domain created */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['VLANDomain'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -49026,6 +49076,7 @@ export interface operations {
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   getVlanDomain: {
@@ -49040,17 +49091,20 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get a VLAN domain. The schema comes with the implementing work package. */
+      /** @description VLAN domain */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['VLANDomain'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   deleteVlanDomain: {
@@ -49065,7 +49119,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Done. */
+      /** @description VLAN domain deleted */
       204: {
         headers: {
           [name: string]: unknown;
@@ -49077,6 +49131,7 @@ export interface operations {
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   updateVlanDomain: {
@@ -49089,14 +49144,20 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateVLANDomainRequest'];
+      };
+    };
     responses: {
-      /** @description Update a VLAN domain. The schema comes with the implementing work package. */
+      /** @description VLAN domain updated */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['VLANDomain'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -49105,6 +49166,7 @@ export interface operations {
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   listVLANDomainVLANs: {
@@ -49120,6 +49182,11 @@ export interface operations {
          *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
       };
       header?: never;
       path: {
@@ -49130,17 +49197,21 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the VLANs of a VLAN domain. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description A page of VLANs */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['VLANListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   listCIAddresses: {

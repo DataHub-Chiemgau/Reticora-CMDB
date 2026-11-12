@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000304_nameserver_set
+Stand: Migration 000305_vlan_domain
 
 ## Prüfung
 
@@ -2054,6 +2054,8 @@ SECURITY`), Policies mit ihrem Kommando.
 | `vault_connection` | ja | ja | vault_connection_isolation (ALL), vault_connection_scoped_delete (DELETE), vault_connection_scoped_update (UPDATE) |
 | `vault_connection_collector` | ja | ja | vault_connection_collector_isolation (ALL), vault_connection_collector_scoped_delete (DELETE), vault_connection_collector_scoped_update (UPDATE) |
 | `vlan` | ja | ja | vlan_isolation (ALL), vlan_scoped_delete (DELETE), vlan_scoped_update (UPDATE) |
+| `vlan_domain` | ja | ja | vlan_domain_isolation (ALL), vlan_domain_scoped_delete (DELETE), vlan_domain_scoped_insert (INSERT), vlan_domain_scoped_update (UPDATE) |
+| `vlan_domain_site` | ja | ja | vlan_domain_site_isolation (ALL) |
 | `vrf` | ja | ja | vrf_isolation (ALL), vrf_scoped_delete (DELETE), vrf_scoped_insert (INSERT), vrf_scoped_update (UPDATE) |
 | `webhook_dead_letter` | ja | ja | webhook_dead_letter_isolation (ALL), webhook_dead_letter_system_select (SELECT) |
 | `webhook_delivery` | ja | ja | webhook_delivery_isolation (ALL), webhook_delivery_system_select (SELECT) |

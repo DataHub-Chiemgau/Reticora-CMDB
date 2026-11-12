@@ -2832,6 +2832,7 @@
       "ci_attribute": "CI-Attribute mit Standortverweis",
       "internal_order": "interne Bestellungen (Ziel-Bin)",
       "vlan": "VLANs",
+      "vlan_domain_site": "VLAN-Domänen (Standortzuordnung)",
       "subnet": "Subnetze",
       "collector": "Collectors",
       "discovery_scope": "Discovery-Scopes",

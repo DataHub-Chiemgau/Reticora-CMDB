@@ -123,7 +123,9 @@ var readPermissionFor = map[string]identity.Permission{
 	"ipam":          identity.PermIPAMRead,
 	"ipam-sections": identity.PermIPAMRead,
 	// Nameserver sets (IPM-05, WP-905); written with ipam:write.
-	"nameserver-sets":          identity.PermIPAMRead,
+	"nameserver-sets": identity.PermIPAMRead,
+	// VLAN domains (IPM-06, WP-906); written with ipam:write.
+	"vlan-domains":             identity.PermIPAMRead,
 	"asns":                     identity.PermIPAMRead,
 	"asn-ranges":               identity.PermIPAMRead,
 	"bgp-peerings":             identity.PermIPAMRead,

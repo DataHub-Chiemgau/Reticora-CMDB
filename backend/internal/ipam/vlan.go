@@ -13,14 +13,18 @@ import (
 )
 
 // VLAN is an entry of the VLAN catalog (NET-08): the number is unique per
-// site, or per organization for VLANs without site (E-24). Subnets and
+// site, or per organization for VLANs without site (E-24); a VLAN of a VLAN
+// domain is unique per domain instead (IPM-06, E-212). Subnets and
 // interfaces reference it by id.
 type VLAN struct {
 	ID             string `json:"id"`
 	OrganizationID string `json:"organization_id"`
 	// ClientID is the client of the site (read-only).
-	ClientID    string    `json:"client_id,omitempty"`
-	SiteID      string    `json:"site_id,omitempty"`
+	ClientID string `json:"client_id,omitempty"`
+	SiteID   string `json:"site_id,omitempty"`
+	// DomainID is the VLAN domain (IPM-06); with a site, the site belongs
+	// to the domain.
+	DomainID    string    `json:"domain_id,omitempty"`
 	VLANID      int       `json:"vlan_id"`
 	Name        string    `json:"name"`
 	Description string    `json:"description,omitempty"`
@@ -31,6 +35,7 @@ type VLAN struct {
 // CreateVLANRequest is the payload for creating a VLAN.
 type CreateVLANRequest struct {
 	SiteID      string `json:"site_id,omitempty"`
+	DomainID    string `json:"domain_id,omitempty"`
 	VLANID      int    `json:"vlan_id"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
@@ -38,6 +43,8 @@ type CreateVLANRequest struct {
 
 // UpdateVLANRequest is the payload for updating a VLAN.
 type UpdateVLANRequest struct {
+	// DomainID sets ("" clears) the VLAN domain (IPM-06).
+	DomainID    *string `json:"domain_id,omitempty"`
 	VLANID      *int    `json:"vlan_id,omitempty"`
 	Name        *string `json:"name,omitempty"`
 	Description *string `json:"description,omitempty"`
@@ -56,11 +63,11 @@ func validateVLAN(number int, name string) error {
 // --- PostgreSQL ---
 
 const vlanCols = `id::text, organization_id::text, COALESCE(client_id::text,''), COALESCE(site_id::text,''),
-	vlan_id, name, COALESCE(description,''), created_at, updated_at`
+	COALESCE(domain_id::text,''), vlan_id, name, COALESCE(description,''), created_at, updated_at`
 
 func scanVLAN(s scanner) (*VLAN, error) {
 	v := &VLAN{}
-	if err := s.Scan(&v.ID, &v.OrganizationID, &v.ClientID, &v.SiteID, &v.VLANID, &v.Name, &v.Description,
+	if err := s.Scan(&v.ID, &v.OrganizationID, &v.ClientID, &v.SiteID, &v.DomainID, &v.VLANID, &v.Name, &v.Description,
 		&v.CreatedAt, &v.UpdatedAt); err != nil {
 		return nil, err
 	}
@@ -118,11 +125,14 @@ func (r *PGRepository) GetVLAN(ctx context.Context, orgID, id string) (*VLAN, er
 // CreateVLAN stores a VLAN; the client follows the site.
 func (r *PGRepository) CreateVLAN(ctx context.Context, v *VLAN) error {
 	return database.WithRequestTenant(ctx, r.pool, v.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		created, err := scanVLAN(tx.QueryRow(ctx, `INSERT INTO vlan (organization_id, site_id, vlan_id, name, description)
-			VALUES ($1, $2, $3, $4, $5) RETURNING `+vlanCols,
-			v.OrganizationID, nilIfEmpty(v.SiteID), v.VLANID, v.Name, nilIfEmpty(v.Description)))
-		if err != nil {
+		if err := checkVLANDomain(ctx, tx, v.OrganizationID, v.DomainID); err != nil {
 			return err
+		}
+		created, err := scanVLAN(tx.QueryRow(ctx, `INSERT INTO vlan (organization_id, site_id, vlan_id, name, description, domain_id)
+			VALUES ($1, $2, $3, $4, $5, $6) RETURNING `+vlanCols,
+			v.OrganizationID, nilIfEmpty(v.SiteID), v.VLANID, v.Name, nilIfEmpty(v.Description), nilIfEmpty(v.DomainID)))
+		if err != nil {
+			return vlanDomainWriteError(err)
 		}
 		*v = *created
 		return nil
@@ -133,15 +143,21 @@ func (r *PGRepository) CreateVLAN(ctx context.Context, v *VLAN) error {
 func (r *PGRepository) UpdateVLAN(ctx context.Context, orgID, id string, req UpdateVLANRequest) (*VLAN, error) {
 	var v *VLAN
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if req.DomainID != nil {
+			if err := checkVLANDomain(ctx, tx, orgID, *req.DomainID); err != nil {
+				return err
+			}
+		}
 		var err error
 		v, err = scanVLAN(tx.QueryRow(ctx, `UPDATE vlan SET vlan_id = COALESCE($3, vlan_id), name = COALESCE($4, name),
-			description = CASE WHEN $5::text IS NULL THEN description ELSE NULLIF($5, '') END
+			description = CASE WHEN $5::text IS NULL THEN description ELSE NULLIF($5, '') END,
+			domain_id = CASE WHEN $6::text IS NULL THEN domain_id ELSE NULLIF($6, '')::uuid END
 			WHERE organization_id = $1 AND id = $2 RETURNING `+vlanCols,
-			orgID, id, req.VLANID, req.Name, req.Description))
+			orgID, id, req.VLANID, req.Name, req.Description, req.DomainID))
 		if err == pgx.ErrNoRows {
 			return ErrNotFound
 		}
-		return err
+		return vlanDomainWriteError(err)
 	})
 	return v, err
 }
@@ -153,9 +169,14 @@ func (r *PGRepository) DeleteVLAN(ctx context.Context, orgID, id string) error {
 
 // --- Memory ---
 
+// vlanTaken applies the uniqueness of the VLAN numbers: per domain for a
+// VLAN of a domain (IPM-06), else per site or organization (E-24).
 func (r *MemoryRepository) vlanTaken(v *VLAN, exceptID string) bool {
 	for _, e := range r.vlans {
-		if e.ID != exceptID && e.OrganizationID == v.OrganizationID && e.SiteID == v.SiteID && e.VLANID == v.VLANID {
+		if e.ID == exceptID || e.OrganizationID != v.OrganizationID || e.VLANID != v.VLANID || e.DomainID != v.DomainID {
+			continue
+		}
+		if v.DomainID != "" || e.SiteID == v.SiteID {
 			return true
 		}
 	}
@@ -219,6 +240,9 @@ func (r *MemoryRepository) UpdateVLAN(_ context.Context, orgID, id string, req U
 		return nil, ErrNotFound
 	}
 	next := *v
+	if req.DomainID != nil {
+		next.DomainID = *req.DomainID
+	}
 	if req.VLANID != nil {
 		next.VLANID = *req.VLANID
 	}

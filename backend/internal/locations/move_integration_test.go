@@ -702,7 +702,7 @@ func TestLocationDeleteReferencesMapToSpecKinds(t *testing.T) {
 	kinds := []string{
 		locations.DependencyLocation, locations.DependencyCI, locations.DependencyAsset, locations.DependencyStockLevel,
 		locations.DependencyStockMovement, locations.DependencyRackMount, locations.DependencyRoleAssignment,
-		locations.DependencyCIAttribute, locations.DependencyInternalOrder, "vlan", "subnet", "collector", "discovery_scope", "agent_enrollment_token", "ci_merge",
+		locations.DependencyCIAttribute, locations.DependencyInternalOrder, "vlan", "vlan_domain_site", "subnet", "collector", "discovery_scope", "agent_enrollment_token", "ci_merge",
 		"collector_enrollment_code",
 		locations.DependencyStocktake, locations.DependencyStocktakeItem, locations.DependencyStockScan,
 	}

@@ -79,6 +79,7 @@ DELETE /api/v1/tickets/{id}/links/{link_id} ticket:write
 DELETE /api/v1/trainings/{id} training:write
 DELETE /api/v1/users/{id} user:manage
 DELETE /api/v1/vault-connections/{id} vault:manage
+DELETE /api/v1/vlan-domains/{id} ipam:write
 DELETE /api/v1/vlans/{id} ipam:write
 DELETE /api/v1/vrfs/{id} vrf:manage
 DELETE /api/v1/webhooks/{id} webhook:manage
@@ -368,6 +369,9 @@ GET /api/v1/users/{id}/data-export user:read
 GET /api/v1/users/{id}/roles user:read
 GET /api/v1/vault-connections/ credential:read
 GET /api/v1/vault-connections/{id} credential:read
+GET /api/v1/vlan-domains ipam:read
+GET /api/v1/vlan-domains/{id} ipam:read
+GET /api/v1/vlan-domains/{id}/vlans ipam:read
 GET /api/v1/vlans ipam:read
 GET /api/v1/vlans/{id} ipam:read
 GET /api/v1/vrfs ipam:read
@@ -449,6 +453,7 @@ PATCH /api/v1/tickets/{id} ticket:write
 PATCH /api/v1/trainings/{id} training:write
 PATCH /api/v1/users/{id} user:manage
 PATCH /api/v1/vault-connections/{id} vault:manage
+PATCH /api/v1/vlan-domains/{id} ipam:write
 PATCH /api/v1/vlans/{id} ipam:write
 PATCH /api/v1/vrfs/{id} vrf:manage
 PATCH /api/v1/workflows/{id} workflow:write
@@ -649,6 +654,7 @@ POST /api/v1/users user:manage
 POST /api/v1/users/{id}/anonymize user:manage
 POST /api/v1/vault-connections/ vault:manage
 POST /api/v1/vault-connections/{id}/test vault:manage
+POST /api/v1/vlan-domains ipam:write
 POST /api/v1/vlans ipam:write
 POST /api/v1/vrfs vrf:manage
 POST /api/v1/webhooks webhook:manage
