@@ -1746,3 +1746,5 @@ COL-06;[B], Air-Gapped [O];E;backend/internal/discovery/collector_group_integrat
 PRB-06;[P3];E;backend/internal/probe/result_schema_integration_test.go;WP-945
 MON-01;[B];E;backend/internal/probe/result_schema_integration_test.go;WP-945
 PRB-07;[P3];E;backend/internal/probe/result_schema_integration_test.go;WP-945
+PRB-04;[P3];E;collector/probe/scheduler_test.go;WP-951
+PRT-01;[P3];E;collector/probe/limits_test.go;WP-951
