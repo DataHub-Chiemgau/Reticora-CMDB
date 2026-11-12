@@ -57,6 +57,8 @@ type SubnetFilter struct {
 	VLANID    string
 	IsPool    *bool
 	Q         string
+	// OriginASNID lists the subnets with this origin AS (WP-1067).
+	OriginASNID string
 	// Contains lists the subnets of the VRF (VRFID, else the default VRF)
 	// that contain the address, the narrowest first.
 	Contains string
@@ -415,6 +417,9 @@ func (r *MemoryRepository) UpdateSubnet(_ context.Context, orgID, id string, req
 	}
 	if req.IsPool != nil {
 		s.IsPool = *req.IsPool
+	}
+	if req.OriginASNID != nil {
+		s.OriginASNID = *req.OriginASNID
 	}
 	s.UpdatedAt = time.Now().UTC()
 	r.placeOrg(orgID)

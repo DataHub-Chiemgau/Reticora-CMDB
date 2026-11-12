@@ -37,6 +37,11 @@ type Subnet struct {
 	ParentID string `json:"parent_id,omitempty"`
 	// IsPool marks a container without host addresses of its own.
 	IsPool bool `json:"is_pool"`
+	// OriginASNID is the AS number that originates the prefix (IPM-16,
+	// WP-1067); OriginASN shows it (read-only, only when the caller sees
+	// it; the PostgreSQL repository only).
+	OriginASNID string           `json:"origin_asn_id,omitempty"`
+	OriginASN   *SubnetOriginASN `json:"origin_asn,omitempty"`
 	// ChildCount counts the children the caller can see.
 	ChildCount int `json:"child_count"`
 	// Warnings are set by create and update only: overlaps (a parent that
@@ -71,6 +76,9 @@ type CreateSubnetRequest struct {
 	Description     string `json:"description,omitempty"`
 	IsManagement    bool   `json:"is_management,omitempty"`
 	IsPool          bool   `json:"is_pool,omitempty"`
+	// OriginASNID names the origin AS (WP-1067): a visible AS number that
+	// is org-wide or of the subnet's client, else 422 origin_asn_id.
+	OriginASNID string `json:"origin_asn_id,omitempty"`
 }
 
 // UpdateSubnetRequest is the payload for updating a subnet.
@@ -98,6 +106,8 @@ type UpdateSubnetRequest struct {
 	// IsPool makes the subnet a container; a subnet with addresses of its
 	// own cannot become one (409 is_pool).
 	IsPool *bool `json:"is_pool,omitempty"`
+	// OriginASNID sets ("" clears) the origin AS (WP-1067).
+	OriginASNID *string `json:"origin_asn_id,omitempty"`
 }
 
 // IPAddress represents a single IP address assignment.

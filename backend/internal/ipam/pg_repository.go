@@ -2,6 +2,7 @@ package ipam
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -49,7 +50,14 @@ type scanner interface {
 const subnetCols = `id::text, organization_id::text, COALESCE(client_id::text,''), COALESCE(site_id::text,''),
 	cidr::text, vrf_id::text, section_id::text, COALESCE(name,''), COALESCE(vlan_id::text,''), COALESCE(host(gateway),''), COALESCE(dns_servers::text[], '{}'),
 	COALESCE(nameserver_set_id::text,''), ` + subnetEffectiveDNS + `,
-	COALESCE(description,''), is_management, ` + subnetTreeCols + `, created_at, updated_at`
+	COALESCE(description,''), is_management, ` + subnetTreeCols + `, ` + subnetOriginCols + `, created_at, updated_at`
+
+// subnetOriginCols are the origin AS of a subnet row (WP-1067): its id and
+// the AS number when the caller sees it (row level security of the
+// sub-select).
+const subnetOriginCols = `COALESCE(origin_asn_id::text, ''),
+	(SELECT jsonb_build_object('id', a.id, 'number', a.number, 'name', a.name) FROM asn a
+		WHERE a.id = subnet.origin_asn_id AND a.organization_id = subnet.organization_id)`
 
 // subnetEffectiveDNS are the effective DNS servers of a subnet row
 // (IPM-05): its own dns_servers when set, else the servers of its
@@ -74,10 +82,19 @@ const subnetRootVisible = `(subnet.parent_id IS NULL OR NOT EXISTS (SELECT 1 FRO
 
 func scanSubnet(s scanner) (*Subnet, error) {
 	sn := &Subnet{}
+	var origin []byte
 	if err := s.Scan(&sn.ID, &sn.OrganizationID, &sn.ClientID, &sn.SiteID, &sn.CIDR, &sn.VRFID, &sn.SectionID, &sn.Name,
 		&sn.VLANID, &sn.Gateway, &sn.DNSServers, &sn.NameserverSetID, &sn.EffectiveDNSServers, &sn.Description, &sn.IsManagement, &sn.ParentID, &sn.IsPool, &sn.ChildCount,
-		&sn.CreatedAt, &sn.UpdatedAt); err != nil {
+		&sn.OriginASNID, &origin, &sn.CreatedAt, &sn.UpdatedAt); err != nil {
 		return nil, err
+	}
+	if len(origin) > 0 {
+		o := &SubnetOriginASN{}
+		if err := json.Unmarshal(origin, o); err != nil {
+			return nil, fmt.Errorf("subnet origin asn: %w", err)
+		}
+		o.ASDot = ASDot(o.Number)
+		sn.OriginASN = o
 	}
 	sn.CreatedAt = sn.CreatedAt.UTC()
 	sn.UpdatedAt = sn.UpdatedAt.UTC()
@@ -286,13 +303,16 @@ func (r *PGRepository) CreateSubnet(ctx context.Context, s *Subnet) error {
 		if err := checkNameserverSet(ctx, tx, s.OrganizationID, s.NameserverSetID); err != nil {
 			return err
 		}
+		if err := checkOriginASN(ctx, tx, s.OrganizationID, s.OriginASNID, s.ClientID); err != nil {
+			return err
+		}
 		if err := placed(ctx, tx, func(tx pgx.Tx) error {
 			return tx.QueryRow(ctx,
-				`INSERT INTO subnet (organization_id, client_id, site_id, cidr, name, vlan_id, gateway, dns_servers, description, is_management, vrf_id, section_id, is_pool, nameserver_set_id)
-				 VALUES ($1,$2,$3,$4::cidr,$5,$6,$7::inet,$8::inet[],$9,$10,$11,$12,$13,$14) RETURNING id::text`,
+				`INSERT INTO subnet (organization_id, client_id, site_id, cidr, name, vlan_id, gateway, dns_servers, description, is_management, vrf_id, section_id, is_pool, nameserver_set_id, origin_asn_id)
+				 VALUES ($1,$2,$3,$4::cidr,$5,$6,$7::inet,$8::inet[],$9,$10,$11,$12,$13,$14,$15) RETURNING id::text`,
 				s.OrganizationID, nilIfEmpty(s.ClientID), nilIfEmpty(s.SiteID), s.CIDR, nilIfEmpty(s.Name),
 				nilIfEmpty(s.VLANID), nilIfEmpty(s.Gateway), dnsServersArg(s.DNSServers), nilIfEmpty(s.Description), s.IsManagement,
-				nilIfEmpty(s.VRFID), nilIfEmpty(s.SectionID), s.IsPool, nilIfEmpty(s.NameserverSetID),
+				nilIfEmpty(s.VRFID), nilIfEmpty(s.SectionID), s.IsPool, nilIfEmpty(s.NameserverSetID), nilIfEmpty(s.OriginASNID),
 			).Scan(&s.ID)
 		}); err != nil {
 			return subnetError(err)
@@ -405,6 +425,9 @@ func (r *PGRepository) UpdateSubnet(ctx context.Context, orgID, id string, req *
 				return err
 			}
 		}
+		if err := checkSubnetOriginASN(ctx, tx, orgID, id, req); err != nil {
+			return err
+		}
 		sets := []string{}
 		args := []any{orgID, id}
 		pos := 3
@@ -473,6 +496,11 @@ func (r *PGRepository) UpdateSubnet(ctx context.Context, orgID, id string, req *
 		if req.IsPool != nil {
 			sets = append(sets, fmt.Sprintf("is_pool = $%d", pos))
 			args = append(args, *req.IsPool)
+			pos++
+		}
+		if req.OriginASNID != nil {
+			sets = append(sets, fmt.Sprintf("origin_asn_id = $%d", pos))
+			args = append(args, nilIfEmpty(*req.OriginASNID))
 		}
 		if len(sets) > 0 {
 			sets = append(sets, "updated_at = NOW()")

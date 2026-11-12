@@ -11,9 +11,11 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
 
-// HTTP handlers of the AS numbers and ranges (IPM-16, WP-1066):
-// /api/v1/asns and /api/v1/asn-ranges; reads need ipam:read, writes
-// ipam:write (authz, WP-866), the feature ipam gates both (WP-865).
+// HTTP handlers of the AS numbers and ranges (IPM-16, WP-1066, WP-1067):
+// /api/v1/asns and /api/v1/asn-ranges with the allocation of the next free
+// number, the usage of a range and the prefixes of an AS number; reads
+// need ipam:read, writes ipam:write (authz, WP-866), the feature ipam gates
+// both (WP-865).
 
 // registerASNRoutes registers the routes of asn_handler.go.
 func (h *Handler) registerASNRoutes(r chi.Router) {
@@ -27,6 +29,10 @@ func (h *Handler) registerASNRoutes(r chi.Router) {
 	r.Get("/api/v1/asn-ranges/{id}", h.GetASNRange)
 	r.Patch("/api/v1/asn-ranges/{id}", h.UpdateASNRange)
 	r.Delete("/api/v1/asn-ranges/{id}", h.DeleteASNRange)
+	// WP-1067: allocation, usage and the prefixes of an AS number.
+	r.Post("/api/v1/asn-ranges/{id}/allocate", h.AllocateASN)
+	r.Get("/api/v1/asn-ranges/{id}/usage", h.ASNRangeUsage)
+	r.Get("/api/v1/asns/{id}/prefixes", h.ListASNPrefixes)
 }
 
 // asnRepo returns the repository of the AS numbers, or answers 501 when the
@@ -334,4 +340,72 @@ func (h *Handler) DeleteASNRange(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// AllocateASN handles POST /api/v1/asn-ranges/{id}/allocate (WP-1067): the
+// AS number gets the lowest free number of the range, atomically; 201 with
+// the AS number, 409 range for a full range, 422 client_id for a client
+// other than the range's.
+func (h *Handler) AllocateASN(w http.ResponseWriter, r *http.Request) {
+	repo, orgID, ok := h.asnRepo(w, r)
+	if !ok {
+		return
+	}
+	var req AllocateASNRequest
+	if err := api.ReadJSON(r, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if err := checkASNText(&name, &req.Kind, &req.RIR); err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
+	a := &ASN{OrganizationID: orgID, Name: name, Kind: req.Kind, Description: req.Description}
+	if req.ClientID != "" {
+		a.ClientID = &req.ClientID
+	}
+	if req.RIR != "" {
+		a.RIR = &req.RIR
+	}
+	if err := repo.AllocateASN(r.Context(), orgID, chi.URLParam(r, "id"), a); err != nil {
+		writeASNError(w, err, "AS number range")
+		return
+	}
+	api.WriteJSON(w, http.StatusCreated, a)
+}
+
+// ASNRangeUsage handles GET /api/v1/asn-ranges/{id}/usage (WP-1067).
+func (h *Handler) ASNRangeUsage(w http.ResponseWriter, r *http.Request) {
+	repo, orgID, ok := h.asnRepo(w, r)
+	if !ok {
+		return
+	}
+	u, err := repo.ASNRangeUsage(r.Context(), orgID, chi.URLParam(r, "id"))
+	if err != nil {
+		writeASNError(w, err, "AS number range")
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, u)
+}
+
+// ListASNPrefixes handles GET /api/v1/asns/{id}/prefixes (WP-1067): the
+// visible subnets with the AS number as origin AS, paginated.
+func (h *Handler) ListASNPrefixes(w http.ResponseWriter, r *http.Request) {
+	repo, orgID, ok := h.asnRepo(w, r)
+	if !ok {
+		return
+	}
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
+		return
+	}
+	items, total, err := repo.ListASNPrefixes(r.Context(), orgID, chi.URLParam(r, "id"), page)
+	if err != nil {
+		writeASNError(w, err, "AS number")
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[ASNPrefix]{
+		Data: items, Total: total, Limit: page.Limit, Offset: page.Offset, HasMore: page.Offset+len(items) < total,
+	})
 }

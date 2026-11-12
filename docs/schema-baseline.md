@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000328_admp_connection_shred
+Stand: Migration 000329_subnet_origin_asn
 
 ## Prüfung
 
@@ -738,6 +738,23 @@ und `collector`. Migration 000294 (WP-894) ergänzt
 `credential_vault_connection_fkey`: `credential (vault_connection_id,
 organization_id) REFERENCES vault_connection (id, organization_id)` mit ON
 DELETE RESTRICT; eine referenzierte Tresorverbindung wird nicht gelöscht.
+
+Migration 000329 (WP-1067, IPM-16) gibt `subnet` die Spalte
+`origin_asn_id` (Origin-AS des Präfixes) mit dem zusammengesetzten
+Fremdschlüssel `subnet_origin_asn_fkey`: `(origin_asn_id, organization_id)
+REFERENCES asn (id, organization_id) ON DELETE SET NULL (origin_asn_id)`
+und dem Teilindex `idx_subnet_origin_asn` auf `(organization_id,
+origin_asn_id) WHERE origin_asn_id IS NOT NULL`. Die Funktion
+`asn_next_free(org, lo, hi)` (SECURITY INVOKER, fester `search_path`)
+liefert die kleinste freie AS-Nummer in `[lo, hi]` ohne 23456 und 65535 oder
+NULL für eine volle Range; sie sucht mengenbasiert mit erweitertem Kunden-,
+Standort- und Team-Scope (`app_scope_widen`/`app_scope_restore`), die
+Organisation bleibt über `app.org_id` fest. Der Aufrufer serialisiert die
+Vergabe je Range mit einem Transaktions-Advisory-Lock
+(`pg_advisory_xact_lock`), weil ein Kunden-Principal die UPDATE-Policy
+organisationsweiter Ranges nicht hat. Die Tabelle oben und die Zeile
+„Stand:“ erzeugt `RETICORA_UPDATE_SCHEMA_BASELINE=1` beim Zusammenführen mit
+den endgültigen Migrationsnummern neu.
 
 `TestTenantReferencesCarryOrganization`
 (`backend/internal/tenant/rls/object_reference_integration_test.go`) prüft

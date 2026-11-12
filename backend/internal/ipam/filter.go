@@ -22,7 +22,7 @@ import (
 
 // subnetFilter reads the filters of GET /subnets: client_id, site_id,
 // parent_id (root: the subnets without a visible parent, IPM-02),
-// section_id, vrf_id, vlan_id, is_pool, q and contains; is_pool that is
+// section_id, vrf_id, vlan_id, origin_asn_id, is_pool, q and contains; is_pool that is
 // no boolean and contains that is no address are 422.
 func subnetFilter(w http.ResponseWriter, r *http.Request) (SubnetFilter, bool) {
 	q := r.URL.Query()
@@ -33,6 +33,8 @@ func subnetFilter(w http.ResponseWriter, r *http.Request) (SubnetFilter, bool) {
 		VRFID:     q.Get("vrf_id"),
 		VLANID:    q.Get("vlan_id"),
 		Q:         strings.TrimSpace(q.Get("q")),
+
+		OriginASNID: q.Get("origin_asn_id"),
 	}
 	switch parent := q.Get("parent_id"); parent {
 	case "":
@@ -92,7 +94,8 @@ func uuidFields(fields ...[2]string) error {
 // checkSubnetFilterIDs checks the id filters of the subnet list.
 func checkSubnetFilterIDs(f *SubnetFilter) error {
 	return uuidFields([2]string{"client_id", f.ClientID}, [2]string{"site_id", f.SiteID},
-		[2]string{"parent_id", f.ParentID}, [2]string{"section_id", f.SectionID}, [2]string{"vrf_id", f.VRFID}, [2]string{"vlan_id", f.VLANID})
+		[2]string{"parent_id", f.ParentID}, [2]string{"section_id", f.SectionID}, [2]string{"vrf_id", f.VRFID}, [2]string{"vlan_id", f.VLANID},
+		[2]string{"origin_asn_id", f.OriginASNID})
 }
 
 // checkIPFilterIDs checks the id filters of the address lists.
@@ -139,6 +142,9 @@ func subnetFilterWhere(orgID string, f *SubnetFilter) (where string, args []any,
 	}
 	if f.VLANID != "" {
 		add("vlan_id = $?", f.VLANID)
+	}
+	if f.OriginASNID != "" {
+		add("origin_asn_id = $?", f.OriginASNID)
 	}
 	if f.IsPool != nil {
 		add("is_pool = $?", *f.IsPool)
@@ -202,7 +208,7 @@ func ipFilterWhere(orgID string, f *IPFilter) (where string, args []any) {
 // subnetMatches applies the filters of IPM-20 to s.
 func (r *MemoryRepository) subnetMatches(s *Subnet, f *SubnetFilter) bool {
 	if (f.SectionID != "" && s.SectionID != f.SectionID) || (f.VLANID != "" && s.VLANID != f.VLANID) ||
-		(f.IsPool != nil && s.IsPool != *f.IsPool) {
+		(f.IsPool != nil && s.IsPool != *f.IsPool) || (f.OriginASNID != "" && s.OriginASNID != f.OriginASNID) {
 		return false
 	}
 	vrfID := f.VRFID

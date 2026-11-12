@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -23,8 +24,8 @@ import (
 // types. A row without client belongs to the whole organization: every
 // principal reads it, only principals without client and site restriction
 // write it; a principal restricted to clients reads and writes the rows of
-// its clients. The allocation from a range and the origin AS of a subnet
-// follow in WP-1067.
+// its clients. WP-1067 adds the allocation of the lowest free number of a
+// range, the usage of a range and the origin AS of a subnet.
 
 // Bounds of an AS number (RFC 6793): 32 bits without 0 and 4294967295;
 // 23456 (AS_TRANS, RFC 6793) and 65535 (RFC 7300) are reserved.
@@ -208,6 +209,55 @@ type ASNRepository interface {
 	CreateASNRange(ctx context.Context, rg *ASNRange) error
 	UpdateASNRange(ctx context.Context, orgID, id string, req *UpdateASNRangeRequest) (*ASNRange, error)
 	DeleteASNRange(ctx context.Context, orgID, id string) error
+	// AllocateASN stores a as the lowest free AS number of the range
+	// (WP-1067): a.Number is set by the store.
+	AllocateASN(ctx context.Context, orgID, rangeID string, a *ASN) error
+	// ASNRangeUsage counts the AS numbers in a visible range.
+	ASNRangeUsage(ctx context.Context, orgID, rangeID string) (*ASNRangeUsage, error)
+	// ListASNPrefixes lists the visible subnets with the AS number as
+	// their origin AS.
+	ListASNPrefixes(ctx context.Context, orgID, asnID string, page api.PaginationParams) ([]ASNPrefix, int, error)
+}
+
+// AllocateASNRequest is the payload of POST /api/v1/asn-ranges/{id}/allocate:
+// the AS number takes the lowest free number of the range.
+type AllocateASNRequest struct {
+	Name        string `json:"name"`
+	Kind        string `json:"kind"`
+	ClientID    string `json:"client_id,omitempty"`
+	RIR         string `json:"rir,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// ASNRangeUsage is the occupancy of a range (WP-1067): total usable
+// numbers (the reserved 23456 and 65535 do not count), used AS numbers of
+// the organization in it (also those created by hand), free and percent
+// used. Scoped tells that the caller is restricted to clients or sites and
+// used counts only the AS numbers it sees.
+type ASNRangeUsage struct {
+	RangeID string  `json:"range_id"`
+	Total   int64   `json:"total"`
+	Used    int64   `json:"used"`
+	Free    int64   `json:"free"`
+	Percent float64 `json:"percent"`
+	Scoped  bool    `json:"scoped"`
+}
+
+// ASNPrefix is a subnet with the AS number as origin AS.
+type ASNPrefix struct {
+	ID       string  `json:"id"`
+	CIDR     string  `json:"cidr"`
+	VRFID    string  `json:"vrf_id"`
+	ClientID *string `json:"client_id"`
+	Name     string  `json:"name,omitempty"`
+}
+
+// SubnetOriginASN is the origin AS of a subnet as the subnet shows it.
+type SubnetOriginASN struct {
+	ID     string `json:"id"`
+	Number int64  `json:"number"`
+	ASDot  string `json:"asdot"`
+	Name   string `json:"name"`
 }
 
 var _ ASNRepository = (*PGRepository)(nil)
@@ -227,7 +277,15 @@ var (
 		Status: http.StatusUnprocessableEntity}
 	errASNRIR = &api.FieldError{Field: "rir", Message: "rir must be one of ripe, arin, apnic, lacnic, afrinic, private",
 		Status: http.StatusUnprocessableEntity}
-	errASNNumberTaken  = &api.ConflictError{Field: "number", Message: "the AS number already exists in the organization"}
+	errASNNumberTaken = &api.ConflictError{Field: "number", Message: "the AS number already exists in the organization"}
+	errASNRangeFull   = &api.ConflictError{Field: "range", Message: "the AS number range has no free AS number"}
+	errASNRangeClient = &api.FieldError{Field: "client_id", Message: "the AS number range belongs to another client",
+		Status: http.StatusUnprocessableEntity}
+	errOriginASN       = &api.FieldError{Field: "origin_asn_id", Message: "AS number not found", Status: http.StatusUnprocessableEntity}
+	errASNOriginClient = &api.FieldError{Field: "client_id", Message: "the AS number is the origin AS of a subnet of another client",
+		Status: http.StatusUnprocessableEntity}
+	errOriginASNClient = &api.FieldError{Field: "origin_asn_id", Message: "the AS number belongs to another client",
+		Status: http.StatusUnprocessableEntity}
 	errASNRangeName    = &api.ConflictError{Field: "name", Message: "an AS number range with this name already exists"}
 	errASNRangeOverlap = &api.ConflictError{Field: "start",
 		Message: "the range overlaps another AS number range of the organization"}
@@ -433,20 +491,266 @@ func (r *PGRepository) CreateASN(ctx context.Context, a *ASN) error {
 		if err := checkASNClient(ctx, tx, a.OrganizationID, a.ClientID); err != nil {
 			return err
 		}
-		created, err := scanASN(tx.QueryRow(ctx, `INSERT INTO asn (organization_id, client_id, number, name, kind, rir, description)
-			VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING `+asnCols,
-			a.OrganizationID, emptyToNil(a.ClientID), a.Number, a.Name, a.Kind, a.RIR, nilIfEmpty(a.Description)))
-		if err != nil {
-			return asnError(err)
-		}
-		*a = *created
-		return r.emitASNChanged(ctx, tx, a, "create")
+		return r.insertASN(ctx, tx, a)
 	})
+}
+
+// insertASN writes a in tx and asn.changed (create) last.
+func (r *PGRepository) insertASN(ctx context.Context, tx pgx.Tx, a *ASN) error {
+	created, err := scanASN(tx.QueryRow(ctx, `INSERT INTO asn (organization_id, client_id, number, name, kind, rir, description)
+		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING `+asnCols,
+		a.OrganizationID, emptyToNil(a.ClientID), a.Number, a.Name, a.Kind, a.RIR, nilIfEmpty(a.Description)))
+	if err != nil {
+		return asnError(err)
+	}
+	*a = *created
+	return r.emitASNChanged(ctx, tx, a, "create")
+}
+
+// asnAllocationLockSQL serializes the allocations from one range for the
+// transaction (pattern allocationLockSQL of WP-904): a row lock (SELECT ...
+// FOR UPDATE) would need the UPDATE policy of asn_range, which a principal
+// restricted to clients does not hold for an org-wide range it may
+// allocate from.
+const asnAllocationLockSQL = "SELECT pg_advisory_xact_lock(hashtextextended('asn_range_alloc:' || $1::text, 0))"
+
+// AllocateASN stores a as the lowest free AS number of the range in one
+// transaction (IPM-16, WP-1067): the range must be visible (else
+// ErrNotFound) and is locked; a client of the AS number other than the
+// client of the range is 422 client_id (an org-wide range allocates to
+// every client; an AS number without client from a client's range takes
+// that client); the number is the lowest one in [start, end] that no AS
+// number of the organization holds and that is not reserved
+// (asn_next_free, set-based over asn_number_key); a full range is 409
+// range. asn.changed (create) is the last write.
+func (r *PGRepository) AllocateASN(ctx context.Context, orgID, rangeID string, a *ASN) error {
+	if !api.IsUUID(rangeID) {
+		return ErrNotFound
+	}
+	a.OrganizationID = orgID
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, asnAllocationLockSQL, rangeID); err != nil {
+			return fmt.Errorf("lock AS number range: %w", err)
+		}
+		rg, err := scanASNRange(tx.QueryRow(ctx, "SELECT "+asnRangeCols+" FROM asn_range WHERE organization_id = $1 AND id = $2",
+			orgID, rangeID))
+		if err != nil {
+			return err
+		}
+		switch {
+		case rg.ClientID == nil:
+		case a.ClientID == nil || *a.ClientID == "":
+			a.ClientID = rg.ClientID
+		case *a.ClientID != *rg.ClientID:
+			return errASNRangeClient
+		}
+		if cerr := checkASNClient(ctx, tx, orgID, a.ClientID); cerr != nil {
+			return cerr
+		}
+		var next *int64
+		if err = tx.QueryRow(ctx, `SELECT asn_next_free($1, $2, $3)`, orgID, rg.Start, rg.End).Scan(&next); err != nil {
+			return fmt.Errorf("find free AS number: %w", err)
+		}
+		if next == nil {
+			return errASNRangeFull
+		}
+		a.Number = *next
+		return r.insertASN(ctx, tx, a)
+	})
+}
+
+// reservedInRange counts the reserved AS numbers 23456 and 65535 in
+// [start, end].
+func reservedInRange(start, end int64) int64 {
+	var n int64
+	for _, reserved := range []int64{asTrans, asLast16} {
+		if reserved >= start && reserved <= end {
+			n++
+		}
+	}
+	return n
+}
+
+// ASNRangeUsage counts the AS numbers of a visible range under the
+// caller's row level security; scoped reports a principal restricted to
+// clients, whose count covers only the rows it sees. The read policy of
+// asn (000316) narrows by client only: a principal restricted to sites
+// sees every AS number, its count is complete and not scoped.
+func (r *PGRepository) ASNRangeUsage(ctx context.Context, orgID, rangeID string) (*ASNRangeUsage, error) {
+	if !api.IsUUID(rangeID) {
+		return nil, ErrNotFound
+	}
+	var out *ASNRangeUsage
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rg, err := scanASNRange(tx.QueryRow(ctx, "SELECT "+asnRangeCols+" FROM asn_range WHERE organization_id = $1 AND id = $2",
+			orgID, rangeID))
+		if err != nil {
+			return err
+		}
+		u := &ASNRangeUsage{RangeID: rg.ID, Total: rg.End - rg.Start + 1 - reservedInRange(rg.Start, rg.End)}
+		if qerr := tx.QueryRow(ctx, `SELECT count(*),
+				NULLIF(current_setting('app.client_scope', true), '') IS NOT NULL
+			FROM asn WHERE organization_id = $1 AND number BETWEEN $2 AND $3`, orgID, rg.Start, rg.End).
+			Scan(&u.Used, &u.Scoped); qerr != nil {
+			return qerr
+		}
+		u.Free = max(u.Total-u.Used, 0)
+		if u.Total > 0 {
+			u.Percent = math.Round(float64(u.Used)*10000/float64(u.Total)) / 100
+		}
+		out = u
+		return nil
+	})
+	return out, err
+}
+
+// ListASNPrefixes lists the visible subnets whose origin AS is a visible
+// AS number (by idx_subnet_origin_asn), ordered by CIDR.
+func (r *PGRepository) ListASNPrefixes(ctx context.Context, orgID, asnID string, page api.PaginationParams) ([]ASNPrefix, int, error) {
+	if !api.IsUUID(asnID) {
+		return nil, 0, ErrNotFound
+	}
+	out := []ASNPrefix{}
+	var total int
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var visible bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM asn WHERE organization_id = $1 AND id = $2)`, orgID, asnID).
+			Scan(&visible); err != nil {
+			return err
+		}
+		if !visible {
+			return ErrNotFound
+		}
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM subnet WHERE organization_id = $1 AND origin_asn_id = $2`, orgID, asnID).
+			Scan(&total); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `SELECT id::text, cidr::text, vrf_id::text, client_id::text, COALESCE(name, '') FROM subnet
+			WHERE organization_id = $1 AND origin_asn_id = $2 ORDER BY cidr, id LIMIT $3 OFFSET $4`, orgID, asnID, page.Limit, page.Offset)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var p ASNPrefix
+			if err := rows.Scan(&p.ID, &p.CIDR, &p.VRFID, &p.ClientID, &p.Name); err != nil {
+				return err
+			}
+			out = append(out, p)
+		}
+		return rows.Err()
+	})
+	return out, total, err
+}
+
+// checkOriginASN accepts no origin AS and an AS number the principal sees
+// that is org-wide or of the subnet's client (clientID; empty: the subnet
+// is org-wide, then only an org-wide AS number); everything else is 422
+// origin_asn_id. The read runs in the writing transaction under the
+// principal's row level security, before origin_asn_id is written (the
+// composite foreign key checks only the organization).
+func checkOriginASN(ctx context.Context, tx pgx.Tx, orgID, asnID, clientID string) error {
+	if strings.TrimSpace(asnID) == "" {
+		return nil
+	}
+	if !api.IsUUID(asnID) {
+		return errOriginASN
+	}
+	// Shared with other subnet writes, exclusive against a client change of
+	// the AS number (UpdateASN): the client read here stays until commit.
+	if _, err := tx.Exec(ctx, asnOriginLockSharedSQL, asnID); err != nil {
+		return fmt.Errorf("lock asn: %w", err)
+	}
+	var visible, sameClient bool
+	if err := tx.QueryRow(ctx, `SELECT count(*) > 0, COALESCE(bool_and(client_id IS NULL OR client_id = $3::uuid), false)
+		FROM asn WHERE organization_id = $1 AND id = $2::uuid`, orgID, asnID, nilIfEmpty(clientID)).Scan(&visible, &sameClient); err != nil {
+		return fmt.Errorf("read asn: %w", err)
+	}
+	switch {
+	case !visible:
+		return errOriginASN
+	case !sameClient:
+		return errOriginASNClient
+	}
+	return nil
+}
+
+// asnOriginLockSQL and asnOriginLockSharedSQL serialize a client change of
+// an AS number against the subnets that name it as origin AS for the
+// transaction (pattern asnAllocationLockSQL): a row lock (FOR SHARE) would
+// need the UPDATE policy of asn, which a principal restricted to clients
+// does not hold for an org-wide AS number it may use as origin AS.
+const (
+	asnOriginLockSQL       = "SELECT pg_advisory_xact_lock(hashtextextended('asn_origin:' || $1::text, 0))"
+	asnOriginLockSharedSQL = "SELECT pg_advisory_xact_lock_shared(hashtextextended('asn_origin:' || $1::text, 0))"
+)
+
+// checkASNOriginSubnets refuses moving the visible AS number id to client
+// clientID (not empty) while a subnet of another client or an org-wide
+// subnet names it as origin AS: 422 client_id. The subnets are read with
+// the client, site and team scope widened (app_scope_widen, pattern
+// heldAddresses), since the caller's scope hides the subnets of other
+// clients; only a boolean leaves the widened statement. An AS number the
+// caller does not see is ErrNotFound before anything else is read.
+func checkASNOriginSubnets(ctx context.Context, tx pgx.Tx, orgID, id, clientID string) error {
+	if _, err := tx.Exec(ctx, asnOriginLockSQL, id); err != nil {
+		return fmt.Errorf("lock asn: %w", err)
+	}
+	var visible bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM asn WHERE organization_id = $1 AND id = $2)`, orgID, id).
+		Scan(&visible); err != nil {
+		return fmt.Errorf("read asn: %w", err)
+	}
+	if !visible {
+		return ErrNotFound
+	}
+	var previous string
+	if err := tx.QueryRow(ctx, `SELECT app_scope_widen()::text`).Scan(&previous); err != nil {
+		return fmt.Errorf("check origin subnets: widen scope: %w", err)
+	}
+	var conflict bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM subnet WHERE organization_id = $1 AND origin_asn_id = $2
+		AND client_id IS DISTINCT FROM $3::uuid)`, orgID, id, clientID).Scan(&conflict)
+	if _, restoreErr := tx.Exec(ctx, `SELECT app_scope_restore($1::text[])`, previous); restoreErr != nil && err == nil {
+		err = restoreErr
+	}
+	if err != nil {
+		return fmt.Errorf("check origin subnets: %w", err)
+	}
+	if conflict {
+		return errASNOriginClient
+	}
+	return nil
+}
+
+// checkSubnetOriginASN applies checkOriginASN to an update of subnet id: to
+// a new origin AS and to the origin AS of a subnet that moves to another
+// client, against the client the subnet has after the update.
+func checkSubnetOriginASN(ctx context.Context, tx pgx.Tx, orgID, id string, req *UpdateSubnetRequest) error {
+	if req.ClientID == nil && (req.OriginASNID == nil || strings.TrimSpace(*req.OriginASNID) == "") {
+		return nil
+	}
+	var clientID, asnID string
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(client_id::text, ''), COALESCE(origin_asn_id::text, '') FROM subnet
+		WHERE organization_id = $1 AND id = $2 FOR UPDATE`, orgID, id).Scan(&clientID, &asnID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("read subnet: %w", err)
+	}
+	if req.ClientID != nil {
+		clientID = *req.ClientID
+	}
+	if req.OriginASNID != nil {
+		asnID = *req.OriginASNID
+	}
+	return checkOriginASN(ctx, tx, orgID, asnID, clientID)
 }
 
 // UpdateASN changes a visible AS number and writes asn.changed (update).
 // A principal restricted in the client or site scope updates no org-wide
-// row: ErrNotFound.
+// row: ErrNotFound. A move to a client while a subnet of another client
+// (or an org-wide one) has the AS number as origin AS is 422 client_id.
 func (r *PGRepository) UpdateASN(ctx context.Context, orgID, id string, req *UpdateASNRequest) (*ASN, error) {
 	if !api.IsUUID(id) {
 		return nil, ErrNotFound
@@ -459,6 +763,11 @@ func (r *PGRepository) UpdateASN(ctx context.Context, orgID, id string, req *Upd
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := checkASNClient(ctx, tx, orgID, req.ClientID); err != nil {
 			return err
+		}
+		if req.ClientID != nil && *req.ClientID != "" {
+			if err := checkASNOriginSubnets(ctx, tx, orgID, id, *req.ClientID); err != nil {
+				return err
+			}
 		}
 		var err error
 		a, err = scanASN(tx.QueryRow(ctx, `UPDATE asn SET

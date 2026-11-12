@@ -131,7 +131,7 @@ var resourceTables = map[string][]string{
 	"nameserver-sets":       {"nameserver_set"},                          // nameserver sets (WP-905)
 	"vlan-domains":          {"vlan_domain"},                             // VLAN domains (WP-906)
 	"asns":                  {"asn"},                                     // AS numbers (WP-1066)
-	"asn-ranges":            {"asn_range"},                               // AS number ranges (WP-1066)
+	"asn-ranges":            {"asn_range", "asn"},                        // AS number ranges (WP-1066), allocated AS numbers (WP-1067)
 	"jobs":                  {"job"},
 	"layouts":               {"form_layout"},
 	"keys":                  {"key_item"},

@@ -11156,7 +11156,7 @@ export interface paths {
     head?: never;
     /**
      * Update an AS number
-     * @description Changes number, name, kind, client, registry or description; an empty client_id makes it org-wide, an empty rir clears it. Same rules as POST; an org-wide AS number is 404 for a principal restricted to clients. Writes asn.changed (update). Requires ipam:write.
+     * @description Changes number, name, kind, client, registry or description; an empty client_id makes it org-wide, an empty rir clears it. Same rules as POST; an org-wide AS number is 404 for a principal restricted to clients. A client_id is 422 (field client_id) while a subnet of another client or an org-wide subnet has the AS number as origin AS (WP-1067). Writes asn.changed (update). Requires ipam:write.
      */
     patch: operations['updateAsn'];
     trace?: never;
@@ -11173,7 +11173,7 @@ export interface paths {
     };
     /**
      * List the prefixes of an ASN
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description IPM-16 (WP-1067): the subnets the caller sees whose origin AS (origin_asn_id) is this AS number, with id, CIDR, VRF and client, ordered by CIDR. An AS number the caller does not see is 404. Requires ipam:read.
      */
     get: operations['listASNPrefixes'];
     put?: never;
@@ -11274,7 +11274,7 @@ export interface paths {
     };
     /**
      * Get the usage of an ASN range
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description IPM-16 (WP-1067): total usable numbers of the range (the reserved 23456 and 65535 do not count), used AS numbers of the organization in it (allocated or created by hand), free and percent used. A principal restricted to clients or sites counts only the AS numbers it sees; the answer says so with scoped true. Requires ipam:read.
      */
     get: operations['getASNRangeUsage'];
     put?: never;
@@ -11299,7 +11299,7 @@ export interface paths {
     put?: never;
     /**
      * Allocate the next free ASN of a range
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description IPM-16 (WP-1067): creates an AS number with the lowest free number of the range in one transaction. Allocations from one range take turns (a lock per range); the number is searched set-based over the AS numbers of the organization (also those of other clients and those created by hand), the reserved 23456 and 65535 are skipped. A full range is 409 with field range. A client_id other than the client of the range is 422 with field client_id; an org-wide range allocates to every client, a client's range without client_id to its client. Writes asn.changed and the route audit. Requires ipam:write.
      */
     post: operations['allocateASN'];
     delete?: never;
@@ -20560,6 +20560,13 @@ export interface components {
       dns_servers?: string[];
       /** @description Nameserver set of the subnet (IPM-05); absent without one. */
       nameserver_set_id?: string;
+      /**
+       * Format: uuid
+       * @description The AS number that originates the prefix (IPM-16, WP-1067); absent without one.
+       */
+      origin_asn_id?: string;
+      /** @description The origin AS when the caller sees it (WP-1067). */
+      readonly origin_asn?: components['schemas']['SubnetOriginASN'];
       /** @description The DNS servers that apply (IPM-05): the subnet's own dns_servers when set, else the servers of its nameserver set; absent when neither applies and in the profile without database. */
       readonly effective_dns_servers?: string[];
       description?: string;
@@ -20600,6 +20607,8 @@ export interface components {
       is_management?: boolean;
       /** @description Container without host addresses of its own (IPM-02). */
       is_pool?: boolean;
+      /** @description The origin AS (IPM-16, WP-1067): an AS number the caller sees that is org-wide or of the subnet's client; else 422 with field origin_asn_id. */
+      origin_asn_id?: string;
     };
     UpdateSubnetRequest: {
       client_id?: string;
@@ -20621,6 +20630,8 @@ export interface components {
       is_management?: boolean;
       /** @description Makes the subnet a container; a subnet with addresses cannot become one (409 is_pool). */
       is_pool?: boolean;
+      /** @description Sets the origin AS (IPM-16, WP-1067), an empty string clears it. An AS number the caller does not see or of another client than the subnet has after the update is 422 with field origin_asn_id. */
+      origin_asn_id?: string;
     };
     /** @description VRF of the organization (TEN-10, CH10). Every organization has exactly one default VRF "global", created with the organization; it cannot be deleted. Every principal of the organization reads the VRFs; only principals without client or site restriction create, change or delete them (E-09). Route distinguisher and route targets follow RFC 4364 (IPM-07); the default VRF keeps them empty. */
     VRF: {
@@ -20863,6 +20874,56 @@ export interface components {
       client_id?: string;
       /** @description An empty string clears it. */
       purpose?: string;
+    };
+    AllocateASNRequest: {
+      name: string;
+      /** @enum {string} */
+      kind: 'own' | 'customer' | 'peer' | 'upstream' | 'ixp';
+      /** Format: uuid */
+      client_id?: string;
+      /** @enum {string} */
+      rir?: 'ripe' | 'arin' | 'apnic' | 'lacnic' | 'afrinic' | 'private';
+      description?: string;
+    };
+    /** @description The occupancy of an AS number range (IPM-16, WP-1067). */
+    ASNRangeUsage: {
+      /** Format: uuid */
+      range_id: string;
+      /**
+       * Format: int64
+       * @description Usable numbers of the range without 23456 and 65535.
+       */
+      total: number;
+      /** Format: int64 */
+      used: number;
+      /** Format: int64 */
+      free: number;
+      /** @description Used in percent */
+      percent: number;
+      /** @description True when used counts only the AS numbers the caller sees. */
+      scoped: boolean;
+    };
+    /** @description A subnet with the AS number as origin AS (WP-1067). */
+    ASNPrefix: {
+      /** Format: uuid */
+      id: string;
+      cidr: string;
+      /** Format: uuid */
+      vrf_id: string;
+      /** Format: uuid */
+      client_id: string | null;
+      name?: string;
+    };
+    ASNPrefixListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['ASNPrefix'][];
+    };
+    SubnetOriginASN: {
+      /** Format: uuid */
+      id: string;
+      /** Format: int64 */
+      number: number;
+      asdot: string;
+      name: string;
     };
     ASNRangeListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['ASNRange'][];
@@ -32519,6 +32580,8 @@ export interface operations {
         vrf_id?: string;
         /** @description Only subnets of this VLAN (IPM-20). */
         vlan_id?: string;
+        /** @description Only subnets with this origin AS (IPM-16, WP-1067). */
+        origin_asn_id?: string;
         /** @description Only pools (true) or only subnets that are no pool (false). */
         is_pool?: boolean;
         /** @description Part of name, description or CIDR, case-insensitive (IPM-20). */
@@ -50482,6 +50545,11 @@ export interface operations {
          *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
       };
       header?: never;
       path: {
@@ -50492,16 +50560,19 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the prefixes of an ASN. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description The prefixes of the AS number */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ASNPrefixListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -50704,12 +50775,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get the usage of an ASN range. The schema comes with the implementing work package. */
+      /** @description The usage of the range */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ASNRangeUsage'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -50727,20 +50800,27 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AllocateASNRequest'];
+      };
+    };
     responses: {
-      /** @description Allocate the next free ASN of a range. The schema comes with the implementing work package. */
-      200: {
+      /** @description The allocated AS number */
+      201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ASN'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };

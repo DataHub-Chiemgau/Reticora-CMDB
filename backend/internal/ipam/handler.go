@@ -248,6 +248,7 @@ func (h *Handler) CreateSubnet(w http.ResponseWriter, r *http.Request) {
 		Description:     req.Description,
 		IsManagement:    req.IsManagement,
 		IsPool:          req.IsPool,
+		OriginASNID:     req.OriginASNID,
 	}
 	if err := h.repo.CreateSubnet(r.Context(), s); err != nil {
 		writeRepoError(w, err, "subnet not found")

@@ -14090,6 +14090,8 @@ Parallele Vergaben aus derselben Range müssen verschiedene Nummern liefern. Fü
   - `MemoryRepository` reicht `origin_asn_id` unverändert durch (Muster WP-905 AK5).
 - [ ] **AK5:** `GET /api/v1/asns/{id}/prefixes` liefert die sichtbaren Subnetze mit diesem Origin-AS (ID, CIDR, VRF, Kunde), paginiert über `api.ParsePagination`.
 
+**Nachtrag 2026-11-12 (Umsetzung):** Abweichend von AK1 sperrt die Vergabe die Range nicht mit `SELECT … FROM asn_range WHERE id = $1 FOR UPDATE`, sondern mit einem Transaktions-Advisory-Lock je Range (`pg_advisory_xact_lock(hashtextextended('asn_range_alloc:' || id, 0))`, Muster `allocationLockSQL` aus `allocate.go`, WP-904). Grund: Eine Zeilensperre verlangt unter RLS die UPDATE-Policy der Zeile; ein Kunden-Principal hat sie für eine org-weite Range nicht, darf aus ihr aber vergeben (AK1). Die Serialisierung paralleler Vergaben aus derselben Range bleibt gleich. Ebenso serialisiert ein Advisory-Lock je ASN (`asn_origin:<id>`, exklusiv beim Kundenwechsel der ASN, geteilt beim Setzen von `origin_asn_id`) die Kundengrenze aus AK4 in beide Richtungen: `PATCH /api/v1/asns/{id}` mit `client_id` ergibt 422 `client_id`, solange ein Subnetz eines anderen Kunden oder ein org-weites Subnetz die ASN als Origin-AS nennt. `scoped` in AK2 ist nur bei Kundeneinschränkung `true`, weil die Lese-Policy von `asn` nur nach Kunde einschränkt. AK5 nutzt `api.ParseOffsetPage` (Offset-Cursor über `next_cursor`, wie die übrigen ASN-Listen).
+
 **Dateien (15 Einträge, Migration = 2):**
 
 - backend/migrations/<nächste Nr.>_subnet_origin_asn.up.sql (neu) + .down.sql (neu)

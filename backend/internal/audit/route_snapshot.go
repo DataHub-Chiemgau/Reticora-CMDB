@@ -369,6 +369,9 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	} {
 		crud(m, v1+collection, table, all...)
 	}
+	// The allocation of the next free AS number of a range (WP-1067)
+	// creates an asn row.
+	m["POST "+v1+"asn-ranges/{id}/allocate"] = created("asn")
 	// DELETE /documents/{id} records document.deleted in its transaction
 	// (WP-732).
 	crud(m, v1+"documents", "document", "POST", "PATCH")

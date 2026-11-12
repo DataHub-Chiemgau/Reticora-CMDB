@@ -9746,6 +9746,10 @@ paths:
           in: query
           description: Only subnets of this VLAN (IPM-20).
           schema: { type: string, format: uuid }
+        - name: origin_asn_id
+          in: query
+          description: Only subnets with this origin AS (IPM-16, WP-1067).
+          schema: { type: string, format: uuid }
         - name: is_pool
           in: query
           description: Only pools (true) or only subnets that are no pool (false).
@@ -25977,7 +25981,9 @@ paths:
         Changes number, name, kind, client, registry or description; an
         empty client_id makes it org-wide, an empty rir clears it. Same
         rules as POST; an org-wide AS number is 404 for a principal
-        restricted to clients. Writes asn.changed (update). Requires
+        restricted to clients. A client_id is 422 (field client_id) while
+        a subnet of another client or an org-wide subnet has the AS number
+        as origin AS (WP-1067). Writes asn.changed (update). Requires
         ipam:write.
       requestBody:
         required: true
@@ -26032,7 +26038,6 @@ paths:
   /api/v1/asns/{id}/prefixes:
     x-phase: P3
     x-feature: ipam
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -26040,14 +26045,22 @@ paths:
       tags: [IPAM]
       summary: List the prefixes of an ASN
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        IPM-16 (WP-1067): the subnets the caller sees whose origin AS
+        (origin_asn_id) is this AS number, with id, CIDR, VRF and client,
+        ordered by CIDR. An AS number the caller does not see is 404.
+        Requires ipam:read.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: List the prefixes of an ASN. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+          description: The prefixes of the AS number
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ASNPrefixListResponse' }
+        '404':
+          $ref: '#/components/responses/NotFound'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -26243,7 +26256,6 @@ paths:
   /api/v1/asn-ranges/{id}/usage:
     x-phase: P3
     x-feature: ipam
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -26251,11 +26263,17 @@ paths:
       tags: [IPAM]
       summary: Get the usage of an ASN range
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        IPM-16 (WP-1067): total usable numbers of the range (the reserved
+        23456 and 65535 do not count), used AS numbers of the organization
+        in it (allocated or created by hand), free and percent used. A
+        principal restricted to clients or sites counts only the AS numbers
+        it sees; the answer says so with scoped true. Requires ipam:read.
       responses:
         '200':
-          description: Get the usage of an ASN range. The schema comes with the implementing work package.
+          description: The usage of the range
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ASNRangeUsage' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -26268,7 +26286,6 @@ paths:
   /api/v1/asn-ranges/{id}/allocate:
     x-phase: P3
     x-feature: ipam
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -26276,11 +26293,29 @@ paths:
       tags: [IPAM]
       summary: Allocate the next free ASN of a range
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        IPM-16 (WP-1067): creates an AS number with the lowest free number
+        of the range in one transaction. Allocations from one range take
+        turns (a lock per range); the number is searched set-based over
+        the AS numbers of the organization (also those of other clients and
+        those created by hand), the reserved 23456 and 65535 are skipped.
+        A full range is 409 with field range. A client_id other than the
+        client of the range is 422 with field client_id; an org-wide range
+        allocates to every client, a client's range without client_id to
+        its client. Writes asn.changed and the route audit. Requires
+        ipam:write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AllocateASNRequest' }
       responses:
-        '200':
-          description: Allocate the next free ASN of a range. The schema comes with the implementing work package.
+        '201':
+          description: The allocated AS number
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ASN' }
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -41643,6 +41678,15 @@ components:
         nameserver_set_id:
           type: string
           description: Nameserver set of the subnet (IPM-05); absent without one.
+        origin_asn_id:
+          type: string
+          format: uuid
+          description: The AS number that originates the prefix (IPM-16, WP-1067); absent without one.
+        origin_asn:
+          readOnly: true
+          description: The origin AS when the caller sees it (WP-1067).
+          allOf:
+            - $ref: '#/components/schemas/SubnetOriginASN'
         effective_dns_servers:
           type: array
           readOnly: true
@@ -41738,6 +41782,12 @@ components:
         is_pool:
           type: boolean
           description: Container without host addresses of its own (IPM-02).
+        origin_asn_id:
+          type: string
+          description: >-
+            The origin AS (IPM-16, WP-1067): an AS number the caller sees that
+            is org-wide or of the subnet's client; else 422 with field
+            origin_asn_id.
 
     UpdateSubnetRequest:
       type: object
@@ -41788,6 +41838,12 @@ components:
         is_pool:
           type: boolean
           description: Makes the subnet a container; a subnet with addresses cannot become one (409 is_pool).
+        origin_asn_id:
+          type: string
+          description: >-
+            Sets the origin AS (IPM-16, WP-1067), an empty string clears it.
+            An AS number the caller does not see or of another client than
+            the subnet has after the update is 422 with field origin_asn_id.
 
     VRF:
       type: object
@@ -42138,6 +42194,54 @@ components:
             - { type: string }
         client_id: { type: string, description: An empty string makes the range org-wide. }
         purpose: { type: string, description: An empty string clears it. }
+    AllocateASNRequest:
+      type: object
+      required: [name, kind]
+      properties:
+        name: { type: string, maxLength: 200 }
+        kind: { type: string, enum: [own, customer, peer, upstream, ixp] }
+        client_id: { type: string, format: uuid }
+        rir: { type: string, enum: [ripe, arin, apnic, lacnic, afrinic, private] }
+        description: { type: string }
+    ASNRangeUsage:
+      type: object
+      description: The occupancy of an AS number range (IPM-16, WP-1067).
+      required: [range_id, total, used, free, percent, scoped]
+      properties:
+        range_id: { type: string, format: uuid }
+        total: { type: integer, format: int64, description: Usable numbers of the range without 23456 and 65535. }
+        used: { type: integer, format: int64 }
+        free: { type: integer, format: int64 }
+        percent: { type: number, description: Used in percent, two decimals. }
+        scoped: { type: boolean, description: True when used counts only the AS numbers the caller sees. }
+    ASNPrefix:
+      type: object
+      description: A subnet with the AS number as origin AS (WP-1067).
+      required: [id, cidr, vrf_id, client_id]
+      properties:
+        id: { type: string, format: uuid }
+        cidr: { type: string }
+        vrf_id: { type: string, format: uuid }
+        client_id: { type: [string, 'null'], format: uuid }
+        name: { type: string }
+    ASNPrefixListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/ASNPrefix'
+    SubnetOriginASN:
+      type: object
+      required: [id, number, asdot, name]
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: integer, format: int64 }
+        asdot: { type: string }
+        name: { type: string }
     ASNRangeListResponse:
       allOf:
         - $ref: '#/components/schemas/PaginationEnvelope'

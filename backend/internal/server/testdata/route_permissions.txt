@@ -110,8 +110,10 @@ GET /api/v1/ai/conversations ai:read
 GET /api/v1/api-keys apikey:manage
 GET /api/v1/asn-ranges ipam:read
 GET /api/v1/asn-ranges/{id} ipam:read
+GET /api/v1/asn-ranges/{id}/usage ipam:read
 GET /api/v1/asns ipam:read
 GET /api/v1/asns/{id} ipam:read
+GET /api/v1/asns/{id}/prefixes ipam:read
 GET /api/v1/assets asset:read
 GET /api/v1/assets/{id} asset:read
 GET /api/v1/assets/{id}/as-of asset:read
@@ -512,6 +514,7 @@ POST /api/v1/ai/conversations ai:read
 POST /api/v1/api-keys apikey:manage
 POST /api/v1/api-keys/{id}/rotate apikey:manage
 POST /api/v1/asn-ranges ipam:write
+POST /api/v1/asn-ranges/{id}/allocate ipam:write
 POST /api/v1/asns ipam:write
 POST /api/v1/asset-locations asset:write
 POST /api/v1/assets asset:write
