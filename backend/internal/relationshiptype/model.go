@@ -202,7 +202,7 @@ func Catalogue() []Type {
 	}
 	return []Type{
 		def("connected_to", "connected to", "connected to", "network", ImpactUndirected, false),
-		def("uplink_to", "uplink to", "uplink from", "network", ImpactSourceDependsOnTarget, false),
+		def("uplink_to", "uplink to", "uplink from", "network", ImpactSourceDependsOnTarget, true),
 		def("powered_by", "powered by", "powers", "power", ImpactSourceDependsOnTarget, true),
 		def("powers", "powers", "powered by", "power", ImpactTargetDependsOnSource, true),
 		def("hosted_on", "hosted on", "hosts", "hosting", ImpactSourceDependsOnTarget, false),

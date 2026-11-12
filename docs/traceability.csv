@@ -1763,3 +1763,5 @@ PRT-21;[P3];E;collector/internal/fakegnmi/fakegnmi_test.go;WP-1015
 ALR-01;[P3];E;backend/internal/alarm/lifecycle_integration_test.go;WP-982
 ALR-03;[P3];E;backend/internal/alarm/incident_integration_test.go;WP-1027
 ALR-09;[P3];E;backend/internal/alarm/incident_test.go;WP-1027
+ALR-09;[P3];E;backend/internal/topology/impact_integration_test.go;WP-1026
+ALR-03;[P3];E;backend/internal/topology/redundancy_test.go;WP-1026
