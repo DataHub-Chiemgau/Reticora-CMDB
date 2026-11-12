@@ -161,6 +161,68 @@ wieder (`collector.metrics.resumed`). Ein Neustart prüft sofort. Diese
 Messwerte zählen nicht als Verlust. Discovery und Inventar sind nicht
 betroffen.
 
+## Probe-Wire-Vertrag (`edgecore/probewire`)
+
+Für das Monitoring der Phase 3 tauschen Collector und Server Nachrichten im
+gemeinsamen Paket `edgecore/probewire` aus (das Paket importiert weder
+`backend/` noch `collector/`):
+
+| Nachricht | Inhalt |
+|---|---|
+| `AssignmentSet` | Seite des versionierten Zuweisungssatzes eines Collectors mit `ProbeSpec` je Probe (Typ, Ziel, Intervall, Timeout, Down-/Up-Count, Parameter, Schwellen, Elternprobe, Epoche) |
+| `ResultBatch` | Bündel von höchstens 1.000 Ergebnissen (`Result`: Probe, Epoche, Sequenz, `observed_at`, Status `ok`/`fail`/`error`, Code, RTT, Verlust, Werte, Labels) |
+| `StateChange` | Zustandswechsel einer Probe (`up`, `degraded`, `down`, `unknown`) mit Epoche, Sequenz, Grund, `observed_at` und letztem Ergebnis |
+| `Alive` | Lebenszeichen alle 10 s mit Uhrzeit des Collectors, Konfigurationsversion, Lastzahlen, Pufferstand, Verlusten und ICMP-Fähigkeit |
+
+**Version.** Jede Nachricht trägt `schema_version` (`<major>.<minor>`, derzeit
+`1.0`). Unbekannte Felder werden ignoriert; eine unbekannte Hauptversion
+weist der Empfänger ab (`ErrUnsupportedVersion`).
+
+**Reihenfolge und Fachzeit (E-175).** Die Reihenfolge ergibt sich aus
+(`epoch`, `seq`), nie aus der Uhrzeit. Die Epoche ist das Fencing-Token der
+Zuweisung und gilt je Probe; je Probe und Epoche ist genau ein Collector
+zuständig, die Ordnung gilt daher je Probe über (`epoch`, `seq`). Die
+Sequenz ist ein Zähler je Collector, den `Result` und `StateChange`
+gemeinsam nutzen; sie steigt streng monoton, wird mit dem Puffer des
+Collectors persistiert und beginnt nach einem Neustart nicht wieder bei 0.
+Der Idempotenzschlüssel ist (`probe_id`, `epoch`, `seq`), getrennt für
+Ergebnisse und für Zustandswechsel: Eine wiederholte Übertragung ist
+erkennbar und erzeugt keine Doppelzeilen. Fachzeit ist `observed_at`, der
+UTC-Zeitpunkt der Messung am Collector. Über `Alive.collector_time` misst
+der Server die Uhrabweichung und korrigiert `observed_at` erst ab 60 s
+Abweichung.
+
+**Absender.** Die Identität des Collectors stammt allein aus der
+authentifizierten Edge-Verbindung (mTLS-Zertifikat und sein
+Subject-Präfix), nie aus einem Feld der Nachricht. `collector_id` in einer
+Nachricht ist nur informativ; der Server weist eine Nachricht ab, deren
+`collector_id` von der authentifizierten Identität abweicht, und nimmt
+Ergebnisse und Zustandswechsel nur für Probes an, die diesem Collector mit
+dieser Epoche zugewiesen sind.
+
+**Gültige Werte.** Der Collector prüft jedes Ergebnis vor dem Bündeln
+(`Result.Validate`: bekannter Status, gültiger Code, nur endliche Zahlen).
+Ein ungültiges Ergebnis, etwa mit NaN, wird verworfen und als Verlust
+gezählt, statt das ganze Bündel unkodierbar zu machen (`ValidResults`).
+
+**Ergebnisse.** Ein `Result` hat kein Freitextfeld; Zusatzinformationen
+eines Typs laufen über `values` (Zahlen) und `labels`. Die Labels
+`credential_id` und `credential_namespace` nennen die genutzte Zugangsart
+(ID und Namespace, nie das Geheimnis). Gründe und Warncodes stehen in
+`edgecore/probewire/reason.go` (`collector_unreachable`, `parent_down`,
+`limit_exceeded`, `unsupported`, `config`, `auth_failed`, `timeout`,
+`refused`, `icmp_unavailable`, `unreachable`, `tls`; Warncodes
+`threshold_exceeded`, `cert_expiring`).
+
+**Abruf des Zuweisungssatzes.** Der Satz wird seitenweise geliefert: höchstens
+2.000 Probes und 768 KiB je Seite. `page` zählt ab 1, `next_page` nennt die
+nächste Seite und fehlt auf der letzten. Ändert sich die Version des Satzes
+während des Abrufs, trägt die Antwort auf die nächste Seite
+`version_changed: true` mit der neuen Version und ohne Probes; der Collector
+verwirft die bisher geholten Seiten und beginnt mit Seite 1 der neuen
+Version. Übernommen wird ein Satz erst, wenn alle Seiten einer Version
+vorliegen.
+
 ## Log-Ereignisse
 
 | Ereignis | Stufe | Bedeutung | Abhilfe |

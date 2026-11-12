@@ -1,0 +1,77 @@
+package probewire
+
+// Reason codes of results (Result.Code) and state changes
+// (StateChange.Reason), PRB-05, PRT-13, PRT-18 and E-177. Probe type work
+// packages add their codes and warn codes only here; deriving "ok with a
+// warn code → degraded" is the job of the collector state machine (WP-952).
+const (
+	// ReasonCollectorUnreachable: no member of the collector group is
+	// reachable (network down, PRB-03).
+	ReasonCollectorUnreachable = "collector_unreachable"
+	// ReasonParentDown: the parent probe is down; the child is not
+	// meaningful.
+	ReasonParentDown = "parent_down"
+	// ReasonLimitExceeded: a parallelism or rate limit of the type was
+	// exceeded on the collector (PRT-01).
+	ReasonLimitExceeded = "limit_exceeded"
+	// ReasonUnsupported: missing collector capability or a type that is not
+	// implemented (PRB-05, PRT-13, PRT-18). Never "not_supported".
+	ReasonUnsupported = "unsupported"
+	// ReasonConfig: the probe configuration is invalid for the target.
+	ReasonConfig = "config"
+	// ReasonAuthFailed: the credential was rejected by the target.
+	ReasonAuthFailed = "auth_failed"
+	// ReasonTimeout: no answer within the timeout.
+	ReasonTimeout = "timeout"
+	// ReasonRefused: the target actively refused the connection.
+	ReasonRefused = "refused"
+	// ReasonICMPUnavailable: the collector cannot send ICMP (no raw or
+	// unprivileged ICMP socket).
+	ReasonICMPUnavailable = "icmp_unavailable"
+	// ReasonUnreachable: the target is not reachable (base code, used by
+	// WP-950 and WP-970).
+	ReasonUnreachable = "unreachable"
+	// ReasonTLS: TLS handshake failed or the certificate is invalid (base
+	// code, used by WP-1016 and WP-1018).
+	ReasonTLS = "tls"
+
+	// WarnThresholdExceeded: the check succeeded but a threshold (RTT,
+	// loss, value) was violated.
+	WarnThresholdExceeded = "threshold_exceeded"
+	// WarnCertExpiring: the check succeeded but the certificate expires
+	// soon.
+	WarnCertExpiring = "cert_expiring"
+)
+
+// WarnCodes are the codes of a successful check with a warning; a result
+// with status ok and one of these codes leads to degraded (WP-952). Every
+// warn code is a valid reason code.
+var WarnCodes = map[string]bool{
+	WarnThresholdExceeded: true,
+	WarnCertExpiring:      true,
+}
+
+// reasons lists every valid reason code apart from the warn codes.
+var reasons = map[string]bool{
+	ReasonCollectorUnreachable: true,
+	ReasonParentDown:           true,
+	ReasonLimitExceeded:        true,
+	ReasonUnsupported:          true,
+	ReasonConfig:               true,
+	ReasonAuthFailed:           true,
+	ReasonTimeout:              true,
+	ReasonRefused:              true,
+	ReasonICMPUnavailable:      true,
+	ReasonUnreachable:          true,
+	ReasonTLS:                  true,
+}
+
+// ValidReason reports whether code is a known reason or warn code.
+func ValidReason(code string) bool {
+	return reasons[code] || WarnCodes[code]
+}
+
+// IsWarnCode reports whether code is a warn code.
+func IsWarnCode(code string) bool {
+	return WarnCodes[code]
+}
