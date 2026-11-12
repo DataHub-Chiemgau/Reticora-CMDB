@@ -92,6 +92,8 @@ func MemoryRepositories() Repositories {
 		discoveryRepo.SeedCIType(typ, typ)
 	}
 	lifecycleStates := lifecycle.NewMemoryStateStore()
+	// Compliance rules read the open findings as inputs (CMP-02, WP-1125).
+	securityFindings := security.NewMemoryRepository()
 	users := user.NewMemoryRepository()
 	serviceAccounts := user.NewMemoryServiceAccounts()
 	// Consumable movements book on the stock per bin of the same store
@@ -152,7 +154,7 @@ func MemoryRepositories() Repositories {
 		Desk:              desk.NewMemoryRepository(),
 		Location:          location.NewMemoryRepository(),
 		Agent:             agent.NewMemoryRepository(),
-		Security:          security.NewMemoryRepository(),
+		Security:          securityFindings,
 		Ticket:            ticket.NewMemoryRepository(),
 		User:              users,
 		Credential:        credential.NewMemoryRepository(),
@@ -172,7 +174,7 @@ func MemoryRepositories() Repositories {
 		SLA:               sla.NewMemoryRepository(),
 		Form:              form.NewMemoryRepository(),
 		Workflow:          workflow.NewMemoryRepository(),
-		Compliance:        compliance.NewMemoryRepository(),
+		Compliance:        compliance.NewMemoryRepository().WithFindings(securityFindings),
 		IGA:               iga.NewMemoryRepository(),
 		Search:            search.NewMemoryRepository(),
 		AI:                ai.NewMemoryRepository(),

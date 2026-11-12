@@ -18385,7 +18385,7 @@ CMP-01;[P3];F;backend/internal/security/config_change_integration_test.go;WP-112
 - [ ] **AK2:** Neue optionale Spalte `applies_when` (MET-45-Bedingung, NULL = immer), zusätzlich zu `ci_type_id`. Passt der CI-Typ nicht oder ist `applies_when` falsch, ist das Ergebnis `not_applicable`. Gleiche Prüfung wie AK1.
 - [ ] **AK3:** `compliance.Inputs` bildet je CI eine flache Map: `name`, `status`, `manufacturer`, `model`, `serial_number`, `management_ip`, `firmware_version`, `os_name`, `os_version`, `ci_type_id`, `client_id`, `site_id`, `lifecycle_state`, `attributes.<key>`, `finding.max_open_severity` (`none|low|medium|high|critical`), `finding.max_open_severity_rank` (0–4, für `gte`/`lt`) und `finding.open_count.<kind>` je Art (0, wenn keine). Offen heißt `status IN ('open','acknowledged')`. Die Art `compliance_violation` ist keine Eingabe (keine Rückkopplung).
 - [ ] **AK4:** Die Finding-Eingaben werden je Seite von CIs mit einer Abfrage gelesen (`FindingFacts(ctx, orgID, ciIDs)`, gruppiert nach `ci_id` und `kind`), nicht je CI. Memory- und PG-Repository verhalten sich gleich.
-- [ ] **AK5:** Datenmigration nach [E-229](entscheidungen.md#e-229) (Option 1): `eq`, `ne`, `contains`, `not_empty` werden 1:1 übertragen, `exists` wird `not_empty`. Regeln mit `matches` oder unbekanntem Operator werden `active = false` gesetzt, behalten den Altausdruck in `description` angehängt und werden per `RAISE NOTICE` mit ID und Name gemeldet.
+- [ ] **AK5:** Datenmigration nach [E-229](entscheidungen.md#e-229) (Option 1): `eq`, `ne`, `contains`, `not_empty` werden 1:1 übertragen, `exists` wird `not_empty`. Regeln mit `matches` oder unbekanntem Operator werden `active = false` gesetzt, behalten den Altausdruck in `description` angehängt und werden per `RAISE NOTICE` mit ID und Name gemeldet. Wie in WP-1087 bleiben Ausdrücke in MET-45-Form unverändert, und eine bereits mit Hinweis deaktivierte Regel wird nicht erneut angefasst, damit Up nach Down keine gültigen Regeln abschaltet.
 - [ ] **AK6:** `eval`, `lookup` und `str` sind aus `evaluator.go` entfernt; `Evaluate` wertet mit `rules.EvaluateCondition` aus. Antwortform von `POST /compliance/evaluations` und `GET /compliance/score` bleibt bis WP-1126 und WP-1127 unverändert.
 
 **Dateien (14 Einträge, Migration = 2):**
@@ -18415,7 +18415,7 @@ CMP-01;[P3];F;backend/internal/security/config_change_integration_test.go;WP-112
   - `TestLifecycleStateInput`.
 - `backend/internal/compliance/rule_ast_integration_test.go`:
   - `TestCreateRuleRejectsInvalidAST` (422 mit Pfad), `TestCreateRuleRejectsUnknownInput` (422).
-  - `TestLegacyRuleMigration`: Altregeln mit `exists`, `eq` und `matches` vor der Migration angelegt → `not_empty`, `eq`, `matches`-Regel inaktiv.
+  - `TestLegacyRuleMigration`: Altregeln mit `exists`, `eq` und `matches` vor der Migration angelegt → `not_empty`, `eq`, `matches`-Regel inaktiv; Regeln in MET-45-Form (`all`, `lt`) bleiben unverändert aktiv, ein zweiter Lauf (Up nach Down) ändert nichts und hängt keinen zweiten Hinweis an.
   - `TestFindingFactsSingleQuery`: 500 CIs, eine Abfrage je Seite (`pgx`-Tracer).
 - `TestMigrationsRoundtrip`, `TestSchemaBaselineMatchesMigratedSchema`.
 

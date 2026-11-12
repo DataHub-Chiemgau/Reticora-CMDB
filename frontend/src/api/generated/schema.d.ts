@@ -19516,7 +19516,10 @@ export interface components {
       /** @enum {string} */
       severity: 'low' | 'medium' | 'high' | 'critical';
       category: string;
+      /** @description One MET-45 condition node of api/rules.schema.json (SEC-03, E-229): true is pass, false is fail. Its fields are the inputs of a CI: name, status, manufacturer, model, serial_number, management_ip, firmware_version, os_name, os_version, ci_type_id, client_id, site_id, lifecycle_state, attributes.<key>, finding.max_open_severity (none|low|medium|high|critical), finding.max_open_severity_rank (0-4) and finding.open_count.<kind> of the open findings (open or acknowledged; compliance_violation is no input, CMP-02). An invalid node or another field is 422 on its path, e.g. expression.rules[1].field. */
       expression: components['schemas']['JSONValue'];
+      /** @description Optional MET-45 condition over the same inputs; false is not_applicable (in addition to ci_type_id), null applies always. Checked like expression (422 on applies_when...). */
+      applies_when: unknown;
       remediation_hint?: string;
       active: boolean;
       /** Format: date-time */
@@ -19531,7 +19534,10 @@ export interface components {
       /** @enum {string} */
       severity: 'low' | 'medium' | 'high' | 'critical';
       category: string;
+      /** @description One MET-45 condition node of api/rules.schema.json (SEC-03, E-229): true is pass, false is fail. Its fields are the inputs of a CI: name, status, manufacturer, model, serial_number, management_ip, firmware_version, os_name, os_version, ci_type_id, client_id, site_id, lifecycle_state, attributes.<key>, finding.max_open_severity (none|low|medium|high|critical), finding.max_open_severity_rank (0-4) and finding.open_count.<kind> of the open findings (open or acknowledged; compliance_violation is no input, CMP-02). An invalid node or another field is 422 on its path, e.g. expression.rules[1].field. */
       expression: components['schemas']['JSONValue'];
+      /** @description Optional MET-45 condition over the same inputs; false is not_applicable (in addition to ci_type_id), null applies always. Checked like expression (422 on applies_when...). */
+      applies_when?: unknown;
       remediation_hint?: string;
       active?: boolean;
     };
@@ -19542,7 +19548,10 @@ export interface components {
       /** @enum {string} */
       severity?: 'low' | 'medium' | 'high' | 'critical';
       category?: string;
+      /** @description One MET-45 condition node of api/rules.schema.json (SEC-03, E-229): true is pass, false is fail. Its fields are the inputs of a CI: name, status, manufacturer, model, serial_number, management_ip, firmware_version, os_name, os_version, ci_type_id, client_id, site_id, lifecycle_state, attributes.<key>, finding.max_open_severity (none|low|medium|high|critical), finding.max_open_severity_rank (0-4) and finding.open_count.<kind> of the open findings (open or acknowledged; compliance_violation is no input, CMP-02). An invalid node or another field is 422 on its path, e.g. expression.rules[1].field. */
       expression?: components['schemas']['JSONValue'];
+      /** @description Optional MET-45 condition over the same inputs; false is not_applicable (in addition to ci_type_id), null applies always. Checked like expression (422 on applies_when...). In a PATCH null removes the condition, absent keeps it. */
+      applies_when?: unknown;
       remediation_hint?: string;
       active?: boolean;
     };
@@ -37198,7 +37207,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      /** @description ci_type_id is no UUID or neither a system type nor a type of the organization (unknown and foreign alike, TEN-04). */
+      /** @description ci_type_id is no UUID or neither a system type nor a type of the organization (unknown and foreign alike, TEN-04), or expression or applies_when is no MET-45 condition over the inputs of a CI (field names the path, e.g. expression.rules[1].field). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -37286,7 +37295,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      /** @description ci_type_id is no UUID or neither a system type nor a type of the organization (unknown and foreign alike, TEN-04). */
+      /** @description ci_type_id is no UUID or neither a system type nor a type of the organization (unknown and foreign alike, TEN-04), or expression or applies_when is no MET-45 condition over the inputs of a CI (field names the path, e.g. expression.rules[1].field). */
       422: {
         headers: {
           [name: string]: unknown;

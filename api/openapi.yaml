@@ -13862,7 +13862,7 @@ paths:
         '201': { description: Compliance rule created, content: { application/json: { schema: { $ref: '#/components/schemas/ComplianceRule' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '422': { description: "ci_type_id is no UUID or neither a system type nor a type of the organization (unknown and foreign alike, TEN-04).", content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
+        '422': { description: "ci_type_id is no UUID or neither a system type nor a type of the organization (unknown and foreign alike, TEN-04), or expression or applies_when is no MET-45 condition over the inputs of a CI (field names the path, e.g. expression.rules[1].field).", content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/compliance/rules/{id}:
     x-phase: P3
@@ -13886,7 +13886,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '422': { description: "ci_type_id is no UUID or neither a system type nor a type of the organization (unknown and foreign alike, TEN-04).", content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
+        '422': { description: "ci_type_id is no UUID or neither a system type nor a type of the organization (unknown and foreign alike, TEN-04), or expression or applies_when is no MET-45 condition over the inputs of a CI (field names the path, e.g. expression.rules[1].field).", content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
     delete:
       operationId: deleteComplianceRule
       tags: [Compliance]
@@ -39796,7 +39796,7 @@ components:
           properties: { data: { type: array, items: { $ref: '#/components/schemas/WorkflowRun' } } }
     ComplianceRule:
       type: object
-      required: [id, organization_id, name, severity, category, expression, active, created_at, updated_at]
+      required: [id, organization_id, name, severity, category, expression, applies_when, active, created_at, updated_at]
       properties:
         id: { type: string }
         organization_id: { type: string }
@@ -39805,7 +39805,25 @@ components:
         description: { type: string }
         severity: { type: string, enum: [low, medium, high, critical] }
         category: { type: string }
-        expression: { $ref: '#/components/schemas/JSONValue' }
+        expression:
+          $ref: '#/components/schemas/JSONValue'
+          description: >-
+            One MET-45 condition node of api/rules.schema.json (SEC-03, E-229):
+            true is pass, false is fail. Its fields are the inputs of a CI:
+            name, status, manufacturer, model, serial_number, management_ip,
+            firmware_version, os_name, os_version, ci_type_id, client_id,
+            site_id, lifecycle_state, attributes.<key>,
+            finding.max_open_severity (none|low|medium|high|critical),
+            finding.max_open_severity_rank (0-4) and
+            finding.open_count.<kind> of the open findings (open or
+            acknowledged; compliance_violation is no input, CMP-02). An
+            invalid node or another field is 422 on its path, e.g.
+            expression.rules[1].field.
+        applies_when:
+          description: >-
+            Optional MET-45 condition over the same inputs; false is
+            not_applicable (in addition to ci_type_id), null applies always.
+            Checked like expression (422 on applies_when...).
         remediation_hint: { type: string }
         active: { type: boolean }
         created_at: { type: string, format: date-time }
@@ -39819,7 +39837,25 @@ components:
         description: { type: string }
         severity: { type: string, enum: [low, medium, high, critical] }
         category: { type: string }
-        expression: { $ref: '#/components/schemas/JSONValue' }
+        expression:
+          $ref: '#/components/schemas/JSONValue'
+          description: >-
+            One MET-45 condition node of api/rules.schema.json (SEC-03, E-229):
+            true is pass, false is fail. Its fields are the inputs of a CI:
+            name, status, manufacturer, model, serial_number, management_ip,
+            firmware_version, os_name, os_version, ci_type_id, client_id,
+            site_id, lifecycle_state, attributes.<key>,
+            finding.max_open_severity (none|low|medium|high|critical),
+            finding.max_open_severity_rank (0-4) and
+            finding.open_count.<kind> of the open findings (open or
+            acknowledged; compliance_violation is no input, CMP-02). An
+            invalid node or another field is 422 on its path, e.g.
+            expression.rules[1].field.
+        applies_when:
+          description: >-
+            Optional MET-45 condition over the same inputs; false is
+            not_applicable (in addition to ci_type_id), null applies always.
+            Checked like expression (422 on applies_when...).
         remediation_hint: { type: string }
         active: { type: boolean }
     UpdateComplianceRuleRequest:
@@ -39830,7 +39866,25 @@ components:
         description: { type: string }
         severity: { type: string, enum: [low, medium, high, critical] }
         category: { type: string }
-        expression: { $ref: '#/components/schemas/JSONValue' }
+        expression:
+          $ref: '#/components/schemas/JSONValue'
+          description: >-
+            One MET-45 condition node of api/rules.schema.json (SEC-03, E-229):
+            true is pass, false is fail. Its fields are the inputs of a CI:
+            name, status, manufacturer, model, serial_number, management_ip,
+            firmware_version, os_name, os_version, ci_type_id, client_id,
+            site_id, lifecycle_state, attributes.<key>,
+            finding.max_open_severity (none|low|medium|high|critical),
+            finding.max_open_severity_rank (0-4) and
+            finding.open_count.<kind> of the open findings (open or
+            acknowledged; compliance_violation is no input, CMP-02). An
+            invalid node or another field is 422 on its path, e.g.
+            expression.rules[1].field.
+        applies_when:
+          description: >-
+            Optional MET-45 condition over the same inputs; false is
+            not_applicable (in addition to ci_type_id), null applies always.
+            Checked like expression (422 on applies_when...). In a PATCH null removes the condition, absent keeps it.
         remediation_hint: { type: string }
         active: { type: boolean }
     ComplianceResult:

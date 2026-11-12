@@ -120,11 +120,23 @@ func (h *Handler) CreateRule(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, 400, "Bad Request", "name, severity, category and expression are required")
 		return
 	}
+	// expression and applies_when are MET-45 conditions over the inputs
+	// of a CI (SEC-03, CMP-02): 422 on the path of the error.
+	if err := ValidateCondition("expression", req.Expression); err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
+	if req.AppliesWhen != nil {
+		if err := ValidateCondition("applies_when", req.AppliesWhen); err != nil {
+			api.WriteFieldError(w, err)
+			return
+		}
+	}
 	active := true
 	if req.Active != nil {
 		active = *req.Active
 	}
-	item := &Rule{OrganizationID: t.OrganizationID, CITypeID: req.CITypeID, Name: req.Name, Description: req.Description, Severity: req.Severity, Category: req.Category, Expression: req.Expression, RemediationHint: req.RemediationHint, Active: active}
+	item := &Rule{OrganizationID: t.OrganizationID, CITypeID: req.CITypeID, Name: req.Name, Description: req.Description, Severity: req.Severity, Category: req.Category, Expression: req.Expression, AppliesWhen: req.AppliesWhen, RemediationHint: req.RemediationHint, Active: active}
 	// An unknown CI type and a private type of another organization answer
 	// alike, 422 on ci_type_id (F-047, TEN-04).
 	if err := h.repo.CreateRule(r.Context(), item); err != nil {
@@ -147,7 +159,17 @@ func (h *Handler) UpdateRule(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, 400, "Bad Request", err.Error())
 		return
 	}
-	item, err := h.repo.UpdateRule(r.Context(), t.OrganizationID, id, req)
+	if req.Expression != nil {
+		if err := ValidateCondition("expression", req.Expression); err != nil {
+			api.WriteFieldError(w, err)
+			return
+		}
+	}
+	if err := req.decodeAppliesWhen(); err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
+	item, err := h.repo.UpdateRule(r.Context(), t.OrganizationID, id, &req)
 	if err != nil {
 		writeComplianceError(w, r, err)
 		return

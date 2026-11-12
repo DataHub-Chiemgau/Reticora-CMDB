@@ -13,7 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const ruleCols = `id::text, organization_id::text, COALESCE(ci_type_id::text,''), name, description, severity, category, expression, remediation_hint, active, created_at, updated_at`
+const ruleCols = `id::text, organization_id::text, COALESCE(ci_type_id::text,''), name, description, severity, category, expression, applies_when, remediation_hint, active, created_at, updated_at`
 const resultCols = `id::text, organization_id::text, rule_id::text, ci_id::text, COALESCE(ci_type_id::text,''), status, details, evaluated_at, created_at, updated_at`
 
 type PGRepository struct{ pool *pgxpool.Pool }
@@ -109,10 +109,10 @@ func (r *PGRepository) CreateRule(ctx context.Context, rule *Rule) error {
 		if err := requireCIType(ctx, tx, rule.OrganizationID, rule.CITypeID); err != nil {
 			return err
 		}
-		return tx.QueryRow(ctx, `INSERT INTO compliance_rule (organization_id,ci_type_id,name,description,severity,category,expression,remediation_hint,active) VALUES ($1,NULLIF($2,'')::uuid,$3,$4,$5,$6,$7,$8,$9) RETURNING id::text, created_at, updated_at`, rule.OrganizationID, rule.CITypeID, rule.Name, rule.Description, rule.Severity, rule.Category, rule.Expression, rule.RemediationHint, rule.Active).Scan(&rule.ID, &rule.CreatedAt, &rule.UpdatedAt)
+		return tx.QueryRow(ctx, `INSERT INTO compliance_rule (organization_id,ci_type_id,name,description,severity,category,expression,applies_when,remediation_hint,active) VALUES ($1,NULLIF($2,'')::uuid,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id::text, created_at, updated_at`, rule.OrganizationID, rule.CITypeID, rule.Name, rule.Description, rule.Severity, rule.Category, rule.Expression, nullableMap(rule.AppliesWhen), rule.RemediationHint, rule.Active).Scan(&rule.ID, &rule.CreatedAt, &rule.UpdatedAt)
 	})
 }
-func (r *PGRepository) UpdateRule(ctx context.Context, orgID, id string, req UpdateRuleRequest) (*Rule, error) {
+func (r *PGRepository) UpdateRule(ctx context.Context, orgID, id string, req *UpdateRuleRequest) (*Rule, error) {
 	var rule *Rule
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		set := []string{}
@@ -149,6 +149,11 @@ func (r *PGRepository) UpdateRule(ctx context.Context, orgID, id string, req Upd
 		if req.Expression != nil {
 			set = append(set, fmt.Sprintf("expression=$%d", pos))
 			args = append(args, req.Expression)
+			pos++
+		}
+		if req.setAppliesWhen {
+			set = append(set, fmt.Sprintf("applies_when=$%d", pos))
+			args = append(args, nullableMap(req.appliesWhen))
 			pos++
 		}
 		if req.RemediationHint != nil {
@@ -254,12 +259,59 @@ func asMap(b []byte) JSONMap {
 }
 func scanRule(s scanner) (*Rule, error) {
 	r := &Rule{}
-	var expr []byte
-	if err := s.Scan(&r.ID, &r.OrganizationID, &r.CITypeID, &r.Name, &r.Description, &r.Severity, &r.Category, &expr, &r.RemediationHint, &r.Active, &r.CreatedAt, &r.UpdatedAt); err != nil {
+	var expr, applies []byte
+	if err := s.Scan(&r.ID, &r.OrganizationID, &r.CITypeID, &r.Name, &r.Description, &r.Severity, &r.Category, &expr, &applies, &r.RemediationHint, &r.Active, &r.CreatedAt, &r.UpdatedAt); err != nil {
 		return nil, err
 	}
 	r.Expression = asMap(expr)
+	if len(applies) > 0 && string(applies) != "null" {
+		r.AppliesWhen = asMap(applies)
+	}
 	return r, nil
+}
+
+// nullableMap is the JSONB value of an optional condition: NULL for nil.
+func nullableMap(m JSONMap) any {
+	if m == nil {
+		return nil
+	}
+	return m
+}
+
+// FindingFacts reads the open findings of the CIs grouped by CI and kind
+// in one query (CMP-02, AK4 of WP-1125).
+func (r *PGRepository) FindingFacts(ctx context.Context, orgID string, ciIDs []string) (map[string]FindingFacts, error) {
+	out := map[string]FindingFacts{}
+	if len(ciIDs) == 0 {
+		return out, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT ci_id::text, kind, count(*)::int,
+		        max(CASE severity WHEN 'low' THEN 1 WHEN 'medium' THEN 2 WHEN 'high' THEN 3 WHEN 'critical' THEN 4 ELSE 0 END)::int
+		   FROM security_finding
+		  WHERE organization_id = $1 AND ci_id = ANY($2::uuid[]) AND status IN ('open', 'acknowledged') AND kind <> $3
+		  GROUP BY ci_id, kind`, orgID, ciIDs, kindComplianceViolation)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id, kind string
+			var n, rank int
+			if err := rows.Scan(&id, &kind, &n, &rank); err != nil {
+				return err
+			}
+			facts := out[id]
+			if facts.OpenCount == nil {
+				facts.OpenCount = map[string]int{}
+			}
+			facts.OpenCount[kind] = n
+			facts.MaxSeverityRank = max(facts.MaxSeverityRank, rank)
+			out[id] = facts
+		}
+		return rows.Err()
+	})
+	return out, err
 }
 func scanResult(s scanner) (*Result, error) {
 	r := &Result{}

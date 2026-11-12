@@ -96,7 +96,7 @@ func TestRepositoryErrorsAreSanitized(t *testing.T) {
 	}
 	rule := func(ciType string) map[string]any {
 		return map[string]any{"ci_type_id": ciType, "name": "t1-err-rule", "severity": "high", "category": "security",
-			"expression": map[string]any{"field": "x"}}
+			"expression": map[string]any{"op": "not_empty", "field": "name"}}
 	}
 
 	for _, c := range []struct {

@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"slices"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/security"
 )
 
 // ErrNotFound: the rule is unknown or of another organization; both answer
@@ -19,16 +22,63 @@ type Repository interface {
 	ListRules(ctx context.Context, orgID, ciTypeID, category string, activeOnly bool, page api.PaginationParams) ([]Rule, int, error)
 	GetRule(ctx context.Context, orgID, id string) (*Rule, error)
 	CreateRule(ctx context.Context, rule *Rule) error
-	UpdateRule(ctx context.Context, orgID, id string, req UpdateRuleRequest) (*Rule, error)
+	UpdateRule(ctx context.Context, orgID, id string, req *UpdateRuleRequest) (*Rule, error)
 	DeleteRule(ctx context.Context, orgID, id string) error
 	ReplaceResults(ctx context.Context, orgID string, results []Result) error
 	ListResults(ctx context.Context, orgID, ciTypeID, status string, page api.PaginationParams) ([]Result, int, error)
+	// FindingFacts returns the facts of the open findings of the CIs in one
+	// read (per page of CIs, not per CI; CMP-02): open is open or
+	// acknowledged, compliance_violation is left out. A CI without open
+	// finding has no entry.
+	FindingFacts(ctx context.Context, orgID string, ciIDs []string) (map[string]FindingFacts, error)
 }
+
+// FindingSource lists the findings of an organization (security.Repository
+// of the memory profile).
+type FindingSource interface {
+	List(ctx context.Context, orgID string, filter *security.FilterParams, page api.PaginationParams) ([]security.Finding, int, error)
+}
+
 type MemoryRepository struct {
-	mu      sync.RWMutex
-	rules   map[string]*Rule
-	results map[string]*Result
-	next    int
+	mu       sync.RWMutex
+	rules    map[string]*Rule
+	results  map[string]*Result
+	findings FindingSource
+	next     int
+}
+
+// WithFindings makes FindingFacts read the findings of src (--no-db, the
+// memory security repository); without one no CI has findings.
+func (r *MemoryRepository) WithFindings(src FindingSource) *MemoryRepository {
+	r.findings = src
+	return r
+}
+
+// FindingFacts aggregates the open findings of the CIs like the query of
+// the PG repository.
+func (r *MemoryRepository) FindingFacts(ctx context.Context, orgID string, ciIDs []string) (map[string]FindingFacts, error) {
+	out := map[string]FindingFacts{}
+	if r.findings == nil || len(ciIDs) == 0 {
+		return out, nil
+	}
+	list, _, err := r.findings.List(ctx, orgID, &security.FilterParams{}, api.PaginationParams{Limit: math.MaxInt32})
+	if err != nil {
+		return nil, err
+	}
+	for i := range list {
+		f := &list[i]
+		if !slices.Contains(ciIDs, f.CIID) || (f.Status != "open" && f.Status != "acknowledged") || f.Kind == kindComplianceViolation {
+			continue
+		}
+		facts := out[f.CIID]
+		if facts.OpenCount == nil {
+			facts.OpenCount = map[string]int{}
+		}
+		facts.OpenCount[f.Kind]++
+		facts.MaxSeverityRank = max(facts.MaxSeverityRank, SeverityRank(f.Severity))
+		out[f.CIID] = facts
+	}
+	return out, nil
 }
 
 func NewMemoryRepository() *MemoryRepository {
@@ -74,7 +124,7 @@ func (r *MemoryRepository) CreateRule(_ context.Context, rule *Rule) error {
 	r.rules[rule.ID] = &cp
 	return nil
 }
-func (r *MemoryRepository) UpdateRule(_ context.Context, orgID, id string, req UpdateRuleRequest) (*Rule, error) {
+func (r *MemoryRepository) UpdateRule(_ context.Context, orgID, id string, req *UpdateRuleRequest) (*Rule, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	rule := r.rules[id]
@@ -98,6 +148,9 @@ func (r *MemoryRepository) UpdateRule(_ context.Context, orgID, id string, req U
 	}
 	if req.Expression != nil {
 		rule.Expression = req.Expression
+	}
+	if req.setAppliesWhen {
+		rule.AppliesWhen = req.appliesWhen
 	}
 	if req.RemediationHint != nil {
 		rule.RemediationHint = *req.RemediationHint

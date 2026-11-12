@@ -2,9 +2,6 @@ package compliance
 
 import (
 	"context"
-	"fmt"
-	"regexp"
-	"strings"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -37,35 +34,38 @@ func (e *Evaluator) Evaluate(ctx context.Context, orgID string) (EvaluationRespo
 			return EvaluationResponse{}, ErrOrgWideScopeRequired
 		}
 	}
-	rules, _, err := e.repo.ListRules(ctx, orgID, "", "", true, api.PaginationParams{Limit: 100})
-	if err != nil {
-		return EvaluationResponse{}, err
-	}
-	items, _, err := e.cis.List(ctx, orgID, &ci.FilterParams{}, api.PaginationParams{Limit: 100})
+	ruleList, _, err := e.repo.ListRules(ctx, orgID, "", "", true, api.PaginationParams{Limit: 100})
 	if err != nil {
 		return EvaluationResponse{}, err
 	}
 	results := []Result{}
 	now := time.Now().UTC()
-	for i := range rules {
-		rule := &rules[i]
+	// One page of CIs at a time; the facts of their open findings are read
+	// once per page (FindingFacts, CMP-02), never per CI.
+	for offset := 0; ; {
+		items, total, err := e.cis.List(ctx, orgID, &ci.FilterParams{}, api.PaginationParams{Limit: evaluationPage, Offset: offset})
+		if err != nil {
+			return EvaluationResponse{}, err
+		}
+		ids := make([]string, len(items))
+		for j := range items {
+			ids[j] = items[j].ID
+		}
+		facts, err := e.repo.FindingFacts(ctx, orgID, ids)
+		if err != nil {
+			return EvaluationResponse{}, err
+		}
 		for j := range items {
 			item := &items[j]
-			status := "not_applicable"
-			details := "CI type does not match rule"
-			if rule.CITypeID == "" || rule.CITypeID == item.CITypeID {
-				if eval(rule.Expression, item) {
-					status = "pass"
-					details = "rule matched"
-				} else {
-					status = "fail"
-					details = rule.RemediationHint
-					if details == "" {
-						details = "expected state was not met"
-					}
-				}
+			inputs := Inputs(item, facts[item.ID])
+			for i := range ruleList {
+				status, details := evaluateRule(&ruleList[i], item, inputs)
+				results = append(results, Result{OrganizationID: orgID, RuleID: ruleList[i].ID, CIID: item.ID, CITypeID: item.CITypeID, Status: status, Details: details, EvaluatedAt: now})
 			}
-			results = append(results, Result{OrganizationID: orgID, RuleID: rule.ID, CIID: item.ID, CITypeID: item.CITypeID, Status: status, Details: details, EvaluatedAt: now})
+		}
+		offset += len(items)
+		if len(items) == 0 || offset >= total {
+			break
 		}
 	}
 	if err := e.repo.ReplaceResults(ctx, orgID, results); err != nil {
@@ -111,56 +111,34 @@ func finish(s *Score) {
 		s.Score = float64(s.Passed) / float64(den) * 100
 	}
 }
-func eval(expr JSONMap, item *ci.Item) bool {
-	field := str(expr, "field", "")
-	op := str(expr, "op", "eq")
-	want := expr["value"]
-	got := lookup(item, field)
-	switch op {
-	case "eq":
-		return fmt.Sprint(got) == fmt.Sprint(want)
-	case "ne":
-		return fmt.Sprint(got) != fmt.Sprint(want)
-	case "exists":
-		return got != nil
-	case "not_empty":
-		return fmt.Sprint(got) != ""
-	case "contains":
-		return strings.Contains(fmt.Sprint(got), fmt.Sprint(want))
-	case "matches":
-		re, err := regexp.Compile(fmt.Sprint(want))
-		return err == nil && re.MatchString(fmt.Sprint(got))
-	default:
-		return false
+
+// evaluationPage is the number of CIs evaluated per finding read.
+const evaluationPage = 100
+
+// evaluateRule is the result of one rule for one CI: not_applicable when
+// the CI type does not match or applies_when is false, otherwise pass or
+// fail by expression (rules.EvaluateCondition over Inputs).
+func evaluateRule(rule *Rule, item *ci.Item, inputs map[string]any) (status, details string) {
+	if rule.CITypeID != "" && rule.CITypeID != item.CITypeID {
+		return "not_applicable", "CI type does not match rule"
 	}
-}
-func lookup(item *ci.Item, field string) any {
-	switch field {
-	case "name":
-		return item.Name
-	case "status":
-		return item.Status
-	case "manufacturer":
-		return item.Manufacturer
-	case "model":
-		return item.Model
-	case "serial_number":
-		return item.SerialNumber
-	case "management_ip":
-		return item.ManagementIP
-	case "firmware_version":
-		return item.FirmwareVersion
-	case "ci_type_id":
-		return item.CITypeID
+	if rule.AppliesWhen != nil {
+		applies, ok := holds(rule.AppliesWhen, inputs)
+		if !ok {
+			return "not_applicable", "rule condition is no valid MET-45 condition"
+		}
+		if !applies {
+			return "not_applicable", "applies_when does not hold"
+		}
 	}
-	if strings.HasPrefix(field, "attributes.") {
-		return item.Attributes[strings.TrimPrefix(field, "attributes.")]
+	pass, ok := holds(rule.Expression, inputs)
+	switch {
+	case !ok:
+		return "not_applicable", "rule expression is no valid MET-45 condition"
+	case pass:
+		return "pass", "rule matched"
+	case rule.RemediationHint != "":
+		return "fail", rule.RemediationHint
 	}
-	return nil
-}
-func str(m map[string]any, key, fallback string) string {
-	if v, ok := m[key].(string); ok && v != "" {
-		return v
-	}
-	return fallback
+	return "fail", "expected state was not met"
 }
