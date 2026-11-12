@@ -1686,3 +1686,6 @@ IPM-07;[P3];G3;backend/internal/ipam/vrf_integration_test.go;WP-907
 PRB-05;[P3];E;edgecore/probewire/probewire_test.go;WP-933
 PRB-07;[P3];E;edgecore/probewire/probewire_test.go;WP-933
 PRB-11;[P3];E;edgecore/probewire/probewire_test.go;WP-933
+PRT-01;[P3];E;edgecore/probewire/types_test.go;WP-934
+PRB-01;[P3];E;edgecore/probewire/types_test.go;WP-934
+PRT-21;[P3];E;edgecore/probewire/types_test.go;WP-934

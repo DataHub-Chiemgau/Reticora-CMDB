@@ -7,6 +7,9 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -16,6 +19,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 )
 
 func testService(t *testing.T, plan Plan) *Service {
@@ -944,6 +948,81 @@ func TestTargetTypeQuotaKeys(t *testing.T) {
 		if err := e.Validate(); !errors.As(err, &verr) || verr.Field != "limits" {
 			t.Errorf("%s: %v, want a ValidationError on limits", key, err)
 		}
+	}
+}
+
+// TestTargetTypeQuotaKeysFollowRegistry covers AK5 of WP-934: a cap
+// max_targets_<type> is accepted only for a key of the probe type register;
+// unknown types and long forms are a 422 on limits.
+func TestTargetTypeQuotaKeysFollowRegistry(t *testing.T) {
+	// The package matrix (PKG-08) references exactly the register keys.
+	if keys := slices.Sorted(slices.Values(probewire.TypeKeys())); !slices.Equal(ProbeTypes(), keys) {
+		t.Errorf("ProbeTypes() = %v, register %v", ProbeTypes(), keys)
+	}
+	for _, key := range probewire.TypeKeys() {
+		e := Entitlement{FeatureKey: FeatureMonitoring, Plan: PlanStandard, Enabled: true, Limits: map[string]int64{TargetTypeQuotaPrefix + key: 10}}
+		if err := e.Validate(); err != nil {
+			t.Errorf("max_targets_%s: %v", key, err)
+		}
+	}
+	for _, key := range []string{"max_targets_foo", "max_targets_icmp_ping", "max_targets_snmp", "max_targets_twamp"} {
+		e := Entitlement{FeatureKey: FeatureMonitoring, Plan: PlanStandard, Enabled: true, Limits: map[string]int64{key: 1}}
+		var verr *ValidationError
+		if err := e.Validate(); !errors.As(err, &verr) || verr.Field != "limits" {
+			t.Errorf("%s: %v, want a ValidationError on limits", key, err)
+		}
+		if _, known := QuotaFeatureOf(key); known {
+			t.Errorf("QuotaFeatureOf(%s) known", key)
+		}
+	}
+}
+
+// targetQuotaLiteral finds max_targets_<type> keys in package defaults and
+// seeds.
+var targetQuotaLiteral = regexp.MustCompile(`max_targets_[a-z][a-z0-9_]*`)
+
+// TestPackageTargetQuotaKeysAreRegistryKeys covers AK7 of WP-934: every
+// max_targets_<type> in the package defaults and the entitlement seeds
+// (WP-881) names a register key; long forms such as max_targets_icmp_ping
+// fail.
+func TestPackageTargetQuotaKeysAreRegistryKeys(t *testing.T) {
+	var found []string
+	for _, quotas := range planQuotaDefaults {
+		for quota := range quotas {
+			if strings.HasPrefix(quota, TargetTypeQuotaPrefix) {
+				found = append(found, "planQuotaDefaults: "+quota)
+			}
+		}
+	}
+	for _, pattern := range []string{
+		"*.go", "../../cmd/seed/*.go", "../../cmd/audit-seed/*.go", "../signup/*.go", "../../migrations/*.sql",
+	} {
+		files, err := filepath.Glob(pattern)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range files {
+			if strings.HasSuffix(f, "_test.go") {
+				continue
+			}
+			b, err := os.ReadFile(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, m := range targetQuotaLiteral.FindAllString(string(b), -1) {
+				found = append(found, f+": "+m)
+			}
+		}
+	}
+	for _, f := range found {
+		_, quota, _ := strings.Cut(f, ": ")
+		if !IsTargetTypeQuota(quota) {
+			t.Errorf("%s names no probe type of the register", f)
+		}
+	}
+	// The check itself catches a long form.
+	if IsTargetTypeQuota("max_targets_icmp_ping") || !IsTargetTypeQuota("max_targets_icmp") {
+		t.Fatal("IsTargetTypeQuota does not follow the register")
 	}
 }
 

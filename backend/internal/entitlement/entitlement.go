@@ -25,6 +25,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 )
 
 // Plan represents a subscription tier.
@@ -255,8 +256,9 @@ const (
 )
 
 // targetTypeQuota is the optional cap of the probe targets of one probe
-// type, max_targets_<type> (E-154); WP-934 checks <type> against the type
-// register.
+// type, max_targets_<type> (E-154); <type> must be a key of the probe type
+// register (probewire.Types(), api/probe-types.json, WP-934), long forms
+// (icmp_ping instead of icmp) are no quota.
 // TargetTypeQuotaPattern is its pattern, also in the OpenAPI limits.
 const TargetTypeQuotaPattern = `^max_targets_[a-z][a-z0-9_]{1,30}$`
 
@@ -269,10 +271,23 @@ func QuotaFeatureOf(quota string) (string, bool) {
 	if f, ok := QuotaFeature[quota]; ok {
 		return f, true
 	}
-	if targetTypeQuota.MatchString(quota) {
+	if IsTargetTypeQuota(quota) {
 		return FeatureMonitoring, true
 	}
 	return "", false
+}
+
+// TargetTypeQuotaPrefix starts every cap of the targets of one probe type.
+const TargetTypeQuotaPrefix = "max_targets_"
+
+// IsTargetTypeQuota reports whether quota is max_targets_<type> for a key of
+// the probe type register (WP-934 AK5).
+func IsTargetTypeQuota(quota string) bool {
+	if !targetTypeQuota.MatchString(quota) {
+		return false
+	}
+	_, ok := probewire.Lookup(strings.TrimPrefix(quota, TargetTypeQuotaPrefix))
+	return ok
 }
 
 // planQuotaDefaults are the default limits per plan (PKG-04, E-153; ENT-06
@@ -520,7 +535,7 @@ func (e *Entitlement) Validate() error {
 	}
 	for k, v := range e.Limits {
 		if _, ok := QuotaFeatureOf(k); !ok {
-			return invalid("limits", fmt.Errorf("unknown limit %q (allowed: %s, max_targets_<type>)", k, strings.Join(Quotas, ", ")))
+			return invalid("limits", fmt.Errorf("unknown limit %q (allowed: %s, max_targets_<type> with a probe type of the register)", k, strings.Join(Quotas, ", ")))
 		}
 		if v < 0 {
 			return invalid("limits", fmt.Errorf("limit %s must not be negative", k))

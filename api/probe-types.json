@@ -1,0 +1,1294 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reticora.example/api/probe-types.json",
+  "title": "Reticora monitoring probe types",
+  "description": "Register of the monitoring probe types (PRT-01, E-154): key, status, defaults, system limits, credential namespaces, collector capabilities and parameter schema. Server and collector validate probes against this contract. Times in seconds, rates in checks per second.",
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "min_interval_s",
+        "default_interval_s",
+        "max_interval_s",
+        "min_timeout_s",
+        "default_timeout_s",
+        "max_timeout_s",
+        "default_down_count",
+        "default_up_count",
+        "max_parallel_per_target",
+        "max_parallel_per_collector",
+        "max_rate_per_collector",
+        "max_probes_per_target",
+        "max_payload_bytes",
+        "max_rows",
+        "credential_namespaces",
+        "capabilities",
+        "params"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "planned",
+            "available"
+          ],
+          "description": "planned types cannot be created (422); type work packages set available."
+        },
+        "min_interval_s": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Shortest interval in seconds."
+        },
+        "default_interval_s": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Interval without override."
+        },
+        "max_interval_s": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Longest interval (default 86400)."
+        },
+        "min_timeout_s": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Shortest timeout."
+        },
+        "default_timeout_s": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Timeout without override; below default_interval_s."
+        },
+        "max_timeout_s": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Longest timeout; per probe timeout < interval."
+        },
+        "default_down_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "default_up_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "max_parallel_per_target": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Concurrent checks per target."
+        },
+        "max_parallel_per_collector": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Concurrent checks per collector."
+        },
+        "max_rate_per_collector": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Checks per second per collector."
+        },
+        "max_probes_per_target": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Probes of this type per target."
+        },
+        "max_payload_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Payload or response cap in bytes."
+        },
+        "max_rows": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Row cap per check (values, OIDs, sessions)."
+        },
+        "credential_namespaces": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "maxItems": 8,
+          "description": "Credential namespaces the type needs (none: empty)."
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "icmp",
+              "ipv6",
+              "privileged_udp_ports",
+              "time_sync"
+            ]
+          },
+          "maxItems": 8,
+          "description": "Collector capabilities the type needs (PRT-18)."
+        },
+        "params": {
+          "type": "object",
+          "description": "JSON Schema of the type parameters."
+        }
+      }
+    }
+  },
+  "types": {
+    "icmp": {
+      "status": "available",
+      "min_interval_s": 10,
+      "default_interval_s": 30,
+      "max_interval_s": 3600,
+      "min_timeout_s": 1,
+      "default_timeout_s": 10,
+      "max_timeout_s": 10,
+      "default_down_count": 5,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 256,
+      "max_rate_per_collector": 1000,
+      "max_probes_per_target": 4,
+      "max_payload_bytes": 1472,
+      "max_rows": 1,
+      "credential_namespaces": [],
+      "capabilities": [
+        "icmp"
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "default": 3,
+            "description": "Echo requests per check."
+          },
+          "spacing_ms": {
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 10000,
+            "default": 1000,
+            "description": "Gap between echo requests."
+          },
+          "payload_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1472,
+            "default": 56,
+            "description": "ICMP payload size."
+          },
+          "rtt_warn_ms": {
+            "type": "number",
+            "minimum": 1,
+            "description": "Average RTT threshold for degraded; no default."
+          },
+          "loss_warn": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.5,
+            "description": "Loss threshold for degraded (fraction)."
+          }
+        }
+      }
+    },
+    "tcp": {
+      "status": "available",
+      "min_interval_s": 10,
+      "default_interval_s": 60,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 5,
+      "max_timeout_s": 30,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 2,
+      "max_parallel_per_collector": 128,
+      "max_rate_per_collector": 500,
+      "max_probes_per_target": 32,
+      "max_payload_bytes": 1024,
+      "max_rows": 1,
+      "credential_namespaces": [],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "description": "Port when the target has none."
+          },
+          "send": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "String sent after connect."
+          },
+          "expect": {
+            "type": "string",
+            "maxLength": 1024,
+            "description": "Regex matched against the banner (read at most 1 KiB)."
+          },
+          "connect_warn_ms": {
+            "type": "number",
+            "minimum": 1,
+            "description": "Connect time threshold for degraded."
+          }
+        }
+      }
+    },
+    "http": {
+      "status": "planned",
+      "min_interval_s": 30,
+      "default_interval_s": 60,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 10,
+      "max_timeout_s": 60,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 2,
+      "max_parallel_per_collector": 64,
+      "max_rate_per_collector": 100,
+      "max_probes_per_target": 32,
+      "max_payload_bytes": 1048576,
+      "max_rows": 1,
+      "credential_namespaces": [
+        "http"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "GET",
+              "HEAD"
+            ],
+            "default": "GET"
+          },
+          "expected_status": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 599
+            },
+            "maxItems": 20
+          },
+          "body_regex": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "body_max_bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1048576,
+            "default": 65536
+          },
+          "max_redirects": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5,
+            "default": 5
+          },
+          "tls_verify": {
+            "type": "boolean",
+            "default": true
+          },
+          "cert_warn_days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365,
+            "default": 14
+          }
+        }
+      }
+    },
+    "snmp_status": {
+      "status": "planned",
+      "min_interval_s": 30,
+      "default_interval_s": 60,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 5,
+      "max_timeout_s": 15,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 32,
+      "max_rate_per_collector": 200,
+      "max_probes_per_target": 4,
+      "max_payload_bytes": 65536,
+      "max_rows": 20,
+      "credential_namespaces": [
+        "snmp"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "checks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "oid": {
+                  "type": "string",
+                  "maxLength": 256
+                },
+                "operator": {
+                  "type": "string",
+                  "enum": [
+                    "eq",
+                    "ne",
+                    "lt",
+                    "gt",
+                    "in",
+                    "regex"
+                  ]
+                },
+                "value": {
+                  "type": "string",
+                  "maxLength": 1024
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "degraded",
+                    "down"
+                  ],
+                  "default": "down"
+                }
+              },
+              "required": [
+                "oid",
+                "operator",
+                "value"
+              ]
+            },
+            "maxItems": 20
+          }
+        }
+      }
+    },
+    "snmp_if": {
+      "status": "planned",
+      "min_interval_s": 60,
+      "default_interval_s": 300,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 10,
+      "max_timeout_s": 60,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 16,
+      "max_rate_per_collector": 50,
+      "max_probes_per_target": 4,
+      "max_payload_bytes": 1048576,
+      "max_rows": 1024,
+      "credential_namespaces": [
+        "snmp"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name_pattern": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "if_index": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maxItems": 1024
+          },
+          "admin_up_only": {
+            "type": "boolean",
+            "default": true
+          },
+          "critical": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "maxItems": 1024
+          },
+          "util_warn_pct": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100
+          }
+        }
+      }
+    },
+    "snmp_custom": {
+      "status": "planned",
+      "min_interval_s": 60,
+      "default_interval_s": 300,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 10,
+      "max_timeout_s": 60,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 16,
+      "max_rate_per_collector": 100,
+      "max_probes_per_target": 8,
+      "max_payload_bytes": 65536,
+      "max_rows": 256,
+      "credential_namespaces": [
+        "snmp"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "oids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "maxItems": 32
+          },
+          "warn": {
+            "type": "number"
+          },
+          "crit": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "redfish": {
+      "status": "planned",
+      "min_interval_s": 60,
+      "default_interval_s": 300,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 15,
+      "max_timeout_s": 60,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 8,
+      "max_rate_per_collector": 20,
+      "max_probes_per_target": 2,
+      "max_payload_bytes": 1048576,
+      "max_rows": 256,
+      "credential_namespaces": [
+        "redfish"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "resources": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "maxItems": 16
+          },
+          "tls_verify": {
+            "type": "boolean",
+            "default": true
+          }
+        }
+      }
+    },
+    "bgp": {
+      "status": "planned",
+      "min_interval_s": 30,
+      "default_interval_s": 60,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 10,
+      "max_timeout_s": 60,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 16,
+      "max_rate_per_collector": 50,
+      "max_probes_per_target": 2,
+      "max_payload_bytes": 1048576,
+      "max_rows": 4096,
+      "credential_namespaces": [
+        "snmp",
+        "gnmi"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expected_peers": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "maxItems": 256
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "snmp",
+              "gnmi"
+            ],
+            "default": "snmp",
+            "description": "Data source (SNMP MIB or gNMI/OpenConfig)."
+          }
+        }
+      }
+    },
+    "ospf": {
+      "status": "planned",
+      "min_interval_s": 30,
+      "default_interval_s": 60,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 10,
+      "max_timeout_s": 60,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 16,
+      "max_rate_per_collector": 50,
+      "max_probes_per_target": 2,
+      "max_payload_bytes": 1048576,
+      "max_rows": 1024,
+      "credential_namespaces": [
+        "snmp",
+        "gnmi"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expected_neighbors": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "maxItems": 256
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "snmp",
+              "gnmi"
+            ],
+            "default": "snmp",
+            "description": "Data source (SNMP MIB or gNMI/OpenConfig)."
+          }
+        }
+      }
+    },
+    "isis": {
+      "status": "planned",
+      "min_interval_s": 30,
+      "default_interval_s": 60,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 10,
+      "max_timeout_s": 60,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 16,
+      "max_rate_per_collector": 50,
+      "max_probes_per_target": 2,
+      "max_payload_bytes": 1048576,
+      "max_rows": 1024,
+      "credential_namespaces": [
+        "snmp",
+        "gnmi"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expected_adjacencies": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "maxItems": 256
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "snmp",
+              "gnmi"
+            ],
+            "default": "snmp",
+            "description": "Data source (SNMP MIB or gNMI/OpenConfig)."
+          }
+        }
+      }
+    },
+    "bfd": {
+      "status": "planned",
+      "min_interval_s": 10,
+      "default_interval_s": 30,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 5,
+      "max_timeout_s": 15,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 16,
+      "max_rate_per_collector": 50,
+      "max_probes_per_target": 2,
+      "max_payload_bytes": 1048576,
+      "max_rows": 1024,
+      "credential_namespaces": [
+        "snmp"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "expected_sessions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "maxItems": 256
+          }
+        }
+      }
+    },
+    "optical": {
+      "status": "planned",
+      "min_interval_s": 60,
+      "default_interval_s": 300,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 15,
+      "max_timeout_s": 60,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 8,
+      "max_rate_per_collector": 20,
+      "max_probes_per_target": 2,
+      "max_payload_bytes": 1048576,
+      "max_rows": 1024,
+      "credential_namespaces": [
+        "snmp",
+        "gnmi"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "interfaces": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "maxItems": 1024
+          },
+          "rx_warn_dbm": {
+            "type": "number"
+          },
+          "rx_alarm_dbm": {
+            "type": "number"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "snmp",
+              "gnmi"
+            ],
+            "default": "snmp",
+            "description": "Data source (SNMP MIB or gNMI/OpenConfig)."
+          }
+        }
+      }
+    },
+    "bng": {
+      "status": "planned",
+      "min_interval_s": 30,
+      "default_interval_s": 60,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 10,
+      "max_timeout_s": 30,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 8,
+      "max_rate_per_collector": 20,
+      "max_probes_per_target": 2,
+      "max_payload_bytes": 1048576,
+      "max_rows": 1024,
+      "credential_namespaces": [
+        "snmp"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "drop_warn": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.2,
+            "description": "Drop against the previous value for degraded."
+          },
+          "drop_down": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Drop against the previous value for down."
+          }
+        }
+      }
+    },
+    "pon": {
+      "status": "planned",
+      "min_interval_s": 120,
+      "default_interval_s": 300,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 60,
+      "max_timeout_s": 120,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 4,
+      "max_rate_per_collector": 5,
+      "max_probes_per_target": 2,
+      "max_payload_bytes": 4194304,
+      "max_rows": 8192,
+      "credential_namespaces": [
+        "snmp"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "ports": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "maxItems": 64
+          },
+          "rx_warn_dbm": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "dns": {
+      "status": "planned",
+      "min_interval_s": 10,
+      "default_interval_s": 60,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 5,
+      "max_timeout_s": 15,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 4,
+      "max_parallel_per_collector": 64,
+      "max_rate_per_collector": 200,
+      "max_probes_per_target": 16,
+      "max_payload_bytes": 65536,
+      "max_rows": 1,
+      "credential_namespaces": [],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "server": {
+            "type": "string",
+            "maxLength": 255
+          },
+          "qname": {
+            "type": "string",
+            "maxLength": 253
+          },
+          "qtype": {
+            "type": "string",
+            "enum": [
+              "A",
+              "AAAA",
+              "CNAME",
+              "MX",
+              "NS",
+              "SOA",
+              "TXT",
+              "PTR",
+              "SRV",
+              "CAA"
+            ],
+            "default": "A"
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "udp",
+              "tcp"
+            ],
+            "default": "udp"
+          },
+          "expected_rcode": {
+            "type": "string",
+            "maxLength": 16,
+            "default": "NOERROR"
+          },
+          "expected_answers": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "maxItems": 16
+          },
+          "require_ad": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      }
+    },
+    "dhcp": {
+      "status": "planned",
+      "min_interval_s": 60,
+      "default_interval_s": 300,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 10,
+      "max_timeout_s": 30,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 1,
+      "max_rate_per_collector": 1,
+      "max_probes_per_target": 1,
+      "max_payload_bytes": 4096,
+      "max_rows": 1,
+      "credential_namespaces": [],
+      "capabilities": [
+        "privileged_udp_ports"
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "inform",
+              "discover"
+            ],
+            "default": "discover"
+          },
+          "giaddr": {
+            "type": "string",
+            "maxLength": 45
+          },
+          "interface": {
+            "type": "string",
+            "maxLength": 64
+          }
+        }
+      }
+    },
+    "stamp": {
+      "status": "planned",
+      "min_interval_s": 10,
+      "default_interval_s": 60,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 5,
+      "max_timeout_s": 30,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 16,
+      "max_rate_per_collector": 20,
+      "max_probes_per_target": 4,
+      "max_payload_bytes": 1472,
+      "max_rows": 1,
+      "credential_namespaces": [],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "packets": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 10,
+            "description": "Test packets per check."
+          },
+          "spacing_ms": {
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 1000,
+            "default": 10,
+            "description": "Gap between test packets."
+          },
+          "dscp": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 63,
+            "default": 0
+          },
+          "packet_size": {
+            "type": "integer",
+            "minimum": 44,
+            "maximum": 1472,
+            "default": 128,
+            "description": "Packet size in bytes."
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "default": 862
+          },
+          "rtt_warn_ms": {
+            "type": "number",
+            "minimum": 1,
+            "description": "RTT threshold for degraded."
+          },
+          "loss_warn": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.5,
+            "description": "Loss threshold for degraded (fraction)."
+          }
+        }
+      }
+    },
+    "twamp_control": {
+      "status": "planned",
+      "min_interval_s": 10,
+      "default_interval_s": 60,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 5,
+      "max_timeout_s": 30,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 16,
+      "max_rate_per_collector": 20,
+      "max_probes_per_target": 4,
+      "max_payload_bytes": 1472,
+      "max_rows": 1,
+      "credential_namespaces": [],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "packets": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 10,
+            "description": "Test packets per check."
+          },
+          "spacing_ms": {
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 1000,
+            "default": 10,
+            "description": "Gap between test packets."
+          },
+          "dscp": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 63,
+            "default": 0
+          },
+          "packet_size": {
+            "type": "integer",
+            "minimum": 44,
+            "maximum": 1472,
+            "default": 128,
+            "description": "Packet size in bytes."
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "default": 862
+          },
+          "rtt_warn_ms": {
+            "type": "number",
+            "minimum": 1,
+            "description": "RTT threshold for degraded."
+          },
+          "loss_warn": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.5,
+            "description": "Loss threshold for degraded (fraction)."
+          }
+        }
+      }
+    },
+    "gnmi": {
+      "status": "planned",
+      "min_interval_s": 10,
+      "default_interval_s": 60,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 10,
+      "max_timeout_s": 60,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 16,
+      "max_rate_per_collector": 50,
+      "max_probes_per_target": 4,
+      "max_payload_bytes": 4194304,
+      "max_rows": 10000,
+      "credential_namespaces": [
+        "gnmi"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 512
+            },
+            "maxItems": 32
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "get",
+              "once"
+            ],
+            "default": "get"
+          }
+        }
+      }
+    },
+    "tr069": {
+      "status": "planned",
+      "min_interval_s": 300,
+      "default_interval_s": 900,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 30,
+      "max_timeout_s": 60,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 4,
+      "max_rate_per_collector": 5,
+      "max_probes_per_target": 1,
+      "max_payload_bytes": 1048576,
+      "max_rows": 256,
+      "credential_namespaces": [
+        "acs"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "parameters": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "maxItems": 32
+          },
+          "inform_factor": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 3,
+            "description": "Last inform older than inform_factor x inform interval is down."
+          }
+        }
+      }
+    },
+    "usp": {
+      "status": "planned",
+      "min_interval_s": 300,
+      "default_interval_s": 900,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 30,
+      "max_timeout_s": 60,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 4,
+      "max_rate_per_collector": 5,
+      "max_probes_per_target": 1,
+      "max_payload_bytes": 1048576,
+      "max_rows": 256,
+      "credential_namespaces": [
+        "acs"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "parameters": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "maxItems": 32
+          },
+          "inform_factor": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 3
+          }
+        }
+      }
+    },
+    "rpki_rtr": {
+      "status": "planned",
+      "min_interval_s": 60,
+      "default_interval_s": 300,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 30,
+      "max_timeout_s": 120,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 4,
+      "max_rate_per_collector": 1,
+      "max_probes_per_target": 1,
+      "max_payload_bytes": 67108864,
+      "max_rows": 2000000,
+      "credential_namespaces": [],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "default": 323
+          },
+          "stale_warn_s": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 86400,
+            "default": 3600,
+            "description": "Cache age for degraded."
+          }
+        }
+      }
+    },
+    "rpki_roa": {
+      "status": "planned",
+      "min_interval_s": 60,
+      "default_interval_s": 300,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 1,
+      "max_timeout_s": 5,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 64,
+      "max_rate_per_collector": 100,
+      "max_probes_per_target": 100,
+      "max_payload_bytes": 65536,
+      "max_rows": 100,
+      "credential_namespaces": [],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "pairs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "prefix": {
+                  "type": "string",
+                  "maxLength": 43
+                },
+                "origin_as": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                }
+              },
+              "required": [
+                "prefix",
+                "origin_as"
+              ]
+            },
+            "maxItems": 100
+          }
+        }
+      }
+    }
+  }
+}
