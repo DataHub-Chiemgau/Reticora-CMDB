@@ -229,3 +229,52 @@ func TestTLSClientsSelectTheScopeOfTheTarget(t *testing.T) {
 		t.Errorf("clients built = %d, want 2", built)
 	}
 }
+
+// TestTLSConfigForPicksScope covers TLSConfigFor (WP-1015): a target (also
+// host:port) inside a scope with a trust anchor gets that scope's
+// verification, every other target the system roots; the configuration
+// verifies a real handshake like the HTTP clients do.
+func TestTLSConfigForPicksScope(t *testing.T) {
+	network := func(cidr string) *net.IPNet {
+		_, n, err := net.ParseCIDR(cidr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	ca := x509.NewCertPool()
+	pin := sha256.Sum256([]byte("pin"))
+	scopes := []TLSScope{
+		{Network: network("192.0.2.0/24")}, // no trust anchor: ignored
+		{Network: network("10.0.0.0/24"), PinsSHA256: [][]byte{pin[:]}},
+		{Network: network("10.0.0.0/8"), RootCAs: ca},
+	}
+	if cfg := TLSConfigFor("10.0.0.5:57400", scopes); cfg.VerifyConnection == nil || !cfg.InsecureSkipVerify {
+		t.Error("10.0.0.5:57400 must use the pinned /24 scope")
+	}
+	if cfg := TLSConfigFor("10.1.0.5", scopes); cfg.RootCAs != ca || cfg.VerifyConnection != nil {
+		t.Error("10.1.0.5 must use the CA of the /8 scope")
+	}
+	for _, target := range []string{"192.0.2.5:57400", "198.51.100.1", "router.example:6030", "[2001:db8::1]:57400"} {
+		cfg := TLSConfigFor(target, scopes)
+		if cfg.RootCAs != nil || cfg.InsecureSkipVerify || cfg.VerifyConnection != nil || cfg.MinVersion != tls.VersionTLS12 {
+			t.Errorf("%s must use the system roots", target)
+		}
+	}
+	if cfg := TLSConfigFor("10.0.0.5", nil); cfg.RootCAs != nil || cfg.InsecureSkipVerify {
+		t.Error("without scopes the system roots apply")
+	}
+
+	// A real handshake: the pin of the endpoint's certificate is accepted
+	// through the scope, the system roots refuse it.
+	srv := tlsEndpoint(t)
+	sum := sha256.Sum256(srv.Certificate().RawSubjectPublicKeyInfo)
+	pinned := []TLSScope{{Network: network("127.0.0.0/8"), PinsSHA256: [][]byte{sum[:]}}}
+	host := srv.Listener.Addr().String()
+	if err := get(srv.URL, TLSConfigFor(host, pinned)); err != nil {
+		t.Errorf("pinned scope: %v", err)
+	}
+	if err := get(srv.URL, TLSConfigFor(host, nil)); !UntrustedCertificate(err) {
+		t.Errorf("system roots: %v, want an untrusted certificate", err)
+	}
+}

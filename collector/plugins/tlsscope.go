@@ -88,6 +88,26 @@ func NewTLSClient(timeout time.Duration, cfg *tls.Config) *http.Client {
 	}
 }
 
+// TLSConfigFor returns the TLS verification for target (an address or
+// host:port) for clients that need a *tls.Config of their own, such as gRPC
+// (WP-1015): that of the first scope that contains the target and names a
+// trust anchor (CA bundle or pin), otherwise SystemTLSConfig. Like
+// TLSClients.For it matches only IP addresses against the scopes.
+func TLSConfigFor(target string, scopes []TLSScope) *tls.Config {
+	host := target
+	if h, _, err := net.SplitHostPort(target); err == nil {
+		host = h
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		for _, s := range scopes {
+			if s.Network != nil && (s.RootCAs != nil || len(s.PinsSHA256) > 0) && s.Network.Contains(ip) {
+				return s.TLSConfig()
+			}
+		}
+	}
+	return SystemTLSConfig()
+}
+
 // TLSClients holds the HTTP clients of a plugin's TLS scopes.
 type TLSClients struct {
 	scoped []scopedClient

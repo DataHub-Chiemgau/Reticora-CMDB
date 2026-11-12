@@ -32,6 +32,29 @@ Ganzes prüfen (Stand WP-329):
 | `@zxing/browser` | E-52, WP-807 | ja (Bundle) | `npm-audit` (Produktion, blockierend) |
 | `@dnd-kit/core`, `@dnd-kit/sortable` | E-54, WP-797 | ja (Bundle) | `npm-audit` (Produktion, blockierend) |
 
+### Abhängigkeiten der Phase 3
+
+Die Phase 3 nimmt nach [E-195](../plan/phase3/entscheidungen.md#e-195)
+(Fremdbibliothek im Collector nur für gNMI/gRPC, mit Lizenzprüfung und SBOM)
+diese Abhängigkeiten neu auf; `govulncheck` erfasst sie ohne Änderung, weil
+der Job das Modul `collector` als Ganzes prüft, die SBOM des Releases
+(syft) führt sie automatisch (Stand WP-1015):
+
+| Abhängigkeit | Version | Lizenz | Entscheidung, WP | Ausgeliefert | Erfasst durch |
+|---|---|---|---|---|---|
+| `github.com/openconfig/gnmi` | v0.14.1 | Apache-2.0 | E-195, E-193, WP-1015 | ja (Collector, gNMI-Client `collector/probe/gnmi`) | `govulncheck` (`collector`) |
+| `google.golang.org/grpc` | v1.84.0 | Apache-2.0 | E-195, WP-1015 | ja (Collector) | `govulncheck` (`collector`) |
+| `google.golang.org/protobuf` (transitiv) | v1.36.11 | BSD-3-Clause | E-195, WP-1015 | ja (Collector) | `govulncheck` (`collector`) |
+| `google.golang.org/genproto/googleapis/rpc` (transitiv) | v0.0.0-20260706201446-f0a921348800 | Apache-2.0 | E-195, WP-1015 | ja (Collector) | `govulncheck` (`collector`) |
+| `golang.org/x/text` (transitiv) | v0.43.0 | BSD-3-Clause | E-195, WP-1015 | ja (Collector) | `govulncheck` (`collector`) |
+
+Der Client verwendet TLS immer (kein `insecure.NewCredentials`, kein
+`grpc.WithInsecure`) und hat weder `Set` noch Subscribe STREAM/POLL.
+Binärgröße des Collectors (linux/amd64, Build wie `collector/Dockerfile`,
+`-ldflags="-s -w"`): vor und nach WP-1015 10.637.474 Byte, weil
+`cmd/collector` den Client erst mit dem Probetyp `gnmi` (WP-1016) einbindet;
+WP-1016 misst die Größe erneut.
+
 ### Fremdimages des Betriebs
 
 Neben den eigenen Release-Images startet der Betrieb Fremdimages. Jedes ist
