@@ -1,4 +1,5 @@
 DELETE /api/v1/admin/orgs/{id}/addons/{key} operator
+DELETE /api/v1/admp/accounts/{id} admp:manage
 DELETE /api/v1/api-keys/{id} apikey:manage
 DELETE /api/v1/assets/{id} asset:write
 DELETE /api/v1/assets/{id}/cis/{ci_id} ci:write
@@ -90,6 +91,8 @@ GET /api/v1/admin/orgs operator
 GET /api/v1/admin/orgs/{id}/entitlements operator
 GET /api/v1/admin/orgs/{id}/usage operator
 GET /api/v1/admin/plans operator
+GET /api/v1/admp/accounts/ admp:manage
+GET /api/v1/admp/accounts/{id} admp:manage
 GET /api/v1/agents agent:read
 GET /api/v1/ai/conversations ai:read
 GET /api/v1/api-keys apikey:manage
@@ -369,6 +372,7 @@ GET /scim/v2/Groups/{id} iga:read
 GET /scim/v2/ServiceProviderConfig iga:read
 GET /scim/v2/Users iga:read
 GET /scim/v2/Users/{id} iga:read
+PATCH /api/v1/admp/accounts/{id} admp:manage
 PATCH /api/v1/agents/{id}/policy agent:manage
 PATCH /api/v1/assets/{id} asset:write
 PATCH /api/v1/attribute-definitions/{id} ci_attribute:manage
@@ -440,6 +444,7 @@ POST /api/v1/admin/auth/callback operator
 POST /api/v1/admin/orgs operator
 POST /api/v1/admin/orgs/{id}/addons/{key} operator
 POST /api/v1/admin/orgs/{id}/entitlements operator
+POST /api/v1/admp/accounts/ admp:manage
 POST /api/v1/agents/enroll agent:manage
 POST /api/v1/agents/enrollment-tokens agent:manage
 POST /api/v1/agents/telemetry agent:ingest

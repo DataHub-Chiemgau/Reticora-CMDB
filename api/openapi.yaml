@@ -25354,20 +25354,24 @@ paths:
   /api/v1/admp/accounts:
     x-phase: P3
     x-feature: admp
-    x-status: planned
     get:
       operationId: listADMPAccounts
       tags: [ADMP]
       summary: List ADMP accounts
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        ADM-01 (WP-925): the ADMP accounts of the organization and its
+        clients in the caller's scope (a principal restricted to clients sees
+        only the accounts of its clients), by name.
+        Local configuration, no call to ADMP. Requires admp:manage.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: List ADMP accounts. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+          description: ADMP accounts
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ADMPAccountListResponse' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -25379,13 +25383,27 @@ paths:
     post:
       operationId: createAdmpAccount
       tags: [ADMP]
-      summary: Create a ADMP account
+      summary: Create an ADMP account
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Creates an account of the organization (without client_id, only an
+        organization-wide principal) or of a client. The login is a
+        credential of kind api_token (stored, or vault_ref of a vault
+        connection with resolve_at server) of the account's client or
+        org-wide; the account stores no secret. base_url and auth_url are
+        absolute https URLs without query and fragment whose destination the
+        egress policy allows. At most one enabled account per client and one
+        enabled organization-wide account (409). Requires admp:manage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ADMPAccountCreate' }
       responses:
         '201':
-          description: Created. The schema comes with the implementing work package.
+          description: The account
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ADMPAccount' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -25393,28 +25411,34 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: The name is taken, or the client or the organization has an enabled account (`field` name or enabled).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: A field is invalid (`field` names it), e.g. a private destination or a credential of another kind or client.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
 
   /api/v1/admp/accounts/{id}:
     x-phase: P3
     x-feature: admp
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: getAdmpAccount
       tags: [ADMP]
-      summary: Get a ADMP account
-      description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+      summary: Get an ADMP account
+      description: One account in the caller's scope. Requires admp:manage.
       responses:
         '200':
-          description: Get a ADMP account. The schema comes with the implementing work package.
+          description: The account
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ADMPAccount' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -25426,13 +25450,23 @@ paths:
     patch:
       operationId: updateAdmpAccount
       tags: [ADMP]
-      summary: Update a ADMP account
+      summary: Update an ADMP account
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Changes name, base_url, auth_url, credential_id, rate_limit_rps,
+        timeout_ms and enabled (null removes auth_url and credential_id);
+        client_id, last_ok_at and last_error_class are 422. The result is
+        checked like a new account. Requires admp:manage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ADMPAccountUpdate' }
       responses:
         '200':
-          description: Update a ADMP account. The schema comes with the implementing work package.
+          description: The account
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ADMPAccount' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -25442,18 +25476,22 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          $ref: '#/components/responses/Conflict'
+          description: The name is taken, or the client or the organization has an enabled account (`field` name or enabled).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+          description: A field is invalid or may not be changed (`field` names it).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
     delete:
       operationId: deleteAdmpAccount
       tags: [ADMP]
-      summary: Delete a ADMP account
-      description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+      summary: Delete an ADMP account
+      description: Deletes the account and its cached ADMP data. Requires admp:manage.
       responses:
         '204':
           description: Done.
@@ -25463,8 +25501,6 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -40055,6 +40091,69 @@ components:
           additionalProperties: { type: string, minLength: 1 }
           description: New field map of a vault_ref credential; raises secret_version.
 
+    ADMPAccount:
+      type: object
+      description: >-
+        An ADMP account (ADM-01, WP-925). It holds no secret; credential names
+        id, name and source of the login.
+      required: [id, organization_id, name, base_url, rate_limit_rps, timeout_ms, enabled, last_ok_at, last_error_class,
+        created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        client_id: { type: string, format: uuid, description: The client; absent for an organization-wide account. }
+        name: { type: string }
+        base_url: { type: string, format: uri }
+        auth_url: { type: string, format: uri }
+        credential_id: { type: string, format: uuid, description: The login; absent without one. }
+        credential:
+          type: object
+          required: [id, name, source]
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+            source: { type: string, enum: [stored, vault_ref] }
+        rate_limit_rps: { type: number, exclusiveMinimum: 0, maximum: 50 }
+        timeout_ms: { type: integer, minimum: 1000, maximum: 60000 }
+        enabled: { type: boolean }
+        last_ok_at: { type: [string, 'null'], format: date-time, readOnly: true }
+        last_error_class:
+          type: [string, 'null']
+          readOnly: true
+          description: Class of the last failure; credential_missing after the credential was deleted or the reference removed, cleared when a credential is attached again.
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ADMPAccountCreate:
+      type: object
+      required: [name, base_url]
+      properties:
+        client_id: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        base_url: { type: string, format: uri }
+        auth_url: { type: string, format: uri }
+        credential_id: { type: string, format: uuid }
+        rate_limit_rps: { type: number, exclusiveMinimum: 0, maximum: 50, default: 2 }
+        timeout_ms: { type: integer, minimum: 1000, maximum: 60000, default: 10000 }
+        enabled: { type: boolean, default: true }
+    ADMPAccountUpdate:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        base_url: { type: string, format: uri }
+        auth_url: { type: [string, 'null'], format: uri }
+        credential_id: { type: [string, 'null'], format: uuid }
+        rate_limit_rps: { type: number, exclusiveMinimum: 0, maximum: 50 }
+        timeout_ms: { type: integer, minimum: 1000, maximum: 60000 }
+        enabled: { type: boolean }
+    ADMPAccountListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/ADMPAccount' }
     CredentialUsage:
       type: object
       description: >-

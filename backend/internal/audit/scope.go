@@ -70,13 +70,17 @@ var resourceTables = map[string][]string{
 	"credential_binding": {"credential_binding"},
 	// Vault connections (WP-893).
 	"vault_connection": {"vault_connection"},
-	"document":         {"document"},
-	"ticket":           {"ticket"},
+	// ADMP accounts (WP-925).
+	"admp_account": {"admp_account"},
+	"document":     {"document"},
+	"ticket":       {"ticket"},
 
 	// Route audit (the first route segment): the route's resource_id is
 	// its first id parameter or the id of the created row, so the tables
 	// are those of the route snapshot register (route_snapshot.go) under
 	// this segment.
+	// The only writes below /admp are the accounts (WP-925).
+	"admp":                      {"admp_account"},
 	"agents":                    {"endpoint_agent", "agent_enrollment_token"},
 	"ai":                        {"ai_conversation"},
 	"api-keys":                  {"api_key"},

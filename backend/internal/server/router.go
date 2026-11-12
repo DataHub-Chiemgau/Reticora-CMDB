@@ -14,6 +14,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/admp"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -121,13 +122,15 @@ type Repositories struct {
 	Ticket            ticket.Repository
 	User              user.Repository
 	Credential        credential.Repository
-	Entitlement       entitlement.Repository
-	TenantHierarchy   tenantapi.Repository
-	Rack              rack.Repository
-	Contact           contact.Repository
-	IPAM              ipam.Repository
-	Metrics           monitoring.MetricStore
-	Permission        permission.Repository
+	// ADMPAccounts are the ADMP accounts (ADM-01, WP-925).
+	ADMPAccounts    admp.AccountRepository
+	Entitlement     entitlement.Repository
+	TenantHierarchy tenantapi.Repository
+	Rack            rack.Repository
+	Contact         contact.Repository
+	IPAM            ipam.Repository
+	Metrics         monitoring.MetricStore
+	Permission      permission.Repository
 	// FieldGrants stores the field permissions (RBA-07, WP-264).
 	FieldGrants permission.FieldGrantRepository
 	// APIKeys identifies and manages API keys (AUT-04).
@@ -935,6 +938,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		savedview.NewHandler(repos.SavedView).WithQueryEngine(repos.FilterQuery).WithPermissions(repos.Permission).
 			WithEntitlements(aiEntitlements).WithInventory(opts.Modules.Enabled(ModuleInventory)),
 		credentialHandler,
+		// ADMP accounts (ADM-01, WP-925): local configuration, the URLs
+		// checked against the egress policy of the router.
+		admp.NewHandler(admp.NewAccountService(repos.ADMPAccounts, admp.CredentialsOf(opts.Credentials), opts.Egress)),
 		ai.NewHandler(repos.AI, opts.AIProvider,
 			ai.NewRetriever(repos.AI, repos.Search, repos.Permission, opts.AIProvider).WithConsent(aiConsent)).
 			WithConsent(aiConsent),
@@ -1156,6 +1162,8 @@ func validate(repos *Repositories, opts *Options) error {
 		return fmt.Errorf("server: entitlement service is required")
 	case opts.Credentials == nil:
 		return fmt.Errorf("server: credential service is required")
+	case repos.ADMPAccounts == nil:
+		return fmt.Errorf("server: ADMP account repository is required")
 	case repos.CIType == nil:
 		return fmt.Errorf("server: CI type repository is required")
 	case repos.RelationshipType == nil:

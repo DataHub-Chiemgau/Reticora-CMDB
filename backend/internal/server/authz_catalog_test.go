@@ -125,7 +125,6 @@ var unroutedUntil = map[string]string{
 	"org:export":        "WP-1151 (organization export)",
 	"org:delete":        "WP-1152 (organization deletion)",
 	"admp:holder_read":  "WP-1076 (holder of an ADMP connection)",
-	"admp:manage":       "WP-925 (ADMP accounts)",
 }
 
 // TestRBA01KeysGateTheirActions covers WP-068 and WP-363 (RBA-01): the

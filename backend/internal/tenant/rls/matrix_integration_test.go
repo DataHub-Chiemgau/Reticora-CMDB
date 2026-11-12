@@ -32,6 +32,16 @@ var matrixOrgWideWrites = map[string]string{
 	"vrf": "routing domains of the whole organization (TEN-10, WP-372, F-089)",
 }
 
+// matrixClientOnlyReads lists the tables whose organization-wide rows
+// (client NULL) only principals without client restriction read: a
+// principal restricted to clients reads only the rows of its clients, not
+// the shared ones (deviation from the TEN-05 read rule, pinned by the test
+// named here).
+var matrixClientOnlyReads = map[string]string{
+	"admp_account": "ADMP accounts: the organization-wide account is configuration of the organization, " +
+		"a principal restricted to clients sees only its clients' accounts (WP-925 AK6): admp.TestAdmpAccountClientScope",
+}
+
 // matrixSnapshotScoped lists the tables that carry a scope snapshot of their
 // creator (uuid arrays) instead of client, site and team columns. A
 // synthesized row has no snapshot and belongs to the whole organization, so
@@ -82,6 +92,9 @@ func (p *matrixPrincipal) read(tbl *matrixTable, r scopeRow) bool {
 		return false
 	}
 	if _, snapshot := matrixSnapshotScoped[tbl.name]; snapshot && p.restricted() {
+		return false
+	}
+	if _, clientOnly := matrixClientOnlyReads[tbl.name]; clientOnly && !dimWrite(p.scope["client"], r.dims["client"]) {
 		return false
 	}
 	for _, dim := range scopeDimensions {

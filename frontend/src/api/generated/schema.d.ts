@@ -11105,13 +11105,13 @@ export interface paths {
     };
     /**
      * List ADMP accounts
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description ADM-01 (WP-925): the ADMP accounts of the organization and its clients in the caller's scope (a principal restricted to clients sees only the accounts of its clients), by name. Local configuration, no call to ADMP. Requires admp:manage.
      */
     get: operations['listADMPAccounts'];
     put?: never;
     /**
-     * Create a ADMP account
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * Create an ADMP account
+     * @description Creates an account of the organization (without client_id, only an organization-wide principal) or of a client. The login is a credential of kind api_token (stored, or vault_ref of a vault connection with resolve_at server) of the account's client or org-wide; the account stores no secret. base_url and auth_url are absolute https URLs without query and fragment whose destination the egress policy allows. At most one enabled account per client and one enabled organization-wide account (409). Requires admp:manage.
      */
     post: operations['createAdmpAccount'];
     delete?: never;
@@ -11131,22 +11131,22 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Get a ADMP account
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * Get an ADMP account
+     * @description One account in the caller's scope. Requires admp:manage.
      */
     get: operations['getAdmpAccount'];
     put?: never;
     post?: never;
     /**
-     * Delete a ADMP account
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * Delete an ADMP account
+     * @description Deletes the account and its cached ADMP data. Requires admp:manage.
      */
     delete: operations['deleteAdmpAccount'];
     options?: never;
     head?: never;
     /**
-     * Update a ADMP account
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * Update an ADMP account
+     * @description Changes name, base_url, auth_url, credential_id, rate_limit_rps, timeout_ms and enabled (null removes auth_url and credential_id); client_id, last_ok_at and last_error_class are 422. The result is checked like a new account. Requires admp:manage.
      */
     patch: operations['updateAdmpAccount'];
     trace?: never;
@@ -19955,6 +19955,78 @@ export interface components {
       field_map?: {
         [key: string]: string;
       };
+    };
+    /** @description An ADMP account (ADM-01, WP-925). It holds no secret; credential names id, name and source of the login. */
+    ADMPAccount: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      /**
+       * Format: uuid
+       * @description The client; absent for an organization-wide account.
+       */
+      client_id?: string;
+      name: string;
+      /** Format: uri */
+      base_url: string;
+      /** Format: uri */
+      auth_url?: string;
+      /**
+       * Format: uuid
+       * @description The login; absent without one.
+       */
+      credential_id?: string;
+      credential?: {
+        /** Format: uuid */
+        id: string;
+        name: string;
+        /** @enum {string} */
+        source: 'stored' | 'vault_ref';
+      };
+      rate_limit_rps: number;
+      timeout_ms: number;
+      enabled: boolean;
+      /** Format: date-time */
+      readonly last_ok_at: string | null;
+      /** @description Class of the last failure; credential_missing after the credential was deleted or the reference removed, cleared when a credential is attached again. */
+      readonly last_error_class: string | null;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    ADMPAccountCreate: {
+      /** Format: uuid */
+      client_id?: string;
+      name: string;
+      /** Format: uri */
+      base_url: string;
+      /** Format: uri */
+      auth_url?: string;
+      /** Format: uuid */
+      credential_id?: string;
+      /** @default 2 */
+      rate_limit_rps: number;
+      /** @default 10000 */
+      timeout_ms: number;
+      /** @default true */
+      enabled: boolean;
+    };
+    ADMPAccountUpdate: {
+      name?: string;
+      /** Format: uri */
+      base_url?: string;
+      /** Format: uri */
+      auth_url?: string | null;
+      /** Format: uuid */
+      credential_id?: string | null;
+      rate_limit_rps?: number;
+      timeout_ms?: number;
+      enabled?: boolean;
+    };
+    ADMPAccountListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['ADMPAccount'][];
     };
     /** @description Usage of a credential at a CI in a namespace (CRD-06, WP-898); never a secret. */
     CredentialUsage: {
@@ -48297,12 +48369,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List ADMP accounts. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description ADMP accounts */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ADMPAccountListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -48317,20 +48391,42 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ADMPAccountCreate'];
+      };
+    };
     responses: {
-      /** @description Created. The schema comes with the implementing work package. */
+      /** @description The account */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ADMPAccount'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['Conflict'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description The name is taken, or the client or the organization has an enabled account (`field` name or enabled). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description A field is invalid (`field` names it), e.g. a private destination or a credential of another kind or client. */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };
@@ -48346,12 +48442,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get a ADMP account. The schema comes with the implementing work package. */
+      /** @description The account */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ADMPAccount'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -48381,7 +48479,6 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -48395,21 +48492,43 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ADMPAccountUpdate'];
+      };
+    };
     responses: {
-      /** @description Update a ADMP account. The schema comes with the implementing work package. */
+      /** @description The account */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ADMPAccount'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
-      422: components['responses']['UnprocessableEntity'];
+      /** @description The name is taken, or the client or the organization has an enabled account (`field` name or enabled). */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description A field is invalid or may not be changed (`field` names it). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
     };
   };

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/admp"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
@@ -139,6 +140,7 @@ func MemoryRepositories() Repositories {
 		Ticket:            ticket.NewMemoryRepository(),
 		User:              users,
 		Credential:        credential.NewMemoryRepository(),
+		ADMPAccounts:      admp.NewMemoryAccountRepository(),
 		Entitlement:       entitlement.NewMemoryRepository(),
 		TenantHierarchy:   tenantapi.NewMemoryRepository(),
 		Rack:              rack.NewMemoryRepository(),
@@ -200,6 +202,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Ticket:            ticket.NewPGRepository(pool).WithEvents(events.NewOutbox()),
 		User:              user.NewPGRepository(pool),
 		Credential:        credential.NewPGRepository(pool),
+		ADMPAccounts:      admp.NewPGAccountRepository(pool),
 		Entitlement:       entitlement.NewPGRepository(pool),
 		TenantHierarchy:   tenantapi.NewPGRepository(pool),
 		Rack:              rack.NewPGRepository(pool),

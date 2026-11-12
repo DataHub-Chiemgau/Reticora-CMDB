@@ -118,8 +118,8 @@ var readPermissionFor = map[string]identity.Permission{
 	"compliance":         identity.PermComplianceRead,
 	"security":           identity.PermFindingRead,
 	// Phase 3 (WP-866, E-160, E-161): IPAM/ASN and ADMP. The writes of ipam
-	// follow the suffix convention (ipam:write); the ADMP accounts get
-	// admp:manage with WP-925.
+	// follow the suffix convention (ipam:write); the ADMP accounts have
+	// admp:manage through routeRules (WP-925).
 	"ipam":                     identity.PermIPAMRead,
 	"ipam-sections":            identity.PermIPAMRead,
 	"asns":                     identity.PermIPAMRead,
@@ -216,9 +216,9 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"credential-bindings": identity.PermCredentialBind,
 	// Vault connections are their own right (WP-870, WP-893).
 	"vault-connections": identity.PermVaultManage,
-	// The only write below /admp is the account management of WP-925 with
-	// admp:manage (WP-870); until then no write route exists and writes
-	// need the org_admin key entitlement:manage (fail-closed).
+	// The only writes below /admp are the accounts with admp:manage
+	// (routeRules, WP-925); any other write needs the org_admin key
+	// entitlement:manage (fail-closed).
 	"admp": identity.PermEntitlementManage,
 	// Escalation chains are read and written with one key (NTF-02, E-161).
 	"escalation-policies":      identity.PermEscalationManage,
@@ -298,6 +298,11 @@ type routeRule struct {
 
 // routeRules are checked in order; the first match wins.
 var routeRules = []routeRule{
+	// The ADMP accounts are local configuration, read and written with
+	// admp:manage (ADM-01, WP-925); the segment admp alone needs
+	// admp:read (WP-866).
+	{"*", "admp/accounts", identity.PermADMPManage},
+	{"*", "admp/accounts/*", identity.PermADMPManage},
 	// Acknowledging alarms, incidents and notification escalations is its
 	// own right (RBA-05, E-161, WP-866).
 	{http.MethodPost, "monitoring/alarms/*/ack", identity.PermAlertAcknowledge},

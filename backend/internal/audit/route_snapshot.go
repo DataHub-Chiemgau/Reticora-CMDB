@@ -393,6 +393,10 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	// The test of a connection (WP-896) starts a job that liest nur: it
 	// logs in and reads the test entry, nothing is written.
 	m["POST "+v1+"vault-connections/{id}/test"] = noValues("liest nur: the job vault.test logs in and reads the test entry; it changes no row")
+	// ADMP accounts (WP-925): the row holds no secret, the login is the
+	// credential credential_id names.
+	crud(m, v1+"admp/accounts", "admp_account", "PATCH", "DELETE")
+	m["POST "+v1+"admp/accounts/"] = created("admp_account")
 	crud(m, v1+"webhooks", "webhook_subscription", "POST", "DELETE")
 	crud(m, v1+"lifecycle-definitions", "lifecycle_definition", "POST", "DELETE")
 	crud(m, v1+"lifecycle-models", "lifecycle_definition", all...)
