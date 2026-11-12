@@ -212,10 +212,19 @@ type LeakyIndex struct {
 // row level security uses leakproof operators (a stored column compared
 // with texteq, a side table such as ci_identity_mac, or reticora_attr_text
 // of migration 000162), and the change that drops or replaces a listed
-// index removes its entry. reticora_attr_text is leakproof (E-73, WP-435),
+// index removes its entry. The exception is an index the plan of its work
+// package demands and no leakproof operator can serve: the index of an
+// exclusion constraint over ranges (desk_booking_no_overlap,
+// asn_range_no_overlap) or a GIN index over an array the API filters on
+// (idx_security_finding_cve_ids); its entry names the work package. reticora_attr_text is leakproof (E-73, WP-435),
 // so the attribute indexes idx_attr_* are not listed. No migration of
 // phase 2 sets a function LEAKPROOF (E-133).
 var LeakyIndexes = map[string]LeakyIndex{
+	"asn_range_no_overlap": {
+		Table: "asn_range", Leaky: "function int8range(bigint,bigint,text), operator class range_ops",
+		Reason: "exclusion constraint against overlapping AS number ranges of an organization (000316, WP-1066); the " +
+			"constraint is checked without the policies, no read of the application role filters on the range",
+	},
 	"desk_booking_no_overlap": {
 		Table: "desk_booking", Leaky: "function tstzrange(timestamp with time zone,timestamp with time zone), operator class range_ops",
 		Reason: "exclusion constraint against overlapping bookings of a desk (000065); the constraint is checked " +

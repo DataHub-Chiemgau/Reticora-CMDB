@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000315_finding_extend
+Stand: Migration 000316_asn
 
 ## Prüfung
 
@@ -648,6 +648,7 @@ des Assets (`source_id` = Asset); `search_index_asset` und sein Trigger
 
 | Index | Tabelle | Nicht leakproof |
 |---|---|---|
+| `asn_range_no_overlap` | `asn_range` | function int8range(bigint,bigint,text), operator class range_ops |
 | `desk_booking_no_overlap` | `desk_booking` | function tstzrange(timestamp with time zone,timestamp with time zone), operator class range_ops |
 | `idx_ci_attributes_path` | `ci` | operator class jsonb_path_ops |
 | `idx_location_path` | `location` | operator class gist_ltree_ops |
@@ -655,6 +656,7 @@ des Assets (`source_id` = Asset); `search_index_asset` und sein Trigger
 | `idx_review_item_candidates` | `review_item` | operator class array_ops |
 | `idx_saved_view_shared_roles` | `saved_view` | operator class array_ops |
 | `idx_search_document_fts` | `search_document` | operator class tsvector_ops |
+| `idx_security_finding_cve_ids` | `security_finding` | operator class array_ops |
 | `idx_signup_request_email` | `signup_request` | function lower(text) |
 | `location_path_key` | `location` | operator class ltree_ops |
 | `rack_mount_no_overlap` | `rack_mount` | function int4pl(integer,integer), function int4range(integer,integer), function rack_face_range(text), operator class range_ops |
@@ -1898,6 +1900,8 @@ SECURITY`), Policies mit ihrem Kommando.
 | `alert_rule` | ja | ja | alert_rule_isolation (ALL), alert_rule_system_select (SELECT) |
 | `api_key` | ja | ja | api_key_system_select (SELECT), org_isolation (ALL) |
 | `app_user` | ja | ja | user_isolation (ALL) |
+| `asn` | ja | ja | asn_isolation (ALL), asn_scoped_delete (DELETE), asn_scoped_update (UPDATE) |
+| `asn_range` | ja | ja | asn_range_isolation (ALL), asn_range_scoped_delete (DELETE), asn_range_scoped_update (UPDATE) |
 | `asset` | ja | ja | asset_scoped_delete (DELETE), asset_scoped_update (UPDATE), asset_tenant_isolation (ALL) |
 | `asset_location` | ja | ja | asset_location_isolation (ALL) |
 | `asset_snapshot` | ja | ja | asset_snapshot_isolation (ALL), asset_snapshot_scoped_delete (DELETE), asset_snapshot_scoped_update (UPDATE) |

@@ -122,6 +122,10 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Patch("/api/v1/vlan-domains/{id}", h.UpdateVLANDomain)
 	r.Delete("/api/v1/vlan-domains/{id}", h.DeleteVLANDomain)
 	r.Get("/api/v1/vlan-domains/{id}/vlans", h.ListVLANDomainVLANs)
+
+	// AS numbers and ranges (IPM-16, asn_handler.go): only with
+	// PostgreSQL, else 501.
+	h.registerASNRoutes(r)
 }
 
 func org(w http.ResponseWriter, r *http.Request) (string, bool) {

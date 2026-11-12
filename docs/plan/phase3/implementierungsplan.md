@@ -14009,11 +14009,16 @@ Für den Überlappungsausschluss steht `btree_gist` bereit (`backend/migrations/
 - backend/internal/audit/route_snapshot.go
 - backend/internal/server/evt02_producers_integration_test.go
 - docs/traceability.csv
+- Ergänzung 2026-11-12 bei der Umsetzung (nach Empfehlung, sachlich aus AK2, AK3 und Konvention 49 nötig):
+  - backend/internal/tenant/rls/known_gaps.go: `LeakyIndexes` um `asn_range_no_overlap` (der Index der Exclusion-Constraint aus AK2 nutzt `int8range` und `range_ops`, die nicht leakproof sind; gleicher Fall wie `desk_booking_no_overlap`)
+  - backend/internal/tenant/rls/fixtures_test.go: `matrixOverrides` für `asn.number` und `asn_range.range_start`/`range_end` (Eindeutigkeit und Überlappungsausschluss)
+  - backend/internal/tenant/rls/matrix_integration_test.go: `matrixSiteWrites` für `asn` und `asn_range` (Schreiben nur ohne Kunden- und Standortbeschränkung, AK3)
+  - frontend/src/api/client.ts: `SCOPED_LISTS` um `/asns` (Filter `client_id`, Konvention 49)
 
 **Migration/RLS:** Migration `<nächste Nr.>_asn`:
 
 - Neue Mandantentabellen `asn` und `asn_range` nach AK1 und AK2 mit ENABLE und FORCE RLS, Policies nach AK3 und Truncate-Guard `reticora_truncate_guard`.
-- Zusammengesetzte Client-Fremdschlüssel (Konvention 19, `client_id_organization_key` aus 000136). Exclusion-Constraint über `btree_gist`.
+- Zusammengesetzte Client-Fremdschlüssel (Konvention 19, `client_id_organization_key` aus 000136). Exclusion-Constraint über `btree_gist`; ihr Index `asn_range_no_overlap` steht als bewusste Ausnahme in `rls.LeakyIndexes` (`TestRLSIndexesAreLeakproof`).
 - `TestRLSCatalog`, `TestClientReferencesCarryOrganization` und `TestTenantReferencesCarryOrganization` laufen ohne neue Ausnahme. `TestRLSMatrix` erfasst beide Tabellen.
 - Down entfernt beide Tabellen.
 

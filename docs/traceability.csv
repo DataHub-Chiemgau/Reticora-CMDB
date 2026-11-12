@@ -1726,3 +1726,4 @@ SEC-02;[P3];F;backend/internal/security/finding_integration_test.go;WP-1116
 EVT-03;[P2–P3];F;backend/internal/server/evt02_producers_integration_test.go;WP-1116
 RBA-05;[P2–P4], [A];F;backend/internal/security/finding_integration_test.go;WP-1116
 API-06;[P2]/[P3]/[P4]/[A];F;backend/internal/security/finding_integration_test.go;WP-1116
+IPM-16;[P3];G3;backend/internal/ipam/asn_integration_test.go;WP-1066

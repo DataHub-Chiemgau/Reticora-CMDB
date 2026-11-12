@@ -1,6 +1,8 @@
 DELETE /api/v1/admin/orgs/{id}/addons/{key} operator
 DELETE /api/v1/admp/accounts/{id} admp:manage
 DELETE /api/v1/api-keys/{id} apikey:manage
+DELETE /api/v1/asn-ranges/{id} ipam:write
+DELETE /api/v1/asns/{id} ipam:write
 DELETE /api/v1/assets/{id} asset:write
 DELETE /api/v1/assets/{id}/cis/{ci_id} ci:write
 DELETE /api/v1/attribute-definitions/{id} ci_attribute:manage
@@ -100,6 +102,10 @@ GET /api/v1/admp/connections/{id} admp:read
 GET /api/v1/agents agent:read
 GET /api/v1/ai/conversations ai:read
 GET /api/v1/api-keys apikey:manage
+GET /api/v1/asn-ranges ipam:read
+GET /api/v1/asn-ranges/{id} ipam:read
+GET /api/v1/asns ipam:read
+GET /api/v1/asns/{id} ipam:read
 GET /api/v1/assets asset:read
 GET /api/v1/assets/{id} asset:read
 GET /api/v1/assets/{id}/as-of asset:read
@@ -394,6 +400,8 @@ GET /scim/v2/Users iga:read
 GET /scim/v2/Users/{id} iga:read
 PATCH /api/v1/admp/accounts/{id} admp:manage
 PATCH /api/v1/agents/{id}/policy agent:manage
+PATCH /api/v1/asn-ranges/{id} ipam:write
+PATCH /api/v1/asns/{id} ipam:write
 PATCH /api/v1/assets/{id} asset:write
 PATCH /api/v1/attribute-definitions/{id} ci_attribute:manage
 PATCH /api/v1/attribute-sets/{id} citype:manage
@@ -479,6 +487,8 @@ POST /api/v1/ai/ask ai:read
 POST /api/v1/ai/conversations ai:read
 POST /api/v1/api-keys apikey:manage
 POST /api/v1/api-keys/{id}/rotate apikey:manage
+POST /api/v1/asn-ranges ipam:write
+POST /api/v1/asns ipam:write
 POST /api/v1/asset-locations asset:write
 POST /api/v1/assets asset:write
 POST /api/v1/assets/bulk asset:write

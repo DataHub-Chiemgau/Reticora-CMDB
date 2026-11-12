@@ -10918,14 +10918,14 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * List ASNs
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * List AS numbers
+     * @description The AS numbers of the organization (IPM-16, WP-1066) by number: org-wide ones and those of the caller's clients. Filters kind, client_id, range_id (numbers inside the range) and q (name, or the number in asplain or asdot). Paged by limit and the signed cursor of next_cursor. Only with PostgreSQL; without a database 501. Requires ipam:read.
      */
     get: operations['listASNs'];
     put?: never;
     /**
-     * Create a ASN
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * Create an AS number
+     * @description Creates an AS number (IPM-16). number takes asplain (65001, 4200000000), asdot (1.10 = 65546) and the prefix AS; 0, 23456, 65535 and values beyond 4294967294 are 422 number, a number taken in the organization 409 number, an invisible or foreign client_id 422 client_id. Without client_id the AS number belongs to the organization and only principals without client and site restriction create it (else 403). Writes asn.changed (create). Requires ipam:write.
      */
     post: operations['createAsn'];
     delete?: never;
@@ -10945,22 +10945,22 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Get a ASN
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * Get an AS number
+     * @description A visible AS number of the organization; unknown, foreign or invisible is 404. Requires ipam:read.
      */
     get: operations['getAsn'];
     put?: never;
     post?: never;
     /**
-     * Delete a ASN
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * Delete an AS number
+     * @description Deletes an AS number; writes asn.changed (delete). Requires ipam:write.
      */
     delete: operations['deleteAsn'];
     options?: never;
     head?: never;
     /**
-     * Update a ASN
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * Update an AS number
+     * @description Changes number, name, kind, client, registry or description; an empty client_id makes it org-wide, an empty rir clears it. Same rules as POST; an org-wide AS number is 404 for a principal restricted to clients. Writes asn.changed (update). Requires ipam:write.
      */
     patch: operations['updateAsn'];
     trace?: never;
@@ -11019,14 +11019,14 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * List ASN ranges
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * List AS number ranges
+     * @description The AS number ranges of the organization (IPM-16, WP-1066) by start: org-wide ones and those of the caller's clients. Paged by limit and the signed cursor of next_cursor. Only with PostgreSQL; without a database 501. Requires ipam:read.
      */
     get: operations['listASNRanges'];
     put?: never;
     /**
-     * Create a ASN range
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * Create an AS number range
+     * @description Creates a range start..end (both inclusive, notation as for number of an AS number; invalid start or end is 422 on the field, start above end 422 end). A range overlapping another range of the organization is 409 start, a taken name 409 name, an invisible or foreign client_id 422 client_id. Requires ipam:write.
      */
     post: operations['createAsnRange'];
     delete?: never;
@@ -11046,22 +11046,22 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Get a ASN range
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * Get an AS number range
+     * @description A visible AS number range of the organization; unknown, foreign or invisible is 404. Requires ipam:read.
      */
     get: operations['getAsnRange'];
     put?: never;
     post?: never;
     /**
-     * Delete a ASN range
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * Delete an AS number range
+     * @description Deletes a range; its AS numbers stay. Requires ipam:write.
      */
     delete: operations['deleteAsnRange'];
     options?: never;
     head?: never;
     /**
-     * Update a ASN range
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * Update an AS number range
+     * @description Changes name, bounds, client or purpose; the rules of POST apply, also against the stored bounds. Requires ipam:write.
      */
     patch: operations['updateAsnRange'];
     trace?: never;
@@ -20384,6 +20384,107 @@ export interface components {
       servers?: string[];
       /** @description An empty string clears it. */
       description?: string;
+    };
+    /** @description An AS number of the organization (IPM-16, WP-1066). */
+    ASN: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      /**
+       * Format: uuid
+       * @description Null: the AS number belongs to the organization.
+       */
+      client_id: string | null;
+      /**
+       * Format: int64
+       * @description The AS number in asplain.
+       */
+      number: number;
+      /** @description The AS number in asdot (RFC 5396): asplain below 65536, else high.low. */
+      asdot: string;
+      name: string;
+      /** @enum {string} */
+      kind: 'own' | 'customer' | 'peer' | 'upstream' | 'ixp';
+      /** @enum {string|null} */
+      rir: 'ripe' | 'arin' | 'apnic' | 'lacnic' | 'afrinic' | 'private' | null;
+      description?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateASNRequest: {
+      /** @description asplain (65001), asdot (1.10) or with the prefix AS; a JSON number or a string. */
+      number: number | string;
+      name: string;
+      /** @enum {string} */
+      kind: 'own' | 'customer' | 'peer' | 'upstream' | 'ixp';
+      /** Format: uuid */
+      client_id?: string;
+      /** @enum {string} */
+      rir?: 'ripe' | 'arin' | 'apnic' | 'lacnic' | 'afrinic' | 'private';
+      description?: string;
+    };
+    UpdateASNRequest: {
+      /** @description asplain, asdot or with the prefix AS; a JSON number or a string. */
+      number?: number | string;
+      name?: string;
+      /** @enum {string} */
+      kind?: 'own' | 'customer' | 'peer' | 'upstream' | 'ixp';
+      /** @description An empty string makes the AS number org-wide. */
+      client_id?: string;
+      /** @description An empty string clears it. */
+      rir?: string;
+      /** @description An empty string clears it. */
+      description?: string;
+    };
+    ASNListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['ASN'][];
+    };
+    /** @description A block of AS numbers start..end, both inclusive (IPM-16, WP-1066). */
+    ASNRange: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      /**
+       * Format: uuid
+       * @description Null: the range belongs to the organization.
+       */
+      client_id: string | null;
+      name: string;
+      /** Format: int64 */
+      start: number;
+      /** Format: int64 */
+      end: number;
+      start_asdot: string;
+      end_asdot: string;
+      purpose?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateASNRangeRequest: {
+      name: string;
+      start: number | string;
+      end: number | string;
+      /** Format: uuid */
+      client_id?: string;
+      purpose?: string;
+    };
+    UpdateASNRangeRequest: {
+      name?: string;
+      start?: number | string;
+      end?: number | string;
+      /** @description An empty string makes the range org-wide. */
+      client_id?: string;
+      /** @description An empty string clears it. */
+      purpose?: string;
+    };
+    ASNRangeListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['ASNRange'][];
     };
     NameserverSetListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['NameserverSet'][];
@@ -49327,6 +49428,17 @@ export interface operations {
          *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        kind?: 'own' | 'customer' | 'peer' | 'upstream' | 'ixp';
+        client_id?: string;
+        /** @description Only the AS numbers inside this range. */
+        range_id?: string;
+        /** @description Part of the name, or an AS number in asplain, asdot or with the prefix AS. */
+        q?: string;
       };
       header?: never;
       path?: never;
@@ -49334,17 +49446,21 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List ASNs. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description A page of AS numbers */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ASNListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   createAsn: {
@@ -49354,14 +49470,20 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateASNRequest'];
+      };
+    };
     responses: {
-      /** @description Created. The schema comes with the implementing work package. */
+      /** @description Created */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ASN'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -49369,6 +49491,7 @@ export interface operations {
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   getAsn: {
@@ -49383,17 +49506,20 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get a ASN. The schema comes with the implementing work package. */
+      /** @description The AS number */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ASN'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   deleteAsn: {
@@ -49408,7 +49534,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Done. */
+      /** @description Deleted. */
       204: {
         headers: {
           [name: string]: unknown;
@@ -49418,8 +49544,8 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   updateAsn: {
@@ -49432,14 +49558,20 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateASNRequest'];
+      };
+    };
     responses: {
-      /** @description Update a ASN. The schema comes with the implementing work package. */
+      /** @description The changed AS number */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ASN'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -49448,6 +49580,7 @@ export interface operations {
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   listASNPrefixes: {
@@ -49524,6 +49657,11 @@ export interface operations {
          *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
       };
       header?: never;
       path?: never;
@@ -49531,17 +49669,21 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List ASN ranges. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description A page of AS number ranges */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ASNRangeListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   createAsnRange: {
@@ -49551,14 +49693,20 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateASNRangeRequest'];
+      };
+    };
     responses: {
-      /** @description Created. The schema comes with the implementing work package. */
+      /** @description Created */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ASNRange'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -49566,6 +49714,7 @@ export interface operations {
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   getAsnRange: {
@@ -49580,17 +49729,20 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get a ASN range. The schema comes with the implementing work package. */
+      /** @description The AS number range */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ASNRange'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   deleteAsnRange: {
@@ -49605,7 +49757,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Done. */
+      /** @description Deleted. */
       204: {
         headers: {
           [name: string]: unknown;
@@ -49615,8 +49767,8 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   updateAsnRange: {
@@ -49629,14 +49781,20 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateASNRangeRequest'];
+      };
+    };
     responses: {
-      /** @description Update a ASN range. The schema comes with the implementing work package. */
+      /** @description The changed AS number range */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ASNRange'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -49645,6 +49803,7 @@ export interface operations {
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   getASNRangeUsage: {

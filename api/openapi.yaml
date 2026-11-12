@@ -25393,38 +25393,80 @@ paths:
   /api/v1/asns:
     x-phase: P3
     x-feature: ipam
-    x-status: planned
     get:
       operationId: listASNs
       tags: [IPAM]
-      summary: List ASNs
+      summary: List AS numbers
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        The AS numbers of the organization (IPM-16, WP-1066) by number:
+        org-wide ones and those of the caller's clients. Filters kind,
+        client_id, range_id (numbers inside the range) and q (name, or the
+        number in asplain or asdot). Paged by limit and the signed cursor
+        of next_cursor. Only with PostgreSQL; without a database 501.
+        Requires ipam:read.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
+        - name: kind
+          in: query
+          schema: { type: string, enum: [own, customer, peer, upstream, ixp] }
+        - name: client_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: range_id
+          in: query
+          description: Only the AS numbers inside this range.
+          schema: { type: string, format: uuid }
+        - name: q
+          in: query
+          description: Part of the name, or an AS number in asplain, asdot or with the prefix AS.
+          schema: { type: string }
       responses:
         '200':
-          description: List ASNs. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+          description: A page of AS numbers
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ASNListResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
     post:
       operationId: createAsn
       tags: [IPAM]
-      summary: Create a ASN
+      summary: Create an AS number
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Creates an AS number (IPM-16). number takes asplain (65001,
+        4200000000), asdot (1.10 = 65546) and the prefix AS; 0, 23456,
+        65535 and values beyond 4294967294 are 422 number, a number taken
+        in the organization 409 number, an invisible or foreign client_id
+        422 client_id. Without client_id the AS number belongs to the
+        organization and only principals without client and site
+        restriction create it (else 403). Writes asn.changed (create).
+        Requires ipam:write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateASNRequest'
       responses:
         '201':
-          description: Created. The schema comes with the implementing work package.
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ASN'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -25437,23 +25479,28 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
 
   /api/v1/asns/{id}:
     x-phase: P3
     x-feature: ipam
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: getAsn
       tags: [IPAM]
-      summary: Get a ASN
+      summary: Get an AS number
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        A visible AS number of the organization; unknown, foreign or invisible
+        is 404. Requires ipam:read.
       responses:
         '200':
-          description: Get a ASN. The schema comes with the implementing work package.
+          description: The AS number
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ASN'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -25462,16 +25509,31 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
     patch:
       operationId: updateAsn
       tags: [IPAM]
-      summary: Update a ASN
+      summary: Update an AS number
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Changes number, name, kind, client, registry or description; an
+        empty client_id makes it org-wide, an empty rir clears it. Same
+        rules as POST; an org-wide AS number is 404 for a principal
+        restricted to clients. Writes asn.changed (update). Requires
+        ipam:write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateASNRequest'
       responses:
         '200':
-          description: Update a ASN. The schema comes with the implementing work package.
+          description: The changed AS number
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ASN'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -25486,26 +25548,28 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
     delete:
       operationId: deleteAsn
       tags: [IPAM]
-      summary: Delete a ASN
+      summary: Delete an AS number
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Deletes an AS number; writes asn.changed (delete). Requires
+        ipam:write.
       responses:
         '204':
-          description: Done.
+          description: Deleted.
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
 
   /api/v1/asns/{id}/prefixes:
     x-phase: P3
@@ -25563,38 +25627,61 @@ paths:
   /api/v1/asn-ranges:
     x-phase: P3
     x-feature: ipam
-    x-status: planned
     get:
       operationId: listASNRanges
       tags: [IPAM]
-      summary: List ASN ranges
+      summary: List AS number ranges
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        The AS number ranges of the organization (IPM-16, WP-1066) by
+        start: org-wide ones and those of the caller's clients. Paged by
+        limit and the signed cursor of next_cursor. Only with PostgreSQL;
+        without a database 501. Requires ipam:read.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: List ASN ranges. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+          description: A page of AS number ranges
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ASNRangeListResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
     post:
       operationId: createAsnRange
       tags: [IPAM]
-      summary: Create a ASN range
+      summary: Create an AS number range
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Creates a range start..end (both inclusive, notation as for
+        number of an AS number; invalid start or end is 422 on the field,
+        start above end 422 end). A range overlapping another range of the
+        organization is 409 start, a taken name 409 name, an invisible or
+        foreign client_id 422 client_id. Requires ipam:write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateASNRangeRequest'
       responses:
         '201':
-          description: Created. The schema comes with the implementing work package.
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ASNRange'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -25607,23 +25694,28 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
 
   /api/v1/asn-ranges/{id}:
     x-phase: P3
     x-feature: ipam
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: getAsnRange
       tags: [IPAM]
-      summary: Get a ASN range
+      summary: Get an AS number range
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        A visible AS number range of the organization; unknown, foreign or invisible
+        is 404. Requires ipam:read.
       responses:
         '200':
-          description: Get a ASN range. The schema comes with the implementing work package.
+          description: The AS number range
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ASNRange'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -25632,16 +25724,28 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
     patch:
       operationId: updateAsnRange
       tags: [IPAM]
-      summary: Update a ASN range
+      summary: Update an AS number range
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Changes name, bounds, client or purpose; the rules of POST apply,
+        also against the stored bounds. Requires ipam:write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateASNRangeRequest'
       responses:
         '200':
-          description: Update a ASN range. The schema comes with the implementing work package.
+          description: The changed AS number range
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ASNRange'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -25656,26 +25760,27 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
     delete:
       operationId: deleteAsnRange
       tags: [IPAM]
-      summary: Delete a ASN range
+      summary: Delete an AS number range
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Deletes a range; its AS numbers stay. Requires ipam:write.
       responses:
         '204':
-          description: Done.
+          description: Deleted.
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
 
   /api/v1/asn-ranges/{id}/usage:
     x-phase: P3
@@ -41211,6 +41316,115 @@ components:
           items: { type: string }
           description: Replaces the whole list.
         description: { type: string, description: An empty string clears it. }
+
+    ASN:
+      type: object
+      description: An AS number of the organization (IPM-16, WP-1066).
+      required: [id, organization_id, client_id, number, asdot, name, kind, rir, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        client_id: { type: [string, 'null'], format: uuid, description: 'Null: the AS number belongs to the organization.' }
+        number: { type: integer, format: int64, minimum: 1, maximum: 4294967294, description: The AS number in asplain. }
+        asdot: { type: string, description: 'The AS number in asdot (RFC 5396): asplain below 65536, else high.low.' }
+        name: { type: string, maxLength: 200 }
+        kind: { type: string, enum: [own, customer, peer, upstream, ixp] }
+        rir: { type: [string, 'null'], enum: [ripe, arin, apnic, lacnic, afrinic, private, null] }
+        description: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateASNRequest:
+      type: object
+      required: [number, name, kind]
+      properties:
+        number:
+          description: asplain (65001), asdot (1.10) or with the prefix AS; a JSON number or a string.
+          oneOf:
+            - { type: integer, minimum: 1, maximum: 4294967294 }
+            - { type: string }
+        name: { type: string, maxLength: 200 }
+        kind: { type: string, enum: [own, customer, peer, upstream, ixp] }
+        client_id: { type: string, format: uuid }
+        rir: { type: string, enum: [ripe, arin, apnic, lacnic, afrinic, private] }
+        description: { type: string }
+    UpdateASNRequest:
+      type: object
+      properties:
+        number:
+          description: asplain, asdot or with the prefix AS; a JSON number or a string.
+          oneOf:
+            - { type: integer, minimum: 1, maximum: 4294967294 }
+            - { type: string }
+        name: { type: string, maxLength: 200 }
+        kind: { type: string, enum: [own, customer, peer, upstream, ixp] }
+        client_id: { type: string, description: An empty string makes the AS number org-wide. }
+        rir: { type: string, description: An empty string clears it. }
+        description: { type: string, description: An empty string clears it. }
+    ASNListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/ASN'
+    ASNRange:
+      type: object
+      description: A block of AS numbers start..end, both inclusive (IPM-16, WP-1066).
+      required: [id, organization_id, client_id, name, start, end, start_asdot, end_asdot, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        client_id: { type: [string, 'null'], format: uuid, description: 'Null: the range belongs to the organization.' }
+        name: { type: string, maxLength: 200 }
+        start: { type: integer, format: int64, minimum: 1, maximum: 4294967294 }
+        end: { type: integer, format: int64, minimum: 1, maximum: 4294967294 }
+        start_asdot: { type: string }
+        end_asdot: { type: string }
+        purpose: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateASNRangeRequest:
+      type: object
+      required: [name, start, end]
+      properties:
+        name: { type: string, maxLength: 200 }
+        start:
+          oneOf:
+            - { type: integer, minimum: 1, maximum: 4294967294 }
+            - { type: string }
+        end:
+          oneOf:
+            - { type: integer, minimum: 1, maximum: 4294967294 }
+            - { type: string }
+        client_id: { type: string, format: uuid }
+        purpose: { type: string }
+    UpdateASNRangeRequest:
+      type: object
+      properties:
+        name: { type: string, maxLength: 200 }
+        start:
+          oneOf:
+            - { type: integer, minimum: 1, maximum: 4294967294 }
+            - { type: string }
+        end:
+          oneOf:
+            - { type: integer, minimum: 1, maximum: 4294967294 }
+            - { type: string }
+        client_id: { type: string, description: An empty string makes the range org-wide. }
+        purpose: { type: string, description: An empty string clears it. }
+    ASNRangeListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/ASNRange'
 
     NameserverSetListResponse:
       allOf:

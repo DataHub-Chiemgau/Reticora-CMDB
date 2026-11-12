@@ -61,6 +61,8 @@ var matrixClientOnlyReads = map[string]string{
 var matrixSiteWrites = map[string]string{
 	"ipam_section":     "IPAM sections, migration 000298 (WP-900): ipam.TestIPAMSectionsOnPostgreSQL",
 	"monitoring_group": "monitoring groups, migration 000307 (WP-935): probe.TestProbeTablesFollowClientScope",
+	"asn":              "AS numbers, migration 000316 (WP-1066): ipam.TestASNClientPrincipal",
+	"asn_range":        "AS number ranges, migration 000316 (WP-1066): ipam.TestASNClientPrincipal",
 }
 
 // matrixSnapshotScoped lists the tables that carry a scope snapshot of their

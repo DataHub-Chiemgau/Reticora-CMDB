@@ -142,6 +142,10 @@ var matrixOverrides = map[string]map[string]string{
 	// A configuration version names its platform and a SHA-256 in hex
 	// (config_snapshot_platform_check, config_snapshot_sha256_check, WP-1052).
 	"config_snapshot": {"platform": "cisco_ios", "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+	// AS numbers are unique per organization, AS number ranges do not
+	// overlap (asn_number_key, asn_range_no_overlap, WP-1066).
+	"asn":       {"number": "@seq"},
+	"asn_range": {"range_start": "@seq", "range_end": "@seq"},
 }
 
 var anyArrayCheck = regexp.MustCompile(`^CHECK \(\((\w+) = ANY \(\(?ARRAY\['([^']*)'`)

@@ -355,6 +355,7 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	const v1 = "/api/v1/"
 	all := []string{"POST", "PATCH", "DELETE"}
 	for collection, table := range map[string]string{
+		"asns": "asn", "asn-ranges": "asn_range", // AS numbers and ranges (WP-1066)
 		"assets": "asset", "buildings": "building", "cables": "cable", "clients": "client",
 		"compliance/rules": "compliance_rule", "consumables": "consumable",
 		"contacts": "contact", "contracts": "contract", "desks": "desk", "discovery-scopes": "discovery_scope",

@@ -248,6 +248,7 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 		usageScope, usageCI                string
 		stateAddress, stateSubnet          string
 		findingCI, changedFinding          string
+		asnID                              string
 		resolvedFinding                    string
 		admpAccount                        string
 		admpSync                           *admp.Sync
@@ -831,6 +832,25 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 			data: func(t *testing.T, entity string, data map[string]any) {
 				if data["id"] != entity || data["status"] != "resolved" || data["severity"] != "medium" {
 					t.Errorf("finding.resolved data %v", data)
+				}
+			}},
+		{typ: events.ASNChanged,
+			// POST /asns creates an AS number of a client (WP-1066).
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/asns",
+					`{"number":"AS4200000055","name":"evt02-asn","kind":"customer","client_id":"`+f.Client1+`"}`)
+				answered(t, "POST /asns", r, refused, http.StatusCreated)
+				if refused {
+					unchanged(t, "AS numbers named evt02-asn", count(t, `asn WHERE organization_id = $1 AND name = 'evt02-asn'`, f.OrgA), "0")
+					return ""
+				}
+				asnID = t6ID(r.Body)
+				return asnID
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["asn"] != float64(4200000055) || data["number"] != float64(4200000055) ||
+					data["client_id"] != f.Client1 || data["change"] != "create" {
+					t.Errorf("asn.changed data %v", data)
 				}
 			}},
 		{typ: events.IPAMSubnetChanged,
@@ -1475,7 +1495,6 @@ var plannedProducers = map[string]string{
 	"org.export_completed":          "WP-1151",
 	"org.deletion_requested":        "WP-1152",
 	"org.deletion_cancelled":        "WP-1152",
-	"asn.changed":                   "WP-1066",
 }
 
 // evt02ADMP is the fake ADMP of the admp.connection.refreshed case: one

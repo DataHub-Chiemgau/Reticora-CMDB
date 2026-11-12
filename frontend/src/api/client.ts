@@ -642,6 +642,8 @@ export const SCOPED_LISTS: Record<string, readonly ('client_id' | 'site_id')[]> 
   // the path until its sunset (API-01).
   '/ips': ['client_id'],
   '/ip-addresses': ['client_id'],
+  // The AS numbers filter by client (IPM-16, WP-1066).
+  '/asns': ['client_id'],
   '/slas': ['client_id'],
   '/business-calendars': ['client_id'],
   '/forms': ['client_id'],
