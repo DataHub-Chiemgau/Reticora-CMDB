@@ -4692,6 +4692,8 @@ ADM-08;[P3];G3;backend/internal/admp/impact_integration_test.go;WP-931
 
 **Nachtrag 2026-11-12 (A-55 geliefert):** `carrier` ist ab WP-1075 der Name der Netzbetreiber-Organisation (`Organization.name`), `service_kind` der Template-Name des Dienstes. Die Port-Verknüpfung entsteht ab WP-1073 über das Port-Inventar (`admp_access_port`). Schnittstelle und Akzeptanzkriterien bleiben unverändert.
 
+**Nachtrag 2026-11-12 (Umsetzung):** Der Einstiegspunkt aus AK1 ist die Methode `(*admp.Impact).AffectedConnections(ctx, orgID, ciIDs, interfaceIDs, opts...)` mit der Signatur aus AK1; die Instanz entsteht bei der Verdrahtung des Verbrauchers (WP-1037) über `admp.NewImpact(repos.ADMP, admpSync)` (Cache der Repositories und `Sync` der Lese-API). Eine paketweite Funktion mit globalem Zustand gibt es nicht; der Vertrag steht in `impact.go`. `WithRefreshStale()` stellt je veraltetem Anschluss die Objektart `connection` und je veraltetem Dienst die Objektart `service` ein, außerhalb einer Transaktion des Aufrufers.
+
 **Nicht Bestandteil:**
 - Ermittlung der betroffenen CIs (WP-1025, WP-1028).
 - Betroffene Anschlüsse je Störung: WP-1037.

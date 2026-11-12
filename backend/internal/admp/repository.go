@@ -47,6 +47,10 @@ type Repository interface {
 	// ListByConnection returns the services of a connection, each with all
 	// its ports, ordered by external id (WP-930).
 	ListByConnection(ctx context.Context, orgID, connectionID string) ([]Service, error)
+	// AffectedConnections returns the connections with a port on one of
+	// ciIDs or interfaceIDs, one entry per connection and port, with their
+	// redundancy (WP-931, impact.go); one set-based statement.
+	AffectedConnections(ctx context.Context, orgID string, ciIDs, interfaceIDs []string) ([]AffectedConnection, error)
 	// ConnectionsByID returns the visible connections among ids (WP-930);
 	// an id the caller does not see is left out.
 	ConnectionsByID(ctx context.Context, orgID string, ids []string) ([]Connection, error)

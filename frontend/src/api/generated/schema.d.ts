@@ -11452,7 +11452,7 @@ export interface paths {
     };
     /**
      * List the ADMP connections of a CI
-     * @description ADM-08 (WP-930): the cached ADMP connections of the services with a port on the CI, ordered by carrier and external_id, each with stale and fetched_at. An unknown CI or one outside the caller's scope is 404. Reads only the cache. Requires admp:read.
+     * @description ADM-08 (WP-930, WP-931): the cached ADMP connections of the services with a port on the CI, ordered by carrier and external_id, each with stale and fetched_at, and redundant with redundant_via when another port of the connection lies on another CI. An unknown CI or one outside the caller's scope is 404. Reads only the cache. Requires admp:read.
      */
     get: operations['listCIADMPConnections'];
     put?: never;
@@ -20601,7 +20601,12 @@ export interface components {
       components['schemas']['ADMPRefreshOutcome'] & {
         data: components['schemas']['ADMPInterfaceService'][];
       };
-    ADMPCIConnection: components['schemas']['ADMPConnectionFields'];
+    ADMPCIConnection: components['schemas']['ADMPConnectionFields'] & {
+      /** @description Another port of a service of the connection lies on a CI other than this one (WP-931, AffectedConnections([id])). */
+      redundant: boolean;
+      /** @description The CIs of those ports, sorted. */
+      redundant_via: string[];
+    };
     ADMPCIConnectionListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['ADMPCIConnection'][];
     };

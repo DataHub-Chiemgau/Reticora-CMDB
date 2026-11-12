@@ -477,6 +477,60 @@ func (r *PGRepository) DeleteExpired(ctx context.Context, orgID string, before t
 	return out, err
 }
 
+// AffectedConnections implements Repository: one statement; the ports of
+// both lists are found through unnest, the redundancy is a lateral read of
+// the other ports of the service and of the connection's other services
+// that are not affected.
+func (r *PGRepository) AffectedConnections(ctx context.Context, orgID string, ciIDs, interfaceIDs []string) ([]AffectedConnection, error) {
+	out := []AffectedConnection{}
+	if len(ciIDs) == 0 && len(interfaceIDs) == 0 {
+		return out, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `WITH cis AS (SELECT unnest($1::uuid[]) AS id),
+				ifaces AS (SELECT unnest($2::uuid[]) AS id),
+				hit AS (
+					SELECT p.id, p.service_id, p.port_key, p.ci_id, p.network_interface_id FROM admp_service_port p
+					WHERE p.ci_id IN (SELECT id FROM cis)
+					UNION
+					SELECT p.id, p.service_id, p.port_key, p.ci_id, p.network_interface_id FROM admp_service_port p
+					WHERE p.network_interface_id IN (SELECT id FROM ifaces))
+			SELECT c.id::text, c.external_id, c.account_id::text, COALESCE(c.carrier, ''), COALESCE(c.contract_id, ''),
+				s.id::text, s.kind, h.port_key, COALESCE(h.ci_id::text, ''), COALESCE(h.network_interface_id::text, ''),
+				c.stale, s.stale, s.external_id, LEAST(c.fetched_at, s.fetched_at),
+				ARRAY(SELECT DISTINCT o.ci_id::text FROM admp_service_port o
+					JOIN admp_service os ON os.id = o.service_id AND os.organization_id = o.organization_id
+					WHERE (o.service_id = s.id OR os.connection_id = c.id) AND o.id <> h.id AND o.ci_id IS NOT NULL
+						AND o.ci_id NOT IN (SELECT id FROM cis)
+						AND (o.network_interface_id IS NULL OR o.network_interface_id NOT IN (SELECT id FROM ifaces))
+					ORDER BY 1)
+			FROM hit h
+			JOIN admp_service s ON s.id = h.service_id
+			JOIN admp_connection c ON c.id = s.connection_id AND c.organization_id = s.organization_id`, ciIDs, interfaceIDs)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var a AffectedConnection
+			if err := rows.Scan(&a.ConnectionID, &a.ExternalID, &a.AccountID, &a.Carrier, &a.ContractID, &a.ServiceID, &a.ServiceKind,
+				&a.PortKey, &a.CIID, &a.NetworkInterfaceID, &a.connectionStale, &a.serviceStale, &a.serviceExternalID, &a.FetchedAt,
+				&a.RedundantVia); err != nil {
+				return err
+			}
+			a.Stale = a.connectionStale || a.serviceStale
+			if a.RedundantVia == nil {
+				a.RedundantVia = []string{}
+			}
+			a.Redundant = len(a.RedundantVia) > 0
+			out = append(out, a)
+		}
+		return rows.Err()
+	})
+	sortAffected(out)
+	return out, err
+}
+
 var _ Targets = (*PGRepository)(nil)
 
 // InterfaceTarget implements Targets: the interface with its CI under the

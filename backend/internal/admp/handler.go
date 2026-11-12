@@ -150,9 +150,13 @@ type interfaceServiceView struct {
 	Connection *connectionFields `json:"connection,omitempty"`
 }
 
-// ciConnectionView is an entry of GET /cis/{id}/admp-connections.
+// ciConnectionView is an entry of GET /cis/{id}/admp-connections:
+// redundant and redundant_via from AffectedConnections([id], nil)
+// (WP-931).
 type ciConnectionView struct {
 	connectionFields
+	Redundant    bool     `json:"redundant"`
+	RedundantVia []string `json:"redundant_via"`
 }
 
 // refreshList is a list page with the outcome of a refresh: the members of
@@ -375,9 +379,20 @@ func (h *DataHandler) listCI(w http.ResponseWriter, r *http.Request) {
 		writeDataError(w, err)
 		return
 	}
+	affected, err := h.cache.AffectedConnections(ctx, orgID, uuids([]string{id}), nil)
+	if err != nil {
+		writeDataError(w, err)
+		return
+	}
+	redundancy := redundancyByConnection(affected)
 	items := make([]ciConnectionView, 0, len(connections))
 	for i := range connections {
-		items = append(items, ciConnectionView{connectionFields: connectionFieldsOf(&connections[i])})
+		via := redundancy[connections[i].ID]
+		if via == nil {
+			via = []string{}
+		}
+		items = append(items, ciConnectionView{connectionFields: connectionFieldsOf(&connections[i]), Redundant: len(via) > 0,
+			RedundantVia: via})
 	}
 	api.WriteJSON(w, http.StatusOK, api.Page(items, page))
 }

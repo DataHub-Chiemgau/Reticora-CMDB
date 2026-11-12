@@ -336,6 +336,73 @@ func (m *MemoryRepository) ListByConnection(ctx context.Context, orgID, connecti
 	return out, nil
 }
 
+// AffectedConnections implements Repository with the rules of the
+// PostgreSQL statement.
+func (m *MemoryRepository) AffectedConnections(ctx context.Context, orgID string, ciIDs, interfaceIDs []string) ([]AffectedConnection, error) {
+	out := []AffectedConnection{}
+	if len(ciIDs) == 0 && len(interfaceIDs) == 0 {
+		return out, nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.refreshClients(ctx)
+	affected := func(p *ServicePort) bool {
+		return (p.CIID != "" && slices.Contains(ciIDs, p.CIID)) ||
+			(p.NetworkInterfaceID != "" && slices.Contains(interfaceIDs, p.NetworkInterfaceID))
+	}
+	// visiblePorts are the ports of a service the caller sees.
+	visiblePorts := func(serviceID string) []*ServicePort {
+		var ports []*ServicePort
+		for i := range m.ports[serviceID] {
+			if p := &m.ports[serviceID][i]; cacheVisible(ctx, p.ClientID) {
+				ports = append(ports, p)
+			}
+		}
+		return ports
+	}
+	for id, s := range m.services {
+		if s.OrganizationID != orgID || s.ConnectionID == "" || !cacheVisible(ctx, s.ClientID) {
+			continue
+		}
+		c, ok := m.connections[s.ConnectionID]
+		if !ok || !cacheVisible(ctx, c.ClientID) {
+			continue
+		}
+		for _, hit := range visiblePorts(id) {
+			if !affected(hit) {
+				continue
+			}
+			via := []string{}
+			for otherID, other := range m.services {
+				if otherID != id && (other.ConnectionID != c.ID || !cacheVisible(ctx, other.ClientID)) {
+					continue
+				}
+				for _, p := range visiblePorts(otherID) {
+					if p == hit || p.CIID == "" || slices.Contains(ciIDs, p.CIID) ||
+						(p.NetworkInterfaceID != "" && slices.Contains(interfaceIDs, p.NetworkInterfaceID)) {
+						continue
+					}
+					if !slices.Contains(via, p.CIID) {
+						via = append(via, p.CIID)
+					}
+				}
+			}
+			slices.Sort(via)
+			fetched := c.FetchedAt
+			if s.FetchedAt.Before(fetched) {
+				fetched = s.FetchedAt
+			}
+			out = append(out, AffectedConnection{ConnectionID: c.ID, ExternalID: c.ExternalID, AccountID: c.AccountID,
+				Carrier: c.Carrier, ContractID: c.ContractID, ServiceID: s.ID, ServiceKind: s.Kind, PortKey: hit.PortKey,
+				CIID: hit.CIID, NetworkInterfaceID: hit.NetworkInterfaceID, Stale: c.Stale || s.Stale, FetchedAt: fetched,
+				Redundant: len(via) > 0, RedundantVia: via, serviceExternalID: s.ExternalID, connectionStale: c.Stale,
+				serviceStale: s.Stale})
+		}
+	}
+	sortAffected(out)
+	return out, nil
+}
+
 // ConnectionsByID implements Repository.
 func (m *MemoryRepository) ConnectionsByID(ctx context.Context, orgID string, ids []string) ([]Connection, error) {
 	m.mu.Lock()
