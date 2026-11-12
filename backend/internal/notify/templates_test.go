@@ -40,6 +40,9 @@ var templateData = map[string]map[string]any{
 		"due_date": "2026-12-31", "expires_at": "2026-12-31", "days_left": float64(5)},
 	events.DocumentScanned: {"document_id": "d-1", "version": float64(2), "result": "infected",
 		"scan_signature": "Win.Test.EICAR_HDB-1", "uploaded_by": "u-7"},
+	events.MaintenanceScheduled: {"id": "w-1", "client_id": "c-1", "title": "Core-Upgrade", "starts_at": "2026-12-01T22:00:00Z",
+		"ends_at": "2026-12-02T02:00:00Z", "maintenance_notification_id": "n-1", "affected_cis": float64(23),
+		"services": float64(2), "contact_roles": []any{"technical"}},
 	events.StockBelowMinimum: {"id": "k-1", "client_id": "c-1", "sku": "TON-415", "name": "Toner HP 415A", "unit": "Stk",
 		"on_hand_total": float64(2.5), "min_level": float64(4)},
 }
@@ -498,5 +501,44 @@ func TestTemplatesSenderName(t *testing.T) {
 		if i >= len(srv.data) || !strings.Contains(srv.data[i], want) {
 			t.Errorf("mail %d lacks %q", i, want)
 		}
+	}
+}
+
+// TestMaintenanceScheduledTemplate covers the template and the recipients
+// of maintenance.scheduled (MGT-04, NTF-05 [P3], WP-1034): German and
+// English texts with title, time span and numbers; the client's contacts
+// in the announced roles and its users with maintenance:read, nobody
+// without a client.
+func TestMaintenanceScheduledTemplate(t *testing.T) {
+	data := templateData[events.MaintenanceScheduled]
+	for locale, words := range map[string][]string{
+		LocaleDE: {"Wartung", "Core-Upgrade", "2026-12-01T22:00:00Z", "2026-12-02T02:00:00Z", "23 Komponenten", "2 Dienste"},
+		LocaleEN: {"maintenance", "Core-Upgrade", "2026-12-01T22:00:00Z", "2026-12-02T02:00:00Z", "23 components", "2 services"},
+	} {
+		text := Render(events.MaintenanceScheduled, locale, data)
+		if text.Subject == "" || text.Body == "" {
+			t.Fatalf("%s: empty text %+v", locale, text)
+		}
+		for _, w := range words {
+			if !strings.Contains(text.Subject+" "+text.Body, w) {
+				t.Errorf("%s: %+v lacks %q", locale, text, w)
+			}
+		}
+	}
+	sub := Subscriptions[events.MaintenanceScheduled]
+	if sub.Category != "maintenance" || sub.Critical || sub.Personal {
+		t.Errorf("subscription %+v", sub)
+	}
+	want := Audience{Permission: identity.PermMaintenanceRead, AllWithPermission: true, ClientID: "c-1",
+		ClientContacts: &ClientContacts{ContactRoles: []string{"technical"}}}
+	if a := sub.Audience(data); a == nil || !reflect.DeepEqual(*a, want) {
+		t.Errorf("audience %+v, want %+v", a, want)
+	}
+	if a := sub.Audience(map[string]any{"id": "w-1", "client_id": "c-1"}); a == nil || a.ClientContacts == nil ||
+		len(a.ClientContacts.ContactRoles) != 0 || a.ClientContacts.Organization {
+		t.Errorf("audience without roles %+v, want every contact of the client", a)
+	}
+	if a := sub.Audience(map[string]any{"id": "w-1"}); a != nil {
+		t.Errorf("audience without client %+v, want nobody", a)
 	}
 }

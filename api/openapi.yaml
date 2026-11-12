@@ -4560,6 +4560,49 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/maintenance-windows/{id}/impact:
+    x-phase: P3
+    x-feature: monitoring
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getMaintenanceWindowImpact
+      tags: [Maintenance]
+      summary: Preview the clients, sites and services a maintenance window affects
+      description: >-
+        The impact of the window's CIs failing together over the configuration graph (MGT-04, IMP-05, WP-1034),
+        computed in the caller's scope: a client outside it never appears. Per client the number of the window's
+        own CIs, of the CIs affected over certain paths and (with include_heuristic) over heuristic paths, and of
+        the affected services.
+      parameters:
+        - name: include_heuristic
+          in: query
+          required: false
+          description: Also count CIs reached only over heuristic paths (connected_to); default false.
+          schema: { type: boolean, default: false }
+        - name: categories
+          in: query
+          required: false
+          description: Comma-separated relationship categories the impact follows (network, power, hosting, logical, physical); empty follows all; an unknown one is 422.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Impact preview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaintenanceImpactPreview'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '501':
+          description: No configuration graph available.
+
   /api/v1/maintenance-windows/{id}/notify:
     x-phase: P3
     x-feature: monitoring
@@ -4568,14 +4611,37 @@ paths:
     post:
       operationId: notifyMaintenanceWindow
       tags: [Maintenance]
-      summary: Notify affected customers (clients derived from the window's CIs)
+      summary: Notify the clients a maintenance window affects over the graph
+      description: >-
+        Finds the affected clients like GET …/impact and announces the window to each in one transaction: one
+        notification of the channel notify (pending) and the event maintenance.scheduled naming it. The notification
+        chain delivers it to the client's contacts with the roles of contact_roles (empty: every contact of the
+        client) and to the users with maintenance:read in the client. A client whose notification is pending or sent
+        is not announced again; a failed one is announced anew under a new notification id, so its status follows
+        the deliveries of the new announcement. An unknown category is 422 (MGT-04, NTF-05, WP-1034).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MaintenanceNotifyRequest'
       responses:
         '200':
-          description: Notifications recorded
+          description: Notifications of the affected clients
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaintenanceNotifyResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /api/v1/maintenance-windows/{id}/notifications:
     x-phase: P3
@@ -4586,13 +4652,25 @@ paths:
       operationId: listMaintenanceNotifications
       tags: [Maintenance]
       summary: List notifications of a maintenance window
+      description: The status of a notification of the channel notify follows its deliveries; without a delivery it is never sent.
       responses:
         '200':
           description: Notifications
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/MaintenanceNotification' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 
   /api/v1/disposal-records:
     x-phase: P2
@@ -29439,7 +29517,7 @@ components:
             the named categories win over `muted_categories`; the response
             lists every category.
           propertyNames:
-            enum: [apikey, certificate, collector, contract, entitlement, export, invitation, job, review, security, stock, ticket, warranty, webhook]
+            enum: [apikey, certificate, collector, contract, entitlement, export, invitation, job, maintenance, review, security, stock, ticket, warranty, webhook]
           additionalProperties:
             type: string
             enum: [subscribed, muted]
@@ -29450,13 +29528,13 @@ components:
             Categories whose e-mails are bundled into one digest per window
             (NTF-04): category → hourly (ends at the full hour) or daily (ends
             at midnight in time_zone). Allowed are the categories with a
-            non-critical event (contract, entitlement, export, job, review, stock, ticket,
+            non-critical event (contract, entitlement, export, job, maintenance, review, stock, ticket,
             warranty, webhook);
             critical notifications, the in-app center and webhooks are never
             bundled. Omitted: the default `{"review":"hourly"}`; `{}`: every
             e-mail on its own.
           propertyNames:
-            enum: [contract, entitlement, export, job, review, stock, ticket, warranty, webhook]
+            enum: [contract, entitlement, export, job, maintenance, review, stock, ticket, warranty, webhook]
           additionalProperties:
             type: string
             enum: [hourly, daily]
@@ -37473,6 +37551,79 @@ components:
         title: { type: string }
         description: { type: string }
         status: { type: string, enum: [scheduled, in_progress, completed, cancelled] }
+    MaintenanceNotification:
+      type: object
+      required: [id, organization_id, maintenance_window_id, channel, status, created_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        maintenance_window_id: { type: string }
+        client_id: { type: string }
+        channel:
+          type: string
+          enum: [notify, webhook]
+          description: notify delivers through the notification chain (WP-1034); webhook rows were queued before and stay readable.
+        status:
+          type: string
+          enum: [pending, sent, failed]
+          description: For the channel notify derived from the deliveries - sent once one is delivered, failed once all failed finally, otherwise pending.
+        sent_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+    MaintenanceNotifyRequest:
+      type: object
+      properties:
+        include_heuristic: { type: boolean, default: false }
+        categories:
+          type: array
+          items: { type: string }
+        contact_roles:
+          type: array
+          items: { type: string }
+          description: Roles (contact.role) of the client contacts to notify; empty notifies every contact of the client.
+    MaintenanceNotifyResponse:
+      type: object
+      required: [notified, queued, notifications]
+      properties:
+        notified: { type: integer, description: Notifications a channel delivered. }
+        queued: { type: integer, description: Notifications still pending or failed. }
+        notifications:
+          type: array
+          items: { $ref: '#/components/schemas/MaintenanceNotification' }
+    MaintenanceClientImpact:
+      type: object
+      required: [client_id, window_cis, certain_cis, heuristic_cis, services]
+      properties:
+        client_id: { type: string }
+        window_cis: { type: integer }
+        certain_cis: { type: integer }
+        heuristic_cis: { type: integer }
+        services: { type: integer }
+    MaintenanceImpactPreview:
+      type: object
+      required: [maintenance_window_id, include_heuristic, categories, clients, site_ids, services, truncated]
+      properties:
+        maintenance_window_id: { type: string }
+        include_heuristic: { type: boolean }
+        categories:
+          type: array
+          items: { type: string }
+        clients:
+          type: array
+          items: { $ref: '#/components/schemas/MaintenanceClientImpact' }
+        site_ids:
+          type: array
+          items: { type: string }
+        services:
+          type: array
+          items:
+            type: object
+            required: [id, name, heuristic]
+            properties:
+              id: { type: string }
+              name: { type: string }
+              client_id: { type: string }
+              heuristic: { type: boolean }
+        truncated: { type: boolean }
     MaintenanceWindowListResponse:
       allOf:
         - $ref: '#/components/schemas/PaginationEnvelope'

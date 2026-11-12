@@ -1940,6 +1940,29 @@ export interface paths {
     patch: operations['updateMaintenanceWindow'];
     trace?: never;
   };
+  '/api/v1/maintenance-windows/{id}/impact': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Preview the clients, sites and services a maintenance window affects
+     * @description The impact of the window's CIs failing together over the configuration graph (MGT-04, IMP-05, WP-1034), computed in the caller's scope: a client outside it never appears. Per client the number of the window's own CIs, of the CIs affected over certain paths and (with include_heuristic) over heuristic paths, and of the affected services.
+     */
+    get: operations['getMaintenanceWindowImpact'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/maintenance-windows/{id}/notify': {
     parameters: {
       query?: never;
@@ -1952,7 +1975,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Notify affected customers (clients derived from the window's CIs) */
+    /**
+     * Notify the clients a maintenance window affects over the graph
+     * @description Finds the affected clients like GET …/impact and announces the window to each in one transaction: one notification of the channel notify (pending) and the event maintenance.scheduled naming it. The notification chain delivers it to the client's contacts with the roles of contact_roles (empty: every contact of the client) and to the users with maintenance:read in the client. A client whose notification is pending or sent is not announced again; a failed one is announced anew under a new notification id, so its status follows the deliveries of the new announcement. An unknown category is 422 (MGT-04, NTF-05, WP-1034).
+     */
     post: operations['notifyMaintenanceWindow'];
     delete?: never;
     options?: never;
@@ -1970,7 +1996,10 @@ export interface paths {
       };
       cookie?: never;
     };
-    /** List notifications of a maintenance window */
+    /**
+     * List notifications of a maintenance window
+     * @description The status of a notification of the channel notify follows its deliveries; without a delivery it is never sent.
+     */
     get: operations['listMaintenanceNotifications'];
     put?: never;
     post?: never;
@@ -12912,7 +12941,7 @@ export interface components {
         [key: string]: 'subscribed' | 'muted';
       };
       /**
-       * @description Categories whose e-mails are bundled into one digest per window (NTF-04): category → hourly (ends at the full hour) or daily (ends at midnight in time_zone). Allowed are the categories with a non-critical event (contract, entitlement, export, job, review, stock, ticket, warranty, webhook); critical notifications, the in-app center and webhooks are never bundled. Omitted: the default `{"review":"hourly"}`; `{}`: every e-mail on its own.
+       * @description Categories whose e-mails are bundled into one digest per window (NTF-04): category → hourly (ends at the full hour) or daily (ends at midnight in time_zone). Allowed are the categories with a non-critical event (contract, entitlement, export, job, maintenance, review, stock, ticket, warranty, webhook); critical notifications, the in-app center and webhooks are never bundled. Omitted: the default `{"review":"hourly"}`; `{}`: every e-mail on its own.
        * @example {
        *       "review": "hourly"
        *     }
@@ -17984,6 +18013,61 @@ export interface components {
       description?: string;
       /** @enum {string} */
       status?: 'scheduled' | 'in_progress' | 'completed' | 'cancelled';
+    };
+    MaintenanceNotification: {
+      id: string;
+      organization_id: string;
+      maintenance_window_id: string;
+      client_id?: string;
+      /**
+       * @description notify delivers through the notification chain (WP-1034); webhook rows were queued before and stay readable.
+       * @enum {string}
+       */
+      channel: 'notify' | 'webhook';
+      /**
+       * @description For the channel notify derived from the deliveries - sent once one is delivered, failed once all failed finally, otherwise pending.
+       * @enum {string}
+       */
+      status: 'pending' | 'sent' | 'failed';
+      /** Format: date-time */
+      sent_at?: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    MaintenanceNotifyRequest: {
+      /** @default false */
+      include_heuristic: boolean;
+      categories?: string[];
+      /** @description Roles (contact.role) of the client contacts to notify; empty notifies every contact of the client. */
+      contact_roles?: string[];
+    };
+    MaintenanceNotifyResponse: {
+      /** @description Notifications a channel delivered. */
+      notified: number;
+      /** @description Notifications still pending or failed. */
+      queued: number;
+      notifications: components['schemas']['MaintenanceNotification'][];
+    };
+    MaintenanceClientImpact: {
+      client_id: string;
+      window_cis: number;
+      certain_cis: number;
+      heuristic_cis: number;
+      services: number;
+    };
+    MaintenanceImpactPreview: {
+      maintenance_window_id: string;
+      include_heuristic: boolean;
+      categories: string[];
+      clients: components['schemas']['MaintenanceClientImpact'][];
+      site_ids: string[];
+      services: {
+        id: string;
+        name: string;
+        client_id?: string;
+        heuristic: boolean;
+      }[];
+      truncated: boolean;
     };
     MaintenanceWindowListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['MaintenanceWindow'][];
@@ -26613,6 +26697,45 @@ export interface operations {
       404: components['responses']['NotFound'];
     };
   };
+  getMaintenanceWindowImpact: {
+    parameters: {
+      query?: {
+        /** @description Also count CIs reached only over heuristic paths (connected_to); default false. */
+        include_heuristic?: boolean;
+        /** @description Comma-separated relationship categories the impact follows (network, power, hosting, logical, physical); empty follows all; an unknown one is 422. */
+        categories?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Impact preview */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['MaintenanceImpactPreview'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+      500: components['responses']['InternalServerError'];
+      /** @description No configuration graph available. */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
   notifyMaintenanceWindow: {
     parameters: {
       query?: never;
@@ -26623,17 +26746,26 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        'application/json': components['schemas']['MaintenanceNotifyRequest'];
+      };
+    };
     responses: {
-      /** @description Notifications recorded */
+      /** @description Notifications of the affected clients */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['MaintenanceNotifyResponse'];
+        };
       };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+      500: components['responses']['InternalServerError'];
     };
   };
   listMaintenanceNotifications: {
@@ -26653,10 +26785,15 @@ export interface operations {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': {
+            data: components['schemas']['MaintenanceNotification'][];
+          };
+        };
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      500: components['responses']['InternalServerError'];
     };
   };
   listDisposalRecords: {

@@ -2,18 +2,19 @@ package maintenance
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const windowCols = `id::text, organization_id::text, title, COALESCE(description,''), starts_at, ends_at, status, COALESCE(created_by::text,''), created_at, updated_at`
-
-const notificationCols = `id::text, organization_id::text, maintenance_window_id::text, COALESCE(client_id::text,''), channel, status, sent_at, created_at`
 
 // PGRepository implements Repository backed by PostgreSQL with RLS.
 type PGRepository struct {
@@ -118,8 +119,8 @@ func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Window, 
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		w, err = scanWindow(tx.QueryRow(ctx, "SELECT "+windowCols+" FROM maintenance_window WHERE "+windowVisible+" AND organization_id = $1 AND id = $2", orgID, id))
-		if err == pgx.ErrNoRows {
-			return fmt.Errorf("maintenance window not found")
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errWindowNotFound
 		}
 		if err != nil {
 			return err
@@ -192,8 +193,8 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateW
 			sets = append(sets, "updated_at = now()")
 			w, err = scanWindow(tx.QueryRow(ctx, "UPDATE maintenance_window SET "+strings.Join(sets, ", ")+" WHERE "+windowWritable+" AND organization_id = $1 AND id = $2 RETURNING "+windowCols, args...))
 		}
-		if err == pgx.ErrNoRows {
-			return fmt.Errorf("maintenance window not found")
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errWindowNotFound
 		}
 		if err != nil {
 			return err
@@ -211,7 +212,7 @@ func (r *PGRepository) Delete(ctx context.Context, orgID, id string) error {
 			return err
 		}
 		if tag.RowsAffected() == 0 {
-			return fmt.Errorf("maintenance window not found")
+			return errWindowNotFound
 		}
 		return nil
 	})
@@ -227,88 +228,159 @@ func visibleWindowTx(ctx context.Context, tx pgx.Tx, orgID, windowID string) err
 		return err
 	}
 	if !visible {
-		return fmt.Errorf("maintenance window not found: %w", api.ErrNotFound)
+		return errWindowNotFound
 	}
 	return nil
 }
 
-// NotifyClients derives affected clients from the window's CIs and records
-// one sent notification per client.
-func (r *PGRepository) NotifyClients(ctx context.Context, orgID, windowID string) ([]Notification, error) {
+// notificationStatusSQL derives the status of a notify notification from
+// its deliveries (WP-1034): sent once one delivery is sent (sent_at the
+// first), failed once every delivery failed or was suppressed for good,
+// otherwise pending; without a delivery never sent. A delivery names the
+// notification at the top level of its data, a digest (NTF-04) in the data
+// of one of its entries. Every announcement has its own notification id
+// (a failed one gets a new id when announced again), so only the
+// deliveries of the latest announcement count. A webhook row of the time
+// before keeps its stored status.
+const notificationStatusSQL = `
+	SELECT CASE WHEN n.channel <> 'notify' THEN n.status
+	            WHEN d.sent > 0 THEN 'sent'
+	            WHEN d.total > 0 AND d.final = d.total THEN 'failed'
+	            ELSE 'pending' END,
+	       CASE WHEN n.channel <> 'notify' THEN n.sent_at ELSE d.first_sent END
+	FROM (SELECT count(*) AS total,
+	             count(*) FILTER (WHERE status = 'sent') AS sent,
+	             count(*) FILTER (WHERE status IN ('failed', 'suppressed')) AS final,
+	             min(sent_at) FILTER (WHERE status = 'sent') AS first_sent
+	        FROM notification_delivery
+	       WHERE organization_id = n.organization_id
+	         AND (data->>'maintenance_notification_id' = n.id::text
+	              OR (data ? 'entries' AND data->'entries' @> jsonb_build_array(jsonb_build_object('data',
+	                    jsonb_build_object('maintenance_notification_id', n.id::text)))))) d`
+
+// notificationSelect reads notifications with their derived status.
+const notificationSelect = `SELECT n.id::text, n.organization_id::text, n.maintenance_window_id::text, COALESCE(n.client_id::text, ''),
+	n.channel, s.status, s.sent_at, n.created_at
+	FROM maintenance_notification n CROSS JOIN LATERAL (` + notificationStatusSQL + `) AS s(status, sent_at)`
+
+func scanNotification(row pgx.Row) (Notification, error) {
+	n := Notification{}
+	err := row.Scan(&n.ID, &n.OrganizationID, &n.WindowID, &n.ClientID, &n.Channel, &n.Status, &n.SentAt, &n.CreatedAt)
+	return n, err
+}
+
+// directClientsTx returns the clients of the window's visible CIs.
+func directClientsTx(ctx context.Context, tx pgx.Tx, orgID, windowID string) ([]ClientImpact, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT ci.client_id::text, count(*)
+		FROM maintenance_window_ci mwc
+		JOIN ci ON ci.id = mwc.ci_id
+		WHERE mwc.maintenance_window_id = $1 AND mwc.organization_id = $2 AND ci.client_id IS NOT NULL
+		GROUP BY ci.client_id ORDER BY 1`, windowID, orgID)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (ClientImpact, error) {
+		var c ClientImpact
+		return c, row.Scan(&c.ClientID, &c.WindowCIs)
+	})
+}
+
+// NotifyClients announces the window to the clients of plan (nil: the
+// clients of its own CIs) in one transaction (WP-1034): per client one
+// notification of the channel notify, pending, and the event
+// maintenance.scheduled naming it (maintenance_notification_id), written
+// last before the commit (Konvention 20). The notification chain delivers
+// it to the client's contacts and users. A client whose notification is
+// pending or sent is not announced again; a failed one is reset to
+// pending under a new id and announced anew, so its status follows the
+// deliveries of the new announcement only. Concurrent calls for one window
+// run one after the other (transaction advisory lock), so a client is
+// announced once.
+func (r *PGRepository) NotifyClients(ctx context.Context, orgID, windowID string, plan *NotifyPlan) ([]Notification, error) {
 	out := []Notification{}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := visibleWindowTx(ctx, tx, orgID, windowID); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `
-			SELECT DISTINCT ci.client_id::text
-			FROM maintenance_window_ci mwc
-			JOIN ci ON ci.id = mwc.ci_id
-			JOIN maintenance_window ON maintenance_window.id = mwc.maintenance_window_id AND `+windowVisible+`
-			WHERE mwc.maintenance_window_id = $1 AND mwc.organization_id = $2
-			  AND ci.client_id IS NOT NULL
-		`, windowID, orgID)
-		if err != nil {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('maintenance.notify:' || $1::text, 0))`,
+			windowID); err != nil {
 			return err
 		}
-		var clientIDs []string
-		for rows.Next() {
-			var id string
-			if err := rows.Scan(&id); err != nil {
-				rows.Close()
-				return err
-			}
-			clientIDs = append(clientIDs, id)
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
+		var title string
+		var startsAt, endsAt time.Time
+		if err := tx.QueryRow(ctx, `SELECT title, starts_at, ends_at FROM maintenance_window WHERE organization_id = $1 AND id = $2`,
+			orgID, windowID).Scan(&title, &startsAt, &endsAt); err != nil {
 			return err
 		}
-		// Queued, not sent: no channel delivers yet, so neither status nor
-		// sent_at may claim a delivery. One notification per window, client
-		// and channel (migration 000173, F-235): a repeated announcement
-		// queues nothing new and returns the stored notification.
-		for _, clientID := range clientIDs {
-			if _, err := tx.Exec(ctx, `
-				INSERT INTO maintenance_notification (organization_id, maintenance_window_id, client_id, channel, status)
-				VALUES ($1, $2, $3::uuid, 'webhook', $4)
-				ON CONFLICT (maintenance_window_id, client_id, channel) DO NOTHING
-			`, orgID, windowID, clientID, NotificationPending); err != nil {
+		targets, roles := []ClientImpact(nil), []string(nil)
+		if plan != nil {
+			targets, roles = plan.Clients, plan.ContactRoles
+		} else {
+			var err error
+			if targets, err = directClientsTx(ctx, tx, orgID, windowID); err != nil {
 				return err
 			}
-			n := Notification{}
-			if err := tx.QueryRow(ctx, "SELECT "+notificationCols+` FROM maintenance_notification
-				WHERE organization_id = $1 AND maintenance_window_id = $2 AND client_id = $3::uuid AND channel = 'webhook'`,
-				orgID, windowID, clientID).
-				Scan(&n.ID, &n.OrganizationID, &n.WindowID, &n.ClientID, &n.Channel, &n.Status, &n.SentAt, &n.CreatedAt); err != nil {
+		}
+		var announce []*events.Event
+		for i := range targets {
+			target := &targets[i]
+			existing, err := scanNotification(tx.QueryRow(ctx, notificationSelect+`
+				WHERE n.organization_id = $1 AND n.maintenance_window_id = $2 AND n.client_id = $3::uuid AND n.channel = 'notify'`,
+				orgID, windowID, target.ClientID))
+			switch {
+			case err == nil && existing.Status != NotificationFailed:
+				out = append(out, existing)
+				continue
+			case err != nil && !errors.Is(err, pgx.ErrNoRows):
+				return err
+			}
+			n, err := scanNotification(tx.QueryRow(ctx, `
+				WITH up AS (
+					INSERT INTO maintenance_notification (organization_id, maintenance_window_id, client_id, channel, status)
+					VALUES ($1, $2, $3::uuid, 'notify', 'pending')
+					ON CONFLICT (maintenance_window_id, client_id, channel)
+						DO UPDATE SET id = gen_random_uuid(), status = 'pending', sent_at = NULL
+					RETURNING id, organization_id, maintenance_window_id, client_id, channel, created_at)
+				SELECT id::text, organization_id::text, maintenance_window_id::text, client_id::text, channel, 'pending', NULL::timestamptz, created_at
+				FROM up`, orgID, windowID, target.ClientID))
+			if err != nil {
 				return err
 			}
 			out = append(out, n)
+			announce = append(announce, &events.Event{OrgID: orgID, Type: events.MaintenanceScheduled, EntityID: windowID,
+				Data: ScheduledData{
+					MaintenanceWindowData: events.MaintenanceWindowData{ID: windowID, ClientID: target.ClientID,
+						StartsAt: startsAt.UTC().Format(time.RFC3339), EndsAt: endsAt.UTC().Format(time.RFC3339)},
+					Title: title, MaintenanceNotificationID: n.ID, AffectedCIs: target.AffectedCIs(),
+					Services: target.Services, ContactRoles: roles}})
 		}
-		return nil
+		if len(announce) == 0 {
+			return nil
+		}
+		return database.BeforeCommit(ctx, func() error {
+			_, err := events.NewOutbox().AppendMany(ctx, tx, announce)
+			return err
+		})
 	})
 	return out, err
 }
 
+// ListNotifications returns the notifications of the window with their
+// status derived from the deliveries.
 func (r *PGRepository) ListNotifications(ctx context.Context, orgID, windowID string) ([]Notification, error) {
 	out := []Notification{}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := visibleWindowTx(ctx, tx, orgID, windowID); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, "SELECT "+notificationCols+" FROM maintenance_notification WHERE organization_id = $1 AND maintenance_window_id = $2 ORDER BY created_at ASC", orgID, windowID)
+		rows, err := tx.Query(ctx, notificationSelect+` WHERE n.organization_id = $1 AND n.maintenance_window_id = $2
+			ORDER BY n.created_at ASC, n.id ASC`, orgID, windowID)
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
-		for rows.Next() {
-			n := Notification{}
-			if err := rows.Scan(&n.ID, &n.OrganizationID, &n.WindowID, &n.ClientID, &n.Channel, &n.Status, &n.SentAt, &n.CreatedAt); err != nil {
-				return err
-			}
-			out = append(out, n)
-		}
-		return rows.Err()
+		out, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (Notification, error) { return scanNotification(row) })
+		return err
 	})
-	return out, err
+	return api.NonNilSlice(out), err
 }

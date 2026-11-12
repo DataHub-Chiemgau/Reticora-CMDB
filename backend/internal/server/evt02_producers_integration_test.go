@@ -270,6 +270,7 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 		admpSync                           *admp.Sync
 		alarms                             = alarm.NewPGService(f.App)
 		ackAlarm, sevAlarm, resAlarm       *alarm.Alarm
+		maintWindow, maintCI               string
 		allocParent                        string
 		hookServer                         *httptest.Server
 		hookSubscription, hookDelivery     string
@@ -1148,6 +1149,32 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 					t.Errorf("org.deletion_cancelled data %v", data)
 				}
 			}},
+		{typ: events.MaintenanceScheduled,
+			// The announcement of a maintenance window to its affected
+			// client (WP-1034): one notification and one event per client.
+			setup: func(t *testing.T) {
+				maintCI = f.CI(t, f.OrgA, f.Client1, "evt02-maint-ci")
+				r := call(t, admin, http.MethodPost, "/api/v1/maintenance-windows",
+					`{"title":"evt02 maintenance","starts_at":"2030-01-01T22:00:00Z","ends_at":"2030-01-02T02:00:00Z","ci_ids":["`+maintCI+`"]}`)
+				if r.Code != http.StatusCreated {
+					t.Fatalf("create window: %d %s", r.Code, t6Short(r.Body))
+				}
+				maintWindow = t6ID(r.Body)
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/maintenance-windows/"+maintWindow+"/notify", `{"contact_roles":["technical"]}`)
+				answered(t, "POST /maintenance-windows/{id}/notify", r, refused, http.StatusOK)
+				if refused {
+					unchanged(t, "maintenance notifications", count(t, `maintenance_notification WHERE maintenance_window_id = $1`, maintWindow), "0")
+				}
+				return maintWindow
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["client_id"] != f.Client1 || data["maintenance_notification_id"] == nil ||
+					data["affected_cis"] != 1.0 || data["starts_at"] != "2030-01-01T22:00:00Z" {
+					t.Errorf("maintenance.scheduled data %v", data)
+				}
+			}},
 		{typ: events.AlarmOpened,
 			// The lifecycle opens a new alarm of a rule series (WP-982).
 			act: func(t *testing.T, refused bool) string {
@@ -1633,7 +1660,6 @@ var plannedProducers = map[string]string{
 	"monitoring.suspension_changed": "WP-942",
 	"capacity.forecast_exceeded":    "WP-1060",
 	"sla.violated":                  "WP-1049",
-	"maintenance.scheduled":         "WP-1034",
 	"maintenance.started":           "WP-1033",
 	"maintenance.ended":             "WP-1033",
 	"workflow.run_started":          "WP-1092",
@@ -1762,7 +1788,7 @@ func TestEVT02ProducerCoverageRule(t *testing.T) {
 		"two cases of a type":            {append(slices.Clone(base), events.CICreated), true},
 		"two cases of a phase 2 type":    {append(slices.Clone(base), events.AssetCreated, events.AssetCreated), true},
 		"unknown type":                   {append(slices.Clone(base), "asset.exploded"), true},
-		"reserved type":                  {append(slices.Clone(base), "maintenance.scheduled"), true},
+		"reserved type":                  {append(slices.Clone(base), "maintenance.started"), true},
 		"phase 3 with a case and a plan": {append(slices.Clone(base), events.AlarmEscalated), true},
 	} {
 		if problems := evt02CoverageProblems(tc.cases); (len(problems) != 0) != tc.fails {

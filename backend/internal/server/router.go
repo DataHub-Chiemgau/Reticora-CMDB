@@ -939,7 +939,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		consumable.NewHandler(repos.Consumable),
 		// The goods receipt books through the movement service (WP-760).
 		order.NewHandler(repos.Order).WithBookings(movements),
-		maintenance.NewHandler(repos.Maintenance),
+		// The recipients of a window follow the graph impact of its CIs
+		// (MGT-04, WP-1034).
+		maintenance.NewHandler(repos.Maintenance).WithAnalyzer(topology.NewAnalyzer(repos.CI, repos.Relationship).
+			WithRelationshipTypes(repos.RelationshipType).WithCITypes(repos.CIType)),
 		disposal.NewHandler(repos.Disposal).WithLifecycle(movements, lifecycleService, repos.LifecycleResolver, repos.Lifecycle),
 		keymgmt.NewHandler(repos.Key),
 		training.NewHandler(repos.Training),

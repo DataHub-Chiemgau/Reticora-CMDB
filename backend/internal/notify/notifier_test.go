@@ -527,7 +527,7 @@ func TestDigestWindowsAndCategories(t *testing.T) {
 	if got := windowEnd(DigestDaily, "", at); !got.Equal(time.Date(2026, 3, 29, 0, 0, 0, 0, time.UTC)) {
 		t.Errorf("daily window end without a time zone: %v", got)
 	}
-	if got := strings.Join(DigestCategories(), ","); got != "contract,entitlement,export,job,review,stock,ticket,warranty,webhook" {
+	if got := strings.Join(DigestCategories(), ","); got != "contract,entitlement,export,job,maintenance,review,stock,ticket,warranty,webhook" {
 		t.Errorf("digest categories: %s", got)
 	}
 	if digestWindow(nil, "review") != DigestHourly || digestWindow(nil, "export") != "" ||

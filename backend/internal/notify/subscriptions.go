@@ -205,6 +205,31 @@ var Subscriptions = map[string]Subscription{
 			return &Audience{Permission: identity.PermStockWrite, AllWithPermission: true, ClientID: str(d, "client_id")}
 		},
 	},
+	events.MaintenanceScheduled: {
+		// A maintenance window announced to one affected client (MGT-04,
+		// NTF-05 [P3], WP-1034): the client's contacts in the roles of the
+		// announcement (contact_roles; empty: every contact of the client)
+		// and the users with maintenance:read in the client. Never another
+		// client's contacts, never the organization-wide ones. Not
+		// critical: quiet hours and muted categories apply.
+		Category: "maintenance",
+		Audience: func(d map[string]any) *Audience {
+			client := str(d, "client_id")
+			if client == "" {
+				return nil
+			}
+			var roles []string
+			if list, ok := d["contact_roles"].([]any); ok {
+				for _, r := range list {
+					if role, ok := r.(string); ok && role != "" {
+						roles = append(roles, role)
+					}
+				}
+			}
+			return &Audience{Permission: identity.PermMaintenanceRead, AllWithPermission: true, ClientID: client,
+				ClientContacts: &ClientContacts{ContactRoles: roles}}
+		},
+	},
 	events.DocumentScanned: {
 		// A finding quarantines the version (SEC-09, E-42, WP-734): its
 		// uploader and the org_admins who read the document are told. A

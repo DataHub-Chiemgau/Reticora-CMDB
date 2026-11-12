@@ -32,15 +32,16 @@ const paginationSpecPath = "../../../api/openapi.yaml"
 // notALists are GET operations whose body has a data array but that are no
 // list resources: a file export streams every row in one document.
 var notALists = map[string]string{
-	"/api/v1/export/cis":                     "export download (JSON file of the whole selection)",
-	"/api/v1/modules":                        "the fixed module catalog of the release (WP-214), no tenant data",
-	"/api/v1/admin/addons":                   "the fixed add-on catalog (WP-883), no tenant data",
-	"/api/v1/cis/{id}/credentials":           "the few bindings of one CI, replaced as a whole by PUT (WP-890)",
-	"/api/v1/cis/{id}/credentials/effective": "one entry per namespace of one CI (WP-891)",
-	"/api/v1/admin/plans":                    "the fixed plan matrix (WP-885), no tenant data",
-	"/api/v1/entitlements/plans":             "the fixed plan matrix (WP-885), no tenant data",
-	"/api/v1/entitlements/usage":             "one report row per quota of the plan model (WP-885), no list resource",
-	"/api/v1/admin/orgs/{id}/usage":          "one report row per quota of the plan model (WP-885), no list resource",
+	"/api/v1/export/cis":                             "export download (JSON file of the whole selection)",
+	"/api/v1/maintenance-windows/{id}/notifications": "at most one notification per affected client and channel of one window (WP-1034)",
+	"/api/v1/modules":                                "the fixed module catalog of the release (WP-214), no tenant data",
+	"/api/v1/admin/addons":                           "the fixed add-on catalog (WP-883), no tenant data",
+	"/api/v1/cis/{id}/credentials":                   "the few bindings of one CI, replaced as a whole by PUT (WP-890)",
+	"/api/v1/cis/{id}/credentials/effective":         "one entry per namespace of one CI (WP-891)",
+	"/api/v1/admin/plans":                            "the fixed plan matrix (WP-885), no tenant data",
+	"/api/v1/entitlements/plans":                     "the fixed plan matrix (WP-885), no tenant data",
+	"/api/v1/entitlements/usage":                     "one report row per quota of the plan model (WP-885), no list resource",
+	"/api/v1/admin/orgs/{id}/usage":                  "one report row per quota of the plan model (WP-885), no list resource",
 }
 
 // TestEveryListIsCursorPaginated is the architecture test of API-02 over

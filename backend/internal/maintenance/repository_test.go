@@ -17,7 +17,7 @@ func TestMaintenanceWindowNotifyDerivesClients(t *testing.T) {
 	if err := repo.Create(context.Background(), w); err != nil {
 		t.Fatal(err)
 	}
-	notifs, err := repo.NotifyClients(context.Background(), "org-1", w.ID)
+	notifs, err := repo.NotifyClients(context.Background(), "org-1", w.ID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestMaintenanceWindowNotifyDerivesClients(t *testing.T) {
 		t.Errorf("expected clients a+b notified, got %v", clients)
 	}
 	// tenant isolation
-	if _, err := repo.NotifyClients(context.Background(), "org-2", w.ID); err == nil {
+	if _, err := repo.NotifyClients(context.Background(), "org-2", w.ID, nil); err == nil {
 		t.Fatal("cross-tenant notify must fail")
 	}
 	// status filter

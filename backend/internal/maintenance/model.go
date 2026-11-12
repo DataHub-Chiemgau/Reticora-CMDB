@@ -3,7 +3,11 @@
 // derives the affected clients via the CIs' client assignment.
 package maintenance
 
-import "time"
+import (
+	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+)
 
 // Window is a scheduled maintenance time window.
 type Window struct {
@@ -20,15 +24,43 @@ type Window struct {
 	CIIDs          []string  `json:"ci_ids,omitempty"`
 }
 
-// Notification is a per-client customer notification for a window.
 // Notification statuses. A notification is sent only once a channel has
-// delivered it; until the notification chain exists (Epic B) it stays
-// pending (MGT-04, NTF-05, NFR-04).
+// delivered it (MGT-04, NTF-05, NFR-04): the status of a notification of
+// the channel notify follows its deliveries (notification_delivery with
+// data.maintenance_notification_id, WP-1034): at least one delivered is
+// sent, all finally failed is failed, otherwise pending.
 const (
 	NotificationPending = "pending"
 	NotificationSent    = "sent"
 	NotificationFailed  = "failed"
 )
+
+// Channels of a notification: notify delivers through the notification
+// chain (event maintenance.scheduled, WP-1034); webhook rows were queued
+// before it and stay readable.
+const (
+	ChannelNotify  = "notify"
+	ChannelWebhook = "webhook"
+)
+
+// NotifyRequest is the optional body of POST /maintenance-windows/{id}/notify.
+type NotifyRequest struct {
+	IncludeHeuristic bool     `json:"include_heuristic"`
+	Categories       []string `json:"categories"`
+	// ContactRoles selects the contacts of each client (contact.role);
+	// empty: every contact of the client.
+	ContactRoles []string `json:"contact_roles"`
+}
+
+// NotifyPlan is what a notification announces: the affected clients with
+// their numbers (RecipientFinder) and the contact roles. A nil plan
+// notifies the clients of the window's own CIs.
+type NotifyPlan struct {
+	Clients      []ClientImpact
+	ContactRoles []string
+}
+
+// Notification is a per-client customer notification for a window.
 
 type Notification struct {
 	ID             string     `json:"id"`
@@ -60,4 +92,17 @@ type UpdateWindowRequest struct {
 // FilterParams scopes window list queries.
 type FilterParams struct {
 	Status string
+}
+
+// ScheduledData is the data of maintenance.scheduled (MGT-04, WP-1034):
+// the frame events.MaintenanceWindowData (id is the window) for one client
+// with the title, the notification it delivers and the numbers of affected
+// CIs and services; contact_roles selects the client's contacts.
+type ScheduledData struct {
+	events.MaintenanceWindowData
+	Title                     string   `json:"title"`
+	MaintenanceNotificationID string   `json:"maintenance_notification_id"`
+	AffectedCIs               int      `json:"affected_cis"`
+	Services                  int      `json:"services"`
+	ContactRoles              []string `json:"contact_roles,omitempty"`
 }

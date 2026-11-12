@@ -1765,3 +1765,5 @@ ALR-03;[P3];E;backend/internal/alarm/incident_integration_test.go;WP-1027
 ALR-09;[P3];E;backend/internal/alarm/incident_test.go;WP-1027
 ALR-09;[P3];E;backend/internal/topology/impact_integration_test.go;WP-1026
 ALR-03;[P3];E;backend/internal/topology/redundancy_test.go;WP-1026
+MGT-04;[P3];E;backend/internal/maintenance/recipients_integration_test.go;WP-1034
+NTF-05;[B], Zusätze [P2], [P3];E;backend/internal/maintenance/recipients_integration_test.go;WP-1034

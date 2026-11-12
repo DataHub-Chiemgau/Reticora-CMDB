@@ -263,6 +263,21 @@ var Templates = map[string]map[string]render{
 					", " + fmt.Sprint(d["days_left"]) + " days left."}
 		},
 	},
+	events.MaintenanceScheduled: {
+		// A maintenance window announced to an affected client (WP-1034):
+		// title, time span and the number of affected CIs and services.
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Geplante Wartung: " + str(d, "title"),
+				"Für den Zeitraum " + str(d, "starts_at") + " bis " + str(d, "ends_at") + " ist die Wartung „" + str(d, "title") +
+					"“ geplant. Betroffen sind " + fmt.Sprint(d["affected_cis"]) + " Komponenten und " +
+					fmt.Sprint(d["services"]) + " Dienste."}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Scheduled maintenance: " + str(d, "title"),
+				"The maintenance \"" + str(d, "title") + "\" is scheduled from " + str(d, "starts_at") + " to " + str(d, "ends_at") +
+					". It affects " + fmt.Sprint(d["affected_cis"]) + " components and " + fmt.Sprint(d["services"]) + " services."}
+		},
+	},
 	events.StockBelowMinimum: {
 		// The total stock of a consumable below its minimum level (WP-285,
 		// WP-845): name, SKU, total stock and minimum level with the unit.
