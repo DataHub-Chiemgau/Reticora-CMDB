@@ -61,6 +61,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Patch("/api/v1/subnets/{id}", h.UpdateSubnet)
 	r.Delete("/api/v1/subnets/{id}", h.DeleteSubnet)
 	r.Get("/api/v1/subnets/{id}/addresses", h.ListSubnetAddresses)
+	r.Get("/api/v1/subnets/{id}/children", h.ListSubnetChildren)
 	r.Get("/api/v1/subnets/{id}/reservations", h.ListReservations)
 	r.Post("/api/v1/subnets/{id}/reservations", h.CreateReservation)
 	r.Delete("/api/v1/subnets/{id}/reservations/{ip_id}", h.DeleteReservation)
@@ -141,6 +142,15 @@ func (h *Handler) ListSubnets(w http.ResponseWriter, r *http.Request) {
 		ClientID: r.URL.Query().Get("client_id"),
 		SiteID:   r.URL.Query().Get("site_id"),
 	}
+	// parent_id=<id> lists the children of a subnet, parent_id=root the
+	// subnets without a parent the caller sees (IPM-02).
+	switch parent := r.URL.Query().Get("parent_id"); parent {
+	case "":
+	case "root":
+		f.Root = true
+	default:
+		f.ParentID = parent
+	}
 	items, total, err := h.repo.ListSubnets(r.Context(), orgID, f, page)
 	if err != nil {
 		api.WriteRepoError(w, err)
@@ -205,6 +215,7 @@ func (h *Handler) CreateSubnet(w http.ResponseWriter, r *http.Request) {
 		DNSServers:     req.DNSServers,
 		Description:    req.Description,
 		IsManagement:   req.IsManagement,
+		IsPool:         req.IsPool,
 	}
 	if err := h.repo.CreateSubnet(r.Context(), s); err != nil {
 		writeRepoError(w, err, "subnet not found")
@@ -311,6 +322,32 @@ func (h *Handler) DeleteSubnet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// ListSubnetChildren handles GET /api/v1/subnets/{id}/children: the
+// children of a visible subnet the caller sees (IPM-02).
+func (h *Handler) ListSubnetChildren(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := org(w, r)
+	if !ok {
+		return
+	}
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
+		return
+	}
+	subnetID := chi.URLParam(r, "id")
+	if _, err := h.repo.GetSubnet(r.Context(), orgID, subnetID); err != nil {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "subnet not found")
+		return
+	}
+	items, total, err := h.repo.ListSubnets(r.Context(), orgID, SubnetFilter{ParentID: subnetID}, page)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[Subnet]{
+		Data: items, Total: total, Limit: page.Limit, Offset: page.Offset, HasMore: page.Offset+page.Limit < total,
+	})
 }
 
 // ListSubnetAddresses handles GET /api/v1/subnets/{id}/addresses

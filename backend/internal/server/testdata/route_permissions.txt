@@ -328,6 +328,7 @@ GET /api/v1/stocktakes/{id}/scans stocktake:read
 GET /api/v1/subnets ipam:read
 GET /api/v1/subnets/{id} ipam:read
 GET /api/v1/subnets/{id}/addresses ipam:read
+GET /api/v1/subnets/{id}/children ipam:read
 GET /api/v1/subnets/{id}/reservations ipam:read
 GET /api/v1/suppliers contract:read
 GET /api/v1/suppliers/{id} contract:read

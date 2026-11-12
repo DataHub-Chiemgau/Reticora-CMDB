@@ -4082,7 +4082,7 @@ export interface paths {
     put?: never;
     /**
      * Create a subnet
-     * @description A gateway outside the CIDR is 422 with field gateway, a gateway that is no IP address 400 (IPM-04). The gateway becomes an address of the subnet with is_gateway (type static, no interface), or marks an existing address of the gateway in the subnet's VRF.
+     * @description A gateway outside the CIDR is 422 with field gateway, a gateway that is no IP address 400 (IPM-04). The gateway becomes an address of the subnet with is_gateway (type static, no interface), or marks an existing address of the gateway in the subnet's VRF. The subnet is placed under the narrowest containing subnet of its VRF (parent_id), and the subnets it now contains hang below it (IPM-02). A true nesting is allowed in every section. An overlap (a parent that is no pool holds addresses of its own inside the subnet, or the subnet holds addresses of its own inside a child) is 409 with field cidr in a section with strict_mode (the detail names the other subnet only when the caller sees it); otherwise the answer carries warnings with code overlap. A child of a pool never overlaps.
      */
     post: operations['createSubnet'];
     delete?: never;
@@ -4105,15 +4105,41 @@ export interface paths {
     get: operations['getSubnet'];
     put?: never;
     post?: never;
-    /** Delete a subnet */
+    /**
+     * Delete a subnet
+     * @description The children of the subnet hang under its former parent (IPM-02).
+     */
     delete: operations['deleteSubnet'];
     options?: never;
     head?: never;
     /**
      * Update a subnet
-     * @description The gateway must lie inside the CIDR after the update, against the new CIDR when it changes (422 gateway; IPM-04). Changing the gateway moves the is_gateway mark to the address of the new gateway (created when missing), clearing it removes the mark; the addresses stay. A new CIDR that leaves addresses of the subnet outside is 422 with field cidr.
+     * @description The gateway must lie inside the CIDR after the update, against the new CIDR when it changes (422 gateway; IPM-04). Changing the gateway moves the is_gateway mark to the address of the new gateway (created when missing), clearing it removes the mark; the addresses stay. A new CIDR that leaves addresses of the subnet outside is 422 with field cidr. A changed CIDR or VRF re-hangs the subnet and its former children in both VRFs (IPM-02); the overlap rule of a strict section is 409 cidr, a subnet with addresses as pool 409 is_pool.
      */
     patch: operations['updateSubnet'];
+    trace?: never;
+  };
+  '/api/v1/subnets/{id}/children': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * List the children of a subnet
+     * @description The subnets whose narrowest containing subnet is this one (IPM-02), those the caller can see. A subnet outside the caller's scope is 404. Requires ipam:read.
+     */
+    get: operations['listSubnetChildren'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   '/api/v1/subnets/{id}/addresses': {
@@ -19350,6 +19376,18 @@ export interface components {
       dns_servers?: string[];
       description?: string;
       is_management: boolean;
+      /** @description Narrowest subnet of the same VRF that contains this one (IPM-02), computed on write; absent for a root and for a parent outside the caller's scope. */
+      readonly parent_id?: string;
+      /** @description Container without host addresses of its own. */
+      is_pool?: boolean;
+      /** @description Number of the children the caller can see. */
+      readonly child_count?: number;
+      /** @description Only in the answers of POST and PATCH: overlaps in a section without strict_mode (code overlap: a parent that is no pool holds addresses of its own inside its child); subnet_id names the other subnet when the caller sees it. */
+      readonly warnings?: {
+        /** @enum {string} */
+        code: 'overlap';
+        subnet_id?: string;
+      }[];
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -19370,6 +19408,8 @@ export interface components {
       dns_servers?: string[];
       description?: string;
       is_management?: boolean;
+      /** @description Container without host addresses of its own (IPM-02). */
+      is_pool?: boolean;
     };
     UpdateSubnetRequest: {
       client_id?: string;
@@ -19387,6 +19427,8 @@ export interface components {
       dns_servers?: string[];
       description?: string;
       is_management?: boolean;
+      /** @description Makes the subnet a container; a subnet with addresses cannot become one (409 is_pool). */
+      is_pool?: boolean;
     };
     /** @description VRF of the organization (TEN-10, CH10). Every organization has exactly one default VRF "global", created with the organization; it cannot be deleted. Every principal of the organization reads the VRFs; only principals without client or site restriction create, change or delete them (E-09). */
     VRF: {
@@ -30549,6 +30591,8 @@ export interface operations {
         offset?: components['parameters']['Offset'];
         client_id?: components['parameters']['ClientID'];
         site_id?: string;
+        /** @description The children of this subnet (IPM-02), or root for the subnets without a parent the caller can see (a subnet under a parent outside the caller's scope counts as root). */
+        parent_id?: string;
       };
       header?: never;
       path?: never;
@@ -30593,6 +30637,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
@@ -30675,6 +30720,48 @@ export interface operations {
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  listSubnetChildren: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description A page of child subnets */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SubnetListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
     };
   };
   listSubnetAddresses: {

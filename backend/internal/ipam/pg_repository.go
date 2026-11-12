@@ -48,12 +48,27 @@ type scanner interface {
 
 const subnetCols = `id::text, organization_id::text, COALESCE(client_id::text,''), COALESCE(site_id::text,''),
 	cidr::text, vrf_id::text, section_id::text, COALESCE(name,''), COALESCE(vlan_id::text,''), COALESCE(host(gateway),''), COALESCE(dns_servers::text[], '{}'),
-	COALESCE(description,''), is_management, created_at, updated_at`
+	COALESCE(description,''), is_management, ` + subnetTreeCols + `, created_at, updated_at`
+
+// subnetTreeCols are the hierarchy columns of a subnet row (IPM-02): the
+// parent only when the caller sees it (row level security of the
+// sub-select, Konvention 11), is_pool, and the number of the children the
+// caller sees (by idx_subnet_org_vrf_parent).
+const subnetTreeCols = `COALESCE((SELECT p.id::text FROM subnet p
+		WHERE p.id = subnet.parent_id AND p.organization_id = subnet.organization_id), ''),
+	is_pool,
+	(SELECT count(*)::int FROM subnet c
+		WHERE c.organization_id = subnet.organization_id AND c.vrf_id = subnet.vrf_id AND c.parent_id = subnet.id)`
+
+// subnetRootVisible: the subnet has no parent the caller sees (?parent_id=root).
+const subnetRootVisible = `(subnet.parent_id IS NULL OR NOT EXISTS (SELECT 1 FROM subnet p
+		WHERE p.id = subnet.parent_id AND p.organization_id = subnet.organization_id))`
 
 func scanSubnet(s scanner) (*Subnet, error) {
 	sn := &Subnet{}
 	if err := s.Scan(&sn.ID, &sn.OrganizationID, &sn.ClientID, &sn.SiteID, &sn.CIDR, &sn.VRFID, &sn.SectionID, &sn.Name,
-		&sn.VLANID, &sn.Gateway, &sn.DNSServers, &sn.Description, &sn.IsManagement, &sn.CreatedAt, &sn.UpdatedAt); err != nil {
+		&sn.VLANID, &sn.Gateway, &sn.DNSServers, &sn.Description, &sn.IsManagement, &sn.ParentID, &sn.IsPool, &sn.ChildCount,
+		&sn.CreatedAt, &sn.UpdatedAt); err != nil {
 		return nil, err
 	}
 	sn.CreatedAt = sn.CreatedAt.UTC()
@@ -167,6 +182,17 @@ func (r *PGRepository) ListSubnets(ctx context.Context, orgID string, f SubnetFi
 			args = append(args, f.SiteID)
 			pos++
 		}
+		if f.ParentID != "" {
+			if !api.IsUUID(f.ParentID) {
+				return nil
+			}
+			where += fmt.Sprintf(" AND parent_id = $%d", pos)
+			args = append(args, f.ParentID)
+			pos++
+		}
+		if f.Root {
+			where += " AND " + subnetRootVisible
+		}
 		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM subnet WHERE "+where, args...).Scan(&total); err != nil {
 			return err
 		}
@@ -202,30 +228,178 @@ func (r *PGRepository) GetSubnet(ctx context.Context, orgID, id string) (*Subnet
 	return sn, err
 }
 
+// lockSubnetTrees takes the advisory locks of the subnet trees of the
+// given VRFs (subnet_tree_lock, migration 000300) before the write touches
+// any subnet row: the placement triggers re-parent other subnets under the
+// lock, so a writer that held a row lock first and waited for the tree
+// lock in its trigger could deadlock with them. An empty VRF is the
+// organization's default VRF; the locks are taken in the order of the
+// trigger (by the text of the id), ids that are no UUID are left to the
+// write, which refuses them. The trigger takes the same locks again
+// (re-entrant).
+func lockSubnetTrees(ctx context.Context, tx pgx.Tx, orgID string, vrfIDs ...string) error {
+	ids := make([]string, 0, len(vrfIDs))
+	for _, v := range vrfIDs {
+		v = strings.ToLower(strings.TrimSpace(v))
+		if v == "" {
+			if err := tx.QueryRow(ctx, "SELECT COALESCE(default_vrf_of($1)::text, '')", orgID).Scan(&v); err != nil {
+				return fmt.Errorf("read default vrf: %w", err)
+			}
+		}
+		if api.IsUUID(v) && !slices.Contains(ids, v) {
+			ids = append(ids, v)
+		}
+	}
+	slices.Sort(ids)
+	for _, v := range ids {
+		if _, err := tx.Exec(ctx, "SELECT subnet_tree_lock($1, $2)", orgID, v); err != nil {
+			return fmt.Errorf("lock subnet tree: %w", err)
+		}
+	}
+	return nil
+}
+
+// lockTreesOfSubnet takes the tree lock of the current VRF of subnet id
+// (read under the caller's row level security, without row lock) and, on
+// a VRF change, of the target VRF. A subnet the caller cannot see takes no
+// lock; the write then finds nothing.
+func lockTreesOfSubnet(ctx context.Context, tx pgx.Tx, orgID, id string, targetVRF *string) error {
+	if !api.IsUUID(id) {
+		return nil
+	}
+	var current string
+	err := tx.QueryRow(ctx, "SELECT vrf_id::text FROM subnet WHERE organization_id = $1 AND id = $2", orgID, id).Scan(&current)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read subnet vrf: %w", err)
+	}
+	if targetVRF == nil {
+		return lockSubnetTrees(ctx, tx, orgID, current)
+	}
+	return lockSubnetTrees(ctx, tx, orgID, current, *targetVRF)
+}
+
 func (r *PGRepository) CreateSubnet(ctx context.Context, s *Subnet) error {
 	return database.WithRequestTenant(ctx, r.pool, s.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := lockSubnetTrees(ctx, tx, s.OrganizationID, s.VRFID); err != nil {
+			return err
+		}
 		if err := checkVLAN(ctx, tx, s.OrganizationID, s.VLANID, s.ClientID); err != nil {
 			return err
 		}
 		if err := checkSection(ctx, tx, s.OrganizationID, s.SectionID, s.ClientID); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(ctx,
-			`INSERT INTO subnet (organization_id, client_id, site_id, cidr, name, vlan_id, gateway, dns_servers, description, is_management, vrf_id, section_id)
-			 VALUES ($1,$2,$3,$4::cidr,$5,$6,$7::inet,$8::inet[],$9,$10,$11,$12) RETURNING id::text, vrf_id::text, section_id::text, created_at, updated_at`,
-			s.OrganizationID, nilIfEmpty(s.ClientID), nilIfEmpty(s.SiteID), s.CIDR, nilIfEmpty(s.Name),
-			nilIfEmpty(s.VLANID), nilIfEmpty(s.Gateway), dnsServersArg(s.DNSServers), nilIfEmpty(s.Description), s.IsManagement,
-			nilIfEmpty(s.VRFID), nilIfEmpty(s.SectionID),
-		).Scan(&s.ID, &s.VRFID, &s.SectionID, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		if err := placed(ctx, tx, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx,
+				`INSERT INTO subnet (organization_id, client_id, site_id, cidr, name, vlan_id, gateway, dns_servers, description, is_management, vrf_id, section_id, is_pool)
+				 VALUES ($1,$2,$3,$4::cidr,$5,$6,$7::inet,$8::inet[],$9,$10,$11,$12,$13) RETURNING id::text`,
+				s.OrganizationID, nilIfEmpty(s.ClientID), nilIfEmpty(s.SiteID), s.CIDR, nilIfEmpty(s.Name),
+				nilIfEmpty(s.VLANID), nilIfEmpty(s.Gateway), dnsServersArg(s.DNSServers), nilIfEmpty(s.Description), s.IsManagement,
+				nilIfEmpty(s.VRFID), nilIfEmpty(s.SectionID), s.IsPool,
+			).Scan(&s.ID)
+		}); err != nil {
 			return err
 		}
-		return syncGateway(ctx, tx, s.OrganizationID, s.ID, s.Gateway)
+		if err := syncGateway(ctx, tx, s.OrganizationID, s.ID, s.Gateway); err != nil {
+			return err
+		}
+		// The row as the triggers left it (VRF, section, parent).
+		stored, err := scanSubnet(tx.QueryRow(ctx, "SELECT "+subnetCols+" FROM subnet WHERE organization_id = $1 AND id = $2", s.OrganizationID, s.ID))
+		if err != nil {
+			return err
+		}
+		if stored.Warnings, err = overlapWarnings(ctx, tx, s.ID); err != nil {
+			return err
+		}
+		*s = *stored
+		return nil
 	})
+}
+
+// placed runs write, an insert or update of a subnet, in a savepoint: a
+// refusal of the overlap rule of a strict section (subnet_overlap_strict,
+// IPM-02) becomes 409 cidr naming the partner only when the caller sees
+// it; a pool with addresses (subnet_pool_addresses) 409 is_pool.
+func placed(ctx context.Context, tx pgx.Tx, write func(tx pgx.Tx) error) error {
+	sp, err := tx.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	err = write(sp)
+	if err == nil {
+		return sp.Commit(ctx)
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23514" ||
+		(pgErr.ConstraintName != "subnet_overlap_strict" && pgErr.ConstraintName != "subnet_pool_addresses") {
+		_ = sp.Rollback(ctx)
+		return err
+	}
+	if rbErr := sp.Rollback(ctx); rbErr != nil {
+		return rbErr
+	}
+	if pgErr.ConstraintName == "subnet_pool_addresses" {
+		return errPoolWithAddresses
+	}
+	// The other subnet, read under the caller's row level security: named
+	// only when visible.
+	partner := ""
+	if api.IsUUID(pgErr.Detail) {
+		if err := tx.QueryRow(ctx, "SELECT COALESCE(max(id::text), '') FROM subnet WHERE id = $1", pgErr.Detail).Scan(&partner); err != nil {
+			return err
+		}
+	}
+	return overlapConflict(partner)
+}
+
+// overlapWarnings are the warnings of a subnet outside a strict section
+// (IPM-02): one per subnet whose address space it shares, naming it only
+// when the caller sees it.
+func overlapWarnings(ctx context.Context, tx pgx.Tx, id string) ([]SubnetWarning, error) {
+	var partners []string
+	if err := tx.QueryRow(ctx, "SELECT subnet_overlaps($1)::text[]", id).Scan(&partners); err != nil {
+		return nil, fmt.Errorf("read subnet overlaps: %w", err)
+	}
+	if len(partners) == 0 {
+		return nil, nil
+	}
+	visible := map[string]bool{}
+	rows, err := tx.Query(ctx, "SELECT id::text FROM subnet WHERE id = ANY($1::uuid[])", partners)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			return nil, err
+		}
+		visible[v] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]SubnetWarning, 0, len(partners))
+	for _, p := range partners {
+		w := SubnetWarning{Code: "overlap"}
+		if visible[p] {
+			w.SubnetID = p
+		}
+		out = append(out, w)
+	}
+	return out, nil
 }
 
 func (r *PGRepository) UpdateSubnet(ctx context.Context, orgID, id string, req *UpdateSubnetRequest) (*Subnet, error) {
 	var sn *Subnet
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		// The tree locks before any row lock (checks and update below).
+		if err := lockTreesOfSubnet(ctx, tx, orgID, id, req.VRFID); err != nil {
+			return err
+		}
 		if err := checkSubnetVLAN(ctx, tx, orgID, id, req); err != nil {
 			return err
 		}
@@ -290,25 +464,46 @@ func (r *PGRepository) UpdateSubnet(ctx context.Context, orgID, id string, req *
 		if req.IsManagement != nil {
 			sets = append(sets, fmt.Sprintf("is_management = $%d", pos))
 			args = append(args, *req.IsManagement)
+			pos++
 		}
-		var err error
-		if len(sets) == 0 {
-			sn, err = scanSubnet(tx.QueryRow(ctx, "SELECT "+subnetCols+" FROM subnet WHERE organization_id = $1 AND id = $2", orgID, id))
-		} else {
+		if req.IsPool != nil {
+			sets = append(sets, fmt.Sprintf("is_pool = $%d", pos))
+			args = append(args, *req.IsPool)
+		}
+		if len(sets) > 0 {
 			sets = append(sets, "updated_at = NOW()")
-			q := "UPDATE subnet SET " + strings.Join(sets, ", ") + " WHERE organization_id = $1 AND id = $2 RETURNING " + subnetCols
-			sn, err = scanSubnet(tx.QueryRow(ctx, q, args...))
+			q := "UPDATE subnet SET " + strings.Join(sets, ", ") + " WHERE organization_id = $1 AND id = $2 RETURNING host(gateway)"
+			var gateway *string
+			err := placed(ctx, tx, func(tx pgx.Tx) error { return tx.QueryRow(ctx, q, args...).Scan(&gateway) })
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			if err != nil {
+				return subnetError(err)
+			}
+			if req.Gateway != nil {
+				gw := ""
+				if gateway != nil {
+					gw = *gateway
+				}
+				if err := syncGateway(ctx, tx, orgID, id, gw); err != nil {
+					return err
+				}
+			}
 		}
-		if err == pgx.ErrNoRows {
+		// The row as the triggers left it (parent, children).
+		var err error
+		sn, err = scanSubnet(tx.QueryRow(ctx, "SELECT "+subnetCols+" FROM subnet WHERE organization_id = $1 AND id = $2", orgID, id))
+		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
 		if err != nil {
-			return subnetError(err)
+			return err
 		}
-		if req.Gateway != nil {
-			return syncGateway(ctx, tx, orgID, id, sn.Gateway)
+		if len(sets) > 0 {
+			sn.Warnings, err = overlapWarnings(ctx, tx, id)
 		}
-		return nil
+		return err
 	})
 	return sn, err
 }
@@ -345,8 +540,22 @@ func syncGateway(ctx context.Context, tx pgx.Tx, orgID, subnetID, gateway string
 	return nil
 }
 
+// DeleteSubnet deletes a visible subnet; its children take its parent
+// (subnet_unplace) under the tree lock, taken before the row lock.
 func (r *PGRepository) DeleteSubnet(ctx context.Context, orgID, id string) error {
-	return r.deleteByID(ctx, orgID, "subnet", "true", id)
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := lockTreesOfSubnet(ctx, tx, orgID, id, nil); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, "DELETE FROM subnet WHERE organization_id = $1 AND id = $2", orgID, id)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
 }
 
 // deleteByID deletes a row of table that is visible under visible.

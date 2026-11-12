@@ -9484,6 +9484,14 @@ paths:
           in: query
           schema:
             type: string
+        - name: parent_id
+          in: query
+          description: >-
+            The children of this subnet (IPM-02), or root for the subnets
+            without a parent the caller can see (a subnet under a parent
+            outside the caller's scope counts as root).
+          schema:
+            type: string
       responses:
         '200':
           description: Paginated list of subnets
@@ -9503,7 +9511,15 @@ paths:
         A gateway outside the CIDR is 422 with field gateway, a gateway that
         is no IP address 400 (IPM-04). The gateway becomes an address of the
         subnet with is_gateway (type static, no interface), or marks an
-        existing address of the gateway in the subnet's VRF.
+        existing address of the gateway in the subnet's VRF. The subnet is
+        placed under the narrowest containing subnet of its VRF (parent_id),
+        and the subnets it now contains hang below it (IPM-02). A true
+        nesting is allowed in every section. An overlap (a parent that is no
+        pool holds addresses of its own inside the subnet, or the subnet
+        holds addresses of its own inside a child) is 409 with field cidr in
+        a section with strict_mode (the detail names the other subnet only
+        when the caller sees it); otherwise the answer carries warnings with
+        code overlap. A child of a pool never overlaps.
       requestBody:
         required: true
         content:
@@ -9521,6 +9537,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
         '500':
@@ -9554,7 +9572,9 @@ paths:
         moves the is_gateway mark to the address of the new gateway (created
         when missing), clearing it removes the mark; the addresses stay. A
         new CIDR that leaves addresses of the subnet outside is 422 with
-        field cidr.
+        field cidr. A changed CIDR or VRF re-hangs the subnet and its former
+        children in both VRFs (IPM-02); the overlap rule of a strict section
+        is 409 cidr, a subnet with addresses as pool 409 is_pool.
       requestBody:
         required: true
         content:
@@ -9582,9 +9602,39 @@ paths:
       operationId: deleteSubnet
       tags: [IPAM]
       summary: Delete a subnet
+      description: The children of the subnet hang under its former parent (IPM-02).
       responses:
         '204':
           description: Subnet deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/subnets/{id}/children:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listSubnetChildren
+      tags: [IPAM]
+      summary: List the children of a subnet
+      description: >-
+        The subnets whose narrowest containing subnet is this one (IPM-02),
+        those the caller can see. A subnet outside the caller's scope is
+        404. Requires ipam:read.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: A page of child subnets
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubnetListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -39232,6 +39282,34 @@ components:
           type: string
         is_management:
           type: boolean
+        parent_id:
+          type: string
+          readOnly: true
+          description: >-
+            Narrowest subnet of the same VRF that contains this one (IPM-02),
+            computed on write; absent for a root and for a parent outside the
+            caller's scope.
+        is_pool:
+          type: boolean
+          description: Container without host addresses of its own.
+        child_count:
+          type: integer
+          readOnly: true
+          description: Number of the children the caller can see.
+        warnings:
+          type: array
+          readOnly: true
+          description: >-
+            Only in the answers of POST and PATCH: overlaps in a section
+            without strict_mode (code overlap: a parent that is no pool holds
+            addresses of its own inside its child); subnet_id names the other
+            subnet when the caller sees it.
+          items:
+            type: object
+            required: [code]
+            properties:
+              code: { type: string, enum: [overlap] }
+              subnet_id: { type: string }
         created_at:
           type: string
           format: date-time
@@ -39277,6 +39355,9 @@ components:
           type: string
         is_management:
           type: boolean
+        is_pool:
+          type: boolean
+          description: Container without host addresses of its own (IPM-02).
 
     UpdateSubnetRequest:
       type: object
@@ -39318,6 +39399,9 @@ components:
           type: string
         is_management:
           type: boolean
+        is_pool:
+          type: boolean
+          description: Makes the subnet a container; a subnet with addresses cannot become one (409 is_pool).
 
     VRF:
       type: object

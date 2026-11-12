@@ -18,13 +18,32 @@ type Subnet struct {
 	SectionID string `json:"section_id"`
 	Name      string `json:"name,omitempty"`
 	// VLANID references the VLAN catalog (NET-02, NET-08).
-	VLANID       string    `json:"vlan_id,omitempty"`
-	Gateway      string    `json:"gateway,omitempty"`
-	DNSServers   []string  `json:"dns_servers,omitempty"`
-	Description  string    `json:"description,omitempty"`
-	IsManagement bool      `json:"is_management"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	VLANID       string   `json:"vlan_id,omitempty"`
+	Gateway      string   `json:"gateway,omitempty"`
+	DNSServers   []string `json:"dns_servers,omitempty"`
+	Description  string   `json:"description,omitempty"`
+	IsManagement bool     `json:"is_management"`
+	// ParentID is the narrowest subnet of the VRF that contains this one
+	// (IPM-02), computed on write and never written by the API; empty for
+	// a root and for a parent the caller cannot see (Konvention 11).
+	ParentID string `json:"parent_id,omitempty"`
+	// IsPool marks a container without host addresses of its own.
+	IsPool bool `json:"is_pool"`
+	// ChildCount counts the children the caller can see.
+	ChildCount int `json:"child_count"`
+	// Warnings are set by create and update only: overlaps (a parent that
+	// is no pool holds addresses of its own inside its child) in a section
+	// without strict_mode (IPM-02).
+	Warnings  []SubnetWarning `json:"warnings,omitempty"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
+}
+
+// SubnetWarning is a warning of a subnet write: code overlap names the
+// subnet whose address space it shares, when the caller sees it.
+type SubnetWarning struct {
+	Code     string `json:"code"`
+	SubnetID string `json:"subnet_id,omitempty"`
 }
 
 // CreateSubnetRequest is the payload for creating a subnet.
@@ -40,6 +59,7 @@ type CreateSubnetRequest struct {
 	DNSServers   []string `json:"dns_servers,omitempty"`
 	Description  string   `json:"description,omitempty"`
 	IsManagement bool     `json:"is_management,omitempty"`
+	IsPool       bool     `json:"is_pool,omitempty"`
 }
 
 // UpdateSubnetRequest is the payload for updating a subnet.
@@ -62,6 +82,9 @@ type UpdateSubnetRequest struct {
 	DNSServers   []string `json:"dns_servers,omitempty"`
 	Description  *string  `json:"description,omitempty"`
 	IsManagement *bool    `json:"is_management,omitempty"`
+	// IsPool makes the subnet a container; a subnet with addresses of its
+	// own cannot become one (409 is_pool).
+	IsPool *bool `json:"is_pool,omitempty"`
 }
 
 // IPAddress represents a single IP address assignment.

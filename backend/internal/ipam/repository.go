@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"sort"
 	"strings"
 	"sync"
@@ -45,6 +46,10 @@ func (e *InterfaceInUseError) Error() string {
 type SubnetFilter struct {
 	ClientID string
 	SiteID   string
+	// ParentID lists the children of a subnet (IPM-02); Root lists the
+	// subnets without a parent the caller can see.
+	ParentID string
+	Root     bool
 }
 
 // Repository defines persistence operations for IPAM entities.
@@ -142,11 +147,98 @@ func (r *MemoryRepository) ListSubnets(_ context.Context, orgID string, f Subnet
 		if f.SiteID != "" && s.SiteID != f.SiteID {
 			continue
 		}
-		out = append(out, *s)
+		if (f.ParentID != "" && s.ParentID != f.ParentID) || (f.Root && s.ParentID != "") {
+			continue
+		}
+		out = append(out, r.withChildCount(s))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	items, total := pageSlice(out, page)
 	return items, total, nil
+}
+
+// withChildCount is a copy of s with the number of its children.
+func (r *MemoryRepository) withChildCount(s *Subnet) Subnet {
+	cp := *s
+	cp.ChildCount = 0
+	for _, c := range r.subnets {
+		if c.OrganizationID == s.OrganizationID && c.ParentID == s.ID {
+			cp.ChildCount++
+		}
+	}
+	return cp
+}
+
+// placeOrg recomputes the parents of the subnets of the organization
+// (IPM-02).
+func (r *MemoryRepository) placeOrg(orgID string) {
+	var all []*Subnet
+	for _, s := range r.subnets {
+		if s.OrganizationID == orgID {
+			all = append(all, s)
+		}
+	}
+	placeSubnets(all)
+}
+
+// overlapPartners are the subnets whose address space s uses twice
+// (IPM-02, subnet_overlap_partners of migration 000300): its parent, when
+// that is no pool and holds addresses of its own inside s, and its
+// children that hold addresses of s, when s is no pool. A true nesting is
+// no overlap.
+func (r *MemoryRepository) overlapPartners(s *Subnet) []string {
+	var out []string
+	if p, ok := r.subnets[s.ParentID]; ok && !p.IsPool && r.holdsAddressIn(p.ID, s.CIDR) {
+		out = append(out, p.ID)
+	}
+	if !s.IsPool {
+		for _, c := range r.subnets {
+			if c.OrganizationID == s.OrganizationID && c.ParentID == s.ID && r.holdsAddressIn(s.ID, c.CIDR) {
+				out = append(out, c.ID)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// holdsAddressIn reports whether subnet subnetID has an address of its own
+// inside cidr.
+func (r *MemoryRepository) holdsAddressIn(subnetID, cidr string) bool {
+	p, err := netip.ParsePrefix(cidr)
+	if err != nil {
+		return false
+	}
+	for _, a := range r.addresses {
+		if a.SubnetID != subnetID {
+			continue
+		}
+		addr, err := netip.ParseAddr(strings.TrimSpace(a.Address))
+		if err != nil {
+			if ap, perr := netip.ParsePrefix(strings.TrimSpace(a.Address)); perr == nil {
+				addr, err = ap.Addr(), nil
+			}
+		}
+		if err == nil && p.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+// checkPlacement applies the overlap rule to s after placement: in a
+// strict section the first partner is a conflict; otherwise each partner
+// becomes a warning of s.
+func (r *MemoryRepository) checkPlacement(s *Subnet) error {
+	partners := r.overlapPartners(s)
+	if sec, ok := r.sections[s.SectionID]; ok && sec.StrictMode && len(partners) > 0 {
+		return overlapConflict(partners[0])
+	}
+	s.Warnings = nil
+	for _, id := range partners {
+		s.Warnings = append(s.Warnings, SubnetWarning{Code: "overlap", SubnetID: id})
+	}
+	return nil
 }
 
 func (r *MemoryRepository) GetSubnet(_ context.Context, orgID, id string) (*Subnet, error) {
@@ -156,7 +248,7 @@ func (r *MemoryRepository) GetSubnet(_ context.Context, orgID, id string) (*Subn
 	if !ok || s.OrganizationID != orgID {
 		return nil, ErrNotFound
 	}
-	cp := *s
+	cp := r.withChildCount(s)
 	return &cp, nil
 }
 
@@ -182,7 +274,15 @@ func (r *MemoryRepository) CreateSubnet(_ context.Context, s *Subnet) error {
 	s.CreatedAt, s.UpdatedAt = now, now
 	stored := *s
 	r.subnets[s.ID] = &stored
+	r.placeOrg(s.OrganizationID)
+	if err := r.checkPlacement(&stored); err != nil {
+		delete(r.subnets, s.ID)
+		r.placeOrg(s.OrganizationID)
+		return err
+	}
 	r.syncGateway(&stored)
+	*s = r.withChildCount(&stored)
+	stored.Warnings = nil
 	return nil
 }
 
@@ -231,6 +331,14 @@ func (r *MemoryRepository) UpdateSubnet(_ context.Context, orgID, id string, req
 	s, ok := r.subnets[id]
 	if !ok || s.OrganizationID != orgID {
 		return nil, ErrNotFound
+	}
+	before := *s
+	if req.IsPool != nil && *req.IsPool && !s.IsPool {
+		for _, a := range r.addresses {
+			if a.OrganizationID == orgID && a.SubnetID == id {
+				return nil, errPoolWithAddresses
+			}
+		}
 	}
 	if req.ClientID != nil || req.SectionID != nil {
 		clientID, sectionID := s.ClientID, s.SectionID
@@ -284,11 +392,21 @@ func (r *MemoryRepository) UpdateSubnet(_ context.Context, orgID, id string, req
 	if req.IsManagement != nil {
 		s.IsManagement = *req.IsManagement
 	}
+	if req.IsPool != nil {
+		s.IsPool = *req.IsPool
+	}
 	s.UpdatedAt = time.Now().UTC()
+	r.placeOrg(orgID)
+	if err := r.checkPlacement(s); err != nil {
+		*s = before
+		r.placeOrg(orgID)
+		return nil, err
+	}
 	if req.Gateway != nil {
 		r.syncGateway(s)
 	}
-	cp := *s
+	cp := r.withChildCount(s)
+	s.Warnings = nil
 	return &cp, nil
 }
 
@@ -307,6 +425,7 @@ func (r *MemoryRepository) DeleteSubnet(_ context.Context, orgID, id string) err
 			a.SubnetID, a.IsGateway = "", false
 		}
 	}
+	r.placeOrg(orgID)
 	return nil
 }
 
