@@ -127,9 +127,11 @@ für Prüfer und für Enterprise-Interessenten steht der Kontakt vorn.
 - **Datenqualität:** die fünf Identitätsschlüssel in ihrer Reihenfolge; die
   Tabelle der Quellränge; drei Beispiele für Review-Fälle; Zusammenführen und
   Rückgängigmachen. Bilder S-02, S-03.
-- **Topologie und Impact:** Kanten mit Herkunft und Verlässlichkeit;
-  Stromkette Gerät → PDU → USV → Quelle; Mehrfachausfall für Wartungsfenster;
-  Rack mit Vorder- und Rückseite. Bilder S-04, S-05, S-06.
+- **Topologie und Impact:** Topologie als Graph mit Punkten nach Status;
+  Ausfallsimulation für ein oder mehrere CIs mit Redundanz über Strom und
+  Cluster; Stromkette Gerät → PDU → USV → Quelle; Herkunft und Prüfstatus je
+  Beziehung in der CI-Ansicht; Rack mit Vorder- und Rückseite. Bilder S-04,
+  S-05, S-06. Das Netzschema folgt `design-system.md` §6.
 - **Verwaltung:** Asset und CI getrennt und verknüpft; Zuweisung mit
   Unterschrift; Lagerbewegungen; Inventur mit Barcode; Dokumente und
   Verträge; DATEV-Export. Bilder S-09, S-10.
@@ -209,7 +211,7 @@ benannte Person ihn abgehakt hat (F-14).
 | C-19 | Berichte für ISO 27001, NIS2, KRITIS | `README.md` §12 | Formulierung: Berichtsfunktion, keine Zertifizierung des Anbieters, keine Garantie der Konformität des Kunden |
 | C-20 | KI-Add-on: Verarbeitung in der EU oder selbst betrieben, kein Training mit Kundendaten, Einschalten je Organisation | `README.md` §13 | Anbieter und Region bestätigen |
 | C-21 | Paketumfang, Limits, Preise | Preise: Auftraggeber, 2026-11-12 (§6.1). Umfang und Limits: `README.md` §14, dort „noch zu bestätigen“ | **offene Punkte aus F-04** |
-| C-22 | Test: 30 Tage, Standard-Umfang, 100 CIs | `README.md` §14, Katalog ENT-07 | – |
+| C-22 | Test: 30 Tage, Standard-Umfang, 100 CIs | `README.md` §14, Katalog ENT-07; im Code 30 Tage, Tarif `standard`, 100 CIs (`backend/internal/config/config.go`) | **Was nach 30 Tagen geschieht, ist zu klären (F-19).** Bis dahin nennt die Website nur Dauer, Umfang und Limit. |
 | C-23 | Barrierefreiheit der App | Ziel WCAG 2.2 AA (`frontend/DESIGN.md` §7) | als Ziel formulieren, nicht als Konformität |
 | C-24 | Funktionen späterer Produktphasen (Monitoring-Alarme, Workflows, Compliance-Befunde, Endpoint-Agent, SAML/SCIM, Reseller, RFID, GIS, Mobil) | `README.md` §14, §17 | **gegen Launch-Umfang prüfen (F-03)** |
 | C-25 | Dedicated Instance und Air-Gapped-Betrieb | `docs/betrieb/referenzmodell.md` | Angebot bestätigen |

@@ -192,7 +192,11 @@ zur Klärung gilt die Annahme in der dritten Spalte.
 | F-15 | **Öffentliche Dokumentation:** Gibt es zum Start eine Doku, API-Referenz, Statusseite, Changelog? | Links nur, wenn die Ziele existieren | Navigation, Footer |
 | F-16 | **Referenzen:** Gibt es Kunden, die genannt werden dürfen? | keine Logos, keine Zitate | Startseite |
 | F-17 | **Datenschutzbeauftragte Person:** benannt oder nicht erforderlich (§38 BDSG)? | offen | Datenschutzerklärung |
-| F-18 | **Zugang zur Demo:** Ist `www.demo.reticora.cloud` ohne Anmeldung offen, mit einem veröffentlichten Demo-Zugang erreichbar, oder nur nach Anfrage? | Link „Live-Demo“ öffnet die Demo-Instanz; das Formular bleibt für Kontakt und Enterprise | Handlungsaufrufe, Navigation |
+| F-18 | **Zugang zur Demo:** Ist `www.demo.reticora.cloud` ohne Anmeldung offen, mit einem veröffentlichten Demo-Zugang erreichbar, oder nur nach Anfrage? Im Code gibt es keinen öffentlichen Demo-Zugang; er müsste eingerichtet werden. | Link „Live-Demo“ öffnet die Demo-Instanz; das Formular bleibt für Kontakt und Enterprise | Handlungsaufrufe, Navigation |
+| F-19 | **Ende des Tests und Übergang in einen Tarif:** `README.md` §14 sagt „danach Essential-Limits“. Der Code schaltet nach 30 Tagen nichts um, und ein Bestell- oder Zahlungsschritt ist im Signup nicht vorhanden. Was darf die Website zusagen, und wie wird aus einem Test ein Vertrag? | Website nennt nur „30 Tage, Standard-Umfang, bis 100 CIs“ und verweist für den Tarifwechsel auf den Kontakt | Preisseite, Abschlussband |
+| F-20 | **B2B in der Registrierung:** Das Signup der App hat keine Bestätigung der gewerblichen Nutzung, keine Annahme von AGB und Datenschutzhinweisen und keine Rechtslinks. Soll die App das ergänzen (Produktänderung), oder genügt der Hinweis auf der Website? | Hinweis „Angebot nur für Unternehmen“ direkt am Handlungsaufruf; Produktänderung empfohlen | BFSG, PAngV, §§312i–k BGB |
+| F-21 | **Sprache beim Wechsel in die App:** Die App nimmt keine Sprache per URL an; sie richtet sich nach dem Browser. Ein englischer Besucher mit deutschem Browser landet in der deutschen Registrierung. | hinnehmen; optional Produktänderung `?lang=en` | englische Seiten |
+| F-22 | **Erste Anmeldung:** Wer sich selbst registriert, muss bei der ersten Anmeldung eine Authenticator-App einrichten. Soll die Website das nennen? | ja, ein Satz in der Beschreibung des Tests | Startseite, Preise |
 
 ## 9. Phasen und Freigaben
 
@@ -201,7 +205,7 @@ zur Klärung gilt die Annahme in der dritten Spalte.
 | 1 | Anforderungen, Zielgruppe, Positionierung | Entwurf liegt vor (dieses Dokument, `brand-strategy.md`) |
 | 2 | Informationsarchitektur, Inhaltsstrategie | Entwurf liegt vor (`content-plan.md`) |
 | 3 | Drei Art Directions | **entschieden: B „Leitstand“** (2026-11-12) |
-| 4 | **Freigabe Design-System** | in Arbeit: Design-System B und technische Spezifikation; danach Freigabe durch den Auftraggeber |
+| 4 | **Freigabe Design-System** | **liegt zur Freigabe vor:** `design-system.md` (mit Ansicht) und `specs/2026-11-12-website-spec.md` |
 | 5 | Startseite | gesperrt bis Phase 4 |
 | 6 | Übrige Seiten, Formulare | gesperrt |
 | 7 | QA, Sicherheit, Datenschutz, Barrierefreiheit | gesperrt |
