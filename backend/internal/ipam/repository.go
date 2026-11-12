@@ -489,9 +489,33 @@ func (r *MemoryRepository) GetIPAddress(_ context.Context, orgID, id string) (*I
 	return &cp, nil
 }
 
+// bindCI applies the device rule of ip_address_ci_bind (IPM-13): with an
+// interface the CI of the address is the CI of the interface; an empty or
+// not explicitly written one is filled (a new interface takes its CI
+// along), an explicitly written different one is refused (422 ci_id).
+func (r *MemoryRepository) bindCI(a *IPAddress, ciExplicit bool) error {
+	if a.Role == "" {
+		a.Role = IPRolePrimary
+	}
+	ni, ok := r.interfaces[a.InterfaceID]
+	if a.InterfaceID == "" || !ok {
+		return nil
+	}
+	switch {
+	case a.CIID == "" || !ciExplicit:
+		a.CIID = ni.CIID
+	case a.CIID != ni.CIID:
+		return errAddressCIInterface
+	}
+	return nil
+}
+
 func (r *MemoryRepository) CreateIPAddress(_ context.Context, a *IPAddress) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := r.bindCI(a, a.CIID != ""); err != nil {
+		return err
+	}
 	a.VRFID = r.defaultVRF(a.OrganizationID).ID
 	if sn, ok := r.subnets[a.SubnetID]; ok && sn.VRFID != "" {
 		a.VRFID = sn.VRFID
@@ -523,12 +547,23 @@ func (r *MemoryRepository) UpdateIPAddress(_ context.Context, orgID, id string, 
 	if req.SubnetID != nil && a.IsGateway && *req.SubnetID != a.SubnetID {
 		return nil, errGatewayAddressSubnet
 	}
+	next := *a
 	if req.SubnetID != nil {
-		a.SubnetID = *req.SubnetID
+		next.SubnetID = *req.SubnetID
 	}
 	if req.InterfaceID != nil {
-		a.InterfaceID = *req.InterfaceID
+		next.InterfaceID = *req.InterfaceID
 	}
+	if req.CIID != nil {
+		next.CIID = *req.CIID
+	}
+	if req.Role != nil {
+		next.Role = *req.Role
+	}
+	if err := r.bindCI(&next, req.CIID != nil && *req.CIID != ""); err != nil {
+		return nil, err
+	}
+	a.SubnetID, a.InterfaceID, a.CIID, a.Role = next.SubnetID, next.InterfaceID, next.CIID, next.Role
 	if req.Type != nil {
 		a.Type = *req.Type
 	}
@@ -559,6 +594,31 @@ func (r *MemoryRepository) DeleteIPAddress(_ context.Context, orgID, id string) 
 	}
 	delete(r.addresses, id)
 	return nil
+}
+
+// ListCIAddresses implements CIAddressLister: the addresses bound to the
+// CI, ordered by address. Without a database the CIs are unknown, so an
+// unknown CI has no addresses.
+func (r *MemoryRepository) ListCIAddresses(_ context.Context, orgID, ciID string, page api.PaginationParams) ([]CIAddress, int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := []CIAddress{}
+	for _, a := range r.addresses {
+		if a.OrganizationID != orgID || a.CIID != ciID {
+			continue
+		}
+		c := CIAddress{IPAddress: *a}
+		if ni, ok := r.interfaces[a.InterfaceID]; ok {
+			c.InterfaceName = ni.Name
+		}
+		if sn, ok := r.subnets[a.SubnetID]; ok {
+			c.SubnetCIDR = sn.CIDR
+		}
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Address < out[j].Address })
+	items, total := pageSlice(out, page)
+	return items, total, nil
 }
 
 // --- Network Interfaces ---

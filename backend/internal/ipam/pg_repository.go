@@ -94,13 +94,15 @@ func dnsServersArg(dns []string) any {
 // IP addresses and interfaces carry no client column yet (WP-025). They are
 // visible only when the objects they hang off are visible under the
 // transaction's tenant scope, whose policies filter the subqueries: an
-// address through its subnet and its interface, an interface through its CI.
+// address through its subnet, its interface and its CI (ci_id, IPM-13), an
+// interface through its CI.
 const (
 	nicVisible = "EXISTS (SELECT 1 FROM ci WHERE ci.id = network_interface.ci_id)"
 	ipVisible  = `(ip_address.subnet_id IS NULL OR EXISTS (SELECT 1 FROM subnet WHERE subnet.id = ip_address.subnet_id))
 	AND (ip_address.interface_id IS NULL OR EXISTS (
 		SELECT 1 FROM network_interface JOIN ci ON ci.id = network_interface.ci_id
-		WHERE network_interface.id = ip_address.interface_id))`
+		WHERE network_interface.id = ip_address.interface_id))
+	AND (ip_address.ci_id IS NULL OR EXISTS (SELECT 1 FROM ci WHERE ci.id = ip_address.ci_id))`
 )
 
 // requireVisible fails with ErrNotFound when the written row of table does not
@@ -582,16 +584,24 @@ func (r *PGRepository) deleteByID(ctx context.Context, orgID, table, visible, id
 
 const ipCols = `id::text, organization_id::text, COALESCE(subnet_id::text,''), COALESCE(interface_id::text,''),
 	address::text, vrf_id::text, type, COALESCE(dns_name,''), COALESCE(description,''), last_seen_at,
-	reserved_until, COALESCE(reserved_by::text,''), state, state_changed_at, is_gateway, created_at, updated_at`
+	reserved_until, COALESCE(reserved_by::text,''), state, state_changed_at, is_gateway,
+	COALESCE(ci_id::text,''), role, created_at, updated_at`
 
 func scanIP(s scanner) (*IPAddress, error) {
 	a := &IPAddress{}
 	var lastSeen *time.Time
 	if err := s.Scan(&a.ID, &a.OrganizationID, &a.SubnetID, &a.InterfaceID, &a.Address, &a.VRFID, &a.Type,
 		&a.DNSName, &a.Description, &lastSeen, &a.ReservedUntil, &a.ReservedBy,
-		&a.State, &a.StateChangedAt, &a.IsGateway, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		&a.State, &a.StateChangedAt, &a.IsGateway, &a.CIID, &a.Role, &a.CreatedAt, &a.UpdatedAt); err != nil {
 		return nil, err
 	}
+	normalizeIP(a, lastSeen)
+	return a, nil
+}
+
+// normalizeIP sets the last observation and turns the times of a scanned
+// address to UTC.
+func normalizeIP(a *IPAddress, lastSeen *time.Time) {
 	if lastSeen != nil {
 		s := lastSeen.UTC().Format(time.RFC3339)
 		a.LastSeenAt = &s
@@ -606,7 +616,6 @@ func scanIP(s scanner) (*IPAddress, error) {
 	}
 	a.CreatedAt = a.CreatedAt.UTC()
 	a.UpdatedAt = a.UpdatedAt.UTC()
-	return a, nil
 }
 
 func (r *PGRepository) ListIPAddresses(ctx context.Context, orgID string, f *IPFilter, page api.PaginationParams) ([]IPAddress, int, error) {
@@ -654,16 +663,117 @@ func (r *PGRepository) GetIPAddress(ctx context.Context, orgID, id string) (*IPA
 
 func (r *PGRepository) CreateIPAddress(ctx context.Context, a *IPAddress) error {
 	return database.WithRequestTenant(ctx, r.pool, a.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx,
-			`INSERT INTO ip_address (organization_id, subnet_id, interface_id, address, type, dns_name, description)
-			 VALUES ($1,$2,$3,$4::inet,$5,$6,$7) RETURNING id::text, vrf_id::text, state, is_gateway, created_at, updated_at`,
-			a.OrganizationID, nilIfEmpty(a.SubnetID), nilIfEmpty(a.InterfaceID), a.Address, a.Type,
-			nilIfEmpty(a.DNSName), nilIfEmpty(a.Description),
-		).Scan(&a.ID, &a.VRFID, &a.State, &a.IsGateway, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		if err := checkAddressCI(ctx, tx, a.OrganizationID, a.CIID); err != nil {
 			return err
+		}
+		role := a.Role
+		if role == "" {
+			role = IPRolePrimary
+		}
+		if err := tx.QueryRow(ctx,
+			`INSERT INTO ip_address (organization_id, subnet_id, interface_id, address, type, dns_name, description, ci_id, role)
+			 VALUES ($1,$2,$3,$4::inet,$5,$6,$7,$8,$9)
+			 RETURNING id::text, vrf_id::text, state, is_gateway, COALESCE(ci_id::text, ''), role, created_at, updated_at`,
+			a.OrganizationID, nilIfEmpty(a.SubnetID), nilIfEmpty(a.InterfaceID), a.Address, a.Type,
+			nilIfEmpty(a.DNSName), nilIfEmpty(a.Description), nilIfEmpty(a.CIID), role,
+		).Scan(&a.ID, &a.VRFID, &a.State, &a.IsGateway, &a.CIID, &a.Role, &a.CreatedAt, &a.UpdatedAt); err != nil {
+			return addressCIError(err)
 		}
 		return requireVisible(ctx, tx, "ip_address", ipVisible, a.ID)
 	})
+}
+
+// errAddressCINotFound is the answer to an unknown CI, a CI of another
+// organization and a CI the caller cannot see alike (IPM-13).
+var errAddressCINotFound = &api.FieldError{Field: "ci_id", Message: "CI not found", Status: http.StatusUnprocessableEntity}
+
+// errAddressCIInterface: the CI of an address with interface is the CI of
+// the interface (ip_address_ci_matches_interface).
+var errAddressCIInterface = &api.FieldError{Field: "ci_id", Message: "the CI differs from the CI of the interface",
+	Status: http.StatusUnprocessableEntity}
+
+// checkAddressCI reads the CI of an address under the caller's row level
+// security in the writing transaction: the composite foreign key checks
+// only the organization. Without a CI it costs no statement.
+func checkAddressCI(ctx context.Context, tx pgx.Tx, orgID, ciID string) error {
+	if ciID == "" {
+		return nil
+	}
+	if !api.IsUUID(ciID) {
+		return errAddressCINotFound
+	}
+	var ok bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ci WHERE organization_id = $1 AND id = $2 AND deleted_at IS NULL)`,
+		orgID, ciID).Scan(&ok); err != nil {
+		return fmt.Errorf("read ci: %w", err)
+	}
+	if !ok {
+		return errAddressCINotFound
+	}
+	return nil
+}
+
+// addressCIError maps the device rules of an address write onto 422 ci_id:
+// a CI other than the one of the interface, a CI deleted meanwhile.
+func addressCIError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch {
+		case pgErr.Code == "23514" && pgErr.ConstraintName == "ip_address_ci_matches_interface":
+			return errAddressCIInterface
+		case pgErr.Code == "23503" && pgErr.ConstraintName == "ip_address_ci_fkey":
+			return errAddressCINotFound
+		}
+	}
+	return err
+}
+
+// ListCIAddresses lists the addresses the caller sees of a CI it sees
+// (IPM-13): with the name of the interface and the CIDR of the subnet,
+// each only when visible, ordered by address. An unknown or invisible CI
+// is ErrNotFound.
+func (r *PGRepository) ListCIAddresses(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]CIAddress, int, error) {
+	if !api.IsUUID(ciID) {
+		return nil, 0, ErrNotFound
+	}
+	out := []CIAddress{}
+	var total int
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var visible bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ci WHERE organization_id = $1 AND id = $2 AND deleted_at IS NULL)`,
+			orgID, ciID).Scan(&visible); err != nil {
+			return err
+		}
+		if !visible {
+			return ErrNotFound
+		}
+		const where = "ip_address.organization_id = $1 AND ip_address.ci_id = $2 AND " + ipVisible
+		if err := tx.QueryRow(ctx, "SELECT count(*) FROM ip_address WHERE "+where, orgID, ciID).Scan(&total); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, "SELECT "+ipCols+`,
+			COALESCE((SELECT n.name FROM network_interface n WHERE n.id = ip_address.interface_id AND n.organization_id = ip_address.organization_id), ''),
+			COALESCE((SELECT s.cidr::text FROM subnet s WHERE s.id = ip_address.subnet_id AND s.organization_id = ip_address.organization_id), '')
+			FROM ip_address WHERE `+where+" ORDER BY address, id LIMIT $3 OFFSET $4", orgID, ciID, page.Limit, page.Offset)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var c CIAddress
+			a := &c.IPAddress
+			var lastSeen *time.Time
+			if err := rows.Scan(&a.ID, &a.OrganizationID, &a.SubnetID, &a.InterfaceID, &a.Address, &a.VRFID, &a.Type,
+				&a.DNSName, &a.Description, &lastSeen, &a.ReservedUntil, &a.ReservedBy, &a.State, &a.StateChangedAt, &a.IsGateway,
+				&a.CIID, &a.Role, &a.CreatedAt, &a.UpdatedAt, &c.InterfaceName, &c.SubnetCIDR); err != nil {
+				return err
+			}
+			normalizeIP(a, lastSeen)
+			out = append(out, c)
+		}
+		return rows.Err()
+	})
+	return out, total, err
 }
 
 func (r *PGRepository) UpdateIPAddress(ctx context.Context, orgID, id string, req UpdateIPAddressRequest) (*IPAddress, error) {
@@ -726,6 +836,19 @@ func (r *PGRepository) UpdateIPAddress(ctx context.Context, orgID, id string, re
 		if req.Description != nil {
 			sets = append(sets, fmt.Sprintf("description = $%d", pos))
 			args = append(args, nilIfEmpty(*req.Description))
+			pos++
+		}
+		if req.CIID != nil {
+			if err := checkAddressCI(ctx, tx, orgID, *req.CIID); err != nil {
+				return err
+			}
+			sets = append(sets, fmt.Sprintf("ci_id = $%d", pos))
+			args = append(args, nilIfEmpty(*req.CIID))
+			pos++
+		}
+		if req.Role != nil {
+			sets = append(sets, fmt.Sprintf("role = $%d", pos))
+			args = append(args, *req.Role)
 		}
 		var err error
 		if len(sets) == 0 {
@@ -739,7 +862,7 @@ func (r *PGRepository) UpdateIPAddress(ctx context.Context, orgID, id string, re
 			return ErrNotFound
 		}
 		if err != nil {
-			return err
+			return addressCIError(err)
 		}
 		// The update may point the address at another subnet or interface.
 		if err := requireVisible(ctx, tx, "ip_address", ipVisible, id); err != nil {

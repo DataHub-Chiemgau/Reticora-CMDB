@@ -346,6 +346,8 @@ var routeRules = []routeRule{
 	{http.MethodGet, "cis/*/contacts", identity.PermContactRead},
 	{http.MethodPost, "cis/*/contacts", identity.PermContactWrite},
 	{http.MethodGet, "cis/*/interfaces", identity.PermIPAMRead},
+	// The addresses of a device (IPM-13, WP-911).
+	{http.MethodGet, "cis/*/addresses", identity.PermIPAMRead},
 	{http.MethodPost, "cis/*/interfaces", identity.PermIPAMWrite},
 	{http.MethodGet, "cis/*/relationships", identity.PermRelationshipRead},
 	{http.MethodGet, "cis/*/dependencies", identity.PermTopologyRead},

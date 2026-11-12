@@ -84,6 +84,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	}
 
 	r.Get("/api/v1/cis/{id}/interfaces", h.ListInterfaces)
+	// The addresses of a device (IPM-13, WP-911).
+	r.Get("/api/v1/cis/{id}/addresses", h.ListCIAddresses)
 	r.Post("/api/v1/cis/{id}/interfaces", h.CreateInterface)
 	r.Get("/api/v1/network-interfaces/{id}", h.GetInterface)
 	r.Patch("/api/v1/network-interfaces/{id}", h.UpdateInterface)
@@ -497,6 +499,10 @@ func (h *Handler) CreateIPAddress(w http.ResponseWriter, r *http.Request) {
 		api.WriteFieldError(w, &api.FieldError{Field: "type", Message: "invalid ip address type"})
 		return
 	}
+	if req.Role != "" && !ValidIPRoles[req.Role] {
+		api.WriteFieldError(w, errInvalidRole)
+		return
+	}
 	if req.SubnetID != "" {
 		subnet, err := h.repo.GetSubnet(r.Context(), orgID, req.SubnetID)
 		if err != nil {
@@ -521,6 +527,8 @@ func (h *Handler) CreateIPAddress(w http.ResponseWriter, r *http.Request) {
 		Type:           ipType,
 		DNSName:        req.DNSName,
 		Description:    req.Description,
+		CIID:           req.CIID,
+		Role:           req.Role,
 	}
 	if err := h.repo.CreateIPAddress(r.Context(), a); err != nil {
 		writeRepoError(w, err, "ip address not found")
@@ -563,6 +571,10 @@ func (h *Handler) UpdateIPAddress(w http.ResponseWriter, r *http.Request) {
 		api.WriteFieldError(w, errInvalidState)
 		return
 	}
+	if req.Role != nil && !ValidIPRoles[*req.Role] {
+		api.WriteFieldError(w, errInvalidRole)
+		return
+	}
 	// Validate address still belongs to a newly-assigned subnet.
 	if req.SubnetID != nil && *req.SubnetID != "" {
 		current, err := h.repo.GetIPAddress(r.Context(), orgID, chi.URLParam(r, "id"))
@@ -595,7 +607,7 @@ func (h *Handler) UpdateIPAddress(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "ip address not found")
 		return
 	}
-	if req.InterfaceID != nil || req.SubnetID != nil || req.Type != nil {
+	if req.InterfaceID != nil || req.SubnetID != nil || req.Type != nil || req.CIID != nil {
 		h.checkDuplicates(r.Context(), orgID, DuplicateSource{IPIDs: []string{a.ID}})
 	}
 	api.WriteJSON(w, http.StatusOK, a)
@@ -616,6 +628,41 @@ func (h *Handler) DeleteIPAddress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// errInvalidRole refuses a role outside ValidIPRoles (IPM-13).
+var errInvalidRole = &api.FieldError{Field: "role", Message: "role must be primary, secondary, vip, anycast, loopback or management",
+	Status: http.StatusUnprocessableEntity}
+
+// CIAddressLister lists the addresses of a CI (IPM-13); both repositories
+// have it.
+type CIAddressLister interface {
+	ListCIAddresses(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]CIAddress, int, error)
+}
+
+// ListCIAddresses handles GET /api/v1/cis/{id}/addresses: the addresses the
+// caller sees of a CI it sees, with interface, subnet, VRF, state, type and
+// role; an unknown or invisible CI is 404.
+func (h *Handler) ListCIAddresses(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := org(w, r)
+	if !ok {
+		return
+	}
+	lister, ok := h.repo.(CIAddressLister)
+	if !ok {
+		api.WriteError(w, http.StatusNotImplemented, "Not Implemented", "the addresses of a CI are not available")
+		return
+	}
+	page := api.ParsePagination(r)
+	items, total, err := lister.ListCIAddresses(r.Context(), orgID, chi.URLParam(r, "id"), page)
+	if err != nil {
+		writeRepoError(w, err, "CI not found")
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[CIAddress]{
+		Data: items, Total: total, Limit: page.Limit, Offset: page.Offset,
+		HasMore: page.Offset+page.Limit < total,
+	})
 }
 
 // --- Network Interfaces ---

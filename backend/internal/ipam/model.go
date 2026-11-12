@@ -128,8 +128,23 @@ type IPAddress struct {
 	State          string     `json:"state"`
 	StateChangedAt *time.Time `json:"state_changed_at,omitempty"`
 	IsGateway      bool       `json:"is_gateway"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	// CIID is the device of the address (IPM-13, E-215): with an interface
+	// always the CI of the interface, without one (VIP, anycast, a
+	// management address) set directly. Role is primary, secondary, vip,
+	// anycast, loopback or management.
+	CIID      string    `json:"ci_id,omitempty"`
+	Role      string    `json:"role"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// CIAddress is an address of a CI in GET /api/v1/cis/{id}/addresses
+// (IPM-13): the address with the name of its interface and the CIDR of
+// its subnet.
+type CIAddress struct {
+	IPAddress
+	InterfaceName string `json:"interface_name,omitempty"`
+	SubnetCIDR    string `json:"subnet_cidr,omitempty"`
 }
 
 // CreateIPAddressRequest is the payload for creating an IP address.
@@ -140,6 +155,11 @@ type CreateIPAddressRequest struct {
 	Type        string `json:"type,omitempty"`
 	DNSName     string `json:"dns_name,omitempty"`
 	Description string `json:"description,omitempty"`
+	// CIID binds the address to a device (IPM-13); with an interface it
+	// must be the CI of the interface (422 ci_id), empty takes it.
+	CIID string `json:"ci_id,omitempty"`
+	// Role of the address, default primary (IPM-13).
+	Role string `json:"role,omitempty"`
 }
 
 // UpdateIPAddressRequest is the payload for updating an IP address.
@@ -151,11 +171,30 @@ type UpdateIPAddressRequest struct {
 	Description *string `json:"description,omitempty"`
 	// State sets the state of the address manually (IPM-04).
 	State *string `json:"state,omitempty"`
+	// CIID sets ("" clears) the device of the address (IPM-13); a new
+	// interface takes its CI along.
+	CIID *string `json:"ci_id,omitempty"`
+	// Role changes the role of the address (IPM-13).
+	Role *string `json:"role,omitempty"`
 }
 
+// Roles of an address (IPM-13, E-215).
+const (
+	IPRolePrimary    = "primary"
+	IPRoleSecondary  = "secondary"
+	IPRoleVIP        = "vip"
+	IPRoleAnycast    = "anycast"
+	IPRoleLoopback   = "loopback"
+	IPRoleManagement = "management"
+)
+
+// ValidIPRoles lists the roles of an address (ip_address_role_check).
+var ValidIPRoles = map[string]bool{IPRolePrimary: true, IPRoleSecondary: true, IPRoleVIP: true, IPRoleAnycast: true,
+	IPRoleLoopback: true, IPRoleManagement: true}
+
 // IPFilter holds the optional filters of the address lists: the subnet,
-// the state and the gateway mark (IPM-04); type, client, VRF, CI (through
-// the interfaces of the CI) and q (prefix of the host or part of the DNS
+// the state and the gateway mark (IPM-04); type, client, VRF, CI (ci_id
+// of the address, IPM-13) and q (prefix of the host or part of the DNS
 // name) (IPM-20, filter.go).
 type IPFilter struct {
 	SubnetID  string

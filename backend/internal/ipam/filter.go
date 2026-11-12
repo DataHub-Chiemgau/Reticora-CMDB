@@ -185,11 +185,8 @@ func ipFilterWhere(orgID string, f *IPFilter) (where string, args []any) {
 		add("vrf_id = $?", f.VRFID)
 	}
 	if f.CIID != "" {
-		// Until the direct binding (WP-911): the addresses of the
-		// interfaces of the CI (idx_network_interface_ci,
-		// idx_ip_address_interface).
-		add(`interface_id IN (SELECT n.id FROM network_interface n
-			WHERE n.organization_id = $1 AND n.ci_id = $?)`, f.CIID)
+		// The device of the address (IPM-13, idx_ip_address_org_ci).
+		add("ci_id = $?", f.CIID)
 	}
 	if f.Q != "" {
 		// host() writes IPv6 in lower case: the prefix is compared in
@@ -272,11 +269,8 @@ func (r *MemoryRepository) addressMatches(a *IPAddress, f *IPFilter) bool {
 			return false
 		}
 	}
-	if f.CIID != "" {
-		ni, ok := r.interfaces[a.InterfaceID]
-		if !ok || ni.CIID != f.CIID {
-			return false
-		}
+	if f.CIID != "" && a.CIID != f.CIID {
+		return false
 	}
 	if f.Q != "" {
 		q := strings.ToLower(f.Q)

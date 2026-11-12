@@ -26698,7 +26698,6 @@ paths:
   /api/v1/cis/{id}/addresses:
     x-phase: P3
     x-feature: ipam
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -26706,20 +26705,29 @@ paths:
       tags: [IPAM]
       summary: List the IP addresses of a CI
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        The addresses bound to the CI (ip_address.ci_id, IPM-13, WP-911) the
+        caller sees, with interface id and name, subnet id and CIDR, VRF,
+        state, type and role, ordered by address. An unknown CI or one the
+        caller cannot see is 404. Requires ipam:read.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: List the IP addresses of a CI. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+          description: A page of addresses of the CI
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CIAddressListResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -42029,7 +42037,7 @@ components:
 
     IPAddress:
       type: object
-      required: [id, organization_id, address, vrf_id, type, created_at, updated_at]
+      required: [id, organization_id, address, vrf_id, type, role, created_at, updated_at]
       properties:
         id:
           type: string
@@ -42074,12 +42082,49 @@ components:
           type: boolean
           readOnly: true
           description: The address is the gateway of its subnet; set only through the gateway of the subnet (IPM-04).
+        ci_id:
+          type: string
+          description: >-
+            Device of the address (IPM-13, E-215). With an interface always
+            the CI of the interface; without one (VIP, anycast, a management
+            address) set directly.
+        role:
+          $ref: '#/components/schemas/IPAddressRole'
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+
+    IPAddressRole:
+      type: string
+      enum: [primary, secondary, vip, anycast, loopback, management]
+      description: Role of an address at its device (IPM-13); default primary.
+
+    CIAddress:
+      description: >-
+        Address of a CI (IPM-13) with the name of its interface and the CIDR
+        of its subnet, each present only when the caller sees them.
+      allOf:
+        - $ref: '#/components/schemas/IPAddress'
+        - type: object
+          properties:
+            interface_name:
+              type: string
+            subnet_cidr:
+              type: string
+
+    CIAddressListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/CIAddress'
 
     IPReservationCreateRequest:
       type: object
@@ -42111,6 +42156,15 @@ components:
           type: string
         description:
           type: string
+        ci_id:
+          type: string
+          description: >-
+            Device of the address (IPM-13). With interface_id it must be the
+            CI of the interface (422 ci_id), omitted it is taken from the
+            interface. An unknown CI, one of another organization and one
+            the caller cannot see are 422 ci_id alike.
+        role:
+          $ref: '#/components/schemas/IPAddressRole'
 
     UpdateIPAddressRequest:
       type: object
@@ -42127,6 +42181,14 @@ components:
           type: string
         state:
           $ref: '#/components/schemas/IPAddressState'
+        ci_id:
+          type: string
+          description: >-
+            Sets ("" clears) the device of the address (IPM-13); a new
+            interface_id takes the CI of the interface along. A CI other than
+            the CI of the interface is 422 ci_id.
+        role:
+          $ref: '#/components/schemas/IPAddressRole'
 
     IPAddressState:
       type: string

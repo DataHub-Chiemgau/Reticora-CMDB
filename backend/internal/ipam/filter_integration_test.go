@@ -294,11 +294,8 @@ func TestIPAMListPlansUnderRLS(t *testing.T) {
 		{"subnets of a parent", subnetPlan(ipam.SubnetFilter{ParentID: subnet}), "idx_subnet_org_vrf_parent", "parent_id"},
 		{"addresses by state", ipPlan(ipam.IPFilter{State: "active"}), "idx_ip_address_org_state", "state"},
 		{"addresses of a subnet", ipPlan(ipam.IPFilter{SubnetID: subnet}), "idx_ip_address_subnet", "subnet_id"},
-		// The interfaces of the CI, then their addresses by an index on
-		// interface_id (idx_ip_address_interface or the unique index of
-		// interface and address).
-		{"addresses of a CI", ipPlan(ipam.IPFilter{CIID: f.ID()}), "idx_ip_address_interface|uq_ip_address_org_vrf_interface_address",
-			"interface_id"},
+		// The device of the address (ip_address.ci_id, WP-911).
+		{"addresses of a CI", ipPlan(ipam.IPFilter{CIID: f.ID()}), "idx_ip_address_org_ci", "ci_id"},
 	} {
 		uses := false
 		for _, index := range strings.Split(c.index, "|") {

@@ -11494,7 +11494,7 @@ export interface paths {
     };
     /**
      * List the IP addresses of a CI
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description The addresses bound to the CI (ip_address.ci_id, IPM-13, WP-911) the caller sees, with interface id and name, subnet id and CIDR, VRF, state, type and role, ordered by address. An unknown CI or one the caller cannot see is 404. Requires ipam:read.
      */
     get: operations['listCIAddresses'];
     put?: never;
@@ -20896,10 +20896,26 @@ export interface components {
       readonly state_changed_at?: string;
       /** @description The address is the gateway of its subnet; set only through the gateway of the subnet (IPM-04). */
       readonly is_gateway?: boolean;
+      /** @description Device of the address (IPM-13, E-215). With an interface always the CI of the interface; without one (VIP, anycast, a management address) set directly. */
+      ci_id?: string;
+      role: components['schemas']['IPAddressRole'];
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    /**
+     * @description Role of an address at its device (IPM-13); default primary.
+     * @enum {string}
+     */
+    IPAddressRole: 'primary' | 'secondary' | 'vip' | 'anycast' | 'loopback' | 'management';
+    /** @description Address of a CI (IPM-13) with the name of its interface and the CIDR of its subnet, each present only when the caller sees them. */
+    CIAddress: components['schemas']['IPAddress'] & {
+      interface_name?: string;
+      subnet_cidr?: string;
+    };
+    CIAddressListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['CIAddress'][];
     };
     IPReservationCreateRequest: {
       /** @description Bare IP address (no prefix length) within the CIDR of the subnet. */
@@ -20918,6 +20934,9 @@ export interface components {
       type?: components['schemas']['IPAddressType'];
       dns_name?: string;
       description?: string;
+      /** @description Device of the address (IPM-13). With interface_id it must be the CI of the interface (422 ci_id), omitted it is taken from the interface. An unknown CI, one of another organization and one the caller cannot see are 422 ci_id alike. */
+      ci_id?: string;
+      role?: components['schemas']['IPAddressRole'];
     };
     UpdateIPAddressRequest: {
       subnet_id?: string;
@@ -20926,6 +20945,9 @@ export interface components {
       dns_name?: string;
       description?: string;
       state?: components['schemas']['IPAddressState'];
+      /** @description Sets ("" clears) the device of the address (IPM-13); a new interface_id takes the CI of the interface along. A CI other than the CI of the interface is 422 ci_id. */
+      ci_id?: string;
+      role?: components['schemas']['IPAddressRole'];
     };
     /**
      * @description Reachability of the address (IPM-04, E-211), apart from its type (NET-03). A change sets state_changed_at and writes ipam.address.state_changed. phpIPAM tags map onto it: Used → active, Offline → offline, Reserved → type reserved, DHCP → type dhcp.
@@ -51031,6 +51053,11 @@ export interface operations {
          *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
       };
       header?: never;
       path: {
@@ -51041,16 +51068,19 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the IP addresses of a CI. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description A page of addresses of the CI */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['CIAddressListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
     };
   };

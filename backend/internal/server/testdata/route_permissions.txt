@@ -143,6 +143,7 @@ GET /api/v1/ci-types/{id}/form ci:read
 GET /api/v1/ci-types/{id}/versions ci:read
 GET /api/v1/cis ci:read
 GET /api/v1/cis/{id} ci:read
+GET /api/v1/cis/{id}/addresses ipam:read
 GET /api/v1/cis/{id}/admp-connections admp:read
 GET /api/v1/cis/{id}/as-of ci:read
 GET /api/v1/cis/{id}/blast-radius topology:read

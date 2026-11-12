@@ -428,6 +428,41 @@ func TestInterfaceCreateOnForeignCI(t *testing.T) {
 	}
 }
 
+// TestAddressInterfaceChangeMovesCI covers IPM-13 (WP-911): moving an
+// address to an interface of another CI sets its ci_id to the new CI; the
+// same move naming a third CI is 422 ci_id.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestAddressInterfaceChangeMovesCI(t *testing.T) {
+	f := scopetest.Seed(t, "91")
+	ciA := f.CI(t, f.OrgA, "", "wp911-a")
+	ciB := f.CI(t, f.OrgA, "", "wp911-b")
+	ciC := f.CI(t, f.OrgA, "", "wp911-c")
+	api := newIfaceAPI(f, f.OrgCtx(f.OrgA), f.OrgA)
+	id := func(path, body string) string {
+		t.Helper()
+		w := api.call(http.MethodPost, path, body)
+		var out struct {
+			ID string `json:"id"`
+		}
+		if w.Code != http.StatusCreated || json.Unmarshal(w.Body.Bytes(), &out) != nil {
+			t.Fatalf("POST %s: %d %s", path, w.Code, w.Body.String())
+		}
+		return out.ID
+	}
+	nicA := id("/api/v1/cis/"+ciA+"/interfaces", `{"name":"eth0"}`)
+	nicB := id("/api/v1/cis/"+ciB+"/interfaces", `{"name":"eth0"}`)
+	addr := id("/api/v1/ips", `{"address":"10.91.9.1","interface_id":"`+nicA+`"}`)
+	if w := api.call(http.MethodPatch, "/api/v1/ips/"+addr, `{"interface_id":"`+nicB+`","ci_id":"`+ciC+`"}`); w.Code != http.StatusUnprocessableEntity ||
+		!strings.Contains(w.Body.String(), `"field":"ci_id"`) {
+		t.Errorf("interface of CI B with ci_id of CI C = %d %s, want 422 ci_id", w.Code, w.Body.String())
+	}
+	w := api.call(http.MethodPatch, "/api/v1/ips/"+addr, `{"interface_id":"`+nicB+`"}`)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"ci_id":"`+ciB+`"`) {
+		t.Errorf("interface change = %d %s, want ci_id %s", w.Code, w.Body.String(), ciB)
+	}
+}
+
 // TestDiscoverySyncKeepsManualAddressesAndInterfaces is the retest of F-249
 // (WP-580, REC-07, REC-03; E-90 option 1) against PostgreSQL: only what
 // discovery brought counts the misses of REC-07. An interface that existed
