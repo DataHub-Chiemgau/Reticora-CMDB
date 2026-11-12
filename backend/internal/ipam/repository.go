@@ -309,6 +309,7 @@ func (r *MemoryRepository) createSubnetLocked(s *Subnet) error {
 		return err
 	}
 	r.syncGateway(&stored)
+	r.takeOverAddressesLocked(&stored)
 	*s = r.withChildCount(&stored)
 	stored.Warnings = nil
 	return nil
@@ -383,14 +384,6 @@ func (r *MemoryRepository) UpdateSubnet(_ context.Context, orgID, id string, req
 		s.SectionID = resolved
 	}
 	if req.CIDR != nil {
-		for _, a := range r.addresses {
-			if a.OrganizationID != orgID || a.SubnetID != id {
-				continue
-			}
-			if in, err := ipInSubnet(hostOf(a.Address), *req.CIDR); err == nil && !in {
-				return nil, errAddressesOutsideCIDR
-			}
-		}
 		s.CIDR = *req.CIDR
 	}
 	if req.ClientID != nil {
@@ -430,8 +423,24 @@ func (r *MemoryRepository) UpdateSubnet(_ context.Context, orgID, id string, req
 		r.placeOrg(orgID)
 		return nil, err
 	}
+	// A shrunk prefix hands the addresses of the subnet outside it to their
+	// longest prefix and takes their gateway mark (subnet_place, IPM-14).
+	if req.CIDR != nil {
+		for _, a := range r.addresses {
+			if a.OrganizationID != orgID || a.SubnetID != id {
+				continue
+			}
+			if in, err := ipInSubnet(hostOf(a.Address), s.CIDR); err == nil && !in {
+				a.SubnetID, a.IsGateway = r.longestPrefixLocked(orgID, a.VRFID, a.Address, id), false
+				a.UpdatedAt = s.UpdatedAt
+			}
+		}
+	}
 	if req.Gateway != nil {
 		r.syncGateway(s)
+	}
+	if req.CIDR != nil || req.VRFID != nil || (req.IsPool != nil && !*req.IsPool) {
+		r.takeOverAddressesLocked(s)
 	}
 	cp := r.withChildCount(s)
 	s.Warnings = nil
@@ -445,14 +454,15 @@ func (r *MemoryRepository) DeleteSubnet(_ context.Context, orgID, id string) err
 	if !ok || s.OrganizationID != orgID {
 		return ErrNotFound
 	}
-	delete(r.subnets, id)
-	// The addresses lose their subnet and with it the gateway mark
-	// (ON DELETE SET NULL, trg_ip_address_gateway_leaves_subnet).
+	// The addresses go to their longest prefix without the subnet (the
+	// parent or none, subnet_release_addresses, IPM-14) and lose the
+	// gateway mark (trg_ip_address_gateway_leaves_subnet).
 	for _, a := range r.addresses {
 		if a.OrganizationID == orgID && a.SubnetID == id {
-			a.SubnetID, a.IsGateway = "", false
+			a.SubnetID, a.IsGateway = r.longestPrefixLocked(orgID, a.VRFID, a.Address, id), false
 		}
 	}
+	delete(r.subnets, id)
 	r.placeOrg(orgID)
 	return nil
 }
@@ -516,9 +526,19 @@ func (r *MemoryRepository) CreateIPAddress(_ context.Context, a *IPAddress) erro
 	if err := r.bindCI(a, a.CIID != ""); err != nil {
 		return err
 	}
-	a.VRFID = r.defaultVRF(a.OrganizationID).ID
+	if a.VRFID != "" && a.SubnetID == "" {
+		if v, ok := r.vrfs[a.VRFID]; !ok || v.OrganizationID != a.OrganizationID {
+			return errAddressVRFNotFound
+		}
+	} else {
+		a.VRFID = r.defaultVRF(a.OrganizationID).ID
+	}
 	if sn, ok := r.subnets[a.SubnetID]; ok && sn.VRFID != "" {
 		a.VRFID = sn.VRFID
+	}
+	// Without subnet the longest prefix of the VRF (IPM-14).
+	if a.SubnetID == "" {
+		a.SubnetID = r.longestPrefixLocked(a.OrganizationID, a.VRFID, a.Address, "")
 	}
 	for _, e := range r.addresses {
 		if e.OrganizationID == a.OrganizationID && e.VRFID == a.VRFID && e.InterfaceID == a.InterfaceID && e.Address == a.Address {

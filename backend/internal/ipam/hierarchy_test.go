@@ -120,3 +120,96 @@ func TestMemoryOverlapRule(t *testing.T) {
 		t.Errorf("child of a strict pool = %+v, %v", child, err)
 	}
 }
+
+// TestLongestPrefix covers the pure longest prefix match of IPM-14
+// (WP-912): the narrowest containing prefix wins, none is false.
+func TestLongestPrefix(t *testing.T) {
+	prefixes := []netip.Prefix{netip.MustParsePrefix("10.1.0.0/16"), netip.MustParsePrefix("10.1.1.0/24"),
+		netip.MustParsePrefix("10.1.1.0/28"), netip.MustParsePrefix("fd00::/64")}
+	for _, c := range []struct {
+		addr string
+		want int
+	}{{"10.1.1.5", 2}, {"10.1.1.200", 1}, {"10.1.2.1", 0}, {"10.2.0.1", -1}, {"fd00::1", 3}} {
+		i, ok := LongestPrefix(netip.MustParseAddr(c.addr), prefixes)
+		if (c.want < 0 && ok) || (c.want >= 0 && i != c.want) {
+			t.Errorf("LongestPrefix(%s) = %d %v, want %d", c.addr, i, ok, c.want)
+		}
+	}
+}
+
+// TestMemoryAutoSubnet covers the memory repository's longest prefix
+// (--no-db, IPM-14): a new address gets the /24, a new /25 takes it over,
+// the deletion of the /25 hands it back.
+func TestMemoryAutoSubnet(t *testing.T) {
+	repo := NewMemoryRepository()
+	ctx := context.Background()
+	s16 := &Subnet{OrganizationID: "org", CIDR: "10.1.0.0/16"}
+	s24 := &Subnet{OrganizationID: "org", CIDR: "10.1.1.0/24"}
+	for _, s := range []*Subnet{s16, s24} {
+		if err := repo.CreateSubnet(ctx, s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a := &IPAddress{OrganizationID: "org", Address: "10.1.1.5", Type: IPTypeStatic}
+	if err := repo.CreateIPAddress(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	if a.SubnetID != s24.ID {
+		t.Fatalf("subnet = %q, want the /24 %s", a.SubnetID, s24.ID)
+	}
+	s25 := &Subnet{OrganizationID: "org", CIDR: "10.1.1.0/25"}
+	if err := repo.CreateSubnet(ctx, s25); err != nil {
+		t.Fatal(err)
+	}
+	subnetOf := func() string {
+		got, err := repo.GetIPAddress(ctx, "org", a.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got.SubnetID
+	}
+	if got := subnetOf(); got != s25.ID {
+		t.Errorf("after the /25: %q, want %s", got, s25.ID)
+	}
+	if err := repo.DeleteSubnet(ctx, "org", s25.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := subnetOf(); got != s24.ID {
+		t.Errorf("after deleting the /25: %q, want %s", got, s24.ID)
+	}
+	// A shrunk prefix hands the address to the /16, a widened one takes it
+	// back.
+	shrunk, widened := "10.1.1.128/25", "10.1.1.0/24"
+	if _, err := repo.UpdateSubnet(ctx, "org", s24.ID, &UpdateSubnetRequest{CIDR: &shrunk}); err != nil {
+		t.Fatal(err)
+	}
+	if got := subnetOf(); got != s16.ID {
+		t.Errorf("after shrinking the /24: %q, want the /16 %s", got, s16.ID)
+	}
+	if _, err := repo.UpdateSubnet(ctx, "org", s24.ID, &UpdateSubnetRequest{CIDR: &widened}); err != nil {
+		t.Fatal(err)
+	}
+	if got := subnetOf(); got != s24.ID {
+		t.Errorf("after widening the /24 again: %q, want %s", got, s24.ID)
+	}
+	// Under a pool: an address in the pool's range lies in the /16; a
+	// subnet inside the pool takes it.
+	pool := &Subnet{OrganizationID: "org", CIDR: "10.1.4.0/22", IsPool: true}
+	if err := repo.CreateSubnet(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	b := &IPAddress{OrganizationID: "org", Address: "10.1.4.9", Type: IPTypeStatic}
+	if err := repo.CreateIPAddress(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	if b.SubnetID != s16.ID {
+		t.Fatalf("address under the pool in %q, want the /16 %s", b.SubnetID, s16.ID)
+	}
+	inPool := &Subnet{OrganizationID: "org", CIDR: "10.1.4.0/24"}
+	if err := repo.CreateSubnet(ctx, inPool); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := repo.GetIPAddress(ctx, "org", b.ID); err != nil || got.SubnetID != inPool.ID {
+		t.Errorf("address under the pool after a subnet inside it: %+v %v, want %s", got, err, inPool.ID)
+	}
+}

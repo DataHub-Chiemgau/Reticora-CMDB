@@ -161,3 +161,46 @@ func TestIPAddressesFollowNET03(t *testing.T) {
 		t.Errorf("same address without interface twice: %d, want an error", w.Code)
 	}
 }
+
+// TestIPAddressCreateWithVRF covers vrf_id of POST /ips (IPM-14, WP-912):
+// without subnet the address lies in the given VRF; with subnet_id another
+// VRF than the subnet's is 422 vrf_id, the subnet's own passes; an unknown
+// VRF, one of another organization and a malformed id are 422 vrf_id.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestIPAddressCreateWithVRF(t *testing.T) {
+	f := scopetest.Seed(t, "9f")
+	api := newIfaceAPI(f, f.OrgCtx(f.OrgA), f.OrgA)
+	create := func(path, body string) map[string]any {
+		t.Helper()
+		w := api.call(http.MethodPost, path, body)
+		var out map[string]any
+		if w.Code != http.StatusCreated || json.Unmarshal(w.Body.Bytes(), &out) != nil {
+			t.Fatalf("POST %s %s = %d %s", path, body, w.Code, w.Body.String())
+		}
+		return out
+	}
+	vrf := create("/api/v1/vrfs", `{"name":"wp912-ip"}`)["id"].(string)
+	subnet := create("/api/v1/subnets", `{"cidr":"10.14.0.0/24"}`)
+	if a := create("/api/v1/ips", `{"address":"10.14.0.5","vrf_id":"`+vrf+`"}`); a["vrf_id"] != vrf || a["subnet_id"] != nil {
+		t.Errorf("address in VRF %s = %v", vrf, a)
+	}
+	if a := create("/api/v1/ips", `{"address":"10.14.0.6","subnet_id":"`+subnet["id"].(string)+`","vrf_id":"`+subnet["vrf_id"].(string)+`"}`); a["subnet_id"] != subnet["id"] {
+		t.Errorf("address with the subnet's VRF = %v", a)
+	}
+	var foreignVRF string
+	if err := f.Admin.QueryRow(context.Background(), `SELECT default_vrf_of($1)::text`, f.OrgB).Scan(&foreignVRF); err != nil {
+		t.Fatal(err)
+	}
+	for _, body := range []string{
+		`{"address":"10.14.0.7","subnet_id":"` + subnet["id"].(string) + `","vrf_id":"` + vrf + `"}`,
+		`{"address":"10.14.0.8","vrf_id":"` + f.ID() + `"}`,
+		`{"address":"10.14.0.9","vrf_id":"` + foreignVRF + `"}`,
+		`{"address":"10.14.0.10","vrf_id":"not-a-uuid"}`,
+	} {
+		if w := api.call(http.MethodPost, "/api/v1/ips", body); w.Code != http.StatusUnprocessableEntity ||
+			!strings.Contains(w.Body.String(), `"field":"vrf_id"`) {
+			t.Errorf("POST /ips %s = %d %s, want 422 vrf_id", body, w.Code, w.Body.String())
+		}
+	}
+}

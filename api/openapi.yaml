@@ -9660,8 +9660,11 @@ paths:
         new CIDR when it changes (422 gateway; IPM-04). Changing the gateway
         moves the is_gateway mark to the address of the new gateway (created
         when missing), clearing it removes the mark; the addresses stay. A
-        new CIDR that leaves addresses of the subnet outside is 422 with
-        field cidr. A changed CIDR or VRF re-hangs the subnet and its former
+        shrunk CIDR hands the addresses of the subnet outside it to their
+        longest prefix (a remaining subnet or none), a wider CIDR, another
+        VRF or is_pool false take the addresses of the VRF inside it that
+        belong to the narrowest subnet around it or to none (IPM-14). A
+        changed CIDR or VRF re-hangs the subnet and its former
         children in both VRFs (IPM-02); the overlap rule of a strict section
         is 409 cidr, a subnet with addresses as pool 409 is_pool.
       requestBody:
@@ -10038,7 +10041,7 @@ paths:
           schema: { type: string, format: uuid }
         - name: ci_id
           in: query
-          description: Only addresses on interfaces of this CI (IPM-20).
+          description: Only addresses bound to this CI (ip_address.ci_id, IPM-13, IPM-20).
           schema: { type: string, format: uuid }
         - name: q
           in: query
@@ -10082,6 +10085,12 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -10163,6 +10172,12 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -42146,6 +42161,19 @@ components:
       properties:
         subnet_id:
           type: string
+          description: >-
+            Subnet of the address; it must contain the address (400).
+            Omitted, the address gets the narrowest subnet of its VRF that
+            is no pool and contains it (longest prefix, IPM-14), whatever
+            the caller sees; when that puts the address outside the
+            caller's scope the answer is 404.
+        vrf_id:
+          type: string
+          description: >-
+            VRF of an address without subnet_id, searched for its longest
+            prefix (IPM-14); omitted, the default VRF. With subnet_id it
+            must be the VRF of the subnet. Another VRF, an unknown one and
+            one the caller cannot see are 422 vrf_id.
         interface_id:
           type: string
         address:

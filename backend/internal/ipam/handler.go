@@ -518,6 +518,12 @@ func (h *Handler) CreateIPAddress(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", "address does not belong to subnet "+subnet.CIDR)
 			return
 		}
+		// The subnet decides the VRF (IPM-14).
+		if req.VRFID != "" && req.VRFID != subnet.VRFID {
+			api.WriteFieldError(w, &api.FieldError{Field: "vrf_id", Message: "the VRF differs from the VRF of the subnet",
+				Status: http.StatusUnprocessableEntity})
+			return
+		}
 	}
 	a := &IPAddress{
 		OrganizationID: orgID,
@@ -529,6 +535,7 @@ func (h *Handler) CreateIPAddress(w http.ResponseWriter, r *http.Request) {
 		Description:    req.Description,
 		CIID:           req.CIID,
 		Role:           req.Role,
+		VRFID:          req.VRFID,
 	}
 	if err := h.repo.CreateIPAddress(r.Context(), a); err != nil {
 		writeRepoError(w, err, "ip address not found")

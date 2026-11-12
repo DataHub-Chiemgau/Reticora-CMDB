@@ -3,6 +3,7 @@ package ipam
 import (
 	"net/netip"
 	"sort"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
@@ -113,6 +114,103 @@ func placeSubnets(subnets []*Subnet) {
 			} else {
 				s.ParentID = ""
 			}
+		}
+	}
+}
+
+// LongestPrefix returns the index of the narrowest prefix among candidates
+// that contains addr (longest prefix match, IPM-14), and false when none
+// does. The PostgreSQL repository computes it in ipam_longest_prefix_subnet
+// (migration 000322).
+func LongestPrefix(addr netip.Addr, candidates []netip.Prefix) (int, bool) {
+	best, bits := -1, -1
+	for i, c := range candidates {
+		if c.IsValid() && c.Contains(addr) && c.Bits() > bits {
+			best, bits = i, c.Bits()
+		}
+	}
+	return best, best >= 0
+}
+
+// longestPrefixLocked is the subnet of the organization and VRF that is no
+// pool, is not except and holds addr with the longest prefix, or "" (the
+// memory repository's ipam_longest_prefix_subnet; the caller holds r.mu).
+func (r *MemoryRepository) longestPrefixLocked(orgID, vrfID, address, except string) string {
+	addr, err := netip.ParseAddr(hostOf(address))
+	if err != nil {
+		return ""
+	}
+	var ids []string
+	var prefixes []netip.Prefix
+	for _, s := range r.subnets {
+		if s.OrganizationID != orgID || s.VRFID != vrfID || s.IsPool || s.ID == except {
+			continue
+		}
+		p, err := netip.ParsePrefix(s.CIDR)
+		if err != nil {
+			continue
+		}
+		ids, prefixes = append(ids, s.ID), append(prefixes, p.Masked())
+	}
+	// Equal lengths cannot both contain the address in one VRF (unique
+	// CIDR); the order of ids does not matter.
+	if i, ok := LongestPrefix(addr, prefixes); ok {
+		return ids[i]
+	}
+	return ""
+}
+
+// containerLocked is the narrowest subnet without pool of the
+// organization and VRF of s whose prefix holds the prefix of s, or "": the
+// longest prefix of the addresses inside s without s, also when a pool lies
+// between (the caller holds r.mu).
+func (r *MemoryRepository) containerLocked(s *Subnet) string {
+	p, err := netip.ParsePrefix(s.CIDR)
+	if err != nil {
+		return ""
+	}
+	p = p.Masked()
+	best, bestBits := "", -1
+	for _, o := range r.subnets {
+		if o.OrganizationID != s.OrganizationID || o.VRFID != s.VRFID || o.IsPool || o.ID == s.ID {
+			continue
+		}
+		q, err := netip.ParsePrefix(o.CIDR)
+		if err != nil {
+			continue
+		}
+		q = q.Masked()
+		if q.Bits() < p.Bits() && q.Contains(p.Addr()) && q.Bits() > bestBits {
+			best, bestBits = o.ID, q.Bits()
+		}
+	}
+	return best
+}
+
+// takeOverAddressesLocked gives the addresses of the VRF inside subnet s
+// that belong to the narrowest subnet without pool around it or to no
+// subnet their longest prefix (the takeover of subnet_place, IPM-14); a
+// pool takes none, gateway marks stay.
+func (r *MemoryRepository) takeOverAddressesLocked(s *Subnet) {
+	if s.IsPool {
+		return
+	}
+	p, err := netip.ParsePrefix(s.CIDR)
+	if err != nil {
+		return
+	}
+	container := r.containerLocked(s)
+	for _, a := range r.addresses {
+		if a.OrganizationID != s.OrganizationID || a.VRFID != s.VRFID || a.IsGateway ||
+			(a.SubnetID != "" && a.SubnetID != container) {
+			continue
+		}
+		addr, err := netip.ParseAddr(hostOf(a.Address))
+		if err != nil || !p.Masked().Contains(addr) {
+			continue
+		}
+		if id := r.longestPrefixLocked(s.OrganizationID, s.VRFID, a.Address, ""); id != "" && id != a.SubnetID {
+			a.SubnetID, a.UpdatedAt = id, time.Now().UTC()
 		}
 	}
 }

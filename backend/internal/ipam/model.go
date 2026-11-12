@@ -160,6 +160,10 @@ type CreateIPAddressRequest struct {
 	CIID string `json:"ci_id,omitempty"`
 	// Role of the address, default primary (IPM-13).
 	Role string `json:"role,omitempty"`
+	// VRFID is the VRF of an address without subnet_id (IPM-14): its
+	// longest prefix is searched there; empty is the default VRF. With
+	// subnet_id it must be the VRF of the subnet (422 vrf_id).
+	VRFID string `json:"vrf_id,omitempty"`
 }
 
 // UpdateIPAddressRequest is the payload for updating an IP address.

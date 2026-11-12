@@ -4123,7 +4123,7 @@ export interface paths {
     head?: never;
     /**
      * Update a subnet
-     * @description The gateway must lie inside the CIDR after the update, against the new CIDR when it changes (422 gateway; IPM-04). Changing the gateway moves the is_gateway mark to the address of the new gateway (created when missing), clearing it removes the mark; the addresses stay. A new CIDR that leaves addresses of the subnet outside is 422 with field cidr. A changed CIDR or VRF re-hangs the subnet and its former children in both VRFs (IPM-02); the overlap rule of a strict section is 409 cidr, a subnet with addresses as pool 409 is_pool.
+     * @description The gateway must lie inside the CIDR after the update, against the new CIDR when it changes (422 gateway; IPM-04). Changing the gateway moves the is_gateway mark to the address of the new gateway (created when missing), clearing it removes the mark; the addresses stay. A shrunk CIDR hands the addresses of the subnet outside it to their longest prefix (a remaining subnet or none), a wider CIDR, another VRF or is_pool false take the addresses of the VRF inside it that belong to the narrowest subnet around it or to none (IPM-14). A changed CIDR or VRF re-hangs the subnet and its former children in both VRFs (IPM-02); the overlap rule of a strict section is 409 cidr, a subnet with addresses as pool 409 is_pool.
      */
     patch: operations['updateSubnet'];
     trace?: never;
@@ -20928,7 +20928,10 @@ export interface components {
       reserved_until?: string;
     };
     CreateIPAddressRequest: {
+      /** @description Subnet of the address; it must contain the address (400). Omitted, the address gets the narrowest subnet of its VRF that is no pool and contains it (longest prefix, IPM-14), whatever the caller sees; when that puts the address outside the caller's scope the answer is 404. */
       subnet_id?: string;
+      /** @description VRF of an address without subnet_id, searched for its longest prefix (IPM-14); omitted, the default VRF. With subnet_id it must be the VRF of the subnet. Another VRF, an unknown one and one the caller cannot see are 422 vrf_id. */
+      vrf_id?: string;
       interface_id?: string;
       address: string;
       type?: components['schemas']['IPAddressType'];
@@ -32635,7 +32638,7 @@ export interface operations {
         client_id?: string;
         /** @description Only addresses of this VRF (IPM-20). */
         vrf_id?: string;
-        /** @description Only addresses on interfaces of this CI (IPM-20). */
+        /** @description Only addresses bound to this CI (ip_address.ci_id, IPM-13, IPM-20). */
         ci_id?: string;
         /** @description Prefix of the address or part of the DNS name (IPM-20). */
         q?: string;
@@ -32684,6 +32687,9 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -32765,6 +32771,9 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };

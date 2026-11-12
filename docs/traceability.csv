@@ -1734,3 +1734,4 @@ API-06;[P2]/[P3]/[P4]/[A];F;backend/internal/form/version_integration_test.go;WP
 REC-04;[P3];F;backend/internal/override/policy_integration_test.go;WP-1105
 IPM-10;[P3];G3;backend/internal/ipam/section_acl_integration_test.go;WP-910
 IPM-13;[P3];G3;backend/internal/ipam/device_binding_integration_test.go;WP-911
+IPM-14;[P3];G3;backend/internal/ipam/auto_subnet_integration_test.go;WP-912

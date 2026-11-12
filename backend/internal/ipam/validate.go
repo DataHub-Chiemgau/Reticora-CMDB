@@ -128,8 +128,6 @@ var (
 		Status: http.StatusUnprocessableEntity}
 	errInvalidState = &api.FieldError{Field: "state", Message: "state must be active, offline or unknown",
 		Status: http.StatusUnprocessableEntity}
-	errAddressesOutsideCIDR = &api.FieldError{Field: "cidr", Message: "addresses of the subnet would lie outside the new prefix",
-		Status: http.StatusUnprocessableEntity}
 	// The gateway address keeps its subnet and stays until the subnet's
 	// gateway changes or is cleared.
 	errGatewayAddressSubnet = &api.FieldError{Field: "subnet_id",

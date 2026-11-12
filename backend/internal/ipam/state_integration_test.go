@@ -131,11 +131,20 @@ func TestAddressStateAndGatewayOnPostgreSQL(t *testing.T) {
 	if n := str(`SELECT count(*)::text FROM ip_address WHERE subnet_id = $1`, subnet.ID); n != "3" {
 		t.Errorf("addresses after clearing = %s, want 3", n)
 	}
-	// A new prefix that leaves addresses outside is 422 cidr; a gateway
-	// outside 422 gateway.
-	if w = call(http.MethodPatch, "/api/v1/subnets/"+subnet.ID, `{"cidr":"10.202.0.128/25"}`); w.Code != http.StatusUnprocessableEntity ||
-		!strings.Contains(w.Body.String(), `"cidr"`) {
-		t.Errorf("PATCH cidr leaving addresses outside: %d %s, want 422 cidr", w.Code, w.Body.String())
+	// A new prefix that leaves addresses outside hands them to their
+	// longest prefix, here none (IPM-14, WP-912); the old prefix takes
+	// them back. A gateway outside is 422 gateway.
+	if w = call(http.MethodPatch, "/api/v1/subnets/"+subnet.ID, `{"cidr":"10.202.0.128/25"}`); w.Code != http.StatusOK {
+		t.Errorf("PATCH cidr leaving addresses outside: %d %s, want 200", w.Code, w.Body.String())
+	}
+	if n := str(`SELECT count(*)::text FROM ip_address WHERE subnet_id = $1`, subnet.ID); n != "1" {
+		t.Errorf("addresses inside the shrunk prefix = %s, want 1 (10.202.0.254)", n)
+	}
+	if w = call(http.MethodPatch, "/api/v1/subnets/"+subnet.ID, `{"cidr":"10.202.0.0/24"}`); w.Code != http.StatusOK {
+		t.Fatalf("PATCH cidr back: %d %s", w.Code, w.Body.String())
+	}
+	if n := str(`SELECT count(*)::text FROM ip_address WHERE subnet_id = $1`, subnet.ID); n != "3" {
+		t.Errorf("addresses after the prefix is back = %s, want 3", n)
 	}
 	if w = call(http.MethodPatch, "/api/v1/subnets/"+subnet.ID, `{"gateway":"10.203.0.1"}`); w.Code != http.StatusUnprocessableEntity ||
 		!strings.Contains(w.Body.String(), `"gateway"`) {
@@ -294,8 +303,10 @@ func TestGatewayMarkFollowsSubnetOnPostgreSQL(t *testing.T) {
 	if w := call(orgCtx, http.MethodDelete, "/api/v1/subnets/"+a.ID, ""); w.Code != http.StatusNoContent {
 		t.Fatalf("DELETE subnet: %d %s", w.Code, w.Body.String())
 	}
-	if got := str(`SELECT COALESCE(subnet_id::text, 'none') || '/' || is_gateway::text FROM ip_address WHERE id = $1`, gw); got != "none/false" {
-		t.Errorf("former gateway address after deleting its subnet = %s, want none/false", got)
+	// The address goes to its longest prefix without the subnet, the /25
+	// (IPM-14, WP-912), without the mark.
+	if got := str(`SELECT COALESCE(subnet_id::text, 'none') || '/' || is_gateway::text FROM ip_address WHERE id = $1`, gw); got != b.ID+"/false" {
+		t.Errorf("former gateway address after deleting its subnet = %s, want %s/false", got, b.ID)
 	}
 	if n := str(`SELECT count(*)::text FROM ip_address WHERE organization_id = $1 AND is_gateway AND subnet_id IS NULL`, f.OrgA); n != "0" {
 		t.Errorf("gateway addresses without subnet = %s, want 0", n)

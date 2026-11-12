@@ -512,19 +512,15 @@ func (r *PGRepository) UpdateSubnet(ctx context.Context, orgID, id string, req *
 	return sn, err
 }
 
-// subnetError maps the prefix checks of a subnet update onto 422: cidr
-// for addresses left outside, gateway for a gateway outside the prefix
-// (subnet_gateway_in_cidr checks the updated row, so concurrent changes of
-// prefix and gateway cannot pass the handler's check both).
+// subnetError maps the prefix check of a subnet update onto 422 gateway
+// for a gateway outside the prefix (subnet_gateway_in_cidr checks the
+// updated row, so concurrent changes of prefix and gateway cannot pass the
+// handler's check both). Addresses left outside a shrunk prefix go to their
+// longest prefix (subnet_place, IPM-14).
 func subnetError(err error) error {
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23514" {
-		switch pgErr.ConstraintName {
-		case "subnet_cidr_addresses":
-			return errAddressesOutsideCIDR
-		case "subnet_gateway_in_cidr":
-			return errGatewayOutside
-		}
+	if errors.As(err, &pgErr) && pgErr.Code == "23514" && pgErr.ConstraintName == "subnet_gateway_in_cidr" {
+		return errGatewayOutside
 	}
 	// A nameserver set deleted after checkNameserverSet read it (IPM-05).
 	if errors.As(err, &pgErr) && pgErr.Code == "23503" && pgErr.ConstraintName == "subnet_nameserver_set_fkey" {
@@ -662,25 +658,83 @@ func (r *PGRepository) GetIPAddress(ctx context.Context, orgID, id string) (*IPA
 }
 
 func (r *PGRepository) CreateIPAddress(ctx context.Context, a *IPAddress) error {
-	return database.WithRequestTenant(ctx, r.pool, a.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+	explicitSubnet := a.SubnetID != ""
+	err := database.WithRequestTenant(ctx, r.pool, a.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := checkAddressCI(ctx, tx, a.OrganizationID, a.CIID); err != nil {
 			return err
+		}
+		if !explicitSubnet {
+			if err := checkAddressVRF(ctx, tx, a.OrganizationID, a.VRFID); err != nil {
+				return err
+			}
 		}
 		role := a.Role
 		if role == "" {
 			role = IPRolePrimary
 		}
+		// Without subnet_id the longest prefix of the VRF (IPM-14, WP-912),
+		// in the same statement; trg_ip_address_vrf takes the VRF of the
+		// subnet, else the given one, else the default VRF.
 		if err := tx.QueryRow(ctx,
-			`INSERT INTO ip_address (organization_id, subnet_id, interface_id, address, type, dns_name, description, ci_id, role)
-			 VALUES ($1,$2,$3,$4::inet,$5,$6,$7,$8,$9)
-			 RETURNING id::text, vrf_id::text, state, is_gateway, COALESCE(ci_id::text, ''), role, created_at, updated_at`,
+			`INSERT INTO ip_address (organization_id, subnet_id, interface_id, address, type, dns_name, description, ci_id, role, vrf_id)
+			 VALUES ($1, COALESCE($2::uuid, ipam_longest_prefix_subnet($1, COALESCE($10::uuid, default_vrf_of($1)), $4::inet)),
+			         $3, $4::inet, $5, $6, $7, $8, $9, $10)
+			 RETURNING id::text, COALESCE(subnet_id::text, ''), vrf_id::text, state, is_gateway, COALESCE(ci_id::text, ''), role,
+			           created_at, updated_at`,
 			a.OrganizationID, nilIfEmpty(a.SubnetID), nilIfEmpty(a.InterfaceID), a.Address, a.Type,
-			nilIfEmpty(a.DNSName), nilIfEmpty(a.Description), nilIfEmpty(a.CIID), role,
-		).Scan(&a.ID, &a.VRFID, &a.State, &a.IsGateway, &a.CIID, &a.Role, &a.CreatedAt, &a.UpdatedAt); err != nil {
+			nilIfEmpty(a.DNSName), nilIfEmpty(a.Description), nilIfEmpty(a.CIID), role, nilIfEmpty(a.VRFID),
+		).Scan(&a.ID, &a.SubnetID, &a.VRFID, &a.State, &a.IsGateway, &a.CIID, &a.Role, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return addressCIError(err)
 		}
 		return requireVisible(ctx, tx, "ip_address", ipVisible, a.ID)
 	})
+	if err != nil && !explicitSubnet && isRLSViolation(err) && r.autoSubnetAssigned(ctx, a) {
+		// The longest prefix put the address into the scope of another
+		// client or site: 404 as for a named foreign subnet
+		// (requireVisible). Only this error path reads again.
+		return ErrNotFound
+	}
+	return err
+}
+
+// autoSubnetAssigned reports whether a new address without subnet_id would
+// get a subnet (ipam_longest_prefix_subnet) in its VRF.
+func (r *PGRepository) autoSubnetAssigned(ctx context.Context, a *IPAddress) bool {
+	var assigned bool
+	err := database.WithRequestTenant(ctx, r.pool, a.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT ipam_longest_prefix_subnet($1, COALESCE($2::uuid, default_vrf_of($1)), $3::inet) IS NOT NULL`,
+			a.OrganizationID, nilIfEmpty(a.VRFID), a.Address).Scan(&assigned)
+	})
+	return err == nil && assigned
+}
+
+// isRLSViolation reports a row refused by a policy (42501).
+func isRLSViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "42501"
+}
+
+// errAddressVRFNotFound refuses an unknown VRF, one of another organization
+// and one the caller cannot see alike (422 vrf_id, IPM-14).
+var errAddressVRFNotFound = &api.FieldError{Field: "vrf_id", Message: "VRF not found", Status: http.StatusUnprocessableEntity}
+
+// checkAddressVRF reads the VRF of a new address without subnet under the
+// caller's row level security; without a VRF it costs no statement.
+func checkAddressVRF(ctx context.Context, tx pgx.Tx, orgID, vrfID string) error {
+	if vrfID == "" {
+		return nil
+	}
+	if !api.IsUUID(vrfID) {
+		return errAddressVRFNotFound
+	}
+	var ok bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM vrf WHERE organization_id = $1 AND id = $2)`, orgID, vrfID).Scan(&ok); err != nil {
+		return fmt.Errorf("read vrf: %w", err)
+	}
+	if !ok {
+		return errAddressVRFNotFound
+	}
+	return nil
 }
 
 // errAddressCINotFound is the answer to an unknown CI, a CI of another
@@ -1445,15 +1499,19 @@ func (r *PGRepository) SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID
 				var key DuplicateKey
 				// The VRF of the record, resolved in the organization; an
 				// empty or unknown one leaves NULL and trg_ip_address_vrf
-				// sets the default VRF (WP-772).
+				// sets the default VRF (WP-772). An address without subnet
+				// gets the longest prefix of that VRF in the same statement
+				// (IPM-14, WP-912).
 				err = tx.QueryRow(ctx, `UPDATE ip_address SET miss_count = 0, last_seen_at = now(), updated_at = now(),
-					vrf_id = (SELECT v.id FROM vrf v WHERE v.id = `+vrfParam(3)+` AND v.organization_id = $4)
+					vrf_id = r.vrf, subnet_id = COALESCE(subnet_id, ipam_longest_prefix_subnet($4, COALESCE(r.vrf, default_vrf_of($4)), address))
+					FROM (SELECT (SELECT v.id FROM vrf v WHERE v.id = `+vrfParam(3)+` AND v.organization_id = $4) AS vrf) r
 					WHERE interface_id = $1 AND host(address) = host($2::inet) RETURNING id::text, vrf_id::text, host(address)`,
 					id, address, ifc.VRFID, orgID).Scan(&ipID, &key.VRFID, &key.Host)
 				if errors.Is(err, pgx.ErrNoRows) {
-					err = tx.QueryRow(ctx, `INSERT INTO ip_address (organization_id, interface_id, address, type, last_seen_at, vrf_id)
-						VALUES ($1, $2, $3::inet, 'discovered', now(),
-							(SELECT v.id FROM vrf v WHERE v.id = `+vrfParam(4)+` AND v.organization_id = $1))
+					err = tx.QueryRow(ctx, `INSERT INTO ip_address (organization_id, interface_id, address, type, last_seen_at, vrf_id, subnet_id)
+						SELECT $1, $2, $3::inet, 'discovered', now(), r.vrf,
+							ipam_longest_prefix_subnet($1, COALESCE(r.vrf, default_vrf_of($1)), $3::inet)
+						FROM (SELECT (SELECT v.id FROM vrf v WHERE v.id = `+vrfParam(4)+` AND v.organization_id = $1) AS vrf) r
 						RETURNING id::text, vrf_id::text, host(address)`,
 						orgID, id, address, ifc.VRFID).Scan(&ipID, &key.VRFID, &key.Host)
 				}
