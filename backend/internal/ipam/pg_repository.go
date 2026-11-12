@@ -48,7 +48,15 @@ type scanner interface {
 
 const subnetCols = `id::text, organization_id::text, COALESCE(client_id::text,''), COALESCE(site_id::text,''),
 	cidr::text, vrf_id::text, section_id::text, COALESCE(name,''), COALESCE(vlan_id::text,''), COALESCE(host(gateway),''), COALESCE(dns_servers::text[], '{}'),
+	COALESCE(nameserver_set_id::text,''), ` + subnetEffectiveDNS + `,
 	COALESCE(description,''), is_management, ` + subnetTreeCols + `, created_at, updated_at`
+
+// subnetEffectiveDNS are the effective DNS servers of a subnet row
+// (IPM-05): its own dns_servers when set, else the servers of its
+// nameserver set (readable org-wide), else none.
+const subnetEffectiveDNS = `ARRAY(SELECT host(u.dns) FROM unnest(COALESCE(NULLIF(dns_servers, '{}'::inet[]),
+		(SELECT ns.servers FROM nameserver_set ns WHERE ns.id = subnet.nameserver_set_id AND ns.organization_id = subnet.organization_id)))
+		WITH ORDINALITY AS u(dns, n) ORDER BY u.n)`
 
 // subnetTreeCols are the hierarchy columns of a subnet row (IPM-02): the
 // parent only when the caller sees it (row level security of the
@@ -67,7 +75,7 @@ const subnetRootVisible = `(subnet.parent_id IS NULL OR NOT EXISTS (SELECT 1 FRO
 func scanSubnet(s scanner) (*Subnet, error) {
 	sn := &Subnet{}
 	if err := s.Scan(&sn.ID, &sn.OrganizationID, &sn.ClientID, &sn.SiteID, &sn.CIDR, &sn.VRFID, &sn.SectionID, &sn.Name,
-		&sn.VLANID, &sn.Gateway, &sn.DNSServers, &sn.Description, &sn.IsManagement, &sn.ParentID, &sn.IsPool, &sn.ChildCount,
+		&sn.VLANID, &sn.Gateway, &sn.DNSServers, &sn.NameserverSetID, &sn.EffectiveDNSServers, &sn.Description, &sn.IsManagement, &sn.ParentID, &sn.IsPool, &sn.ChildCount,
 		&sn.CreatedAt, &sn.UpdatedAt); err != nil {
 		return nil, err
 	}
@@ -273,16 +281,19 @@ func (r *PGRepository) CreateSubnet(ctx context.Context, s *Subnet) error {
 		if err := checkSection(ctx, tx, s.OrganizationID, s.SectionID, s.ClientID); err != nil {
 			return err
 		}
+		if err := checkNameserverSet(ctx, tx, s.OrganizationID, s.NameserverSetID); err != nil {
+			return err
+		}
 		if err := placed(ctx, tx, func(tx pgx.Tx) error {
 			return tx.QueryRow(ctx,
-				`INSERT INTO subnet (organization_id, client_id, site_id, cidr, name, vlan_id, gateway, dns_servers, description, is_management, vrf_id, section_id, is_pool)
-				 VALUES ($1,$2,$3,$4::cidr,$5,$6,$7::inet,$8::inet[],$9,$10,$11,$12,$13) RETURNING id::text`,
+				`INSERT INTO subnet (organization_id, client_id, site_id, cidr, name, vlan_id, gateway, dns_servers, description, is_management, vrf_id, section_id, is_pool, nameserver_set_id)
+				 VALUES ($1,$2,$3,$4::cidr,$5,$6,$7::inet,$8::inet[],$9,$10,$11,$12,$13,$14) RETURNING id::text`,
 				s.OrganizationID, nilIfEmpty(s.ClientID), nilIfEmpty(s.SiteID), s.CIDR, nilIfEmpty(s.Name),
 				nilIfEmpty(s.VLANID), nilIfEmpty(s.Gateway), dnsServersArg(s.DNSServers), nilIfEmpty(s.Description), s.IsManagement,
-				nilIfEmpty(s.VRFID), nilIfEmpty(s.SectionID), s.IsPool,
+				nilIfEmpty(s.VRFID), nilIfEmpty(s.SectionID), s.IsPool, nilIfEmpty(s.NameserverSetID),
 			).Scan(&s.ID)
 		}); err != nil {
-			return err
+			return subnetError(err)
 		}
 		if err := syncGateway(ctx, tx, s.OrganizationID, s.ID, s.Gateway); err != nil {
 			return err
@@ -387,6 +398,11 @@ func (r *PGRepository) UpdateSubnet(ctx context.Context, orgID, id string, req *
 		if err := checkSubnetSection(ctx, tx, orgID, id, req); err != nil {
 			return err
 		}
+		if req.NameserverSetID != nil {
+			if err := checkNameserverSet(ctx, tx, orgID, *req.NameserverSetID); err != nil {
+				return err
+			}
+		}
 		sets := []string{}
 		args := []any{orgID, id}
 		pos := 3
@@ -435,6 +451,11 @@ func (r *PGRepository) UpdateSubnet(ctx context.Context, orgID, id string, req *
 		if req.DNSServers != nil {
 			sets = append(sets, fmt.Sprintf("dns_servers = $%d::inet[]", pos))
 			args = append(args, dnsServersArg(req.DNSServers))
+			pos++
+		}
+		if req.NameserverSetID != nil {
+			sets = append(sets, fmt.Sprintf("nameserver_set_id = $%d", pos))
+			args = append(args, nilIfEmpty(*req.NameserverSetID))
 			pos++
 		}
 		if req.Description != nil {
@@ -502,6 +523,10 @@ func subnetError(err error) error {
 		case "subnet_gateway_in_cidr":
 			return errGatewayOutside
 		}
+	}
+	// A nameserver set deleted after checkNameserverSet read it (IPM-05).
+	if errors.As(err, &pgErr) && pgErr.Code == "23503" && pgErr.ConstraintName == "subnet_nameserver_set_fkey" {
+		return errNameserverSetNotFound
 	}
 	return err
 }

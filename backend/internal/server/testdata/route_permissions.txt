@@ -48,6 +48,7 @@ DELETE /api/v1/metamodel/drafts/{id} citype:manage
 DELETE /api/v1/metamodel/drafts/{id}/items/{item_id} citype:manage
 DELETE /api/v1/monitoring/alerts/{id} monitoring:write
 DELETE /api/v1/mounts/{id} rack:write
+DELETE /api/v1/nameserver-sets/{id} ipam:write
 DELETE /api/v1/network-interfaces/{id} ipam:write
 DELETE /api/v1/notification-channels/{id} notification:manage
 DELETE /api/v1/orders/{id} order:write
@@ -269,6 +270,8 @@ GET /api/v1/monitoring/alerts monitoring:read
 GET /api/v1/monitoring/metrics monitoring:read
 GET /api/v1/mounts rack:read
 GET /api/v1/mounts/{id} rack:read
+GET /api/v1/nameserver-sets ipam:read
+GET /api/v1/nameserver-sets/{id} ipam:read
 GET /api/v1/network-interfaces/{id} ipam:read
 GET /api/v1/notification-channels notification:manage
 GET /api/v1/notification-channels/{id} notification:manage
@@ -419,6 +422,7 @@ PATCH /api/v1/maintenance-windows/{id} maintenance:write
 PATCH /api/v1/metamodel/drafts/{id} citype:manage
 PATCH /api/v1/monitoring/alerts/{id} monitoring:write
 PATCH /api/v1/mounts/{id} rack:write
+PATCH /api/v1/nameserver-sets/{id} ipam:write
 PATCH /api/v1/network-interfaces/{id} ipam:write
 PATCH /api/v1/notification-channels/{id} notification:manage
 PATCH /api/v1/orders/{id} order:write
@@ -577,6 +581,7 @@ POST /api/v1/metamodel/import citype:manage
 POST /api/v1/monitoring/alerts monitoring:write
 POST /api/v1/monitoring/metrics monitoring:write
 POST /api/v1/mounts rack:write
+POST /api/v1/nameserver-sets ipam:write
 POST /api/v1/notification-channels notification:manage
 POST /api/v1/notifications/read-all authenticated
 POST /api/v1/notifications/{id}/read authenticated

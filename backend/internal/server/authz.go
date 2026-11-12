@@ -120,8 +120,10 @@ var readPermissionFor = map[string]identity.Permission{
 	// Phase 3 (WP-866, E-160, E-161): IPAM/ASN and ADMP. The writes of ipam
 	// follow the suffix convention (ipam:write); the ADMP accounts have
 	// admp:manage through routeRules (WP-925).
-	"ipam":                     identity.PermIPAMRead,
-	"ipam-sections":            identity.PermIPAMRead,
+	"ipam":          identity.PermIPAMRead,
+	"ipam-sections": identity.PermIPAMRead,
+	// Nameserver sets (IPM-05, WP-905); written with ipam:write.
+	"nameserver-sets":          identity.PermIPAMRead,
 	"asns":                     identity.PermIPAMRead,
 	"asn-ranges":               identity.PermIPAMRead,
 	"bgp-peerings":             identity.PermIPAMRead,

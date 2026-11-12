@@ -18,11 +18,19 @@ type Subnet struct {
 	SectionID string `json:"section_id"`
 	Name      string `json:"name,omitempty"`
 	// VLANID references the VLAN catalog (NET-02, NET-08).
-	VLANID       string   `json:"vlan_id,omitempty"`
-	Gateway      string   `json:"gateway,omitempty"`
-	DNSServers   []string `json:"dns_servers,omitempty"`
-	Description  string   `json:"description,omitempty"`
-	IsManagement bool     `json:"is_management"`
+	VLANID     string   `json:"vlan_id,omitempty"`
+	Gateway    string   `json:"gateway,omitempty"`
+	DNSServers []string `json:"dns_servers,omitempty"`
+	// NameserverSetID references a nameserver set (IPM-05); empty without
+	// one.
+	NameserverSetID string `json:"nameserver_set_id,omitempty"`
+	// EffectiveDNSServers are the DNS servers that apply to the subnet
+	// (read-only, IPM-05): its own dns_servers when set, else the servers
+	// of its nameserver set, else none. Only the PostgreSQL repository
+	// resolves them.
+	EffectiveDNSServers []string `json:"effective_dns_servers,omitempty"`
+	Description         string   `json:"description,omitempty"`
+	IsManagement        bool     `json:"is_management"`
 	// ParentID is the narrowest subnet of the VRF that contains this one
 	// (IPM-02), computed on write and never written by the API; empty for
 	// a root and for a parent the caller cannot see (Konvention 11).
@@ -48,18 +56,21 @@ type SubnetWarning struct {
 
 // CreateSubnetRequest is the payload for creating a subnet.
 type CreateSubnetRequest struct {
-	ClientID     string   `json:"client_id,omitempty"`
-	SiteID       string   `json:"site_id,omitempty"`
-	CIDR         string   `json:"cidr"`
-	VRFID        string   `json:"vrf_id,omitempty"`
-	SectionID    string   `json:"section_id,omitempty"`
-	Name         string   `json:"name,omitempty"`
-	VLANID       string   `json:"vlan_id,omitempty"`
-	Gateway      string   `json:"gateway,omitempty"`
-	DNSServers   []string `json:"dns_servers,omitempty"`
-	Description  string   `json:"description,omitempty"`
-	IsManagement bool     `json:"is_management,omitempty"`
-	IsPool       bool     `json:"is_pool,omitempty"`
+	ClientID   string   `json:"client_id,omitempty"`
+	SiteID     string   `json:"site_id,omitempty"`
+	CIDR       string   `json:"cidr"`
+	VRFID      string   `json:"vrf_id,omitempty"`
+	SectionID  string   `json:"section_id,omitempty"`
+	Name       string   `json:"name,omitempty"`
+	VLANID     string   `json:"vlan_id,omitempty"`
+	Gateway    string   `json:"gateway,omitempty"`
+	DNSServers []string `json:"dns_servers,omitempty"`
+	// NameserverSetID names a nameserver set of the organization (IPM-05);
+	// an unknown one is 422 nameserver_set_id.
+	NameserverSetID string `json:"nameserver_set_id,omitempty"`
+	Description     string `json:"description,omitempty"`
+	IsManagement    bool   `json:"is_management,omitempty"`
+	IsPool          bool   `json:"is_pool,omitempty"`
 }
 
 // UpdateSubnetRequest is the payload for updating a subnet.
@@ -77,11 +88,13 @@ type UpdateSubnetRequest struct {
 	SectionID *string `json:"section_id,omitempty"`
 	Name      *string `json:"name,omitempty"`
 	// VLANID sets ("" clears) the VLAN of the subnet.
-	VLANID       *string  `json:"vlan_id,omitempty"`
-	Gateway      *string  `json:"gateway,omitempty"`
-	DNSServers   []string `json:"dns_servers,omitempty"`
-	Description  *string  `json:"description,omitempty"`
-	IsManagement *bool    `json:"is_management,omitempty"`
+	VLANID     *string  `json:"vlan_id,omitempty"`
+	Gateway    *string  `json:"gateway,omitempty"`
+	DNSServers []string `json:"dns_servers,omitempty"`
+	// NameserverSetID sets ("" clears) the nameserver set (IPM-05).
+	NameserverSetID *string `json:"nameserver_set_id,omitempty"`
+	Description     *string `json:"description,omitempty"`
+	IsManagement    *bool   `json:"is_management,omitempty"`
 	// IsPool makes the subnet a container; a subnet with addresses of its
 	// own cannot become one (409 is_pool).
 	IsPool *bool `json:"is_pool,omitempty"`

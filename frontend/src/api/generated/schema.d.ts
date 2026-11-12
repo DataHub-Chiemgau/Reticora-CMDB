@@ -11125,14 +11125,14 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * List nameserver sets
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * List the nameserver sets by name
+     * @description The nameserver sets of the organization (IPM-05, WP-905); every principal of the organization reads them. Paged by limit and the signed cursor of next_cursor. Only with PostgreSQL; without a database 501. Requires ipam:read.
      */
     get: operations['listNameserverSets'];
     put?: never;
     /**
      * Create a nameserver set
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Creates a set of 1 to 8 DNS servers (IPM-05). Only principals without client and site restriction write sets; a scoped principal gets 403 (E-09). A name taken in the organization is 409 with field name, an empty or too long list or an invalid address 422 with field servers. Requires ipam:write.
      */
     post: operations['createNameserverSet'];
     delete?: never;
@@ -11153,21 +11153,21 @@ export interface paths {
     };
     /**
      * Get a nameserver set
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Requires ipam:read; without a database 501.
      */
     get: operations['getNameserverSet'];
     put?: never;
     post?: never;
     /**
      * Delete a nameserver set
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description A set that subnets use (also subnets outside the caller's scope) is 409. For a principal with client or site restriction the set answers 404 (E-09). Requires ipam:write.
      */
     delete: operations['deleteNameserverSet'];
     options?: never;
     head?: never;
     /**
      * Update a nameserver set
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Changes name, servers (the whole list) and description. For a principal with client or site restriction the set answers 404 (E-09). A name taken is 409 with field name, an invalid server list 422 with field servers. Requires ipam:write.
      */
     patch: operations['updateNameserverSet'];
     trace?: never;
@@ -19562,6 +19562,10 @@ export interface components {
       vlan_id?: string;
       gateway?: string;
       dns_servers?: string[];
+      /** @description Nameserver set of the subnet (IPM-05); absent without one. */
+      nameserver_set_id?: string;
+      /** @description The DNS servers that apply (IPM-05): the subnet's own dns_servers when set, else the servers of its nameserver set; absent when neither applies and in the profile without database. */
+      readonly effective_dns_servers?: string[];
       description?: string;
       is_management: boolean;
       /** @description Narrowest subnet of the same VRF that contains this one (IPM-02), computed on write; absent for a root and for a parent outside the caller's scope. */
@@ -19594,6 +19598,8 @@ export interface components {
       vlan_id?: string;
       gateway?: string;
       dns_servers?: string[];
+      /** @description Nameserver set of the organization (IPM-05); an empty string clears it on update. An unknown set is 422 with field nameserver_set_id. */
+      nameserver_set_id?: string;
       description?: string;
       is_management?: boolean;
       /** @description Container without host addresses of its own (IPM-02). */
@@ -19613,6 +19619,8 @@ export interface components {
       vlan_id?: string;
       gateway?: string;
       dns_servers?: string[];
+      /** @description Nameserver set of the organization (IPM-05); an empty string clears it on update. An unknown set is 422 with field nameserver_set_id. */
+      nameserver_set_id?: string;
       description?: string;
       is_management?: boolean;
       /** @description Makes the subnet a container; a subnet with addresses cannot become one (409 is_pool). */
@@ -19708,6 +19716,34 @@ export interface components {
       strict_mode?: boolean;
       show_vlan?: boolean;
       show_vrf?: boolean;
+    };
+    /** @description Nameserver set of the organization (IPM-05): a reusable list of DNS servers that subnets reference (nameserver_set_id). Every principal of the organization reads the sets; only principals without client and site restriction write them (E-09). */
+    NameserverSet: {
+      id: string;
+      organization_id: string;
+      /** @description Unique in the organization. */
+      name: string;
+      servers: string[];
+      description?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CreateNameserverSetRequest: {
+      name: string;
+      servers: string[];
+      description?: string;
+    };
+    UpdateNameserverSetRequest: {
+      name?: string;
+      /** @description Replaces the whole list. */
+      servers?: string[];
+      /** @description An empty string clears it. */
+      description?: string;
+    };
+    NameserverSetListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['NameserverSet'][];
     };
     IPAMSectionListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['IPAMSection'][];
@@ -21077,6 +21113,15 @@ export interface components {
     };
     /** @description Internal server error */
     InternalServerError: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['ProblemDetail'];
+      };
+    };
+    /** @description Not available in the profile without database (--no-db). */
+    NotImplemented: {
       headers: {
         [name: string]: unknown;
       };
@@ -48777,6 +48822,11 @@ export interface operations {
          *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
       };
       header?: never;
       path?: never;
@@ -48784,17 +48834,20 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List nameserver sets. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description A page of nameserver sets */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['NameserverSetListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   createNameserverSet: {
@@ -48804,14 +48857,20 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateNameserverSetRequest'];
+      };
+    };
     responses: {
-      /** @description Created. The schema comes with the implementing work package. */
+      /** @description Nameserver set created */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['NameserverSet'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -48819,6 +48878,7 @@ export interface operations {
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   getNameserverSet: {
@@ -48833,17 +48893,20 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get a nameserver set. The schema comes with the implementing work package. */
+      /** @description Nameserver set */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['NameserverSet'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   deleteNameserverSet: {
@@ -48858,7 +48921,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Done. */
+      /** @description Nameserver set deleted */
       204: {
         headers: {
           [name: string]: unknown;
@@ -48870,6 +48933,7 @@ export interface operations {
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   updateNameserverSet: {
@@ -48882,14 +48946,20 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateNameserverSetRequest'];
+      };
+    };
     responses: {
-      /** @description Update a nameserver set. The schema comes with the implementing work package. */
+      /** @description Nameserver set updated */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['NameserverSet'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -48898,6 +48968,7 @@ export interface operations {
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   listVLANDomains: {

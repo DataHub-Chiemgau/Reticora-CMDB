@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000303_ipam_search
+Stand: Migration 000304_nameserver_set
 
 ## Prüfung
 
@@ -1988,6 +1988,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `metamodel_rule` | ja | ja | metamodel_rule_isolation_delete (DELETE), metamodel_rule_isolation_insert (INSERT), metamodel_rule_isolation_select (SELECT), metamodel_rule_isolation_update (UPDATE) |
 | `metric_sample` | nein | nein | – |
 | `migration_quarantine` | ja | ja | migration_quarantine_isolation (ALL) |
+| `nameserver_set` | ja | ja | nameserver_set_isolation (ALL), nameserver_set_scoped_delete (DELETE), nameserver_set_scoped_insert (INSERT), nameserver_set_scoped_update (UPDATE) |
 | `network_interface` | ja | ja | network_interface_scoped_delete (DELETE), network_interface_scoped_update (UPDATE), org_isolation (ALL) |
 | `notice_sent` | ja | ja | notice_sent_isolation (ALL) |
 | `notification_channel` | ja | ja | notification_channel_isolation (ALL) |

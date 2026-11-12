@@ -106,6 +106,14 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/ipam-sections/{id}", h.GetSection)
 	r.Patch("/api/v1/ipam-sections/{id}", h.UpdateSection)
 	r.Delete("/api/v1/ipam-sections/{id}", h.DeleteSection)
+
+	// Nameserver sets (IPM-05, nameserver.go): only with PostgreSQL, else
+	// 501.
+	r.Get("/api/v1/nameserver-sets", h.ListNameserverSets)
+	r.Post("/api/v1/nameserver-sets", h.CreateNameserverSet)
+	r.Get("/api/v1/nameserver-sets/{id}", h.GetNameserverSet)
+	r.Patch("/api/v1/nameserver-sets/{id}", h.UpdateNameserverSet)
+	r.Delete("/api/v1/nameserver-sets/{id}", h.DeleteNameserverSet)
 }
 
 func org(w http.ResponseWriter, r *http.Request) (string, bool) {
@@ -202,20 +210,25 @@ func (h *Handler) CreateSubnet(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if err := h.checkSubnetNameserverSet(&req.NameserverSetID); err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
 	s := &Subnet{
-		OrganizationID: orgID,
-		ClientID:       req.ClientID,
-		SiteID:         req.SiteID,
-		CIDR:           normalized,
-		VRFID:          req.VRFID,
-		SectionID:      req.SectionID,
-		Name:           req.Name,
-		VLANID:         req.VLANID,
-		Gateway:        gateway,
-		DNSServers:     req.DNSServers,
-		Description:    req.Description,
-		IsManagement:   req.IsManagement,
-		IsPool:         req.IsPool,
+		OrganizationID:  orgID,
+		ClientID:        req.ClientID,
+		SiteID:          req.SiteID,
+		CIDR:            normalized,
+		VRFID:           req.VRFID,
+		SectionID:       req.SectionID,
+		Name:            req.Name,
+		VLANID:          req.VLANID,
+		Gateway:         gateway,
+		DNSServers:      req.DNSServers,
+		NameserverSetID: req.NameserverSetID,
+		Description:     req.Description,
+		IsManagement:    req.IsManagement,
+		IsPool:          req.IsPool,
 	}
 	if err := h.repo.CreateSubnet(r.Context(), s); err != nil {
 		writeRepoError(w, err, "subnet not found")
@@ -270,6 +283,10 @@ func (h *Handler) UpdateSubnet(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid dns server: "+err.Error())
 			return
 		}
+	}
+	if err := h.checkSubnetNameserverSet(req.NameserverSetID); err != nil {
+		api.WriteFieldError(w, err)
+		return
 	}
 	// The gateway lies inside the subnet after the update, checked against
 	// the new prefix when it changes (IPM-04).

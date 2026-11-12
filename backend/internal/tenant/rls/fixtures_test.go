@@ -70,6 +70,8 @@ var matrixOverrides = map[string]map[string]string{
 	"credential_binding": {"target_kind": "ci", "ci_id": "@uuid"},
 	// A stored credential carries its ciphertext (credential_source_ciphertext_check, WP-894).
 	"credential": {"ciphertext": `\x00`},
+	// A nameserver set holds 1 to 8 servers (nameserver_set_servers_check, WP-905).
+	"nameserver_set": {"servers": "{10.0.0.53}"},
 	// A port is matched by rule, manually or not at all
 	// (admp_service_port_matched_by_check, WP-928); a connection has a
 	// private address surrogate or a business address, not both

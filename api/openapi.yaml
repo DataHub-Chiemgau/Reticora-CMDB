@@ -25550,20 +25550,26 @@ paths:
   /api/v1/nameserver-sets:
     x-phase: P3
     x-feature: ipam
-    x-status: planned
     get:
       operationId: listNameserverSets
       tags: [IPAM]
-      summary: List nameserver sets
+      summary: List the nameserver sets by name
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        The nameserver sets of the organization (IPM-05, WP-905); every
+        principal of the organization reads them. Paged by limit and the
+        signed cursor of next_cursor. Only with PostgreSQL; without a
+        database 501. Requires ipam:read.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: List nameserver sets. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+          description: A page of nameserver sets
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NameserverSetListResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -25572,16 +25578,31 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
     post:
       operationId: createNameserverSet
       tags: [IPAM]
       summary: Create a nameserver set
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Creates a set of 1 to 8 DNS servers (IPM-05). Only principals
+        without client and site restriction write sets; a scoped principal
+        gets 403 (E-09). A name taken in the organization is 409 with field
+        name, an empty or too long list or an invalid address 422 with field
+        servers. Requires ipam:write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateNameserverSetRequest'
       responses:
         '201':
-          description: Created. The schema comes with the implementing work package.
+          description: Nameserver set created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NameserverSet'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -25594,23 +25615,26 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
 
   /api/v1/nameserver-sets/{id}:
     x-phase: P3
     x-feature: ipam
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: getNameserverSet
       tags: [IPAM]
       summary: Get a nameserver set
-      description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+      description: Requires ipam:read; without a database 501.
       responses:
         '200':
-          description: Get a nameserver set. The schema comes with the implementing work package.
+          description: Nameserver set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NameserverSet'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -25619,16 +25643,30 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
     patch:
       operationId: updateNameserverSet
       tags: [IPAM]
       summary: Update a nameserver set
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Changes name, servers (the whole list) and description. For a
+        principal with client or site restriction the set answers 404
+        (E-09). A name taken is 409 with field name, an invalid server list
+        422 with field servers. Requires ipam:write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateNameserverSetRequest'
       responses:
         '200':
-          description: Update a nameserver set. The schema comes with the implementing work package.
+          description: Nameserver set updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NameserverSet'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -25643,16 +25681,19 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
     delete:
       operationId: deleteNameserverSet
       tags: [IPAM]
       summary: Delete a nameserver set
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        A set that subnets use (also subnets outside the caller's scope) is
+        409. For a principal with client or site restriction the set answers
+        404 (E-09). Requires ipam:write.
       responses:
         '204':
-          description: Done.
+          description: Nameserver set deleted
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -25663,6 +25704,8 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
 
   /api/v1/vlan-domains:
     x-phase: P3
@@ -27023,6 +27066,12 @@ components:
             $ref: '#/components/schemas/ViolationProblem'
     InternalServerError:
       description: Internal server error
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
+    NotImplemented:
+      description: Not available in the profile without database (--no-db).
       content:
         application/problem+json:
           schema:
@@ -39674,6 +39723,18 @@ components:
           type: array
           items:
             type: string
+        nameserver_set_id:
+          type: string
+          description: Nameserver set of the subnet (IPM-05); absent without one.
+        effective_dns_servers:
+          type: array
+          readOnly: true
+          items:
+            type: string
+          description: >-
+            The DNS servers that apply (IPM-05): the subnet's own dns_servers
+            when set, else the servers of its nameserver set; absent when
+            neither applies and in the profile without database.
         description:
           type: string
         is_management:
@@ -39747,6 +39808,12 @@ components:
           type: array
           items:
             type: string
+        nameserver_set_id:
+          type: string
+          description: >-
+            Nameserver set of the organization (IPM-05); an empty string
+            clears it on update. An unknown set is 422 with field
+            nameserver_set_id.
         description:
           type: string
         is_management:
@@ -39791,6 +39858,12 @@ components:
           type: array
           items:
             type: string
+        nameserver_set_id:
+          type: string
+          description: >-
+            Nameserver set of the organization (IPM-05); an empty string
+            clears it on update. An unknown set is 422 with field
+            nameserver_set_id.
         description:
           type: string
         is_management:
@@ -39936,6 +40009,62 @@ components:
         strict_mode: { type: boolean }
         show_vlan: { type: boolean }
         show_vrf: { type: boolean }
+
+    NameserverSet:
+      type: object
+      required: [id, organization_id, name, servers, created_at, updated_at]
+      description: >-
+        Nameserver set of the organization (IPM-05): a reusable list of DNS
+        servers that subnets reference (nameserver_set_id). Every principal
+        of the organization reads the sets; only principals without client
+        and site restriction write them (E-09).
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        name: { type: string, description: Unique in the organization. }
+        servers:
+          type: array
+          minItems: 1
+          maxItems: 8
+          items: { type: string, description: IPv4 or IPv6 address. }
+        description: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    CreateNameserverSetRequest:
+      type: object
+      required: [name, servers]
+      properties:
+        name: { type: string }
+        servers:
+          type: array
+          minItems: 1
+          maxItems: 8
+          items: { type: string }
+        description: { type: string }
+
+    UpdateNameserverSetRequest:
+      type: object
+      properties:
+        name: { type: string }
+        servers:
+          type: array
+          minItems: 1
+          maxItems: 8
+          items: { type: string }
+          description: Replaces the whole list.
+        description: { type: string, description: An empty string clears it. }
+
+    NameserverSetListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/NameserverSet'
 
     IPAMSectionListResponse:
       allOf:
