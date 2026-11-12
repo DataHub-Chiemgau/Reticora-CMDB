@@ -11038,7 +11038,13 @@ paths:
         `vault_approle` (role_id, secret_id) and `vault_token` (token) are the
         logins of vault connections (WP-893); a missing member is 422
         (`field` = `secret`), and they are not bound to targets and only
-        stored. Instead of `secret` a credential may carry `vault_ref`
+        stored. The probe kinds (WP-967) are `http` and `acs` (username and
+        password, or token, not both) and `gnmi` (username and password
+        and/or client_cert and client_key as PEM, optionally ca as PEM); a
+        missing, superfluous or unparseable member is 422 (`field` =
+        `secret.<member>`), here and on PUT /credentials/{id}/secret; the
+        message names the member, never its value. Instead of `secret` a
+        credential may carry `vault_ref`
         (WP-894): a vault connection of the credential's client or an
         org-wide one (else 422 `vault_ref.connection_id`), a path and a
         `field_map` covering the required fields of the kind (else 422
@@ -11189,7 +11195,10 @@ paths:
         write. The answer carries the metadata, never the old or the new
         secret. Requires credential:manage. The id stays, so discovery scopes
         and connectors keep their reference. A vault_ref credential has no
-        stored secret: 409 (WP-894).
+        stored secret: 409 (WP-894). The secret keeps the members of its
+        kind: a vault login 422 `secret`, the probe kinds http, gnmi and acs
+        422 `secret.<member>` (WP-967). An empty secret is 422 `secret` for
+        every kind.
       requestBody:
         required: true
         content:
@@ -41887,7 +41896,7 @@ components:
           type: string
         kind:
           type: string
-          enum: [snmp_v2c, snmp_v3, ssh_password, ssh_key, redfish, ipmi, wmi, api_token, nut, nas, vault_approle, vault_token]
+          enum: [snmp_v2c, snmp_v3, ssh_password, ssh_key, redfish, ipmi, wmi, api_token, nut, nas, vault_approle, vault_token, http, gnmi, acs]
         scope:
           type: string
         key_version:
@@ -41928,7 +41937,7 @@ components:
         credential_id: { type: string, format: uuid }
         target_kind: { type: string, enum: [ci, device_group, subnet, probe] }
         target_id: { type: string, format: uuid }
-        namespace: { type: string, enum: [snmp, ssh, redfish, ipmi, wmi, api, nut, nas] }
+        namespace: { type: string, enum: [snmp, ssh, redfish, ipmi, wmi, api, nut, nas, http, gnmi, acs] }
         priority: { type: integer, minimum: 0, maximum: 10000 }
         client_id: { type: string, format: uuid, description: Client of the target. }
         site_id: { type: string, format: uuid, description: Site of the target. }
@@ -41944,7 +41953,7 @@ components:
         target_id: { type: string, format: uuid }
         namespace:
           type: string
-          enum: [snmp, ssh, redfish, ipmi, wmi, api, nut, nas]
+          enum: [snmp, ssh, redfish, ipmi, wmi, api, nut, nas, http, gnmi, acs]
           description: Empty takes the namespace of the credential's kind.
         priority: { type: integer, minimum: 0, maximum: 10000, default: 100 }
     CredentialBindingUpdate:
@@ -41952,7 +41961,7 @@ components:
       additionalProperties: false
       minProperties: 1
       properties:
-        namespace: { type: string, enum: [snmp, ssh, redfish, ipmi, wmi, api, nut, nas] }
+        namespace: { type: string, enum: [snmp, ssh, redfish, ipmi, wmi, api, nut, nas, http, gnmi, acs] }
         priority: { type: integer, minimum: 0, maximum: 10000 }
     CredentialBindingListResponse:
       allOf:
@@ -42004,7 +42013,7 @@ components:
           properties:
             namespace:
               type: string
-              enum: [snmp, ssh, redfish, ipmi, wmi, api, nut, nas]
+              enum: [snmp, ssh, redfish, ipmi, wmi, api, nut, nas, http, gnmi, acs]
             overridden:
               type: array
               description: The other candidates of the namespace in resolution order.
@@ -42032,7 +42041,7 @@ components:
             required: [credential_id]
             properties:
               credential_id: { type: string, format: uuid }
-              namespace: { type: string, enum: [snmp, ssh, redfish, ipmi, wmi, api, nut, nas] }
+              namespace: { type: string, enum: [snmp, ssh, redfish, ipmi, wmi, api, nut, nas, http, gnmi, acs] }
               priority: { type: integer, minimum: 0, maximum: 10000, default: 100 }
     VaultConnection:
       type: object
@@ -42348,7 +42357,7 @@ components:
         ci_id: { type: string, format: uuid }
         namespace:
           type: string
-          enum: [snmp, ssh, redfish, ipmi, wmi, api, nut, nas]
+          enum: [snmp, ssh, redfish, ipmi, wmi, api, nut, nas, http, gnmi, acs]
         last_success_at: { type: [string, 'null'], format: date-time }
         last_failure_at: { type: [string, 'null'], format: date-time }
         last_error_class:
@@ -42415,7 +42424,7 @@ components:
           type: string
         kind:
           type: string
-          enum: [snmp_v2c, snmp_v3, ssh_password, ssh_key, redfish, ipmi, wmi, api_token, nut, nas, vault_approle, vault_token]
+          enum: [snmp_v2c, snmp_v3, ssh_password, ssh_key, redfish, ipmi, wmi, api_token, nut, nas, vault_approle, vault_token, http, gnmi, acs]
         scope:
           type: string
         secret:

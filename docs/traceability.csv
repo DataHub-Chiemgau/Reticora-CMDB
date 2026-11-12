@@ -1711,3 +1711,5 @@ NFR-11;[P3];E;backend/internal/monitoring/probe_storage_spike_integration_test.g
 MON-01;[B];E;backend/internal/monitoring/probe_storage_spike_integration_test.go;WP-943
 NFR-06;[B];E;backend/internal/monitoring/probe_storage_spike_integration_test.go;WP-943
 PRT-01;[P3];E;collector/probe/executor_test.go;WP-950
+PRT-22;[P3];E;backend/internal/credential/credential_test.go;WP-967
+COL-02;[B];E;collector/collectorcmd/discovery_credentials_test.go;WP-967

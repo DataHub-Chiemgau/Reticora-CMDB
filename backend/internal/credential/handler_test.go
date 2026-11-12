@@ -311,3 +311,52 @@ func TestHandlerPatchRejectsImmutableFields(t *testing.T) {
 		t.Errorf("remove the age limit: %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+// TestHandlerProbeKindsSecretFieldErrors covers WP-967 AK2 on HTTP level:
+// POST /credentials and PUT /credentials/{id}/secret answer a secret
+// without the members of a probe kind with 422 and field secret.<member>;
+// the body never carries a value of the secret.
+func TestHandlerProbeKindsSecretFieldErrors(t *testing.T) {
+	router, _ := testRouter(t)
+	const value = "probe-secret-value-967"
+	fieldOf := func(rec *httptest.ResponseRecorder) string {
+		t.Helper()
+		var problem struct {
+			Field string `json:"field"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &problem); err != nil {
+			t.Fatalf("problem %s: %v", rec.Body.String(), err)
+		}
+		return problem.Field
+	}
+	for _, tc := range []struct{ body, field string }{
+		{`{"name":"h","kind":"http","secret":{"password":"` + value + `"}}`, "secret.username"},
+		{`{"name":"a","kind":"acs","secret":{"username":"u","password":"` + value + `","token":"` + value + `"}}`, "secret.token"},
+		{`{"name":"g","kind":"gnmi","secret":{"client_cert":"` + value + `","client_key":"` + value + `"}}`, "secret.client_cert"},
+	} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, withTenant(httptest.NewRequest(http.MethodPost, "/api/v1/credentials", bytes.NewBufferString(tc.body)), "org-1"))
+		if rec.Code != http.StatusUnprocessableEntity || fieldOf(rec) != tc.field {
+			t.Errorf("POST %s: %d %s, want 422 %s", tc.body, rec.Code, rec.Body.String(), tc.field)
+		}
+		if strings.Contains(rec.Body.String(), value) {
+			t.Errorf("POST %s: the answer carries the secret: %s", tc.body, rec.Body.String())
+		}
+	}
+
+	cred := createCredential(t, router, `{"name":"gnmi-967","kind":"gnmi","secret":{"username":"u","password":"p"}}`)
+	for _, tc := range []struct{ body, field string }{
+		{`{"secret":{"username":"u","password":"p","client_cert":"` + value + `","client_key":"` + value + `"}}`, "secret.client_cert"},
+		{`{"secret":{"username":"u","password":"p","ca":"` + value + `"}}`, "secret.ca"},
+		{`{"secret":{"client_cert":"` + value + `"}}`, "secret.client_key"},
+	} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, withTenant(httptest.NewRequest(http.MethodPut, "/api/v1/credentials/"+cred.ID+"/secret", bytes.NewBufferString(tc.body)), "org-1"))
+		if rec.Code != http.StatusUnprocessableEntity || fieldOf(rec) != tc.field {
+			t.Errorf("PUT %s: %d %s, want 422 %s", tc.body, rec.Code, rec.Body.String(), tc.field)
+		}
+		if strings.Contains(rec.Body.String(), value) {
+			t.Errorf("PUT %s: the answer carries the secret: %s", tc.body, rec.Body.String())
+		}
+	}
+}

@@ -61,6 +61,41 @@ var KindFields = map[string][]string{
 	KindAPIToken:    {"token"},
 	KindNUT:         {"username", "password"},
 	KindNAS:         {"username", "password"},
+	// The probe kinds (WP-967): the first variant; kindFieldVariants names
+	// the others.
+	KindHTTP: {"username", "password"},
+	KindGNMI: {"username", "password"},
+	KindACS:  {"username", "password"},
+}
+
+// kindFieldVariants are further sets of fields a field_map of the kind may
+// map instead of KindFields (WP-967): token for http and acs, the client
+// certificate (alone or with username and password) for gnmi.
+var kindFieldVariants = map[string][][]string{
+	KindHTTP: {{"token"}},
+	KindACS:  {{"token"}},
+	KindGNMI: {{"client_cert", "client_key"}, {"username", "password", "client_cert", "client_key"}},
+}
+
+// kindOptionalFields may be mapped in addition to a variant (gnmi: ca).
+var kindOptionalFields = map[string][]string{
+	KindGNMI: {"ca"},
+}
+
+// fieldMapMatches reports whether fieldMap maps exactly the fields of
+// variant, plus optional ones.
+func fieldMapMatches(fieldMap map[string]string, variant, optional []string) bool {
+	for _, field := range variant {
+		if strings.TrimSpace(fieldMap[field]) == "" {
+			return false
+		}
+	}
+	for field, source := range fieldMap {
+		if strings.TrimSpace(source) == "" || (!slices.Contains(variant, field) && !slices.Contains(optional, field)) {
+			return false
+		}
+	}
+	return true
 }
 
 func refFieldError(field, message string) error {
@@ -79,6 +114,15 @@ func normalizeVaultPath(path string) (string, error) {
 // checkFieldMap requires a vault field for every required field of kind.
 func checkFieldMap(kind string, fieldMap map[string]string) error {
 	required := KindFields[kind]
+	if variants, ok := kindFieldVariants[kind]; ok {
+		for _, variant := range append([][]string{required}, variants...) {
+			if fieldMapMatches(fieldMap, variant, kindOptionalFields[kind]) {
+				return nil
+			}
+		}
+		return refFieldError("field_map", fmt.Sprintf("field_map must map one variant of the fields of kind %s: %s",
+			kind, describeVariants(append([][]string{required}, variants...), kindOptionalFields[kind])))
+	}
 	var missing []string
 	for _, field := range required {
 		if strings.TrimSpace(fieldMap[field]) == "" {
@@ -95,6 +139,18 @@ func checkFieldMap(kind string, fieldMap map[string]string) error {
 		}
 	}
 	return nil
+}
+
+func describeVariants(variants [][]string, optional []string) string {
+	parts := make([]string, 0, len(variants))
+	for _, v := range variants {
+		parts = append(parts, strings.Join(v, " and "))
+	}
+	out := strings.Join(parts, " or ")
+	if len(optional) > 0 {
+		out += ", optionally " + strings.Join(optional, ", ")
+	}
+	return out
 }
 
 // checkVaultRef validates the reference of a new credential of kind and

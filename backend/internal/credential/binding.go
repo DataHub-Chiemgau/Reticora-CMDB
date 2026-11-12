@@ -54,7 +54,7 @@ const maxListedBindings = 50
 var KindNamespace = map[string]string{
 	KindSNMPv2c: "snmp", KindSNMPv3: "snmp", KindSSHPassword: "ssh", KindSSHKey: "ssh",
 	KindRedfish: "redfish", KindIPMI: "ipmi", KindWMI: "wmi", KindAPIToken: "api", KindNUT: "nut",
-	KindNAS: "nas",
+	KindNAS: "nas", KindHTTP: "http", KindGNMI: "gnmi", KindACS: "acs",
 }
 
 // Binding binds a credential to a target for one namespace with a priority
@@ -318,6 +318,10 @@ func bindingError(err error) error {
 		return ErrClientRule
 	case "credential_binding_ci_fkey", "credential_binding_subnet_fkey", "credential_binding_device_group_fkey", "credential_binding_probe_fkey":
 		return ErrTargetUnknown
+	case "credential_binding_namespace_check":
+		// validate admits only the namespaces of KindNamespace; a namespace
+		// the table does not know yet is a field error, not a 500.
+		return &api.FieldError{Field: "namespace", Status: http.StatusUnprocessableEntity, Message: "namespace is not supported"}
 	case "credential_binding_credential_fkey":
 		return &api.FieldError{Field: "credential_id", Status: http.StatusUnprocessableEntity, Message: "credential not found"}
 	}

@@ -175,6 +175,11 @@ var credentialNamespace = map[string]string{
 	// The logins of vault connections (WP-893): no plugin reads them, the
 	// resolver of the vault references (WP-895) does.
 	"vault_approle": "vault", "vault_token": "vault",
+	// The kinds of the probes (PRT-22, WP-967), each under its own
+	// namespace without alias: no discovery plugin reads them, the probe
+	// executors of their probe types (testdata/credential-kinds.json
+	// probe_types) do.
+	"http": "http", "gnmi": "gnmi", "acs": "acs",
 }
 
 // bundleCache holds the credentials of the last bundle in memory, by ID,

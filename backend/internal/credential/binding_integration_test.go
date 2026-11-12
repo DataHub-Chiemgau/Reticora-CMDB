@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -389,5 +390,54 @@ func TestCIBindingsReplace(t *testing.T) {
 	}
 	if rec = e.do(http.MethodGet, "/api/v1/cis/"+e.ci2+"/credentials", "", e.f.Client1); rec.Code != http.StatusNotFound {
 		t.Errorf("CI outside the scope: %d, want 404", rec.Code)
+	}
+}
+
+// TestBindingProbeCredentialKinds covers PRT-22 (WP-967): a credential of
+// the probe kinds http, gnmi and acs binds to a CI under its own namespace
+// (CRD-01), a usage row of these namespaces is stored (CRD-06), and the
+// down migration of 000312 refuses while such a usage row or binding
+// exists.
+func TestBindingProbeCredentialKinds(t *testing.T) {
+	e := newBindingEnv(t)
+	ids := map[string]string{}
+	for _, kind := range []string{credential.KindHTTP, credential.KindGNMI, credential.KindACS} {
+		id := e.createCredential(`{"name":"wp967-` + kind + `","kind":"` + kind + `","secret":{"username":"u","password":"p"}}`)
+		ids[kind] = id
+		rec := e.bind(id, "ci", e.ci1, 100)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("bind %s credential to a CI: %d %s", kind, rec.Code, rec.Body.String())
+		}
+		var b credential.Binding
+		if err := json.Unmarshal(rec.Body.Bytes(), &b); err != nil {
+			t.Fatal(err)
+		}
+		if b.Namespace != kind {
+			t.Errorf("binding of the %s credential has namespace %q, want %q", kind, b.Namespace, kind)
+		}
+	}
+	e.exec(`INSERT INTO credential_usage (organization_id, credential_id, ci_id, namespace, last_success_at)
+		VALUES ($1, $2, $3, 'http', now())`, e.f.OrgA, ids[credential.KindHTTP], e.ci1)
+
+	down, err := os.ReadFile("../../migrations/000312_credential_kind_probes.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bg := context.Background()
+	revert := func() error {
+		tx, beginErr := e.f.Admin.Begin(bg)
+		if beginErr != nil {
+			t.Fatal(beginErr)
+		}
+		defer func() { _ = tx.Rollback(bg) }()
+		_, execErr := tx.Exec(bg, string(down))
+		return execErr
+	}
+	if err = revert(); err == nil || !strings.Contains(err.Error(), "credential_usage holds rows of namespace http, gnmi or acs") {
+		t.Fatalf("down with a usage row: %v, want the usage refusal", err)
+	}
+	e.exec(`DELETE FROM credential_usage WHERE organization_id = $1`, e.f.OrgA)
+	if err = revert(); err == nil || !strings.Contains(err.Error(), "credential_binding holds bindings of namespace http, gnmi or acs") {
+		t.Fatalf("down with bindings: %v, want the binding refusal", err)
 	}
 }

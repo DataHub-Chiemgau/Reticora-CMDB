@@ -2,11 +2,20 @@ package credential
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
+	"math/big"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
@@ -481,6 +490,14 @@ func TestService_FieldMapPerKind(t *testing.T) {
 		{KindSSHPassword, map[string]string{"username": "user"}, "field_map"},
 		{KindSSHPassword, map[string]string{"username": "user", "password": "pw"}, ""},
 		{KindSSHKey, map[string]string{"username": "user", "private_key": "key"}, ""},
+		// The probe kinds map one variant of their fields (WP-967).
+		{KindHTTP, map[string]string{"token": "t"}, ""},
+		{KindHTTP, map[string]string{"username": "u", "password": "p"}, ""},
+		{KindHTTP, map[string]string{"username": "u", "password": "p", "token": "t"}, "field_map"},
+		{KindACS, map[string]string{"username": "u"}, "field_map"},
+		{KindGNMI, map[string]string{"client_cert": "c", "client_key": "k", "ca": "ca"}, ""},
+		{KindGNMI, map[string]string{"username": "u", "password": "p", "client_cert": "c", "client_key": "k"}, ""},
+		{KindGNMI, map[string]string{"ca": "ca"}, "field_map"},
 		{KindVaultToken, map[string]string{"token": "t"}, "vault_ref"},
 		{KindVaultAppRole, map[string]string{"role_id": "r", "secret_id": "s"}, "vault_ref"},
 	} {
@@ -585,5 +602,107 @@ func TestVaultLoginOnlyThroughConnection(t *testing.T) {
 	}
 	if err = svc.Delete(ctx, "org-1", token); err != nil {
 		t.Errorf("delete an unused login: %v", err)
+	}
+}
+
+// testPEMPair returns a self-signed certificate and its PKCS#8 key as PEM.
+func testPEMPair(t *testing.T) (certPEM, keyPEM string) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "gnmi-client"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour)}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})),
+		string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}))
+}
+
+// TestProbeKindsRequiredFields covers WP-967 AK1 and AK2 (PRT-22, COL-02):
+// http and acs carry username and password or token, not both; gnmi at
+// least one of the pairs username/password and client_cert/client_key,
+// optionally ca, with parseable PEM. A violation is 422 secret.<member> on
+// Create and on the replacement of the secret; the message never holds a
+// value.
+func TestProbeKindsRequiredFields(t *testing.T) {
+	cert, key := testPEMPair(t)
+	const secretValue = "s3cr3t-value-never-echoed"
+	cases := []struct {
+		name   string
+		kind   string
+		secret map[string]any
+		field  string // "" = valid
+	}{
+		{"http user/password", KindHTTP, map[string]any{"username": "u", "password": secretValue}, ""},
+		{"http token", KindHTTP, map[string]any{"token": secretValue}, ""},
+		{"http nothing", KindHTTP, map[string]any{}, "secret.username"},
+		{"http username only", KindHTTP, map[string]any{"username": "u"}, "secret.password"},
+		{"http password only", KindHTTP, map[string]any{"password": secretValue}, "secret.username"},
+		{"http both variants", KindHTTP, map[string]any{"username": "u", "password": secretValue, "token": secretValue}, "secret.token"},
+		{"http token not a string", KindHTTP, map[string]any{"token": 42}, "secret.token"},
+		{"acs user/password", KindACS, map[string]any{"username": "u", "password": secretValue}, ""},
+		{"acs token", KindACS, map[string]any{"token": secretValue}, ""},
+		{"acs both variants", KindACS, map[string]any{"username": "u", "password": secretValue, "token": secretValue}, "secret.token"},
+		{"acs empty token", KindACS, map[string]any{"token": " "}, "secret.username"},
+		{"gnmi user/password", KindGNMI, map[string]any{"username": "u", "password": secretValue}, ""},
+		{"gnmi client cert", KindGNMI, map[string]any{"client_cert": cert, "client_key": key}, ""},
+		{"gnmi both pairs and ca", KindGNMI, map[string]any{"username": "u", "password": secretValue, "client_cert": cert, "client_key": key, "ca": cert + cert}, ""},
+		{"gnmi user/password and ca", KindGNMI, map[string]any{"username": "u", "password": secretValue, "ca": cert}, ""},
+		{"gnmi nothing", KindGNMI, map[string]any{"ca": cert}, "secret.username"},
+		{"gnmi cert without key", KindGNMI, map[string]any{"client_cert": cert}, "secret.client_key"},
+		{"gnmi key without cert", KindGNMI, map[string]any{"client_key": key}, "secret.client_cert"},
+		{"gnmi invalid cert PEM", KindGNMI, map[string]any{"client_cert": secretValue, "client_key": key}, "secret.client_cert"},
+		{"gnmi key is a certificate", KindGNMI, map[string]any{"client_cert": cert, "client_key": cert}, "secret.client_key"},
+		{"gnmi invalid key PEM", KindGNMI, map[string]any{"client_cert": cert, "client_key": "-----BEGIN PRIVATE KEY-----\n" + secretValue + "\n-----END PRIVATE KEY-----"}, "secret.client_key"},
+		{"gnmi invalid ca PEM", KindGNMI, map[string]any{"username": "u", "password": secretValue, "ca": secretValue}, "secret.ca"},
+	}
+	ctx := context.Background()
+	svc := NewService(NewMemoryRepository(), testEncryptor(t))
+	for _, tc := range cases {
+		_, err := svc.Create(ctx, CreateRequest{OrganizationID: "org-1", Name: tc.name, Kind: tc.kind, Secret: tc.secret})
+		checkProbeKindError(t, "Create "+tc.name, err, tc.field, secretValue, cert, key)
+	}
+	// The replacement of the secret applies the same check.
+	for _, kind := range []string{KindHTTP, KindGNMI, KindACS} {
+		cred, err := svc.Create(ctx, CreateRequest{OrganizationID: "org-1", Name: "replace " + kind, Kind: kind,
+			Secret: map[string]any{"username": "u", "password": "p"}})
+		if err != nil {
+			t.Fatalf("create %s: %v", kind, err)
+		}
+		for _, tc := range cases {
+			if tc.kind != kind {
+				continue
+			}
+			_, err := svc.ReplaceSecret(ctx, "org-1", cred.ID, tc.secret, nil)
+			checkProbeKindError(t, "ReplaceSecret "+tc.name, err, tc.field, secretValue, cert, key)
+		}
+	}
+}
+
+func checkProbeKindError(t *testing.T, name string, err error, field string, secrets ...string) {
+	t.Helper()
+	if field == "" {
+		if err != nil {
+			t.Errorf("%s: %v, want valid", name, err)
+		}
+		return
+	}
+	var fe *api.FieldError
+	if !errors.As(err, &fe) || fe.Field != field || fe.Status != 422 {
+		t.Errorf("%s: %v, want 422 field %s", name, err, field)
+		return
+	}
+	for _, s := range secrets {
+		if strings.Contains(fe.Message, s) || strings.Contains(err.Error(), s) {
+			t.Errorf("%s: the message %q echoes a value of the secret", name, fe.Message)
+		}
 	}
 }

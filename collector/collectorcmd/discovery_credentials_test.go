@@ -22,6 +22,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/snmp"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 )
 
 // TestAuditCredentialKindRouting: every vault credential kind reaches the
@@ -413,6 +414,9 @@ type credentialKinds struct {
 		Kind      string   `json:"kind"`
 		Namespace string   `json:"namespace"`
 		Plugins   []string `json:"plugins"`
+		// ProbeTypes are the probe types of the type register that read
+		// the kind (WP-967).
+		ProbeTypes []string `json:"probe_types"`
 	} `json:"kinds"`
 }
 
@@ -453,6 +457,18 @@ func TestCredentialKindsContract(t *testing.T) {
 		slices.Sort(reached)
 		if want := slices.Sorted(slices.Values(k.Plugins)); !slices.Equal(reached, want) {
 			t.Errorf("a credential of kind %q reaches the plugins %v, contract says %v", k.Kind, reached, want)
+		}
+		// Every probe type of the kind exists in the type register and
+		// reads the namespace of the kind (WP-967 AK4).
+		for _, pt := range k.ProbeTypes {
+			typ, ok := probewire.Lookup(pt)
+			if !ok {
+				t.Errorf("kind %q names probe type %q, which the type register does not know", k.Kind, pt)
+				continue
+			}
+			if !slices.Contains(typ.CredentialNamespaces, k.Namespace) {
+				t.Errorf("kind %q names probe type %q, whose credential namespaces %v lack %q", k.Kind, pt, typ.CredentialNamespaces, k.Namespace)
+			}
 		}
 	}
 	for kind := range credentialNamespace {

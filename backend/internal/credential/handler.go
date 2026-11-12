@@ -107,7 +107,8 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		// A secret without the members of its kind (422 secret), a client outside the scope (403), an unknown client (422) or a
+		// A secret without the members of its kind (422 secret, for the probe kinds http, gnmi and acs
+		// secret.<member>; WP-967), a client outside the scope (403), an unknown client (422) or a
 		// value the database refuses (400) through the sanitized
 		// contract (API-03, F-390); anything else 500.
 		api.WriteRepoError(w, err)
@@ -281,6 +282,8 @@ func (h *Handler) replaceSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(req.Secret) == 0 {
+		// For every kind, the probe kinds included: their members are
+		// checked by validateSecret (422 secret.<member>, WP-967).
 		writeFieldError(w, "secret", "secret must not be empty")
 		return
 	}

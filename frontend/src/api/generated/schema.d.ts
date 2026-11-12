@@ -4731,7 +4731,7 @@ export interface paths {
     put?: never;
     /**
      * Create an encrypted credential
-     * @description Stores a credential whose secret is envelope-encrypted at rest. The owning organization is derived from the authenticated tenant; any `organization_id` in the request body is ignored. A missing or unknown `kind` is answered with 422 (`field` = `kind`); `nas` is the account of the NAS plugin (Synology DSM: username and password). `vault_approle` (role_id, secret_id) and `vault_token` (token) are the logins of vault connections (WP-893); a missing member is 422 (`field` = `secret`), and they are not bound to targets and only stored. Instead of `secret` a credential may carry `vault_ref` (WP-894): a vault connection of the credential's client or an org-wide one (else 422 `vault_ref.connection_id`), a path and a `field_map` covering the required fields of the kind (else 422 `field_map`); both or none is 422. Database refusals use the sanitized error contract (API-03): a value the store refuses (e.g. a `client_id` that is no UUID, a NUL byte) 400, an unknown `client_id` 422, a `client_id` outside the caller's client scope 403.
+     * @description Stores a credential whose secret is envelope-encrypted at rest. The owning organization is derived from the authenticated tenant; any `organization_id` in the request body is ignored. A missing or unknown `kind` is answered with 422 (`field` = `kind`); `nas` is the account of the NAS plugin (Synology DSM: username and password). `vault_approle` (role_id, secret_id) and `vault_token` (token) are the logins of vault connections (WP-893); a missing member is 422 (`field` = `secret`), and they are not bound to targets and only stored. The probe kinds (WP-967) are `http` and `acs` (username and password, or token, not both) and `gnmi` (username and password and/or client_cert and client_key as PEM, optionally ca as PEM); a missing, superfluous or unparseable member is 422 (`field` = `secret.<member>`), here and on PUT /credentials/{id}/secret; the message names the member, never its value. Instead of `secret` a credential may carry `vault_ref` (WP-894): a vault connection of the credential's client or an org-wide one (else 422 `vault_ref.connection_id`), a path and a `field_map` covering the required fields of the kind (else 422 `field_map`); both or none is 422. Database refusals use the sanitized error contract (API-03): a value the store refuses (e.g. a `client_id` that is no UUID, a NUL byte) 400, an unknown `client_id` 422, a `client_id` outside the caller's client scope 403.
      */
     post: operations['createCredential'];
     delete?: never;
@@ -4784,7 +4784,7 @@ export interface paths {
     get?: never;
     /**
      * Replace the secret of a credential
-     * @description CRD-05 (WP-889): encrypts the new secret with the current DEK, raises secret_version and sets rotated_at in one transaction under a lock of the DEK, and appends credential.rotated (source stored) as its last write. The answer carries the metadata, never the old or the new secret. Requires credential:manage. The id stays, so discovery scopes and connectors keep their reference. A vault_ref credential has no stored secret: 409 (WP-894).
+     * @description CRD-05 (WP-889): encrypts the new secret with the current DEK, raises secret_version and sets rotated_at in one transaction under a lock of the DEK, and appends credential.rotated (source stored) as its last write. The answer carries the metadata, never the old or the new secret. Requires credential:manage. The id stays, so discovery scopes and connectors keep their reference. A vault_ref credential has no stored secret: 409 (WP-894). The secret keeps the members of its kind: a vault login 422 `secret`, the probe kinds http, gnmi and acs 422 `secret.<member>` (WP-967). An empty secret is 422 `secret` for every kind.
      */
     put: operations['replaceCredentialSecret'];
     post?: never;
@@ -20775,7 +20775,10 @@ export interface components {
         | 'nut'
         | 'nas'
         | 'vault_approle'
-        | 'vault_token';
+        | 'vault_token'
+        | 'http'
+        | 'gnmi'
+        | 'acs';
       scope?: string;
       /** @description Version of the organization's data encryption key. */
       key_version: number;
@@ -20811,7 +20814,18 @@ export interface components {
       /** Format: uuid */
       target_id: string;
       /** @enum {string} */
-      namespace: 'snmp' | 'ssh' | 'redfish' | 'ipmi' | 'wmi' | 'api' | 'nut' | 'nas';
+      namespace:
+        | 'snmp'
+        | 'ssh'
+        | 'redfish'
+        | 'ipmi'
+        | 'wmi'
+        | 'api'
+        | 'nut'
+        | 'nas'
+        | 'http'
+        | 'gnmi'
+        | 'acs';
       priority: number;
       /**
        * Format: uuid
@@ -20839,13 +20853,35 @@ export interface components {
        * @description Empty takes the namespace of the credential's kind.
        * @enum {string}
        */
-      namespace?: 'snmp' | 'ssh' | 'redfish' | 'ipmi' | 'wmi' | 'api' | 'nut' | 'nas';
+      namespace?:
+        | 'snmp'
+        | 'ssh'
+        | 'redfish'
+        | 'ipmi'
+        | 'wmi'
+        | 'api'
+        | 'nut'
+        | 'nas'
+        | 'http'
+        | 'gnmi'
+        | 'acs';
       /** @default 100 */
       priority: number;
     };
     CredentialBindingUpdate: {
       /** @enum {string} */
-      namespace?: 'snmp' | 'ssh' | 'redfish' | 'ipmi' | 'wmi' | 'api' | 'nut' | 'nas';
+      namespace?:
+        | 'snmp'
+        | 'ssh'
+        | 'redfish'
+        | 'ipmi'
+        | 'wmi'
+        | 'api'
+        | 'nut'
+        | 'nas'
+        | 'http'
+        | 'gnmi'
+        | 'acs';
       priority?: number;
     };
     CredentialBindingListResponse: components['schemas']['PaginationEnvelope'] & {
@@ -20878,7 +20914,18 @@ export interface components {
     };
     EffectiveCredential: components['schemas']['ResolvedCredential'] & {
       /** @enum {string} */
-      namespace: 'snmp' | 'ssh' | 'redfish' | 'ipmi' | 'wmi' | 'api' | 'nut' | 'nas';
+      namespace:
+        | 'snmp'
+        | 'ssh'
+        | 'redfish'
+        | 'ipmi'
+        | 'wmi'
+        | 'api'
+        | 'nut'
+        | 'nas'
+        | 'http'
+        | 'gnmi'
+        | 'acs';
       /** @description The other candidates of the namespace in resolution order. */
       overridden: components['schemas']['ResolvedCredential'][];
     };
@@ -20893,7 +20940,18 @@ export interface components {
         /** Format: uuid */
         credential_id: string;
         /** @enum {string} */
-        namespace?: 'snmp' | 'ssh' | 'redfish' | 'ipmi' | 'wmi' | 'api' | 'nut' | 'nas';
+        namespace?:
+          | 'snmp'
+          | 'ssh'
+          | 'redfish'
+          | 'ipmi'
+          | 'wmi'
+          | 'api'
+          | 'nut'
+          | 'nas'
+          | 'http'
+          | 'gnmi'
+          | 'acs';
         /** @default 100 */
         priority: number;
       }[];
@@ -21211,7 +21269,18 @@ export interface components {
       /** Format: uuid */
       ci_id: string;
       /** @enum {string} */
-      namespace: 'snmp' | 'ssh' | 'redfish' | 'ipmi' | 'wmi' | 'api' | 'nut' | 'nas';
+      namespace:
+        | 'snmp'
+        | 'ssh'
+        | 'redfish'
+        | 'ipmi'
+        | 'wmi'
+        | 'api'
+        | 'nut'
+        | 'nas'
+        | 'http'
+        | 'gnmi'
+        | 'acs';
       /** Format: date-time */
       last_success_at: string | null;
       /** Format: date-time */
@@ -21279,7 +21348,10 @@ export interface components {
         | 'nut'
         | 'nas'
         | 'vault_approle'
-        | 'vault_token';
+        | 'vault_token'
+        | 'http'
+        | 'gnmi'
+        | 'acs';
       scope?: string;
       /** @description Plaintext secret data, encrypted at rest before storage. */
       secret?: {

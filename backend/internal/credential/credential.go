@@ -7,7 +7,9 @@ package credential
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"net/http"
@@ -37,6 +39,14 @@ const (
 	// reads them.
 	KindVaultAppRole = "vault_approle"
 	KindVaultToken   = "vault_token"
+	// The kinds of the probes (PRT-22, WP-967), each under its own
+	// namespace of the collector without alias: http (HTTP probes:
+	// username/password or token), gnmi (gNMI: username/password and/or
+	// client_cert/client_key, optional ca) and acs (TR-069/USP ACS:
+	// username/password or token).
+	KindHTTP = "http"
+	KindGNMI = "gnmi"
+	KindACS  = "acs"
 )
 
 var (
@@ -60,6 +70,9 @@ var validKinds = map[string]bool{
 	KindNAS:          true,
 	KindVaultAppRole: true,
 	KindVaultToken:   true,
+	KindHTTP:         true,
+	KindGNMI:         true,
+	KindACS:          true,
 }
 
 // vaultLoginFields are the required members of the secret of a vault login
@@ -79,6 +92,159 @@ func checkVaultLoginSecret(kind string, secret map[string]any) error {
 		}
 	}
 	return nil
+}
+
+// validateSecret checks the members of a stored secret of kind (AK2 of
+// WP-967): the logins of vault connections and the probe kinds http, gnmi
+// and acs; other kinds are not checked. It applies to Create and to the
+// replacement of the secret (PUT /credentials/{id}/secret). A violation is
+// a 422 with field secret.<member> (secret for a vault login); the message
+// names the members only, never a value.
+func validateSecret(kind string, secret map[string]any) error {
+	if err := checkVaultLoginSecret(kind, secret); err != nil {
+		return err
+	}
+	switch kind {
+	case KindHTTP, KindACS:
+		return checkUserOrTokenSecret(kind, secret)
+	case KindGNMI:
+		return checkGNMISecret(secret)
+	}
+	return nil
+}
+
+func secretFieldError(member, message string) error {
+	return &api.FieldError{Field: "secret." + member, Status: http.StatusUnprocessableEntity, Message: message}
+}
+
+// secretString returns a member of the secret as a non-empty string; a
+// member of another type is an error.
+func secretString(secret map[string]any, member string) (value string, set bool, err error) {
+	v, ok := secret[member]
+	if !ok || v == nil {
+		return "", false, nil
+	}
+	s, ok := v.(string)
+	if !ok {
+		return "", false, secretFieldError(member, member+" must be a string")
+	}
+	return s, strings.TrimSpace(s) != "", nil
+}
+
+// secretPair reports whether both members of a pair are set; one member
+// without the other is an error naming the missing one.
+func secretPair(kind string, secret map[string]any, a, b string) (bool, error) {
+	_, hasA, err := secretString(secret, a)
+	if err != nil {
+		return false, err
+	}
+	_, hasB, err := secretString(secret, b)
+	if err != nil {
+		return false, err
+	}
+	switch {
+	case hasA && !hasB:
+		return false, secretFieldError(b, "a credential of kind "+kind+" with "+a+" needs "+b)
+	case hasB && !hasA:
+		return false, secretFieldError(a, "a credential of kind "+kind+" with "+b+" needs "+a)
+	}
+	return hasA && hasB, nil
+}
+
+// checkUserOrTokenSecret: http and acs carry either username and password
+// or token, not both.
+func checkUserOrTokenSecret(kind string, secret map[string]any) error {
+	userPass, err := secretPair(kind, secret, "username", "password")
+	if err != nil {
+		return err
+	}
+	_, token, err := secretString(secret, "token")
+	if err != nil {
+		return err
+	}
+	switch {
+	case userPass && token:
+		return secretFieldError("token", "a credential of kind "+kind+" has either username and password or token, not both")
+	case !userPass && !token:
+		return secretFieldError("username", "a credential of kind "+kind+" needs username and password or token")
+	}
+	return nil
+}
+
+// checkGNMISecret: gnmi carries at least one of the pairs username/password
+// and client_cert/client_key, optionally ca; certificates and the key must
+// parse as PEM.
+func checkGNMISecret(secret map[string]any) error {
+	userPass, err := secretPair(KindGNMI, secret, "username", "password")
+	if err != nil {
+		return err
+	}
+	certPair, err := secretPair(KindGNMI, secret, "client_cert", "client_key")
+	if err != nil {
+		return err
+	}
+	if !userPass && !certPair {
+		return secretFieldError("username", "a credential of kind gnmi needs username and password or client_cert and client_key")
+	}
+	if certPair {
+		cert, _, _ := secretString(secret, "client_cert")
+		if !pemCertificates(cert) {
+			return secretFieldError("client_cert", "client_cert must be a PEM encoded certificate")
+		}
+		key, _, _ := secretString(secret, "client_key")
+		if !pemPrivateKey(key) {
+			return secretFieldError("client_key", "client_key must be a PEM encoded private key")
+		}
+	}
+	ca, hasCA, err := secretString(secret, "ca")
+	if err != nil {
+		return err
+	}
+	if hasCA && !pemCertificates(ca) {
+		return secretFieldError("ca", "ca must hold PEM encoded certificates")
+	}
+	return nil
+}
+
+// pemCertificates reports whether s holds one or more PEM certificates and
+// nothing else.
+func pemCertificates(s string) bool {
+	rest := []byte(strings.TrimSpace(s))
+	n := 0
+	for len(rest) > 0 {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil || block.Type != "CERTIFICATE" {
+			return false
+		}
+		if _, err := x509.ParseCertificate(block.Bytes); err != nil {
+			return false
+		}
+		rest = []byte(strings.TrimSpace(string(rest)))
+		n++
+	}
+	return n > 0
+}
+
+// pemPrivateKey reports whether s is one PEM private key (PKCS#8, PKCS#1 or
+// SEC 1).
+func pemPrivateKey(s string) bool {
+	block, rest := pem.Decode([]byte(strings.TrimSpace(s)))
+	if block == nil || strings.TrimSpace(string(rest)) != "" {
+		return false
+	}
+	switch block.Type {
+	case "PRIVATE KEY":
+		_, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+		return err == nil
+	case "RSA PRIVATE KEY":
+		_, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+		return err == nil
+	case "EC PRIVATE KEY":
+		_, err := x509.ParseECPrivateKey(block.Bytes)
+		return err == nil
+	}
+	return false
 }
 
 // Credential is the domain model for an encrypted credential.
@@ -250,7 +416,7 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Credential, e
 	if req.VaultRef != nil {
 		return s.createVaultRef(ctx, &req)
 	}
-	if err := checkVaultLoginSecret(req.Kind, req.Secret); err != nil {
+	if err := validateSecret(req.Kind, req.Secret); err != nil {
 		return nil, err
 	}
 
@@ -375,13 +541,14 @@ func (s *Service) ReplaceSecret(ctx context.Context, orgID, id string, secret ma
 	if !ok {
 		return nil, ErrUnsupported
 	}
-	// A vault login keeps the members of its kind (WP-893); an unknown id
+	// A vault login and a probe kind keep the members of their kind
+	// (WP-893, WP-967); an unknown id
 	// is reported by the replacement.
 	if current, err := s.repo.Get(ctx, orgID, id); err == nil {
 		if current.Source == SourceVaultRef {
 			return nil, ErrVaultRefHasNoSecret
 		}
-		if loginErr := checkVaultLoginSecret(current.Kind, secret); loginErr != nil {
+		if loginErr := validateSecret(current.Kind, secret); loginErr != nil {
 			return nil, loginErr
 		}
 	}

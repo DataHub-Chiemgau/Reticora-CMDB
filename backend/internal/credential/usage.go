@@ -123,6 +123,7 @@ func UsageMetrics() []prometheus.Collector {
 // namespaces of the collector).
 var usageNamespaces = map[string]bool{
 	"snmp": true, "ssh": true, "redfish": true, "ipmi": true, "wmi": true, "api": true, "nut": true, "nas": true,
+	"http": true, "gnmi": true, "acs": true,
 }
 
 // usageKey identifies a credential_usage row.
