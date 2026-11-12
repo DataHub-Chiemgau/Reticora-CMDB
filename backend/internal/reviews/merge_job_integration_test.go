@@ -97,8 +97,13 @@ func TestLongOperationsRunAsJobsAgainstPostgres(t *testing.T) {
 	// The state snapshot is a job with the replayed state as result.
 	jobSvc.Register(jobs.Kind{Name: history.SnapshotJobKind, MaxAttempts: 1})
 	ciID := f.CI(t, f.OrgA, f.Client1, "job-snapshot")
-	if _, err := f.Admin.Exec(context.Background(), `INSERT INTO ci_change (organization_id, ci_id, change_type, field_name, new_value, ci_version)
-		VALUES ($1, $2, 'update', 'name', '"job-snapshot-renamed"', 2)`, f.OrgA, ciID); err != nil {
+	// The change is stamped a minute back: created_at comes from the
+	// database clock, the snapshot instant without "at" from the clock of
+	// the server (time.Now); a database clock a few milliseconds ahead
+	// (Docker VM) would otherwise put the only change after the instant
+	// and fail the job with "no recorded state before".
+	if _, err := f.Admin.Exec(context.Background(), `INSERT INTO ci_change (organization_id, ci_id, change_type, field_name, new_value, ci_version, created_at)
+		VALUES ($1, $2, 'update', 'name', '"job-snapshot-renamed"', 2, now() - interval '1 minute')`, f.OrgA, ciID); err != nil {
 		t.Fatal(err)
 	}
 	mux := chi.NewRouter()
