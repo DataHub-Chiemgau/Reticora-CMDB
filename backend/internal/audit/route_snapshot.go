@@ -398,6 +398,9 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	// credential credential_id names.
 	crud(m, v1+"admp/accounts", "admp_account", "PATCH", "DELETE")
 	m["POST "+v1+"admp/accounts/"] = created("admp_account")
+	// Probe definitions (PRB-01, WP-939); config.changed goes to the
+	// outbox in the write transaction.
+	crud(m, v1+"monitoring/probes", "probe", all...)
 	crud(m, v1+"webhooks", "webhook_subscription", "POST", "DELETE")
 	crud(m, v1+"lifecycle-definitions", "lifecycle_definition", "POST", "DELETE")
 	crud(m, v1+"lifecycle-models", "lifecycle_definition", all...)

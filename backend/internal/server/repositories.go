@@ -44,6 +44,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/privacy"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/probe"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
@@ -151,20 +152,29 @@ func MemoryRepositories() Repositories {
 		Contact:           contact.NewMemoryRepository(),
 		IPAM:              ipam.NewMemoryRepository(),
 		Metrics:           monitoring.NewMemoryMetricStore(),
-		Permission:        permission.NewMemoryRepository(),
-		FieldGrants:       permission.NewMemoryFieldGrants(),
-		APIKeys:           identity.NewMemoryAPIKeyStore(),
-		ServiceAccounts:   serviceAccounts,
-		SLA:               sla.NewMemoryRepository(),
-		Form:              form.NewMemoryRepository(),
-		Workflow:          workflow.NewMemoryRepository(),
-		Compliance:        compliance.NewMemoryRepository(),
-		IGA:               iga.NewMemoryRepository(),
-		Search:            search.NewMemoryRepository(),
-		AI:                ai.NewMemoryRepository(),
-		ExportJobs:        export.NewMemoryJobRepository(),
-		Jobs:              jobs.NewMemoryRepository(),
-		Privacy:           privacy.NewMemoryRepository(),
+		// The memory probes read client and site of a CI from the CI store
+		// (WP-939).
+		Probes: probe.NewMemoryRepository().WithCIs(func(ctx context.Context, orgID, id string) (string, string, bool) {
+			item, err := cis.GetByID(ctx, orgID, id)
+			if err != nil {
+				return "", "", false
+			}
+			return item.ClientID, item.SiteID, true
+		}),
+		Permission:      permission.NewMemoryRepository(),
+		FieldGrants:     permission.NewMemoryFieldGrants(),
+		APIKeys:         identity.NewMemoryAPIKeyStore(),
+		ServiceAccounts: serviceAccounts,
+		SLA:             sla.NewMemoryRepository(),
+		Form:            form.NewMemoryRepository(),
+		Workflow:        workflow.NewMemoryRepository(),
+		Compliance:      compliance.NewMemoryRepository(),
+		IGA:             iga.NewMemoryRepository(),
+		Search:          search.NewMemoryRepository(),
+		AI:              ai.NewMemoryRepository(),
+		ExportJobs:      export.NewMemoryJobRepository(),
+		Jobs:            jobs.NewMemoryRepository(),
+		Privacy:         privacy.NewMemoryRepository(),
 	}
 }
 
@@ -221,6 +231,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		IPAM:              ipamRepo,
 		IPAMManagement:    management,
 		Metrics:           monitoring.NewPGMetricStore(pool),
+		Probes:            probe.NewPGRepository(pool),
 		Permission:        permission.NewPGRepository(pool),
 		FieldGrants:       permission.NewPGFieldGrants(pool),
 		APIKeys:           identity.NewPGAPIKeyStore(pool),

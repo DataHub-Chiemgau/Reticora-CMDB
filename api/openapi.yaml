@@ -23298,13 +23298,12 @@ paths:
   /api/v1/monitoring/probes:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     get:
       operationId: listProbes
       tags: [Monitoring]
       summary: List probes
       description: >-
-        Planned (WP-938, E-160); implemented by WP-939. The probes in the caller's client and site
+        Implemented by WP-939 (E-160). The probes in the caller's client and site
         scope (PRB-01), ordered by id; filters ci_id, type (a key of
         api/probe-types.json), collector_group_id, client_id and enabled; total
         counts the matching probes. Requires monitoring:read; the feature and module monitoring gate the path.
@@ -23335,7 +23334,7 @@ paths:
       tags: [Monitoring]
       summary: Create a probe
       description: >-
-        Planned (WP-938, E-160); implemented by WP-939. The type must be a key of
+        Implemented by WP-939 (E-160). The type must be a key of
         api/probe-types.json with status available (planned → 422 type). params
         holds the overrides of the level probe; interval, timeout, counts,
         thresholds and type parameters are checked against the type limits on the
@@ -23374,7 +23373,6 @@ paths:
   /api/v1/monitoring/probes/{id}:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -23382,7 +23380,7 @@ paths:
       tags: [Monitoring]
       summary: Get a probe
       description: >-
-        Planned (WP-938, E-160); implemented by WP-939. A probe of another organization or outside
+        Implemented by WP-939 (E-160). A probe of another organization or outside
         the caller's client and site scope is 404. Requires monitoring:read; the feature and module monitoring gate the path.
       responses:
         '200':
@@ -23403,7 +23401,7 @@ paths:
       tags: [Monitoring]
       summary: Update a probe
       description: >-
-        Planned (WP-938, E-160); implemented by WP-939. Changes target, params, enabled,
+        Implemented by WP-939 (E-160). Changes target, params, enabled,
         parent_probe_id and collector_group_id with the checks of the creation; the
         type is fixed. Requires monitoring:write; the feature and module monitoring gate the path.
       requestBody:
@@ -23436,7 +23434,7 @@ paths:
       tags: [Monitoring]
       summary: Delete a probe
       description: >-
-        Planned (WP-938, E-160); implemented by WP-939. Deletes the probe with its state, history
+        Implemented by WP-939 (E-160). Deletes the probe with its state, history
         and assignment; child probes lose their parent. Requires monitoring:write; the feature and module monitoring gate the path.
       responses:
         '204':
@@ -23628,13 +23626,12 @@ paths:
   /api/v1/monitoring/probe-types:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     get:
       operationId: listProbeTypes
       tags: [Monitoring]
       summary: List probe types
       description: >-
-        Planned (WP-938, E-160); implemented by WP-939. The probe type register
+        Implemented by WP-939 (E-160). The probe type register
         (api/probe-types.json, WP-934): key, status, defaults, limits and the
         parameter schema of every type, in register order. Requires monitoring:read; the feature and module monitoring gate the path.
       parameters:
@@ -23658,7 +23655,6 @@ paths:
   /api/v1/monitoring/probe-types/{key}:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     parameters:
       - name: key
         in: path
@@ -23670,7 +23666,7 @@ paths:
       tags: [Monitoring]
       summary: Get a probe type
       description: >-
-        Planned (WP-938, E-160); implemented by WP-939. One entry of the probe type register; an unknown key is 404. Requires monitoring:read; the feature and module monitoring gate the path.
+        Implemented by WP-939 (E-160). One entry of the probe type register; an unknown key is 404. Requires monitoring:read; the feature and module monitoring gate the path.
       responses:
         '200':
           description: Probe type

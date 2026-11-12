@@ -50,6 +50,7 @@ DELETE /api/v1/maintenance-windows/{id} maintenance:write
 DELETE /api/v1/metamodel/drafts/{id} citype:manage
 DELETE /api/v1/metamodel/drafts/{id}/items/{item_id} citype:manage
 DELETE /api/v1/monitoring/alerts/{id} monitoring:write
+DELETE /api/v1/monitoring/probes/{id} monitoring:write
 DELETE /api/v1/mounts/{id} rack:write
 DELETE /api/v1/nameserver-sets/{id} ipam:write
 DELETE /api/v1/network-interfaces/{id} ipam:write
@@ -283,6 +284,10 @@ GET /api/v1/metamodel/drafts/{id}/test metamodel:publish
 GET /api/v1/modules entitlement:read
 GET /api/v1/monitoring/alerts monitoring:read
 GET /api/v1/monitoring/metrics monitoring:read
+GET /api/v1/monitoring/probe-types monitoring:read
+GET /api/v1/monitoring/probe-types/{key} monitoring:read
+GET /api/v1/monitoring/probes monitoring:read
+GET /api/v1/monitoring/probes/{id} monitoring:read
 GET /api/v1/mounts rack:read
 GET /api/v1/mounts/{id} rack:read
 GET /api/v1/nameserver-sets ipam:read
@@ -447,6 +452,7 @@ PATCH /api/v1/locations/{id} location:write
 PATCH /api/v1/maintenance-windows/{id} maintenance:write
 PATCH /api/v1/metamodel/drafts/{id} citype:manage
 PATCH /api/v1/monitoring/alerts/{id} monitoring:write
+PATCH /api/v1/monitoring/probes/{id} monitoring:write
 PATCH /api/v1/mounts/{id} rack:write
 PATCH /api/v1/nameserver-sets/{id} ipam:write
 PATCH /api/v1/network-interfaces/{id} ipam:write
@@ -610,6 +616,7 @@ POST /api/v1/metamodel/drafts/{id}/test metamodel:publish
 POST /api/v1/metamodel/import citype:manage
 POST /api/v1/monitoring/alerts monitoring:write
 POST /api/v1/monitoring/metrics monitoring:write
+POST /api/v1/monitoring/probes monitoring:write
 POST /api/v1/mounts rack:write
 POST /api/v1/nameserver-sets ipam:write
 POST /api/v1/notification-channels notification:manage

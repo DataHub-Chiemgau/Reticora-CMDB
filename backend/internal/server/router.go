@@ -65,6 +65,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/privacy"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/probe"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
@@ -137,7 +138,9 @@ type Repositories struct {
 	// calls it; nil without a database.
 	IPAMManagement *ipam.ManagementSync
 	Metrics        monitoring.MetricStore
-	Permission     permission.Repository
+	// Probes are the probe definitions of monitoring P3 (PRB-01, WP-939).
+	Probes     probe.Store
+	Permission permission.Repository
 	// FieldGrants stores the field permissions (RBA-07, WP-264).
 	FieldGrants permission.FieldGrantRepository
 	// APIKeys identifies and manages API keys (AUT-04).
@@ -952,6 +955,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		// discovery (NET-06, WP-300).
 		ipam.NewHandler(repos.IPAM).WithReviews(discoveryHandler.ReviewService()),
 		monitoringHandler,
+		// The probe definitions and the probe type register (PRB-01,
+		// PRT-01, WP-939).
+		probe.NewHandler(probeStore(&repos)),
 		// The BFF gates the fields of late modules itself (WP-311): its
 		// route belongs to no module prefix.
 		graphqlbff.NewHandler(repos.CI, repos.Relationship).WithEntitlements(opts.Entitlements).
@@ -1650,6 +1656,15 @@ func UsageCounters(repos *Repositories) entitlement.UsageCounters {
 		}
 	}
 	return counters
+}
+
+// probeStore returns the probe store of repos, an empty memory store when
+// the repositories carry none (tests that build them partly).
+func probeStore(repos *Repositories) probe.Store {
+	if repos.Probes != nil {
+		return repos.Probes
+	}
+	return probe.NewMemoryRepository()
 }
 
 // admpTargetsOf resolves the interfaces and CIs of the ADMP read routes

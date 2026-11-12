@@ -55,6 +55,18 @@ var monitoringContractOperations = []speccheck.Operation{
 	{Method: "POST", Path: "/api/v1/collector-groups/{id}/members"},
 }
 
+// monitoringImplemented names the operations of the contract whose
+// implementing work package registered the route: they lose x-status:
+// planned (TestRoutesAndSpecificationAreInParity checks the route).
+var monitoringImplemented = map[speccheck.Operation]string{
+	{Method: "GET", Path: "/api/v1/monitoring/probes"}:         "WP-939",
+	{Method: "POST", Path: "/api/v1/monitoring/probes"}:        "WP-939",
+	{Method: "GET", Path: "/api/v1/monitoring/probes/{id}"}:    "WP-939",
+	{Method: "PATCH", Path: "/api/v1/monitoring/probes/{id}"}:  "WP-939",
+	{Method: "DELETE", Path: "/api/v1/monitoring/probes/{id}"}: "WP-939",
+	{Method: "GET", Path: "/api/v1/monitoring/probe-types"}:    "WP-939",
+}
+
 // contractSchema is the part of a schema the contract test reads.
 type contractSchema struct {
 	Ref                  string                     `yaml:"$ref"`
@@ -187,7 +199,9 @@ func TestMonitoringContractOperations(t *testing.T) {
 	doc := loadMonitoringSpec(t)
 
 	for _, op := range monitoringContractOperations {
-		if !planned[op] {
+		if wp, done := monitoringImplemented[op]; done && planned[op] {
+			t.Errorf("%s: implemented by %s but still marked x-status: planned", op, wp)
+		} else if !done && !planned[op] {
 			t.Errorf("%s: not marked x-status: planned", op)
 		}
 		if phases[op.Path] != PhaseP3 {

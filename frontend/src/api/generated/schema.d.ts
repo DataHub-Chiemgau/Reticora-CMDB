@@ -9801,13 +9801,13 @@ export interface paths {
     };
     /**
      * List probes
-     * @description Planned (WP-938, E-160); implemented by WP-939. The probes in the caller's client and site scope (PRB-01), ordered by id; filters ci_id, type (a key of api/probe-types.json), collector_group_id, client_id and enabled; total counts the matching probes. Requires monitoring:read; the feature and module monitoring gate the path.
+     * @description Implemented by WP-939 (E-160). The probes in the caller's client and site scope (PRB-01), ordered by id; filters ci_id, type (a key of api/probe-types.json), collector_group_id, client_id and enabled; total counts the matching probes. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['listProbes'];
     put?: never;
     /**
      * Create a probe
-     * @description Planned (WP-938, E-160); implemented by WP-939. The type must be a key of api/probe-types.json with status available (planned → 422 type). params holds the overrides of the level probe; interval, timeout, counts, thresholds and type parameters are checked against the type limits on the effective values (probewire.Validate, timeout_s below interval_s), every violation 422 with field and the list in violations. Unknown or invisible ci_id, parent_probe_id and collector_group_id are 422 alike; a parent chain deeper than 8 levels is 422 parent_probe_id, a cycle 409. Without collector_group_id the only collector group of the probe's client is taken (none or several: 422 collector_group_id). Quota and probe budget (max_monitored_targets, max_probes_per_minute, max_targets_<type>) are 403 entitlement-limit (WP-940). Requires monitoring:write; the feature and module monitoring gate the path.
+     * @description Implemented by WP-939 (E-160). The type must be a key of api/probe-types.json with status available (planned → 422 type). params holds the overrides of the level probe; interval, timeout, counts, thresholds and type parameters are checked against the type limits on the effective values (probewire.Validate, timeout_s below interval_s), every violation 422 with field and the list in violations. Unknown or invisible ci_id, parent_probe_id and collector_group_id are 422 alike; a parent chain deeper than 8 levels is 422 parent_probe_id, a cycle 409. Without collector_group_id the only collector group of the probe's client is taken (none or several: 422 collector_group_id). Quota and probe budget (max_monitored_targets, max_probes_per_minute, max_targets_<type>) are 403 entitlement-limit (WP-940). Requires monitoring:write; the feature and module monitoring gate the path.
      */
     post: operations['createProbe'];
     delete?: never;
@@ -9828,21 +9828,21 @@ export interface paths {
     };
     /**
      * Get a probe
-     * @description Planned (WP-938, E-160); implemented by WP-939. A probe of another organization or outside the caller's client and site scope is 404. Requires monitoring:read; the feature and module monitoring gate the path.
+     * @description Implemented by WP-939 (E-160). A probe of another organization or outside the caller's client and site scope is 404. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['getProbe'];
     put?: never;
     post?: never;
     /**
      * Delete a probe
-     * @description Planned (WP-938, E-160); implemented by WP-939. Deletes the probe with its state, history and assignment; child probes lose their parent. Requires monitoring:write; the feature and module monitoring gate the path.
+     * @description Implemented by WP-939 (E-160). Deletes the probe with its state, history and assignment; child probes lose their parent. Requires monitoring:write; the feature and module monitoring gate the path.
      */
     delete: operations['deleteProbe'];
     options?: never;
     head?: never;
     /**
      * Update a probe
-     * @description Planned (WP-938, E-160); implemented by WP-939. Changes target, params, enabled, parent_probe_id and collector_group_id with the checks of the creation; the type is fixed. Requires monitoring:write; the feature and module monitoring gate the path.
+     * @description Implemented by WP-939 (E-160). Changes target, params, enabled, parent_probe_id and collector_group_id with the checks of the creation; the type is fixed. Requires monitoring:write; the feature and module monitoring gate the path.
      */
     patch: operations['updateProbe'];
     trace?: never;
@@ -9971,7 +9971,7 @@ export interface paths {
     };
     /**
      * List probe types
-     * @description Planned (WP-938, E-160); implemented by WP-939. The probe type register (api/probe-types.json, WP-934): key, status, defaults, limits and the parameter schema of every type, in register order. Requires monitoring:read; the feature and module monitoring gate the path.
+     * @description Implemented by WP-939 (E-160). The probe type register (api/probe-types.json, WP-934): key, status, defaults, limits and the parameter schema of every type, in register order. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['listProbeTypes'];
     put?: never;
@@ -9994,7 +9994,7 @@ export interface paths {
     };
     /**
      * Get a probe type
-     * @description Planned (WP-938, E-160); implemented by WP-939. One entry of the probe type register; an unknown key is 404. Requires monitoring:read; the feature and module monitoring gate the path.
+     * @description Implemented by WP-939 (E-160). One entry of the probe type register; an unknown key is 404. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['getProbeType'];
     put?: never;

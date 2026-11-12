@@ -265,6 +265,7 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 		asnID                              string
 		resolvedFinding                    string
 		admpAccount                        string
+		probeGroup                         string
 		admpSync                           *admp.Sync
 		allocParent                        string
 		hookServer                         *httptest.Server
@@ -731,6 +732,35 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 					if s, ok := v.(string); ok && strings.Contains(s, "evt02-usage-secret") {
 						t.Errorf("credential.resolution_failed carries a secret value: %v", data)
 					}
+				}
+			}},
+		{typ: events.ProbeConfigChanged,
+			// POST /monitoring/probes (WP-939): a new probe is a change of
+			// the probe configuration (E-161), in the write transaction.
+			setup: func(t *testing.T) {
+				probeGroup = scalar(t, `INSERT INTO collector_group (organization_id, client_id, name)
+					VALUES ($1, $2, 'evt02-probes') RETURNING id::text`, f.OrgA, f.Client1)
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/monitoring/probes",
+					`{"type":"icmp","target":"10.250.0.1","client_id":"`+f.Client1+`","collector_group_id":"`+probeGroup+`"}`)
+				answered(t, "POST /monitoring/probes", r, refused, http.StatusCreated)
+				if refused {
+					unchanged(t, "probes", count(t, `probe WHERE organization_id = $1`, f.OrgA), "0")
+					return ""
+				}
+				var p struct {
+					ID string `json:"id"`
+				}
+				if err := json.Unmarshal(r.Body, &p); err != nil {
+					t.Fatal(err)
+				}
+				return p.ID
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				fields, _ := data["changed_fields"].([]any)
+				if data["id"] != entity || data["client_id"] != f.Client1 || len(fields) == 0 {
+					t.Errorf("config.changed data %v", data)
 				}
 			}},
 		{typ: events.ADMPConnectionRefreshed,
@@ -1521,7 +1551,6 @@ var plannedProducers = map[string]string{
 	"collector_group.reachable":     "WP-964",
 	"collector_group.failover":      "WP-963",
 	"collector.clock_skew":          "WP-962",
-	"config.changed":                "WP-939",
 	"ci.config_changed":             "WP-1054",
 	"monitoring.suspension_changed": "WP-942",
 	"capacity.forecast_exceeded":    "WP-1060",

@@ -7,10 +7,12 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 )
 
 // PGRepository is the Repository on PostgreSQL. Every call runs in one
@@ -78,30 +80,11 @@ func (r *PGRepository) List(ctx context.Context, f *ListFilter) ([]Probe, error)
 	}
 	out := make([]Probe, 0)
 	err := r.tenant(ctx, func(ctx context.Context, tx pgx.Tx, orgID string) error {
-		where := []string{"p.organization_id = $1"}
-		args := []any{orgID}
-		add := func(cond string, v any) {
-			args = append(args, v)
-			where = append(where, fmt.Sprintf(cond, len(args)))
+		where, args, ok := listWhere(orgID, f)
+		if !ok {
+			return nil // an invalid id matches nothing
 		}
-		for _, c := range []struct{ col, v string }{
-			{"p.ci_id", f.CIID}, {"p.collector_group_id", f.CollectorGroupID}, {"p.client_id", f.ClientID},
-		} {
-			if c.v == "" {
-				continue
-			}
-			if !api.IsUUID(c.v) {
-				return nil // an invalid id matches nothing
-			}
-			add(c.col+" = $%d", c.v)
-		}
-		if f.Type != "" {
-			add("p.type = $%d", f.Type)
-		}
-		if f.Enabled != nil {
-			add("p.enabled = $%d", *f.Enabled)
-		}
-		query := `SELECT ` + probeColumns + ` FROM probe p WHERE ` + strings.Join(where, " AND ") + ` ORDER BY p.id`
+		query := `SELECT ` + probeColumns + ` FROM probe p WHERE ` + where + ` ORDER BY p.id`
 		if f.Limit > 0 {
 			query += fmt.Sprintf(" LIMIT %d", f.Limit)
 		}
@@ -113,6 +96,54 @@ func (r *PGRepository) List(ctx context.Context, f *ListFilter) ([]Probe, error)
 		return err
 	})
 	return out, err
+}
+
+// Count implements Store.
+func (r *PGRepository) Count(ctx context.Context, f *ListFilter) (int, error) {
+	if f == nil {
+		f = &ListFilter{}
+	}
+	var n int
+	err := r.tenant(ctx, func(ctx context.Context, tx pgx.Tx, orgID string) error {
+		where, args, ok := listWhere(orgID, f)
+		if !ok {
+			return nil
+		}
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM probe p WHERE `+where, args...).Scan(&n); err != nil {
+			return fmt.Errorf("count probes: %w", err)
+		}
+		return nil
+	})
+	return n, err
+}
+
+// listWhere builds the condition of a listing; ok false when an id filter
+// is no UUID (it matches nothing).
+func listWhere(orgID string, f *ListFilter) (where string, args []any, ok bool) {
+	conds := []string{"p.organization_id = $1"}
+	args = []any{orgID}
+	add := func(cond string, v any) {
+		args = append(args, v)
+		conds = append(conds, fmt.Sprintf(cond, len(args)))
+	}
+	for _, c := range []struct{ col, v string }{
+		{"p.ci_id", f.CIID}, {"p.collector_group_id", f.CollectorGroupID}, {"p.client_id", f.ClientID},
+	} {
+		if c.v == "" {
+			continue
+		}
+		if !api.IsUUID(c.v) {
+			return "", nil, false
+		}
+		add(c.col+" = $%d", c.v)
+	}
+	if f.Type != "" {
+		add("p.type = $%d", f.Type)
+	}
+	if f.Enabled != nil {
+		add("p.enabled = $%d", *f.Enabled)
+	}
+	return strings.Join(conds, " AND "), args, true
 }
 
 func collectProbes(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]Probe, error) {
@@ -290,4 +321,362 @@ func keys(m map[string]bool) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// --- writes (WP-939) ---------------------------------------------------------
+
+var _ Store = (*PGRepository)(nil)
+
+// lockParents takes the advisory lock probe_parent:<org> until the end of
+// the transaction: the checks of the parent chain of concurrent writes run
+// one after the other, so A→B and B→A cannot both pass (AK3).
+func lockParents(ctx context.Context, tx pgx.Tx, orgID string) error {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('probe_parent:' || $1, 0))`, orgID); err != nil {
+		return fmt.Errorf("lock probe parents: %w", err)
+	}
+	return nil
+}
+
+// probeWriteError maps the constraints of probe onto the request fields.
+func probeWriteError(err error) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return err
+	}
+	switch pgErr.ConstraintName {
+	case "probe_target_key":
+		return ErrTargetTaken
+	case "probe_parent_not_self":
+		return ErrParentCycle
+	case "probe_ci_fkey":
+		return unprocessable("ci_id", "ci not found")
+	case "probe_client_fkey", "probe_client_required":
+		return unprocessable("client_id", "client not found")
+	case "probe_site_fkey", "probe_site_client":
+		return unprocessable("site_id", "site not found or not a site of the client")
+	case "probe_parent_fkey":
+		return unprocessable("parent_probe_id", "parent probe not found")
+	case "probe_collector_group_fkey", "probe_collector_group_client":
+		return unprocessable("collector_group_id", "collector group not found or not one of the probe's client")
+	case "probe_target_check":
+		return unprocessable("target", "target must not be blank and at most 1024 characters")
+	case "probe_type_check":
+		return unprocessable("type", "unknown probe type")
+	case "probe_params_check":
+		return unprocessable("params", "params must be a JSON object")
+	}
+	return err
+}
+
+// emitConfigChanged appends config.changed as the last write of the
+// transaction (Konvention 20).
+func emitConfigChanged(ctx context.Context, tx pgx.Tx, p *Probe, fields []string) error {
+	if fields == nil {
+		fields = []string{}
+	}
+	data := events.ProbeConfigChangedData{ID: p.ID, CIID: p.CIID, ClientID: p.ClientID, SiteID: p.SiteID, ChangedFields: fields}
+	return database.BeforeCommit(database.ContextWithTx(ctx, tx), func() error {
+		_, err := events.NewOutbox().Append(ctx, tx, &events.Event{OrgID: p.OrganizationID, Type: events.ProbeConfigChanged,
+			EntityID: p.ID, Data: data})
+		return err
+	})
+}
+
+// Create implements Store.
+func (r *PGRepository) Create(ctx context.Context, in *Probe, check Check) (*Probe, error) {
+	var out Probe
+	err := r.tenant(ctx, func(ctx context.Context, tx pgx.Tx, orgID string) error {
+		p := *in
+		p.OrganizationID = orgID
+		if p.ParentProbeID != "" {
+			if werr := lockParents(ctx, tx, orgID); werr != nil {
+				return werr
+			}
+		}
+		if check != nil {
+			if err := check(ctx, &pgWriteTx{tx: tx, orgID: orgID}, &p, nil); err != nil {
+				return err
+			}
+		}
+		created, err := scanProbe(tx.QueryRow(ctx, `INSERT INTO probe AS p (organization_id, client_id, site_id, ci_id,
+				collector_group_id, type, target, params, enabled, parent_probe_id, created_by_surrogate)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING `+probeColumns,
+			orgID, nullID(p.ClientID), nullID(p.SiteID), nullID(p.CIID), p.CollectorGroupID, p.Type, p.Target,
+			[]byte(p.Params), p.Enabled, nullID(p.ParentProbeID), nullID(p.CreatedBySurrogate)))
+		if err != nil {
+			return probeWriteError(err)
+		}
+		out = created
+		return emitConfigChanged(ctx, tx, &out, createdFields(&out))
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// Update implements Store.
+func (r *PGRepository) Update(ctx context.Context, id string, change func(*Probe) (*Probe, []string, error), check Check) (*Probe, error) {
+	if !api.IsUUID(id) {
+		return nil, ErrNotFound
+	}
+	var out Probe
+	err := r.tenant(ctx, func(ctx context.Context, tx pgx.Tx, orgID string) error {
+		// FOR NO KEY UPDATE, not FOR UPDATE: the change never touches the
+		// key, and the weaker lock does not conflict with the FOR KEY SHARE
+		// that the foreign key probe_parent_fkey takes on a parent. With
+		// FOR UPDATE, A→B and B→A deadlock between this row lock and the
+		// advisory lock probe_parent:<org> instead of reaching the cycle
+		// check (AK3).
+		current, err := scanProbe(tx.QueryRow(ctx, `SELECT `+probeColumns+` FROM probe p
+			WHERE p.organization_id = $1 AND p.id = $2 FOR NO KEY UPDATE`, orgID, id))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("read probe: %w", err)
+		}
+		next, fields, err := change(&current)
+		if err != nil {
+			return err
+		}
+		if next.ParentProbeID != current.ParentProbeID && next.ParentProbeID != "" {
+			if werr := lockParents(ctx, tx, orgID); werr != nil {
+				return werr
+			}
+		}
+		if check != nil {
+			if werr := check(ctx, &pgWriteTx{tx: tx, orgID: orgID}, next, &current); werr != nil {
+				return werr
+			}
+		}
+		if len(fields) == 0 {
+			out = current
+			return nil
+		}
+		out, err = scanProbe(tx.QueryRow(ctx, `UPDATE probe AS p SET target = $3, params = $4, enabled = $5,
+				parent_probe_id = $6, collector_group_id = $7
+			WHERE p.organization_id = $1 AND p.id = $2 RETURNING `+probeColumns,
+			orgID, id, next.Target, []byte(next.Params), next.Enabled, nullID(next.ParentProbeID), next.CollectorGroupID))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return probeWriteError(err)
+		}
+		return emitConfigChanged(ctx, tx, &out, fields)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// Delete implements Store. The foreign key probe_parent_fkey sets
+// parent_probe_id of the child probes to NULL (ON DELETE SET NULL), also of
+// children outside the caller's scope: their configuration changes, so each
+// direct child gets its own config.changed (changed_fields parent_probe_id).
+func (r *PGRepository) Delete(ctx context.Context, id string) error {
+	if !api.IsUUID(id) {
+		return ErrNotFound
+	}
+	return r.tenant(ctx, func(ctx context.Context, tx pgx.Tx, orgID string) error {
+		// The row lock blocks new children (FOR KEY SHARE of their foreign
+		// key check) until the delete commits, so the children read below
+		// are the ones the delete detaches.
+		var locked string
+		err := tx.QueryRow(ctx, `SELECT p.id::text FROM probe p WHERE p.organization_id = $1 AND p.id = $2 FOR UPDATE`,
+			orgID, id).Scan(&locked)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("read probe: %w", err)
+		}
+		children, err := (&pgWriteTx{tx: tx, orgID: orgID}).children(ctx, id)
+		if err != nil {
+			return err
+		}
+		p, err := scanProbe(tx.QueryRow(ctx, `DELETE FROM probe AS p WHERE p.organization_id = $1 AND p.id = $2 RETURNING `+probeColumns,
+			orgID, id))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return probeWriteError(err)
+		}
+		for i := range children {
+			if err := emitConfigChanged(ctx, tx, &children[i], []string{"parent_probe_id"}); err != nil {
+				return err
+			}
+		}
+		return emitConfigChanged(ctx, tx, &p, []string{DeletedField})
+	})
+}
+
+// nullID maps an empty id to NULL.
+func nullID(id string) any {
+	if id == "" {
+		return nil
+	}
+	return id
+}
+
+// pgWriteTx is the WriteTx of a PostgreSQL write transaction.
+type pgWriteTx struct {
+	tx    pgx.Tx
+	orgID string
+}
+
+func (t *pgWriteTx) CI(ctx context.Context, id string) (clientID, siteID string, ok bool, err error) {
+	err = t.tx.QueryRow(ctx, `SELECT COALESCE(client_id::text, ''), COALESCE(site_id::text, '') FROM ci
+		WHERE organization_id = $1 AND id = $2 AND deleted_at IS NULL`, t.orgID, id).Scan(&clientID, &siteID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", false, nil
+	}
+	if err != nil {
+		return "", "", false, fmt.Errorf("read ci: %w", err)
+	}
+	return clientID, siteID, true, nil
+}
+
+func (t *pgWriteTx) exists(ctx context.Context, table, id string) (bool, error) {
+	var ok bool
+	if err := t.tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM `+table+` WHERE organization_id = $1 AND id = $2)`,
+		t.orgID, id).Scan(&ok); err != nil {
+		return false, fmt.Errorf("read %s: %w", table, err)
+	}
+	return ok, nil
+}
+
+func (t *pgWriteTx) ClientVisible(ctx context.Context, id string) (bool, error) {
+	return t.exists(ctx, "client", id)
+}
+
+func (t *pgWriteTx) ProbeVisible(ctx context.Context, id string) (bool, error) {
+	return t.exists(ctx, "probe", id)
+}
+
+func (t *pgWriteTx) Site(ctx context.Context, id string) (client string, ok bool, err error) {
+	err = t.tx.QueryRow(ctx, `SELECT COALESCE(client_id::text, '') FROM site WHERE organization_id = $1 AND id = $2`,
+		t.orgID, id).Scan(&client)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("read site: %w", err)
+	}
+	return client, true, nil
+}
+
+func (t *pgWriteTx) CollectorGroup(ctx context.Context, id string) (client string, ok bool, err error) {
+	err = t.tx.QueryRow(ctx, `SELECT COALESCE(client_id::text, '') FROM collector_group WHERE organization_id = $1 AND id = $2`,
+		t.orgID, id).Scan(&client)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("read collector group: %w", err)
+	}
+	return client, true, nil
+}
+
+func (t *pgWriteTx) CollectorGroupsOfClient(ctx context.Context, clientID string) ([]string, error) {
+	rows, err := t.tx.Query(ctx, `SELECT id::text FROM collector_group
+		WHERE organization_id = $1 AND client_id IS NOT DISTINCT FROM $2::uuid ORDER BY id LIMIT 2`, t.orgID, nullID(clientID))
+	if err != nil {
+		return nil, fmt.Errorf("read collector groups: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("read collector groups: %w", err)
+	}
+	return ids, nil
+}
+
+// widened runs fn with the client, site and team scope widened
+// (app_scope_widen, migration 000139; pattern ipam heldAddresses): only
+// probe ids leave it.
+func (t *pgWriteTx) widened(ctx context.Context, fn func() error) error {
+	var previous string
+	if err := t.tx.QueryRow(ctx, `SELECT app_scope_widen()::text`).Scan(&previous); err != nil {
+		return fmt.Errorf("widen scope: %w", err)
+	}
+	err := fn()
+	if _, restoreErr := t.tx.Exec(ctx, `SELECT app_scope_restore($1::text[])`, previous); restoreErr != nil && err == nil {
+		err = fmt.Errorf("restore scope: %w", restoreErr)
+	}
+	return err
+}
+
+func (t *pgWriteTx) Ancestors(ctx context.Context, id string, limit int) ([]string, error) {
+	var out []string
+	err := t.widened(ctx, func() error {
+		rows, err := t.tx.Query(ctx, `WITH RECURSIVE chain (id, parent, depth, path) AS (
+				SELECT p.id, p.parent_probe_id, 1, ARRAY[p.id] FROM probe p WHERE p.organization_id = $1 AND p.id = $2
+				UNION ALL
+				SELECT p.id, p.parent_probe_id, c.depth + 1, c.path || p.id
+				  FROM chain c JOIN probe p ON p.organization_id = $1 AND p.id = c.parent
+				 WHERE c.depth < $3 AND NOT p.id = ANY (c.path))
+			SELECT id::text FROM chain ORDER BY depth`, t.orgID, id, limit)
+		if err != nil {
+			return err
+		}
+		out, err = pgx.CollectRows(rows, pgx.RowTo[string])
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read parent chain: %w", err)
+	}
+	return out, nil
+}
+
+// children returns the direct child probes of id with the scope widened:
+// the delete of a parent detaches them all, visible or not. Only the
+// identifiers and the scope columns of the event leave the widened scope.
+func (t *pgWriteTx) children(ctx context.Context, id string) ([]Probe, error) {
+	var out []Probe
+	err := t.widened(ctx, func() error {
+		rows, err := t.tx.Query(ctx, `SELECT p.id::text, COALESCE(p.ci_id::text, ''), COALESCE(p.client_id::text, ''),
+				COALESCE(p.site_id::text, '') FROM probe p
+			WHERE p.organization_id = $1 AND p.parent_probe_id = $2 ORDER BY p.id`, t.orgID, id)
+		if err != nil {
+			return err
+		}
+		out, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (Probe, error) {
+			c := Probe{OrganizationID: t.orgID}
+			scanErr := row.Scan(&c.ID, &c.CIID, &c.ClientID, &c.SiteID)
+			return c, scanErr
+		})
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read child probes: %w", err)
+	}
+	return out, nil
+}
+
+func (t *pgWriteTx) SubtreeHeight(ctx context.Context, id string, limit int) (int, error) {
+	var height int
+	err := t.widened(ctx, func() error {
+		return t.tx.QueryRow(ctx, `WITH RECURSIVE tree (id, depth, path) AS (
+				SELECT p.id, 1, ARRAY[p.id] FROM probe p WHERE p.organization_id = $1 AND p.parent_probe_id = $2
+				UNION ALL
+				SELECT p.id, t.depth + 1, t.path || p.id
+				  FROM tree t JOIN probe p ON p.organization_id = $1 AND p.parent_probe_id = t.id
+				 WHERE t.depth < $3 AND NOT p.id = ANY (t.path))
+			SELECT COALESCE(max(depth), 0) FROM tree`, t.orgID, id, limit).Scan(&height)
+	})
+	if err != nil {
+		return 0, fmt.Errorf("read child probes: %w", err)
+	}
+	return height, nil
+}
+
+func (t *pgWriteTx) Layers(ctx context.Context, p *Probe) (Layers, error) {
+	x, err := loadLayers(ctx, t.tx, t.orgID, []Probe{*p})
+	if err != nil {
+		return Layers{}, err
+	}
+	return x.layers(p), nil
 }
