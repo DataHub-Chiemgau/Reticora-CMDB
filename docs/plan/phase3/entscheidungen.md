@@ -4,7 +4,7 @@ Stand: 2026-11-12 (Grundlage main `6d019370`; Anforderungen des Auftraggebers vo
 
 **Geltung der früheren Entscheidungen:** Alle Entscheidungen der Phase 1, des Korrekturplans und der Phase 2 sind entschieden (Beschluss des Auftraggebers vom 2026-10-28) und gelten in Phase 3 unverändert weiter. Diese Datei ändert keine von ihnen. Wo eine Phase-3-Entscheidung eine frühere ergänzt oder einschränkt (zum Beispiel [E-34](../entscheidungen.md#e-34) durch [E-151](#e-151) und [E-153](#e-153), [E-44](../phase2/entscheidungen.md#e-44) durch [E-153](#e-153) und [E-157](#e-157)), nennt sie die frühere ausdrücklich; ohne diese Nennung gilt die frühere Festlegung. Zitiert wird mit relativem Link, der Korrekturplan mit dem Zusatz „(Korrekturplan)“, zum Beispiel [E-59](../g1-korrektur/entscheidungen.md#e-59) (Korrekturplan). Alle Aufgaben A-01 bis A-53 sind erledigt (A-28 am 2026-11-09 mit WP-832).
 
-**Nummern:** E-Nummern sind über alle vier Entscheidungsdateien eindeutig. Phase 1 belegt E-01 bis E-36 und E-56 bis E-58, der Korrekturplan E-59 bis E-102 und E-144, Phase 2 E-37 bis E-55, E-103 bis E-143 und E-145 bis E-147. Diese Datei führt E-148 bis E-255. A-Nummern sind über die Dateien der Phasen 1 bis 3 eindeutig: Phase 1 belegt A-01 bis A-14, Phase 2 A-15 bis A-54, diese Datei A-55 bis A-86. Neue Entscheidungen erhalten die nächste freie Nummer über alle vier Dateien, neue Aufgaben die nächste freie Nummer über die Dateien der Phasen 1 bis 3 (Stand dieser Fassung: **E-256** und **A-87**; E-245 und E-246 vom 2026-11-10 nach Empfehlung, E-247 vom 2026-11-12 durch den Auftraggeber, E-248 bis E-255 vom 2026-11-12 nach Empfehlung (ADMP-API-Doku), A-85 und A-86 offen). **Nachtrag vom 2026-11-10:** Phase 2 hat am 2026-11-09 E-146, E-147 und A-54 selbst vergeben. Die Nummern dieser Datei sind deshalb um zwei (E) bzw. eins (A) verschoben; Inhalt und Status bleiben gleich.
+**Nummern:** E-Nummern sind über alle vier Entscheidungsdateien eindeutig. Phase 1 belegt E-01 bis E-36 und E-56 bis E-58, der Korrekturplan E-59 bis E-102 und E-144, Phase 2 E-37 bis E-55, E-103 bis E-143 und E-145 bis E-147. Diese Datei führt E-148 bis E-255. A-Nummern sind über die Dateien der Phasen 1 bis 3 eindeutig: Phase 1 belegt A-01 bis A-14, Phase 2 A-15 bis A-54, diese Datei A-55 bis A-86. Neue Entscheidungen erhalten die nächste freie Nummer über alle vier Dateien, neue Aufgaben die nächste freie Nummer über die Dateien der Phasen 1 bis 3 (Stand dieser Fassung: **E-257** und **A-87**; E-245 und E-246 vom 2026-11-10 nach Empfehlung, E-247 vom 2026-11-12 durch den Auftraggeber, E-248 bis E-255 vom 2026-11-12 nach Empfehlung (ADMP-API-Doku), E-256 vom 2026-11-12 nach Empfehlung, A-85 und A-86 offen). **Nachtrag vom 2026-11-10:** Phase 2 hat am 2026-11-09 E-146, E-147 und A-54 selbst vergeben. Die Nummern dieser Datei sind deshalb um zwei (E) bzw. eins (A) verschoben; Inhalt und Status bleiben gleich.
 
 **Status:** Alle Entscheidungen dieser Datei sind entschieden, E-148 bis E-244 am 2026-11-09, die späteren an dem Datum in ihrem Statusfeld. Jede nennt Schlüssel, Status, Kontext, Optionen, Empfehlung, Auswirkung, Quelle sowie betroffene IDs und WPs. Die WP-Blöcke des Plans nennen den Status im Feld „Entscheidungsbedarf“.
 
@@ -2759,3 +2759,25 @@ Mengengerüst (aus [E-222](#e-222)/[E-225](#e-225)): Mit gezielter Auffrischung 
 **Betroffene IDs:** ADM-02
 
 **Betroffene WPs:** WP-1073 (`p3-admp-ep-port-service`), WP-1074, WP-1075, WP-1076, WP-1077 (`p3-admp-contract-test`)
+
+<a id="e-256"></a>
+## E-256 – Section-Rechte nach Löschen des letzten berechtigten Teams (fail-closed)
+
+**Status:** entschieden (2026-11-12, nach Empfehlung: Option 1); Umsetzung als Nachtrag zu WP-910
+**Kontext:** Nach [E-214](#e-214) gilt eine Section als beschränkt, solange sie mindestens einen Eintrag in `ipam_section_permission` hat. WP-910 AK1 verlangt `ON DELETE CASCADE` vom Team auf `ipam_section_permission`. Löscht jemand das letzte berechtigte Team einer Section, verschwinden damit alle Einträge, und die Section ist ohne weitere Aktion für jeden Principal mit `ipam:read`/`ipam:write` offen (fail-open). Der Befund stammt aus der Prüfung von WP-910 am 2026-11-12.
+**Optionen:**
+
+1. Die Section erhält `acl_enabled boolean NOT NULL DEFAULT false`. Ein Trigger setzt das Flag beim ersten Eintrag in `ipam_section_permission`; `ipam_section_denied` sperrt jede Section mit `acl_enabled`, für deren Stufe der Principal keinen passenden Eintrag hat, auch wenn keine Einträge mehr bestehen. Die Freigabe ist eine ausdrückliche, auditierte Änderung (`PATCH /ipam-sections/{id}` mit `acl_enabled=false`, Recht `ipam:write` plus `write` auf die Section oder org-weiter Admin). Folge: fail-closed; eine Migration und ein Feld mehr.
+2. Wie im Plan: CASCADE, die Section wird offen. Folge: Rechteverlust führt zu Sichtbarkeit, entgegen TEN-05.
+3. `ON DELETE RESTRICT` für den letzten Eintrag einer Section: Das Team lässt sich erst löschen, wenn die Section anders berechtigt oder geöffnet ist. Folge: fail-closed, blockiert aber das Löschen von Teams mit 409 und betrifft die Teamverwaltung außerhalb von IPAM.
+
+**Empfehlung:** Option 1. Sicherheitsrelevante Grenzen dürfen durch das Entfernen einer Berechtigung nicht weiter werden; die Freigabe bleibt eine bewusste Entscheidung mit Audit, ohne die Teamverwaltung zu blockieren.
+
+**Auswirkung:** Nachtrag zu WP-910: Migration mit `ipam_section.acl_enabled`, Backfill (`true` für Sections mit Einträgen), Trigger, angepasste `ipam_section_denied`, PATCH-Feld, Tests „letztes Team gelöscht → Section bleibt gesperrt“ und „Freigabe nur ausdrücklich“ im Kanalmatrix-Test.
+
+**Quelle:** Prüfbericht WP-910 (2026-11-12); backend/migrations/000320_ipam_section_permission.up.sql
+
+**Betroffene IDs:** IPM-10, TEN-05
+
+**Betroffene WPs:** WP-910 (`p3-ipam-section-acl`)
+

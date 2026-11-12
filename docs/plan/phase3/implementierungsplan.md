@@ -3304,6 +3304,8 @@ IPM-10;[P3];G3;backend/internal/ipam/section_acl_integration_test.go;WP-910
 - Rechte je Subnetz oder je Adresse (nicht gefordert).
 - Principal-Art in asynchronen Jobs: `export.Job` baut seinen Scope ohne `PrincipalType` (`backend/internal/export/job.go:77`); ein von einem API-Schlüssel gestarteter Export sieht daher nur die Sections der Teams des Eigentümers (restriktiver, kein Leck).
 
+**Nachtrag 2026-11-12:** Löschen des letzten berechtigten Teams darf eine Section nicht öffnen; Umsetzung fail-closed nach [E-256](entscheidungen.md#e-256) als Nachtrag zu diesem WP.
+
 ### WP-911 – Geräte ↔ IP: ip_address.ci_id und role, Konsistenztrigger zum Interface, GET /cis/{id}/addresses
 
 **Schlüssel:** `p3-ipam-device-binding` · **Meilenstein:** M3.4 IPAM-Kern, Geräte ↔ IP und IPAM-Oberfläche · **Epic (Traceability):** G3 · **Aufwand:** 2,0 PT · **G3-Umfang:** ja
@@ -3428,6 +3430,8 @@ IPM-14;[P3];G3;backend/internal/ipam/auto_subnet_integration_test.go;WP-912
 - Herkunft, Pinning und Konfliktregeln der Discovery: WP-914 (`p3-ipam-discovery-override`).
 - Zuordnung beim CSV-Import: WP-920 (`p3-ipam-import`) nutzt AK1.
 - Zuordnung der Management-Adresse: WP-913 (`p3-ipam-mgmt-sync`) nutzt AK1.
+
+**Nachtrag 2026-11-12 (bekannte Grenze):** Legt eine Transaktion eine Adresse an, während eine andere gleichzeitig ein engeres Subnetz anlegt (READ COMMITTED), kann die Adresse im Elternsubnetz statt im engsten landen; es wird nichts offengelegt. Eine gemeinsame Sperre je Adresse hätte neue Deadlock-Reihenfolgen mit der Management-Synchronisation (WP-913) erzeugt. Die Neuzuordnung bei der nächsten Subnetzänderung oder ein späterer Abgleich korrigiert die Zuordnung.
 
 ### WP-913 – Management-IP: ci.management_ip und Adresse mit role management in derselben Transaktion konsistent
 
@@ -20882,6 +20886,8 @@ SEC-05;[B];F;backend/internal/privacy/subject_integration_test.go;WP-1158
 - Nutzer als Vault-Subject (`kind = user`): `app_user` hält E-Mail und Namen weiterhin selbst; die Anonymisierung bleibt bei `AnonymizeUserTx`.
 - Oberfläche der Personenrechte: siehe WP-1157 „Nicht Bestandteil“.
 - EU-Residenz, AVV und Gesamtnachweis CH16: WP-1159.
+
+**Nachtrag 2026-11-12:** Die Anzeige „gelöscht“ für pseudonymisierte Personen in Audit, CI-Historie, Beziehungsverlauf und Ereignissen (AK3, Oberfläche) braucht eine eigene Markierung im API-Vertrag; sie folgt mit der Oberfläche der Betroffenenrechte (WP-1157 bzw. ihrem Folge-WP). Bis dahin liefert die API `null` für aufgelöste Personen.
 
 ### WP-1159 – SEC-05 [P3] Abschluss: EU-Residenz, AVV-Fähigkeit und Nachweis, dass historische Daten gelöschte PII nicht offenlegen (CH16)
 
