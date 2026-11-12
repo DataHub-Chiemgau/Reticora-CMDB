@@ -9499,6 +9499,11 @@ paths:
       operationId: createSubnet
       tags: [IPAM]
       summary: Create a subnet
+      description: >-
+        A gateway outside the CIDR is 422 with field gateway, a gateway that
+        is no IP address 400 (IPM-04). The gateway becomes an address of the
+        subnet with is_gateway (type static, no interface), or marks an
+        existing address of the gateway in the subnet's VRF.
       requestBody:
         required: true
         content:
@@ -9543,6 +9548,13 @@ paths:
       operationId: updateSubnet
       tags: [IPAM]
       summary: Update a subnet
+      description: >-
+        The gateway must lie inside the CIDR after the update, against the
+        new CIDR when it changes (422 gateway; IPM-04). Changing the gateway
+        moves the is_gateway mark to the address of the new gateway (created
+        when missing), clearing it removes the mark; the addresses stay. A
+        new CIDR that leaves addresses of the subnet outside is 422 with
+        field cidr.
       requestBody:
         required: true
         content:
@@ -9562,6 +9574,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
     delete:
@@ -9587,6 +9601,16 @@ paths:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
+        - name: state
+          in: query
+          description: Only addresses in this state (IPM-04); another value is 422 with field state.
+          schema:
+            $ref: '#/components/schemas/IPAddressState'
+        - name: is_gateway
+          in: query
+          description: Only gateway addresses (true) or no gateway addresses (false), IPM-04.
+          schema:
+            type: boolean
       responses:
         '200':
           description: Paginated list of IP addresses
@@ -9598,6 +9622,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
 
   /api/v1/ip-addresses:
     get:
@@ -9616,6 +9642,16 @@ paths:
           in: query
           schema:
             type: string
+        - name: state
+          in: query
+          description: Only addresses in this state (IPM-04); another value is 422 with field state.
+          schema:
+            $ref: '#/components/schemas/IPAddressState'
+        - name: is_gateway
+          in: query
+          description: Only gateway addresses (true) or no gateway addresses (false), IPM-04.
+          schema:
+            type: boolean
       responses:
         '200':
           description: Paginated list of IP addresses
@@ -9625,6 +9661,8 @@ paths:
                 $ref: '#/components/schemas/IPAddressListResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
     post:
@@ -9668,6 +9706,16 @@ paths:
           in: query
           schema:
             type: string
+        - name: state
+          in: query
+          description: Only addresses in this state (IPM-04); another value is 422 with field state.
+          schema:
+            $ref: '#/components/schemas/IPAddressState'
+        - name: is_gateway
+          in: query
+          description: Only gateway addresses (true) or no gateway addresses (false), IPM-04.
+          schema:
+            type: boolean
       responses:
         '200':
           description: Paginated list of IP addresses
@@ -9677,6 +9725,8 @@ paths:
                 $ref: '#/components/schemas/IPAddressListResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
     post:
@@ -39235,6 +39285,11 @@ components:
           type: string
         site_id:
           type: string
+        cidr:
+          type: string
+          description: >-
+            New prefix of the subnet; its addresses must stay inside (422
+            cidr), the gateway is checked against it (422 gateway).
         name:
           type: string
         vrf_id:
@@ -39468,6 +39523,17 @@ components:
           type: string
           readOnly: true
           description: Surrogate id of the user who made the reservation; set only by POST /api/v1/subnets/{id}/reservations.
+        state:
+          $ref: '#/components/schemas/IPAddressState'
+        state_changed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          description: Time of the last change of state; absent before the first one.
+        is_gateway:
+          type: boolean
+          readOnly: true
+          description: The address is the gateway of its subnet; set only through the gateway of the subnet (IPM-04).
         created_at:
           type: string
           format: date-time
@@ -39519,6 +39585,17 @@ components:
           type: string
         description:
           type: string
+        state:
+          $ref: '#/components/schemas/IPAddressState'
+
+    IPAddressState:
+      type: string
+      enum: [active, offline, unknown]
+      description: >-
+        Reachability of the address (IPM-04, E-211), apart from its type
+        (NET-03). A change sets state_changed_at and writes
+        ipam.address.state_changed. phpIPAM tags map onto it: Used → active,
+        Offline → offline, Reserved → type reserved, DHCP → type dhcp.
 
     IPAddressListResponse:
       allOf:

@@ -627,9 +627,11 @@ type SubnetChangedData struct {
 }
 
 // AddressStateChangedData is the data of ipam.address.state_changed
-// (IPM-04): the state of an IP address changed.
+// (IPM-04): the state of an IP address changed (active, offline, unknown).
+// SubnetID is the subnet of the address, empty without one (WP-902).
 type AddressStateChangedData struct {
 	ID       string `json:"id"`
+	SubnetID string `json:"subnet_id,omitempty"`
 	ClientID string `json:"client_id,omitempty"`
 	SiteID   string `json:"site_id,omitempty"`
 	CIID     string `json:"ci_id,omitempty"`

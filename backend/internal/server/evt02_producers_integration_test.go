@@ -245,6 +245,7 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 		rotatedCredential, agedCredential  string
 		usageCredential, usageCollector    string
 		usageScope, usageCI                string
+		stateAddress, stateSubnet          string
 		hookServer                         *httptest.Server
 		hookSubscription, hookDelivery     string
 		hookDispatcher                     *webhook.Dispatcher
@@ -709,6 +710,28 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 					if s, ok := v.(string); ok && strings.Contains(s, "evt02-usage-secret") {
 						t.Errorf("credential.resolution_failed carries a secret value: %v", data)
 					}
+				}
+			}},
+		{typ: events.IPAMAddressStateChanged,
+			// PATCH /ips/{id} sets the state of an address (WP-902).
+			setup: func(t *testing.T) {
+				stateSubnet = scalar(t, `INSERT INTO subnet (organization_id, client_id, cidr) VALUES ($1, $2, '10.255.55.0/24')
+					RETURNING id::text`, f.OrgA, f.Client1)
+				stateAddress = scalar(t, `INSERT INTO ip_address (organization_id, subnet_id, address) VALUES ($1, $2, '10.255.55.7')
+					RETURNING id::text`, f.OrgA, stateSubnet)
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPatch, "/api/v1/ips/"+stateAddress, `{"state":"active"}`)
+				answered(t, "PATCH /ips/{id} state", r, refused, http.StatusOK)
+				if refused {
+					unchanged(t, "state", scalar(t, `SELECT state FROM ip_address WHERE id = $1`, stateAddress), "unknown")
+				}
+				return stateAddress
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["subnet_id"] != stateSubnet || data["client_id"] != f.Client1 ||
+					data["from"] != "unknown" || data["to"] != "active" {
+					t.Errorf("ipam.address.state_changed data %v", data)
 				}
 			}},
 		{typ: events.EntitlementChanged,
@@ -1336,7 +1359,6 @@ var plannedProducers = map[string]string{
 	"org.deletion_requested":        "WP-1152",
 	"org.deletion_cancelled":        "WP-1152",
 	"ipam.subnet.changed":           "WP-904",
-	"ipam.address.state_changed":    "WP-902",
 	"asn.changed":                   "WP-1066",
 	"admp.connection.refreshed":     "WP-929",
 }

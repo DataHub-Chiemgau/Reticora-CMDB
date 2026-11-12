@@ -49,7 +49,7 @@ func TestIPAMRepositoryClientScope(t *testing.T) {
 	if err != nil || len(subnets) != 1 || subnets[0].ID != ownNet.ID {
 		t.Fatalf("client-1 subnets: %+v err=%v, want only the client-1 subnet", subnets, err)
 	}
-	ips, total, err := repo.ListIPAddresses(ctx, f.OrgA, "", page)
+	ips, total, err := repo.ListIPAddresses(ctx, f.OrgA, ipam.IPFilter{}, page)
 	if err != nil || total != 0 || len(ips) != 0 {
 		t.Fatalf("client-1 addresses: total=%d %+v err=%v, want none", total, ips, err)
 	}

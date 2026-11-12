@@ -12,6 +12,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -22,11 +23,21 @@ import (
 // PGRepository implements Repository backed by PostgreSQL with RLS.
 type PGRepository struct {
 	pool *pgxpool.Pool
+	// outbox writes ipam.address.state_changed in the writing transaction
+	// (IPM-04, Konvention 13); nil writes no events.
+	outbox *events.Outbox
 }
 
 // NewPGRepository creates a new PostgreSQL-backed IPAM repository.
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 	return &PGRepository{pool: pool}
+}
+
+// WithEvents attaches the event outbox: every change of the state of an
+// address writes ipam.address.state_changed.
+func (r *PGRepository) WithEvents(outbox *events.Outbox) *PGRepository {
+	r.outbox = outbox
+	return r
 }
 
 type scanner interface {
@@ -36,7 +47,7 @@ type scanner interface {
 // --- Subnets ---
 
 const subnetCols = `id::text, organization_id::text, COALESCE(client_id::text,''), COALESCE(site_id::text,''),
-	cidr::text, vrf_id::text, section_id::text, COALESCE(name,''), COALESCE(vlan_id::text,''), COALESCE(gateway::text,''), COALESCE(dns_servers::text[], '{}'),
+	cidr::text, vrf_id::text, section_id::text, COALESCE(name,''), COALESCE(vlan_id::text,''), COALESCE(host(gateway),''), COALESCE(dns_servers::text[], '{}'),
 	COALESCE(description,''), is_management, created_at, updated_at`
 
 func scanSubnet(s scanner) (*Subnet, error) {
@@ -199,13 +210,16 @@ func (r *PGRepository) CreateSubnet(ctx context.Context, s *Subnet) error {
 		if err := checkSection(ctx, tx, s.OrganizationID, s.SectionID, s.ClientID); err != nil {
 			return err
 		}
-		return tx.QueryRow(ctx,
+		if err := tx.QueryRow(ctx,
 			`INSERT INTO subnet (organization_id, client_id, site_id, cidr, name, vlan_id, gateway, dns_servers, description, is_management, vrf_id, section_id)
 			 VALUES ($1,$2,$3,$4::cidr,$5,$6,$7::inet,$8::inet[],$9,$10,$11,$12) RETURNING id::text, vrf_id::text, section_id::text, created_at, updated_at`,
 			s.OrganizationID, nilIfEmpty(s.ClientID), nilIfEmpty(s.SiteID), s.CIDR, nilIfEmpty(s.Name),
 			nilIfEmpty(s.VLANID), nilIfEmpty(s.Gateway), dnsServersArg(s.DNSServers), nilIfEmpty(s.Description), s.IsManagement,
 			nilIfEmpty(s.VRFID), nilIfEmpty(s.SectionID),
-		).Scan(&s.ID, &s.VRFID, &s.SectionID, &s.CreatedAt, &s.UpdatedAt)
+		).Scan(&s.ID, &s.VRFID, &s.SectionID, &s.CreatedAt, &s.UpdatedAt); err != nil {
+			return err
+		}
+		return syncGateway(ctx, tx, s.OrganizationID, s.ID, s.Gateway)
 	})
 }
 
@@ -229,6 +243,11 @@ func (r *PGRepository) UpdateSubnet(ctx context.Context, orgID, id string, req *
 		if req.SiteID != nil {
 			sets = append(sets, fmt.Sprintf("site_id = $%d", pos))
 			args = append(args, nilIfEmpty(*req.SiteID))
+			pos++
+		}
+		if req.CIDR != nil {
+			sets = append(sets, fmt.Sprintf("cidr = $%d::cidr", pos))
+			args = append(args, *req.CIDR)
 			pos++
 		}
 		if req.Name != nil {
@@ -283,9 +302,47 @@ func (r *PGRepository) UpdateSubnet(ctx context.Context, orgID, id string, req *
 		if err == pgx.ErrNoRows {
 			return ErrNotFound
 		}
-		return err
+		if err != nil {
+			return subnetError(err)
+		}
+		if req.Gateway != nil {
+			return syncGateway(ctx, tx, orgID, id, sn.Gateway)
+		}
+		return nil
 	})
 	return sn, err
+}
+
+// subnetError maps the prefix checks of a subnet update onto 422: cidr
+// for addresses left outside, gateway for a gateway outside the prefix
+// (subnet_gateway_in_cidr checks the updated row, so concurrent changes of
+// prefix and gateway cannot pass the handler's check both).
+func subnetError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23514" {
+		switch pgErr.ConstraintName {
+		case "subnet_cidr_addresses":
+			return errAddressesOutsideCIDR
+		case "subnet_gateway_in_cidr":
+			return errGatewayOutside
+		}
+	}
+	return err
+}
+
+// syncGateway keeps the gateway mark of the addresses of subnet subnetID in
+// step with its gateway (IPM-04), in the writing transaction, through
+// ipam_subnet_sync_gateway (migration 000299): the addresses of a subnet
+// can belong to other clients than the subnet, so the function checks the
+// subnet under the caller's row level security and then keeps the mark
+// over all of them with the scope widened. The mark of another address
+// goes (the address stays); a gateway marks an address of the subnet's VRF
+// in the subnet or without one, or creates one (static, no interface).
+func syncGateway(ctx context.Context, tx pgx.Tx, orgID, subnetID, gateway string) error {
+	if _, err := tx.Exec(ctx, "SELECT ipam_subnet_sync_gateway($1, $2, $3::inet)", orgID, subnetID, nilIfEmpty(gateway)); err != nil {
+		return fmt.Errorf("sync gateway mark: %w", err)
+	}
+	return nil
 }
 
 func (r *PGRepository) DeleteSubnet(ctx context.Context, orgID, id string) error {
@@ -310,13 +367,14 @@ func (r *PGRepository) deleteByID(ctx context.Context, orgID, table, visible, id
 
 const ipCols = `id::text, organization_id::text, COALESCE(subnet_id::text,''), COALESCE(interface_id::text,''),
 	address::text, vrf_id::text, type, COALESCE(dns_name,''), COALESCE(description,''), last_seen_at,
-	reserved_until, COALESCE(reserved_by::text,''), created_at, updated_at`
+	reserved_until, COALESCE(reserved_by::text,''), state, state_changed_at, is_gateway, created_at, updated_at`
 
 func scanIP(s scanner) (*IPAddress, error) {
 	a := &IPAddress{}
 	var lastSeen *time.Time
 	if err := s.Scan(&a.ID, &a.OrganizationID, &a.SubnetID, &a.InterfaceID, &a.Address, &a.VRFID, &a.Type,
-		&a.DNSName, &a.Description, &lastSeen, &a.ReservedUntil, &a.ReservedBy, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		&a.DNSName, &a.Description, &lastSeen, &a.ReservedUntil, &a.ReservedBy,
+		&a.State, &a.StateChangedAt, &a.IsGateway, &a.CreatedAt, &a.UpdatedAt); err != nil {
 		return nil, err
 	}
 	if lastSeen != nil {
@@ -327,20 +385,32 @@ func scanIP(s scanner) (*IPAddress, error) {
 		until := a.ReservedUntil.UTC()
 		a.ReservedUntil = &until
 	}
+	if a.StateChangedAt != nil {
+		changed := a.StateChangedAt.UTC()
+		a.StateChangedAt = &changed
+	}
 	a.CreatedAt = a.CreatedAt.UTC()
 	a.UpdatedAt = a.UpdatedAt.UTC()
 	return a, nil
 }
 
-func (r *PGRepository) ListIPAddresses(ctx context.Context, orgID, subnetID string, page api.PaginationParams) ([]IPAddress, int, error) {
+func (r *PGRepository) ListIPAddresses(ctx context.Context, orgID string, f IPFilter, page api.PaginationParams) ([]IPAddress, int, error) {
 	var out []IPAddress
 	var total int
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where := "organization_id = $1 AND " + ipVisible
 		args := []any{orgID}
-		if subnetID != "" {
-			where += " AND subnet_id = $2"
-			args = append(args, subnetID)
+		if f.SubnetID != "" {
+			args = append(args, f.SubnetID)
+			where += fmt.Sprintf(" AND subnet_id = $%d", len(args))
+		}
+		if f.State != "" {
+			args = append(args, f.State)
+			where += fmt.Sprintf(" AND state = $%d", len(args))
+		}
+		if f.IsGateway != nil {
+			args = append(args, *f.IsGateway)
+			where += fmt.Sprintf(" AND is_gateway = $%d", len(args))
 		}
 		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM ip_address WHERE "+where, args...).Scan(&total); err != nil {
 			return err
@@ -381,10 +451,10 @@ func (r *PGRepository) CreateIPAddress(ctx context.Context, a *IPAddress) error 
 	return database.WithRequestTenant(ctx, r.pool, a.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx,
 			`INSERT INTO ip_address (organization_id, subnet_id, interface_id, address, type, dns_name, description)
-			 VALUES ($1,$2,$3,$4::inet,$5,$6,$7) RETURNING id::text, vrf_id::text, created_at, updated_at`,
+			 VALUES ($1,$2,$3,$4::inet,$5,$6,$7) RETURNING id::text, vrf_id::text, state, is_gateway, created_at, updated_at`,
 			a.OrganizationID, nilIfEmpty(a.SubnetID), nilIfEmpty(a.InterfaceID), a.Address, a.Type,
 			nilIfEmpty(a.DNSName), nilIfEmpty(a.Description),
-		).Scan(&a.ID, &a.VRFID, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		).Scan(&a.ID, &a.VRFID, &a.State, &a.IsGateway, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return err
 		}
 		return requireVisible(ctx, tx, "ip_address", ipVisible, a.ID)
@@ -397,6 +467,37 @@ func (r *PGRepository) UpdateIPAddress(ctx context.Context, orgID, id string, re
 		sets := []string{}
 		args := []any{orgID, id}
 		pos := 3
+		var fromState string
+		if req.SubnetID != nil {
+			// The gateway mark belongs to the subnet: the gateway address
+			// stays in it until the subnet's gateway changes (IPM-04).
+			var isGateway bool
+			var subnetID string
+			if err := tx.QueryRow(ctx, "SELECT is_gateway, COALESCE(subnet_id::text, '') FROM ip_address WHERE organization_id = $1 AND id = $2 AND "+ipVisible+
+				" FOR UPDATE", orgID, id).Scan(&isGateway, &subnetID); err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return ErrNotFound
+				}
+				return err
+			}
+			if isGateway && subnetID != *req.SubnetID {
+				return errGatewayAddressSubnet
+			}
+		}
+		if req.State != nil {
+			// The state before the change, locked until the commit.
+			if err := tx.QueryRow(ctx, "SELECT state FROM ip_address WHERE organization_id = $1 AND id = $2 AND "+ipVisible+
+				" FOR UPDATE", orgID, id).Scan(&fromState); err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return ErrNotFound
+				}
+				return err
+			}
+			sets = append(sets, fmt.Sprintf("state = $%d", pos),
+				fmt.Sprintf("state_changed_at = CASE WHEN state IS DISTINCT FROM $%d THEN now() ELSE state_changed_at END", pos))
+			args = append(args, *req.State)
+			pos++
+		}
 		if req.SubnetID != nil {
 			sets = append(sets, fmt.Sprintf("subnet_id = $%d", pos))
 			args = append(args, nilIfEmpty(*req.SubnetID))
@@ -436,13 +537,56 @@ func (r *PGRepository) UpdateIPAddress(ctx context.Context, orgID, id string, re
 			return err
 		}
 		// The update may point the address at another subnet or interface.
-		return requireVisible(ctx, tx, "ip_address", ipVisible, id)
+		if err := requireVisible(ctx, tx, "ip_address", ipVisible, id); err != nil {
+			return err
+		}
+		if req.State != nil && fromState != a.State {
+			return r.emitStateChanged(ctx, tx, a, fromState)
+		}
+		return nil
 	})
 	return a, err
 }
 
+// emitStateChanged writes ipam.address.state_changed for address a, whose
+// state changed from from (IPM-04, Konvention 13), as the last write of the
+// transaction (Konvention 20); nothing without an outbox. The payload names
+// the address, its subnet, client and site and both states.
+func (r *PGRepository) emitStateChanged(ctx context.Context, tx pgx.Tx, a *IPAddress, from string) error {
+	if r.outbox == nil {
+		return nil
+	}
+	data := events.AddressStateChangedData{ID: a.ID, SubnetID: a.SubnetID, From: from, To: a.State}
+	if err := tx.QueryRow(ctx, `SELECT COALESCE(client_id::text, ''), COALESCE(site_id::text, '') FROM ip_address
+		WHERE organization_id = $1 AND id = $2`, a.OrganizationID, a.ID).Scan(&data.ClientID, &data.SiteID); err != nil {
+		return fmt.Errorf("read address scope: %w", err)
+	}
+	orgID := a.OrganizationID
+	return database.BeforeCommit(ctx, func() error {
+		_, err := r.outbox.Append(ctx, tx, &events.Event{OrgID: orgID, Type: events.IPAMAddressStateChanged,
+			EntityID: data.ID, Data: data})
+		return err
+	})
+}
+
+// DeleteIPAddress deletes a visible address; the gateway address of a
+// subnet stays until the subnet's gateway changes (409 is_gateway, IPM-04).
 func (r *PGRepository) DeleteIPAddress(ctx context.Context, orgID, id string) error {
-	return r.deleteByID(ctx, orgID, "ip_address", ipVisible, id)
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var isGateway bool
+		if err := tx.QueryRow(ctx, "SELECT is_gateway FROM ip_address WHERE organization_id = $1 AND id = $2 AND "+ipVisible+
+			" FOR UPDATE", orgID, id).Scan(&isGateway); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		if isGateway {
+			return errGatewayAddressDelete
+		}
+		_, err := tx.Exec(ctx, "DELETE FROM ip_address WHERE organization_id = $1 AND id = $2 AND "+ipVisible, orgID, id)
+		return err
+	})
 }
 
 // --- Network projection (IMP-11) ---

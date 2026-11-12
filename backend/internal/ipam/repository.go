@@ -55,7 +55,7 @@ type Repository interface {
 	UpdateSubnet(ctx context.Context, orgID, id string, req *UpdateSubnetRequest) (*Subnet, error)
 	DeleteSubnet(ctx context.Context, orgID, id string) error
 
-	ListIPAddresses(ctx context.Context, orgID, subnetID string, page api.PaginationParams) ([]IPAddress, int, error)
+	ListIPAddresses(ctx context.Context, orgID string, f IPFilter, page api.PaginationParams) ([]IPAddress, int, error)
 	GetIPAddress(ctx context.Context, orgID, id string) (*IPAddress, error)
 	CreateIPAddress(ctx context.Context, a *IPAddress) error
 	UpdateIPAddress(ctx context.Context, orgID, id string, req UpdateIPAddressRequest) (*IPAddress, error)
@@ -182,7 +182,47 @@ func (r *MemoryRepository) CreateSubnet(_ context.Context, s *Subnet) error {
 	s.CreatedAt, s.UpdatedAt = now, now
 	stored := *s
 	r.subnets[s.ID] = &stored
+	r.syncGateway(&stored)
 	return nil
+}
+
+// syncGateway keeps the gateway mark of the addresses of subnet s in step
+// with its gateway (IPM-04), as the PostgreSQL repository does.
+func (r *MemoryRepository) syncGateway(s *Subnet) {
+	var marked *IPAddress
+	for _, a := range r.addresses {
+		if a.OrganizationID != s.OrganizationID || a.SubnetID != s.ID || !a.IsGateway {
+			continue
+		}
+		if s.Gateway != "" && hostOf(a.Address) == s.Gateway {
+			marked = a
+			continue
+		}
+		a.IsGateway = false
+	}
+	if s.Gateway == "" || marked != nil {
+		return
+	}
+	var pick *IPAddress
+	for _, a := range r.addresses {
+		if a.OrganizationID != s.OrganizationID || a.VRFID != s.VRFID || hostOf(a.Address) != s.Gateway ||
+			(a.SubnetID != s.ID && a.SubnetID != "") {
+			continue
+		}
+		if pick == nil || (a.SubnetID != "" && pick.SubnetID == "") ||
+			(a.SubnetID == pick.SubnetID && a.InterfaceID == "" && pick.InterfaceID != "") {
+			pick = a
+		}
+	}
+	now := time.Now().UTC()
+	if pick != nil {
+		pick.IsGateway, pick.SubnetID, pick.UpdatedAt = true, s.ID, now
+		return
+	}
+	r.seq++
+	a := &IPAddress{ID: fmt.Sprintf("ip-%d", r.seq), OrganizationID: s.OrganizationID, SubnetID: s.ID, Address: s.Gateway,
+		VRFID: s.VRFID, Type: IPTypeStatic, State: IPStateUnknown, IsGateway: true, CreatedAt: now, UpdatedAt: now}
+	r.addresses[a.ID] = a
 }
 
 func (r *MemoryRepository) UpdateSubnet(_ context.Context, orgID, id string, req *UpdateSubnetRequest) (*Subnet, error) {
@@ -205,6 +245,17 @@ func (r *MemoryRepository) UpdateSubnet(_ context.Context, orgID, id string, req
 			return nil, err
 		}
 		s.SectionID = resolved
+	}
+	if req.CIDR != nil {
+		for _, a := range r.addresses {
+			if a.OrganizationID != orgID || a.SubnetID != id {
+				continue
+			}
+			if in, err := ipInSubnet(hostOf(a.Address), *req.CIDR); err == nil && !in {
+				return nil, errAddressesOutsideCIDR
+			}
+		}
+		s.CIDR = *req.CIDR
 	}
 	if req.ClientID != nil {
 		s.ClientID = *req.ClientID
@@ -234,6 +285,9 @@ func (r *MemoryRepository) UpdateSubnet(_ context.Context, orgID, id string, req
 		s.IsManagement = *req.IsManagement
 	}
 	s.UpdatedAt = time.Now().UTC()
+	if req.Gateway != nil {
+		r.syncGateway(s)
+	}
 	cp := *s
 	return &cp, nil
 }
@@ -246,12 +300,19 @@ func (r *MemoryRepository) DeleteSubnet(_ context.Context, orgID, id string) err
 		return ErrNotFound
 	}
 	delete(r.subnets, id)
+	// The addresses lose their subnet and with it the gateway mark
+	// (ON DELETE SET NULL, trg_ip_address_gateway_leaves_subnet).
+	for _, a := range r.addresses {
+		if a.OrganizationID == orgID && a.SubnetID == id {
+			a.SubnetID, a.IsGateway = "", false
+		}
+	}
 	return nil
 }
 
 // --- IP Addresses ---
 
-func (r *MemoryRepository) ListIPAddresses(_ context.Context, orgID, subnetID string, page api.PaginationParams) ([]IPAddress, int, error) {
+func (r *MemoryRepository) ListIPAddresses(_ context.Context, orgID string, f IPFilter, page api.PaginationParams) ([]IPAddress, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []IPAddress
@@ -259,7 +320,8 @@ func (r *MemoryRepository) ListIPAddresses(_ context.Context, orgID, subnetID st
 		if a.OrganizationID != orgID {
 			continue
 		}
-		if subnetID != "" && a.SubnetID != subnetID {
+		if (f.SubnetID != "" && a.SubnetID != f.SubnetID) || (f.State != "" && a.State != f.State) ||
+			(f.IsGateway != nil && a.IsGateway != *f.IsGateway) {
 			continue
 		}
 		out = append(out, *a)
@@ -294,6 +356,9 @@ func (r *MemoryRepository) CreateIPAddress(_ context.Context, a *IPAddress) erro
 	}
 	r.seq++
 	a.ID = fmt.Sprintf("ip-%d", r.seq)
+	if a.State == "" {
+		a.State = IPStateUnknown
+	}
 	now := time.Now().UTC()
 	a.CreatedAt, a.UpdatedAt = now, now
 	stored := *a
@@ -308,6 +373,9 @@ func (r *MemoryRepository) UpdateIPAddress(_ context.Context, orgID, id string, 
 	if !ok || a.OrganizationID != orgID {
 		return nil, ErrNotFound
 	}
+	if req.SubnetID != nil && a.IsGateway && *req.SubnetID != a.SubnetID {
+		return nil, errGatewayAddressSubnet
+	}
 	if req.SubnetID != nil {
 		a.SubnetID = *req.SubnetID
 	}
@@ -316,6 +384,10 @@ func (r *MemoryRepository) UpdateIPAddress(_ context.Context, orgID, id string, 
 	}
 	if req.Type != nil {
 		a.Type = *req.Type
+	}
+	if req.State != nil && *req.State != a.State {
+		changed := time.Now().UTC()
+		a.State, a.StateChangedAt = *req.State, &changed
 	}
 	if req.DNSName != nil {
 		a.DNSName = *req.DNSName
@@ -334,6 +406,9 @@ func (r *MemoryRepository) DeleteIPAddress(_ context.Context, orgID, id string) 
 	a, ok := r.addresses[id]
 	if !ok || a.OrganizationID != orgID {
 		return ErrNotFound
+	}
+	if a.IsGateway {
+		return errGatewayAddressDelete
 	}
 	delete(r.addresses, id)
 	return nil

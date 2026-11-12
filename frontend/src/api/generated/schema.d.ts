@@ -4080,7 +4080,10 @@ export interface paths {
     /** List subnets */
     get: operations['listSubnets'];
     put?: never;
-    /** Create a subnet */
+    /**
+     * Create a subnet
+     * @description A gateway outside the CIDR is 422 with field gateway, a gateway that is no IP address 400 (IPM-04). The gateway becomes an address of the subnet with is_gateway (type static, no interface), or marks an existing address of the gateway in the subnet's VRF.
+     */
     post: operations['createSubnet'];
     delete?: never;
     options?: never;
@@ -4106,7 +4109,10 @@ export interface paths {
     delete: operations['deleteSubnet'];
     options?: never;
     head?: never;
-    /** Update a subnet */
+    /**
+     * Update a subnet
+     * @description The gateway must lie inside the CIDR after the update, against the new CIDR when it changes (422 gateway; IPM-04). Changing the gateway moves the is_gateway mark to the address of the new gateway (created when missing), clearing it removes the mark; the addresses stay. A new CIDR that leaves addresses of the subnet outside is 422 with field cidr.
+     */
     patch: operations['updateSubnet'];
     trace?: never;
   };
@@ -19368,6 +19374,8 @@ export interface components {
     UpdateSubnetRequest: {
       client_id?: string;
       site_id?: string;
+      /** @description New prefix of the subnet; its addresses must stay inside (422 cidr), the gateway is checked against it (422 gateway). */
+      cidr?: string;
       name?: string;
       /** @description Moves the subnet and its addresses to another VRF (empty string = default VRF). */
       vrf_id?: string;
@@ -19502,6 +19510,14 @@ export interface components {
       readonly reserved_until?: string;
       /** @description Surrogate id of the user who made the reservation; set only by POST /api/v1/subnets/{id}/reservations. */
       readonly reserved_by?: string;
+      state?: components['schemas']['IPAddressState'];
+      /**
+       * Format: date-time
+       * @description Time of the last change of state; absent before the first one.
+       */
+      readonly state_changed_at?: string;
+      /** @description The address is the gateway of its subnet; set only through the gateway of the subnet (IPM-04). */
+      readonly is_gateway?: boolean;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -19531,7 +19547,13 @@ export interface components {
       type?: components['schemas']['IPAddressType'];
       dns_name?: string;
       description?: string;
+      state?: components['schemas']['IPAddressState'];
     };
+    /**
+     * @description Reachability of the address (IPM-04, E-211), apart from its type (NET-03). A change sets state_changed_at and writes ipam.address.state_changed. phpIPAM tags map onto it: Used → active, Offline → offline, Reserved → type reserved, DHCP → type dhcp.
+     * @enum {string}
+     */
+    IPAddressState: 'active' | 'offline' | 'unknown';
     IPAddressListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['IPAddress'][];
     };
@@ -30651,6 +30673,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
     };
   };
@@ -30672,6 +30695,10 @@ export interface operations {
          *     supplied.
          */
         offset?: components['parameters']['Offset'];
+        /** @description Only addresses in this state (IPM-04); another value is 422 with field state. */
+        state?: components['schemas']['IPAddressState'];
+        /** @description Only gateway addresses (true) or no gateway addresses (false), IPM-04. */
+        is_gateway?: boolean;
       };
       header?: never;
       path: {
@@ -30693,6 +30720,7 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
     };
   };
   listIPAddressesLegacy: {
@@ -30714,6 +30742,10 @@ export interface operations {
          */
         offset?: components['parameters']['Offset'];
         subnet_id?: string;
+        /** @description Only addresses in this state (IPM-04); another value is 422 with field state. */
+        state?: components['schemas']['IPAddressState'];
+        /** @description Only gateway addresses (true) or no gateway addresses (false), IPM-04. */
+        is_gateway?: boolean;
       };
       header?: never;
       path?: never;
@@ -30731,6 +30763,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -30780,6 +30813,10 @@ export interface operations {
          */
         offset?: components['parameters']['Offset'];
         subnet_id?: string;
+        /** @description Only addresses in this state (IPM-04); another value is 422 with field state. */
+        state?: components['schemas']['IPAddressState'];
+        /** @description Only gateway addresses (true) or no gateway addresses (false), IPM-04. */
+        is_gateway?: boolean;
       };
       header?: never;
       path?: never;
@@ -30797,6 +30834,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };

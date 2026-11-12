@@ -216,7 +216,7 @@ func (r *MemoryRepository) CreateReservation(_ context.Context, a *IPAddress) er
 	r.seq++
 	now := time.Now().UTC()
 	stored := IPAddress{ID: fmt.Sprintf("ip-%d", r.seq), OrganizationID: a.OrganizationID, SubnetID: a.SubnetID,
-		Address: a.Address, VRFID: vrfID, Type: IPTypeReserved, Description: a.Description,
+		Address: a.Address, VRFID: vrfID, Type: IPTypeReserved, State: IPStateUnknown, Description: a.Description,
 		ReservedUntil: a.ReservedUntil, ReservedBy: a.ReservedBy, CreatedAt: now, UpdatedAt: now}
 	r.addresses[stored.ID] = &stored
 	*a = stored

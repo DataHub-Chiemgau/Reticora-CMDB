@@ -46,6 +46,10 @@ type CreateSubnetRequest struct {
 type UpdateSubnetRequest struct {
 	ClientID *string `json:"client_id,omitempty"`
 	SiteID   *string `json:"site_id,omitempty"`
+	// CIDR changes the prefix of the subnet; its addresses must stay inside
+	// (422 cidr), and the gateway is checked against the new prefix (422
+	// gateway, IPM-04).
+	CIDR *string `json:"cidr,omitempty"`
 	// VRFID moves the subnet to another VRF ("" = default VRF).
 	VRFID *string `json:"vrf_id,omitempty"`
 	// SectionID moves the subnet to another IPAM section ("" = default
@@ -81,8 +85,15 @@ type IPAddress struct {
 	// /subnets/{id}/reservations, never by POST or PATCH /ips.
 	ReservedUntil *time.Time `json:"reserved_until,omitempty"`
 	ReservedBy    string     `json:"reserved_by,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	// State is the reachability of the address, active, offline or unknown
+	// (IPM-04, E-211), apart from Type; StateChangedAt is the time of the
+	// last change. IsGateway marks the gateway of the subnet; only the
+	// gateway of the subnet sets it (read-only here).
+	State          string     `json:"state"`
+	StateChangedAt *time.Time `json:"state_changed_at,omitempty"`
+	IsGateway      bool       `json:"is_gateway"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 // CreateIPAddressRequest is the payload for creating an IP address.
@@ -102,7 +113,27 @@ type UpdateIPAddressRequest struct {
 	Type        *string `json:"type,omitempty"`
 	DNSName     *string `json:"dns_name,omitempty"`
 	Description *string `json:"description,omitempty"`
+	// State sets the state of the address manually (IPM-04).
+	State *string `json:"state,omitempty"`
 }
+
+// IPFilter holds the optional filters of the address lists: the subnet,
+// the state and the gateway mark (IPM-04).
+type IPFilter struct {
+	SubnetID  string
+	State     string
+	IsGateway *bool
+}
+
+// Address states of IPM-04 (E-211).
+const (
+	IPStateActive  = "active"
+	IPStateOffline = "offline"
+	IPStateUnknown = "unknown"
+)
+
+// ValidIPStates lists the address states (IPM-04).
+var ValidIPStates = map[string]bool{IPStateActive: true, IPStateOffline: true, IPStateUnknown: true}
 
 // NetworkInterface represents a CI's network interface (NET-01): the
 // name is unique per CI.

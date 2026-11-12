@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -171,11 +172,19 @@ func (h *Handler) CreateSubnet(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	gateway := ""
 	if req.Gateway != "" {
-		if _, err := validateIP(req.Gateway); err != nil {
+		gw, err := validateIP(req.Gateway)
+		if err != nil {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 			return
 		}
+		gateway = gw
+	}
+	// The gateway lies inside the subnet (IPM-04).
+	if err := checkGateway(gateway, normalized); err != nil {
+		api.WriteFieldError(w, err)
+		return
 	}
 	for _, dns := range req.DNSServers {
 		if _, err := validateIP(dns); err != nil {
@@ -192,7 +201,7 @@ func (h *Handler) CreateSubnet(w http.ResponseWriter, r *http.Request) {
 		SectionID:      req.SectionID,
 		Name:           req.Name,
 		VLANID:         req.VLANID,
-		Gateway:        req.Gateway,
+		Gateway:        gateway,
 		DNSServers:     req.DNSServers,
 		Description:    req.Description,
 		IsManagement:   req.IsManagement,
@@ -229,11 +238,21 @@ func (h *Handler) UpdateSubnet(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	if req.Gateway != nil && *req.Gateway != "" {
-		if _, err := validateIP(*req.Gateway); err != nil {
+	if req.CIDR != nil {
+		normalized, err := validateCIDR(*req.CIDR)
+		if err != nil {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 			return
 		}
+		req.CIDR = &normalized
+	}
+	if req.Gateway != nil && *req.Gateway != "" {
+		gw, err := validateIP(*req.Gateway)
+		if err != nil {
+			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+			return
+		}
+		req.Gateway = &gw
 	}
 	for _, dns := range req.DNSServers {
 		if _, err := validateIP(dns); err != nil {
@@ -241,9 +260,34 @@ func (h *Handler) UpdateSubnet(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// The gateway lies inside the subnet after the update, checked against
+	// the new prefix when it changes (IPM-04).
+	if req.CIDR != nil || (req.Gateway != nil && *req.Gateway != "") {
+		current, err := h.repo.GetSubnet(r.Context(), orgID, chi.URLParam(r, "id"))
+		if err != nil {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "subnet not found")
+			return
+		}
+		cidr, gateway := current.CIDR, current.Gateway
+		if req.CIDR != nil {
+			cidr = *req.CIDR
+		}
+		if req.Gateway != nil {
+			gateway = *req.Gateway
+		}
+		if err := checkGateway(gateway, cidr); err != nil {
+			api.WriteFieldError(w, err)
+			return
+		}
+	}
 	s, err := h.repo.UpdateSubnet(r.Context(), orgID, chi.URLParam(r, "id"), &req)
 	if err != nil {
-		if !api.WriteFieldError(w, err) {
+		// A field rule is its field problem, a CIDR the VRF holds already
+		// (unique violation) 409; anything else, an unknown or malformed id
+		// included, is 404.
+		if status, _, _, isDB := api.ClassifyDBError(err); isDB && status == http.StatusConflict {
+			api.WriteRepoError(w, err)
+		} else if !api.WriteFieldError(w, err) {
 			api.WriteError(w, http.StatusNotFound, "Not Found", "subnet not found")
 		}
 		return
@@ -280,8 +324,13 @@ func (h *Handler) ListSubnetAddresses(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "subnet not found")
 		return
 	}
+	f, ok := ipFilter(w, r)
+	if !ok {
+		return
+	}
+	f.SubnetID = subnetID
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListIPAddresses(r.Context(), orgID, subnetID, page)
+	items, total, err := h.repo.ListIPAddresses(r.Context(), orgID, f, page)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
@@ -294,14 +343,43 @@ func (h *Handler) ListSubnetAddresses(w http.ResponseWriter, r *http.Request) {
 
 // --- IP Addresses ---
 
+// ipFilter reads the filters state and is_gateway of the address lists
+// (IPM-04); an unknown state or a gateway flag that is no boolean is 422.
+func ipFilter(w http.ResponseWriter, r *http.Request) (IPFilter, bool) {
+	var f IPFilter
+	q := r.URL.Query()
+	if v := q.Get("state"); v != "" {
+		if !ValidIPStates[v] {
+			api.WriteFieldError(w, errInvalidState)
+			return f, false
+		}
+		f.State = v
+	}
+	if v := q.Get("is_gateway"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			api.WriteFieldError(w, &api.FieldError{Field: "is_gateway", Message: "is_gateway must be true or false",
+				Status: http.StatusUnprocessableEntity})
+			return f, false
+		}
+		f.IsGateway = &b
+	}
+	return f, true
+}
+
 // ListIPAddresses handles GET /api/v1/ip-addresses
 func (h *Handler) ListIPAddresses(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := org(w, r)
 	if !ok {
 		return
 	}
+	f, ok := ipFilter(w, r)
+	if !ok {
+		return
+	}
+	f.SubnetID = r.URL.Query().Get("subnet_id")
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListIPAddresses(r.Context(), orgID, r.URL.Query().Get("subnet_id"), page)
+	items, total, err := h.repo.ListIPAddresses(r.Context(), orgID, f, page)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
@@ -402,6 +480,10 @@ func (h *Handler) UpdateIPAddress(w http.ResponseWriter, r *http.Request) {
 		api.WriteFieldError(w, &api.FieldError{Field: "type", Message: "invalid ip address type"})
 		return
 	}
+	if req.State != nil && !ValidIPStates[*req.State] {
+		api.WriteFieldError(w, errInvalidState)
+		return
+	}
 	// Validate address still belongs to a newly-assigned subnet.
 	if req.SubnetID != nil && *req.SubnetID != "" {
 		current, err := h.repo.GetIPAddress(r.Context(), orgID, chi.URLParam(r, "id"))
@@ -426,6 +508,11 @@ func (h *Handler) UpdateIPAddress(w http.ResponseWriter, r *http.Request) {
 	}
 	a, err := h.repo.UpdateIPAddress(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
+		// The gateway address keeps its subnet (422 subnet_id); anything
+		// else is an address the caller cannot see.
+		if api.WriteFieldError(w, err) {
+			return
+		}
 		api.WriteError(w, http.StatusNotFound, "Not Found", "ip address not found")
 		return
 	}
@@ -442,6 +529,10 @@ func (h *Handler) DeleteIPAddress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.repo.DeleteIPAddress(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {
+		// The gateway address of a subnet stays (409 is_gateway).
+		if api.WriteFieldError(w, err) {
+			return
+		}
 		api.WriteError(w, http.StatusNotFound, "Not Found", "ip address not found")
 		return
 	}

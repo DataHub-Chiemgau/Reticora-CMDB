@@ -212,7 +212,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		TenantHierarchy:   tenantapi.NewPGRepository(pool),
 		Rack:              rack.NewPGRepository(pool),
 		Contact:           contact.NewPGRepository(pool),
-		IPAM:              ipam.NewPGRepository(pool),
+		IPAM:              ipam.NewPGRepository(pool).WithEvents(events.NewOutbox()),
 		Metrics:           monitoring.NewPGMetricStore(pool),
 		Permission:        permission.NewPGRepository(pool),
 		FieldGrants:       permission.NewPGFieldGrants(pool),
