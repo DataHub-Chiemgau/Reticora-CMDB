@@ -570,6 +570,10 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	}
 	// Settings of the organization and of the acting user.
 	m["PATCH /api/v1/org"] = RouteSnapshot{Table: "organization", Keys: []SnapshotKey{{"id", "$org"}}}
+	// The deletion request of the organization and its cancel change the
+	// deletion columns of the organization row (TLC-06, WP-1152).
+	m["POST /api/v1/org/deletion"] = RouteSnapshot{Table: "organization", Keys: []SnapshotKey{{"id", "$org"}}}
+	m["DELETE /api/v1/org/deletion"] = RouteSnapshot{Table: "organization", Keys: []SnapshotKey{{"id", "$org"}}}
 	m["PUT /api/v1/privacy/retention"] = RouteSnapshot{Table: "privacy_retention_policy", Keys: []SnapshotKey{{"organization_id", "$org"}}}
 	m["PUT /api/v1/reconciliation/source-policy"] = RouteSnapshot{Table: "source_priority_policy",
 		Keys: []SnapshotKey{{"organization_id", "$org"}}, Where: "t.is_default"}

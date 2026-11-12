@@ -4124,50 +4124,73 @@
       ]
     },
     "org.deletion_requested": {
-      "description": "Data of org.deletion_requested. entity_id: the deletion request. Origin: EVT-03 [P3], TLC-06. Producer: WP-1152. the deletion request of the organization.",
+      "description": "Data of org.deletion_requested. entity_id: the organization. Origin: EVT-03 [P3], TLC-06. Producer: WP-1152. the deletion request of the organization.",
       "type": "object",
-      "required": ["id"],
+      "required": ["id", "due_at"],
       "additionalProperties": true,
       "properties": {
         "id": {
           "type": "string",
           "format": "uuid",
-          "description": "The deletion request."
+          "description": "The organization."
         },
-        "effective_at": {
+        "requested_by": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The user who requested the deletion."
+        },
+        "due_at": {
           "type": "string",
           "format": "date-time",
-          "description": "When the hard delete runs (after the 30-day grace period); absent when cancelled."
+          "description": "The end of the 30-day grace period, after which the purge runs."
+        },
+        "cancelled_by": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The user who cancelled the request (org.deletion_cancelled only)."
         }
       },
       "examples": [
         {
           "id": "11111111-1111-4111-8111-111111111111",
-          "effective_at": "2026-12-01T22:00:00Z"
+          "requested_by": "22222222-2222-4222-8222-222222222222",
+          "due_at": "2026-12-01T22:00:00Z"
         }
       ]
     },
     "org.deletion_cancelled": {
-      "description": "Data of org.deletion_cancelled. entity_id: the deletion request. Origin: EVT-03 [P3], TLC-06. Producer: WP-1152. the deletion request of the organization.",
+      "description": "Data of org.deletion_cancelled. entity_id: the organization. Origin: EVT-03 [P3], TLC-06. Producer: WP-1152. the deletion request of the organization.",
       "type": "object",
-      "required": ["id"],
+      "required": ["id", "due_at"],
       "additionalProperties": true,
       "properties": {
         "id": {
           "type": "string",
           "format": "uuid",
-          "description": "The deletion request."
+          "description": "The organization."
         },
-        "effective_at": {
+        "requested_by": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The user who requested the deletion."
+        },
+        "due_at": {
           "type": "string",
           "format": "date-time",
-          "description": "When the hard delete runs (after the 30-day grace period); absent when cancelled."
+          "description": "The end of the 30-day grace period, after which the purge runs."
+        },
+        "cancelled_by": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The user who cancelled the request (org.deletion_cancelled only)."
         }
       },
       "examples": [
         {
           "id": "11111111-1111-4111-8111-111111111111",
-          "effective_at": "2026-12-01T22:00:00Z"
+          "requested_by": "22222222-2222-4222-8222-222222222222",
+          "due_at": "2026-12-01T22:00:00Z",
+          "cancelled_by": "22222222-2222-4222-8222-222222222222"
         }
       ]
     },

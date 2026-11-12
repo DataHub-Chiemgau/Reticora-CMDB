@@ -299,7 +299,11 @@ type SessionClaims struct {
 	ID string
 	// Operator marks an operator session of the /admin path (SEC-07). Such a
 	// token carries no organization and is refused by the tenant API.
-	Operator  bool
+	Operator bool
+	// MFA records that the login of the session used a second factor
+	// (MFASatisfied on amr and acr of the ID token, WP-1152). A refresh
+	// keeps it; the org deletion of TLC-06 requires it.
+	MFA       bool
 	IssuedAt  time.Time
 	ExpiresAt time.Time
 }
@@ -326,6 +330,7 @@ type sessionClaimsWire struct {
 	SessionID        string                          `json:"sid,omitempty"`
 	ID               string                          `json:"jti,omitempty"`
 	Operator         bool                            `json:"opr,omitempty"`
+	MFA              bool                            `json:"mfa,omitempty"`
 	IssuedAt         int64                           `json:"iat,omitempty"`
 	ExpiresAt        int64                           `json:"exp,omitempty"`
 }
@@ -404,6 +409,7 @@ func (c SessionClaims) MarshalJSON() ([]byte, error) { //nolint:gocritic // see 
 		SessionID:      c.SessionID,
 		ID:             c.ID,
 		Operator:       c.Operator,
+		MFA:            c.MFA,
 		IssuedAt:       numericDate(c.IssuedAt),
 		ExpiresAt:      numericDate(c.ExpiresAt),
 	}
@@ -441,6 +447,7 @@ func (c *SessionClaims) UnmarshalJSON(data []byte) error {
 		SessionID:      w.SessionID,
 		ID:             w.ID,
 		Operator:       w.Operator,
+		MFA:            w.MFA,
 		IssuedAt:       fromNumericDate(w.IssuedAt),
 		ExpiresAt:      fromNumericDate(w.ExpiresAt),
 	}

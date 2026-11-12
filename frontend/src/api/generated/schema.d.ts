@@ -11940,19 +11940,19 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Get the deletion request of the organization
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * Get the deletion state of the organization
+     * @description The deletion state of the organization (TLC-06, WP-1152): `none`, `requested` (30 days of grace, cancellable), `purging` or `purged`, with the time of the request, the end of the grace period and the seconds left. Readable with location:read (segment org), so the banner of the grace period reaches every user of the organization. Module org_lifecycle; without a database the state is `none`.
      */
     get: operations['getOrganizationDeletion'];
     put?: never;
     /**
      * Request the deletion of the organization
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Requests the deletion of the organization (TLC-06, WP-1152): org:delete for the whole organization and a session opened with a second factor (claim `mfa` of the session; an API key never has one: 403 with type urn:reticora:problem:mfa-required). `confirm_slug` must equal the slug of the organization (422 `confirm_slug`). The state becomes `requested`, due 30 days later; the event org.deletion_requested is written in the same transaction. An existing request or a running purge is 409.
      */
     post: operations['requestOrganizationDeletion'];
     /**
      * Withdraw the deletion request of the organization
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Withdraws a requested deletion during the grace period (TLC-06, WP-1152): org:delete for the whole organization and a session with a second factor, like the request. The state becomes `none`, the request is emptied and the event org.deletion_cancelled is written. Without a request 404; once the purge started (`purging`, `purged`) 409.
      */
     delete: operations['cancelOrganizationDeletion'];
     options?: never;
@@ -21374,6 +21374,32 @@ export interface components {
         /** @default 100 */
         priority: number;
       }[];
+    };
+    /** @description The deletion state of the organization (TLC-06, WP-1152). */
+    OrganizationDeletion: {
+      /** @enum {string} */
+      state: 'none' | 'requested' | 'purging' | 'purged';
+      /** Format: date-time */
+      requested_at: string | null;
+      /**
+       * Format: date-time
+       * @description End of the 30-day grace period; the purge runs after it.
+       */
+      due_at: string | null;
+      /**
+       * Format: uuid
+       * @description The user who requested the deletion.
+       */
+      requested_by: string | null;
+      /**
+       * Format: int64
+       * @description Seconds left of the grace period, 0 once it ended; null without a request.
+       */
+      remaining_seconds: number | null;
+    };
+    OrganizationDeletionRequest: {
+      /** @description The slug of the organization, typed as confirmation. */
+      confirm_slug: string;
     };
     /** @description A connection to a KV v2 vault (CRD-03). It holds no secret; the login is the credential auth_credential_id names. */
     VaultConnection: {
@@ -51876,12 +51902,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get the deletion request of the organization. The schema comes with the implementing work package. */
+      /** @description The deletion state */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['OrganizationDeletion'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -51895,20 +51923,44 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['OrganizationDeletionRequest'];
+      };
+    };
     responses: {
-      /** @description Accepted as a job. The schema comes with the implementing work package. */
+      /** @description The deletion is requested; the purge runs after the grace period */
       202: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['OrganizationDeletion'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Missing org:delete for the whole organization, or a session without second factor (type urn:reticora:problem:mfa-required). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       409: components['responses']['Conflict'];
+      /** @description confirm_slug is missing or does not match the slug of the organization (`field`). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   cancelOrganizationDeletion: {
@@ -51920,17 +51972,29 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Done. */
-      204: {
+      /** @description The deletion state after the cancel */
+      200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['OrganizationDeletion'];
+        };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Missing org:delete for the whole organization, or a session without second factor (type urn:reticora:problem:mfa-required). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   listOrganizationAddons: {

@@ -532,10 +532,13 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	"POST /api/v1/agents/{id}/site":                          {"", `{"site_id":"<id:/api/v1/sites>"}`},
 	// Assignment through the asset (WP-746): <asset3> is assigned and
 	// returned, <asset4> held by <user> is transferred.
-	"POST /api/v1/assets/{id}/assign":                  {"/api/v1/assets/<asset3>/assign", `{"assigned_user_id":"<user2>"}`},
-	"POST /api/v1/assets/{id}/return":                  {"/api/v1/assets/<asset3>/return", `{"expected_holder":"<user2>"}`},
-	"POST /api/v1/assets/{id}/transfer":                {"/api/v1/assets/<asset4>/transfer", `{"expected_holder":"<user>","assigned_user_id":"<user2>"}`},
-	"PATCH /api/v1/org":                                {"", `{}`},
+	"POST /api/v1/assets/{id}/assign":   {"/api/v1/assets/<asset3>/assign", `{"assigned_user_id":"<user2>"}`},
+	"POST /api/v1/assets/{id}/return":   {"/api/v1/assets/<asset3>/return", `{"expected_holder":"<user2>"}`},
+	"POST /api/v1/assets/{id}/transfer": {"/api/v1/assets/<asset4>/transfer", `{"expected_holder":"<user>","assigned_user_id":"<user2>"}`},
+	"PATCH /api/v1/org":                 {"", `{}`},
+	// The deletion request of the organization (WP-1152) with its slug as
+	// confirmation; the cancel runs with the deletes.
+	"POST /api/v1/org/deletion":                        {"", `{"confirm_slug":"scopetest-a5-a"}`},
 	"PUT /api/v1/clients/{id}/hidden-ci-types":         {"/api/v1/clients/<id:/api/v1/clients>/hidden-ci-types", `{"ci_type_ids":["<id:/api/v1/ci-types>"]}`}, // WP-858
 	"PUT /api/v1/documents/{id}/content":               {"", `a5 content`},
 	"DELETE /api/v1/ci-fields/global/{name}":           {"/api/v1/ci-fields/global/a5_global", ""},
@@ -788,7 +791,9 @@ func TestEveryWriteRouteAuditedOnPostgreSQL(t *testing.T) {
 		method, _, _ := strings.Cut(key, " ")
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		p := identity.Principal{Subject: user, OrganizationID: f.OrgA, Type: identity.PrincipalTypeUser,
+		// The session has a second factor: the deletion of the
+		// organization requires one (WP-1152).
+		p := identity.Principal{Subject: user, OrganizationID: f.OrgA, Type: identity.PrincipalTypeUser, MFA: true,
 			Scope:       &identity.Scope{Clients: identity.ScopeSet{All: true}, Sites: identity.ScopeSet{All: true}, Teams: identity.ScopeSet{All: true}},
 			Permissions: identity.AllPermissions(), Credential: "audit-a5"}
 		ctx := identity.WithPermissions(identity.WithPrincipal(req.Context(), p), p.Permissions)

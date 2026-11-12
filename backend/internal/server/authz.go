@@ -304,6 +304,12 @@ type routeRule struct {
 
 // routeRules are checked in order; the first match wins.
 var routeRules = []routeRule{
+	// Requesting and cancelling the deletion of the organization is its own
+	// right (TLC-06, WP-1152); the handler also requires the second factor
+	// of the session. Reading the state stays location:read through the
+	// segment org, so the banner of the grace period reaches every user.
+	{http.MethodPost, "org/deletion", identity.PermOrgDelete},
+	{http.MethodDelete, "org/deletion", identity.PermOrgDelete},
 	// The ADMP accounts are local configuration, read and written with
 	// admp:manage (ADM-01, WP-925); the segment admp alone needs
 	// admp:read (WP-866).

@@ -925,6 +925,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		iga.NewHandler(repos.IGA, repos.User, opts.Credentials, repos.Discovery, repos.Workflow).
 			WithWorkflowRuns(accessRequestRuns(opts.Modules, workflowRuns)).WithEgress(opts.Egress),
 		tenantapi.NewHandler(repos.TenantHierarchy),
+		// The deletion of the organization (TLC-06, WP-1152), module
+		// org_lifecycle; without a pool the state is none and writes 503.
+		tenantapi.NewDeletionHandler(opts.AuditPool),
 		rack.NewHandler(repos.Rack),
 		contact.NewHandler(repos.Contact),
 		contract.NewHandler(repos.Supplier),

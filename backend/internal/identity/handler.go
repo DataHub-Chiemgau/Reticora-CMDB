@@ -545,6 +545,9 @@ func (h *Handler) exchangeAndIssue(ctx context.Context, code, codeVerifier strin
 		Groups:         append([]string(nil), idToken.Groups...),
 		Name:           idToken.Name,
 		Email:          idToken.Email,
+		// The second factor of the login (amr, acr of the ID token) is
+		// recorded for the whole session; a refresh keeps it (WP-1152).
+		MFA: MFASatisfied(idToken.AMR, idToken.ACR),
 	}
 	granted, err := h.applyAccess(ctx, &claims)
 	if err != nil {

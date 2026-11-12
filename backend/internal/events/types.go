@@ -609,11 +609,16 @@ type OrgExportData struct {
 	ExpiresAt string `json:"expires_at"`
 }
 
-// OrgDeletionData is the data of the org.deletion_* types (TLC-06): the
-// deletion request of the organization.
+// OrgDeletionData is the data of the org.deletion_* types (TLC-06,
+// WP-1152): the deletion request of the organization. ID is the
+// organization, RequestedBy the user who requested it, DueAt the end of the
+// 30-day grace period (of the cancelled request for org.deletion_cancelled),
+// CancelledBy the user who cancelled it.
 type OrgDeletionData struct {
 	ID          string `json:"id"`
-	EffectiveAt string `json:"effective_at,omitempty"`
+	RequestedBy string `json:"requested_by,omitempty"`
+	DueAt       string `json:"due_at"`
+	CancelledBy string `json:"cancelled_by,omitempty"`
 }
 
 // SubnetChangedData is the data of ipam.subnet.changed (IPM-02): a subnet

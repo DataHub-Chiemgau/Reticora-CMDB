@@ -56,6 +56,9 @@ type Principal struct {
 	// ServiceAccountID is the service account an API key acts as (RBA-08);
 	// empty for sessions and for keys acting as their creator.
 	ServiceAccountID string
+	// MFA reports that the session was opened with a second factor
+	// (SessionClaims.MFA, WP-1152); an API key never has it.
+	MFA bool
 }
 
 type principalContextKey struct{}

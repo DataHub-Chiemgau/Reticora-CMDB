@@ -46,6 +46,9 @@ type Claims struct {
 	// Groups are the IdP groups of the session (SessionClaims.Groups); they
 	// name the standard roles held through the IdP (RBA-07).
 	Groups []string `json:"groups,omitempty"`
+	// MFA is the claim mfa of a session token: its login used a second
+	// factor (identity.MFASatisfied, WP-1152).
+	MFA bool `json:"mfa,omitempty"`
 }
 
 // SessionVerifier verifies the signature of session tokens issued by the
@@ -195,6 +198,7 @@ func authenticateRequest(r *http.Request, verifier SessionVerifier, apiKeys APIK
 		Permissions:      claims.Permissions,
 		Type:             identity.PrincipalTypeUser,
 		Groups:           append([]string(nil), claims.Groups...),
+		MFA:              claims.MFA,
 	}
 	// The session budget of API-04 counts the session (sid), which every
 	// refresh keeps; tokens issued without sid (until they expire, at most
@@ -255,6 +259,7 @@ func authenticate(r *http.Request, verifier SessionVerifier) (Claims, error) {
 		TokenID:          sessionClaims.ID,
 		SessionID:        sessionClaims.SessionID,
 		Groups:           append([]string(nil), sessionClaims.Groups...),
+		MFA:              sessionClaims.MFA,
 	}, nil
 }
 

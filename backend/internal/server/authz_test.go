@@ -118,11 +118,14 @@ func TestAuthorizationMiddlewareEnforcesPermissions(t *testing.T) {
 			}
 
 			// Principal with the required permission: anything but 401/403.
+			// The session has a second factor, which the deletion of the
+			// organization requires besides org:delete (WP-1152).
 			req = withPrincipal(httptest.NewRequest(op.Method, target, nil), identity.Principal{
 				Subject:        "user-1",
 				OrganizationID: "org-1",
 				Permissions:    []identity.Permission{required},
 				Type:           identity.PrincipalTypeUser,
+				MFA:            true,
 			})
 			w = httptest.NewRecorder()
 			handler.ServeHTTP(w, req)

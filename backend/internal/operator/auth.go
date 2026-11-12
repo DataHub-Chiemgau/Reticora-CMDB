@@ -9,12 +9,12 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
-	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -50,21 +50,10 @@ func (c *Config) group() string {
 	return c.Group
 }
 
-// mfaMethods are amr values (RFC 8176) that mean more than one factor.
-var mfaMethods = []string{"mfa", "otp", "totp", "hwk", "swk", "webauthn", "sms"}
-
-// MFASatisfied reports whether the login used a second factor.
+// MFASatisfied reports whether the login used a second factor: the rule of
+// identity.MFASatisfied with the configured acr values.
 func (c *Config) MFASatisfied(amr []string, acr string) bool {
-	for _, m := range amr {
-		if slices.Contains(mfaMethods, strings.ToLower(m)) {
-			return true
-		}
-	}
-	acrValues := c.MFAACRValues
-	if len(acrValues) == 0 {
-		acrValues = []string{"2"}
-	}
-	return acr != "" && slices.Contains(acrValues, acr)
+	return identity.MFASatisfied(amr, acr, c.MFAACRValues...)
 }
 
 // Identity is the authenticated operator of a request.

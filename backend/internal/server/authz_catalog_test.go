@@ -122,7 +122,6 @@ var unroutedUntil = map[string]string{
 	"workflow:approve":  "WP-1098 (workflow approvals)",
 	"escalation:manage": "WP-1145 (escalation policies)",
 	"org:export":        "WP-1151 (organization export)",
-	"org:delete":        "WP-1152 (organization deletion)",
 	"admp:holder_read":  "WP-1076 (holder of an ADMP connection)",
 }
 

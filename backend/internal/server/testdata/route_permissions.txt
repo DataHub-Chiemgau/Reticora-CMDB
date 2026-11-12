@@ -55,6 +55,7 @@ DELETE /api/v1/nameserver-sets/{id} ipam:write
 DELETE /api/v1/network-interfaces/{id} ipam:write
 DELETE /api/v1/notification-channels/{id} notification:manage
 DELETE /api/v1/orders/{id} order:write
+DELETE /api/v1/org/deletion org:delete
 DELETE /api/v1/rack-mounts/{id} rack:write
 DELETE /api/v1/racks/{id} rack:write
 DELETE /api/v1/racks/{id}/mounts/{ci_id} rack:write
@@ -296,6 +297,7 @@ GET /api/v1/notifications/preferences authenticated
 GET /api/v1/orders order:read
 GET /api/v1/orders/{id} order:read
 GET /api/v1/org location:read
+GET /api/v1/org/deletion location:read
 GET /api/v1/permissions permission:read
 GET /api/v1/privacy/retention user:manage
 GET /api/v1/rack-mounts/{id} rack:read
@@ -622,6 +624,7 @@ POST /api/v1/orders/{id}/place order:write
 POST /api/v1/orders/{id}/receive stock:write
 POST /api/v1/orders/{id}/reject order:approve
 POST /api/v1/orders/{id}/submit order:write
+POST /api/v1/org/deletion org:delete
 POST /api/v1/privacy/erasure user:manage
 POST /api/v1/racks rack:write
 POST /api/v1/racks/{id}/mounts rack:write

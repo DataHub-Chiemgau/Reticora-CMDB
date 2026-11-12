@@ -27456,17 +27456,23 @@ paths:
 
   /api/v1/org/deletion:
     x-phase: P3
-    x-status: planned
     get:
       operationId: getOrganizationDeletion
       tags: [Privacy]
-      summary: Get the deletion request of the organization
+      summary: Get the deletion state of the organization
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        The deletion state of the organization (TLC-06, WP-1152): `none`,
+        `requested` (30 days of grace, cancellable), `purging` or `purged`,
+        with the time of the request, the end of the grace period and the
+        seconds left. Readable with location:read (segment org), so the
+        banner of the grace period reaches every user of the organization.
+        Module org_lifecycle; without a database the state is `none`.
       responses:
         '200':
-          description: Get the deletion request of the organization. The schema comes with the implementing work package.
+          description: The deletion state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrganizationDeletion' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -27478,39 +27484,81 @@ paths:
       tags: [Privacy]
       summary: Request the deletion of the organization
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Requests the deletion of the organization (TLC-06, WP-1152):
+        org:delete for the whole organization and a session opened with a
+        second factor (claim `mfa` of the session; an API key never has one:
+        403 with type urn:reticora:problem:mfa-required). `confirm_slug` must
+        equal the slug of the organization (422 `confirm_slug`). The state
+        becomes `requested`, due 30 days later; the event
+        org.deletion_requested is written in the same transaction. An
+        existing request or a running purge is 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OrganizationDeletionRequest' }
       responses:
         '202':
-          description: Accepted as a job. The schema comes with the implementing work package.
+          description: The deletion is requested; the purge runs after the grace period
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrganizationDeletion' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            Missing org:delete for the whole organization, or a session
+            without second factor (type urn:reticora:problem:mfa-required).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '409':
           $ref: '#/components/responses/Conflict'
+        '422':
+          description: confirm_slug is missing or does not match the slug of the organization (`field`).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
     delete:
       operationId: cancelOrganizationDeletion
       tags: [Privacy]
       summary: Withdraw the deletion request of the organization
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Withdraws a requested deletion during the grace period (TLC-06,
+        WP-1152): org:delete for the whole organization and a session with
+        a second factor, like the request. The state becomes `none`, the
+        request is emptied and the event org.deletion_cancelled is written.
+        Without a request 404; once the purge started (`purging`, `purged`)
+        409.
       responses:
-        '204':
-          description: Done.
+        '200':
+          description: The deletion state after the cancel
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrganizationDeletion' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            Missing org:delete for the whole organization, or a session
+            without second factor (type urn:reticora:problem:mfa-required).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/admin/orgs/{id}/addons:
     x-status: planned
@@ -42811,6 +42859,37 @@ components:
               credential_id: { type: string, format: uuid }
               namespace: { type: string, enum: [snmp, ssh, redfish, ipmi, wmi, api, nut, nas, http, gnmi, acs] }
               priority: { type: integer, minimum: 0, maximum: 10000, default: 100 }
+    OrganizationDeletion:
+      type: object
+      description: The deletion state of the organization (TLC-06, WP-1152).
+      required: [state, requested_at, due_at, requested_by, remaining_seconds]
+      properties:
+        state:
+          type: string
+          enum: [none, requested, purging, purged]
+        requested_at:
+          type: [string, 'null']
+          format: date-time
+        due_at:
+          type: [string, 'null']
+          format: date-time
+          description: End of the 30-day grace period; the purge runs after it.
+        requested_by:
+          type: [string, 'null']
+          format: uuid
+          description: The user who requested the deletion.
+        remaining_seconds:
+          type: [integer, 'null']
+          format: int64
+          description: Seconds left of the grace period, 0 once it ended; null without a request.
+    OrganizationDeletionRequest:
+      type: object
+      additionalProperties: false
+      required: [confirm_slug]
+      properties:
+        confirm_slug:
+          type: string
+          description: The slug of the organization, typed as confirmation.
     VaultConnection:
       type: object
       description: A connection to a KV v2 vault (CRD-03). It holds no secret; the login is the credential auth_credential_id names.

@@ -172,6 +172,20 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 		t.Helper()
 		return e.Call(t, as, method, path, body)
 	}
+	// callMFA is call with a session opened with a second factor (the
+	// deletion of the organization, WP-1152).
+	callMFA := func(t *testing.T, as t6As, method, path, body string) t6Response {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		p := identity.Principal{Subject: as.User, OrganizationID: as.Org, Type: identity.PrincipalTypeUser, MFA: true,
+			Scope:       &identity.Scope{Clients: identity.ScopeSet{All: true}, Sites: identity.ScopeSet{All: true}, Teams: identity.ScopeSet{All: true}},
+			Permissions: as.Perms, Credential: "evt02-mfa"}
+		ctx := identity.WithPermissions(identity.WithPrincipal(req.Context(), p), p.Permissions)
+		w := httptest.NewRecorder()
+		e.handler.ServeHTTP(w, req.WithContext(ctx))
+		return t6Response{Code: w.Code, Body: w.Body.Bytes()}
+	}
 	// answered checks the answer of a request: refused, the request must
 	// fail; otherwise it must answer want.
 	answered := func(t *testing.T, what string, r t6Response, refused bool, want int) {
@@ -1069,6 +1083,38 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 					t.Errorf("data %v, want id %s, on_hand_total 4, min_level 5 and sku evt02-toner", data, entity)
 				}
 			}},
+		{typ: events.OrgDeletionRequested,
+			// POST /org/deletion (WP-1152): an org_admin with a second
+			// factor requests the deletion of the organization.
+			act: func(t *testing.T, refused bool) string {
+				r := callMFA(t, admin, http.MethodPost, "/api/v1/org/deletion", `{"confirm_slug":"scopetest-55-a"}`)
+				answered(t, "POST /org/deletion", r, refused, http.StatusAccepted)
+				if refused {
+					unchanged(t, "deletion_state", scalar(t, `SELECT deletion_state FROM organization WHERE id = $1`, f.OrgA), "none")
+				}
+				return f.OrgA
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["requested_by"] != admin.User || data["due_at"] == nil || data["cancelled_by"] != nil {
+					t.Errorf("org.deletion_requested data %v", data)
+				}
+			}},
+		{typ: events.OrgDeletionCancelled,
+			// DELETE /org/deletion (WP-1152) withdraws the request of the
+			// case before during the grace period.
+			act: func(t *testing.T, refused bool) string {
+				r := callMFA(t, admin, http.MethodDelete, "/api/v1/org/deletion", "")
+				answered(t, "DELETE /org/deletion", r, refused, http.StatusOK)
+				if refused {
+					unchanged(t, "deletion_state", scalar(t, `SELECT deletion_state FROM organization WHERE id = $1`, f.OrgA), "requested")
+				}
+				return f.OrgA
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["requested_by"] != admin.User || data["cancelled_by"] != admin.User || data["due_at"] == nil {
+					t.Errorf("org.deletion_cancelled data %v", data)
+				}
+			}},
 	}
 
 	// The table covers every type of events.Types without a frame in
@@ -1493,8 +1539,6 @@ var plannedProducers = map[string]string{
 	"notification.escalated":        "WP-1146",
 	"notification.acknowledged":     "WP-1146",
 	"org.export_completed":          "WP-1151",
-	"org.deletion_requested":        "WP-1152",
-	"org.deletion_cancelled":        "WP-1152",
 }
 
 // evt02ADMP is the fake ADMP of the admp.connection.refreshed case: one

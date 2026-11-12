@@ -1737,3 +1737,4 @@ IPM-13;[P3];G3;backend/internal/ipam/device_binding_integration_test.go;WP-911
 IPM-14;[P3];G3;backend/internal/ipam/auto_subnet_integration_test.go;WP-912
 IPM-13;[P3];G3;backend/internal/ipam/management_integration_test.go;WP-913
 TLC-05;[P3];F;backend/internal/export/orgexport_integration_test.go;WP-1149
+TLC-06;[P3];F;backend/internal/tenantapi/deletion_integration_test.go;WP-1152
