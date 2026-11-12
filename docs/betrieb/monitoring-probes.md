@@ -71,6 +71,41 @@ die Verbindung sofort nach dem Aufbau und sendet nichts.
 Messwert: Die Aufbauzeit steht als `rtt_ms` im Ergebnis und heißt als
 Metrik `probe_tcp_connect_seconds`.
 
+## DNS-Abfrage (`dns`)
+
+Standard nach PRT-12 und A-64: Intervall 60 s (10 s–24 h), Timeout 5 s
+(1–10 s, je Probe unter dem Intervall), Down-Count 3, Up-Count 1, höchstens
+4 gleichzeitige Prüfungen je Ziel. Ziel der Probe ist der DNS-Server.
+Parameter: `qname` (Pflicht; DNS-Name mit Labels von 1–63 Byte, `.` ist die
+Wurzel), `qtype` `A|AAAA|CNAME|MX|NS|SOA|TXT|PTR|SRV|CAA`
+(Standard `A`), `transport` `udp|tcp` (Standard `udp`), `port` (Standard
+53), `rd` (Standard `true`), `expect_rcode` (Standard `NOERROR`),
+`expect_contains[]` (höchstens 10 Texte, Groß-/Kleinschreibung egal),
+`require_ad` (Standard `false`), `severity` `degraded|down` (Standard
+`down`).
+
+Ablauf: eine Abfrage mit zufälliger ID; über UDP mit EDNS0 (Puffer 4096
+Byte) und Rückfall auf TCP bei gesetztem TC-Bit, über TCP mit
+2-Byte-Längenpräfix. Antworten mit fremder ID oder Frage verwirft der
+Collector bis zum Timeout. Antwortgrenze 4096 Byte (UDP) bzw. 64 KiB (TCP;
+das Längenpräfix begrenzt eine Nachricht auf 65535 Byte, `max_payload_bytes`).
+Der Collector prüft DNSSEC nicht selbst; `require_ad` wertet nur das AD-Bit
+des Resolvers aus.
+
+| Ergebnis | Bedeutung | Zustand |
+|---|---|---|
+| `ok` | RCODE wie erwartet, alle erwarteten Inhalte und ggf. das AD-Bit vorhanden | `up` |
+| `ok`/`answer_mismatch` | Abweichung bei `severity` `degraded` | `degraded` |
+| `fail`/`answer_mismatch` | abweichender RCODE, fehlender Inhalt oder fehlendes AD-Bit bei `severity` `down` | zählt auf `down` |
+| `fail`/`timeout` | keine passende Antwort bis zum Timeout | zählt auf `down` |
+| `fail`/`refused` | Verbindung abgelehnt oder abgebaut (TCP), ICMP Port unreachable (UDP) | zählt auf `down` |
+| `fail`/`response_too_large` | Antwort über der Antwortgrenze verworfen | zählt auf `down` |
+| `error`/`config` | ungültige Parameter (Feld im Label `field`) | `unknown` |
+
+Messwerte in `values`: `probe_dns_response_seconds`, `probe_dns_rcode`,
+`probe_dns_answer_count` und bei SOA `probe_dns_soa_serial`. Fehlende
+erwartete Inhalte (und `AD`) nennt das Label `missing`.
+
 ## Typtabelle
 
 Zeiten in Sekunden, Rate in Prüfungen je Sekunde. Die Werte sind Startwerte
@@ -93,7 +128,7 @@ nach E-154; WP-1023 misst die Raten nach.
 | `optical` | planned | 300 / 60 / 86400 | 15 / 1 / 60 | 3 / 1 | 1 | 8 | 20 | 2 | 1048576 | 1024 | snmp, gnmi | – |
 | `bng` | planned | 60 / 30 / 86400 | 10 / 1 / 30 | 3 / 1 | 1 | 8 | 20 | 2 | 1048576 | 1024 | snmp | – |
 | `pon` | planned | 300 / 120 / 86400 | 60 / 1 / 120 | 3 / 1 | 1 | 4 | 5 | 2 | 4194304 | 8192 | snmp | – |
-| `dns` | planned | 60 / 10 / 86400 | 5 / 1 / 15 | 3 / 1 | 4 | 64 | 200 | 16 | 65536 | 1 | – | – |
+| `dns` | available | 60 / 10 / 86400 | 5 / 1 / 10 | 3 / 1 | 4 | 64 | 200 | 16 | 65535 | 1 | – | – |
 | `dhcp` | planned | 300 / 60 / 86400 | 10 / 1 / 30 | 3 / 1 | 1 | 1 | 1 | 1 | 4096 | 1 | – | privileged_udp_ports |
 | `stamp` | planned | 60 / 10 / 86400 | 5 / 1 / 30 | 3 / 1 | 1 | 16 | 20 | 4 | 1472 | 1 | – | – |
 | `twamp_control` | planned | 60 / 10 / 86400 | 5 / 1 / 30 | 3 / 1 | 1 | 16 | 20 | 4 | 1472 | 1 | – | – |

@@ -835,34 +835,35 @@
       }
     },
     "dns": {
-      "status": "planned",
+      "status": "available",
       "min_interval_s": 10,
       "default_interval_s": 60,
       "max_interval_s": 86400,
       "min_timeout_s": 1,
       "default_timeout_s": 5,
-      "max_timeout_s": 15,
+      "max_timeout_s": 10,
       "default_down_count": 3,
       "default_up_count": 1,
       "max_parallel_per_target": 4,
       "max_parallel_per_collector": 64,
       "max_rate_per_collector": 200,
       "max_probes_per_target": 16,
-      "max_payload_bytes": 65536,
+      "max_payload_bytes": 65535,
       "max_rows": 1,
       "credential_namespaces": [],
       "capabilities": [],
       "params": {
         "type": "object",
         "additionalProperties": false,
+        "required": [
+          "qname"
+        ],
         "properties": {
-          "server": {
-            "type": "string",
-            "maxLength": 255
-          },
           "qname": {
             "type": "string",
-            "maxLength": 253
+            "minLength": 1,
+            "maxLength": 253,
+            "description": "Name to query (required); the target of the probe is the DNS server."
           },
           "qtype": {
             "type": "string",
@@ -878,7 +879,8 @@
               "SRV",
               "CAA"
             ],
-            "default": "A"
+            "default": "A",
+            "description": "Record type of the question."
           },
           "transport": {
             "type": "string",
@@ -886,24 +888,62 @@
               "udp",
               "tcp"
             ],
-            "default": "udp"
+            "default": "udp",
+            "description": "UDP with EDNS0 (4096 bytes) and fallback to TCP on a truncated answer, or TCP only."
           },
-          "expected_rcode": {
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "default": 53,
+            "description": "Port of the DNS server."
+          },
+          "rd": {
+            "type": "boolean",
+            "default": true,
+            "description": "Recursion desired."
+          },
+          "expect_rcode": {
             "type": "string",
-            "maxLength": 16,
-            "default": "NOERROR"
+            "enum": [
+              "NOERROR",
+              "FORMERR",
+              "SERVFAIL",
+              "NXDOMAIN",
+              "NOTIMP",
+              "REFUSED",
+              "YXDOMAIN",
+              "YXRRSET",
+              "NXRRSET",
+              "NOTAUTH",
+              "NOTZONE"
+            ],
+            "default": "NOERROR",
+            "description": "Expected response code."
           },
-          "expected_answers": {
+          "expect_contains": {
             "type": "array",
             "items": {
               "type": "string",
-              "maxLength": 1024
+              "minLength": 1,
+              "maxLength": 255
             },
-            "maxItems": 16
+            "maxItems": 10,
+            "description": "Texts every one of which must occur in an answer record (case-insensitive)."
           },
           "require_ad": {
             "type": "boolean",
-            "default": false
+            "default": false,
+            "description": "Require the AD bit of the resolver (no DNSSEC validation on the collector)."
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "degraded",
+              "down"
+            ],
+            "default": "down",
+            "description": "State of an answer mismatch: degraded (ok with warn code answer_mismatch) or down (fail)."
           }
         }
       }

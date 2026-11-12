@@ -38,6 +38,10 @@ const (
 	// match the expected pattern (tcp banner, WP-970). A failed check, not
 	// a warning: a violated expected value counts towards down (E-177).
 	ReasonExpectMismatch = "expect_mismatch"
+	// ReasonResponseTooLarge: the answer exceeds the response limit of the
+	// type and was discarded (dns: 4096 bytes over UDP, 64 KiB over TCP,
+	// WP-1010).
+	ReasonResponseTooLarge = "response_too_large"
 
 	// WarnThresholdExceeded: the check succeeded but a threshold (RTT,
 	// loss, value) was violated.
@@ -45,6 +49,11 @@ const (
 	// WarnCertExpiring: the check succeeded but the certificate expires
 	// soon.
 	WarnCertExpiring = "cert_expiring"
+	// WarnAnswerMismatch: the answer differs from the expectation (dns:
+	// RCODE, expected contents or AD bit, WP-1010). With severity
+	// degraded it is a warn code (ok → degraded), with severity down the
+	// code of a failed check.
+	WarnAnswerMismatch = "answer_mismatch"
 )
 
 // WarnCodes are the codes of a successful check with a warning; a result
@@ -53,6 +62,7 @@ const (
 var WarnCodes = map[string]bool{
 	WarnThresholdExceeded: true,
 	WarnCertExpiring:      true,
+	WarnAnswerMismatch:    true,
 }
 
 // reasons lists every valid reason code apart from the warn codes.
@@ -69,6 +79,7 @@ var reasons = map[string]bool{
 	ReasonUnreachable:          true,
 	ReasonTLS:                  true,
 	ReasonExpectMismatch:       true,
+	ReasonResponseTooLarge:     true,
 }
 
 // ValidReason reports whether code is a known reason or warn code.

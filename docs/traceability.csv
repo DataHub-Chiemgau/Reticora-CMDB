@@ -1751,3 +1751,5 @@ PRT-01;[P3];E;collector/probe/limits_test.go;WP-951
 PRB-05;[P3];E;collector/probe/state_test.go;WP-952
 PRB-09;[P3];E;collector/probe/seq_test.go;WP-952
 PRT-03;[P3];E;collector/probe/tcp_test.go;WP-970
+PRT-12;[P3];E;collector/probe/dns_test.go;WP-1010
+PRT-21;[P3];E;collector/probe/dns_test.go;WP-1010

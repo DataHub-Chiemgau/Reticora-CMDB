@@ -402,7 +402,7 @@ func TestReasonCodes(t *testing.T) {
 	for _, code := range []string{
 		ReasonCollectorUnreachable, ReasonParentDown, ReasonLimitExceeded, ReasonUnsupported,
 		ReasonConfig, ReasonAuthFailed, ReasonTimeout, ReasonRefused, ReasonICMPUnavailable,
-		"unsupported", "unreachable", "tls", "expect_mismatch",
+		"unsupported", "unreachable", "tls", "expect_mismatch", "response_too_large",
 	} {
 		if !ValidReason(code) {
 			t.Fatalf("%q rejected", code)
@@ -413,7 +413,7 @@ func TestReasonCodes(t *testing.T) {
 			t.Fatalf("%q accepted", code)
 		}
 	}
-	for _, code := range []string{"threshold_exceeded", "cert_expiring"} {
+	for _, code := range []string{"threshold_exceeded", "cert_expiring", "answer_mismatch"} {
 		if !WarnCodes[code] || !IsWarnCode(code) {
 			t.Fatalf("WarnCodes lacks %q", code)
 		}

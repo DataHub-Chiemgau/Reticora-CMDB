@@ -61,7 +61,7 @@ func TestRegistryComplete(t *testing.T) {
 			t.Errorf("%s params schema: %v", key, err)
 		}
 		wantStatus := TypePlanned
-		if key == "icmp" || key == "tcp" {
+		if key == "icmp" || key == "tcp" || key == "dns" {
 			wantStatus = TypeAvailable
 		}
 		if typ.Status != wantStatus {

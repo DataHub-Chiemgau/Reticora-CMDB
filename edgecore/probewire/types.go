@@ -297,10 +297,42 @@ func Validate(spec ProbeSpec) []FieldError {
 }
 
 // paramChecks are the checks of a type's parameters that the schema subset
-// cannot express (WP-970: send in bytes, expect as RE2 expression). They
-// run on decodable params and report field errors.
+// cannot express (WP-970: send in bytes, expect as RE2 expression;
+// WP-1010: qname as DNS name). They run on decodable params and report
+// field errors.
 var paramChecks = map[string]func(params map[string]any) []FieldError{
 	"tcp": checkTCPParams,
+	"dns": checkDNSParams,
+}
+
+// checkDNSParams checks qname of the dns type (PRT-12): a DNS name whose
+// labels hold 1 to 63 bytes; surrounding spaces are ignored, a single
+// trailing dot is allowed and "." alone is the root.
+func checkDNSParams(params map[string]any) []FieldError {
+	qname, ok := params["qname"].(string)
+	if !ok || ValidDNSName(qname) {
+		return nil
+	}
+	return []FieldError{{Field: "params.qname", Message: "must be a DNS name with labels of 1 to 63 bytes"}}
+}
+
+// ValidDNSName reports whether name is a DNS name with labels of 1 to 63
+// bytes and at most 253 bytes in its presentation form (RFC 1035 2.3.4).
+func ValidDNSName(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "." {
+		return true
+	}
+	name = strings.TrimSuffix(name, ".")
+	if name == "" || len(name) > 253 {
+		return false
+	}
+	for _, label := range strings.Split(name, ".") {
+		if label == "" || len(label) > 63 {
+			return false
+		}
+	}
+	return true
 }
 
 // MaxTCPSend is the largest send string of the tcp type in bytes (PRT-03).
