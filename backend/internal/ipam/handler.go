@@ -65,6 +65,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/subnets/{id}/usage", h.SubnetUsage)
 	r.Get("/api/v1/subnets/{id}/free-addresses", h.SubnetFreeAddresses)
 	r.Get("/api/v1/subnets/{id}/free-subnets", h.SubnetFreeSubnets)
+	r.Post("/api/v1/subnets/{id}/allocate", h.AllocateAddress)
+	r.Post("/api/v1/subnets/{id}/allocate-subnet", h.AllocateSubnet)
 	r.Get("/api/v1/subnets/{id}/reservations", h.ListReservations)
 	r.Post("/api/v1/subnets/{id}/reservations", h.CreateReservation)
 	r.Delete("/api/v1/subnets/{id}/reservations/{ip_id}", h.DeleteReservation)

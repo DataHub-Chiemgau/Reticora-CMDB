@@ -9743,6 +9743,95 @@ paths:
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
 
+  /api/v1/subnets/{id}/allocate:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: allocateSubnetAddress
+      tags: [IPAM]
+      summary: Allocate the next free address of a subnet
+      description: >-
+        Stores the lowest free host address of the subnet as a new address
+        (IPM-03), atomically under a lock per subnet
+        (pg_advisory_xact_lock): two allocations never choose the same
+        address. Occupied are the addresses of the subnet (reserved ones
+        included, also outside the caller's scope), its gateway, the ranges
+        of its children and addresses the VRF holds elsewhere. When a writer
+        without the lock (POST /ips, a reservation, Discovery) takes the
+        chosen address, the allocation tries the next free one, at most
+        three more times, and then answers 409. Type reserved sets
+        reserved_by to the calling user. A full subnet is 409 with type
+        urn:reticora:problem:subnet-exhausted, a pool 409 with field
+        is_pool; an interface the caller cannot see is 422 interface_id.
+        Requires ipam:write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IPAllocateRequest'
+      responses:
+        '201':
+          description: The allocated address.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IPAddress'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /api/v1/subnets/{id}/allocate-subnet:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    post:
+      operationId: allocateSubnetChild
+      tags: [IPAM]
+      summary: Allocate the next free subnet inside a subnet
+      description: >-
+        Stores the lowest aligned free prefix of length prefix_length inside
+        the subnet as its child (IPM-03), under the same lock per subnet as
+        the address allocation. The child takes the VRF and site of the
+        parent; client and section default to the parent's. Writes
+        ipam.subnet.changed (change_kind allocated). No room is 409 with type
+        urn:reticora:problem:subnet-exhausted; prefix_length not longer than
+        the subnet's prefix or longer than 32 (IPv4) or 128 (IPv6) is 422
+        with field prefix_length. Requires ipam:write.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubnetAllocateRequest'
+      responses:
+        '201':
+          description: The allocated subnet.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subnet'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+
   /api/v1/subnets/{id}/addresses:
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -39700,6 +39789,27 @@ components:
         subnets:
           type: array
           items: { type: string }
+
+    IPAllocateRequest:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [static, reserved]
+          default: static
+        interface_id: { type: string, format: uuid }
+        dns_name: { type: string }
+        description: { type: string }
+
+    SubnetAllocateRequest:
+      type: object
+      required: [prefix_length]
+      properties:
+        prefix_length: { type: integer, minimum: 1, maximum: 128 }
+        name: { type: string }
+        client_id: { type: string, format: uuid }
+        is_pool: { type: boolean, default: false }
+        section_id: { type: string, format: uuid }
 
     SubnetListResponse:
       allOf:

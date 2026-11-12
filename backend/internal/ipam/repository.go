@@ -96,6 +96,9 @@ type Repository interface {
 	// Occupancy of a subnet for usage and free space (IPM-03,
 	// space_handler.go).
 	SpaceRepository
+
+	// Atomic allocation of addresses and subnets (IPM-03, allocate.go).
+	AllocationRepository
 }
 
 // MemoryRepository is an in-memory implementation of Repository.
@@ -259,6 +262,11 @@ func (r *MemoryRepository) GetSubnet(_ context.Context, orgID, id string) (*Subn
 func (r *MemoryRepository) CreateSubnet(_ context.Context, s *Subnet) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.createSubnetLocked(s)
+}
+
+// createSubnetLocked is CreateSubnet under a held lock.
+func (r *MemoryRepository) createSubnetLocked(s *Subnet) error {
 	if s.VRFID == "" {
 		s.VRFID = r.defaultVRF(s.OrganizationID).ID
 	}

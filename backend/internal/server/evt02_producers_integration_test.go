@@ -249,6 +249,7 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 		stateAddress, stateSubnet          string
 		admpAccount                        string
 		admpSync                           *admp.Sync
+		allocParent                        string
 		hookServer                         *httptest.Server
 		hookSubscription, hookDelivery     string
 		hookDispatcher                     *webhook.Dispatcher
@@ -770,6 +771,27 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 				if data["id"] != entity || data["subnet_id"] != stateSubnet || data["client_id"] != f.Client1 ||
 					data["from"] != "unknown" || data["to"] != "active" {
 					t.Errorf("ipam.address.state_changed data %v", data)
+				}
+			}},
+		{typ: events.IPAMSubnetChanged,
+			// POST /subnets/{id}/allocate-subnet allocates a child (WP-904).
+			setup: func(t *testing.T) {
+				allocParent = scalar(t, `INSERT INTO subnet (organization_id, client_id, cidr, is_pool) VALUES ($1, $2, '10.255.56.0/24', true)
+					RETURNING id::text`, f.OrgA, f.Client1)
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/subnets/"+allocParent+"/allocate-subnet", `{"prefix_length":26}`)
+				answered(t, "POST /subnets/{id}/allocate-subnet", r, refused, http.StatusCreated)
+				if refused {
+					unchanged(t, "allocated subnets", count(t, `subnet WHERE parent_id = $1`, allocParent), "0")
+					return ""
+				}
+				return t6ID(r.Body)
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["cidr"] != "10.255.56.0/26" || data["client_id"] != f.Client1 ||
+					data["change_kind"] != "allocated" {
+					t.Errorf("ipam.subnet.changed data %v", data)
 				}
 			}},
 		{typ: events.EntitlementChanged,
@@ -1396,7 +1418,6 @@ var plannedProducers = map[string]string{
 	"org.export_completed":          "WP-1151",
 	"org.deletion_requested":        "WP-1152",
 	"org.deletion_cancelled":        "WP-1152",
-	"ipam.subnet.changed":           "WP-904",
 	"asn.changed":                   "WP-1066",
 }
 

@@ -617,6 +617,8 @@ POST /api/v1/stocktakes/{id}/complete stocktake:complete
 POST /api/v1/stocktakes/{id}/scans stocktake:write
 POST /api/v1/stocktakes/{id}/start stocktake:write
 POST /api/v1/subnets ipam:write
+POST /api/v1/subnets/{id}/allocate ipam:write
+POST /api/v1/subnets/{id}/allocate-subnet ipam:write
 POST /api/v1/subnets/{id}/reservations ipam:write
 POST /api/v1/suppliers contract:write
 POST /api/v1/tags tag:manage

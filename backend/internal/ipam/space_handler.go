@@ -24,22 +24,7 @@ type SpaceRepository interface {
 func (r *MemoryRepository) SubnetOccupancy(_ context.Context, orgID, subnetID string) (*Occupancy, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	s, ok := r.subnets[subnetID]
-	if !ok || s.OrganizationID != orgID {
-		return nil, ErrNotFound
-	}
-	o := &Occupancy{CIDR: s.CIDR, Gateway: s.Gateway, IsPool: s.IsPool}
-	for _, a := range r.addresses {
-		if a.OrganizationID == orgID && a.SubnetID == subnetID {
-			o.Addresses = append(o.Addresses, OccupiedAddress{Host: hostOf(a.Address), Type: a.Type, State: a.State})
-		}
-	}
-	for _, c := range r.subnets {
-		if c.OrganizationID == orgID && c.ParentID == subnetID {
-			o.Children = append(o.Children, c.CIDR)
-		}
-	}
-	return o, nil
+	return r.occupancyLocked(orgID, subnetID)
 }
 
 // occupancy answers 404 for a subnet the caller cannot see.

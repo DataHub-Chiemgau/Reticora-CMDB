@@ -4211,6 +4211,52 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/subnets/{id}/allocate': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Allocate the next free address of a subnet
+     * @description Stores the lowest free host address of the subnet as a new address (IPM-03), atomically under a lock per subnet (pg_advisory_xact_lock): two allocations never choose the same address. Occupied are the addresses of the subnet (reserved ones included, also outside the caller's scope), its gateway, the ranges of its children and addresses the VRF holds elsewhere. When a writer without the lock (POST /ips, a reservation, Discovery) takes the chosen address, the allocation tries the next free one, at most three more times, and then answers 409. Type reserved sets reserved_by to the calling user. A full subnet is 409 with type urn:reticora:problem:subnet-exhausted, a pool 409 with field is_pool; an interface the caller cannot see is 422 interface_id. Requires ipam:write.
+     */
+    post: operations['allocateSubnetAddress'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/subnets/{id}/allocate-subnet': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Allocate the next free subnet inside a subnet
+     * @description Stores the lowest aligned free prefix of length prefix_length inside the subnet as its child (IPM-03), under the same lock per subnet as the address allocation. The child takes the VRF and site of the parent; client and section default to the parent's. Writes ipam.subnet.changed (change_kind allocated). No room is 409 with type urn:reticora:problem:subnet-exhausted; prefix_length not longer than the subnet's prefix or longer than 32 (IPv4) or 128 (IPv6) is 422 with field prefix_length. Requires ipam:write.
+     */
+    post: operations['allocateSubnetChild'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/subnets/{id}/addresses': {
     parameters: {
       query?: never;
@@ -19630,6 +19676,27 @@ export interface components {
       prefix_length: number;
       subnets: string[];
     };
+    IPAllocateRequest: {
+      /**
+       * @default static
+       * @enum {string}
+       */
+      type: 'static' | 'reserved';
+      /** Format: uuid */
+      interface_id?: string;
+      dns_name?: string;
+      description?: string;
+    };
+    SubnetAllocateRequest: {
+      prefix_length: number;
+      name?: string;
+      /** Format: uuid */
+      client_id?: string;
+      /** @default false */
+      is_pool: boolean;
+      /** Format: uuid */
+      section_id?: string;
+    };
     SubnetListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Subnet'][];
     };
@@ -30953,6 +31020,72 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  allocateSubnetAddress: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['IPAllocateRequest'];
+      };
+    };
+    responses: {
+      /** @description The allocated address. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['IPAddress'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  allocateSubnetChild: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SubnetAllocateRequest'];
+      };
+    };
+    responses: {
+      /** @description The allocated subnet. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Subnet'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
     };
   };

@@ -1473,32 +1473,11 @@ func (r *PGRepository) SubnetOccupancy(ctx context.Context, orgID, subnetID stri
 	if !api.IsUUID(subnetID) {
 		return nil, ErrNotFound
 	}
-	o := &Occupancy{}
+	var o *Occupancy
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, `SELECT cidr::text, COALESCE(host(gateway), ''), is_pool FROM subnet
-			WHERE organization_id = $1 AND id = $2`, orgID, subnetID).Scan(&o.CIDR, &o.Gateway, &o.IsPool); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return ErrNotFound
-			}
-			return err
-		}
-		rows, err := tx.Query(ctx, "SELECT kind, value, COALESCE(ip_type, ''), COALESCE(ip_state, '') FROM ipam_subnet_occupancy($1)", subnetID)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var kind, value, ipType, state string
-			if err := rows.Scan(&kind, &value, &ipType, &state); err != nil {
-				return err
-			}
-			if kind == "child" {
-				o.Children = append(o.Children, value)
-			} else {
-				o.Addresses = append(o.Addresses, OccupiedAddress{Host: value, Type: ipType, State: state})
-			}
-		}
-		return rows.Err()
+		var err error
+		o, err = readOccupancy(ctx, tx, orgID, subnetID)
+		return err
 	})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "P0002" {

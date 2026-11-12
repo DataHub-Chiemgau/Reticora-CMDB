@@ -450,6 +450,9 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	} {
 		m[route] = created(table)
 	}
+	// The address and the subnet of an allocation (IPM-03, WP-904).
+	m["POST /api/v1/subnets/{id}/allocate"] = created("ip_address")
+	m["POST /api/v1/subnets/{id}/allocate-subnet"] = created("subnet")
 	// The ticket a review item opens (WP-291).
 	m["POST /api/v1/review-items/{id}/ticket"] = created("ticket")
 	// The snapshot job: the answer names it as job_id.
