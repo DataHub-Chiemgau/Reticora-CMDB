@@ -633,7 +633,10 @@ func TestTemplateMigrationJobOnPostgreSQL(t *testing.T) {
 		if err != nil || failed.Status != jobs.StatusQueued {
 			t.Fatalf("failed attempt: %+v %v, want queued for a retry", failed, err)
 		}
-		if _, err = f.Admin.Exec(bg, `UPDATE job SET run_after = now() WHERE id = $1`, job.ID); err != nil {
+		// The claim compares run_after with the clock of the application, not
+		// with the one of the database: a past run_after keeps the retry due
+		// when the database clock runs ahead.
+		if _, err = f.Admin.Exec(bg, `UPDATE job SET run_after = now() - interval '1 minute' WHERE id = $1`, job.ID); err != nil {
 			t.Fatal(err)
 		}
 		again, err := jobSvc.ClaimJob(bg, f.OrgA, job.ID)
