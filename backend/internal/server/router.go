@@ -132,8 +132,12 @@ type Repositories struct {
 	Rack            rack.Repository
 	Contact         contact.Repository
 	IPAM            ipam.Repository
-	Metrics         monitoring.MetricStore
-	Permission      permission.Repository
+	// IPAMManagement keeps ci.management_ip and the address with role
+	// management consistent (IPM-13, WP-913): the PostgreSQL CI repository
+	// calls it; nil without a database.
+	IPAMManagement *ipam.ManagementSync
+	Metrics        monitoring.MetricStore
+	Permission     permission.Repository
 	// FieldGrants stores the field permissions (RBA-07, WP-264).
 	FieldGrants permission.FieldGrantRepository
 	// APIKeys identifies and manages API keys (AUT-04).
@@ -638,6 +642,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			// The test of a vault connection is read with vault:manage like
 			// its start (WP-896); it has no revert.
 			WithKind(credential.VaultTestJobKind, identity.PermVaultManage, nil).
+			// The backfill of the management addresses (WP-913) is queued by
+			// its migration; it is read and cancelled with ipam:write.
+			WithKind(ipam.MgmtBackfillJobKind, identity.PermIPAMWrite, nil).
 			// The merge is reverted by its unmerge within 30 days (CI-12, E-25).
 			// It answers 200 (no revert job).
 			WithKind(ci.MergeJobKind, identity.PermCIDelete, func(ctx context.Context, job *jobs.Job) (*jobs.Job, error) {
@@ -683,7 +690,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			assetHandler.WithCreatorPolicy(ci.CreatorPolicyOf(fieldResolver, users))
 		}
 		registerJobKinds(jobService, opts.JobQueue, opts.CIService, bulkRevert, historyHandler, templateJobs, draftHandler,
-			importHandler, documentScanner, searchHandler, labelBatch, assetHandler, assetRevert, credentialHandler, admpSync)
+			importHandler, documentScanner, searchHandler, labelBatch, assetHandler, assetRevert, credentialHandler, admpSync,
+			repos.IPAMManagement)
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -861,6 +869,12 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	assetDelegates := AssetBulkDelegates(movements, repos.AssignmentService, lifecycleService, repos.LifecycleResolver, opts.Entitlements)
 	assetDelegates.Exporter = AssetBulkExporter(exportJobHandler)
 	assetHandler.WithBulkDelegates(&assetDelegates)
+	// The duplicate check of the management addresses (WP-913) opens its
+	// items in the review queue of discovery, built once its jobs and
+	// tickets are attached.
+	if repos.IPAMManagement != nil {
+		repos.IPAMManagement.WithReviews(discoveryHandler.ReviewService())
+	}
 	registrars := []registrar{
 		identityHandler,
 		operatorHandler(&opts),

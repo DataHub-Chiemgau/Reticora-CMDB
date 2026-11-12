@@ -489,8 +489,9 @@ type pgRepositoryWithOtherSignature struct{ *PGRepository }
 func (pgRepositoryWithOtherSignature) MergedInto(context.Context, string) error { return nil }
 
 // TestIndexingRepositoryCoversPGRepositoryMethods guards SR-11: every
-// exported method of *PGRepository except WithEvents, WithComputed and WithFeatureCheck
-// (construction, WP-717) exists
+// exported method of *PGRepository except WithEvents, WithComputed, WithFeatureCheck and
+// WithManagementSync
+// (construction, WP-717, WP-913) exists
 // on the indexing decorator with the same signature, so an optional
 // interface the PostgreSQL repository gains is not lost behind the
 // decorator in production. The checker reports a method the decorator
@@ -506,19 +507,19 @@ func TestIndexingRepositoryCoversPGRepositoryMethods(t *testing.T) {
 			t.Fatalf("*PGRepository has no method %s; the guard would check nothing", name)
 		}
 	}
-	if missing := uncoveredMethods(pg, decorator, "WithEvents", "WithComputed", "WithFeatureCheck"); len(missing) > 0 {
+	if missing := uncoveredMethods(pg, decorator, "WithEvents", "WithComputed", "WithFeatureCheck", "WithManagementSync"); len(missing) > 0 {
 		t.Errorf("the indexing decorator does not forward %v of *PGRepository; callers asserting them fail in production (SR-11)", missing)
 	}
 
 	// Negative: the checker reports what the decorator does not offer.
-	if got := uncoveredMethods(reflect.TypeOf(pgRepositoryWithExtra{}), decorator, "WithEvents", "WithComputed", "WithFeatureCheck"); !slices.Equal(got, []string{"Reindex"}) {
+	if got := uncoveredMethods(reflect.TypeOf(pgRepositoryWithExtra{}), decorator, "WithEvents", "WithComputed", "WithFeatureCheck", "WithManagementSync"); !slices.Equal(got, []string{"Reindex"}) {
 		t.Errorf("extra method without forwarding: checker reported %v, want [Reindex]", got)
 	}
-	if got := uncoveredMethods(reflect.TypeOf(pgRepositoryWithOtherSignature{}), decorator, "WithEvents", "WithComputed", "WithFeatureCheck"); !slices.Equal(got, []string{"MergedInto"}) {
+	if got := uncoveredMethods(reflect.TypeOf(pgRepositoryWithOtherSignature{}), decorator, "WithEvents", "WithComputed", "WithFeatureCheck", "WithManagementSync"); !slices.Equal(got, []string{"MergedInto"}) {
 		t.Errorf("method with another signature: checker reported %v, want [MergedInto]", got)
 	}
-	if got := uncoveredMethods(pg, decorator); !slices.Equal(got, []string{"WithComputed", "WithEvents", "WithFeatureCheck"}) {
-		t.Errorf("without the exceptions: checker reported %v, want [WithComputed WithEvents WithFeatureCheck]", got)
+	if got := uncoveredMethods(pg, decorator); !slices.Equal(got, []string{"WithComputed", "WithEvents", "WithFeatureCheck", "WithManagementSync"}) {
+		t.Errorf("without the exceptions: checker reported %v, want [WithComputed WithEvents WithFeatureCheck WithManagementSync]", got)
 	}
 }
 

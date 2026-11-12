@@ -83,6 +83,9 @@ type PGRepository struct {
 	// features reports the feature assets_basic for the computed asset
 	// sources (WithFeatureCheck, SR-58); nil: enabled.
 	features FeatureCheck
+	// mgmt synchronises the management address in IPAM
+	// (WithManagementSync, WP-913); nil touches no address.
+	mgmt ManagementAddressSyncer
 }
 
 // WithEvents makes every CI mutation write its domain event into the
@@ -946,6 +949,10 @@ func (r *PGRepository) Create(ctx context.Context, item *Item) error {
 
 		item.CreatedAt = createdAt.UTC().Format(time.RFC3339Nano)
 		item.UpdatedAt = updatedAt.UTC().Format(time.RFC3339Nano)
+		// The management address in IPAM, right after the row (WP-913).
+		if err := r.syncManagement(ctx, tx, item.OrganizationID, nil, item, discoveredItem(item), false); err != nil {
+			return err
+		}
 		if len(computed) > 0 {
 			if err := writeComputedProvenance(ctx, tx, item.OrganizationID, env.now,
 				computedValuesOf(item.ID, nonEmpty(computed[0]))); err != nil {
@@ -1044,6 +1051,11 @@ func (r *PGRepository) CreateMany(ctx context.Context, orgID string, items []*It
 		res.Refused = refused
 		if len(created) == 0 {
 			return nil
+		}
+		// The management addresses in IPAM (WP-913): set-based for the new
+		// CIs with a management IP, nothing without.
+		if err := r.syncCreatedManagement(ctx, tx, orgID, created); err != nil {
+			return err
 		}
 		if err := loadAssetFacts(ctx, tx, created); err != nil {
 			return err
@@ -1730,6 +1742,11 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 		return nil, err
 	}
 	if err := writeComputedProvenance(ctx, tx, orgID, computedAt, computedValuesOf(id, computedChanged)); err != nil {
+		return nil, err
+	}
+	// The management address in IPAM when management_ip or its VRF
+	// changed (WP-913); an ingest record writes it as discovered.
+	if err := r.syncManagement(ctx, tx, orgID, before, item, isRecordWrite(ctx), false); err != nil {
 		return nil, err
 	}
 	w := &rowUpdate{before: before, after: item, changes: diffCI(before, item), templates: templates}
@@ -3356,7 +3373,7 @@ func (r *PGRepository) recordTypeChangeAudit(ctx context.Context, tx pgx.Tx, tc 
 func (r *PGRepository) UpdateRecord(ctx context.Context, orgID, id string, rec *RecordUpdate) (*RecordUpdateResult, error) {
 	result := &RecordUpdateResult{}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		w, err := r.updateRow(ctx, tx, orgID, id, &rec.Update)
+		w, err := r.updateRow(context.WithValue(ctx, recordWriteKey{}, true), tx, orgID, id, &rec.Update)
 		if err != nil {
 			return err
 		}

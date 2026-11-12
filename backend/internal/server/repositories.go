@@ -178,6 +178,12 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 	// override recomputes them in its own (WP-717).
 	types := citype.NewPGRepository(pool)
 	cis := ci.NewPGRepositoryWithAudit(pool, recorder).WithEvents(events.NewOutbox()).WithComputed(types)
+	// The management address of a CI follows its management IP in the
+	// CI's transaction (WP-913); router.go attaches the review queue of
+	// the duplicate check.
+	ipamRepo := ipam.NewPGRepository(pool).WithEvents(events.NewOutbox())
+	management := ipam.NewManagementSync(ipamRepo, nil)
+	cis.WithManagementSync(management)
 	movements := movement.NewService(movement.NewPGRepository(pool))
 	assignments := assignment.NewService(pool, movements, events.NewOutbox())
 	return Repositories{
@@ -212,7 +218,8 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		TenantHierarchy:   tenantapi.NewPGRepository(pool),
 		Rack:              rack.NewPGRepository(pool),
 		Contact:           contact.NewPGRepository(pool),
-		IPAM:              ipam.NewPGRepository(pool).WithEvents(events.NewOutbox()),
+		IPAM:              ipamRepo,
+		IPAMManagement:    management,
 		Metrics:           monitoring.NewPGMetricStore(pool),
 		Permission:        permission.NewPGRepository(pool),
 		FieldGrants:       permission.NewPGFieldGrants(pool),

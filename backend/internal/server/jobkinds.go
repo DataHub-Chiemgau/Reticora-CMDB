@@ -15,6 +15,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/importer"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/labels"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/metamodel"
@@ -94,6 +95,12 @@ var (
 	// with its class. Its dedupe is the idempotency key per object and
 	// window (admp.RefreshKey).
 	admpRefreshJobKind = jobs.Kind{Name: admp.RefreshJobKind, MaxAttempts: 3, Timeout: 2 * time.Minute}
+	// mgmtBackfillJobKind (WP-913, IPM-13): the backfill of the management
+	// addresses of an organization in batches of 500 CIs, one transaction
+	// each; it skips every CI already in line, so a retry goes on where the
+	// previous attempt stopped. A running backfill can be cancelled between
+	// two batches.
+	mgmtBackfillJobKind = jobs.Kind{Name: ipam.MgmtBackfillJobKind, MaxAttempts: 3, Timeout: time.Hour, Cancellable: true}
 )
 
 // jobKind is a submitted kind and the handler that runs its jobs.
@@ -119,7 +126,7 @@ type jobKind struct {
 func applicationJobKinds(ciService *ci.Service, bulkRevert *ci.BulkRevert, historyHandler *history.Handler,
 	templateJobs *ci.TemplateMigrationJobs, draftHandler *metamodel.Handler, importHandler *importer.ImportHandler,
 	scanner *document.Scanner, searchHandler *search.Handler, labelBatch *labels.BatchHandler, assets *asset.Handler,
-	assetRevert *asset.BulkRevert, credentials *credential.Handler, admpSync *admp.Sync) []jobKind {
+	assetRevert *asset.BulkRevert, credentials *credential.Handler, admpSync *admp.Sync, management *ipam.ManagementSync) []jobKind {
 	kinds := []jobKind{{kind: snapshotJobKind, handler: historyHandler.RunSnapshotJob},
 		{kind: metamodelTestJobKind, handler: draftHandler.RunTestJob},
 		{kind: importJobKind, handler: importHandler.RunJob},
@@ -151,6 +158,9 @@ func applicationJobKinds(ciService *ci.Service, bulkRevert *ci.BulkRevert, histo
 	if scanner != nil {
 		kinds = append(kinds, jobKind{kind: documentScanJobKind, handler: scanner.RunJob})
 	}
+	if management != nil {
+		kinds = append(kinds, jobKind{kind: mgmtBackfillJobKind, handler: management.RunBackfillJob})
+	}
 	return kinds
 }
 
@@ -174,7 +184,7 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 	historyHandler *history.Handler, templateJobs *ci.TemplateMigrationJobs, draftHandler *metamodel.Handler,
 	importHandler *importer.ImportHandler, scanner *document.Scanner, searchHandler *search.Handler,
 	labelBatch *labels.BatchHandler, assets *asset.Handler, assetRevert *asset.BulkRevert, credentials *credential.Handler,
-	admpSync *admp.Sync) {
+	admpSync *admp.Sync, management *ipam.ManagementSync) {
 	svc.Register(exportJobKind)
 	importHandler.WithJobs(svc)
 	labelBatch.WithJobs(svc)
@@ -187,7 +197,7 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 		ciService.WithBulkJobs(svc)
 	}
 	for _, k := range applicationJobKinds(ciService, bulkRevert, historyHandler, templateJobs, draftHandler, importHandler,
-		scanner, searchHandler, labelBatch, assets, assetRevert, credentials, admpSync) {
+		scanner, searchHandler, labelBatch, assets, assetRevert, credentials, admpSync, management) {
 		svc.Register(k.kind)
 		if queue != nil {
 			queue.Handle(k.kind, k.handler)

@@ -1507,13 +1507,30 @@ func (r *PGRepository) SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID
 					FROM (SELECT (SELECT v.id FROM vrf v WHERE v.id = `+vrfParam(3)+` AND v.organization_id = $4) AS vrf) r
 					WHERE interface_id = $1 AND host(address) = host($2::inet) RETURNING id::text, vrf_id::text, host(address)`,
 					id, address, ifc.VRFID, orgID).Scan(&ipID, &key.VRFID, &key.Host)
+				// A new address at the interface: the CI's row without
+				// interface of the same host and VRF (its management
+				// address, WP-913, written before the interfaces) moves to
+				// the interface with its role and type; else a new row. One
+				// statement either way, through idx_ip_address_org_ci.
 				if errors.Is(err, pgx.ErrNoRows) {
-					err = tx.QueryRow(ctx, `INSERT INTO ip_address (organization_id, interface_id, address, type, last_seen_at, vrf_id, subnet_id)
-						SELECT $1, $2, $3::inet, 'discovered', now(), r.vrf,
-							ipam_longest_prefix_subnet($1, COALESCE(r.vrf, default_vrf_of($1)), $3::inet)
-						FROM (SELECT (SELECT v.id FROM vrf v WHERE v.id = `+vrfParam(4)+` AND v.organization_id = $1) AS vrf) r
-						RETURNING id::text, vrf_id::text, host(address)`,
-						orgID, id, address, ifc.VRFID).Scan(&ipID, &key.VRFID, &key.Host)
+					err = tx.QueryRow(ctx, `WITH r AS (
+							SELECT (SELECT v.id FROM vrf v WHERE v.id = `+vrfParam(4)+` AND v.organization_id = $1) AS vrf
+						), adopted AS (
+							UPDATE ip_address a SET interface_id = $2, miss_count = 0, last_seen_at = now(), updated_at = now()
+							  FROM r
+							 WHERE a.organization_id = $1 AND a.interface_id IS NULL AND a.ci_id = $5
+							   AND a.vrf_id = COALESCE(r.vrf, default_vrf_of($1)) AND host(a.address) = host($3::inet)
+							RETURNING a.id, a.vrf_id, host(a.address) AS host
+						), inserted AS (
+							INSERT INTO ip_address (organization_id, interface_id, address, type, last_seen_at, vrf_id, subnet_id)
+							SELECT $1, $2, $3::inet, 'discovered', now(), r.vrf,
+								ipam_longest_prefix_subnet($1, COALESCE(r.vrf, default_vrf_of($1)), $3::inet)
+							FROM r WHERE NOT EXISTS (SELECT 1 FROM adopted)
+							RETURNING id, vrf_id, host(address) AS host
+						)
+						SELECT id::text, vrf_id::text, host FROM adopted
+						UNION ALL SELECT id::text, vrf_id::text, host FROM inserted`,
+						orgID, id, address, ifc.VRFID, ciID).Scan(&ipID, &key.VRFID, &key.Host)
 				}
 				if err != nil {
 					return fmt.Errorf("sync address %s: %w", address, err)

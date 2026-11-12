@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000322_ip_address_auto_subnet
+Stand: Migration 000323_ipam_mgmt_backfill
 
 ## Prüfung
 

@@ -326,6 +326,10 @@ var mergeReferences = []mergeReference{
 		prepare: `UPDATE network_interface v SET name = v.name || ' (' || left(v.ci_id::text, 8) || ')'
 			WHERE v.ci_id = $2 AND EXISTS (SELECT 1 FROM network_interface s WHERE s.ci_id = $1 AND s.name = v.name)`,
 	},
+	// The addresses bound to the victim (ip_address.ci_id, IPM-13) follow
+	// it, after its interfaces (ip_address_ci_bind); the unmerge gives
+	// back device and role (WP-913).
+	{key: "addresses", table: "ip_address", column: "ci_id", restore: []string{"ci_id", "role"}},
 	{
 		key: "contacts", table: "ci_contact", column: "ci_id",
 		dedupe: `DELETE FROM ci_contact v WHERE v.ci_id = $2 AND EXISTS (SELECT 1 FROM ci_contact s
@@ -478,6 +482,14 @@ func (r *PGRepository) Merge(ctx context.Context, orgID, survivorID, victimID, m
 			return fmt.Errorf("read survivor: %w", err)
 		}
 		result.Survivor = merged
+		// The management address of the survivor (WP-913): the merged
+		// management IP has role management, every other address of the
+		// survivor (also those taken from the victim) none.
+		if survivor.ManagementIP != "" || victim.ManagementIP != "" {
+			if syncErr := r.syncManagement(ctx, tx, orgID, survivor, merged, false, true); syncErr != nil {
+				return syncErr
+			}
+		}
 		rawSnap, err := json.Marshal(snap)
 		if err != nil {
 			return fmt.Errorf("encode merge snapshot: %w", err)
