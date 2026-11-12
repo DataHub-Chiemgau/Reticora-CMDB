@@ -10611,13 +10611,13 @@ export interface paths {
     };
     /**
      * List collector groups
-     * @description Planned (WP-938, E-160); implemented by WP-947. The collector groups (PRB-03, COL-06, E-160: not below /monitoring) in the caller's scope with their members, member status, last sign of life, clock offset and assigned probes; filters client_id and site_id. Requires monitoring:read (segment collector-groups in readPermissionFor, WP-947); the feature and module monitoring gate the path.
+     * @description Implemented by WP-947 (E-160). The collector groups (PRB-03, COL-06, E-160: not below /monitoring) in the caller's scope with their members, member status, last sign of life, clock offset and assigned probes; filters client_id and site_id. Requires monitoring:read (segment collector-groups in readPermissionFor, WP-947); the feature and module monitoring gate the path.
      */
     get: operations['listCollectorGroups'];
     put?: never;
     /**
      * Create a collector group
-     * @description Planned (WP-938, E-160); implemented by WP-947. mode distributed or failover, liveness_timeout_s 20–300 (else 422), anchor_probe_id a probe of the same organization and client (else 422). Requires collector:manage (WP-947); the feature and module monitoring gate the path.
+     * @description Implemented by WP-947 (E-160). mode distributed or failover, liveness_timeout_s 20–300 (else 422), anchor_probe_id a probe of the same organization and client (else 422). Requires collector:manage (WP-947); the feature and module monitoring gate the path.
      */
     post: operations['createCollectorGroup'];
     delete?: never;
@@ -10638,21 +10638,21 @@ export interface paths {
     };
     /**
      * Get a collector group
-     * @description Planned (WP-938, E-160); implemented by WP-947. Requires monitoring:read (segment collector-groups in readPermissionFor, WP-947); the feature and module monitoring gate the path.
+     * @description Implemented by WP-947 (E-160). Requires monitoring:read (segment collector-groups in readPermissionFor, WP-947); the feature and module monitoring gate the path.
      */
     get: operations['getCollectorGroup'];
     put?: never;
     post?: never;
     /**
      * Delete a collector group
-     * @description Planned (WP-938, E-160); implemented by WP-947. A group with probes is 409 with their number. Requires collector:manage (WP-947); the feature and module monitoring gate the path.
+     * @description Implemented by WP-947 (E-160). A group with probes is 409 with their number. Requires collector:manage (WP-947); the feature and module monitoring gate the path.
      */
     delete: operations['deleteCollectorGroup'];
     options?: never;
     head?: never;
     /**
      * Update a collector group
-     * @description Planned (WP-938, E-160); implemented by WP-947. Changes name, mode, liveness_timeout_s and anchor_probe_id. Requires collector:manage (WP-947); the feature and module monitoring gate the path.
+     * @description Implemented by WP-947 (E-160). Changes name, mode, liveness_timeout_s and anchor_probe_id. Requires collector:manage (WP-947); the feature and module monitoring gate the path.
      */
     patch: operations['updateCollectorGroup'];
     trace?: never;
@@ -10671,7 +10671,7 @@ export interface paths {
     put?: never;
     /**
      * Add a collector to a collector group
-     * @description Planned (WP-938, E-160); implemented by WP-947. A collector of another client is 422 collector_id; a collector of another group moves in one transaction. Requires collector:manage (WP-947); the feature and module monitoring gate the path.
+     * @description Implemented by WP-947 (E-160). A collector of another client is 422 collector_id; a collector of another group moves in one transaction. Requires collector:manage (WP-947); the feature and module monitoring gate the path.
      */
     post: operations['addCollectorGroupMember'];
     delete?: never;
@@ -10696,7 +10696,7 @@ export interface paths {
     post?: never;
     /**
      * Remove a collector from a collector group
-     * @description Planned (WP-938, E-160); implemented by WP-947. The last member of a group with assigned probes is 409. Requires collector:manage (WP-947); the feature and module monitoring gate the path.
+     * @description Implemented by WP-947 (E-160). The last member of a group with assigned probes is 409. Requires collector:manage (WP-947); the feature and module monitoring gate the path.
      */
     delete: operations['removeCollectorGroupMember'];
     options?: never;

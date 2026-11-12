@@ -59,12 +59,18 @@ var monitoringContractOperations = []speccheck.Operation{
 // implementing work package registered the route: they lose x-status:
 // planned (TestRoutesAndSpecificationAreInParity checks the route).
 var monitoringImplemented = map[speccheck.Operation]string{
-	{Method: "GET", Path: "/api/v1/monitoring/probes"}:         "WP-939",
-	{Method: "POST", Path: "/api/v1/monitoring/probes"}:        "WP-939",
-	{Method: "GET", Path: "/api/v1/monitoring/probes/{id}"}:    "WP-939",
-	{Method: "PATCH", Path: "/api/v1/monitoring/probes/{id}"}:  "WP-939",
-	{Method: "DELETE", Path: "/api/v1/monitoring/probes/{id}"}: "WP-939",
-	{Method: "GET", Path: "/api/v1/monitoring/probe-types"}:    "WP-939",
+	{Method: "GET", Path: "/api/v1/monitoring/probes"}:              "WP-939",
+	{Method: "POST", Path: "/api/v1/monitoring/probes"}:             "WP-939",
+	{Method: "GET", Path: "/api/v1/monitoring/probes/{id}"}:         "WP-939",
+	{Method: "PATCH", Path: "/api/v1/monitoring/probes/{id}"}:       "WP-939",
+	{Method: "DELETE", Path: "/api/v1/monitoring/probes/{id}"}:      "WP-939",
+	{Method: "GET", Path: "/api/v1/monitoring/probe-types"}:         "WP-939",
+	{Method: "GET", Path: "/api/v1/collector-groups"}:               "WP-947",
+	{Method: "POST", Path: "/api/v1/collector-groups"}:              "WP-947",
+	{Method: "GET", Path: "/api/v1/collector-groups/{id}"}:          "WP-947",
+	{Method: "PATCH", Path: "/api/v1/collector-groups/{id}"}:        "WP-947",
+	{Method: "DELETE", Path: "/api/v1/collector-groups/{id}"}:       "WP-947",
+	{Method: "POST", Path: "/api/v1/collector-groups/{id}/members"}: "WP-947",
 }
 
 // contractSchema is the part of a schema the contract test reads.

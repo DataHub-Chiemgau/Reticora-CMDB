@@ -99,6 +99,7 @@ var resourceTables = map[string][]string{
 	"cis":                   {"ci"},
 	"clients":               {"client"},
 	"collectors":            {"collector", "collector_enrollment_code"},
+	"collector-groups":      {"collector_group"}, // collector groups (WP-947)
 	"compliance":            {"compliance_rule"},
 	"consumables":           {"consumable"},
 	"contacts":              {"contact"},

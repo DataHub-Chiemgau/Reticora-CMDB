@@ -24706,13 +24706,12 @@ paths:
   /api/v1/collector-groups:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     get:
       operationId: listCollectorGroups
       tags: [Collectors]
       summary: List collector groups
       description: >-
-        Planned (WP-938, E-160); implemented by WP-947. The collector groups (PRB-03, COL-06, E-160:
+        Implemented by WP-947 (E-160). The collector groups (PRB-03, COL-06, E-160:
         not below /monitoring) in the caller's scope with their members, member
         status, last sign of life, clock offset and assigned probes; filters
         client_id and site_id. Requires monitoring:read (segment collector-groups in readPermissionFor, WP-947); the feature and module monitoring gate the path.
@@ -24740,7 +24739,7 @@ paths:
       tags: [Collectors]
       summary: Create a collector group
       description: >-
-        Planned (WP-938, E-160); implemented by WP-947. mode distributed or failover,
+        Implemented by WP-947 (E-160). mode distributed or failover,
         liveness_timeout_s 20–300 (else 422), anchor_probe_id a probe of the same
         organization and client (else 422). Requires collector:manage (WP-947); the feature and module monitoring gate the path.
       requestBody:
@@ -24770,7 +24769,6 @@ paths:
   /api/v1/collector-groups/{id}:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -24778,7 +24776,7 @@ paths:
       tags: [Collectors]
       summary: Get a collector group
       description: >-
-        Planned (WP-938, E-160); implemented by WP-947. Requires monitoring:read (segment collector-groups in readPermissionFor, WP-947); the feature and module monitoring gate the path.
+        Implemented by WP-947 (E-160). Requires monitoring:read (segment collector-groups in readPermissionFor, WP-947); the feature and module monitoring gate the path.
       responses:
         '200':
           description: Collector group
@@ -24798,7 +24796,7 @@ paths:
       tags: [Collectors]
       summary: Update a collector group
       description: >-
-        Planned (WP-938, E-160); implemented by WP-947. Changes name, mode, liveness_timeout_s and anchor_probe_id. Requires collector:manage (WP-947); the feature and module monitoring gate the path.
+        Implemented by WP-947 (E-160). Changes name, mode, liveness_timeout_s and anchor_probe_id. Requires collector:manage (WP-947); the feature and module monitoring gate the path.
       requestBody:
         required: true
         content:
@@ -24829,7 +24827,7 @@ paths:
       tags: [Collectors]
       summary: Delete a collector group
       description: >-
-        Planned (WP-938, E-160); implemented by WP-947. A group with probes is 409 with their number. Requires collector:manage (WP-947); the feature and module monitoring gate the path.
+        Implemented by WP-947 (E-160). A group with probes is 409 with their number. Requires collector:manage (WP-947); the feature and module monitoring gate the path.
       responses:
         '204':
           description: Collector group deleted
@@ -24847,7 +24845,6 @@ paths:
   /api/v1/collector-groups/{id}/members:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -24855,7 +24852,7 @@ paths:
       tags: [Collectors]
       summary: Add a collector to a collector group
       description: >-
-        Planned (WP-938, E-160); implemented by WP-947. A collector of another client is 422
+        Implemented by WP-947 (E-160). A collector of another client is 422
         collector_id; a collector of another group moves in one transaction. Requires collector:manage (WP-947); the feature and module monitoring gate the path.
       requestBody:
         required: true
@@ -24886,7 +24883,6 @@ paths:
   /api/v1/collector-groups/{id}/members/{collector_id}:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
       - { name: collector_id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -24895,7 +24891,7 @@ paths:
       tags: [Collectors]
       summary: Remove a collector from a collector group
       description: >-
-        Planned (WP-938, E-160); implemented by WP-947. The last member of a group with assigned probes is 409. Requires collector:manage (WP-947); the feature and module monitoring gate the path.
+        Implemented by WP-947 (E-160). The last member of a group with assigned probes is 409. Requires collector:manage (WP-947); the feature and module monitoring gate the path.
       responses:
         '204':
           description: Member removed

@@ -18,6 +18,8 @@ DELETE /api/v1/cis/{id}/field-definitions/{name} ci_instance_attribute:manage
 DELETE /api/v1/cis/{id}/fields/{name}/override override:write
 DELETE /api/v1/cis/{id}/instance-attributes/{key} ci_instance_attribute:manage
 DELETE /api/v1/clients/{id} user:manage
+DELETE /api/v1/collector-groups/{id} collector:manage
+DELETE /api/v1/collector-groups/{id}/members/{collector_id} collector:manage
 DELETE /api/v1/compliance/rules/{id} compliance:write
 DELETE /api/v1/consumables/{id} stock:write
 DELETE /api/v1/contacts/{id} contact:write
@@ -169,6 +171,8 @@ GET /api/v1/cis/{id}/templates ci:read
 GET /api/v1/clients location:read
 GET /api/v1/clients/{id} location:read
 GET /api/v1/clients/{id}/hidden-ci-types location:read
+GET /api/v1/collector-groups monitoring:read
+GET /api/v1/collector-groups/{id} monitoring:read
 GET /api/v1/collectors discovery:read
 GET /api/v1/collectors/pki discovery:read
 GET /api/v1/compliance/report compliance:read
@@ -426,6 +430,7 @@ PATCH /api/v1/cables/{id} rack:write
 PATCH /api/v1/ci-types/{id} citype:manage
 PATCH /api/v1/cis/{id} ci:write
 PATCH /api/v1/clients/{id} user:manage
+PATCH /api/v1/collector-groups/{id} collector:manage
 PATCH /api/v1/collectors/{id} collector:manage
 PATCH /api/v1/compliance/rules/{id} compliance:write
 PATCH /api/v1/consumables/{id} stock:write
@@ -540,6 +545,8 @@ POST /api/v1/cis/{id}/restore ci:delete
 POST /api/v1/cis/{id}/type ci:write
 POST /api/v1/cis/{id}/unmerge ci:delete
 POST /api/v1/clients user:manage
+POST /api/v1/collector-groups collector:manage
+POST /api/v1/collector-groups/{id}/members collector:manage
 POST /api/v1/collectors collector:manage
 POST /api/v1/collectors/enroll public
 POST /api/v1/collectors/enrollment-codes collector:manage

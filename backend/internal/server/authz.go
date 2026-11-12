@@ -134,6 +134,9 @@ var readPermissionFor = map[string]identity.Permission{
 	"escalation-policies":      identity.PermEscalationManage,
 	"notification-escalations": identity.PermEscalationManage,
 	"monitoring":               identity.PermMonitoringRead,
+	// Collector groups (PRB-03, WP-947, E-160): read with monitoring:read,
+	// written with collector:manage (writePermissionOverrides).
+	"collector-groups": identity.PermMonitoringRead,
 	// Privacy/DSGVO acts on other people's personal data; even the read-side
 	// retention policy requires the manage permission.
 	"privacy": identity.PermUserManage,
@@ -204,7 +207,9 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"invitations":      identity.PermUserManage,
 	"teams":            identity.PermTeamManage,
 	// RBA-01: collectors and discovery jobs have their own manage keys.
-	"collectors":       identity.PermCollectorManage,
+	"collectors": identity.PermCollectorManage,
+	// Collector groups are managed like collectors (WP-947).
+	"collector-groups": identity.PermCollectorManage,
 	"discovery":        identity.PermDiscoveryManage,
 	"discovery-scopes": identity.PermDiscoveryManage,
 	// Resolving reconciliation conflicts is resolving review items.

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/admp"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
@@ -69,6 +70,18 @@ import (
 func MemoryRepositories() Repositories {
 	assets := asset.NewMemoryRepository()
 	discoveryRepo := discovery.NewMemoryRepository()
+	cis := ci.NewMemoryRepository()
+	// The memory probes read client and site of a CI from the CI store
+	// (WP-939); the memory collector groups count their probes and mirror
+	// their groups into the probe store (WP-947).
+	probes := probe.NewMemoryRepository().WithCIs(func(ctx context.Context, orgID, id string) (string, string, bool) {
+		item, err := cis.GetByID(ctx, orgID, id)
+		if err != nil {
+			return "", "", false
+		}
+		return item.ClientID, item.SiteID, true
+	})
+	discoveryRepo.WithGroupProbes(memoryGroupProbes{probes: probes})
 	// Seed the system CI types so name-based ingest works in --no-db mode just
 	// like against the migrated database (migration 000021 seeds them there).
 	for _, typ := range []string{
@@ -79,7 +92,6 @@ func MemoryRepositories() Repositories {
 		discoveryRepo.SeedCIType(typ, typ)
 	}
 	lifecycleStates := lifecycle.NewMemoryStateStore()
-	cis := ci.NewMemoryRepository()
 	users := user.NewMemoryRepository()
 	serviceAccounts := user.NewMemoryServiceAccounts()
 	// Consumable movements book on the stock per bin of the same store
@@ -152,31 +164,48 @@ func MemoryRepositories() Repositories {
 		Contact:           contact.NewMemoryRepository(),
 		IPAM:              ipam.NewMemoryRepository(),
 		Metrics:           monitoring.NewMemoryMetricStore(),
-		// The memory probes read client and site of a CI from the CI store
-		// (WP-939).
-		Probes: probe.NewMemoryRepository().WithCIs(func(ctx context.Context, orgID, id string) (string, string, bool) {
-			item, err := cis.GetByID(ctx, orgID, id)
-			if err != nil {
-				return "", "", false
-			}
-			return item.ClientID, item.SiteID, true
-		}),
-		Permission:      permission.NewMemoryRepository(),
-		FieldGrants:     permission.NewMemoryFieldGrants(),
-		APIKeys:         identity.NewMemoryAPIKeyStore(),
-		ServiceAccounts: serviceAccounts,
-		SLA:             sla.NewMemoryRepository(),
-		Form:            form.NewMemoryRepository(),
-		Workflow:        workflow.NewMemoryRepository(),
-		Compliance:      compliance.NewMemoryRepository(),
-		IGA:             iga.NewMemoryRepository(),
-		Search:          search.NewMemoryRepository(),
-		AI:              ai.NewMemoryRepository(),
-		ExportJobs:      export.NewMemoryJobRepository(),
-		Jobs:            jobs.NewMemoryRepository(),
-		Privacy:         privacy.NewMemoryRepository(),
+		Probes:            probes,
+		Permission:        permission.NewMemoryRepository(),
+		FieldGrants:       permission.NewMemoryFieldGrants(),
+		APIKeys:           identity.NewMemoryAPIKeyStore(),
+		ServiceAccounts:   serviceAccounts,
+		SLA:               sla.NewMemoryRepository(),
+		Form:              form.NewMemoryRepository(),
+		Workflow:          workflow.NewMemoryRepository(),
+		Compliance:        compliance.NewMemoryRepository(),
+		IGA:               iga.NewMemoryRepository(),
+		Search:            search.NewMemoryRepository(),
+		AI:                ai.NewMemoryRepository(),
+		ExportJobs:        export.NewMemoryJobRepository(),
+		Jobs:              jobs.NewMemoryRepository(),
+		Privacy:           privacy.NewMemoryRepository(),
 	}
 }
+
+// memoryGroupProbes answers the memory collector groups from the memory
+// probe store (--no-db, WP-947) and mirrors their groups into it.
+type memoryGroupProbes struct{ probes *probe.MemoryRepository }
+
+func (m memoryGroupProbes) ProbeClient(ctx context.Context, orgID, probeID string) (clientID string, ok bool, err error) {
+	p, err := m.probes.Get(ctx, probeID)
+	if errors.Is(err, probe.ErrNotFound) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return p.ClientID, p.OrganizationID == orgID, nil
+}
+
+func (m memoryGroupProbes) CountGroupProbes(ctx context.Context, _, groupID string) (int, error) {
+	return m.probes.Count(ctx, &probe.ListFilter{CollectorGroupID: groupID})
+}
+
+func (m memoryGroupProbes) AddCollectorGroup(orgID, id, clientID string) {
+	m.probes.AddCollectorGroup(orgID, id, clientID)
+}
+
+func (m memoryGroupProbes) RemoveCollectorGroup(id string) { m.probes.RemoveCollectorGroup(id) }
 
 // PostgresRepositories returns the PostgreSQL-backed implementations. The
 // audit recorder is passed to the CI repository so history is written inside

@@ -233,6 +233,9 @@ type MemoryRepository struct {
 	orgSettings  map[string]map[string]any
 	orgTimezone  map[string]string
 	seq          int
+	// collectorGroups are the collector groups (WP-947); every collector
+	// gets one of its own, as on PostgreSQL (WP-936).
+	collectorGroups *memCollectorGroups
 }
 
 // NewMemoryRepository creates a new in-memory discovery repository.
@@ -320,6 +323,7 @@ func (r *MemoryRepository) RegisterCollector(_ context.Context, c *Collector) er
 		c.LastHeartbeatAt = now
 	}
 	r.collectors[c.ID] = c
+	r.addDefaultCollectorGroup(c)
 	return nil
 }
 
@@ -942,6 +946,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	// Reconciliation review queue.
 	// The review-items resource (API-05) and its deprecated discovery path.
 	reviews.NewHandler(h.ReviewService()).RegisterRoutes(r)
+
+	// Collector groups (PRB-03, COL-06, WP-947).
+	h.RegisterCollectorGroupRoutes(r)
 }
 
 // ListCollectors handles GET /api/v1/collectors

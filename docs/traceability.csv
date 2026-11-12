@@ -1741,3 +1741,5 @@ TLC-06;[P3];F;backend/internal/tenantapi/deletion_integration_test.go;WP-1152
 SEC-05;[B];F;backend/internal/privacy/subject_integration_test.go;WP-1158
 PRB-01;[P3];E;backend/internal/probe/probe_scope_integration_test.go;WP-939
 PRT-01;[P3];E;backend/internal/probe/handler_test.go;WP-939
+PRB-03;[P3];E;backend/internal/discovery/collector_group_integration_test.go;WP-947
+COL-06;[B], Air-Gapped [O];E;backend/internal/discovery/collector_group_integration_test.go;WP-947

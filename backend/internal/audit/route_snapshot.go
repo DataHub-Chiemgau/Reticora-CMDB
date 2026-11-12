@@ -401,6 +401,16 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	// Probe definitions (PRB-01, WP-939); config.changed goes to the
 	// outbox in the write transaction.
 	crud(m, v1+"monitoring/probes", "probe", all...)
+	// Collector groups (PRB-03, WP-947): the group row; adding or moving a
+	// member shows the members of the group, removing one the member row.
+	crud(m, v1+"collector-groups", "collector_group", all...)
+	m["POST "+v1+"collector-groups/{id}/members"] = RouteSnapshot{Table: "collector_group", Keys: []SnapshotKey{{"id", "id"}},
+		Select: `jsonb_build_object('id', t.id, 'organization_id', t.organization_id, 'members',
+			(SELECT COALESCE(jsonb_agg(jsonb_build_object('collector_id', m.collector_id, 'priority', m.priority,
+				'weight', m.weight) ORDER BY m.collector_id), '[]'::jsonb)
+			   FROM collector_group_member m WHERE m.organization_id = t.organization_id AND m.group_id = t.id))`}
+	m["DELETE "+v1+"collector-groups/{id}/members/{collector_id}"] = RouteSnapshot{Table: "collector_group_member",
+		Keys: []SnapshotKey{{"group_id", "id"}, {"collector_id", "collector_id"}}}
 	crud(m, v1+"webhooks", "webhook_subscription", "POST", "DELETE")
 	crud(m, v1+"lifecycle-definitions", "lifecycle_definition", "POST", "DELETE")
 	crud(m, v1+"lifecycle-models", "lifecycle_definition", all...)
