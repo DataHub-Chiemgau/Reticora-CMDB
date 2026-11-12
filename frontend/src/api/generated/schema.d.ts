@@ -871,6 +871,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/privacy/subjects/report': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Report everything kept about a person (DSGVO Art. 15)
+     * @description Starts the job `privacy.subject_report` (SEC-05 [P3], WP-1158; user:manage). The person is exactly one of a user (`user_id`), a contact (`contact_id`) or a vault subject of kind person or contact (`subject_id`, e.g. the holder of an ADMP connection); a person of another organization or outside the scope is 404. The job decrypts the value subjects of the history in batches of 1,000 and compares them with e-mail, name and phone of the person (lower case, trimmed); a value found by the name alone is a candidate (`candidate`: it may be another person's). The job and its result (GET /api/v1/jobs/{id}/result) are seen with user:manage only, job:read alone answers 404 and lists no such job. The result names per finding the table, the row id and the field path: surrogate references in every jsonb column (audit_log.changes, ci_change, event_outbox and later tables), the user as actor, assignee or recipient (audit_log.actor_id, ci_change, stock_movement, tickets, assignments), notification deliveries to the person, every column with a foreign key on pii_subject (contact.pii_subject_id, admp_connection.holder_subject_id) and other contacts with the person's address; the values of the person are unsealed (E-165). The audit entry names only the id, the mode and the counts.
+     */
+    post: operations['reportPrivacySubject'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/privacy/subjects/erase': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Erase or pseudonymize a person (DSGVO Art. 17)
+     * @description Starts the job `privacy.subject_erase` (SEC-05 [P3], WP-1158; user:manage) for the person of the body, found like the report. `mode = shred` deletes the value subjects of the person in one transaction per batch of 1,000 (a candidate of the report, found by the name alone, only when listed in `confirmed_surrogates`; the audit names the erasure before the first batch) and its vault subject (anchored subjects such as an ADMP address by cascade), anonymizes a user (account deactivated, sessions revoked), empties the address of the notification deliveries to the person and the results of earlier reports about it (open reports are cancelled); every reference in audit, CI history and events resolves to null afterwards. `mode = pseudonymize` replaces the data of the found subjects with `person-<8 hex digits of SHA-256 of the surrogate>` (the user id for a user) and keeps the surrogates. The own account cannot be erased (422 `user_id`). The job result and the audit entry carry counts only, never a value.
+     */
+    post: operations['erasePrivacySubject'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/relationships': {
     parameters: {
       query?: never;
@@ -1350,7 +1390,7 @@ export interface paths {
     };
     /**
      * The result of a succeeded job
-     * @description Also the partial result a job cancelled while running kept, e.g. the report of a bulk change (status cancelled). The result of a job template.migrate is a TemplateMigrationReport; a cancelled template migration has none (409).
+     * @description Also the partial result a job cancelled while running kept, e.g. the report of a bulk change (status cancelled). The result of a job template.migrate is a TemplateMigrationReport; a cancelled template migration has none (409). A job privacy.subject_report or privacy.subject_erase is seen only with user:manage (404 without, also for its creator; WP-1158).
      */
     get: operations['getJobResult'];
     put?: never;
@@ -19479,6 +19519,38 @@ export interface components {
       /** Format: date-time */
       updated_at: string;
     };
+    /** @description The person of a report or an erasure (WP-1158); exactly one of the ids. */
+    PrivacySubjectRequest: {
+      /** Format: uuid */
+      user_id?: string;
+      /** Format: uuid */
+      contact_id?: string;
+      /**
+       * Format: uuid
+       * @description A vault subject of kind person or contact, e.g. the holder of an ADMP connection.
+       */
+      subject_id?: string;
+    };
+    /** @description The person of an erasure (exactly one of the ids) and the mode (WP-1158). */
+    PrivacySubjectEraseRequest: {
+      /** Format: uuid */
+      user_id?: string;
+      /** Format: uuid */
+      contact_id?: string;
+      /** Format: uuid */
+      subject_id?: string;
+      /** @enum {string} */
+      mode: 'shred' | 'pseudonymize';
+      /** @description Candidates of the report (value subjects found by the name alone) the erasure includes; any other candidate stays, since the name may be another person's. */
+      confirmed_surrogates?: string[];
+    };
+    PrivacySubjectJob: {
+      /** Format: uuid */
+      job_id: string;
+      status: string;
+      /** @enum {string} */
+      kind: 'privacy.subject_report' | 'privacy.subject_erase';
+    };
     ErasureSummary: {
       /** Format: date-time */
       cutoff: string;
@@ -24209,6 +24281,72 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+    };
+  };
+  reportPrivacySubject: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PrivacySubjectRequest'];
+      };
+    };
+    responses: {
+      /** @description Report accepted; the job runs. */
+      202: {
+        headers: {
+          /** @description The job of the report (/api/v1/jobs/{id}). */
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PrivacySubjectJob'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+      500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  erasePrivacySubject: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PrivacySubjectEraseRequest'];
+      };
+    };
+    responses: {
+      /** @description Erasure accepted; the job runs. */
+      202: {
+        headers: {
+          /** @description The job of the erasure (/api/v1/jobs/{id}). */
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PrivacySubjectJob'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+      500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   listRelationships: {

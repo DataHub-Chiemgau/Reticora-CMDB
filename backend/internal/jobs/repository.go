@@ -135,7 +135,7 @@ func (r *MemoryRepository) List(_ context.Context, orgID string, filter Filter, 
 	var out []Job
 	for _, j := range r.jobs {
 		if j.OrganizationID == orgID && (filter.Kind == "" || j.Kind == filter.Kind) &&
-			(filter.Status == "" || j.Status == filter.Status) {
+			(filter.Status == "" || j.Status == filter.Status) && !slices.Contains(filter.ExcludeKinds, j.Kind) {
 			out = append(out, *j)
 		}
 	}

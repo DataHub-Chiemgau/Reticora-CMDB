@@ -176,6 +176,8 @@ func ExponentialBackoff(base, limit time.Duration) func(int) time.Duration {
 type Filter struct {
 	Kind   string
 	Status Status
+	// ExcludeKinds are left out (kinds the caller may not read, WP-1158).
+	ExcludeKinds []string
 }
 
 // Errors of the job model.

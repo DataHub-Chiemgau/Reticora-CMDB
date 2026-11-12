@@ -262,6 +262,10 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter Filter, pa
 			args = append(args, string(filter.Status))
 			where = append(where, fmt.Sprintf("status = $%d", len(args)))
 		}
+		if len(filter.ExcludeKinds) > 0 {
+			args = append(args, filter.ExcludeKinds)
+			where = append(where, fmt.Sprintf("kind <> ALL($%d::text[])", len(args)))
+		}
 		cond := strings.Join(where, " AND ") + own
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM job WHERE `+cond, args...).Scan(&total); err != nil {
 			return fmt.Errorf("count jobs: %w", err)

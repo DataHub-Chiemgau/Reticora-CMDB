@@ -626,6 +626,8 @@ POST /api/v1/orders/{id}/reject order:approve
 POST /api/v1/orders/{id}/submit order:write
 POST /api/v1/org/deletion org:delete
 POST /api/v1/privacy/erasure user:manage
+POST /api/v1/privacy/subjects/erase user:manage
+POST /api/v1/privacy/subjects/report user:manage
 POST /api/v1/racks rack:write
 POST /api/v1/racks/{id}/mounts rack:write
 POST /api/v1/relationship-types relationship_type:manage

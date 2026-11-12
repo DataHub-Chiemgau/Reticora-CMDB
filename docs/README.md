@@ -813,6 +813,34 @@ account is deactivated, while the row itself is kept so foreign keys
 rejected so an operator cannot lock themselves out mid-request. Both
 endpoints require `user:manage`.
 
+**Rights of a person (SEC-05 [P3], WP-1158):** `POST
+/api/v1/privacy/subjects/report` and `POST /api/v1/privacy/subjects/erase`
+(both `user:manage`, 202 with the job, `Location: /api/v1/jobs/{id}`) cover
+every person, not only users: the body names exactly one of `user_id`,
+`contact_id` or `subject_id` (a vault subject of kind person or contact, e.g.
+the holder of an ADMP connection); a person of another organization is 404.
+The match values are e-mail, name and phone of the account or of the
+decrypted vault subject (lower case, trimmed). Personal values of the history
+are value subjects without a blind index, so the jobs decrypt them in batches
+of 1,000 and compare; a value anchored to the person's subject belongs to it
+anyway. The job `privacy.subject_report` lists per finding table, row id and
+field path: surrogate references in every jsonb column of the tenant tables
+(audit changes, CI history, events and later tables without code change), the
+user as actor, assignee or recipient (audit, CI history, stock movements,
+deliveries, tickets, assignments), deliveries to the person's address, every
+column with a foreign key on `pii_subject` (read from `pg_constraint`, e.g.
+`contact.pii_subject_id`, `admp_connection.holder_subject_id`) and other
+contacts with the same address. The values are unsealed in the result (E-165),
+which only `user:manage` reads. `privacy.subject_erase` with `mode = shred`
+deletes the value subjects (one transaction per batch) and the person's
+subject (anchored ones such as an ADMP address by cascade), anonymizes a user
+(sessions revoked), empties the address of deliveries to the person and the
+results of earlier reports about it; every reference then resolves to null
+(shown as "deleted"). `mode = pseudonymize` replaces the data of the found
+subjects with `person-<8 hex digits of SHA-256 of the surrogate>` and keeps the
+surrogates. Both jobs write one audit entry (`privacy.subject_report`,
+`privacy.subject_erase`) with id or surrogate, mode and counts, never a value.
+
 **Document content:** documents carry metadata rows; the binary content lives
 in blob storage. `PUT /api/v1/documents/{id}/content` stores the request body
 (limited to 25 MiB, Content-Type validated against a whitelist of common

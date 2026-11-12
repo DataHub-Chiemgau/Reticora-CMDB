@@ -4,7 +4,8 @@
 // surrogate id. Resolving a surrogate works only within its organization
 // (row level security and an explicit organization check); a deleted
 // subject cannot be resolved anymore, which is the basis of
-// crypto-shredding (the deletion and export workflows follow in P3).
+// crypto-shredding: the report and erasure of a person (SEC-05 [P3],
+// WP-1158) live in package privacy, the full export in package export.
 package pii
 
 import (
@@ -348,4 +349,79 @@ func nilIfEmpty(s string) any {
 		return nil
 	}
 	return s
+}
+
+// ValueSubject is a decrypted value subject of the history (KindValue):
+// its surrogate, the person it is anchored to (empty without anchor) and
+// the value.
+type ValueSubject struct {
+	ID       string
+	ParentID string
+	Value    string
+}
+
+// ValueSubjectsTx decrypts the value subjects of the organization in
+// surrogate order after the surrogate after (empty: from the start), at most
+// limit of them: the batches of the subject report and erasure of SEC-05
+// (WP-1158), which find the values of a person by comparing them, since
+// value subjects have no blind index. Fewer than limit means the last batch.
+func (v *Vault) ValueSubjectsTx(ctx context.Context, tx pgx.Tx, orgID, after string, limit int) ([]ValueSubject, error) {
+	if after == "" {
+		after = "00000000-0000-0000-0000-000000000000"
+	}
+	rows, err := tx.Query(ctx, `SELECT surrogate_id::text, COALESCE(parent_id::text, '') FROM pii_subject
+		WHERE organization_id = $1 AND kind = $2 AND surrogate_id > $3::uuid
+		ORDER BY surrogate_id LIMIT $4`, orgID, KindValue, after, limit)
+	if err != nil {
+		return nil, fmt.Errorf("read value subjects: %w", err)
+	}
+	type row struct{ id, parent string }
+	stored, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (row, error) {
+		var s row
+		scanErr := r.Scan(&s.id, &s.parent)
+		return s, scanErr
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read value subjects: %w", err)
+	}
+	if len(stored) == 0 {
+		return nil, nil
+	}
+	ids := make([]string, len(stored))
+	for i, s := range stored {
+		ids[i] = s.id
+	}
+	subjects, err := v.ResolveTx(ctx, tx, orgID, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ValueSubject, 0, len(stored))
+	for _, s := range stored {
+		value := ""
+		if subject := subjects[s.id]; subject != nil {
+			value = subject.Data["v"]
+		}
+		out = append(out, ValueSubject{ID: s.id, ParentID: s.parent, Value: value})
+	}
+	return out, nil
+}
+
+// DeleteManyTx deletes the subjects of the organization with the given
+// surrogates (their anchored values by cascade) and returns how many it
+// deleted: the crypto-shredding of a person (SEC-05, WP-1158).
+func DeleteManyTx(ctx context.Context, tx pgx.Tx, orgID string, ids []string) (int64, error) {
+	valid := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if isUUID(id) {
+			valid = append(valid, id)
+		}
+	}
+	if len(valid) == 0 {
+		return 0, nil
+	}
+	tag, err := tx.Exec(ctx, `DELETE FROM pii_subject WHERE organization_id = $1 AND surrogate_id = ANY($2::uuid[])`, orgID, valid)
+	if err != nil {
+		return 0, fmt.Errorf("delete pii subjects: %w", err)
+	}
+	return tag.RowsAffected(), nil
 }

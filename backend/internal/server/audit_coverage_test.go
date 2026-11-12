@@ -538,7 +538,11 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	"PATCH /api/v1/org":                 {"", `{}`},
 	// The deletion request of the organization (WP-1152) with its slug as
 	// confirmation; the cancel runs with the deletes.
-	"POST /api/v1/org/deletion":                        {"", `{"confirm_slug":"scopetest-a5-a"}`},
+	"POST /api/v1/org/deletion": {"", `{"confirm_slug":"scopetest-a5-a"}`},
+	// The report and the pseudonymization of a contact (WP-1158) start
+	// their jobs.
+	"POST /api/v1/privacy/subjects/report":             {"", `{"contact_id":"<id:/api/v1/contacts>"}`},
+	"POST /api/v1/privacy/subjects/erase":              {"", `{"contact_id":"<id:/api/v1/contacts>","mode":"pseudonymize"}`},
 	"PUT /api/v1/clients/{id}/hidden-ci-types":         {"/api/v1/clients/<id:/api/v1/clients>/hidden-ci-types", `{"ci_type_ids":["<id:/api/v1/ci-types>"]}`}, // WP-858
 	"PUT /api/v1/documents/{id}/content":               {"", `a5 content`},
 	"DELETE /api/v1/ci-fields/global/{name}":           {"/api/v1/ci-fields/global/a5_global", ""},

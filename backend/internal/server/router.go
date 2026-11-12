@@ -595,6 +595,14 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		WithReservations(reservationLookup{repo: repos.Reservation}).
 		// Links write ci.asset_id through the CI service (WP-272).
 		WithCILinks(opts.CIService)
+	// The report and the erasure of a person (SEC-05 [P3], WP-1158) are the
+	// jobs privacy.subject_report and privacy.subject_erase on the
+	// application pool; an erased user is anonymized with its sessions
+	// revoked.
+	subjectService := privacy.NewSubjectService(opts.AuditPool, repos.User)
+	if revocations := opts.Sessions.Revocations(); revocations != nil {
+		subjectService.WithSessionRevoker(revocations)
+	}
 	if repos.Jobs != nil {
 		jobService := jobs.NewService(repos.Jobs)
 		jobTracker = jobService
@@ -645,6 +653,14 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			// The backfill of the management addresses (WP-913) is queued by
 			// its migration; it is read and cancelled with ipam:write.
 			WithKind(ipam.MgmtBackfillJobKind, identity.PermIPAMWrite, nil).
+			// The report about a person holds its values unsealed, the
+			// erasure names the person in its parameters: both are seen
+			// and controlled only with user:manage like their start, job:read
+			// alone does not reveal them (WP-1158); neither has a revert.
+			WithKind(privacy.SubjectReportJobKind, identity.PermUserManage, nil).
+			WithReadKind(privacy.SubjectReportJobKind, identity.PermUserManage).
+			WithKind(privacy.SubjectEraseJobKind, identity.PermUserManage, nil).
+			WithReadKind(privacy.SubjectEraseJobKind, identity.PermUserManage).
 			// The merge is reverted by its unmerge within 30 days (CI-12, E-25).
 			// It answers 200 (no revert job).
 			WithKind(ci.MergeJobKind, identity.PermCIDelete, func(ctx context.Context, job *jobs.Job) (*jobs.Job, error) {
@@ -694,7 +710,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			repos.IPAMManagement,
 			// The full export of an organization (WP-1149, TLC-05) reads on
 			// the application pool and writes to the object storage.
-			export.NewOrgExporter(opts.AuditPool, opts.Blobs, jobService))
+			export.NewOrgExporter(opts.AuditPool, opts.Blobs, jobService), subjectService)
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -983,7 +999,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		ai.NewHandler(repos.AI, opts.AIProvider,
 			ai.NewRetriever(repos.AI, repos.Search, repos.Permission, opts.AIProvider).WithConsent(aiConsent)).
 			WithConsent(aiConsent),
-		privacy.NewHandler(privacy.NewService(repos.Privacy, repos.Contact, repos.User)),
+		privacy.NewHandler(privacy.NewService(repos.Privacy, repos.Contact, repos.User)).WithSubjects(subjectService),
 		signup.NewHandler(opts.Signup).WithProtection(opts.SignupProtection),
 		modulesHandler{set: opts.Modules},
 	}

@@ -176,10 +176,12 @@ func TestRouteSnapshotRegisterIsValid(t *testing.T) {
 			tables++
 		}
 	}
-	// 14 routes write no row of their own (noValues), among them the
-	// test of a vault connection (WP-896), which only reads, and the
-	// replacement of the source ranks (WP-1105), audited by its domain entry.
-	if tables < len(routes)-14 {
+	// 16 routes write no row of their own (noValues), among them the
+	// test of a vault connection (WP-896), which only reads, the
+	// replacement of the source ranks (WP-1105), audited by its domain entry,
+	// and the report and the erasure of a person (WP-1158), jobs that record
+	// id, mode and counts themselves.
+	if tables < len(routes)-16 {
 		t.Errorf("only %d of %d entries name a table", tables, len(routes))
 	}
 	for _, bad := range []audit.RouteSnapshot{
