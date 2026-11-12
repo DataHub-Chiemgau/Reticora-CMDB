@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -31,6 +32,12 @@ const (
 	// MetricsSuffix carries the collector's metric samples (sweep
 	// reachability, UPS values, SNMP polls and traps; MON-02).
 	MetricsSuffix = ".metrics"
+	// ProbeStateSuffix, ProbeResultsSuffix and ProbeAliveSuffix carry the
+	// monitoring probes' state changes, result batches and alive messages
+	// (PRB-05, E-173, WP-959); served once WithEdgeProbes set a handler.
+	ProbeStateSuffix   = ".probe.state"
+	ProbeResultsSuffix = ".probe.results"
+	ProbeAliveSuffix   = ".probe.alive"
 	// edgeDataQueue spreads the requests over the server instances: each
 	// is processed once.
 	edgeDataQueue = "reticora-edge-data"
@@ -94,6 +101,25 @@ type FeatureStatus interface {
 // subject is not served and the collectors keep their samples.
 func (h *Handler) WithEdgeMetrics(metrics MetricsIngester, features FeatureStatus) *Handler {
 	h.metrics, h.features = metrics, features
+	return h
+}
+
+// EdgeProbes takes the monitoring probe messages of a collector the edge
+// dispatcher checked (probe.Edge, WP-959): it answers with a reply the
+// dispatcher sends as JSON. Workers is the number of handlers per instance
+// that serve the probe subjects in parallel (RETICORA_PROBE_EDGE_WORKERS).
+type EdgeProbes interface {
+	ProbeState(ctx context.Context, orgID, collectorID string, data []byte) any
+	ProbeResults(ctx context.Context, orgID, collectorID string, data []byte) any
+	ProbeAlive(ctx context.Context, orgID, collectorID string, data []byte) any
+	Workers() int
+}
+
+// WithEdgeProbes serves the probe subjects .probe.state, .probe.results and
+// .probe.alive with probes (E-173). Without it the subjects are not served
+// and the collectors keep their probe messages in the spool.
+func (h *Handler) WithEdgeProbes(probes EdgeProbes) *Handler {
+	h.probes = probes
 	return h
 }
 
@@ -443,55 +469,164 @@ func (h *Handler) collectorContext(ctx context.Context, orgID, collectorID strin
 	return tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: orgID, ClientID: col.ClientID}), col, nil
 }
 
+// edgeHandler answers an edge data request of a checked collector; the
+// reply is sent as JSON.
+type edgeHandler func(ctx context.Context, orgID, collectorID string, data []byte) any
+
+// edgeReplying adapts a handler answering with an EdgeReply.
+func edgeReplying(handle func(ctx context.Context, orgID, collectorID string, data []byte) EdgeReply) edgeHandler {
+	return func(ctx context.Context, orgID, collectorID string, data []byte) any {
+		return handle(ctx, orgID, collectorID, data)
+	}
+}
+
+// probeSuffixes are the suffixes the probe handler pool serves.
+var probeSuffixes = []string{ProbeStateSuffix, ProbeResultsSuffix, ProbeAliveSuffix}
+
 // edgeHandlers are the handlers of the edge data subjects by suffix; they
 // run only for a collector the dispatcher checked. .metrics is served once
-// the metrics ingest is set (WithEdgeMetrics).
-func (h *Handler) edgeHandlers() map[string]func(ctx context.Context, orgID, collectorID string, data []byte) EdgeReply {
-	handlers := map[string]func(ctx context.Context, orgID, collectorID string, data []byte) EdgeReply{
-		IngestSuffix:    h.edgeIngest,
-		HeartbeatSuffix: h.EdgeHeartbeat,
+// the metrics ingest is set (WithEdgeMetrics), the probe suffixes once a
+// probe handler is set (WithEdgeProbes).
+func (h *Handler) edgeHandlers() map[string]edgeHandler {
+	handlers := map[string]edgeHandler{
+		IngestSuffix:    edgeReplying(h.edgeIngest),
+		HeartbeatSuffix: edgeReplying(h.EdgeHeartbeat),
 	}
 	if h.metrics != nil {
-		handlers[MetricsSuffix] = h.edgeMetrics
+		handlers[MetricsSuffix] = edgeReplying(h.edgeMetrics)
+	}
+	if h.probes != nil {
+		handlers[ProbeStateSuffix] = h.probes.ProbeState
+		handlers[ProbeResultsSuffix] = h.probes.ProbeResults
+		handlers[ProbeAliveSuffix] = h.probes.ProbeAlive
 	}
 	return handlers
 }
 
-// ServeCollectorEdge answers the ingest, heartbeat and metrics requests of
-// the collectors on nc until ctx ends. A request of an unknown or disabled
-// collector is refused before its handler runs, whatever the suffix, so
-// nothing of it is persisted (COL-04).
+// serveEdgeRequest answers one edge data request: a request of an unknown
+// or disabled collector is refused before its handler runs (COL-04).
+func (h *Handler) serveEdgeRequest(ctx context.Context, msg *nats.Msg, suffix string, handle edgeHandler) {
+	var reply any = EdgeReply{Status: http.StatusBadRequest, Error: "invalid subject"}
+	if orgID, collectorID, ok := subjectCollector(msg.Subject, suffix); ok {
+		sctx := systemContext(ctx, orgID)
+		if cerr := h.checkCollector(sctx, orgID, collectorID); cerr != nil {
+			slog.Warn("collector edge request refused", "organization_id", orgID, "collector_id", collectorID,
+				"suffix", suffix, "error", cerr)
+			reply = edgeRefusal(cerr)
+		} else {
+			reply = handle(sctx, orgID, collectorID, msg.Data)
+		}
+	}
+	raw, _ := json.Marshal(reply)
+	if msg.Reply != "" {
+		if rerr := msg.Respond(raw); rerr != nil {
+			slog.Error("collector edge reply", "error", rerr)
+		}
+	}
+}
+
+// ServeCollectorEdge answers the ingest, heartbeat, metrics and probe
+// requests of the collectors on nc until ctx ends. A request of an unknown
+// or disabled collector is refused before its handler runs, whatever the
+// suffix, so nothing of it is persisted (COL-04). nats.go calls the
+// callbacks of a subscription one after another; the probe subjects
+// therefore run on a pool of EdgeProbes.Workers handlers per instance
+// (ChanQueueSubscribe, NFR-11).
 func (h *Handler) ServeCollectorEdge(ctx context.Context, nc *nats.Conn) error {
 	handlers := h.edgeHandlers()
 	subs := make([]*nats.Subscription, 0, len(handlers))
+	defer func() {
+		for _, sub := range subs {
+			_ = sub.Unsubscribe()
+		}
+	}()
+	var probeMsgs chan *nats.Msg
+	var probeSubs []*nats.Subscription
+	if h.probes != nil {
+		workers := max(h.probes.Workers(), 1)
+		probeMsgs = make(chan *nats.Msg, probePending)
+		for range workers {
+			go h.serveProbeMessages(ctx, probeMsgs, handlers)
+		}
+	}
 	for suffix, handle := range handlers {
-		sub, err := nc.QueueSubscribe("collector.*.*"+suffix, edgeDataQueue, func(msg *nats.Msg) {
-			reply := EdgeReply{Status: http.StatusBadRequest, Error: "invalid subject"}
-			if orgID, collectorID, ok := subjectCollector(msg.Subject, suffix); ok {
-				sctx := systemContext(ctx, orgID)
-				if cerr := h.checkCollector(sctx, orgID, collectorID); cerr != nil {
-					slog.Warn("collector edge request refused", "organization_id", orgID, "collector_id", collectorID,
-						"suffix", suffix, "error", cerr)
-					reply = edgeRefusal(cerr)
-				} else {
-					reply = handle(sctx, orgID, collectorID, msg.Data)
-				}
+		subject := "collector.*.*" + suffix
+		if slices.Contains(probeSuffixes, suffix) {
+			sub, err := nc.ChanQueueSubscribe(subject, edgeDataQueue, probeMsgs)
+			if err != nil {
+				return fmt.Errorf("subscribe %s: %w", suffix, err)
 			}
-			raw, _ := json.Marshal(reply)
-			if msg.Reply != "" {
-				if rerr := msg.Respond(raw); rerr != nil {
-					slog.Error("collector edge reply", "error", rerr)
-				}
-			}
+			subs = append(subs, sub)
+			probeSubs = append(probeSubs, sub)
+			continue
+		}
+		sub, err := nc.QueueSubscribe(subject, edgeDataQueue, func(msg *nats.Msg) {
+			h.serveEdgeRequest(ctx, msg, suffix, handle)
 		})
 		if err != nil {
 			return fmt.Errorf("subscribe %s: %w", suffix, err)
 		}
 		subs = append(subs, sub)
 	}
-	<-ctx.Done()
-	for _, sub := range subs {
-		_ = sub.Unsubscribe()
+	if len(probeSubs) > 0 {
+		watchProbeDrops(ctx, probeSubs)
+		return nil
 	}
+	<-ctx.Done()
 	return nil
+}
+
+// probePending is the buffer of the probe handler pool, as many messages
+// as a callback subscription keeps pending by default: nats.go hands a
+// channel subscription its messages without blocking and drops one the
+// full channel cannot take (slow consumer), and the queue group does not
+// send it to another instance. The collector repeats a dropped request
+// only after its request timeout, so the buffer is sized for the resync
+// burst of NFR-11, not for the pool.
+const probePending = nats.DefaultSubPendingMsgsLimit
+
+// probeDropCheck is how often watchProbeDrops looks for dropped messages.
+const probeDropCheck = 10 * time.Second
+
+// watchProbeDrops logs the probe messages a full buffer dropped (slow
+// consumer) until ctx ends; the collectors repeat them after their
+// request timeout.
+func watchProbeDrops(ctx context.Context, subs []*nats.Subscription) {
+	ticker := time.NewTicker(probeDropCheck)
+	defer ticker.Stop()
+	reported := make([]int, len(subs))
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			for i, sub := range subs {
+				dropped, err := sub.Dropped()
+				if err != nil || dropped <= reported[i] {
+					continue
+				}
+				slog.Warn("probe edge dropped messages: handler pool overloaded (slow consumer)",
+					"subject", sub.Subject, "dropped", dropped-reported[i], "pending_limit", probePending)
+				reported[i] = dropped
+			}
+		}
+	}
+}
+
+// serveProbeMessages is one handler of the probe pool: it answers the
+// messages of the probe subjects until ctx ends.
+func (h *Handler) serveProbeMessages(ctx context.Context, msgs <-chan *nats.Msg, handlers map[string]edgeHandler) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg := <-msgs:
+			for _, suffix := range probeSuffixes {
+				if strings.HasSuffix(msg.Subject, suffix) {
+					h.serveEdgeRequest(ctx, msg, suffix, handlers[suffix])
+					break
+				}
+			}
+		}
+	}
 }

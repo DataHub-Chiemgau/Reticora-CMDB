@@ -44,6 +44,14 @@ type Config struct {
 	// E-56). 1 processes the ingest of an organization serially as before.
 	// Every instance must use the same value.
 	IngestLanes int
+	// ProbeStreamMaxBytes bounds the JetStream stream RETICORA_PROBE that
+	// takes the collectors' probe state changes and results
+	// (RETICORA_PROBE_STREAM_MAX_BYTES, default 5 GiB; E-173, WP-959).
+	ProbeStreamMaxBytes int64
+	// ProbeEdgeWorkers is the number of handlers per instance that answer
+	// the probe edge subjects in parallel (RETICORA_PROBE_EDGE_WORKERS,
+	// default and minimum 8; NFR-11, WP-959).
+	ProbeEdgeWorkers int
 
 	// Cache / Rate-Limiting / Idempotency
 	RedisURL string
@@ -262,7 +270,10 @@ func Load() *Config {
 		DatabaseURL: l.str("RETICORA_DATABASE_URL", "postgres://localhost:5432/reticora?sslmode=disable"),
 		NATSUrl:     l.str("RETICORA_NATS_URL", "nats://localhost:4222"),
 		IngestLanes: l.integer("RETICORA_INGEST_LANES", DefaultIngestLanes),
-		RedisURL:    l.str("RETICORA_REDIS_URL", "redis://localhost:6379"),
+
+		ProbeStreamMaxBytes: l.int64("RETICORA_PROBE_STREAM_MAX_BYTES", DefaultProbeStreamMaxBytes),
+		ProbeEdgeWorkers:    l.integer("RETICORA_PROBE_EDGE_WORKERS", MinProbeEdgeWorkers),
+		RedisURL:            l.str("RETICORA_REDIS_URL", "redis://localhost:6379"),
 
 		S3Endpoint:  l.str("RETICORA_S3_ENDPOINT", "localhost:9000"),
 		S3Bucket:    l.str("RETICORA_S3_BUCKET", "reticora"),
@@ -477,6 +488,15 @@ const (
 	MaxIngestLanes     = 16
 )
 
+// Probe edge (WP-959): the byte limit of the stream RETICORA_PROBE
+// (probe.DefaultStreamMaxBytes) and the bounds of the handler pool per
+// instance (probe.DefaultEdgeWorkers).
+const (
+	DefaultProbeStreamMaxBytes = int64(5) << 30
+	MinProbeEdgeWorkers        = 8
+	MaxProbeEdgeWorkers        = 256
+)
+
 // Background workers with an independent operator switch (OPS-02). The
 // convention: worker <name> is switched by RETICORA_WORKER_<NAME>_ENABLED
 // (true/false, default true); a disabled worker is not started in this
@@ -676,6 +696,13 @@ func (c *Config) Validate(noDB bool) error {
 	}
 	if c.IngestLanes < 1 || c.IngestLanes > MaxIngestLanes {
 		errs = append(errs, fmt.Errorf("RETICORA_INGEST_LANES must be between 1 and %d, got %d", MaxIngestLanes, c.IngestLanes))
+	}
+	if c.ProbeStreamMaxBytes <= 0 {
+		errs = append(errs, fmt.Errorf("RETICORA_PROBE_STREAM_MAX_BYTES must be positive, got %d", c.ProbeStreamMaxBytes))
+	}
+	if c.ProbeEdgeWorkers < MinProbeEdgeWorkers || c.ProbeEdgeWorkers > MaxProbeEdgeWorkers {
+		errs = append(errs, fmt.Errorf("RETICORA_PROBE_EDGE_WORKERS must be between %d and %d, got %d",
+			MinProbeEdgeWorkers, MaxProbeEdgeWorkers, c.ProbeEdgeWorkers))
 	}
 	if c.RateLimitRPM <= 0 {
 		errs = append(errs, fmt.Errorf("RETICORA_RATE_LIMIT_RPM must be positive, got %d", c.RateLimitRPM))

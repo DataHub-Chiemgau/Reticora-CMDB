@@ -59,7 +59,7 @@ func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range append(append([]string{
 		"RETICORA_ENVIRONMENT", "RETICORA_RATE_LIMIT_RPM", "RETICORA_RATE_LIMIT_ORG_RPM", "RETICORA_METRICS_TENANT_LABEL", "RETICORA_NATS_URL",
-		"RETICORA_INGEST_LANES", "RETICORA_INVITATION_ACCEPT_URL", "RETICORA_SIGNUP_VERIFY_URL", "RETICORA_EVENTS_MAX_AGE",
+		"RETICORA_INGEST_LANES", "RETICORA_PROBE_STREAM_MAX_BYTES", "RETICORA_PROBE_EDGE_WORKERS", "RETICORA_INVITATION_ACCEPT_URL", "RETICORA_SIGNUP_VERIFY_URL", "RETICORA_EVENTS_MAX_AGE",
 		"RETICORA_EVENTS_MAX_BYTES", "RETICORA_DOCUMENT_MAX_UPLOAD_MB", "RETICORA_DOCUMENT_UPLOAD_CONCURRENCY",
 		"RETICORA_DOCUMENT_UPLOAD_TIMEOUT", "RETICORA_CLAMD_ADDR", "RETICORA_CLAMD_TIMEOUT", "RETICORA_MODULES",
 	}, requiredOutsideDevelopment...), s3Keys...) {
@@ -213,6 +213,9 @@ func TestValidateRejectsInvalidSettings(t *testing.T) {
 		{"no ingest lane", map[string]string{"RETICORA_INGEST_LANES": "0"}, false, "RETICORA_INGEST_LANES must be between 1 and 16, got 0"},
 		{"too many ingest lanes", map[string]string{"RETICORA_INGEST_LANES": "17"}, false, "RETICORA_INGEST_LANES must be between 1 and 16, got 17"},
 		{"unparsable ingest lanes", map[string]string{"RETICORA_INGEST_LANES": "x"}, false, "RETICORA_INGEST_LANES has an invalid value"},
+		{"too few probe edge workers", map[string]string{"RETICORA_PROBE_EDGE_WORKERS": "4"}, false, "RETICORA_PROBE_EDGE_WORKERS must be between 8 and 256, got 4"},
+		{"too many probe edge workers", map[string]string{"RETICORA_PROBE_EDGE_WORKERS": "257"}, false, "RETICORA_PROBE_EDGE_WORKERS must be between 8 and 256, got 257"},
+		{"no probe stream bytes", map[string]string{"RETICORA_PROBE_STREAM_MAX_BYTES": "0"}, false, "RETICORA_PROBE_STREAM_MAX_BYTES must be positive"},
 		{"no upload size", map[string]string{"RETICORA_DOCUMENT_MAX_UPLOAD_MB": "0"}, false, "RETICORA_DOCUMENT_MAX_UPLOAD_MB must be positive"},
 		{"negative upload size", map[string]string{"RETICORA_DOCUMENT_MAX_UPLOAD_MB": "-1"}, false, "RETICORA_DOCUMENT_MAX_UPLOAD_MB must be positive"},
 		{"no upload concurrency", map[string]string{"RETICORA_DOCUMENT_UPLOAD_CONCURRENCY": "0"}, false,

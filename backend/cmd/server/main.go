@@ -43,6 +43,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/httpx"
 	redisx "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/redis"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/probe"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
@@ -313,6 +314,15 @@ func main() {
 		}
 		defer ingestQueue.Close()
 		slog.Info("ingest lanes", "lanes", ingestQueue.Lanes())
+		// The collectors' probe state changes and results are stored in
+		// RETICORA_PROBE before the edge acknowledges them (E-173, WP-959).
+		streamCtx, cancelStream := context.WithTimeout(context.Background(), 30*time.Second)
+		_, natsErr = probe.EnsureStream(streamCtx, ingestQueue.JetStream(), probe.DefaultStream(cfg.ProbeStreamMaxBytes))
+		cancelStream()
+		if natsErr != nil {
+			slog.Error("failed to set up the probe stream on NATS", "error", natsErr)
+			os.Exit(1)
+		}
 	}
 	// Jobs are distributed over the JOBS work queue on NATS (TEC-14); job
 	// kinds register their handlers with jobQueue.Handle.
@@ -577,6 +587,8 @@ func main() {
 		Egress:               egressPolicy,
 		Readiness:            readiness,
 		IngestQueue:          ingestQueue,
+		ProbeEdgeWorkers:     cfg.ProbeEdgeWorkers,
+		ProbeStreamMaxBytes:  cfg.ProbeStreamMaxBytes,
 		JobQueue:             jobQueue,
 		Signup:               signupService(cfg, auditPool, smtpSender),
 		Notifications:        notifications,

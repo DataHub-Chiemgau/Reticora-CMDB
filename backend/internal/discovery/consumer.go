@@ -962,6 +962,10 @@ func (q *NATSIngestQueue) Publish(ctx context.Context, msgs []IngestMessage) err
 // Close closes the NATS connection.
 func (q *NATSIngestQueue) Close() { q.nc.Close() }
 
+// JetStream is the JetStream context of the queue's connection, on which the
+// edge data path also stores the probe messages (RETICORA_PROBE, WP-959).
+func (q *NATSIngestQueue) JetStream() jetstream.JetStream { return q.js }
+
 // Attach sets the handler that processes consumed messages and makes it
 // publish to this queue with the queue's lanes.
 func (q *NATSIngestQueue) Attach(h *Handler) {

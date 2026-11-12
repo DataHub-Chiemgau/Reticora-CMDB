@@ -11,8 +11,9 @@ nichts ankommt. Ports und Freigaben: [Firewall-Matrix](firewall-matrix.md).
 
 ## Der einzige Lieferweg: mTLS-NATS auf Port 4222
 
-Records, Heartbeats und Messwerte gehen ausschließlich über die
-mTLS-Verbindung des Collectors zum NATS-Endpunkt `nats-edge`:
+Records, Heartbeats, Messwerte und die Probe-Nachrichten des Monitorings
+gehen ausschließlich über die mTLS-Verbindung des Collectors zum
+NATS-Endpunkt `nats-edge`:
 
 - Endpunkt: `tls://<Host der Server-URL>:4222`; `RETICORA_NATS_URL`
   überschreibt ihn. Die Server-URL ist `RETICORA_SERVER_URL` oder, wenn
@@ -222,6 +223,48 @@ während des Abrufs, trägt die Antwort auf die nächste Seite
 verwirft die bisher geholten Seiten und beginnt mit Seite 1 der neuen
 Version. Übernommen wird ein Satz erst, wenn alle Seiten einer Version
 vorliegen.
+
+## Probe-Subjects am Edge (E-173)
+
+Zustandswechsel, Ergebnisse und Lebenszeichen des Monitorings gehen per
+Request/Reply über dieselbe mTLS-Verbindung wie Records und Messwerte, im
+Subject-Baum des Collectors (`collector.<org>.<id>.>`):
+
+| Subject | Nachricht | Antwort |
+|---|---|---|
+| `collector.<org>.<id>.probe.state` | ein `StateChange` | `{"status":202,"seq":<seq>}` nach dem PubAck des Streams |
+| `collector.<org>.<id>.probe.results` | ein `ResultBatch` (1 bis 1.000 Ergebnisse) | `{"status":202,"seq":<höchste seq des Bündels>}` nach dem PubAck |
+| `collector.<org>.<id>.probe.alive` | ein `Alive` | `{"status":200,"server_time":"…"}` (`AliveReply`); gespeichert wird nichts |
+
+- **Identität.** Organisation und Collector stammen aus dem Subject, also
+  aus der authentifizierten Edge-Identität. Ein unbekannter Collector
+  erhält 404, ein gesperrter 403, bevor die Nachricht gelesen wird
+  (COL-04). Nennt eine Nachricht eine andere `collector_id`, antwortet der
+  Server 422 (`collector_id: invalid`).
+- **Annahme.** Der Server prüft Größe (höchstens 256 KiB, sonst 413),
+  `schema_version` (andere Hauptversion: 400) und die Felder (422 mit dem
+  Feld). Gültige Zustandswechsel und Bündel legt er im JetStream-Stream
+  `RETICORA_PROBE` ab (`probe.state.<org>.<id>` bzw.
+  `probe.results.<org>.<id>`) und antwortet erst nach dem PubAck. Eine
+  Bestätigung heißt also: Die Nachricht ist persistent angenommen, der
+  Collector darf seinen Spool bis zur gemeldeten `seq` freigeben.
+- **Doppelversand.** Die Nachrichten-ID ist
+  `<collector>:<art>:<epoch>:<seq_from>-<seq_to>` mit `<art>` = `state`
+  oder `results` (bei einem Zustandswechsel `seq_from = seq_to`, bei einem
+  Bündel mit mehreren Epochen die höchste). JetStream dedupliziert über den
+  ganzen Stream; die Art trennt Zustandswechsel und Ergebnisse, deren
+  Zähler getrennt laufen (WP-952) und gleiche `seq` tragen können.
+  Ein Doppelversand innerhalb von 2 min ergibt eine Stream-Nachricht und
+  wird ebenfalls mit 202 bestätigt (`duplicate: true`); danach
+  dedupliziert die Datenbank über (`probe_id`, `epoch`, `seq`) (PRB-07).
+- **Kein Monitoring.** Ohne Feature `monitoring` antworten alle drei
+  Subjects 403 mit Problemtyp `feature-not-entitled`; der Collector pausiert
+  dann seinen Uplink, die Daten bleiben im Spool (WP-955).
+- **Störung.** Bestätigt der Stream nicht (NATS oder Stream nicht
+  verfügbar, Stream voll), antwortet der Server 503; der Collector
+  wiederholt mit Backoff, nichts geht verloren.
+
+Stream, Grenzen und Handler-Pool: [`docs/ops/workers.md`](../ops/workers.md#probe-edge-and-stream-reticora_probe-wp-959).
 
 ## Log-Ereignisse
 

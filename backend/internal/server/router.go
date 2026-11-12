@@ -260,6 +260,11 @@ type Options struct {
 	// IngestQueue carries discovery records over ingest.> (REC-01); nil
 	// processes them in the request.
 	IngestQueue *discovery.NATSIngestQueue
+	// ProbeEdgeWorkers and ProbeStreamMaxBytes configure the probe edge
+	// subjects on the IngestQueue connection (RETICORA_PROBE_EDGE_WORKERS,
+	// RETICORA_PROBE_STREAM_MAX_BYTES, WP-959); 0 takes the defaults.
+	ProbeEdgeWorkers    int
+	ProbeStreamMaxBytes int64
 	// JobQueue runs the submitted job kinds on the JOBS work queue on NATS
 	// (TEC-14, jobkinds.go); nil runs them in the accepting process.
 	JobQueue *jobs.Queue
@@ -757,6 +762,17 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		monitoringFeatures = opts.Entitlements
 	}
 	discoveryHandler.WithEdgeMetrics(monitoringHandler, monitoringFeatures)
+	// The probe state changes, results and alive messages arrive on the
+	// edge as well and go into the stream RETICORA_PROBE on the ingest
+	// queue's connection (E-173, WP-959); the stream is created at start.
+	if opts.IngestQueue != nil {
+		probeEdge := probe.NewEdge(opts.IngestQueue.JetStream(), probe.DefaultStream(opts.ProbeStreamMaxBytes)).
+			WithWorkers(opts.ProbeEdgeWorkers)
+		if opts.Entitlements != nil {
+			probeEdge.WithFeatures(opts.Entitlements)
+		}
+		discoveryHandler.WithEdgeProbes(probeEdge)
+	}
 	// The location tree is core; its rack nodes are written only with
 	// rack_view, like /api/v1/racks (ENT-05, F-400).
 	locationsHandler := locations.NewHandler(repos.LocationTree)

@@ -63,7 +63,7 @@ monitoring workers itself.
 |---|---|---|
 | `webhook_dispatcher` | `RETICORA_WORKER_WEBHOOK_DISPATCHER_ENABLED` | Re-sends persisted webhook deliveries that are due for a retry. The first attempt of an event is sent by the instance that raised it, which holds a two-minute lease on it; this worker takes the delivery over only after the lease, when that instance died (TEC-14). |
 | `export` | `RETICORA_WORKER_EXPORT_ENABLED` | Processes queued asynchronous export jobs. Only active with object storage. A job that has been running for 15 minutes is queued again: its instance died (TEC-14). |
-| `ingest` | `RETICORA_WORKER_INGEST_ENABLED` | Consumes `ingest.>` from NATS (REC-01): one consumer per ingest lane (`RETICORA_INGEST_LANES`, default 4), the consumer of the releases before the lanes and lanes left by a higher lane count; at most 6 batches at a time per instance. The API still publishes to the queue. It also answers the collectors' records, heartbeats and metric samples over the NATS endpoint (`collector.<org>.<id>.ingest`, `….heartbeat`, `….metrics`, COL-08, MON-02; the samples are assigned in the collector's client and site scope and need the monitoring entitlement); a request of an unknown or disabled collector is refused before it is handled and changes nothing (COL-04). Only an instance running this worker reports the backlog per lane in `/readyz` (`details.ingest`, its last 30-s sample); every instance running it holds up to 1,542 identity locks, which sizes the PostgreSQL lock table. See [`docs/betrieb/ingest-spuren.md`](../betrieb/ingest-spuren.md). |
+| `ingest` | `RETICORA_WORKER_INGEST_ENABLED` | Consumes `ingest.>` from NATS (REC-01): one consumer per ingest lane (`RETICORA_INGEST_LANES`, default 4), the consumer of the releases before the lanes and lanes left by a higher lane count; at most 6 batches at a time per instance. The API still publishes to the queue. It also answers the collectors' records, heartbeats and metric samples over the NATS endpoint (`collector.<org>.<id>.ingest`, `….heartbeat`, `….metrics`, COL-08, MON-02, and the probe subjects `….probe.state`, `….probe.results`, `….probe.alive`, see [Probe edge and stream RETICORA_PROBE](#probe-edge-and-stream-reticora_probe-wp-959); the samples are assigned in the collector's client and site scope and need the monitoring entitlement); a request of an unknown or disabled collector is refused before it is handled and changes nothing (COL-04). Only an instance running this worker reports the backlog per lane in `/readyz` (`details.ingest`, its last 30-s sample); every instance running it holds up to 1,542 identity locks, which sizes the PostgreSQL lock table. See [`docs/betrieb/ingest-spuren.md`](../betrieb/ingest-spuren.md). |
 | `monitoring` | `RETICORA_WORKER_MONITORING_ENABLED` | Evaluates the alert rules every minute (MON-04). Part of the module `monitoring` (former key `alerting`, WP-863): it starts only with `RETICORA_MODULES` naming `monitoring` or the phase value `P3` (or `all`), otherwise the server logs `worker disabled` for it. It does not compute `ci.health`; that is the worker `health`. |
 | `health` | `RETICORA_WORKER_HEALTH_ENABLED` | Recomputes `ci.health` of every CI every minute (DB-05, MON-02): per organization, in its tenant transaction, the database function `ci_refresh_health` sets `critical` or `warning` when the latest sample of a metric breaches an enabled alert rule of that severity, `ok` for samples of the last 15 minutes without a breach and `unknown` without such a sample. It belongs to no late module and runs in the G1 default configuration (`RETICORA_MODULES` empty); with the module `monitoring` the refresh still runs once per cycle, here and not in `monitoring` (F-087). Run it on one or more instances; a refresh is idempotent. Needs the database. |
 | `scheduler` | `RETICORA_WORKER_SCHEDULER_ENABLED` | Runs the system jobs on their cron schedules (JOB-02). Every replica runs a scheduler; one leads through a PostgreSQL advisory lock, each job kind also runs under a lock of its own, so scaling (HPA) never runs a job twice. When the leader stops or loses its database session, another replica takes over and catches up on missed slots, at most `MaxCatchUp` per kind (state in `scheduler_run`). Registered: `reservation.expire` (every minute) releases expired reservations; the retention runs (nightly, see below); the notice runs `entitlement.notices` and `certificate.notices` (daily, see below); `audit.route_intents` (every minute, see below); `discovery.jobs.reap` (every minute) fails ad-hoc discovery jobs that their collector neither took nor finished within one hour of creation or start with cause `timeout`; `jobs.reap` (every minute, see "Job queue and timeout reaper"); `notify.digest` (every minute, see "Notification digests"); `history.weekly_snapshot` (Sundays 02:07, see "Weekly CI snapshots"; with the module `inventory` also the asset snapshots); with the module `monitoring` `alarm.retention` (daily 04:37, see "Retention runs"); with the module `ticketing` `sla.check` (every minute, only for organizations with an active `ticketing_standard`) marks each due time of a ticket SLA that passed without first response or resolution and reports it exactly once as `ticket.sla_breached`, the escalation to the assignee and the lead of the ticket's team (TKT-01, WP-769; batches of 500 rows, one transaction each); with the module `inventory` `expiry.check` (daily 05:07 UTC, only for organizations with an active `assets_basic`) reports each reached stage before the end of a contract or an asset warranty once as `contract.expiring` or `asset.warranty_expiring` (NTF-05 [P2], MGT-12, WP-270; see "Notice runs"); with the module `inventory` and a blob storage `signature.migrate` (every 24 hours, at most one missed run caught up) takes the legacy signatures of migration 000047 in `assignment_signature_legacy` over (AST-02, E-51, WP-749): per organization and batch of 100 rows the image (`image_base64`, or the blob of an `object_key` below `org/<org>/`, an image type of the upload whitelist by content) is stored outside the transaction, then in one tenant transaction it becomes a document of the category `signature` (version 1, uploaded by the user who booked the movement, counted against `max_storage_mb`) linked to the movement, a plaintext signer name is sealed into the vault, the payload is replaced by `{document_id, signer_surrogate, signed_at, method}` (`payload_sha256` stays) and `stock_movement.signature_migrated` is audited; the scan is submitted after the commit, on an error the stored images are deleted. Rows it cannot take over (foreign or missing object key, no image, unreadable blob, storage limit, plaintext signer without vault) stay unchanged and are logged with `slog.Warn` (organization, row id, reason); later runs try them again and skip the rows already taken over; with the module `documents` and the job queue `document.scan_sweep` (every 15 minutes) submits the document versions still `pending_scan` or `scan_failed` without an open job to `document.scan` again (SEC-09, E-42). |
@@ -774,6 +774,55 @@ After the alert:
 2. Read the uses in `operator_audit` (`GET /api/v1/admin/audit`, operator kind `break_glass`) and check the chain with `GET /api/v1/admin/audit/verify`. The server log of the instance named in the alert has a line `SECURITY ALERT: operator break-glass token used` with method, path and remote address per request.
 3. If the use is not justified or cannot be attributed, treat the token as compromised: set a new `RETICORA_OPERATOR_TOKEN` (at least 32 characters) on every server instance and restart them, then review the organizations and entitlements written in the audited requests.
 4. Record the result (justification or incident) with the alert.
+
+## Probe edge and stream RETICORA_PROBE (WP-959)
+
+The collectors deliver the monitoring probes' state changes, result batches
+and alive messages over the NATS endpoint (`collector.<org>.<id>.probe.state`,
+`….probe.results`, `….probe.alive`; E-173, PRB-05, PRB-07). The `ingest`
+worker serves them next to `.ingest`, `.heartbeat` and `.metrics`, in the same
+queue group `reticora-edge-data`; a request of an unknown or disabled
+collector is refused before it is handled (COL-04), without the feature
+`monitoring` all three answer 403 `feature-not-entitled`. Details of the
+messages: [`docs/betrieb/collector-verbindung.md`](../betrieb/collector-verbindung.md#probe-subjects-am-edge-e-173).
+
+- **Handler pool.** nats.go answers the messages of one subscription one
+  after another; the probe subjects therefore run on a pool of
+  `RETICORA_PROBE_EDGE_WORKERS` handlers per instance (default and minimum
+  8, at most 256), fed by `ChanQueueSubscribe` through a buffer of 65,536
+  messages (the default pending limit of a NATS subscription), sized for the
+  resync burst of many collectors. nats.go drops a message the full buffer
+  cannot take (slow consumer) and the queue group does not hand it to
+  another instance; the server then logs `probe edge dropped messages`
+  (checked every 10 s) and the collectors repeat the request after their
+  request timeout. The benchmark
+  `BenchmarkProbeEdgeResults` (`backend/internal/probe/edge_test.go`) sends
+  batches of 177 results (the mean batch of E-173) through the dispatcher
+  into the stream; it requires at least 2,000 batches per minute per instance
+  (AK6) and measured about 126,000 on a developer machine. The test
+  `TestProbeEdgeResultsThroughput` checks the same lower bound in every test
+  run (CI with `TEST_NATS_URL`).
+- **Stream.** State changes and result batches are stored in the JetStream
+  stream `RETICORA_PROBE` (subjects `probe.state.<org>.<collector>` and
+  `probe.results.<org>.<collector>`) before the collector gets its
+  acknowledgement; the alive message is answered with the server time and not
+  stored. The server creates or updates the stream at start
+  (`CreateOrUpdateStream`, next to `RETICORA_INGEST`) when `RETICORA_NATS_URL`
+  is set.
+
+| Setting | Value |
+|---|---|
+| Retention | work queue: a message is gone once the workers `probe-ingest` (WP-960) or `probe-state` (WP-961) acknowledged it |
+| Storage | file |
+| Duplicate window | 2 min; the message ID is `<collector>:<kind>:<epoch>:<seq_from>-<seq_to>` with kind `state` or `results` (deduplication spans the whole stream; state and results count their seq separately), a repeated transmission is acknowledged again but stored once (PRB-07) |
+| `MaxAge` | 24 h, as the collector's spool (PRB-07) |
+| `MaxBytes` | `RETICORA_PROBE_STREAM_MAX_BYTES`, default 5 GiB (≈ 2 days of results at 353 results/s, E-173) |
+| Discard | new: a full stream refuses messages (503), the collectors keep them in their spool |
+
+ADR 0002 (WP-943) may correct these values. A 503 on the probe subjects in
+the server log (`probe edge publish failed`) means the stream did not
+acknowledge: check NATS, the stream's fill level
+(`nats stream info RETICORA_PROBE`) and the probe workers.
 
 ## Planned workers
 
