@@ -1801,6 +1801,8 @@ Teilfrage Datenbasis (aus `d-alr-sla-source`): (a) Berechnung aus `metric_sample
 
 **Auswirkung:** WP-908 (Tabelle, Schreibpfade, `GET /subnets/{id}/history` und `/ips/{id}/history`).
 
+**Nachtrag 2026-11-12 (WP-908, nach Empfehlung):** Neben `updated_at`, `created_at` und `address_host` protokolliert `ipam_change` auch die Beobachtungsbuchhaltung `last_seen_at` und `miss_count` nicht als Feldänderung. Jeder Discovery-Sync setzt `last_seen_at` jeder beobachteten Adresse neu; bei 50.000 Adressen und einem Lauf je Stunde wären das ≈ 1,2 Mio. Zeilen/Tag statt der oben gerechneten ≈ 2.500, ohne fachliche Aussage. Anlage, Verschiebung und Entfernung durch die Discovery bleiben als `create`, `update` und `delete` erfasst.
+
 **Quelle:** `backend/internal/audit/scope.go:145`; `backend/internal/ipam/pg_repository.go:905`; `backend/migrations/000055_cmdb_extensions.up.sql:538`; `backend/migrations/000261_relationship_change.up.sql:31`; `docs/spec/katalog-v3/06-audit-sicherheit-events.md:20` (AUD-09).
 
 **Betroffene IDs:** IPM-08, AUD-09

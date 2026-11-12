@@ -232,10 +232,12 @@ GET /api/v1/inventory/items/{id} stock:read
 GET /api/v1/invitations user:manage
 GET /api/v1/ip-addresses ipam:read
 GET /api/v1/ip-addresses/{id} ipam:read
+GET /api/v1/ip-addresses/{id}/history ipam:read
 GET /api/v1/ipam-sections ipam:read
 GET /api/v1/ipam-sections/{id} ipam:read
 GET /api/v1/ips ipam:read
 GET /api/v1/ips/{id} ipam:read
+GET /api/v1/ips/{id}/history ipam:read
 GET /api/v1/jobs job:read
 GET /api/v1/jobs/{id} job:read
 GET /api/v1/jobs/{id}/result job:read
@@ -331,6 +333,7 @@ GET /api/v1/subnets/{id}/addresses ipam:read
 GET /api/v1/subnets/{id}/children ipam:read
 GET /api/v1/subnets/{id}/free-addresses ipam:read
 GET /api/v1/subnets/{id}/free-subnets ipam:read
+GET /api/v1/subnets/{id}/history ipam:read
 GET /api/v1/subnets/{id}/reservations ipam:read
 GET /api/v1/subnets/{id}/usage ipam:read
 GET /api/v1/suppliers contract:read

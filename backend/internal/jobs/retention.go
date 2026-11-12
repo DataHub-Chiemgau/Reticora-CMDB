@@ -155,6 +155,8 @@ var historyRetention = []string{
 			WHEN 'asset' THEN e.created_at <= ` + assetHistoryAnchor("e.entity_id") + `
 			ELSE true END`,
 	`DELETE FROM location_change WHERE organization_id = $1 AND changed_at < $2`,
+	// The IPAM history (IPM-08, WP-908): the same period, no anchor.
+	`DELETE FROM ipam_change WHERE organization_id = $1 AND changed_at < $2`,
 	`DELETE FROM relationship_change c WHERE c.organization_id = $1 AND c.created_at < $2
 		AND NOT EXISTS (SELECT 1 FROM (VALUES (c.source_ci_id), (c.target_ci_id),
 				(CASE WHEN c.change_kind = 'rewired' THEN (c.before->>'source_ci_id')::uuid END),
@@ -164,8 +166,8 @@ var historyRetention = []string{
 	`DELETE FROM asset_snapshot s WHERE s.organization_id = $1 AND s.taken_at < ` + assetHistoryAnchor("s.asset_id"),
 }
 
-// RunHistory removes CI, entity, location and relationship history
-// (relationship_change, WP-771) and CI and asset snapshots older than the
+// RunHistory removes CI, entity, location, relationship and IPAM history
+// (relationship_change, WP-771; ipam_change, WP-908) and CI and asset snapshots older than the
 // history period, keeping per CI and asset its anchor snapshot and the
 // rows after it (historyRetention, WP-793, WP-795).
 func (r *Retention) RunHistory(ctx context.Context) error {

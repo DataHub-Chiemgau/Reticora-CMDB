@@ -9832,6 +9832,46 @@ paths:
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
 
+  /api/v1/subnets/{id}/history:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listSubnetHistory
+      tags: [IPAM]
+      summary: Change history of a subnet
+      description: >-
+        The rows of ipam_change of the subnet (IPM-08), the newest first: one
+        row per create and delete with the object as new_value or old_value
+        and one row per changed field with old_value and new_value. source is
+        manual, discovery, scan, import or allocation; actor_id is the user
+        surrogate, absent for a writer without user (Discovery). The rows
+        carry the client and site of the object; a principal restricted to
+        clients or sites sees only the rows of its scope and of org-wide
+        objects. An object the caller does not see is 404; a deleted object
+        lists its history while the caller sees the row of its deletion.
+        Without PostgreSQL 501. Requires ipam:read.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated change history.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IPAMChangeListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '501':
+          description: The IPAM history needs PostgreSQL.
+
   /api/v1/subnets/{id}/addresses:
     parameters:
       - $ref: '#/components/parameters/ResourceID'
@@ -10112,6 +10152,90 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /api/v1/ip-addresses/{id}/history:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listIPAddressHistoryLegacy
+      deprecated: true
+      x-deprecated-at: '2026-10-13'
+      x-sunset: '2027-10-14'
+      x-successor: '/api/v1/ips/{id}/history'
+      tags: [IPAM]
+      summary: Change history of an IP address
+      description: >-
+        The rows of ipam_change of the address (IPM-08), the newest first: one
+        row per create and delete with the object as new_value or old_value
+        and one row per changed field with old_value and new_value. source is
+        manual, discovery, scan, import or allocation; actor_id is the user
+        surrogate, absent for a writer without user (Discovery). The rows
+        carry the client and site of the object; a principal restricted to
+        clients or sites sees only the rows of its scope and of org-wide
+        objects. An object the caller does not see is 404; a deleted object
+        lists its history while the caller sees the row of its deletion.
+        Without PostgreSQL 501. Requires ipam:read.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated change history.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IPAMChangeListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '501':
+          description: The IPAM history needs PostgreSQL.
+
+  /api/v1/ips/{id}/history:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listIPAddressHistory
+      tags: [IPAM]
+      summary: Change history of an IP address
+      description: >-
+        The rows of ipam_change of the address (IPM-08), the newest first: one
+        row per create and delete with the object as new_value or old_value
+        and one row per changed field with old_value and new_value. source is
+        manual, discovery, scan, import or allocation; actor_id is the user
+        surrogate, absent for a writer without user (Discovery). The rows
+        carry the client and site of the object; a principal restricted to
+        clients or sites sees only the rows of its scope and of org-wide
+        objects. An object the caller does not see is 404; a deleted object
+        lists its history while the caller sees the row of its deletion.
+        Without PostgreSQL 501. Requires ipam:read.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Paginated change history.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IPAMChangeListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '501':
+          description: The IPAM history needs PostgreSQL.
 
   /api/v1/cis/{id}/interfaces:
     parameters:
@@ -39810,6 +39934,45 @@ components:
         client_id: { type: string, format: uuid }
         is_pool: { type: boolean, default: false }
         section_id: { type: string, format: uuid }
+
+    IPAMChange:
+      type: object
+      required: [id, object_kind, object_id, source, change_type, changed_at]
+      properties:
+        id: { type: string, format: uuid }
+        object_kind:
+          type: string
+          enum: [subnet, ip_address, vlan, vrf, section]
+        object_id: { type: string, format: uuid }
+        actor_id:
+          type: string
+          format: uuid
+          description: User surrogate (Konvention 16); absent without user.
+        source:
+          type: string
+          enum: [manual, discovery, scan, import, allocation]
+        change_type:
+          type: string
+          enum: [create, update, delete]
+        field_name:
+          type: string
+          description: The changed field of an update.
+        old_value:
+          description: The value before an update, the object of a delete (JSON).
+        new_value:
+          description: The value after an update, the object of a create (JSON).
+        changed_at: { type: string, format: date-time }
+
+    IPAMChangeListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/IPAMChange'
 
     SubnetListResponse:
       allOf:

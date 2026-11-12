@@ -1273,7 +1273,12 @@ func (r *PGRepository) SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID
 	var res SyncResult
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		existing := map[string]string{} // name -> id
-		rows, err := tx.Query(ctx, `SELECT id::text, name FROM network_interface WHERE ci_id = $1 AND organization_id = $2`, ciID, orgID)
+		// The first statement also names the source of the IPAM history
+		// rows of the transaction (app.ipam_change_source, WP-908): the
+		// uncorrelated sub-select runs once before the scan, without a
+		// statement of its own (TestIngestStatementBudget).
+		rows, err := tx.Query(ctx, `SELECT id::text, name FROM network_interface WHERE ci_id = $1 AND organization_id = $2
+			AND (SELECT set_config('app.ipam_change_source', $3, true)) IS NOT NULL`, ciID, orgID, ChangeSourceDiscovery)
 		if err != nil {
 			return fmt.Errorf("list interfaces: %w", err)
 		}

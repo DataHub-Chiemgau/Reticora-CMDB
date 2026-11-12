@@ -4257,6 +4257,29 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/subnets/{id}/history': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Change history of a subnet
+     * @description The rows of ipam_change of the subnet (IPM-08), the newest first: one row per create and delete with the object as new_value or old_value and one row per changed field with old_value and new_value. source is manual, discovery, scan, import or allocation; actor_id is the user surrogate, absent for a writer without user (Discovery). The rows carry the client and site of the object; a principal restricted to clients or sites sees only the rows of its scope and of org-wide objects. An object the caller does not see is 404; a deleted object lists its history while the caller sees the row of its deletion. Without PostgreSQL 501. Requires ipam:read.
+     */
+    get: operations['listSubnetHistory'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/subnets/{id}/addresses': {
     parameters: {
       query?: never;
@@ -4370,6 +4393,53 @@ export interface paths {
     head?: never;
     /** Update an IP address */
     patch: operations['updateIPAddress'];
+    trace?: never;
+  };
+  '/api/v1/ip-addresses/{id}/history': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Change history of an IP address
+     * @deprecated
+     * @description The rows of ipam_change of the address (IPM-08), the newest first: one row per create and delete with the object as new_value or old_value and one row per changed field with old_value and new_value. source is manual, discovery, scan, import or allocation; actor_id is the user surrogate, absent for a writer without user (Discovery). The rows carry the client and site of the object; a principal restricted to clients or sites sees only the rows of its scope and of org-wide objects. An object the caller does not see is 404; a deleted object lists its history while the caller sees the row of its deletion. Without PostgreSQL 501. Requires ipam:read.
+     */
+    get: operations['listIPAddressHistoryLegacy'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/ips/{id}/history': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * Change history of an IP address
+     * @description The rows of ipam_change of the address (IPM-08), the newest first: one row per create and delete with the object as new_value or old_value and one row per changed field with old_value and new_value. source is manual, discovery, scan, import or allocation; actor_id is the user surrogate, absent for a writer without user (Discovery). The rows carry the client and site of the object; a principal restricted to clients or sites sees only the rows of its scope and of org-wide objects. An object the caller does not see is 404; a deleted object lists its history while the caller sees the row of its deletion. Without PostgreSQL 501. Requires ipam:read.
+     */
+    get: operations['listIPAddressHistory'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   '/api/v1/cis/{id}/interfaces': {
@@ -19697,6 +19767,34 @@ export interface components {
       /** Format: uuid */
       section_id?: string;
     };
+    IPAMChange: {
+      /** Format: uuid */
+      id: string;
+      /** @enum {string} */
+      object_kind: 'subnet' | 'ip_address' | 'vlan' | 'vrf' | 'section';
+      /** Format: uuid */
+      object_id: string;
+      /**
+       * Format: uuid
+       * @description User surrogate (Konvention 16); absent without user.
+       */
+      actor_id?: string;
+      /** @enum {string} */
+      source: 'manual' | 'discovery' | 'scan' | 'import' | 'allocation';
+      /** @enum {string} */
+      change_type: 'create' | 'update' | 'delete';
+      /** @description The changed field of an update. */
+      field_name?: string;
+      /** @description The value before an update, the object of a delete (JSON). */
+      old_value?: unknown;
+      /** @description The value after an update, the object of a create (JSON). */
+      new_value?: unknown;
+      /** Format: date-time */
+      changed_at: string;
+    };
+    IPAMChangeListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['IPAMChange'][];
+    };
     SubnetListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Subnet'][];
     };
@@ -31089,6 +31187,56 @@ export interface operations {
       422: components['responses']['UnprocessableEntity'];
     };
   };
+  listSubnetHistory: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated change history. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['IPAMChangeListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description The IPAM history needs PostgreSQL. */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
   listSubnetAddresses: {
     parameters: {
       query?: {
@@ -31431,6 +31579,106 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+    };
+  };
+  listIPAddressHistoryLegacy: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated change history. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['IPAMChangeListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description The IPAM history needs PostgreSQL. */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  listIPAddressHistory: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated change history. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['IPAMChangeListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description The IPAM history needs PostgreSQL. */
+      501: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
     };
   };
   listCIInterfaces: {

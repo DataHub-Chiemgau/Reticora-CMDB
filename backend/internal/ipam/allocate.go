@@ -227,6 +227,9 @@ func (r *PGRepository) AllocateAddress(ctx context.Context, a *IPAddress) error 
 	}
 	orgID := a.OrganizationID
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := setChangeSource(ctx, tx, ChangeSourceAllocation); err != nil {
+			return err
+		}
 		vrfID, err := lockAllocation(ctx, tx, orgID, a.SubnetID)
 		if err != nil {
 			return err
@@ -311,6 +314,9 @@ func (r *PGRepository) AllocateSubnet(ctx context.Context, parentID string, pref
 	}
 	orgID := s.OrganizationID
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := setChangeSource(ctx, tx, ChangeSourceAllocation); err != nil {
+			return err
+		}
 		var vrfID, parentClient, parentSite, parentSection string
 		err := tx.QueryRow(ctx, `SELECT vrf_id::text, COALESCE(client_id::text, ''), COALESCE(site_id::text, ''), section_id::text
 			FROM subnet WHERE organization_id = $1 AND id = $2`, orgID, parentID).Scan(&vrfID, &parentClient, &parentSite, &parentSection)

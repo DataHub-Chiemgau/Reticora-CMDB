@@ -32,6 +32,14 @@ var matrixOrgWideWrites = map[string]string{
 	"vrf": "routing domains of the whole organization (TEN-10, WP-372, F-089)",
 }
 
+// matrixOrgWideDeletes lists the append-only tables whose rows only
+// principals without client and site restriction delete (the retention):
+// a scoped principal reads and writes them within its scope, its DELETE
+// finds no row.
+var matrixOrgWideDeletes = map[string]string{
+	"ipam_change": "IPAM history, migration 000302 (WP-908): ipam.TestIPAMHistoryOnPostgreSQL",
+}
+
 // matrixClientOnlyReads lists the tables whose organization-wide rows
 // (client NULL) only principals without client restriction read: a
 // principal restricted to clients reads only the rows of its clients, not
@@ -390,6 +398,10 @@ func (m *matrixRun) checkPrincipal(p *matrixPrincipal, all []scopeRow) {
 			m.checkUpdate(p, ctid, r, want, fail)
 		}
 		if tbl.privileges["DELETE"] {
+			want := want
+			if _, orgWide := matrixOrgWideDeletes[tbl.name]; orgWide && (p.scope["client"] != nil || p.scope["site"] != nil) {
+				want = false
+			}
 			n, err := m.attempt(func() (int64, error) {
 				tag, e := m.tx.Exec(m.ctx, `DELETE FROM `+ident+` WHERE ctid = $1::tid`, ctid)
 				return tag.RowsAffected(), e
