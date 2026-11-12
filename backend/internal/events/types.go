@@ -436,9 +436,14 @@ type ProbeStateChangedData struct {
 	RootIncidentID string `json:"root_incident_id,omitempty"`
 }
 
-// AlarmData is the data of the alarm.* types (ALR-01, ALR-02).
+// AlarmData is the data of the alarm.* types (ALR-01, ALR-02). id and
+// alarm_id both name the alarm: id is the frame of every type (WP-867),
+// alarm_id the name of ALR-01 (WP-982); dedup_key is the deduplication key
+// of the alarm.
 type AlarmData struct {
 	ID         string `json:"id"`
+	AlarmID    string `json:"alarm_id"`
+	DedupKey   string `json:"dedup_key"`
 	CIID       string `json:"ci_id,omitempty"`
 	ClientID   string `json:"client_id,omitempty"`
 	SiteID     string `json:"site_id,omitempty"`

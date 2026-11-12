@@ -2655,13 +2655,22 @@
     "alarm.opened": {
       "description": "Data of alarm.opened. entity_id: the alarm. Origin: EVT-03 [P3], E-161. Producer: WP-982. AlarmData is the data of the alarm.* types (ALR-01, ALR-02).",
       "type": "object",
-      "required": ["id", "severity"],
+      "required": ["id", "alarm_id", "dedup_key", "severity"],
       "additionalProperties": true,
       "properties": {
         "id": {
           "type": "string",
           "format": "uuid",
           "description": "The alarm."
+        },
+        "alarm_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The alarm (same as id; the name of ALR-01)."
+        },
+        "dedup_key": {
+          "type": "string",
+          "description": "Deduplication key of the alarm: source, source id and series."
         },
         "ci_id": {
           "type": "string",
@@ -2692,6 +2701,8 @@
       "examples": [
         {
           "id": "11111111-1111-4111-8111-111111111111",
+          "alarm_id": "11111111-1111-4111-8111-111111111111",
+          "dedup_key": "rule:55555555-5555-4555-8555-555555555555:ifInErrors/eth0",
           "ci_id": "22222222-2222-4222-8222-222222222222",
           "client_id": "33333333-3333-4333-8333-333333333333",
           "site_id": "44444444-4444-4444-8444-444444444444",
@@ -2703,13 +2714,22 @@
     "alarm.acknowledged": {
       "description": "Data of alarm.acknowledged. entity_id: the alarm. Origin: EVT-03 [P3], E-161. Producer: WP-982. AlarmData is the data of the alarm.* types (ALR-01, ALR-02).",
       "type": "object",
-      "required": ["id", "severity"],
+      "required": ["id", "alarm_id", "dedup_key", "severity"],
       "additionalProperties": true,
       "properties": {
         "id": {
           "type": "string",
           "format": "uuid",
           "description": "The alarm."
+        },
+        "alarm_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The alarm (same as id; the name of ALR-01)."
+        },
+        "dedup_key": {
+          "type": "string",
+          "description": "Deduplication key of the alarm: source, source id and series."
         },
         "ci_id": {
           "type": "string",
@@ -2740,6 +2760,8 @@
       "examples": [
         {
           "id": "11111111-1111-4111-8111-111111111111",
+          "alarm_id": "11111111-1111-4111-8111-111111111111",
+          "dedup_key": "rule:55555555-5555-4555-8555-555555555555:ifInErrors/eth0",
           "ci_id": "22222222-2222-4222-8222-222222222222",
           "client_id": "33333333-3333-4333-8333-333333333333",
           "site_id": "44444444-4444-4444-8444-444444444444",
@@ -2751,13 +2773,22 @@
     "alarm.escalated": {
       "description": "Data of alarm.escalated. entity_id: the alarm. Origin: EVT-03 [P3], E-161. Producer: WP-1146. AlarmData is the data of the alarm.* types (ALR-01, ALR-02).",
       "type": "object",
-      "required": ["id", "severity"],
+      "required": ["id", "alarm_id", "dedup_key", "severity"],
       "additionalProperties": true,
       "properties": {
         "id": {
           "type": "string",
           "format": "uuid",
           "description": "The alarm."
+        },
+        "alarm_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The alarm (same as id; the name of ALR-01)."
+        },
+        "dedup_key": {
+          "type": "string",
+          "description": "Deduplication key of the alarm: source, source id and series."
         },
         "ci_id": {
           "type": "string",
@@ -2788,6 +2819,8 @@
       "examples": [
         {
           "id": "11111111-1111-4111-8111-111111111111",
+          "alarm_id": "11111111-1111-4111-8111-111111111111",
+          "dedup_key": "rule:55555555-5555-4555-8555-555555555555:ifInErrors/eth0",
           "ci_id": "22222222-2222-4222-8222-222222222222",
           "client_id": "33333333-3333-4333-8333-333333333333",
           "site_id": "44444444-4444-4444-8444-444444444444",
@@ -2799,13 +2832,22 @@
     "alarm.severity_changed": {
       "description": "Data of alarm.severity_changed. entity_id: the alarm. Origin: EVT-03 [P3], E-161. Producer: WP-982. AlarmData is the data of the alarm.* types (ALR-01, ALR-02).",
       "type": "object",
-      "required": ["id", "severity"],
+      "required": ["id", "alarm_id", "dedup_key", "severity"],
       "additionalProperties": true,
       "properties": {
         "id": {
           "type": "string",
           "format": "uuid",
           "description": "The alarm."
+        },
+        "alarm_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The alarm (same as id; the name of ALR-01)."
+        },
+        "dedup_key": {
+          "type": "string",
+          "description": "Deduplication key of the alarm: source, source id and series."
         },
         "ci_id": {
           "type": "string",
@@ -2836,6 +2878,8 @@
       "examples": [
         {
           "id": "11111111-1111-4111-8111-111111111111",
+          "alarm_id": "11111111-1111-4111-8111-111111111111",
+          "dedup_key": "rule:55555555-5555-4555-8555-555555555555:ifInErrors/eth0",
           "ci_id": "22222222-2222-4222-8222-222222222222",
           "client_id": "33333333-3333-4333-8333-333333333333",
           "site_id": "44444444-4444-4444-8444-444444444444",
@@ -2847,13 +2891,22 @@
     "alarm.resolved": {
       "description": "Data of alarm.resolved. entity_id: the alarm. Origin: EVT-03 [P3], E-161. Producer: WP-982. AlarmData is the data of the alarm.* types (ALR-01, ALR-02).",
       "type": "object",
-      "required": ["id", "severity"],
+      "required": ["id", "alarm_id", "dedup_key", "severity"],
       "additionalProperties": true,
       "properties": {
         "id": {
           "type": "string",
           "format": "uuid",
           "description": "The alarm."
+        },
+        "alarm_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The alarm (same as id; the name of ALR-01)."
+        },
+        "dedup_key": {
+          "type": "string",
+          "description": "Deduplication key of the alarm: source, source id and series."
         },
         "ci_id": {
           "type": "string",
@@ -2884,6 +2937,8 @@
       "examples": [
         {
           "id": "11111111-1111-4111-8111-111111111111",
+          "alarm_id": "11111111-1111-4111-8111-111111111111",
+          "dedup_key": "rule:55555555-5555-4555-8555-555555555555:ifInErrors/eth0",
           "ci_id": "22222222-2222-4222-8222-222222222222",
           "client_id": "33333333-3333-4333-8333-333333333333",
           "site_id": "44444444-4444-4444-8444-444444444444",

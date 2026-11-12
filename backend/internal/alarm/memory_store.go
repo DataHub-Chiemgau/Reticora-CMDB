@@ -60,6 +60,18 @@ func (m *MemoryStore) LockForUpdate(ctx context.Context, orgID, id string) (*Ala
 	return m.Get(ctx, orgID, id)
 }
 
+// LockOpenByKey implements Store.
+func (m *MemoryStore) LockOpenByKey(_ context.Context, orgID, dedupKey string) (*Alarm, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, a := range m.alarms {
+		if a.OrganizationID == orgID && a.DedupKey == dedupKey && a.State != StateResolved {
+			return clone(a), nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
 // matches reports whether a passes the filter (without cursor and limit).
 func matches(a *Alarm, f *ListFilter) bool {
 	eq := func(p *string, v string) bool { return v == "" || (p != nil && *p == v) }
@@ -177,6 +189,9 @@ func (m *MemoryStore) UpdateState(_ context.Context, orgID, id string, u *StateU
 
 // AppendTransition implements Store.
 func (m *MemoryStore) AppendTransition(_ context.Context, orgID string, in *Transition) (*Transition, error) {
+	if err := ValidateTransition(in); err != nil {
+		return nil, err
+	}
 	tr := *in
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -52,6 +52,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/admp"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
@@ -267,6 +268,8 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 		admpAccount                        string
 		probeGroup                         string
 		admpSync                           *admp.Sync
+		alarms                             = alarm.NewPGService(f.App)
+		ackAlarm, sevAlarm, resAlarm       *alarm.Alarm
 		allocParent                        string
 		hookServer                         *httptest.Server
 		hookSubscription, hookDelivery     string
@@ -1145,6 +1148,85 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 					t.Errorf("org.deletion_cancelled data %v", data)
 				}
 			}},
+		{typ: events.AlarmOpened,
+			// The lifecycle opens a new alarm of a rule series (WP-982).
+			act: func(t *testing.T, refused bool) string {
+				a, err := alarms.Raise(f.OrgCtx(f.OrgA), f.OrgA, evt02AlarmInput("evt02-opened", alarm.SeverityWarning))
+				failed(t, "raise alarm", err, refused)
+				if refused {
+					unchanged(t, "alarms", count(t, `alarm WHERE organization_id = $1 AND series_key = 'evt02-opened'`, f.OrgA), "0")
+					return ""
+				}
+				return a.ID
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				want := alarm.DedupKey(alarm.SourceRule, evt02AlarmSource, "evt02-opened")
+				if data["id"] != entity || data["alarm_id"] != entity || data["severity"] != "warning" || data["dedup_key"] != want {
+					t.Errorf("alarm.opened data %v", data)
+				}
+			}},
+		{typ: events.AlarmAcknowledged,
+			setup: func(t *testing.T) {
+				var err error
+				if ackAlarm, err = alarms.Raise(f.OrgCtx(f.OrgA), f.OrgA, evt02AlarmInput("evt02-ack", alarm.SeverityWarning)); err != nil {
+					t.Fatal(err)
+				}
+			},
+			act: func(t *testing.T, refused bool) string {
+				_, err := alarms.Acknowledge(f.OrgCtx(f.OrgA), f.OrgA, ackAlarm.ID, f.User, "evt02")
+				failed(t, "acknowledge alarm", err, refused)
+				if refused {
+					unchanged(t, "alarm state", scalar(t, `SELECT state FROM alarm WHERE id = $1`, ackAlarm.ID), "open")
+				}
+				return ackAlarm.ID
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["alarm_id"] != entity || data["dedup_key"] != ackAlarm.DedupKey {
+					t.Errorf("alarm.acknowledged data %v", data)
+				}
+			}},
+		{typ: events.AlarmSeverityChanged,
+			setup: func(t *testing.T) {
+				var err error
+				if sevAlarm, err = alarms.Raise(f.OrgCtx(f.OrgA), f.OrgA, evt02AlarmInput("evt02-sev", alarm.SeverityWarning)); err != nil {
+					t.Fatal(err)
+				}
+			},
+			act: func(t *testing.T, refused bool) string {
+				_, err := alarms.Raise(f.OrgCtx(f.OrgA), f.OrgA, evt02AlarmInput("evt02-sev", alarm.SeverityCritical))
+				failed(t, "raise alarm severity", err, refused)
+				if refused {
+					unchanged(t, "alarm severity", scalar(t, `SELECT severity FROM alarm WHERE id = $1`, sevAlarm.ID), "warning")
+				}
+				return sevAlarm.ID
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["alarm_id"] != entity || data["severity"] != "critical" ||
+					data["dedup_key"] != sevAlarm.DedupKey {
+					t.Errorf("alarm.severity_changed data %v", data)
+				}
+			}},
+		{typ: events.AlarmResolved,
+			setup: func(t *testing.T) {
+				var err error
+				if resAlarm, err = alarms.Raise(f.OrgCtx(f.OrgA), f.OrgA, evt02AlarmInput("evt02-res", alarm.SeverityWarning)); err != nil {
+					t.Fatal(err)
+				}
+			},
+			act: func(t *testing.T, refused bool) string {
+				_, err := alarms.Clear(f.OrgCtx(f.OrgA), f.OrgA, resAlarm.DedupKey, time.Time{}, "evt02")
+				failed(t, "clear alarm", err, refused)
+				if refused {
+					unchanged(t, "alarm state", scalar(t, `SELECT state FROM alarm WHERE id = $1`, resAlarm.ID), "open")
+				}
+				return resAlarm.ID
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["alarm_id"] != entity || data["severity"] != "warning" ||
+					data["dedup_key"] != resAlarm.DedupKey {
+					t.Errorf("alarm.resolved data %v", data)
+				}
+			}},
 	}
 
 	// The table covers every type of events.Types without a frame in
@@ -1539,11 +1621,7 @@ func evt02ValidateValue(root map[string]any, path string, schema map[string]any,
 // (p3-gate) the list is empty.
 var plannedProducers = map[string]string{
 	"probe.state_changed":           "WP-961",
-	"alarm.opened":                  "WP-982",
-	"alarm.acknowledged":            "WP-982",
 	"alarm.escalated":               "WP-1146",
-	"alarm.severity_changed":        "WP-982",
-	"alarm.resolved":                "WP-982",
 	"incident.opened":               "WP-1028",
 	"incident.updated":              "WP-1036",
 	"incident.resolved":             "WP-1028",
@@ -1568,6 +1646,15 @@ var plannedProducers = map[string]string{
 	"notification.escalated":        "WP-1146",
 	"notification.acknowledged":     "WP-1146",
 	"org.export_completed":          "WP-1151",
+}
+
+// evt02AlarmSource is the rule of the alarm cases.
+const evt02AlarmSource = "11111111-1111-4111-8111-111111111111"
+
+// evt02AlarmInput is a raise of a rule series of the alarm cases.
+func evt02AlarmInput(series, severity string) *alarm.RaiseInput {
+	return &alarm.RaiseInput{SourceKind: alarm.SourceRule, SourceID: evt02AlarmSource,
+		SeriesKey: series, Severity: severity, Summary: "evt02 " + series}
 }
 
 // evt02ADMP is the fake ADMP of the admp.connection.refreshed case: one
@@ -1676,7 +1763,7 @@ func TestEVT02ProducerCoverageRule(t *testing.T) {
 		"two cases of a phase 2 type":    {append(slices.Clone(base), events.AssetCreated, events.AssetCreated), true},
 		"unknown type":                   {append(slices.Clone(base), "asset.exploded"), true},
 		"reserved type":                  {append(slices.Clone(base), "maintenance.scheduled"), true},
-		"phase 3 with a case and a plan": {append(slices.Clone(base), events.AlarmOpened), true},
+		"phase 3 with a case and a plan": {append(slices.Clone(base), events.AlarmEscalated), true},
 	} {
 		if problems := evt02CoverageProblems(tc.cases); (len(problems) != 0) != tc.fails {
 			t.Errorf("%s: problems %v, want failure %v", name, problems, tc.fails)

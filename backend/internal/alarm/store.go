@@ -2,6 +2,7 @@ package alarm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 )
@@ -23,6 +24,9 @@ type Store interface {
 	// LockForUpdate reads the alarm and locks its row until the end of the
 	// transaction (SELECT … FOR UPDATE), or returns ErrNotFound.
 	LockForUpdate(ctx context.Context, orgID, id string) (*Alarm, error)
+	// LockOpenByKey reads the alarm of dedupKey that is not resolved and
+	// locks its row like LockForUpdate, or returns ErrNotFound.
+	LockOpenByKey(ctx context.Context, orgID, dedupKey string) (*Alarm, error)
 	// UpdateState writes the state of the alarm and returns it, or
 	// ErrNotFound.
 	UpdateState(ctx context.Context, orgID, id string, u *StateUpdate) (*Alarm, error)
@@ -63,6 +67,44 @@ func validateState(u *StateUpdate) error {
 		return fmt.Errorf("alarm: unknown suppression reason %q", *u.SuppressedReason)
 	case (u.State == StateResolved) != (u.ResolvedAt != nil):
 		return fmt.Errorf("alarm: resolved_at is set exactly in state resolved")
+	}
+	return nil
+}
+
+// ErrInvalidTransitionInput is returned for a transition whose values the
+// database refuses (state, severity, reason or comment too long); nothing
+// is written.
+var ErrInvalidTransitionInput = errors.New("alarm: invalid transition input")
+
+// Lengths of the free text of a transition (characters), as the database
+// checks them.
+const (
+	ReasonMaxLen  = 200
+	CommentMaxLen = 1000
+)
+
+// ValidateTransition checks a transition against the value sets and
+// lengths of alarm_transition, so both stores refuse the same input.
+func ValidateTransition(tr *Transition) error {
+	switch {
+	case !slices.Contains(States, tr.ToState):
+		return fmt.Errorf("%w: unknown state %q", ErrInvalidTransitionInput, tr.ToState)
+	case tr.FromState != nil && !slices.Contains(States, *tr.FromState):
+		return fmt.Errorf("%w: unknown state %q", ErrInvalidTransitionInput, *tr.FromState)
+	case tr.FromSeverity != nil && !slices.Contains(Severities, *tr.FromSeverity),
+		tr.ToSeverity != nil && !slices.Contains(Severities, *tr.ToSeverity):
+		return fmt.Errorf("%w: unknown severity", ErrInvalidTransitionInput)
+	}
+	return validateTransitionText(tr.Reason, tr.Comment)
+}
+
+// validateTransitionText checks reason and comment of a transition.
+func validateTransitionText(reason string, comment *string) error {
+	if len([]rune(reason)) > ReasonMaxLen {
+		return fmt.Errorf("%w: reason longer than %d characters", ErrInvalidTransitionInput, ReasonMaxLen)
+	}
+	if comment != nil && len([]rune(*comment)) > CommentMaxLen {
+		return fmt.Errorf("%w: comment longer than %d characters", ErrInvalidTransitionInput, CommentMaxLen)
 	}
 	return nil
 }

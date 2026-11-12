@@ -1760,3 +1760,4 @@ PRT-07;[P3];E;collector/plugins/snmp/table_test.go;WP-993
 PRT-11;[P3];E;collector/plugins/snmp/table_test.go;WP-993
 PRT-16;[P3];E;collector/probe/gnmi/client_test.go;WP-1015
 PRT-21;[P3];E;collector/internal/fakegnmi/fakegnmi_test.go;WP-1015
+ALR-01;[P3];E;backend/internal/alarm/lifecycle_integration_test.go;WP-982

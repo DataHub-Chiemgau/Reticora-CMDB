@@ -103,6 +103,18 @@ func (s *PGStore) LockForUpdate(ctx context.Context, orgID, id string) (*Alarm, 
 	return out, err
 }
 
+// LockOpenByKey implements Store.
+func (s *PGStore) LockOpenByKey(ctx context.Context, orgID, dedupKey string) (*Alarm, error) {
+	var out *Alarm
+	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		out, err = scanAlarm(tx.QueryRow(ctx, `SELECT `+alarmColumns+` FROM alarm
+			WHERE organization_id = $1 AND dedup_key = $2 AND state <> 'resolved' FOR UPDATE`, orgID, dedupKey))
+		return err
+	})
+	return out, err
+}
+
 // List implements Store.
 func (s *PGStore) List(ctx context.Context, orgID string, f *ListFilter) (Page, error) {
 	args := []any{orgID}
@@ -247,6 +259,9 @@ func (s *PGStore) UpdateState(ctx context.Context, orgID, id string, u *StateUpd
 
 // AppendTransition implements Store.
 func (s *PGStore) AppendTransition(ctx context.Context, orgID string, tr *Transition) (*Transition, error) {
+	if err := ValidateTransition(tr); err != nil {
+		return nil, err
+	}
 	var at any
 	if !tr.At.IsZero() {
 		at = tr.At

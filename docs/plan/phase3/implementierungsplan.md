@@ -8259,19 +8259,22 @@ MON-04;[P3];E;backend/internal/alarm/alarm_scope_integration_test.go;WP-981
   - `alarm.severity_changed`
   - `alarm.resolved`, nur für zuvor geöffnete Alarme; `pending` → `resolved` erzeugt kein Ereignis
   - Un-Ack hat keinen Ereignistyp ([E-161](entscheidungen.md#e-161)); dafür gibt es Transition und Audit (WP-983).
-  Die Payload enthält `alarm_id`, `ci_id`, `client_id`, `site_id`, `severity` und `dedup_key`.
+  Die Payload enthält `alarm_id`, `ci_id`, `client_id`, `site_id`, `severity` und `dedup_key`. `events.AlarmData` und die `$defs` der `alarm.*`-Typen in `api/events.schema.json` führen `alarm_id` (gleich dem Rahmenfeld `id` aus WP-867) und `dedup_key` als Pflichtfelder; `ci_id`, `client_id` und `site_id` fehlen nach der Rahmenkonvention, wenn der Alarm keinen solchen Bezug hat.
 - [ ] **AK5:** Nebenläufigkeit: Parallele `Raise` desselben Schlüssels ergeben genau einen Alarm über `UpsertOpen` (ON CONFLICT auf den Teilindex) und genau ein `alarm.opened`. Ack und Clear sperren die Zeile (`SELECT … FOR UPDATE`).
 - [ ] **AK6:** Der Service läuft in der Transaktion des Aufrufers (Evaluator und Check-Consumer schreiben unter `database.WithTenant` je Organisation). Der `MemoryStore` bildet für `--no-db` dieselben Regeln ab.
 - [ ] **AK7:** Outbox-Durchsatz nach [E-226](entscheidungen.md#e-226): `Publisher.publishOrg` veröffentlicht je Organisation und Takt so lange Batches, bis die Outbox der Organisation leer oder ein Zeitbudget von 900 ms erreicht ist. Reihenfolge je Organisation, Advisory-Lock und Abbruch beim ersten Zustellfehler bleiben unverändert. Nachweis: ≥ 200 Ereignisse/s je Organisation.
 - [ ] **AK8:** `plannedProducers` verliert `alarm.opened`, `alarm.acknowledged`, `alarm.severity_changed` und `alarm.resolved`; `TestEveryEVT02TypeHasAProducer` erhält einen Produzentenfall je Typ. `alarm.escalated` bleibt bei WP-1146.
 
-**Dateien (9 Einträge):**
+**Dateien (12 Einträge):**
 
 - backend/internal/alarm/lifecycle.go (neu)
 - backend/internal/alarm/lifecycle_test.go (neu)
 - backend/internal/alarm/lifecycle_integration_test.go (neu)
+- backend/internal/alarm/store.go (aus WP-981): Port `LockOpenByKey`, gemeinsame Prüfung `ValidateTransition` (Grund ≤ 200, Kommentar ≤ 1.000 Zeichen)
 - backend/internal/alarm/pg_store.go (aus WP-981)
 - backend/internal/alarm/memory_store.go (aus WP-981)
+- backend/internal/events/types.go: `AlarmData` um `alarm_id` und `dedup_key`
+- api/events.schema.json: `$defs` der `alarm.*`-Typen um `alarm_id` und `dedup_key`
 - backend/internal/server/evt02_producers_integration_test.go
 - backend/internal/events/publisher.go
 - backend/internal/events/publisher_test.go (neu)

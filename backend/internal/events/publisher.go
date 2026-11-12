@@ -27,6 +27,10 @@ type Consumer interface {
 const (
 	DefaultBatch    = 100
 	DefaultInterval = time.Second
+	// DefaultBudget is how long one cycle keeps publishing the batches of
+	// an organization (E-226): an alarm storm drains at several batches
+	// per cycle instead of one.
+	DefaultBudget = 900 * time.Millisecond
 	// publisherLockKey namespaces the per-organization publisher lock.
 	publisherLockKey = 1165389429
 )
@@ -42,6 +46,9 @@ type Publisher struct {
 	consumers []Consumer
 	Batch     int
 	Interval  time.Duration
+	// Budget is how long publishOrg keeps publishing further batches of
+	// one organization in a cycle (DefaultBudget).
+	Budget time.Duration
 	// MaxAge and MaxBytes are the retention of the stream (EVT-01,
 	// RETICORA_EVENTS_MAX_AGE, RETICORA_EVENTS_MAX_BYTES); published outbox
 	// rows keep their data as long as the stream keeps the events
@@ -49,7 +56,15 @@ type Publisher struct {
 	MaxAge   time.Duration
 	MaxBytes int64
 	now      func() time.Time
+	// batch publishes one batch of an organization (publishBatch; tests
+	// replace it).
+	batch batchFunc
 }
+
+// batchFunc publishes one batch of at most limit pending events of an
+// organization and returns how many it delivered; full reports that the
+// batch was full and delivered completely, so more events may wait.
+type batchFunc func(ctx context.Context, orgID string, limit int) (published int, full bool, err error)
 
 // KeepPublished is how long published rows keep their data in the outbox:
 // as long as the stream keeps the events (MaxAge).
@@ -64,8 +79,10 @@ func (p *Publisher) WithClock(now func() time.Time) *Publisher {
 // NewPublisher creates a publisher on pool; js may be nil (no NATS: the
 // consumers still receive the events).
 func NewPublisher(pool *pgxpool.Pool, js jetstream.JetStream, consumers ...Consumer) *Publisher {
-	return &Publisher{pool: pool, js: js, consumers: consumers, Batch: DefaultBatch, Interval: DefaultInterval,
-		MaxAge: StreamMaxAge, MaxBytes: StreamMaxBytes, now: func() time.Time { return time.Now().UTC() }}
+	p := &Publisher{pool: pool, js: js, consumers: consumers, Batch: DefaultBatch, Interval: DefaultInterval,
+		Budget: DefaultBudget, MaxAge: StreamMaxAge, MaxBytes: StreamMaxBytes, now: func() time.Time { return time.Now().UTC() }}
+	p.batch = p.publishBatch
+	return p
 }
 
 // Setup creates or updates the stream RETICORA_EVENTS with the retention
@@ -138,10 +155,41 @@ func (p *Publisher) PublishPending(ctx context.Context) (int, error) {
 	return total, firstErr
 }
 
+// PublishOrg delivers the pending events of one organization and returns
+// how many it delivered (publishOrg).
+func (p *Publisher) PublishOrg(ctx context.Context, orgID string) (int, error) {
+	return p.publishOrg(ctx, orgID)
+}
+
+// publishOrg publishes batches of the organization until its outbox is
+// empty, a delivery fails or the cycle's Budget is spent (E-226): one batch
+// per cycle capped an organization at Batch events per Interval. Each batch
+// runs in a transaction of its own under the organization's advisory lock,
+// so the order per organization holds and the next batch starts after the
+// commit of the previous one.
 func (p *Publisher) publishOrg(ctx context.Context, orgID string) (int, error) {
-	scope := database.OrgWideScope(orgID, "")
+	start := p.now()
+	limit := p.Batch
+	if limit <= 0 {
+		limit = DefaultBatch
+	}
 	published := 0
-	var deliveryErr error
+	for {
+		n, full, err := p.batch(ctx, orgID, limit)
+		published += n
+		if err != nil || !full {
+			return published, err
+		}
+		if p.Budget <= 0 || p.now().Sub(start) >= p.Budget || ctx.Err() != nil {
+			return published, nil
+		}
+	}
+}
+
+// publishBatch publishes one batch of the organization (batchFunc).
+func (p *Publisher) publishBatch(ctx context.Context, orgID string, limit int) (published int, full bool, deliveryErr error) {
+	scope := database.OrgWideScope(orgID, "")
+	fetched := 0
 	err := database.WithTenant(ctx, p.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
 		var locked bool
 		if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock($1, audit_org_lock_key($2))`,
@@ -150,7 +198,7 @@ func (p *Publisher) publishOrg(ctx context.Context, orgID string) (int, error) {
 		}
 		rows, err := tx.Query(ctx, `SELECT id::text, type, organization_id::text, occurred_at, sequence,
 			COALESCE(entity_id, ''), COALESCE(entity_seq, 0), data
-			FROM event_outbox WHERE organization_id = $1 AND published_at IS NULL ORDER BY sequence LIMIT $2`, orgID, p.Batch)
+			FROM event_outbox WHERE organization_id = $1 AND published_at IS NULL ORDER BY sequence LIMIT $2`, orgID, limit)
 		if err != nil {
 			return err
 		}
@@ -163,6 +211,7 @@ func (p *Publisher) publishOrg(ctx context.Context, orgID string) (int, error) {
 		if err != nil {
 			return err
 		}
+		fetched = len(pending)
 		for i := range pending {
 			// The stream keeps the surrogates; the in-process consumers
 			// (webhooks, notifications) need the personal values.
@@ -184,9 +233,9 @@ func (p *Publisher) publishOrg(ctx context.Context, orgID string) (int, error) {
 		return nil
 	})
 	if err != nil {
-		return 0, err
+		return 0, false, err
 	}
-	return published, deliveryErr
+	return published, deliveryErr == nil && fetched == limit && published == limit, deliveryErr
 }
 
 // deliver sends one event to the stream (the event id is the message id:
