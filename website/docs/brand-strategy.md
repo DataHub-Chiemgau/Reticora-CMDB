@@ -139,17 +139,19 @@ Layout.
 - **Risiko:** liest sich langsamer; Serifenschrift steht der App ferner;
   Handlungsaufrufe treten zurück.
 
-### Empfehlung
+### Entscheidung
 
-**A „Messblatt“ als Grundlage**, mit zwei Übernahmen:
+**Der Auftraggeber hat am 2026-11-12 Richtung B „Leitstand“ gewählt**
+(`project-brief.md` W-E04). Claude hatte A empfohlen; die Empfehlung ist
+damit erledigt. A und C bleiben oben als verworfene Alternativen
+dokumentiert.
 
-1. aus C das Belegprinzip als Inhaltsregel: Aussagen mit Zahl oder
-   Sicherheitsbezug tragen einen sichtbaren Hinweis auf ihre Quelle;
-2. aus B die Ausfallsimulation als eine kleine, helle Schemazeichnung auf der
-   Seite „Topologie und Impact“, sofern das Budget (`project-brief.md` §7)
-   hält.
+Die Risiken von B werden im Design-System so behandelt:
 
-Begründung: Der Auftrag verlangt „passend zur tatsächlichen Software“. A teilt
-Schrift, Farbe und Bildmarke mit der App, hält die Seiten am leichtesten und
-ist auf einem Shared Hosting am einfachsten zu pflegen. Die Entscheidung
-trifft der Auftraggeber (Phase 4).
+| Risiko | Gegenmaßnahme |
+|---|---|
+| sieht aus wie jede dunkle SaaS-Seite | keine Verläufe, kein Leuchten; die Bühne ist ein Netzschema in der Bildsprache der echten Topologie-Ansicht; Zahlen mit Einheit statt Schlagworten |
+| lange Texte und Tabellen lesen sich dunkel schlechter | hoher Kontrast (Fließtext mindestens 7:1), begrenzte Zeilenlänge, großzügiger Zeilenabstand; Rechtstexte, Preisvergleich im Druck und alle Druckansichten im hellen Dokumentthema |
+| mehr JavaScript | genau eine Insel (Ausfallsimulation) mit festem Budget; ohne JavaScript ein vollwertiges Standbild |
+| weiter weg vom hellen Standard der App | Farben und Formen aus dem dunklen Thema der App; Screenshots im dunklen Thema |
+| Aussagen ohne Beleg | Belegprinzip aus C bleibt Inhaltsregel: Aussagen mit Zahl oder Sicherheitsbezug zeigen ihre Quelle |

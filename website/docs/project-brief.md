@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | Stand | 2026-11-12 |
-| Phase | 1–3: Anforderungen, Informationsarchitektur, Art Directions |
-| Status | **Entwurf – Freigabe durch den Auftraggeber ausstehend** |
+| Phase | 4: Design-System für Richtung B „Leitstand“ und technische Spezifikation |
+| Status | **Richtung B gewählt (2026-11-12). Design-System und Spezifikation sind noch nicht freigegeben.** |
 | Geltung | Lebendes Dokument. Jede Entscheidung wird hier oder im verlinkten Dokument nachgetragen. |
 
 Bis zur Design-Freigabe (Phase 4) entsteht kein Website-Code. Pfade in den
@@ -26,6 +26,17 @@ Vom Auftraggeber vorgegeben (2026-11-12):
   Backend für Lead-Erfassung, Playwright und axe-core.
 - Vorgehen in acht Phasen mit Freigaben; drei Art Directions vor der
   Umsetzung; Compliance-Matrix und Vendor-Register werden gepflegt.
+
+Entscheidungen des Auftraggebers vom 2026-11-12 (zweite Nachricht):
+
+- **Art Direction B „Leitstand“.**
+- **Anbieter:** Koyer Consulting für IT und Kommunikation UG
+  (haftungsbeschränkt), Dr. Albert-Frank-Str. 2, 83308 Trostberg.
+- **Domains:** Website `www.reticora.de`, Demo `www.demo.reticora.cloud`,
+  produktive SaaS `www.reticora.cloud`.
+- **Preise:** siehe `content-plan.md` §6.1.
+- **Zielgruppe:** ausschließlich B2B.
+- **Sprachen:** Deutsch und Englisch.
 
 Annahmen von Claude (bitte widersprechen, wenn falsch):
 
@@ -68,8 +79,9 @@ Alle Angaben stammen aus dem Repository; die Quelle steht dabei.
 
 1. Ein Techniker versteht in unter einer Minute, was Reticora ausliest und
    warum die Daten belastbar sind.
-2. Zwei klare Wege zum Kontakt: **„30 Tage testen“** (Self-Signup in der App)
-   und **„Demo anfragen“** (Formular).
+2. Drei klare Wege: **„30 Tage testen“** (Self-Signup in der App unter
+   `www.reticora.cloud`), **„Live-Demo“** (Demo-Instanz unter
+   `www.demo.reticora.cloud`, Zugang siehe F-18) und **„Kontakt“** (Formular).
 3. Eine Sicherheits- und Datenschutzseite, die eine Erstprüfung durch
    Informationssicherheit und Einkauf ohne Rückfrage übersteht.
 4. Keine Aussage ohne Beleg: Jede Produktaussage steht im Claim-Register
@@ -112,7 +124,9 @@ Browser ──HTTPS──▶ Hetzner Webhosting L (Apache)
                            └── sendet per SMTP an das Vertriebspostfach
                     Cronjob: löscht abgelaufene Leads und Rate-Limit-Einträge
 
-CTA „30 Tage testen“ ──Link──▶ Self-Signup der Reticora-App (eigene Domain, F-02)
+CTA „30 Tage testen“ ──Link──▶ https://www.reticora.cloud/onboarding (Self-Signup der App)
+CTA „Live-Demo“      ──Link──▶ https://www.demo.reticora.cloud (Zugang: F-18)
+Website selbst       ────────▶ https://www.reticora.de
 ```
 
 | Baustein | Wahl | Begründung |
@@ -161,14 +175,14 @@ zur Klärung gilt die Annahme in der dritten Spalte.
 
 | Nr. | Fehlender Fakt | Annahme bis zur Klärung | Blockiert |
 |---|---|---|---|
-| F-01 | **Anbieter:** Firma, Rechtsform, Anschrift, Vertretungsberechtigte, Register und Nummer, USt-IdNr., E-Mail, Telefon. Im Repository steht nur der GitHub-Name „DataHub-Chiemgau“. | Platzhalter im Impressum | Go-live (DDG §5) |
-| F-02 | **Domains:** Website, App (Signup, Login), Dokumentation, Statusseite. Im Repository kommen `reticora.io` (Fehler-URIs) und `dev.reticora.cloud` (Entwicklung) vor. | Platzhalter-URLs in einer Konfigurationsdatei | CTA-Ziele, Canonical, Deploy |
-| F-03 | **Launch-Umfang:** Welche Pakete und Module sind beim Go-live der Website buchbar? | gesamter Paketumfang aus `README.md` §14 wird als verfügbar dargestellt | Claim-Prüfung vor Go-live |
-| F-04 | **Preise:** `README.md` §14 nennt Beta- und Endpreise und vermerkt „noch zu bestätigen“. Welche Preise zeigt die Website, bedeutet „19 €–190 €“ Monat und Jahr, netto? Mindestlaufzeit, Zahlungsweise, Zusatzkosten je CI und Monitoring-Service? | Preisseite mit Platzhaltern, Struktur nach README | Preisseite |
-| F-05 | **Ausschließlich B2B?** Verkauft Reticora nur an Unternehmer (§14 BGB), und wie wird das im Signup sichergestellt? | ja, ausschließlich B2B | BFSG, PAngV, §§312j/k BGB |
+| F-01 | **Anbieter – teilweise geklärt:** Koyer Consulting für IT und Kommunikation UG (haftungsbeschränkt), Dr. Albert-Frank-Str. 2, 83308 Trostberg. **Noch offen:** vertretungsberechtigte Geschäftsführung, Registergericht und Nummer, USt-IdNr., E-Mail-Adresse, Telefon. | Platzhalter für die offenen Angaben | Go-live (DDG §5) |
+| F-02 | **Domains – geklärt:** Website `www.reticora.de`, Demo `www.demo.reticora.cloud`, produktive SaaS `www.reticora.cloud`. **Noch offen:** Dokumentation und Statusseite (F-15). | Registrierung unter dem Pfad `/onboarding` der App | Links im Footer |
+| F-03 | **Launch-Umfang:** Welche Pakete und Module sind beim Go-live der Website buchbar? | gesamter Paketumfang wird als verfügbar dargestellt | Claim-Prüfung vor Go-live |
+| F-04 | **Preise – geklärt** (`content-plan.md` §6.1). **Noch offen:** (a) Nettopreise zzgl. USt.? (b) Zusatzkosten „je zusätzlichem CI 0,003 €“ und „je Monitoring-Zeitreihe 0,05 €“: je Monat? `README.md` §14 nennt 0,05 € je CI und 0,03 € je Monitoring-Service, bitte die neuen Werte bestätigen. (c) Paketname „Essentials“ gegenüber „Essential“ in App und README. (d) Was unterscheidet „Enterprise Shared“ und „Enterprise Local“? (e) Gelten die Limits aus `README.md` §14 (CIs, Collectors, Nutzer) weiter? (f) Bis wann ist der Beta-Rabatt buchbar? | Nettopreise; Limits nach README; „Enterprise Shared“ = gemeinsame Plattform, „Enterprise Local“ = eigene Instanz | Preisseite |
+| F-05 | **Ausschließlich B2B – bestätigt.** **Noch offen:** Wie stellt die Registrierung der App das sicher (Hinweis, Bestätigung, AGB)? | Hinweis „Angebot nur für Unternehmen“ auf Website und Preisseite | BFSG, PAngV, §§312j/k BGB |
 | F-06 | **Vertriebsweg:** Wer beantwortet Anfragen, an welches Postfach, in welcher Frist? CRM vorhanden? | ein Postfach bei Hetzner, kein CRM | Formular, Vendor-Register |
 | F-07 | **Formulare:** nur Kontakt/Demo, oder auch Newsletter, Partneranfrage, Rückruf? | nur Kontakt/Demo, kein Newsletter | Umfang Phase 6, UWG §7 |
-| F-08 | **Sprachen zum Start:** nur Deutsch oder Deutsch und Englisch? | Deutsch zuerst, Englisch technisch vorbereitet | Umfang Phase 6 |
+| F-08 | **Sprachen – geklärt:** Deutsch und Englisch zum Start. | Deutsch wird zuerst freigegeben, dann übersetzt | – |
 | F-09 | **Hosting-Konto:** PHP-Version, SSH ja/nein, `mod_headers`, Log-Anonymisierung, AV-Vertrag mit Hetzner abgeschlossen? | SFTP-Deploy, AVV offen | Deploy, DSGVO Art. 28 |
 | F-10 | **Belege für Sicherheitsaussagen:** Pentest (Dienstleister, Datum, darf genannt werden?), Hosting-Region und Anbieter der SaaS, Subprozessorenliste (`docs/legal/subprozessoren.md` ist leer), zugesagte Verfügbarkeit (SLA) | keine Nennung von Pentest, SLA-Zahlen und Zertifikaten | Sicherheitsseite |
 | F-11 | **Rechtstexte:** Wer liefert Impressum, Datenschutzerklärung, AGB, AVV, TOM? | Platzhalterseiten mit klarer Kennzeichnung | Go-live |
@@ -178,6 +192,7 @@ zur Klärung gilt die Annahme in der dritten Spalte.
 | F-15 | **Öffentliche Dokumentation:** Gibt es zum Start eine Doku, API-Referenz, Statusseite, Changelog? | Links nur, wenn die Ziele existieren | Navigation, Footer |
 | F-16 | **Referenzen:** Gibt es Kunden, die genannt werden dürfen? | keine Logos, keine Zitate | Startseite |
 | F-17 | **Datenschutzbeauftragte Person:** benannt oder nicht erforderlich (§38 BDSG)? | offen | Datenschutzerklärung |
+| F-18 | **Zugang zur Demo:** Ist `www.demo.reticora.cloud` ohne Anmeldung offen, mit einem veröffentlichten Demo-Zugang erreichbar, oder nur nach Anfrage? | Link „Live-Demo“ öffnet die Demo-Instanz; das Formular bleibt für Kontakt und Enterprise | Handlungsaufrufe, Navigation |
 
 ## 9. Phasen und Freigaben
 
@@ -185,8 +200,8 @@ zur Klärung gilt die Annahme in der dritten Spalte.
 |---|---|---|
 | 1 | Anforderungen, Zielgruppe, Positionierung | Entwurf liegt vor (dieses Dokument, `brand-strategy.md`) |
 | 2 | Informationsarchitektur, Inhaltsstrategie | Entwurf liegt vor (`content-plan.md`) |
-| 3 | Drei Art Directions | Entwurf liegt vor (`brand-strategy.md` §6, `design-system.md`) |
-| 4 | **Freigabe Design-System** | **wartet auf Auftraggeber** |
+| 3 | Drei Art Directions | **entschieden: B „Leitstand“** (2026-11-12) |
+| 4 | **Freigabe Design-System** | in Arbeit: Design-System B und technische Spezifikation; danach Freigabe durch den Auftraggeber |
 | 5 | Startseite | gesperrt bis Phase 4 |
 | 6 | Übrige Seiten, Formulare | gesperrt |
 | 7 | QA, Sicherheit, Datenschutz, Barrierefreiheit | gesperrt |
@@ -199,3 +214,9 @@ zur Klärung gilt die Annahme in der dritten Spalte.
 | W-E01 | 2026-11-12 | Website als Teilprojekt `website/` im Produkt-Repository | Annahme Claude, zu bestätigen |
 | W-E02 | 2026-11-12 | Funktionen werden als verfügbar dargestellt; Prüfung der Claims vor Go-live | Auftraggeber |
 | W-E03 | 2026-11-12 | Lead-Backend in PHP auf demselben Webhosting, kein Node.js zur Laufzeit | Vorschlag Claude, zu bestätigen |
+| W-E04 | 2026-11-12 | Art Direction B „Leitstand“ | Auftraggeber |
+| W-E05 | 2026-11-12 | Anbieter: Koyer Consulting für IT und Kommunikation UG (haftungsbeschränkt), Trostberg | Auftraggeber |
+| W-E06 | 2026-11-12 | Domains: `www.reticora.de` (Website), `www.demo.reticora.cloud` (Demo), `www.reticora.cloud` (SaaS) | Auftraggeber |
+| W-E07 | 2026-11-12 | Preise und Beta-Rabatt nach `content-plan.md` §6.1 | Auftraggeber |
+| W-E08 | 2026-11-12 | Angebot ausschließlich B2B | Auftraggeber |
+| W-E09 | 2026-11-12 | Deutsch und Englisch zum Start | Auftraggeber |

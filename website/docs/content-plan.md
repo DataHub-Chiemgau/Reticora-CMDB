@@ -39,7 +39,7 @@
   msp/                         Für Managed-Service-Provider
 /sicherheit/                   Sicherheit, Datenschutz, Betriebsmodelle
 /preise/                       Pakete, Add-ons, Fragen
-/kontakt/                      Kontakt und Demo-Anfrage (Formular)
+/kontakt/                      Kontakt (Formular)
 /kontakt/danke/                Bestätigung (noindex)
 /impressum/                    Rechtstext vom Auftraggeber
 /datenschutz/                  Rechtstext vom Auftraggeber
@@ -47,29 +47,34 @@
 /subprozessoren/               Liste vom Auftraggeber
 /barrierefreiheit/             Stand der Barrierefreiheit, Kontakt für Hinweise
 /404
-/en/…                          englische Fassung, gleiche Struktur (F-08)
+/en/…                          englische Fassung, gleiche Struktur, zum Start
 ```
 
-„30 Tage testen“ ist ein Link zur Registrierung in der App (F-02) und keine
-eigene Seite.
+Zwei Handlungsaufrufe führen von der Website weg und sind keine eigenen
+Seiten:
+
+- **„30 Tage testen“** → `https://www.reticora.cloud/onboarding`
+  (Registrierung in der App).
+- **„Live-Demo“** → `https://www.demo.reticora.cloud` (Demo-Instanz; wie der
+  Zugang funktioniert, ist offen, F-18).
 
 | Seite | Zweck | Hauptrolle | Handlungsaufruf | Start |
 |---|---|---|---|---|
-| Startseite | Produkt in einer Minute verstehen | alle | Testen, Demo | Pflicht |
+| Startseite | Produkt in einer Minute verstehen | alle | Testen, Live-Demo | Pflicht |
 | Discovery | zeigen, wie der Bestand entsteht | Techniker | Testen | Pflicht |
 | Datenqualität | zeigen, warum die Daten stimmen | Techniker | Testen | Pflicht |
-| Topologie und Impact | Zusammenhänge und Ausfallfolgen | Netzbetrieb | Testen | Pflicht |
-| Verwaltung | Assets, Lager, Inventur, Dokumente | Bestandsverwaltung | Demo | Pflicht |
-| Betrieb | Tickets, Monitoring, Workflows | Service-Desk | Demo | Pflicht |
-| Compliance | Audit, Befunde, IGA | Compliance | Demo | Pflicht |
+| Topologie und Impact | Zusammenhänge und Ausfallfolgen | Netzbetrieb | Live-Demo, Testen | Pflicht |
+| Verwaltung | Assets, Lager, Inventur, Dokumente | Bestandsverwaltung | Live-Demo | Pflicht |
+| Betrieb | Tickets, Monitoring, Workflows | Service-Desk | Live-Demo | Pflicht |
+| Compliance | Audit, Befunde, IGA | Compliance | Kontakt | Pflicht |
 | API | Integration bewerten | Techniker | Doku, Testen | Pflicht |
 | Geräte | „Wird mein Gerät erkannt?“ | Techniker | Testen | Pflicht |
-| Lösungen ISP / MSP | Nutzen je Geschäftsmodell | Entscheider | Demo | Pflicht |
+| Lösungen ISP / MSP | Nutzen je Geschäftsmodell | Entscheider | Live-Demo, Kontakt | Pflicht |
 | Sicherheit | Erstprüfung bestehen | Sicherheit, Einkauf | Kontakt | Pflicht |
-| Preise | Paket wählen | Entscheider | Testen, Demo | Pflicht |
+| Preise | Paket wählen | Entscheider | Testen, Kontakt (Enterprise) | Pflicht |
 | Kontakt | Anfrage stellen | Entscheider | Absenden | Pflicht |
 | Rechtsseiten | Pflichtangaben | alle | – | Pflicht |
-| Englisch | internationale Interessenten | alle | wie oben | offen (F-08) |
+| Englisch | internationale Interessenten | alle | wie oben | Pflicht (W-E09) |
 
 Nicht zum Start: Blog, Changelog, Karriere, Partnerseite, Vergleichsseiten,
 Newsletter. Jede dieser Seiten bringt eigene Pflichten mit
@@ -78,8 +83,9 @@ Newsletter. Jede dieser Seiten bringt eigene Pflichten mit
 ## 3. Navigation
 
 - **Kopfzeile:** Produkt (Menü mit den sieben Produktseiten), Geräte,
-  Lösungen, Sicherheit, Preise; rechts „Anmelden“ (Link zur App), „Demo
-  anfragen“, „30 Tage testen“.
+  Lösungen, Sicherheit, Preise; rechts „Anmelden“ (Link zur App),
+  „Live-Demo“, „30 Tage testen“. „Kontakt“ steht in der Fußzeile und als
+  Handlungsaufruf auf den Seiten für Entscheider und Prüfer.
 - **Fußzeile:** alle Seiten, Impressum, Datenschutz, AGB, Subprozessoren,
   Barrierefreiheit, Sprache. Impressum und Datenschutz sind von jeder Seite
   mit einem Klick erreichbar.
@@ -89,20 +95,20 @@ Newsletter. Jede dieser Seiten bringt eigene Pflichten mit
 | Weg | Wer | Verlauf | Ziel |
 |---|---|---|---|
 | A Selbst testen | Techniker | Startseite → Discovery oder Geräte → „30 Tage testen“ | Registrierung in der App (Organisation, E-Mail, Name) |
-| B Entscheiden | Leitung MSP | Startseite → Lösungen MSP → Preise → „Demo anfragen“ | Formular |
+| B Ansehen, dann entscheiden | Leitung MSP | Startseite → „Live-Demo“ → Lösungen MSP → Preise → „30 Tage testen“ | Demo-Instanz, dann Registrierung |
 | C Prüfen | Sicherheit, Einkauf | Sicherheit → Subprozessoren → Kontakt | Formular, Thema „Sicherheit und Datenschutz“ |
 | D Großer Bestand | Netzbetrieb ISP | Lösungen ISP → Preise (Enterprise) → Kontakt | Formular, Thema „Enterprise“ |
 
-Der Test ist der erste Handlungsaufruf, die Demo der zweite. Auf Seiten für
-Entscheider und Prüfer steht die Demo bzw. der Kontakt vorn.
+Der Test ist der erste Handlungsaufruf, die Live-Demo der zweite. Auf Seiten
+für Prüfer und für Enterprise-Interessenten steht der Kontakt vorn.
 
 ## 5. Startseite
 
 | Nr. | Abschnitt | Aussage | Bild |
 |---|---|---|---|
-| 1 | Einstieg | „Die CMDB, die Ihr Netz selbst ausliest und jeden Wert belegt.“ Ein Satz dazu, für wen und wie. Zwei Handlungsaufrufe. | S-02 CI-Detail mit Herkunft eines Feldes |
+| 1 | Einstieg | „Die CMDB, die Ihr Netz selbst ausliest und jeden Wert belegt.“ Ein Satz dazu, für wen und wie. Zwei Handlungsaufrufe. Darunter die Leiste mit Betriebswerten. | Netzschema mit Ausfallsimulation (Schemazeichnung, kein Screenshot) |
 | 2 | So entsteht der Bestand | Ablauf in fünf Schritten: Collector verbinden, Scope bestätigen, auslesen, abgleichen, prüfen. Die Reihenfolge ist die des Onboardings der App. | Schema Collector → Cloud |
-| 3 | Daten, denen Sie trauen | Quelle, Zeitpunkt und Grund je Feld; manuell gewinnt; Review-Inbox statt stiller Überschreibung | S-03 Review-Inbox |
+| 3 | Daten, denen Sie trauen | Quelle, Zeitpunkt und Grund je Feld; manuell gewinnt; Review-Inbox statt stiller Überschreibung | S-02 CI-Detail, S-03 Review-Inbox |
 | 4 | Zusammenhänge | Topologie aus LLDP, Rack höheneinheitengenau, Ausfallsimulation mit Redundanz | S-04, S-05, S-06 |
 | 5 | Für mehrere Kunden | Organisation → Kunde → Standort; getrennt bis in die Datenbank; Rollen mit Geltungsbereich | S-18 Arbeitsbereich |
 | 6 | Auf demselben Bestand | Assets, Lager, Inventur, Tickets, Monitoring, Workflows, Compliance als Verzeichnis mit je einem Satz, keine Kartenreihe | – |
@@ -110,7 +116,7 @@ Entscheider und Prüfer steht die Demo bzw. der Kontakt vorn.
 | 8 | Sicherheit in Kürze | nur ausgehende Verbindung, EU, verschlüsselte Zugangsdaten, Audit-Kette; Link zur Sicherheitsseite | Schema Verbindungsrichtung |
 | 9 | Geräte | Auszug der erkannten Hersteller als Textliste; Link zur Geräteseite | – |
 | 10 | Pakete | vier Pakete in einer Zeile je Paket; Link zur Preisseite | – |
-| 11 | Abschluss | Test: 30 Tage, Standard-Umfang, 100 CIs. Daneben Demo. | – |
+| 11 | Abschluss | Test: 30 Tage, Standard-Umfang, 100 CIs. Daneben Live-Demo und Kontakt. | – |
 
 ## 6. Übrige Seiten in Stichpunkten
 
@@ -142,10 +148,37 @@ Entscheider und Prüfer steht die Demo bzw. der Kontakt vorn.
   Mandantentrennung; Verschlüsselung der Zugangsdaten; Identität und MFA;
   Audit; Datenschutz (PII-Tresor, Löschung); Datenstandort;
   Subprozessoren; Meldeweg für Sicherheitslücken.
-- **Preise:** Paketmatrix aus einer Datendatei; Add-ons; Test; Fragen (Was
-  zählt als CI? Was passiert über dem Limit? Was passiert nach Ablauf?).
+- **Preise:** Paketmatrix aus einer Datendatei (§6.1); Add-ons; Test; Fragen
+  (Was zählt als CI? Was passiert über dem Limit? Was passiert nach Ablauf?).
   Antworten stehen in `README.md` §14.
 - **Kontakt:** Formular (§9), daneben direkte Kontaktdaten (F-01).
+
+### 6.1 Preise
+
+Angabe des Auftraggebers vom 2026-11-12. Sie ersetzt die Preise in
+`README.md` §14. Die Website führt sie an genau einer Stelle
+(`src/data/pricing.ts`).
+
+| Tarif | monatlich | jährlich | erstes Beta-Jahr bei jährlicher Zahlung |
+|---|---|---|---|
+| Essentials | 49 € | 490 € | 441 € |
+| Standard | 119 € | 1.190 € | 1.071 € |
+| Pro | 299 € | 2.990 € | 2.691 € |
+| Enterprise Shared | ab 999 € | auf Anfrage | – |
+| Enterprise Local | ab 1.999 € | auf Anfrage | – |
+
+- **Beta-Rabatt:** 20 % in den ersten sechs Monaten, 10 % in den folgenden
+  sechs Monaten, danach der volle Preis. Bei jährlicher Vorauszahlung gilt
+  der Preis der letzten Spalte.
+- **Zusatzkosten:** je zusätzlichem CI 0,003 €, je Monitoring-Zeitreihe
+  0,05 €.
+- **Darstellung:** Nettopreise mit dem Zusatz „zzgl. USt.“ und dem Hinweis
+  „Angebot nur für Unternehmen“ (`compliance-matrix.md` B-02). Die
+  Bedingungen des Beta-Rabatts stehen direkt bei den Preisen (I-03).
+- **Offen (F-04):** netto ja/nein; Abrechnungszeitraum der Zusatzkosten und
+  Bestätigung der Werte, weil `README.md` §14 andere nennt; Schreibweise
+  „Essentials“; Unterschied der beiden Enterprise-Tarife; Limits je Tarif;
+  Buchungszeitraum des Beta-Rabatts.
 
 ## 7. Claim-Register
 
@@ -175,7 +208,7 @@ benannte Person ihn abgehakt hat (F-14).
 | C-18 | Antwortzeiten und Durchsatz | Zielwerte, Lastschwellen G2 vorläufig (`docs/acceptance/lasttest-g2.md`) | **nicht nennen ohne Freigabe** |
 | C-19 | Berichte für ISO 27001, NIS2, KRITIS | `README.md` §12 | Formulierung: Berichtsfunktion, keine Zertifizierung des Anbieters, keine Garantie der Konformität des Kunden |
 | C-20 | KI-Add-on: Verarbeitung in der EU oder selbst betrieben, kein Training mit Kundendaten, Einschalten je Organisation | `README.md` §13 | Anbieter und Region bestätigen |
-| C-21 | Paketumfang, Limits, Preise | `README.md` §14, dort „noch zu bestätigen“ | **F-04** |
+| C-21 | Paketumfang, Limits, Preise | Preise: Auftraggeber, 2026-11-12 (§6.1). Umfang und Limits: `README.md` §14, dort „noch zu bestätigen“ | **offene Punkte aus F-04** |
 | C-22 | Test: 30 Tage, Standard-Umfang, 100 CIs | `README.md` §14, Katalog ENT-07 | – |
 | C-23 | Barrierefreiheit der App | Ziel WCAG 2.2 AA (`frontend/DESIGN.md` §7) | als Ziel formulieren, nicht als Konformität |
 | C-24 | Funktionen späterer Produktphasen (Monitoring-Alarme, Workflows, Compliance-Befunde, Endpoint-Agent, SAML/SCIM, Reseller, RFID, GIS, Mobil) | `README.md` §14, §17 | **gegen Launch-Umfang prüfen (F-03)** |
@@ -209,14 +242,14 @@ Kundendaten.
 | S-17 | Berechtigungen | `PermissionsPage` | Sicherheit |
 | S-18 | Arbeitsbereich Organisation → Kunde → Standort | Kopfzeile der App, `ClientsPage` | Startseite, Lösungen MSP |
 
-## 9. Formular „Kontakt und Demo“
+## 9. Formular „Kontakt“
 
 | Feld | Pflicht | Zweck |
 |---|---|---|
 | Name | ja | Anrede in der Antwort |
 | Geschäftliche E-Mail-Adresse | ja | Antwort |
 | Unternehmen | ja | Zuordnung, B2B-Bezug |
-| Anliegen (Demo, Enterprise, Sicherheit und Datenschutz, Sonstiges) | ja | Zuteilung |
+| Anliegen (Vorführung, Enterprise, Sicherheit und Datenschutz, Sonstiges) | ja | Zuteilung |
 | Nachricht | nein | Inhalt der Anfrage |
 
 - Kein Telefonfeld, keine Positionsbezeichnung, keine Größenabfrage: nicht
@@ -231,8 +264,10 @@ Kundendaten.
 
 ## 10. Sprache und Auffindbarkeit
 
-- Deutsch ist Standard, Englisch unter `/en/` mit `hreflang` in beide
-  Richtungen. Inhalte werden zuerst deutsch freigegeben, dann übersetzt.
+- Deutsch und Englisch erscheinen zum Start (W-E09). Deutsch ist Standard
+  unter `www.reticora.de/`, Englisch unter `/en/`, mit `hreflang` in beide
+  Richtungen. Inhalte werden zuerst deutsch freigegeben, dann übersetzt; die
+  englischen Begriffe folgen der englischen Oberfläche der App.
 - Je Seite: eindeutiger Titel, Beschreibung, kanonische URL, Vorschaubild
   ohne Drittdienst, `sitemap.xml`, `robots.txt`.
 - Suchbegriffe, um die die Seiten gebaut sind: CMDB für ISP, CMDB für MSP,
