@@ -4571,6 +4571,29 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/credentials/{id}/usage': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /**
+     * List the usage of a credential
+     * @description CRD-06 (WP-898): per CI and protocol namespace the last successful and the last failed use of the credential with the error class, as the collectors report it with their scope runs (never a secret). A restricted principal sees only the rows of the CIs of its clients and sites (and of CIs without). Filter ci_id. Requires credential:read. An unknown or foreign credential is 404.
+     */
+    get: operations['listCredentialUsage'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/credentials/rotate-keys': {
     parameters: {
       query?: never;
@@ -19933,6 +19956,43 @@ export interface components {
         [key: string]: string;
       };
     };
+    /** @description Usage of a credential at a CI in a namespace (CRD-06, WP-898); never a secret. */
+    CredentialUsage: {
+      /** Format: uuid */
+      credential_id: string;
+      /** Format: uuid */
+      ci_id: string;
+      /** @enum {string} */
+      namespace: 'snmp' | 'ssh' | 'redfish' | 'ipmi' | 'wmi' | 'api' | 'nut' | 'nas';
+      /** Format: date-time */
+      last_success_at: string | null;
+      /** Format: date-time */
+      last_failure_at: string | null;
+      /** @enum {string|null} */
+      last_error_class:
+        | 'auth_failed'
+        | 'timeout'
+        | 'unreachable'
+        | 'tls'
+        | 'vault_unreachable'
+        | 'vault_denied'
+        | 'vault_not_found'
+        | 'field_missing'
+        | null;
+      /**
+       * Format: uuid
+       * @description Client of the CI.
+       */
+      client_id: string | null;
+      /**
+       * Format: uuid
+       * @description Site of the CI.
+       */
+      site_id: string | null;
+    };
+    CredentialUsageListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['CredentialUsage'][];
+    };
     CredentialSecretReplace: {
       /** @description The new plaintext secret, encrypted at rest; never returned. */
       secret: {
@@ -31689,6 +31749,55 @@ export interface operations {
         };
       };
       /** @description The secret is missing or empty, or lacks the members of a vault login (`field` secret). */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  listCredentialUsage: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        ci_id?: string;
+      };
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Usage of the credential */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CredentialUsageListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      /** @description ci_id is no UUID (`field` ci_id). */
       422: {
         headers: {
           [name: string]: unknown;

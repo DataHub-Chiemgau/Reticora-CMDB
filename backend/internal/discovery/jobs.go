@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -327,6 +328,16 @@ type JobStatusReport struct {
 	Status string         `json:"status"`
 	Error  string         `json:"error,omitempty"`
 	Result map[string]any `json:"result,omitempty"`
+	// CredentialUsage is the credential usage of the job's scope passes
+	// (CRD-06, WP-898), per scope; at most credential.MaxUsageEntries
+	// entries in all.
+	CredentialUsage []JobScopeUsage `json:"credential_usage,omitempty"`
+}
+
+// JobScopeUsage is the credential usage of one scope pass of a job.
+type JobScopeUsage struct {
+	ScopeID string                   `json:"scope_id"`
+	Usage   []credential.UsageReport `json:"usage"`
 }
 
 func (h *Handler) jobRunRepo() (JobRunRepository, error) {
@@ -397,7 +408,48 @@ func (h *Handler) RecordCollectorJobStatus(ctx context.Context, orgID, collector
 		}
 		result["cause"] = cause
 	}
-	return repo.UpdateJobStatus(ctx, orgID, rep.JobID, status, errMsg, own, JobFrom(JobStatusRunning), JobResult(result))
+	job, err := repo.UpdateJobStatus(ctx, orgID, rep.JobID, status, errMsg, own, JobFrom(JobStatusRunning), JobResult(result))
+	if err != nil {
+		return nil, err
+	}
+	h.recordJobUsage(ctx, orgID, collectorID, rep.CredentialUsage)
+	return job, nil
+}
+
+// recordJobUsage records the credential usage of the scope passes of a
+// finished job like that of a scope run (CRD-06): each against the bundle
+// part of its scope. A failure is logged; the job's status stands.
+func (h *Handler) recordJobUsage(ctx context.Context, orgID, collectorID string, usage []JobScopeUsage) {
+	usageRepo, ok := h.repo.(ScopeRunUsageRecorder)
+	if !ok {
+		return
+	}
+	at := time.Now().UTC()
+	budget := credential.MaxUsageEntries
+	for _, u := range usage {
+		entries := u.Usage
+		if budget <= 0 {
+			break
+		}
+		if len(entries) > budget {
+			entries = entries[:budget]
+		}
+		if len(entries) == 0 {
+			continue
+		}
+		budget -= len(entries)
+		out, err := usageRepo.RecordScopeUsage(ctx, orgID, collectorID, u.ScopeID, at, entries)
+		if err != nil {
+			slog.Warn("credential usage of a discovery job not recorded", "organization_id", orgID,
+				"collector_id", collectorID, "scope_id", u.ScopeID, "error", err)
+			continue
+		}
+		if out.Unmatched > 0 || out.Rejected > 0 {
+			slog.Info("credential usage of a discovery job partly dropped", "event", "credential.usage.dropped",
+				"organization_id", orgID, "collector_id", collectorID, "scope_id", u.ScopeID,
+				"recorded", out.Recorded, "unmatched", out.Unmatched, "rejected", out.Rejected)
+		}
+	}
 }
 
 // JobReaper fails the ad-hoc jobs without a report from their collector

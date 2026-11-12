@@ -20,6 +20,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
@@ -632,6 +633,101 @@ func (r *PGRepository) RecordScopeRun(ctx context.Context, orgID, id string, run
 		}
 		return err
 	})
+}
+
+// RecordScopeRunUsage implements ScopeRunUsageRecorder: the run and the
+// credential usage it reports in one transaction (CRD-06, WP-898).
+func (r *PGRepository) RecordScopeRunUsage(ctx context.Context, orgID, collectorID, scopeID string, run *ScopeRun,
+	usage []credential.UsageReport) (credential.UsageOutcome, error) {
+	var out credential.UsageOutcome
+	result, err := json.Marshal(run.Result)
+	if err != nil {
+		return out, err
+	}
+	err = database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var scopeClient *string
+		qerr := tx.QueryRow(ctx, `UPDATE discovery_scope SET last_run_at = $3, last_result = $4, next_run_at = $5
+			WHERE id = $1 AND organization_id = $2 RETURNING client_id::text`, scopeID, orgID, run.At, result,
+			nilIfZero(run.NextRun)).Scan(&scopeClient)
+		if errors.Is(qerr, pgx.ErrNoRows) {
+			return fmt.Errorf("not found")
+		}
+		if qerr != nil {
+			return qerr
+		}
+		var uerr error
+		out, uerr = recordScopeUsage(ctx, tx, orgID, collectorID, scopeID, deref(scopeClient), run.At, usage)
+		return uerr
+	})
+	return out, err
+}
+
+// RecordScopeUsage implements ScopeRunUsageRecorder: the credential usage
+// of a scope pass of an ad-hoc discovery job (JOB-01), which does not
+// count as a run of the scope. A scope of another collector is not found.
+func (r *PGRepository) RecordScopeUsage(ctx context.Context, orgID, collectorID, scopeID string, at time.Time,
+	usage []credential.UsageReport) (credential.UsageOutcome, error) {
+	var out credential.UsageOutcome
+	if !audit.IsUUID(scopeID) {
+		return out, fmt.Errorf("not found")
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var scopeClient *string
+		qerr := tx.QueryRow(ctx, `SELECT client_id::text FROM discovery_scope
+			WHERE id = $1 AND organization_id = $2 AND collector_id = $3`, scopeID, orgID, collectorID).Scan(&scopeClient)
+		if errors.Is(qerr, pgx.ErrNoRows) {
+			return fmt.Errorf("not found")
+		}
+		if qerr != nil {
+			return qerr
+		}
+		var uerr error
+		out, uerr = recordScopeUsage(ctx, tx, orgID, collectorID, scopeID, deref(scopeClient), at, usage)
+		return uerr
+	})
+	return out, err
+}
+
+// recordScopeUsage checks the usage against the part of the bundle
+// VerifyBundleTarget seals for the collector now that belongs to the
+// reporting scope (the effective credentials of that scope and its
+// per-device targets) and records it. A credential of another scope of the
+// collector (possibly of another client) is rejected.
+func recordScopeUsage(ctx context.Context, tx pgx.Tx, orgID, collectorID, scopeID, scopeClient string, at time.Time,
+	usage []credential.UsageReport) (credential.UsageOutcome, error) {
+	var collectorClient *string
+	if err := tx.QueryRow(ctx, `SELECT client_id::text FROM collector WHERE id = $1 AND organization_id = $2`,
+		collectorID, orgID).Scan(&collectorClient); err != nil {
+		return credential.UsageOutcome{}, err
+	}
+	perScope, err := scopeCredentials(ctx, tx, orgID, collectorID)
+	if err != nil {
+		return credential.UsageOutcome{}, err
+	}
+	bundle := credential.UsageBundle{CredentialIDs: map[string]bool{}}
+	for _, id := range perScope[scopeID] {
+		bundle.CredentialIDs[id] = true
+	}
+	targets, err := credential.ResolveCollector(ctx, tx, orgID, collectorID, deref(collectorClient), credential.NoDeviceGroups{})
+	if err != nil {
+		return credential.UsageOutcome{}, err
+	}
+	for i := range targets {
+		if targets[i].ScopeID != scopeID {
+			continue
+		}
+		bundle.CredentialIDs[targets[i].CredentialID] = true
+		bundle.Targets = append(bundle.Targets, targets[i])
+	}
+	return credential.RecordUsage(ctx, tx, &credential.UsageInput{OrganizationID: orgID, ScopeID: scopeID,
+		ScopeClientID: scopeClient, Bundle: bundle, Entries: usage, At: at})
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 func nilIfZero(t time.Time) any {

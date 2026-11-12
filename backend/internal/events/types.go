@@ -677,6 +677,24 @@ type CredentialRotationDueData struct {
 	DueAt      string `json:"due_at,omitempty"`
 }
 
+// CredentialResolutionFailedData is the data of
+// credential.resolution_failed (CRD-06, WP-898): the frame of the
+// credential.* types with the failed use, the credential (again as
+// credential_id), the CI, the namespace and the error class; never a
+// secret.
+type CredentialResolutionFailedData struct {
+	ID            string `json:"id"`
+	ClientID      string `json:"client_id,omitempty"`
+	Kind          string `json:"kind"`
+	Reason        string `json:"reason,omitempty"`
+	SecretVersion int    `json:"secret_version,omitempty"`
+	Source        string `json:"source,omitempty"`
+	CredentialID  string `json:"credential_id"`
+	CIID          string `json:"ci_id,omitempty"`
+	Namespace     string `json:"namespace,omitempty"`
+	ErrorClass    string `json:"error_class"`
+}
+
 // ADMPConnectionRefreshedData is the data of admp.connection.refreshed
 // (ADM-03): the read-only copy of an ADMP connection was refreshed; never
 // the holder in plain text.
@@ -752,6 +770,6 @@ var Payloads = map[string]any{
 	ASNChanged:                  ASNChangedData{},
 	CredentialRotated:           CredentialEventData{},
 	CredentialRotationDue:       CredentialRotationDueData{},
-	CredentialResolutionFailed:  CredentialEventData{},
+	CredentialResolutionFailed:  CredentialResolutionFailedData{},
 	ADMPConnectionRefreshed:     ADMPConnectionRefreshedData{},
 }

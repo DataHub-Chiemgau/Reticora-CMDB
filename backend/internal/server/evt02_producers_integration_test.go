@@ -243,6 +243,8 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 		jobService                         *jobs.Service
 		warned, expired                    string
 		rotatedCredential, agedCredential  string
+		usageCredential, usageCollector    string
+		usageScope, usageCI                string
 		hookServer                         *httptest.Server
 		hookSubscription, hookDelivery     string
 		hookDispatcher                     *webhook.Dispatcher
@@ -665,6 +667,47 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 				for _, v := range data {
 					if s, ok := v.(string); ok && strings.Contains(s, "evt02-") {
 						t.Errorf("credential.rotation_due carries a secret value: %v", data)
+					}
+				}
+			}},
+		{typ: events.CredentialResolutionFailed,
+			// A scope run reports an auth_failed use of a credential of the
+			// collector's bundle at a CI (WP-898).
+			setup: func(t *testing.T) {
+				r := call(t, admin, http.MethodPost, "/api/v1/credentials",
+					`{"name":"evt02-usage","kind":"ssh_password","secret":{"username":"u","password":"evt02-usage-secret"}}`)
+				if r.Code != http.StatusCreated {
+					t.Fatalf("create credential: %d %s", r.Code, t6Short(r.Body))
+				}
+				usageCredential = t6ID(r.Body)
+				usageCollector = scalar(t, `INSERT INTO collector (organization_id, name, status) VALUES ($1, 'evt02-usage', 'active')
+					RETURNING id::text`, f.OrgA)
+				usageScope = scalar(t, `INSERT INTO discovery_scope (organization_id, collector_id, name, kind, target, credential_ids)
+					VALUES ($1, $2, 'evt02-usage', 'host', '10.97.0.1', ARRAY[$3]::uuid[]) RETURNING id::text`,
+					f.OrgA, usageCollector, usageCredential)
+				usageCI = f.CI(t, f.OrgA, "", "evt02-usage-ci")
+				exec(t, `UPDATE ci SET management_ip = '10.97.0.1' WHERE id = $1`, usageCI)
+			},
+			act: func(t *testing.T, refused bool) string {
+				h := discovery.NewHandler(discovery.NewPGRepository(f.App), nil)
+				err := h.RecordCollectorScopeRun(f.OrgCtx(f.OrgA), f.OrgA, usageCollector, &discovery.ScopeResultReport{
+					ScopeID: usageScope, At: time.Now(), Result: map[string]any{"records": 1},
+					CredentialUsage: []credential.UsageReport{{Target: "10.97.0.1", Namespace: "ssh", CredentialID: usageCredential,
+						Cause: credential.UsageAuthFailed}}})
+				failed(t, "scope run with credential usage", err, refused)
+				if refused {
+					unchanged(t, "credential usage", count(t, `credential_usage WHERE credential_id = $1`, usageCredential), "0")
+				}
+				return usageCredential
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["credential_id"] != entity || data["ci_id"] != usageCI || data["namespace"] != "ssh" ||
+					data["error_class"] != "auth_failed" || data["kind"] != "ssh_password" {
+					t.Errorf("credential.resolution_failed data %v", data)
+				}
+				for _, v := range data {
+					if s, ok := v.(string); ok && strings.Contains(s, "evt02-usage-secret") {
+						t.Errorf("credential.resolution_failed carries a secret value: %v", data)
 					}
 				}
 			}},
@@ -1295,7 +1338,6 @@ var plannedProducers = map[string]string{
 	"ipam.subnet.changed":           "WP-904",
 	"ipam.address.state_changed":    "WP-902",
 	"asn.changed":                   "WP-1066",
-	"credential.resolution_failed":  "WP-898",
 	"admp.connection.refreshed":     "WP-929",
 }
 

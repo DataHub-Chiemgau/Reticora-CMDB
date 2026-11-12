@@ -16,6 +16,7 @@ import (
 	"github.com/nats-io/nats.go"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
@@ -350,12 +351,27 @@ type SubnetsReport struct {
 	Subnets []string `json:"subnets"`
 }
 
-// ScopeResultReport is the result of one scope run.
+// ScopeResultReport is the result of one scope run. CredentialUsage are
+// the credentials the run used per target and namespace (CRD-06, WP-898),
+// never a value of a secret; at most credential.MaxUsageEntries count.
 type ScopeResultReport struct {
-	ScopeID string         `json:"scope_id"`
-	At      time.Time      `json:"at"`
-	NextRun time.Time      `json:"next_run"`
-	Result  map[string]any `json:"result"`
+	ScopeID         string                   `json:"scope_id"`
+	At              time.Time                `json:"at"`
+	NextRun         time.Time                `json:"next_run"`
+	Result          map[string]any           `json:"result"`
+	CredentialUsage []credential.UsageReport `json:"credential_usage,omitempty"`
+}
+
+// ScopeRunUsageRecorder stores a scope run together with its credential
+// usage in one transaction (CRD-06): the PostgreSQL repository. Without it
+// (--no-db) the usage of a run is dropped.
+type ScopeRunUsageRecorder interface {
+	RecordScopeRunUsage(ctx context.Context, orgID, collectorID, scopeID string, run *ScopeRun,
+		usage []credential.UsageReport) (credential.UsageOutcome, error)
+	// RecordScopeUsage records the usage of a scope pass of a discovery
+	// job without touching the scope's run.
+	RecordScopeUsage(ctx context.Context, orgID, collectorID, scopeID string, at time.Time,
+		usage []credential.UsageReport) (credential.UsageOutcome, error)
 }
 
 // subjectCollector extracts org and collector id from
@@ -443,7 +459,21 @@ func (h *Handler) RecordCollectorScopeRun(ctx context.Context, orgID, collectorI
 		slog.Warn("discovery scope run failed", "event", "discovery.scope."+state, "organization_id", orgID,
 			"collector_id", collectorID, "scope_id", rep.ScopeID, "errors", result["errors"])
 	}
-	return repo.RecordScopeRun(ctx, orgID, rep.ScopeID, &ScopeRun{At: at, Result: result, NextRun: rep.NextRun})
+	run := &ScopeRun{At: at, Result: result, NextRun: rep.NextRun}
+	if usageRepo, withUsage := h.repo.(ScopeRunUsageRecorder); withUsage && len(rep.CredentialUsage) > 0 {
+		usage := rep.CredentialUsage
+		if len(usage) > credential.MaxUsageEntries {
+			usage = usage[:credential.MaxUsageEntries]
+		}
+		out, uerr := usageRepo.RecordScopeRunUsage(ctx, orgID, collectorID, rep.ScopeID, run, usage)
+		if uerr == nil && (out.Unmatched > 0 || out.Rejected > 0) {
+			slog.Info("credential usage of a scope run partly dropped", "event", "credential.usage.dropped",
+				"organization_id", orgID, "collector_id", collectorID, "scope_id", rep.ScopeID,
+				"recorded", out.Recorded, "unmatched", out.Unmatched, "rejected", out.Rejected)
+		}
+		return uerr
+	}
+	return repo.RecordScopeRun(ctx, orgID, rep.ScopeID, run)
 }
 
 // collectorsWithoutScopes holds the collectors this process logged as

@@ -10,6 +10,7 @@ package collectorcmd
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"maps"
 	"os"
@@ -442,7 +443,7 @@ func TestCredentialKindsContract(t *testing.T) {
 			t.Errorf("kind %q maps to namespace %q (known %v), contract says %q", k.Kind, ns, ok, k.Namespace)
 		}
 		collectorBundle.set(&bundleContent{Credentials: []bundleCredential{{ID: "cred", Kind: k.Kind, Secret: map[string]any{"probe": "secret-of-" + k.Kind}}}})
-		resolved := collectorBundle.resolve([]string{"cred"})
+		resolved, _ := collectorBundle.resolve([]string{"cred"})
 		var reached []string
 		for name := range pluginRegistry {
 			if plugins.CredentialsFor(name, resolved)["probe"] != "" {
@@ -457,6 +458,94 @@ func TestCredentialKindsContract(t *testing.T) {
 	for kind := range credentialNamespace {
 		if !listed[kind] {
 			t.Errorf("the collector maps kind %q, which the contract does not list", kind)
+		}
+	}
+}
+
+// TestRunReportsCredentialUsage covers WP-898 (CRD-06): a scope run reports
+// per target and namespace the bundle credential the target used, a
+// success and an auth_failed with the right credential (a target credential
+// of the bundle with its CI), names the credential in the run error and
+// carries no value of a secret.
+func TestRunReportsCredentialUsage(t *testing.T) {
+	const (
+		scopeA  = "6f0b6f0e-0000-4000-8000-0000000000c1"
+		scopeB  = "6f0b6f0e-0000-4000-8000-0000000000c2"
+		targetA = "192.0.2.71"
+		targetB = "192.0.2.72"
+	)
+	runs := auditCaptureScopeRuns(t)
+	up, _ := auditUploadSink(t)
+	spy := &auditSpy{name: "ssh",
+		alive: func(targets []string) []plugins.Result {
+			out := make([]plugins.Result, 0, len(targets))
+			for _, tg := range targets {
+				out = append(out, plugins.Result{IP: tg})
+			}
+			return out
+		},
+		collect: func(_ context.Context, target string) (*plugins.DeviceRecord, error) {
+			if target == targetB {
+				return nil, fmt.Errorf("ssh %s: %w", target, plugins.ErrAuthFailed)
+			}
+			// Collected: the probe result stands for the record.
+			return nil, nil
+		}}
+	auditUsePlugins(t, spy)
+	collectorBundle.set(&bundleContent{
+		Credentials: []bundleCredential{
+			{ID: "cred-scope-a", Kind: "ssh_password", Secret: map[string]any{"username": "a", "password": "usage-secret-scope-a"}},
+			{ID: "cred-scope-b", Kind: "ssh_password", Secret: map[string]any{"username": "b", "password": "usage-secret-scope-b"}},
+			{ID: "cred-device-b", Kind: "ssh_password", Secret: map[string]any{"username": "d", "password": "usage-secret-device-b"}},
+		},
+		Targets: []bundleTarget{{CIID: "ci-b", ScopeID: scopeB, ManagementIP: targetB, Namespace: "ssh",
+			CredentialID: "cred-device-b", Origin: "ci"}},
+	})
+	collectorScopes.set([]collectorScope{
+		{ID: scopeA, Kind: "host", Target: targetA, Schedule: "24h", CredentialIDs: []string{"cred-scope-a"}, Plugins: []string{"ssh"}},
+		{ID: scopeB, Kind: "host", Target: targetB, Schedule: "24h", CredentialIDs: []string{"cred-scope-b"}, Plugins: []string{"ssh"}},
+	}, nil)
+	runDueDiscovery(context.Background(), &collectorConfig{}, up, newScheduler(), &hostCache{}, time.Now())
+
+	byScope := map[string]auditScopeRun{}
+	for _, r := range runs() {
+		byScope[r.ScopeID] = r
+		for _, secret := range []string{"usage-secret-scope-a", "usage-secret-scope-b", "usage-secret-device-b"} {
+			if strings.Contains(string(r.Raw), secret) {
+				t.Errorf("the run report of scope %s carries a value of a secret", r.ScopeID)
+			}
+		}
+	}
+	a, b := byScope[scopeA], byScope[scopeB]
+	wantA := []credentialUse{{Target: targetA, Namespace: "ssh", CredentialID: "cred-scope-a", OK: true}}
+	if !slices.Equal(a.CredentialUsage, wantA) {
+		t.Errorf("usage of scope A = %+v, want %+v", a.CredentialUsage, wantA)
+	}
+	wantB := []credentialUse{{Target: targetB, CIID: "ci-b", Namespace: "ssh", CredentialID: "cred-device-b", Cause: "auth_failed"}}
+	if !slices.Equal(b.CredentialUsage, wantB) {
+		t.Errorf("usage of scope B = %+v, want %+v (the target credential, not the scope's)", b.CredentialUsage, wantB)
+	}
+	if len(b.Result.Errors) != 1 || b.Result.Errors[0].CredentialID != "cred-device-b" || b.Result.Errors[0].Cause != "auth_failed" {
+		t.Errorf("run errors of scope B = %+v, want one auth_failed naming cred-device-b", b.Result.Errors)
+	}
+
+	// An ad-hoc job (JOB-01) reports the usage of its scope passes too,
+	// per scope, with its status.
+	_, _, _, jobUsage := runJob(context.Background(), &collectorConfig{}, up, &hostCache{}, &collectorJob{ID: "job-usage", JobType: "poll"})
+	byJobScope := map[string][]credentialUse{}
+	for _, u := range jobUsage {
+		byJobScope[u.ScopeID] = u.Usage
+	}
+	if !slices.Equal(byJobScope[scopeA], wantA) || !slices.Equal(byJobScope[scopeB], wantB) {
+		t.Errorf("usage of the job = %+v, want scope A %+v and scope B %+v", jobUsage, wantA, wantB)
+	}
+	raw, err := json.Marshal(jobUsage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"usage-secret-scope-a", "usage-secret-scope-b", "usage-secret-device-b"} {
+		if strings.Contains(string(raw), secret) {
+			t.Errorf("the job's usage carries a value of a secret")
 		}
 	}
 }

@@ -75,7 +75,7 @@ func TestCredentialBundle(t *testing.T) {
 		{[]string{"c1", "c-unknown"}, map[string]string{"snmp.community": "golden-community"}},
 		{nil, map[string]string{}},
 	} {
-		if got := collectorBundle.resolve(c.ids); !maps.Equal(got, c.want) {
+		if got, _ := collectorBundle.resolve(c.ids); !maps.Equal(got, c.want) {
 			t.Errorf("resolve(%v) = %v, want %v", c.ids, got, c.want)
 		}
 	}
@@ -174,7 +174,7 @@ func TestBundleVaultRefKeepsNamespaceFree(t *testing.T) {
 		{[]string{"ref"}, map[string]string{}},
 		{[]string{"ref", "legacy"}, map[string]string{"ssh.username": "u", "ssh.password": "p"}},
 	} {
-		if got := collectorBundle.resolve(c.ids); !maps.Equal(got, c.want) {
+		if got, _ := collectorBundle.resolve(c.ids); !maps.Equal(got, c.want) {
 			t.Errorf("resolve(%v) = %v, want %v", c.ids, got, c.want)
 		}
 	}
@@ -329,13 +329,13 @@ func TestCredentialsForTargetOverridesScope(t *testing.T) {
 	cfg := collectorConfig{Credentials: map[string]string{"snmp.community": "local"}}
 	want := map[string]string{"snmp.username": "dev-v3", "snmp.auth_password": "dev-auth",
 		"ssh.username": "scope", "ssh.password": "scope-pass"}
-	if got := credentialsForTarget(&cfg, deviceScope, "192.0.2.91", ""); !maps.Equal(got, want) {
+	if got, _ := credentialsForTarget(&cfg, deviceScope, "192.0.2.91", ""); !maps.Equal(got, want) {
 		t.Errorf("by address: %v, want %v", got, want)
 	}
-	if got := credentialsForTarget(&cfg, deviceScope, "", "ci-1"); !maps.Equal(got, want) {
+	if got, _ := credentialsForTarget(&cfg, deviceScope, "", "ci-1"); !maps.Equal(got, want) {
 		t.Errorf("by CI id: %v, want %v", got, want)
 	}
-	if got := credentialsForTarget(&cfg, nil, "192.0.2.91", "ci-1"); !maps.Equal(got, cfg.Credentials) {
+	if got, _ := credentialsForTarget(&cfg, nil, "192.0.2.91", "ci-1"); !maps.Equal(got, cfg.Credentials) {
 		t.Errorf("pass without server scopes: %v, want only the local settings", got)
 	}
 	// The scope's list stays as it is (credentialsFor unchanged).
@@ -355,11 +355,11 @@ func TestCredentialsForTargetNamespaceFallback(t *testing.T) {
 	cfg := collectorConfig{}
 	scopeOnly := map[string]string{"snmp.community": "scope-community", "ssh.username": "scope", "ssh.password": "scope-pass"}
 	want := map[string]string{"snmp.community": "scope-community", "ssh.username": "dev", "ssh.private_key": "dev-key"}
-	if got := credentialsForTarget(&cfg, deviceScope, "192.0.2.92", ""); !maps.Equal(got, want) {
+	if got, _ := credentialsForTarget(&cfg, deviceScope, "192.0.2.92", ""); !maps.Equal(got, want) {
 		t.Errorf("SSH target: %v, want %v", got, want)
 	}
 	for _, ip := range []string{"192.0.2.10", "192.0.2.93"} {
-		if got := credentialsForTarget(&cfg, deviceScope, ip, ""); !maps.Equal(got, scopeOnly) {
+		if got, _ := credentialsForTarget(&cfg, deviceScope, ip, ""); !maps.Equal(got, scopeOnly) {
 			t.Errorf("%s: %v, want the scope's %v", ip, got, scopeOnly)
 		}
 		if key := collectorBundle.targetKey(deviceScope, ip, ""); key != "" {
@@ -394,8 +394,8 @@ func TestBundleFormat1HasNoTargets(t *testing.T) {
 		t.Fatalf("after a format 1 bundle the indexes hold targets of %d scopes, want none", scopes)
 	}
 	scope := &collectorScope{CredentialIDs: []string{"c1"}}
-	if got, want := credentialsForTarget(&collectorConfig{}, scope, "192.0.2.91", "ci-1"), credentialsFor(&collectorConfig{}, scope); !maps.Equal(got, want) {
-		t.Errorf("format 1: %v, want the scope's %v", got, want)
+	if got, _ := credentialsForTarget(&collectorConfig{}, scope, "192.0.2.91", "ci-1"); !maps.Equal(got, credentialsFor(&collectorConfig{}, scope)) {
+		t.Errorf("format 1: %v, want the scope's %v", got, credentialsFor(&collectorConfig{}, scope))
 	}
 
 	dup := deviceBundle()
@@ -434,18 +434,18 @@ func TestTargetCredentialsStayInTheirScope(t *testing.T) {
 	})
 	t.Cleanup(func() { collectorBundle.set(nil) })
 	cfg := &collectorConfig{}
-	if got := credentialsForTarget(cfg, scopeX, "10.0.0.5", ""); got["snmp.community"] != "x-device-community" {
+	if got, _ := credentialsForTarget(cfg, scopeX, "10.0.0.5", ""); got["snmp.community"] != "x-device-community" {
 		t.Errorf("pass of scope X: %v, want the target credential of client X's device", got)
 	}
 	for _, c := range []struct{ ip, ci string }{{"10.0.0.5", ""}, {"10.0.0.5", "ci-x"}, {"10.0.0.6", "ci-unscoped"}} {
-		if got := credentialsForTarget(cfg, scopeY, c.ip, c.ci); !maps.Equal(got, map[string]string{"snmp.community": "y-scope-community"}) {
+		if got, _ := credentialsForTarget(cfg, scopeY, c.ip, c.ci); !maps.Equal(got, map[string]string{"snmp.community": "y-scope-community"}) {
 			t.Errorf("pass of scope Y, %s/%q: %v, want only scope Y's community", c.ip, c.ci, got)
 		}
 		if key := collectorBundle.targetKey(scopeY, c.ip, c.ci); key != "" {
 			t.Errorf("pass of scope Y, %s/%q: resolution key %q, want none", c.ip, c.ci, key)
 		}
 	}
-	if got := credentialsForTarget(cfg, scopeX, "10.0.0.6", ""); got["snmp.community"] != "x-scope-community" {
+	if got, _ := credentialsForTarget(cfg, scopeX, "10.0.0.6", ""); got["snmp.community"] != "x-scope-community" {
 		t.Errorf("a target without a scope: %v, want the scope's credentials", got)
 	}
 }
@@ -469,7 +469,7 @@ func TestHostScopeByNameUsesTargetCredential(t *testing.T) {
 	collectorBundle.set(content)
 	t.Cleanup(func() { collectorBundle.set(nil) })
 	for _, target := range []string{"printer.example", "192.0.2.150", "192.0.2.151"} {
-		if got := credentialsForTarget(&collectorConfig{}, scope, target, ""); got["snmp.community"] != "device-community" {
+		if got, _ := credentialsForTarget(&collectorConfig{}, scope, target, ""); got["snmp.community"] != "device-community" {
 			t.Errorf("%s: %v, want the device's community", target, got)
 		}
 	}
@@ -479,7 +479,7 @@ func TestHostScopeByNameUsesTargetCredential(t *testing.T) {
 	content.Targets = append(content.Targets, bundleTarget{CIID: "ci-other", ScopeID: scope.ID, ManagementIP: "192.0.2.151",
 		Namespace: "snmp", CredentialID: "dev-snmp", Origin: "ci"})
 	collectorBundle.set(content)
-	if got := credentialsForTarget(&collectorConfig{}, scope, "printer.example", ""); got["snmp.community"] != "scope-community" {
+	if got, _ := credentialsForTarget(&collectorConfig{}, scope, "printer.example", ""); got["snmp.community"] != "scope-community" {
 		t.Errorf("ambiguous name: %v, want the scope's community", got)
 	}
 }
@@ -503,17 +503,17 @@ func TestBundleCacheKeepsResolvedReferences(t *testing.T) {
 		t.Fatalf("resolution = %v", out)
 	}
 	collectorBundle.set(content("network/sw1", testSecretID))
-	if got := collectorBundle.resolve([]string{"ref"}); got["snmp.community"] != testValue {
+	if got, _ := collectorBundle.resolve([]string{"ref"}); got["snmp.community"] != testValue {
 		t.Fatalf("the same reference lost its values: %v", got)
 	}
 	collectorBundle.set(content("network/sw2", testSecretID))
-	if got := collectorBundle.resolve([]string{"ref"}); len(got) != 0 {
+	if got, _ := collectorBundle.resolve([]string{"ref"}); len(got) != 0 {
 		t.Fatalf("a changed path kept the values: %v", got)
 	}
 	collectorBundle.set(content("network/sw1", testSecretID))
 	collectorVault.resolveBundle(context.Background(), collectorBundle)
 	collectorBundle.set(content("network/sw1", "rotated-secret-id"))
-	if got := collectorBundle.resolve([]string{"ref"}); len(got) != 0 {
+	if got, _ := collectorBundle.resolve([]string{"ref"}); len(got) != 0 {
 		t.Fatalf("a changed login kept the values: %v", got)
 	}
 }
@@ -609,7 +609,7 @@ func TestBundleChangedTriggersReload(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, 5*time.Second, "the reload of a later notice", func() bool { return fetches() == 3 })
-	if got := collectorBundle.resolve([]string{"c1"}); got["snmp.community"] != "golden-community" {
+	if got, _ := collectorBundle.resolve([]string{"c1"}); got["snmp.community"] != "golden-community" {
 		t.Fatalf("the reloaded bundle is not in memory: %v", got)
 	}
 }
@@ -643,7 +643,8 @@ func TestBundleChangedWithinSixtySeconds(t *testing.T) {
 		t.Fatal(err)
 	}
 	took := waitFor(t, bundleReloadJitter+5*time.Second, "the new bundle in memory", func() bool {
-		return collectorBundle.resolve([]string{"c1"})["snmp.community"] == "golden-community"
+		got, _ := collectorBundle.resolve([]string{"c1"})
+		return got["snmp.community"] == "golden-community"
 	})
 	if took < bundleReloadJitter-50*time.Millisecond {
 		t.Fatalf("the reload came after %v, before its delay of %v", took, bundleReloadJitter)

@@ -508,6 +508,7 @@ func runDueDiscovery(ctx context.Context, cfg *collectorConfig, up *uploader, sc
 		scope   *collectorScope
 		records int
 		errs    []runError
+		usage   []credentialUse
 		next    time.Time
 	}
 	var outcomes []scopeOutcome
@@ -518,9 +519,10 @@ func runDueDiscovery(ctx context.Context, cfg *collectorConfig, up *uploader, sc
 		if len(due) == 0 {
 			continue
 		}
-		passRecords, errs := runPass(ctx, cfg, up, &pass, due, hosts)
+		passRecords, errs, usage := runPass(ctx, cfg, up, &pass, due, hosts)
 		records = append(records, passRecords...)
-		outcomes = append(outcomes, scopeOutcome{scope: pass.scope, records: len(passRecords), errs: errs, next: pass.nextRun(sched)})
+		outcomes = append(outcomes, scopeOutcome{scope: pass.scope, records: len(passRecords), errs: errs, usage: usage,
+			next: pass.nextRun(sched)})
 	}
 	if len(outcomes) == 0 {
 		return 0
@@ -531,21 +533,24 @@ func runDueDiscovery(ctx context.Context, cfg *collectorConfig, up *uploader, sc
 		if uploadErr != nil && o.records > 0 {
 			errs = append(errs, *uploadErr)
 		}
-		reportScopeRun(ctx, o.scope, now, o.records, errs, o.next)
+		reportScopeRun(ctx, o.scope, now, o.records, errs, o.usage, o.next)
 	}
 	slog.Info("discovery completed", "duration_ms", time.Since(now).Milliseconds(), "total_records", len(records))
 	return len(records)
 }
 
 // runPass runs the protocols of a pass, the sweep first, and returns its
-// records, tagged with its scope, and its run errors (DIS-08).
-func runPass(ctx context.Context, cfg *collectorConfig, up *uploader, pass *discoveryPass, protocols []string, hosts *hostCache) ([]plugins.DeviceRecord, []runError) {
+// records, tagged with its scope, its run errors (DIS-08) and the
+// credentials it used per target and namespace (CRD-06, WP-898).
+func runPass(ctx context.Context, cfg *collectorConfig, up *uploader, pass *discoveryPass, protocols []string,
+	hosts *hostCache) ([]plugins.DeviceRecord, []runError, []credentialUse) {
 	slog.Info("discovery started", "pass", pass.key, "protocols", protocols)
 	// Only the credentials of this pass (COL-02, DIS-09); every plugin
 	// receives the namespace of its protocol.
-	passCreds := credentialsFor(cfg, pass.scope)
+	passCreds, passRefs := credentialsForPass(cfg, pass.scope)
 	var passRecords []plugins.DeviceRecord
 	var errs []runError
+	var usage []credentialUse
 	if pass.truncated {
 		slog.Warn("discovery scope truncated", "event", "discovery.scope.truncated", "scope_id", pass.scope.ID,
 			"target", pass.scope.Target, "limit", maxScopeAddresses)
@@ -569,14 +574,27 @@ func runPass(ctx context.Context, cfg *collectorConfig, up *uploader, pass *disc
 			if collectorBundle.targetKey(pass.scope, ip, "") == "" {
 				return creds
 			}
-			return plugins.CredentialsFor(protocol, credentialsForTarget(cfg, pass.scope, ip, ""))
+			c, _ := credentialsForTarget(cfg, pass.scope, ip, "")
+			return plugins.CredentialsFor(protocol, c)
+		}
+		// The credential a device uses in the namespace of the protocol
+		// (WP-898), resolved like credsOf.
+		namespace := plugins.CredentialNamespace(protocol)
+		refOf := func(ip string) credentialRef {
+			if collectorBundle.targetKey(pass.scope, ip, "") == "" {
+				return passRefs[namespace]
+			}
+			_, refs := credentialsForTarget(cfg, pass.scope, ip, "")
+			return refs[namespace]
 		}
 		hits, probeErrs, failed, ok := probeByCredentials(ctx, protocol, plug, pass.scope, targets, creds, credsOf)
 		errs = append(errs, failed...)
 		if probeErrs != nil {
 			// Targets the probe could not check go with protocol, target
 			// and cause into the scope run (DIS-08).
-			errs = append(errs, probeTargetErrors(protocol, probeErrs)...)
+			probeFailed := probeTargetErrors(protocol, probeErrs)
+			usage = append(usage, credentialUses(namespace, nil, probeFailed, refOf)...)
+			errs = append(errs, probeFailed...)
 		}
 		if !ok {
 			continue
@@ -591,6 +609,7 @@ func runPass(ctx context.Context, cfg *collectorConfig, up *uploader, pass *disc
 			hosts.set(pass.key, reachable)
 		}
 		collected, collectFailed := collectHits(ctx, protocol, plug, hits, credsOf)
+		usage = append(usage, credentialUses(namespace, hits, collectFailed, refOf)...)
 		errs = append(errs, collectFailed...)
 		if protocol == "power" {
 			// UPS and PDU readings of the power devices (MON-02), each
@@ -601,7 +620,63 @@ func runPass(ctx context.Context, cfg *collectorConfig, up *uploader, pass *disc
 		passRecords = append(passRecords, collected...)
 	}
 	tagRecords(passRecords, pass.scope)
-	return passRecords, errs
+	return passRecords, errs, usage
+}
+
+// credentialUse is an entry of the credential usage of a scope run (CRD-06,
+// WP-898): the bundle credential a target used in a namespace, the CI when
+// the bundle named it, and whether the use succeeded; never a value of the
+// secret.
+type credentialUse struct {
+	Target       string `json:"target"`
+	CIID         string `json:"ci_id,omitempty"`
+	Namespace    string `json:"namespace"`
+	CredentialID string `json:"credential_id"`
+	OK           bool   `json:"ok"`
+	Cause        string `json:"cause,omitempty"`
+}
+
+// usageCauses are the causes of a failed use the server stores
+// (credential_usage_error_class_check); a failure with another cause says
+// nothing about the credential and is not reported as usage.
+var usageCauses = map[string]bool{"auth_failed": true, "timeout": true, "unreachable": true, "tls": true}
+
+// maxReportedUsage bounds the usage entries of one run report
+// (credential.MaxUsageEntries of the server).
+const maxReportedUsage = 1000
+
+// credentialUses returns the usage entries of a protocol in a pass: a
+// success for every hit without a failure, a failure for every failed
+// target with a cause of usageCauses; only for targets that used a bundle
+// credential in the namespace (refOf). It also names that credential in
+// each failure (runError.CredentialID).
+func credentialUses(namespace string, hits []plugins.Result, failed []runError, refOf func(ip string) credentialRef) []credentialUse {
+	var out []credentialUse
+	failedAt := map[string]bool{}
+	for i := range failed {
+		f := &failed[i]
+		if f.Target == "" {
+			continue
+		}
+		failedAt[f.Target] = true
+		ref := refOf(f.Target)
+		if ref.ID == "" {
+			continue
+		}
+		f.CredentialID = ref.ID
+		if usageCauses[f.Cause] {
+			out = append(out, credentialUse{Target: f.Target, CIID: ref.CIID, Namespace: namespace, CredentialID: ref.ID, Cause: f.Cause})
+		}
+	}
+	for i := range hits {
+		if failedAt[hits[i].IP] {
+			continue
+		}
+		if ref := refOf(hits[i].IP); ref.ID != "" {
+			out = append(out, credentialUse{Target: hits[i].IP, CIID: ref.CIID, Namespace: namespace, CredentialID: ref.ID, OK: true})
+		}
+	}
+	return out
 }
 
 // probeByCredentials runs the probe of a protocol: the targets without a
@@ -675,7 +750,8 @@ func pollPowerByTarget(ctx context.Context, cfg *collectorConfig, scope *collect
 	for i := range hits {
 		creds := scopeSNMP
 		if collectorBundle.targetKey(scope, hits[i].IP, "") != "" {
-			creds = plugins.CredentialsFor("snmp", credentialsForTarget(cfg, scope, hits[i].IP, ""))
+			c, _ := credentialsForTarget(cfg, scope, hits[i].IP, "")
+			creds = plugins.CredentialsFor("snmp", c)
 		}
 		samples = append(samples, pollPowerValues(ctx, hits[i:i+1], creds)...)
 	}

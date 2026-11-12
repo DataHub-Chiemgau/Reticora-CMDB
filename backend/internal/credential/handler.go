@@ -53,6 +53,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Get("/{id}", h.get)
 		r.Patch("/{id}", h.update)
 		r.Put("/{id}/secret", h.replaceSecret)
+		// The usage per CI and namespace the collectors report (CRD-06).
+		r.Get("/{id}/usage", h.listUsage)
 		// There is deliberately no decrypt route: plaintext secrets never
 		// leave the server through the API (SEC-01, COL-02). They are only
 		// decrypted in server memory for delivery to collectors and

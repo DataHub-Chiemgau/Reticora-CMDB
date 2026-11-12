@@ -127,6 +127,15 @@ var credentialAliases = map[string]string{
 	"power": "snmp",
 }
 
+// CredentialNamespace is the credential namespace a protocol plugin reads:
+// its own name unless credentialAliases borrows another.
+func CredentialNamespace(protocol string) string {
+	if alias, ok := credentialAliases[protocol]; ok {
+		return alias
+	}
+	return protocol
+}
+
 // CredentialsFor selects the credentials a protocol plugin may receive (COL-02).
 // Collector credentials are namespaced by protocol ("ssh.username",
 // "redfish.password", "snmp.community", "wmi.password"); the plugin gets only
@@ -134,11 +143,7 @@ var credentialAliases = map[string]string{
 // receives the credentials of another protocol unless credentialAliases says
 // so; without entries of its namespace it gets none, never a fallback.
 func CredentialsFor(protocol string, all map[string]string) map[string]string {
-	namespace := protocol
-	if alias, ok := credentialAliases[protocol]; ok {
-		namespace = alias
-	}
-	prefix := namespace + "."
+	prefix := CredentialNamespace(protocol) + "."
 	out := make(map[string]string)
 	for key, value := range all {
 		if name, ok := strings.CutPrefix(key, prefix); ok && name != "" {

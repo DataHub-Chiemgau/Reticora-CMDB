@@ -153,22 +153,22 @@ func TestBundleWithReferenceResolvesInMemory(t *testing.T) {
 		},
 		Targets: []bundleTarget{{CIID: "ci-1", ScopeID: "s1", ManagementIP: "192.0.2.10", Namespace: "snmp", CredentialID: "ref", Origin: "ci"}},
 	})
-	if got := collectorBundle.resolve([]string{"ref"}); len(got) != 0 {
+	if got, _ := collectorBundle.resolve([]string{"ref"}); len(got) != 0 {
 		t.Fatalf("an unresolved reference applied: %v", got)
 	}
 	ctx := context.Background()
 	if out := collectorVault.resolveBundle(ctx, collectorBundle); out["ref"] != vaultResultOK {
 		t.Fatalf("resolution = %v", out)
 	}
-	if got := collectorBundle.resolve([]string{"ref", "scope-snmp"}); !maps.Equal(got, map[string]string{"snmp.community": testValue}) {
+	if got, _ := collectorBundle.resolve([]string{"ref", "scope-snmp"}); !maps.Equal(got, map[string]string{"snmp.community": testValue}) {
 		t.Fatalf("resolve = %v", got)
 	}
 	cfg := collectorConfig{}
 	scope := &collectorScope{ID: "s1", Kind: "network", CredentialIDs: []string{"scope-snmp"}}
-	if got := credentialsForTarget(&cfg, scope, "192.0.2.10", ""); got["snmp.community"] != testValue {
+	if got, _ := credentialsForTarget(&cfg, scope, "192.0.2.10", ""); got["snmp.community"] != testValue {
 		t.Fatalf("target credentials = %v", got)
 	}
-	if got := credentialsForTarget(&cfg, scope, "192.0.2.11", ""); got["snmp.community"] != "scope-community" {
+	if got, _ := credentialsForTarget(&cfg, scope, "192.0.2.11", ""); got["snmp.community"] != "scope-community" {
 		t.Fatalf("other device = %v", got)
 	}
 	collectorVault.resolveBundle(ctx, collectorBundle)
@@ -212,7 +212,7 @@ func TestVaultFailureDisablesOnlyAffectedCredential(t *testing.T) {
 	if !maps.Equal(out, want) {
 		t.Fatalf("outcomes = %v, want %v", out, want)
 	}
-	got := collectorBundle.resolve([]string{"denied", "missing", "field", "wmi-ref", "good", "stored-ssh"})
+	got, _ := collectorBundle.resolve([]string{"denied", "missing", "field", "wmi-ref", "good", "stored-ssh"})
 	if !maps.Equal(got, map[string]string{"snmp.community": testValue, "ssh.username": "u", "ssh.password": "p"}) {
 		t.Fatalf("resolve = %v", got)
 	}
@@ -228,7 +228,7 @@ func TestVaultFailureDisablesOnlyAffectedCredential(t *testing.T) {
 	if out = collectorVault.resolveBundle(context.Background(), collectorBundle); out["good"] != "field_missing" {
 		t.Fatalf("changed map = %v", out["good"])
 	}
-	if got = collectorBundle.resolve([]string{"good"}); len(got) != 0 {
+	if got, _ = collectorBundle.resolve([]string{"good"}); len(got) != 0 {
 		t.Fatalf("a failed reference kept its values: %v", got)
 	}
 }
@@ -463,7 +463,7 @@ func TestVaultVersionChangeCounted(t *testing.T) {
 		if out := collectorVault.resolveBundle(ctx, collectorBundle); out["ref"] != vaultResultOK {
 			t.Fatalf("read %d = %v", i, out)
 		}
-		if got := collectorBundle.resolve([]string{"ref"}); got["snmp.community"] != fmt.Sprint("v", version) {
+		if got, _ := collectorBundle.resolve([]string{"ref"}); got["snmp.community"] != fmt.Sprint("v", version) {
 			t.Fatalf("read %d = %v", i, got)
 		}
 	}

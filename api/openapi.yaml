@@ -10707,6 +10707,46 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
+  /api/v1/credentials/{id}/usage:
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: listCredentialUsage
+      tags: [Credentials]
+      summary: List the usage of a credential
+      description: >-
+        CRD-06 (WP-898): per CI and protocol namespace the last successful and
+        the last failed use of the credential with the error class, as the
+        collectors report it with their scope runs (never a secret). A
+        restricted principal sees only the rows of the CIs of its clients and
+        sites (and of CIs without). Filter ci_id. Requires credential:read.
+        An unknown or foreign credential is 404.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - { name: ci_id, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Usage of the credential
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CredentialUsageListResponse' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: ci_id is no UUID (`field` ci_id).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
   /api/v1/credentials/rotate-keys:
     post:
       operationId: rotateCredentialKeys
@@ -40015,6 +40055,34 @@ components:
           additionalProperties: { type: string, minLength: 1 }
           description: New field map of a vault_ref credential; raises secret_version.
 
+    CredentialUsage:
+      type: object
+      description: >-
+        Usage of a credential at a CI in a namespace (CRD-06, WP-898); never a
+        secret.
+      required: [credential_id, ci_id, namespace, last_success_at, last_failure_at, last_error_class, client_id, site_id]
+      properties:
+        credential_id: { type: string, format: uuid }
+        ci_id: { type: string, format: uuid }
+        namespace:
+          type: string
+          enum: [snmp, ssh, redfish, ipmi, wmi, api, nut, nas]
+        last_success_at: { type: [string, 'null'], format: date-time }
+        last_failure_at: { type: [string, 'null'], format: date-time }
+        last_error_class:
+          type: [string, 'null']
+          enum: [auth_failed, timeout, unreachable, tls, vault_unreachable, vault_denied, vault_not_found, field_missing, null]
+        client_id: { type: [string, 'null'], format: uuid, description: Client of the CI. }
+        site_id: { type: [string, 'null'], format: uuid, description: Site of the CI. }
+    CredentialUsageListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/CredentialUsage' }
     CredentialSecretReplace:
       type: object
       writeOnly: true

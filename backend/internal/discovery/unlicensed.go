@@ -14,6 +14,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
@@ -65,6 +66,8 @@ func RegisterMetrics(reg prometheus.Registerer) {
 	}, func() float64 { return float64(UnlicensedQueued()) }))
 	// Discovery error states (DIS-08).
 	reg.MustRegister(scopeRuns, discoveryErrors)
+	// Credential usage entries dropped from the scope runs (CRD-06).
+	reg.MustRegister(credential.UsageMetrics()...)
 	// Losses and backpressure reported by the collectors (NFR-04, F-234).
 	reg.MustRegister(collectorSpoolDropped, collectorSpoolBackpressure)
 	// Vault version changes reported by the collectors (CRD-05, WP-897).

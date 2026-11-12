@@ -340,15 +340,22 @@ func (c *bundleCache) targetKey(scope *collectorScope, ip, ciID string) string {
 	return strings.Join(parts, ",")
 }
 
+// credentialRef names the bundle credential a device uses in a namespace
+// and, when it came from a bundle target, the CI the server resolved it for
+// (CRD-06, WP-898). It carries no value of the secret.
+type credentialRef struct {
+	ID   string
+	CIID string
+}
+
 // overrideTarget replaces in creds (namespaced, owned by the caller) every
 // namespace the device has a target credential for by that credential and
-// returns the namespaces replaced; the other namespaces keep the scope's
-// credentials.
-func (c *bundleCache) overrideTarget(creds map[string]string, scope *collectorScope, ip, ciID string) []string {
+// returns the targets used, by namespace; the other namespaces keep the
+// scope's credentials.
+func (c *bundleCache) overrideTarget(creds map[string]string, scope *collectorScope, ip, ciID string) map[string]bundleTarget {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	usable := c.usableTargets(scope, ip, ciID)
-	replaced := make([]string, 0, len(usable))
 	for ns, tgt := range usable {
 		prefix := ns + "."
 		for k := range creds {
@@ -361,10 +368,8 @@ func (c *bundleCache) overrideTarget(creds map[string]string, scope *collectorSc
 				creds[prefix+k] = str
 			}
 		}
-		replaced = append(replaced, ns)
 	}
-	slices.Sort(replaced)
-	return replaced
+	return usable
 }
 
 // resolve returns the cached credentials with the given IDs as
@@ -373,29 +378,29 @@ func (c *bundleCache) overrideTarget(creds map[string]string, scope *collectorSc
 // kinds without a namespace and entries without secret values (a vault
 // reference not resolved, WP-894, WP-895) are skipped without taking their
 // namespace, so a stored credential later in ids still applies. A resolved
-// reference applies like a stored credential.
-func (c *bundleCache) resolve(ids []string) map[string]string {
+// reference applies like a stored credential. The second result names per
+// namespace the ID of the credential that applies (WP-898).
+func (c *bundleCache) resolve(ids []string) (creds, used map[string]string) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	out := map[string]string{}
-	taken := map[string]bool{}
+	creds, used = map[string]string{}, map[string]string{}
 	for _, id := range ids {
 		cred, ok := c.creds[id]
 		if !ok {
 			continue
 		}
 		ns, known := credentialNamespace[cred.Kind]
-		if !known || taken[ns] || len(cred.Secret) == 0 {
+		if !known || used[ns] != "" || len(cred.Secret) == 0 {
 			continue
 		}
-		taken[ns] = true
+		used[ns] = id
 		for k, v := range cred.Secret {
 			if s, isString := v.(string); isString {
-				out[ns+"."+k] = s
+				creds[ns+"."+k] = s
 			}
 		}
 	}
-	return out
+	return creds, used
 }
 
 // credentialsFor returns the credentials of a discovery pass (COL-02,
@@ -404,10 +409,22 @@ func (c *bundleCache) resolve(ids []string) map[string]string {
 // never those of another scope; the locally configured credentials apply
 // only to the fallback pass without server scopes (scope nil).
 func credentialsFor(cfg *collectorConfig, scope *collectorScope) map[string]string {
+	creds, _ := credentialsForPass(cfg, scope)
+	return creds
+}
+
+// credentialsForPass is credentialsFor with the credential that applies per
+// namespace (none for the local settings, which have no ID).
+func credentialsForPass(cfg *collectorConfig, scope *collectorScope) (map[string]string, map[string]credentialRef) {
+	refs := map[string]credentialRef{}
 	if scope == nil {
-		return maps.Clone(cfg.Credentials)
+		return maps.Clone(cfg.Credentials), refs
 	}
-	return collectorBundle.resolve(scope.CredentialIDs)
+	creds, used := collectorBundle.resolve(scope.CredentialIDs)
+	for ns, id := range used {
+		refs[ns] = credentialRef{ID: id}
+	}
+	return creds, refs
 }
 
 // credentialsForTarget returns the credentials of one device of a pass
@@ -417,17 +434,25 @@ func credentialsFor(cfg *collectorConfig, scope *collectorScope) map[string]stri
 // scope's (credentialsFor). A target credential for snmp does not displace
 // the scope's ssh credential. The pass without server scopes (scope nil)
 // uses only the local settings. It is the one resolution for every
-// consumer, the probe engine (WP-948) passes the CI id. The log names at
-// most namespace and origin, never a value.
-func credentialsForTarget(cfg *collectorConfig, scope *collectorScope, ip, ciID string) map[string]string {
-	creds := credentialsFor(cfg, scope)
+// consumer, the probe engine (WP-948) passes the CI id. The second result
+// names per namespace the credential that applies and, for a target
+// credential, its CI (WP-898). The log names at most namespace and origin,
+// never a value.
+func credentialsForTarget(cfg *collectorConfig, scope *collectorScope, ip, ciID string) (map[string]string, map[string]credentialRef) {
+	creds, refs := credentialsForPass(cfg, scope)
 	if scope == nil {
-		return creds
+		return creds, refs
 	}
 	if replaced := collectorBundle.overrideTarget(creds, scope, ip, ciID); len(replaced) > 0 {
-		slog.Debug("discovery credentials of a target", "namespaces", replaced, "origin", "target")
+		namespaces := make([]string, 0, len(replaced))
+		for ns, tgt := range replaced {
+			refs[ns] = credentialRef{ID: tgt.CredentialID, CIID: tgt.CIID}
+			namespaces = append(namespaces, ns)
+		}
+		slices.Sort(namespaces)
+		slog.Debug("discovery credentials of a target", "namespaces", namespaces, "origin", "target")
 	}
-	return creds
+	return creds, refs
 }
 
 // fetchBundle requests and opens the collector's bundle over nc.

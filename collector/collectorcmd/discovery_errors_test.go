@@ -353,7 +353,7 @@ func TestHostScopeSilentTargetsOnly(t *testing.T) {
 			collectorScopes.set([]collectorScope{{ID: "6f0b6f0e-0000-4000-8000-000000000641", Kind: tc.kind, Target: tc.target,
 				Schedule: "24h", Plugins: []string{"sweep", "snmp"}}}, nil)
 			passes := discoveryPasses(&collectorConfig{})
-			_, errs := runPass(context.Background(), &collectorConfig{}, nil, &passes[0], []string{"sweep", "snmp"}, &hostCache{})
+			_, errs, _ := runPass(context.Background(), &collectorConfig{}, nil, &passes[0], []string{"sweep", "snmp"}, &hostCache{})
 			var got []runError
 			for _, e := range errs {
 				if e.Message == "" || !strings.Contains(e.Message, e.Target) {

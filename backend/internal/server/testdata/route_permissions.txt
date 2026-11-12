@@ -171,6 +171,7 @@ GET /api/v1/credential-bindings/ credential:read
 GET /api/v1/credential-bindings/{id} credential:read
 GET /api/v1/credentials/ credential:read
 GET /api/v1/credentials/{id} credential:read
+GET /api/v1/credentials/{id}/usage credential:read
 GET /api/v1/desks desk:read
 GET /api/v1/desks/{id} desk:read
 GET /api/v1/desks/{id}/bookings desk:read
