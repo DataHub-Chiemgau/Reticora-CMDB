@@ -78,6 +78,8 @@ type connectionFields struct {
 	ContractID       string         `json:"contract_id,omitempty"`
 	AddressText      string         `json:"address_text,omitempty"`
 	AddressSubjectID string         `json:"address_subject_id,omitempty"`
+	AddressForm      string         `json:"address_form"`
+	RemovedAt        string         `json:"removed_at,omitempty"`
 	HolderSubjectID  string         `json:"holder_subject_id,omitempty"`
 	HolderPresent    bool           `json:"holder_present"`
 	Properties       map[string]any `json:"properties"`
@@ -93,10 +95,25 @@ func connectionFieldsOf(c *Connection) connectionFields {
 	if props == nil {
 		props = map[string]any{}
 	}
+	removed, _ := props["removed_at"].(string)
 	return connectionFields{ID: c.ID, AccountID: c.AccountID, ExternalID: c.ExternalID, Carrier: c.Carrier,
 		ContractID: c.ContractID, AddressText: c.AddressText, AddressSubjectID: c.AddressSubjectID,
+		AddressForm: addressForm(c), RemovedAt: removed,
 		HolderSubjectID: c.HolderSubjectID, HolderPresent: c.HolderSubjectID != "", Properties: props,
 		FetchedAt: c.FetchedAt, ExpiresAt: c.ExpiresAt, Stale: c.Stale, LastErrorClass: c.LastErrorClass, ClientID: c.ClientID}
+}
+
+// addressForm derives the form of the stored address (WP-1075, E-252):
+// business for an address in plain text, private for a surrogate, none
+// without an address.
+func addressForm(c *Connection) string {
+	switch {
+	case c.AddressText != "":
+		return AddressFormBusiness
+	case c.AddressSubjectID != "":
+		return AddressFormPrivate
+	}
+	return AddressFormNone
 }
 
 // portView is a port of a service: the CI only by its id.

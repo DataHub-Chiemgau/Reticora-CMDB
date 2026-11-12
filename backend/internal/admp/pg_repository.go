@@ -96,16 +96,29 @@ func nilIfZero(t time.Time) any {
 // shred a replaced holder or address (also when a concurrent upsert of the
 // same connection won the insert) and refuse a subject that was not
 // created in the same transaction or is linked to another connection
-// (admp_connection_subject_check: ErrInvalidCacheEntry).
+// (admp_connection_subject_check: ErrInvalidCacheEntry). The private
+// address and the personal keys of the properties go into the PII vault
+// in this transaction (WP-1075); the trigger of migration 000328 shreds
+// the property surrogates the row no longer carries.
 func (r *PGRepository) UpsertConnection(ctx context.Context, c *Connection) error {
 	if err := checkConnection(c); err != nil {
 		return err
 	}
-	props, err := json.Marshal(c.Properties)
-	if err != nil {
-		return err
-	}
 	return database.WithRequestTenant(ctx, r.pool, c.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		var previous connectionState
+		err := tx.QueryRow(ctx, `SELECT COALESCE(address_subject_id::text, ''), COALESCE(holder_subject_id::text, ''), properties
+			FROM admp_connection WHERE account_id = $1 AND external_id = $2 FOR UPDATE`, c.AccountID, c.ExternalID).
+			Scan(&previous.addressSubjectID, &previous.holderSubjectID, &previous.properties)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return cacheError(err)
+		}
+		if serr := sealConnection(ctx, tx, c, &previous); serr != nil {
+			return serr
+		}
+		props, err := json.Marshal(c.Properties)
+		if err != nil {
+			return err
+		}
 		stored, err := scanConnection(tx.QueryRow(ctx, `INSERT INTO admp_connection AS c (organization_id, account_id, external_id,
 				carrier, contract_id, address_subject_id, address_text, holder_subject_id, properties, fetched_at, expires_at,
 				stale, last_error_class)
@@ -123,6 +136,96 @@ func (r *PGRepository) UpsertConnection(ctx context.Context, c *Connection) erro
 			return cacheError(err)
 		}
 		*c = *stored
+		return nil
+	})
+}
+
+// connectionState is the stored state of a connection an upsert builds
+// on: its surrogates and properties (empty for a new one).
+type connectionState struct {
+	addressSubjectID string
+	holderSubjectID  string
+	properties       []byte
+}
+
+// sealConnection moves the personal values of c into the PII vault in tx
+// (WP-1075, E-243): the private address keeps its surrogate when it is
+// unchanged (with the same holder), else it becomes a new value subject
+// (anchored at the holder) and the old one is shredded first; without a vault the address is not
+// stored. The personal keys of the properties are sealed; only the
+// references the row carried may stay.
+func sealConnection(ctx context.Context, tx pgx.Tx, c *Connection, previous *connectionState) error {
+	kept := map[string]bool{}
+	if len(previous.properties) > 0 {
+		var old any
+		if err := json.Unmarshal(previous.properties, &old); err != nil {
+			return err
+		}
+		for _, id := range refIDs(old) {
+			kept[id] = true
+		}
+	}
+	if err := sealProperties(c.Properties, func(v string) (any, error) {
+		return pii.SealValueTx(ctx, tx, c.OrganizationID, v)
+	}, func(id string) bool { return kept[id] }); err != nil {
+		return err
+	}
+	address := c.PrivateAddress
+	c.PrivateAddress = ""
+	if address == "" {
+		return nil
+	}
+	vault := pii.Default()
+	if vault == nil {
+		return nil
+	}
+	if previous.addressSubjectID != "" {
+		subjects, err := vault.ResolveTx(ctx, tx, c.OrganizationID, []string{previous.addressSubjectID})
+		if err != nil {
+			return err
+		}
+		// The anchor must stay too: an address anchored at a holder that
+		// goes would go with it.
+		if s := subjects[previous.addressSubjectID]; s != nil && s.Data["v"] == address &&
+			c.HolderSubjectID == previous.holderSubjectID {
+			c.AddressSubjectID = previous.addressSubjectID
+			return nil
+		}
+		// The address (or its holder) changed: the old surrogate goes before
+		// the row points to the new one (crypto-shredding).
+		if err = pii.DeleteTx(ctx, tx, c.OrganizationID, previous.addressSubjectID); err != nil && !errors.Is(err, pii.ErrNotFound) {
+			return err
+		}
+	}
+	sealCtx := ctx
+	if c.HolderSubjectID != "" {
+		sealCtx = pii.WithAnchor(ctx, c.HolderSubjectID)
+	}
+	ref, err := pii.SealValueTx(sealCtx, tx, c.OrganizationID, address)
+	if err != nil {
+		return err
+	}
+	if id, ok := pii.RefID(ref); ok {
+		c.AddressSubjectID = id
+	}
+	return nil
+}
+
+// DeleteConnection implements Repository: the triggers of admp_connection
+// shred the holder, the address and the property surrogates; the services
+// keep their row (ON DELETE SET NULL).
+func (r *PGRepository) DeleteConnection(ctx context.Context, orgID, id string) error {
+	if !api.IsUUID(id) {
+		return ErrCacheNotFound
+	}
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `DELETE FROM admp_connection WHERE id = $1`, id)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrCacheNotFound
+		}
 		return nil
 	})
 }

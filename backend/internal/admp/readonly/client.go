@@ -353,7 +353,9 @@ func (c *Client) attempts(ctx context.Context, u *url.URL, out any) error {
 			}
 			continue
 		case status < 200 || status > 299:
-			return classErr(ClassClient, status, nil)
+			e := classErr(ClassClient, status, nil)
+			e.named = status == http.StatusNotFound && namedError(body)
+			return e
 		}
 		if out != nil && len(body) > 0 {
 			if derr := json.Unmarshal(body, out); derr != nil {

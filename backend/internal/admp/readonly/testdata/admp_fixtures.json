@@ -131,5 +131,102 @@
       ],
       "actions": []
     }
+  },
+  "getV1Anschluss:id#4711": {
+    "_comment": "Business connection (WP-1075): holder Gewerblich, netzbetreiber embedded with relations that are dropped while decoding.",
+    "status": 200,
+    "headers": {"Content-Type": "application/json"},
+    "body": {
+      "id": 4711,
+      "netzbetreiberId": 9,
+      "vertragId": "V-2024-0815",
+      "created": 1690000000,
+      "removed": null,
+      "strasse": "Bahnhofstraße",
+      "hausnummer": "12",
+      "hausnummerzusatz": "a",
+      "plz": "83278",
+      "ort": "Traunstein",
+      "netzbetreiber": {
+        "id": 9,
+        "name": "Netz Chiemgau GmbH",
+        "netzbetreiberNummer": 4711,
+        "shortName": "NCG",
+        "groupName": "group-canary",
+        "authUsers": [
+          {"id": 1, "organizationId": 9, "ldapDN": "CN=carrier-ldap-canary", "ldapCN": "carrier-cn-canary", "ldapEmail": "carrier-mail-canary@example.net", "ldapUsername": "carrier-user-canary", "anwUser": false}
+        ],
+        "accessNodes": [
+          {"id": 3, "organizationId": 9, "typeId": 1, "name": "carrier-node-canary", "url": "ssh://carrier-url-canary.example.net", "username": "carrier-node-user-canary", "password": "carrier-node-password-canary", "iv": "carrier-iv-canary", "snmpVersion": null}
+        ],
+        "anschlüsse": [],
+        "dienstTemplates": []
+      },
+      "inhaber": [
+        {"id": 21, "anschlussId": 4711, "typ": "Gewerblich", "titel": null, "name": "Muster Bau GmbH", "vorname": null, "geburtsdatum": null, "registerinstanz": "Amtsgericht Traunstein", "registernummer": "HRB 1234", "strasse": "Bahnhofstraße", "hausnummer": "12", "hausnummerzusatz": "a", "plz": "83278", "ort": "Traunstein",
+         "anschluss": {"id": 4711, "netzbetreiberId": 9, "vertragId": "holder-anschluss-canary", "created": 1, "removed": null, "strasse": null, "hausnummer": null, "hausnummerzusatz": null, "plz": null, "ort": null}}
+      ],
+      "dienste": [
+        {"id": 815, "anschlussId": 4711, "templateId": 3, "gebucht": null, "bereitstellung": null, "bereitgestellt": null, "gekuendigt": null, "abschaltung": null, "abgeschaltet": null, "properties": [{"key": "dienst-canary"}]}
+      ],
+      "actions": [
+        {"anschlussId": 4711, "actionId": 1, "action": {"id": 1, "name": "action-canary"}}
+      ]
+    }
+  },
+  "getV1Anschluss:id#4712": {
+    "_comment": "Private connection (WP-1075, WP-1076): two holders Privat in reverse id order, without netzbetreiber; geburtsdatum is never decoded.",
+    "status": 200,
+    "headers": {"Content-Type": "application/json"},
+    "body": {
+      "id": 4712,
+      "netzbetreiberId": 9,
+      "vertragId": "V-2024-0816",
+      "created": 1690000000000,
+      "removed": 1700000000,
+      "strasse": "Hauptstraße",
+      "hausnummer": "3",
+      "hausnummerzusatz": null,
+      "plz": "83313",
+      "ort": "Siegsdorf",
+      "inhaber": [
+        {"id": 32, "anschlussId": 4712, "typ": "Privat", "titel": null, "name": "Mustermann", "vorname": "Max", "geburtsdatum": -123456789, "registerinstanz": null, "registernummer": null, "strasse": "Hauptstraße", "hausnummer": "3", "hausnummerzusatz": null, "plz": "83313", "ort": "Siegsdorf"},
+        {"id": 31, "anschlussId": 4712, "typ": "Privat", "titel": "Dr.", "name": "Musterfrau", "vorname": "Erika", "geburtsdatum": 315532800, "registerinstanz": null, "registernummer": null, "strasse": "Hauptstraße", "hausnummer": "3", "hausnummerzusatz": null, "plz": "83313", "ort": "Siegsdorf"}
+      ]
+    }
+  },
+  "getV1Anschluss:id#4713": {
+    "_comment": "Connection without the relations inhaber and netzbetreiber (A-86: whether ADMP embeds them is not documented).",
+    "status": 200,
+    "headers": {"Content-Type": "application/json"},
+    "body": {
+      "id": 4713,
+      "netzbetreiberId": 9,
+      "vertragId": null,
+      "created": 1690000000,
+      "removed": null,
+      "strasse": "Seestraße",
+      "hausnummer": "7",
+      "hausnummerzusatz": null,
+      "plz": "83346",
+      "ort": "Bergen"
+    }
+  },
+  "getV1Anschluss:id": {
+    "_comment": "Any other id: 404 NamedError.",
+    "status": 404,
+    "headers": {"Content-Type": "application/json"},
+    "body": {"name": "NotFoundError", "message": "Anschluss not found"}
+  },
+  "getV1OrganizationByIds": {
+    "_comment": "Two organizations; the client takes the one with the id it asked for.",
+    "status": 200,
+    "headers": {"Content-Type": "application/json"},
+    "body": [
+      {"id": 8, "name": "Andere Netz AG", "netzbetreiberNummer": null, "shortName": "ANA", "groupName": "group-canary-2"},
+      {"id": 9, "name": "Netz Chiemgau GmbH", "netzbetreiberNummer": 4711, "shortName": "NCG", "groupName": "group-canary",
+       "authUsers": [{"id": 1, "organizationId": 9, "ldapDN": "CN=byids-ldap-canary", "ldapCN": "byids-cn-canary", "ldapEmail": "byids-mail-canary@example.net", "ldapUsername": "byids-user-canary", "anwUser": false}],
+       "accessNodes": [{"id": 3, "organizationId": 9, "typeId": 1, "name": "byids-node-canary", "url": "ssh://byids-url-canary.example.net", "username": "byids-node-user-canary", "password": "byids-node-password-canary", "iv": "byids-iv-canary", "snmpVersion": null}]}
+    ]
   }
 }

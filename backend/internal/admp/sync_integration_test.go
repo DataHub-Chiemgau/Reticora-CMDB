@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -679,16 +681,17 @@ func TestAdmpRefreshFailureKeepsCacheStale(t *testing.T) {
 		t.Fatalf("account without credential: %+v", res)
 	}
 
-	// The productive source fetches no connection until WP-1075:
-	// not_implemented, cache as is.
+	// The productive source without a secret source fails with the class
+	// credential before any request (WP-1075); a connection not cached
+	// stays absent.
 	productive := admp.NewSync(&admp.SyncOptions{Accounts: e.accounts, Cache: e.cache, Pool: e.f.App,
 		Sources: admp.NewClientSources(nil, egress.Options{})})
 	got, err := productive.Refresh(e.org(), e.f.OrgA, admp.RefreshParams{AccountID: e.account1, Kind: admp.KindConnection,
-		ExternalID: "wp929-line-new"})
-	if err != nil || got.Result != admp.ClassNotImplemented {
+		ExternalID: "4711"})
+	if err != nil || got.Result != readonly.ClassCredential {
 		t.Fatalf("productive source: %+v, %v", got, err)
 	}
-	if n := e.scalar(`SELECT count(*)::text FROM admp_connection WHERE external_id = 'wp929-line-new'`); n != "0" {
+	if n := e.scalar(`SELECT count(*)::text FROM admp_connection WHERE external_id = '4711'`); n != "0" {
 		t.Fatal("the productive source stored a connection")
 	}
 
@@ -1720,5 +1723,465 @@ func TestAdmpServiceStatusFromLifecycle(t *testing.T) {
 	lc, _ := props["lifecycle"].(map[string]any)
 	if lc["provisioned_at"] != "2023-11-20T08:00:00Z" {
 		t.Errorf("life cycle %v", props)
+	}
+}
+
+// --- A connection with carrier, contract and address (ADM-07, E-252,
+// WP-1075) through the productive source against a mock of the ADMP
+// documentation.
+
+// docFixture is one answer of readonly/testdata/admp_fixtures.json.
+type docFixture struct {
+	Status  int               `json:"status"`
+	Headers map[string]string `json:"headers"`
+	Body    json.RawMessage   `json:"body"`
+}
+
+// docADMP is an httptest ADMP with the documented login (POST
+// /V1/user/authentication, cookie AuthToken) that answers the GETs of the
+// connection with the fixtures (E-255): "<operationId>#<id>" before
+// "<operationId>". It counts requests per method and path; a non-GET
+// other than the login is 405.
+type docADMP struct {
+	t        *testing.T
+	srv      *httptest.Server
+	mu       sync.Mutex
+	fixtures map[string]docFixture
+	hits     map[string]int
+	queries  []string
+}
+
+func newDocADMP(t *testing.T) *docADMP {
+	t.Helper()
+	raw, err := os.ReadFile("readonly/testdata/admp_fixtures.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var all map[string]json.RawMessage
+	if err = json.Unmarshal(raw, &all); err != nil {
+		t.Fatal(err)
+	}
+	m := &docADMP{t: t, fixtures: map[string]docFixture{}, hits: map[string]int{}}
+	for op, v := range all {
+		if strings.HasPrefix(op, "_") {
+			continue
+		}
+		var f docFixture
+		if err = json.Unmarshal(v, &f); err != nil {
+			t.Fatalf("fixture %s: %v", op, err)
+		}
+		m.fixtures[op] = f
+	}
+	m.srv = httptest.NewServer(http.HandlerFunc(m.serve))
+	t.Cleanup(m.srv.Close)
+	return m
+}
+
+func (m *docADMP) serve(w http.ResponseWriter, r *http.Request) {
+	m.mu.Lock()
+	m.hits[r.Method+" "+r.URL.Path]++
+	if r.URL.RawQuery != "" {
+		m.queries = append(m.queries, r.URL.Path+"?"+r.URL.RawQuery)
+	}
+	m.mu.Unlock()
+	if r.URL.Path == "/V1/user/authentication" && r.Method == http.MethodPost {
+		http.SetCookie(w, &http.Cookie{Name: "AuthToken", Value: "doc-token", MaxAge: 600, Path: "/"})
+		_, _ = w.Write([]byte(`{"message":"ok"}`))
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	if c, err := r.Cookie("AuthToken"); err != nil || c.Value != "doc-token" {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	segs := strings.Split(strings.TrimPrefix(r.URL.Path, "/"), "/")
+	op := ""
+	switch {
+	case len(segs) == 3 && segs[1] == "anschluss":
+		op = "getV1Anschluss:id"
+	case r.URL.Path == "/V1/organization/byIds":
+		op = "getV1OrganizationByIds"
+	case r.URL.Path == "/V1/user/authentication":
+		op = "getV1UserAuthentication"
+	}
+	m.mu.Lock()
+	f, ok := m.fixtures[op+"#"+segs[len(segs)-1]]
+	if !ok {
+		f, ok = m.fixtures[op]
+	}
+	m.mu.Unlock()
+	if op == "" || !ok {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	for k, v := range f.Headers {
+		w.Header().Set(k, v)
+	}
+	w.WriteHeader(f.Status)
+	_, _ = w.Write(f.Body)
+}
+
+// set replaces the fixture of an operation (or "<operationId>#<id>") with
+// a 200 answer; status 0 removes it.
+func (m *docADMP) set(op string, status int, body string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if status == 0 {
+		delete(m.fixtures, op)
+		return
+	}
+	m.fixtures[op] = docFixture{Status: status, Headers: map[string]string{"Content-Type": "application/json"},
+		Body: json.RawMessage(body)}
+}
+
+func (m *docADMP) count(key string) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.hits[key]
+}
+
+// nonGet counts the requests other than GET and the login.
+func (m *docADMP) nonGet() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for k, v := range m.hits {
+		if !strings.HasPrefix(k, http.MethodGet+" ") && k != "POST /V1/user/authentication" {
+			n += v
+		}
+	}
+	return n
+}
+
+// docSecrets is the api_token credential of E-249: username and token.
+type docSecrets struct{}
+
+func (docSecrets) Decrypt(context.Context, string, string) (map[string]any, error) {
+	return map[string]any{"username": "svc-reticora", "token": "doc-password"}, nil
+}
+
+// docSync points account1 to the mock and returns the refresh with the
+// productive source (ClientSources); the vault of the environment is the
+// default vault.
+func (e *syncEnv) docSync(m *docADMP) (*admp.Sync, *admp.ClientSources) {
+	e.t.Helper()
+	e.exec(`UPDATE admp_account SET base_url = $1 WHERE id = $2`, m.srv.URL, e.account1)
+	prev := pii.Default()
+	pii.SetDefault(e.vault)
+	e.t.Cleanup(func() { pii.SetDefault(prev) })
+	sources := admp.NewClientSources(docSecrets{}, egress.Options{AllowPrivate: true})
+	return admp.NewSync(&admp.SyncOptions{Accounts: e.accounts, Cache: e.cache, Sources: sources, Pool: e.f.App,
+		Now: func() time.Time { return e.now }}), sources
+}
+
+func (e *syncEnv) docRefresh(s *admp.Sync, kind, external string) admp.RefreshResult {
+	e.t.Helper()
+	res, err := s.Refresh(e.org(), e.f.OrgA, admp.RefreshParams{AccountID: e.account1, Kind: kind, ExternalID: external})
+	if err != nil {
+		e.t.Fatalf("refresh %s %s: %v", kind, external, err)
+	}
+	return res
+}
+
+// storedConnection is a row of admp_connection as the database holds it.
+type storedConnection struct {
+	ID, Carrier, ContractID, AddressText, AddressSubject, HolderSubject string
+	Properties                                                          map[string]any
+	Row                                                                 string
+}
+
+func (e *syncEnv) storedConnection(external string) storedConnection {
+	e.t.Helper()
+	var c storedConnection
+	var props []byte
+	if err := e.f.Admin.QueryRow(context.Background(), `SELECT id::text, COALESCE(carrier, ''), COALESCE(contract_id, ''),
+			COALESCE(address_text, ''), COALESCE(address_subject_id::text, ''), COALESCE(holder_subject_id::text, ''), properties,
+			to_jsonb(c)::text
+		FROM admp_connection c WHERE account_id = $1 AND external_id = $2`, e.account1, external).
+		Scan(&c.ID, &c.Carrier, &c.ContractID, &c.AddressText, &c.AddressSubject, &c.HolderSubject, &props, &c.Row); err != nil {
+		e.t.Fatalf("connection %s: %v", external, err)
+	}
+	if err := json.Unmarshal(props, &c.Properties); err != nil {
+		e.t.Fatal(err)
+	}
+	return c
+}
+
+// outboxText is the data of every event of the organization as text.
+func (e *syncEnv) outboxText() string {
+	e.t.Helper()
+	return e.scalar(`SELECT COALESCE(string_agg(data::text, ' '), '') FROM event_outbox WHERE organization_id = $1`, e.f.OrgA)
+}
+
+// TestAdmpConnectionBusinessAddressAsText: a connection whose holders are
+// all Gewerblich is a business connection: the address is one line in
+// address_text, no surrogate; carrier, contract, carrier_id,
+// carrier_short_name, carrier_number and created_at come from the answer
+// with the embedded carrier (no read of byIds); exactly one GET of the
+// connection, no write.
+func TestAdmpConnectionBusinessAddressAsText(t *testing.T) {
+	e := newSyncEnv(t)
+	m := newDocADMP(t)
+	s, _ := e.docSync(m)
+	if res := e.docRefresh(s, admp.KindConnection, "4711"); res.Result != "ok" || res.Refreshed != 1 {
+		t.Fatalf("refresh: %+v", res)
+	}
+	c := e.storedConnection("4711")
+	if c.AddressText != "Bahnhofstraße 12a, 83278 Traunstein" || c.AddressSubject != "" || c.Carrier != "Netz Chiemgau GmbH" ||
+		c.ContractID != "V-2024-0815" {
+		t.Errorf("connection %+v", c)
+	}
+	want := map[string]any{"carrier_id": float64(9), "carrier_short_name": "NCG", "carrier_number": float64(4711),
+		"created_at": "2023-07-22T04:26:40Z"}
+	for k, v := range want {
+		if c.Properties[k] != v {
+			t.Errorf("properties.%s = %v, want %v (%v)", k, c.Properties[k], v, c.Properties)
+		}
+	}
+	if m.count("GET /V1/anschluss/4711") != 1 || m.count("GET /V1/organization/byIds") != 0 || m.nonGet() != 0 {
+		t.Errorf("requests %v", m.hits)
+	}
+	if strings.Contains(c.Row, "canary") {
+		t.Errorf("the row carries a value of a dropped member: %s", c.Row)
+	}
+}
+
+// TestAdmpConnectionPrivateAddressAsSurrogate: a connection with a holder
+// Privat keeps its address only as a value subject: address_text NULL,
+// address_subject_id resolves to the line; neither admp_connection nor
+// event_outbox holds the address in plain text, the event neither the
+// contract; the event carries id, account_id, client_id and stale only;
+// removed_at is set.
+func TestAdmpConnectionPrivateAddressAsSurrogate(t *testing.T) {
+	e := newSyncEnv(t)
+	m := newDocADMP(t)
+	s, _ := e.docSync(m)
+	if res := e.docRefresh(s, admp.KindConnection, "4712"); res.Result != "ok" {
+		t.Fatalf("refresh: %+v", res)
+	}
+	c := e.storedConnection("4712")
+	if c.AddressText != "" || c.AddressSubject == "" || c.Properties["removed_at"] != "2023-11-14T22:13:20Z" ||
+		c.Properties["created_at"] != "2023-07-22T04:26:40Z" || c.Carrier != "Netz Chiemgau GmbH" {
+		t.Fatalf("connection %+v", c)
+	}
+	subject, err := e.vault.Resolve(e.org(), e.f.OrgA, c.AddressSubject)
+	if err != nil || subject.Data["v"] != "Hauptstraße 3, 83313 Siegsdorf" || subject.Kind != pii.KindValue {
+		t.Fatalf("address surrogate %+v %v", subject, err)
+	}
+	for _, plain := range []string{"Hauptstraße", "Siegsdorf", "83313", "Musterfrau"} {
+		if strings.Contains(c.Row, plain) {
+			t.Errorf("admp_connection holds %q: %s", plain, c.Row)
+		}
+	}
+	outbox := e.outboxText()
+	for _, plain := range []string{"Hauptstraße", "Siegsdorf", "V-2024-0816", "Netz Chiemgau"} {
+		if strings.Contains(outbox, plain) {
+			t.Errorf("event_outbox holds %q: %s", plain, outbox)
+		}
+	}
+	evs := e.events(c.ID)
+	if len(evs) != 1 {
+		t.Fatalf("events %v", evs)
+	}
+	keys := make([]string, 0, len(evs[0]))
+	for k := range evs[0] {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	if !reflect.DeepEqual(keys, []string{"account_id", "client_id", "id", "stale"}) {
+		t.Errorf("event data members %v", keys)
+	}
+	// An unchanged refresh keeps the surrogate.
+	e.now = e.now.Add(time.Hour)
+	e.docRefresh(s, admp.KindConnection, "4712")
+	if again := e.storedConnection("4712"); again.AddressSubject != c.AddressSubject {
+		t.Errorf("an unchanged address got a new surrogate: %s, was %s", again.AddressSubject, c.AddressSubject)
+	}
+}
+
+// TestAdmpConnectionUnknownFormIsPrivate: without the relation inhaber the
+// form is private (E-243): the address is a surrogate; with an empty
+// holder list and no address part there is no address at all.
+func TestAdmpConnectionUnknownFormIsPrivate(t *testing.T) {
+	e := newSyncEnv(t)
+	m := newDocADMP(t)
+	s, _ := e.docSync(m)
+	e.docRefresh(s, admp.KindConnection, "4713")
+	c := e.storedConnection("4713")
+	if c.AddressText != "" || c.AddressSubject == "" || c.ContractID != "" {
+		t.Fatalf("connection without holders %+v", c)
+	}
+	if subject, err := e.vault.Resolve(e.org(), e.f.OrgA, c.AddressSubject); err != nil || subject.Data["v"] != "Seestraße 7, 83346 Bergen" {
+		t.Fatalf("address %+v %v", subject, err)
+	}
+	m.set("getV1Anschluss:id#4713", http.StatusOK, `{"id":4713,"netzbetreiberId":9,"vertragId":null,"created":1690000000,
+		"removed":null,"strasse":null,"hausnummer":null,"hausnummerzusatz":null,"plz":null,"ort":null,"inhaber":[]}`)
+	e.now = e.now.Add(time.Hour)
+	e.docRefresh(s, admp.KindConnection, "4713")
+	none := e.storedConnection("4713")
+	if none.AddressText != "" || none.AddressSubject != "" {
+		t.Errorf("connection without address %+v", none)
+	}
+	if _, err := e.vault.Resolve(e.org(), e.f.OrgA, c.AddressSubject); !errors.Is(err, pii.ErrNotFound) {
+		t.Errorf("the dropped address still resolves (%v)", err)
+	}
+}
+
+// TestAdmpConnectionAddressChangeShredsOldSubject: a changed private
+// address becomes a new surrogate in the same transaction and the old one
+// is shredded; a change to a business connection drops the surrogate and
+// keeps the address as text.
+func TestAdmpConnectionAddressChangeShredsOldSubject(t *testing.T) {
+	e := newSyncEnv(t)
+	m := newDocADMP(t)
+	s, _ := e.docSync(m)
+	e.docRefresh(s, admp.KindConnection, "4712")
+	first := e.storedConnection("4712").AddressSubject
+	moved := func(typ string) string {
+		return `{"id":4712,"netzbetreiberId":9,"vertragId":"V-2024-0816","created":1690000000,"removed":null,
+			"strasse":"Kirchweg","hausnummer":"5","hausnummerzusatz":"b","plz":"83313","ort":"Siegsdorf",
+			"inhaber":[{"id":31,"anschlussId":4712,"typ":"` + typ + `","titel":null,"name":"Musterfrau","vorname":null,"geburtsdatum":null,
+			"registerinstanz":null,"registernummer":null,"strasse":null,"hausnummer":null,"hausnummerzusatz":null,"plz":null,"ort":null}]}`
+	}
+	m.set("getV1Anschluss:id#4712", http.StatusOK, moved("Privat"))
+	e.now = e.now.Add(time.Hour)
+	e.docRefresh(s, admp.KindConnection, "4712")
+	second := e.storedConnection("4712").AddressSubject
+	if second == "" || second == first {
+		t.Fatalf("surrogate after the change %q, was %q", second, first)
+	}
+	if _, err := e.vault.Resolve(e.org(), e.f.OrgA, first); !errors.Is(err, pii.ErrNotFound) {
+		t.Errorf("the old address still resolves (%v)", err)
+	}
+	if subject, err := e.vault.Resolve(e.org(), e.f.OrgA, second); err != nil || subject.Data["v"] != "Kirchweg 5b, 83313 Siegsdorf" {
+		t.Errorf("new address %+v %v", subject, err)
+	}
+	m.set("getV1Anschluss:id#4712", http.StatusOK, moved("Genossenschaft"))
+	e.now = e.now.Add(time.Hour)
+	e.docRefresh(s, admp.KindConnection, "4712")
+	business := e.storedConnection("4712")
+	if business.AddressText != "Kirchweg 5b, 83313 Siegsdorf" || business.AddressSubject != "" {
+		t.Errorf("business connection %+v", business)
+	}
+	if _, err := e.vault.Resolve(e.org(), e.f.OrgA, second); !errors.Is(err, pii.ErrNotFound) {
+		t.Errorf("the private address still resolves after the change to business (%v)", err)
+	}
+}
+
+// TestAdmpConnectionCarrierFromByIds: without the embedded carrier the
+// name comes from GET /V1/organization/byIds?id=<netzbetreiberId>, read at
+// most once per carrier in one run of the source (job run and account);
+// a carrier ADMP does not know leaves the name empty.
+func TestAdmpConnectionCarrierFromByIds(t *testing.T) {
+	e := newSyncEnv(t)
+	m := newDocADMP(t)
+	s, sources := e.docSync(m)
+	acc, err := e.accounts.GetAccount(e.org(), e.f.OrgA, e.account1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := sources.For(e.org(), acc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"4712", "4713", "4712"} {
+		d, ferr := src.FetchConnection(e.org(), id)
+		if ferr != nil || d.Carrier != "Netz Chiemgau GmbH" || d.Properties["carrier_short_name"] != "NCG" {
+			t.Fatalf("connection %s: %+v %v", id, d, ferr)
+		}
+	}
+	m.mu.Lock()
+	queries := slices.Clone(m.queries)
+	m.mu.Unlock()
+	if m.count("GET /V1/organization/byIds") != 1 || !reflect.DeepEqual(queries, []string{"/V1/organization/byIds?id=9"}) {
+		t.Errorf("byIds reads %d %v, want one with id=9", m.count("GET /V1/organization/byIds"), queries)
+	}
+	// A refresh is a run of its own.
+	e.docRefresh(s, admp.KindConnection, "4713")
+	if n := m.count("GET /V1/organization/byIds"); n != 2 {
+		t.Errorf("byIds reads after the next run %d, want 2", n)
+	}
+	if c := e.storedConnection("4713"); c.Carrier != "Netz Chiemgau GmbH" || c.Properties["carrier_number"] != float64(4711) {
+		t.Errorf("stored carrier %+v", c)
+	}
+	m.set("getV1OrganizationByIds", http.StatusOK, `[]`)
+	e.now = e.now.Add(time.Hour)
+	e.docRefresh(s, admp.KindConnection, "4713")
+	if c := e.storedConnection("4713"); c.Carrier != "" || c.Properties["carrier_id"] != float64(9) {
+		t.Errorf("unknown carrier %+v", c)
+	}
+	if m.nonGet() != 0 {
+		t.Errorf("writes at the mock: %v", m.hits)
+	}
+}
+
+// TestAdmpConnection404DeletesEntry: another failure than 404, and a 404
+// whose body is no NamedError of ADMP, mark the entry stale; a 404
+// NamedError of ADMP deletes the cache entry with its surrogates
+// (AFTER-DELETE trigger of WP-928); its service keeps its row with
+// connection_id NULL; the refresh is ok with deleted 1 and the account
+// records success.
+func TestAdmpConnection404DeletesEntry(t *testing.T) {
+	e := newSyncEnv(t)
+	m := newDocADMP(t)
+	s, _ := e.docSync(m)
+	m.set("getV1Anschluss:id#4714", http.StatusOK, `{"id":4714,"netzbetreiberId":9,"vertragId":"V-1","created":1690000000,
+		"removed":null,"strasse":"Hauptstraße","hausnummer":"9","hausnummerzusatz":null,"plz":"83313","ort":"Siegsdorf"}`)
+	e.docRefresh(s, admp.KindConnection, "4714")
+	c := e.storedConnection("4714")
+	if c.AddressSubject == "" {
+		t.Fatalf("connection %+v", c)
+	}
+	svc := &admp.Service{OrganizationID: e.f.OrgA, AccountID: e.account1, ExternalID: "wp1075-svc", ConnectionID: c.ID, Kind: "internet",
+		ExpiresAt: e.now.Add(time.Hour)}
+	if err := e.cache.UpsertService(e.org(), svc); err != nil {
+		t.Fatal(err)
+	}
+	m.set("getV1Anschluss:id#4714", http.StatusBadRequest, `{"name":"BadRequest"}`)
+	if res := e.docRefresh(s, admp.KindConnection, "4714"); res.Result != readonly.ClassClient {
+		t.Fatalf("400: %+v", res)
+	}
+	if r := e.connectionRow(e.account1, "4714"); !r.Stale || r.ErrorClass != readonly.ClassClient {
+		t.Fatalf("after 400: %+v", r)
+	}
+	// A 404 that is no NamedError of ADMP (a proxy, a gateway, a wrong
+	// base path) keeps the entry: stale with class client, nothing shredded.
+	for _, body := range []string{`""`, `{"error":"no route"}`, `{"name":""}`} {
+		m.set("getV1Anschluss:id#4714", http.StatusNotFound, body)
+		if res := e.docRefresh(s, admp.KindConnection, "4714"); res.Result != readonly.ClassClient || res.Deleted != 0 {
+			t.Fatalf("404 without NamedError %s: %+v", body, res)
+		}
+		if r := e.connectionRow(e.account1, "4714"); !r.Stale || r.ErrorClass != readonly.ClassClient {
+			t.Fatalf("after 404 without NamedError %s: %+v", body, r)
+		}
+		if _, err := e.vault.Resolve(e.org(), e.f.OrgA, c.AddressSubject); err != nil {
+			t.Fatalf("404 without NamedError %s shredded the address: %v", body, err)
+		}
+	}
+	m.set("getV1Anschluss:id#4714", 0, "")
+	res := e.docRefresh(s, admp.KindConnection, "4714")
+	if res.Result != "ok" || res.Deleted != 1 {
+		t.Fatalf("404: %+v", res)
+	}
+	if n := e.scalar(`SELECT count(*)::text FROM admp_connection WHERE account_id = $1 AND external_id = '4714'`, e.account1); n != "0" {
+		t.Fatalf("connection kept: %s", n)
+	}
+	if _, err := e.vault.Resolve(e.org(), e.f.OrgA, c.AddressSubject); !errors.Is(err, pii.ErrNotFound) {
+		t.Errorf("the address of the deleted connection resolves (%v)", err)
+	}
+	if conn := e.scalar(`SELECT COALESCE(connection_id::text, 'null') FROM admp_service WHERE id = $1`, svc.ID); conn != "null" {
+		t.Errorf("service connection_id %s, want NULL", conn)
+	}
+	if okAt, class := e.accountStatus(e.account1); okAt == nil || class != "" {
+		t.Errorf("account after 404: %v %q", okAt, class)
+	}
+	if res = e.docRefresh(s, admp.KindConnection, "4714"); res.Result != "ok" || res.Deleted != 0 {
+		t.Errorf("second 404: %+v", res)
+	}
+	if m.nonGet() != 0 {
+		t.Errorf("writes at the mock: %v", m.hits)
 	}
 }

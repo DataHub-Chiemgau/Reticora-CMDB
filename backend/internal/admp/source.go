@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -16,16 +17,18 @@ import (
 // The source decouples the refresh (WP-929) from the endpoints of ADMP. The
 // productive source is clientSource on the read-only client of the
 // account (WP-1073, ADMP documentation 9.14.0): the port inventory, the
-// services of a port and a service. A connection follows with WP-1075;
-// until then FetchConnection ends with the class not_implemented. Tests
-// use a fake source.
+// services of a port, a service and a connection with its carrier
+// (WP-1075). Tests use a fake source.
 
 // Classes of a refresh beyond those of the read-only client
 // (readonly.Classes).
 const (
 	// ClassNotImplemented: the source of the endpoint is not there yet
-	// (FetchConnection until WP-1075).
+	// (a fake source of the tests).
 	ClassNotImplemented = "not_implemented"
+	// ClassNotFound: ADMP answered 404 for the object (WP-1075): the
+	// refresh deletes its cache entry with its personal surrogates.
+	ClassNotFound = "not_found"
 	// ClassNotSupported: the documentation has no endpoint for the read
 	// (the ports of a service: ADMP knows only port → services, E-251).
 	ClassNotSupported = "not_supported"
@@ -34,14 +37,18 @@ const (
 	ClassCredentialMissing = ErrorCredentialMissing
 )
 
-// ConnectionData is a connection as the source returns it: no personal
-// value in plain text (the holder follows as a surrogate with WP-1076).
+// ConnectionData is a connection as the source returns it (WP-1075,
+// E-252): AddressText is the address of a business connection,
+// PrivateAddress that of a private one; the store keeps the latter only as
+// a pii_subject surrogate (E-243), it never reaches a log, an event or a
+// job result. At most one of both is set; neither: no address.
 type ConnectionData struct {
-	ExternalID  string
-	Carrier     string
-	ContractID  string
-	AddressText string
-	Properties  map[string]any
+	ExternalID     string
+	Carrier        string
+	ContractID     string
+	AddressText    string
+	PrivateAddress string
+	Properties     map[string]any
 }
 
 // ServiceData is a service as the source returns it.
@@ -113,7 +120,18 @@ func classOf(err error) string {
 }
 
 // clientSource reads through the read-only client of an account (WP-1073).
-type clientSource struct{ c *readonly.Client }
+// It lives for one refresh (Sources.For per job run and account) and keeps
+// the carriers it read by id for that run (WP-1075).
+type clientSource struct {
+	c *readonly.Client
+
+	mu       sync.Mutex
+	carriers map[int64]*readonly.Organization
+}
+
+func newClientSource(c *readonly.Client) *clientSource {
+	return &clientSource{c: c, carriers: map[int64]*readonly.Organization{}}
+}
 
 // externalNumber parses an external id of ADMP (a decimal id); anything
 // else is the class client without a request.
@@ -125,16 +143,135 @@ func externalNumber(id string) (int64, error) {
 	return n, nil
 }
 
-// FetchConnection implements Source: the connection follows with
-// WP-1075.
-func (clientSource) FetchConnection(context.Context, string) (*ConnectionData, error) {
-	return nil, &SourceError{Class: ClassNotImplemented}
+// Holder types of the documentation (AnschlussInhaber.typ) of a business
+// connection; any other (Privat) is private.
+const (
+	holderBusiness    = "Gewerblich"
+	holderCooperative = "Genossenschaft"
+)
+
+// FetchConnection implements Source: GET /V1/anschluss/{id}, the carrier
+// from the embedded netzbetreiber, else GET /V1/organization/byIds once per
+// carrier and run (E-252). A 404 of ADMP is ClassNotFound.
+func (s *clientSource) FetchConnection(ctx context.Context, externalID string) (*ConnectionData, error) {
+	id, err := externalNumber(externalID)
+	if err != nil {
+		return nil, err
+	}
+	d, err := s.c.GetConnection(ctx, id)
+	if errors.Is(err, readonly.ErrNotFound) {
+		return nil, &SourceError{Class: ClassNotFound}
+	}
+	if err != nil {
+		return nil, err
+	}
+	carrier, err := s.carrier(ctx, d)
+	if err != nil {
+		return nil, err
+	}
+	return connectionData(d, carrier), nil
+}
+
+// carrier returns the carrier of a connection: the embedded one, else the
+// one read for its id in this run, else a read of byIds. A carrier ADMP
+// does not know leaves the name empty.
+func (s *clientSource) carrier(ctx context.Context, d *readonly.Connection) (*readonly.Organization, error) {
+	if d.Carrier != nil {
+		return d.Carrier, nil
+	}
+	s.mu.Lock()
+	org, seen := s.carriers[d.CarrierID]
+	s.mu.Unlock()
+	if seen {
+		return org, nil
+	}
+	org, err := s.c.GetOrganization(ctx, d.CarrierID)
+	switch {
+	case errors.Is(err, readonly.ErrNotFound):
+		org = nil
+	case err != nil:
+		return nil, err
+	}
+	s.mu.Lock()
+	s.carriers[d.CarrierID] = org
+	s.mu.Unlock()
+	return org, nil
+}
+
+// connectionData maps an Anschluss of the documentation (WP-1075, E-252):
+// carrier, contract, the address as one line and its form, created and
+// removed as RFC 3339 (E-253).
+func connectionData(d *readonly.Connection, carrier *readonly.Organization) *ConnectionData {
+	out := &ConnectionData{ExternalID: strconv.FormatInt(d.ID, 10), ContractID: d.ContractID,
+		Properties: map[string]any{"carrier_id": d.CarrierID}}
+	if carrier != nil {
+		out.Carrier = carrier.Name
+		if carrier.ShortName != "" {
+			out.Properties["carrier_short_name"] = carrier.ShortName
+		}
+		if carrier.Number != nil {
+			out.Properties["carrier_number"] = *carrier.Number
+		}
+	}
+	if t, ok := DocTime(d.Created); ok {
+		out.Properties["created_at"] = t.Format(time.RFC3339)
+	}
+	if t, ok := DocTime(d.Removed); ok {
+		out.Properties["removed_at"] = t.Format(time.RFC3339)
+	}
+	address := AddressLine(d.Street, d.HouseNumber, d.HouseNumberSuffix, d.PostalCode, d.City)
+	if AddressFormOf(d.Holders) == AddressFormBusiness {
+		out.AddressText = address
+	} else {
+		out.PrivateAddress = address
+	}
+	return out
+}
+
+// AddressLine joins an address of the documentation into one line:
+// "<street> <number><suffix>, <postal code> <city>"; empty parts are left
+// out, all empty is no address.
+func AddressLine(street, number, suffix, postalCode, city string) string {
+	join := func(sep string, parts ...string) string {
+		kept := make([]string, 0, len(parts))
+		for _, p := range parts {
+			if p = strings.TrimSpace(p); p != "" {
+				kept = append(kept, p)
+			}
+		}
+		return strings.Join(kept, sep)
+	}
+	house := strings.TrimSpace(number) + strings.TrimSpace(suffix)
+	return join(", ", join(" ", street, house), join(" ", postalCode, city))
+}
+
+// Address forms of a connection (E-252, E-243).
+const (
+	AddressFormBusiness = "business"
+	AddressFormPrivate  = "private"
+	AddressFormNone     = "none"
+)
+
+// AddressFormOf derives the form of the address from the holders: private
+// when one holder is Privat, business when there are holders and all are
+// Gewerblich or Genossenschaft; without holders (or an unknown type)
+// private (E-243).
+func AddressFormOf(holders []readonly.Holder) string {
+	if len(holders) == 0 {
+		return AddressFormPrivate
+	}
+	for _, h := range holders {
+		if h.Type != holderBusiness && h.Type != holderCooperative {
+			return AddressFormPrivate
+		}
+	}
+	return AddressFormBusiness
 }
 
 // FetchService implements Source: GET /V1/dienst/{id}. kind is the
 // template name, else template:<templateId>, else unknown; the template id
 // and the life cycle (E-253) go into properties.
-func (s clientSource) FetchService(ctx context.Context, externalID string) (*ServiceData, error) {
+func (s *clientSource) FetchService(ctx context.Context, externalID string) (*ServiceData, error) {
 	id, err := externalNumber(externalID)
 	if err != nil {
 		return nil, err
@@ -218,12 +355,12 @@ func DocTime(v *float64) (time.Time, bool) {
 
 // FetchServicePorts implements Source: the documentation knows no
 // direction service → ports (E-251).
-func (clientSource) FetchServicePorts(context.Context, string) ([]PortData, error) {
+func (*clientSource) FetchServicePorts(context.Context, string) ([]PortData, error) {
 	return nil, &SourceError{Class: ClassNotSupported}
 }
 
 // FetchInventory implements Source: GET /V1/infrastructure/accessnodepicker.
-func (s clientSource) FetchInventory(ctx context.Context) ([]InventoryPort, error) {
+func (s *clientSource) FetchInventory(ctx context.Context) ([]InventoryPort, error) {
 	ports, err := s.c.ListAccessPorts(ctx)
 	if err != nil {
 		return nil, err
@@ -238,7 +375,7 @@ func (s clientSource) FetchInventory(ctx context.Context) ([]InventoryPort, erro
 
 // FetchPortServices implements Source: GET
 // /V1/infrastructure/port/{portId}/dienstIds.
-func (s clientSource) FetchPortServices(ctx context.Context, portKey string) ([]string, error) {
+func (s *clientSource) FetchPortServices(ctx context.Context, portKey string) ([]string, error) {
 	id, err := externalNumber(portKey)
 	if err != nil {
 		return nil, err
@@ -255,7 +392,7 @@ func (s clientSource) FetchPortServices(ctx context.Context, portKey string) ([]
 }
 
 // CheckSession implements Source: GET /V1/user/authentication.
-func (s clientSource) CheckSession(ctx context.Context) error {
+func (s *clientSource) CheckSession(ctx context.Context) error {
 	_, err := s.c.GetSession(ctx)
 	return err
 }
@@ -267,8 +404,8 @@ func (s clientSource) CheckSession(ctx context.Context) error {
 type ClientSources struct {
 	secrets readonly.SecretSource
 	egress  egress.Options
-	// newSource builds the source of a client (clientSource; tests may
-	// replace it).
+	// newSource builds the source of a client for one refresh
+	// (clientSource; tests may replace it).
 	newSource func(c *readonly.Client) Source
 
 	mu      sync.Mutex
@@ -285,7 +422,7 @@ type cachedClient struct {
 // and the egress policy of the router.
 func NewClientSources(secrets readonly.SecretSource, policy egress.Options) *ClientSources {
 	return &ClientSources{secrets: secrets, egress: policy, clients: map[string]cachedClient{},
-		newSource: func(c *readonly.Client) Source { return clientSource{c: c} }}
+		newSource: func(c *readonly.Client) Source { return newClientSource(c) }}
 }
 
 // configKey identifies the values of an account the client depends on.

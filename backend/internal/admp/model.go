@@ -41,6 +41,12 @@ type Connection struct {
 	Stale            bool           `json:"stale"`
 	LastErrorClass   string         `json:"last_error_class,omitempty"`
 	ClientID         string         `json:"client_id,omitempty"`
+	// PrivateAddress is the address of a private connection in plain text
+	// on its way into the store (WP-1075): UpsertConnection keeps it only
+	// as the surrogate AddressSubjectID (the unchanged one, else a new
+	// value subject; without a vault none) and clears it. It is never
+	// read back, marshalled or logged.
+	PrivateAddress string `json:"-"`
 }
 
 // Service is a service of ADMP on a connection.

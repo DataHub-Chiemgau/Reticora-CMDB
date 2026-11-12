@@ -146,9 +146,14 @@ func cloneService(s *Service) Service {
 	return out
 }
 
-// UpsertConnection implements Repository.
+// UpsertConnection implements Repository; without a vault the private
+// address is not stored and personal properties are redacted (WP-1075).
 func (m *MemoryRepository) UpsertConnection(ctx context.Context, c *Connection) error {
 	if err := checkConnection(c); err != nil {
+		return err
+	}
+	c.PrivateAddress = ""
+	if err := sealProperties(c.Properties, redactedRef, noKeptRefs); err != nil {
 		return err
 	}
 	// The account must exist and its rows be writable by the caller (the
@@ -602,6 +607,26 @@ func (m *MemoryRepository) ConnectionsByID(ctx context.Context, orgID string, id
 		return cmp.Or(cmp.Compare(a.ExternalID, b.ExternalID), cmp.Compare(a.ID, b.ID))
 	})
 	return out, nil
+}
+
+// DeleteConnection implements Repository: its services keep their entry
+// without connection.
+func (m *MemoryRepository) DeleteConnection(ctx context.Context, orgID, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.refreshClients(ctx)
+	c, ok := m.connections[id]
+	if !ok || c.OrganizationID != orgID || !inScope(ctx, c.ClientID) {
+		return ErrCacheNotFound
+	}
+	delete(m.connections, id)
+	for _, s := range m.services {
+		if s.ConnectionID == id {
+			s.ConnectionID = ""
+		}
+	}
+	m.refreshClients(ctx)
+	return nil
 }
 
 // MarkStale implements Repository.

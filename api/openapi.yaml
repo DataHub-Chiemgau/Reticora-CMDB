@@ -27163,15 +27163,18 @@ paths:
       tags: [ADMP]
       summary: Get an ADMP connection
       description: >-
-        ADM-07 (WP-930): a cached ADMP connection with carrier, contract,
-        address, fetched_at, expires_at, stale and last_error_class, and its
-        services with their ports. {id} is the Reticora id of the cache
+        ADM-07 (WP-930, WP-1075): a cached ADMP connection with carrier,
+        contract, address, address_form, removed_at, fetched_at, expires_at,
+        stale and last_error_class, and its services with their ports. {id} is the Reticora id of the cache
         entry; the ADMP id is external_id. The holder and the address of a
         private connection appear only as holder_subject_id,
         address_subject_id and holder_present, never in plain text (E-243).
         CIs appear only as ci_id. refresh=true queues the job admp.refresh
-        (at most one job per connection and minute; a second request in the
-        minute names the same job) and answers 202 with the cached state and
+        for exactly this connection (at most one job per connection and
+        minute; a second request in the minute names the same job), which
+        reads GET /V1/anschluss/{external_id} of ADMP and at most once GET
+        /V1/organization/byIds; a 404 of ADMP deletes the cache entry with
+        its surrogates. The route answers 202 with the cached state and
         refresh_job_id; with an open circuit breaker of the account it
         answers 200 with refresh_skipped circuit_open. Reads only the cache,
         never ADMP. Requires admp:read.
@@ -43351,18 +43354,35 @@ components:
     ADMPConnectionFields:
       type: object
       description: >-
-        The members of a cached ADMP connection (ADM-07, WP-930). The holder
-        and the address of a private connection are pii_subject surrogates
-        (E-243); at most one of address_text and address_subject_id is set.
-      required: [id, account_id, external_id, holder_present, properties, fetched_at, expires_at, stale]
+        The members of a cached ADMP connection (ADM-07, WP-930, WP-1075). The
+        holder and the address of a private connection are pii_subject
+        surrogates (E-243); at most one of address_text and
+        address_subject_id is set. WP-1075 fills carrier (Organization.name
+        of the netzbetreiber), contract_id (vertragId) and the address (one
+        line of street, number, postal code and city) from GET
+        /V1/anschluss/{id} of ADMP (E-252); properties carry carrier_id,
+        carrier_short_name, carrier_number, created_at and removed_at.
+      required: [id, account_id, external_id, address_form, holder_present, properties, fetched_at, expires_at, stale]
       properties:
         id: { type: string, format: uuid, description: The Reticora id of the cache entry. }
         account_id: { type: string, format: uuid }
         external_id: { type: string, description: The id of the connection in ADMP. }
-        carrier: { type: string }
+        carrier: { type: string, description: The name of the carrier (netzbetreiber). }
         contract_id: { type: string }
         address_text: { type: string, description: The address of a business connection. }
-        address_subject_id: { type: string, format: uuid, description: Surrogate of the address of a private connection. }
+        address_subject_id: { type: string, format: uuid, description: Surrogate of the address of a private connection; never resolved. }
+        address_form:
+          type: string
+          enum: [business, private, none]
+          description: >-
+            Derived from the stored address (WP-1075, E-252): business for an
+            address in plain text (all holders Gewerblich or Genossenschaft),
+            private for an address kept as a surrogate (a holder Privat, or no
+            holder information, E-243), none without an address.
+        removed_at:
+          type: string
+          format: date-time
+          description: The time ADMP reports the connection as removed (removed, A-86); missing when not removed.
         holder_subject_id: { type: string, format: uuid, description: Surrogate of the holder. }
         holder_present: { type: boolean }
         properties: { type: object, additionalProperties: true }

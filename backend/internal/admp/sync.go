@@ -131,6 +131,9 @@ type RefreshResult struct {
 	Result    string `json:"result"`
 	Refreshed int    `json:"refreshed"`
 	Stale     int    `json:"stale"`
+	// Deleted counts the cache entries removed because ADMP no longer
+	// knows them (404, WP-1075).
+	Deleted int `json:"deleted,omitempty"`
 	*MatchResult
 }
 
@@ -345,7 +348,7 @@ func (s *Sync) Refresh(ctx context.Context, orgID string, p RefreshParams) (Refr
 	// The account records an outcome only when a fetch ran or a class
 	// forbade one; an interface without services of the account fetches
 	// nothing and leaves last_ok_at and last_error_class as they are.
-	if res.Result != resultOK || res.Refreshed+res.Stale > 0 {
+	if res.Result != resultOK || res.Refreshed+res.Stale+res.Deleted > 0 {
 		s.recordAccount(ctx, a, res.Result)
 	}
 	return res, nil
@@ -421,7 +424,8 @@ func normalized(props map[string]any) string {
 // connectionChanged reports whether an upsert changes the connection.
 func connectionChanged(prev, next *Connection) bool {
 	return prev == nil || prev.Carrier != next.Carrier || prev.ContractID != next.ContractID ||
-		prev.AddressText != next.AddressText || prev.Stale != next.Stale || prev.LastErrorClass != next.LastErrorClass ||
+		prev.AddressText != next.AddressText || prev.AddressSubjectID != next.AddressSubjectID ||
+		prev.HolderSubjectID != next.HolderSubjectID || prev.Stale != next.Stale || prev.LastErrorClass != next.LastErrorClass ||
 		normalized(prev.Properties) != normalized(next.Properties)
 }
 
@@ -477,12 +481,15 @@ func (s *Sync) refreshConnection(ctx context.Context, a *Account, src Source, cl
 	}
 	data, err := src.FetchConnection(ctx, externalID)
 	if err != nil {
+		if class := classOf(err); class == ClassNotFound {
+			return s.deleteConnection(ctx, a, externalID)
+		}
 		return s.fail(ctx, a, KindConnection, externalID, classOf(err))
 	}
 	now := s.o.Now().UTC()
 	c := &Connection{OrganizationID: a.OrganizationID, AccountID: a.ID, ExternalID: externalID, Carrier: data.Carrier,
-		ContractID: data.ContractID, AddressText: data.AddressText, Properties: maps.Clone(data.Properties),
-		FetchedAt: now, ExpiresAt: now.Add(s.o.TTL)}
+		ContractID: data.ContractID, AddressText: data.AddressText, PrivateAddress: data.PrivateAddress,
+		Properties: maps.Clone(data.Properties), FetchedAt: now, ExpiresAt: now.Add(s.o.TTL)}
 	err = s.inTx(ctx, a.OrganizationID, func(ctx context.Context) error {
 		prev, perr := s.o.Cache.ConnectionByExternal(ctx, a.OrganizationID, a.ID, externalID)
 		switch {
@@ -492,11 +499,10 @@ func (s *Sync) refreshConnection(ctx context.Context, a *Account, src Source, cl
 			return perr
 		default:
 			// The holder stays a surrogate of the vault until the source
-			// names it (WP-1076); a business address replaces a private one.
+			// names it (WP-1076). The address is the source's: a private one
+			// is sealed by the store (an unchanged one keeps its surrogate),
+			// none clears it (WP-1075).
 			c.HolderSubjectID = prev.HolderSubjectID
-			if c.AddressText == "" {
-				c.AddressSubjectID = prev.AddressSubjectID
-			}
 		}
 		if uerr := s.o.Cache.UpsertConnection(ctx, c); uerr != nil {
 			return uerr
@@ -511,6 +517,33 @@ func (s *Sync) refreshConnection(ctx context.Context, a *Account, src Source, cl
 	}
 	s.count(KindConnection, resultOK)
 	return RefreshResult{Result: resultOK, Refreshed: 1}, nil
+}
+
+// deleteConnection removes the cached connection ADMP answered 404 for,
+// with its holder and address (the triggers of admp_connection shred
+// them); its services keep their entry without connection (WP-1075,
+// E-252). ADMP answered, so the refresh is ok.
+func (s *Sync) deleteConnection(ctx context.Context, a *Account, externalID string) (RefreshResult, error) {
+	res := RefreshResult{Result: resultOK}
+	err := s.inTx(ctx, a.OrganizationID, func(ctx context.Context) error {
+		c, err := s.o.Cache.ConnectionByExternal(ctx, a.OrganizationID, a.ID, externalID)
+		if errors.Is(err, ErrCacheNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if err = s.o.Cache.DeleteConnection(ctx, a.OrganizationID, c.ID); err != nil && !errors.Is(err, ErrCacheNotFound) {
+			return err
+		}
+		res.Deleted++
+		return nil
+	})
+	if err != nil {
+		return RefreshResult{}, fmt.Errorf("admp: delete connection: %w", err)
+	}
+	s.count(KindConnection, ClassNotFound)
+	return res, nil
 }
 
 // refreshService fetches a service and its ports and stores them; the
@@ -581,6 +614,7 @@ func (s *Sync) storeService(ctx context.Context, a *Account, src Source, externa
 				return RefreshResult{}, nil, serr
 			}
 			res.Refreshed += sub.Refreshed
+			res.Deleted += sub.Deleted
 			switch sub.Result {
 			case resultOK:
 			case ClassNotImplemented:
@@ -647,6 +681,7 @@ type merger struct{ res RefreshResult }
 func (m *merger) add(r RefreshResult) {
 	m.res.Refreshed += r.Refreshed
 	m.res.Stale += r.Stale
+	m.res.Deleted += r.Deleted
 	if r.Result != resultOK && r.Result != ClassNotImplemented {
 		m.res.Result = r.Result
 	}

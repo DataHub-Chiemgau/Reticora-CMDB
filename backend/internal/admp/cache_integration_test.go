@@ -3,8 +3,10 @@ package admp_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -313,38 +315,83 @@ func TestAdmpInterfaceDeleteUnlinksPort(t *testing.T) {
 	}
 }
 
-// TestAdmpUpsertRejectsPersonalProperties: a personal key in the
-// properties, also nested, is ErrPersonalProperty on PostgreSQL and in
-// memory; nothing is stored.
-func TestAdmpUpsertRejectsPersonalProperties(t *testing.T) {
-	check := func(t *testing.T, repo admp.Repository, ctx context.Context, orgID, account string) {
-		for _, props := range []map[string]any{
-			{"email": "holder@example.org"},
-			{"contact": map[string]any{"phone": "+49 861 0"}},
-			{"lines": []any{map[string]any{"full_name": "Max Mustermann"}}},
-		} {
-			c := &admp.Connection{OrganizationID: orgID, AccountID: account, ExternalID: "wp928-pii", Properties: props,
-				ExpiresAt: time.Now().Add(time.Hour)}
-			if err := repo.UpsertConnection(ctx, c); !errors.Is(err, admp.ErrPersonalProperty) {
-				t.Errorf("connection with %v: %v, want ErrPersonalProperty", props, err)
-			}
-			// A service seals its personal values since WP-1074
-			// (TestAdmpServicePersonalPropertySealed); the refusal holds for
-			// connections until WP-1075.
+// TestAdmpConnectionPersonalPropertySealed: a personal key in the
+// properties of a connection, also nested, is sealed into the PII vault in
+// the transaction of the upsert (WP-1075, replaces the refusal of WP-928):
+// admp_connection.properties holds no plain text, the surrogate resolves;
+// a replaced value and the deleted row shred their surrogates (migration
+// 000328); a reference the caller passes is neutralised; the memory store
+// redacts.
+func TestAdmpConnectionPersonalPropertySealed(t *testing.T) {
+	e := newCacheEnv(t)
+	prev := pii.Default()
+	pii.SetDefault(e.vault)
+	t.Cleanup(func() { pii.SetDefault(prev) })
+	ctx := e.org()
+	foreign, err := e.vault.Create(ctx, e.f.OrgA, pii.KindValue, pii.Data{"v": "fremd"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	upsert := func(props map[string]any) (*admp.Connection, string) {
+		t.Helper()
+		c := &admp.Connection{OrganizationID: e.f.OrgA, AccountID: e.accountOrg, ExternalID: "wp1075-pii", Properties: props,
+			ExpiresAt: e.expires}
+		if uerr := e.repo.UpsertConnection(ctx, c); uerr != nil {
+			t.Fatal(uerr)
+		}
+		var raw string
+		if serr := e.f.Admin.QueryRow(context.Background(), `SELECT properties::text FROM admp_connection WHERE id = $1`, c.ID).
+			Scan(&raw); serr != nil {
+			t.Fatal(serr)
+		}
+		return c, raw
+	}
+	c, raw := upsert(map[string]any{"email": "holder.wp1075@example.org", "contact": map[string]any{"phone": "+49 861 0"},
+		"lines": []any{map[string]any{"full_name": "Max Mustermann"}}, "carrier_id": 9, "ticket": map[string]any{"$pii": foreign}})
+	for _, plain := range []string{"holder.wp1075", "+49 861 0", "Mustermann", foreign} {
+		if strings.Contains(raw, plain) {
+			t.Fatalf("admp_connection.properties holds %q: %s", plain, raw)
 		}
 	}
-	t.Run("memory", func(t *testing.T) {
-		m := newMemoryCache(t)
-		check(t, m.repo, m.ctx, m.org, m.accountOrg)
-	})
-	t.Run("postgres", func(t *testing.T) {
-		e := newCacheEnv(t)
-		check(t, e.repo, e.org(), e.f.OrgA, e.accountOrg)
-		var n int
-		if err := e.f.Admin.QueryRow(context.Background(), `SELECT count(*) FROM admp_connection WHERE organization_id = $1`, e.f.OrgA).Scan(&n); err != nil || n != 0 {
-			t.Errorf("connections stored: %d, %v", n, err)
-		}
-	})
+	id, ok := pii.RefID(c.Properties["email"])
+	if !ok || id == "" || c.Properties["carrier_id"] != float64(9) {
+		t.Fatalf("properties %v, want a surrogate for email", c.Properties)
+	}
+	subject, err := e.vault.Resolve(ctx, e.f.OrgA, id)
+	if err != nil || subject.Data["v"] != "holder.wp1075@example.org" {
+		t.Fatalf("surrogate %+v %v", subject, err)
+	}
+	// A new value replaces the surrogate and shreds the old one.
+	c2, _ := upsert(map[string]any{"email": "neu.wp1075@example.org"})
+	id2, _ := pii.RefID(c2.Properties["email"])
+	if _, rerr := e.vault.Resolve(ctx, e.f.OrgA, id); !errors.Is(rerr, pii.ErrNotFound) || id2 == id {
+		t.Errorf("replaced surrogate %s still resolves (%v)", id, rerr)
+	}
+	// The deleted row shreds its surrogates, never the foreign one.
+	if err = e.repo.DeleteConnection(ctx, e.f.OrgA, c2.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, rerr := e.vault.Resolve(ctx, e.f.OrgA, id2); !errors.Is(rerr, pii.ErrNotFound) {
+		t.Errorf("surrogate of the deleted connection still resolves (%v)", rerr)
+	}
+	if _, rerr := e.vault.Resolve(ctx, e.f.OrgA, foreign); rerr != nil {
+		t.Errorf("the foreign subject was shredded: %v", rerr)
+	}
+	if err = e.repo.DeleteConnection(ctx, e.f.OrgA, c2.ID); !errors.Is(err, admp.ErrCacheNotFound) {
+		t.Errorf("second delete: %v", err)
+	}
+	// --no-db: the memory store redacts.
+	m := newMemoryCache(t)
+	mc := &admp.Connection{OrganizationID: m.org, AccountID: m.accountOrg, ExternalID: "wp1075-pii", ExpiresAt: e.expires,
+		Properties: map[string]any{"email": "holder.wp1075@example.org"}, PrivateAddress: "Hauptstraße 3, 83313 Siegsdorf"}
+	if err = m.repo.UpsertConnection(m.ctx, mc); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := m.repo.ConnectionByExternal(m.ctx, m.org, m.accountOrg, "wp1075-pii")
+	text := fmt.Sprintf("%+v", stored)
+	if err != nil || strings.Contains(text, "holder.wp1075") || strings.Contains(text, "Hauptstraße") || stored.AddressSubjectID != "" {
+		t.Fatalf("memory store: %s %v", text, err)
+	}
 }
 
 // memoryCache is the cache of --no-db with an organization-wide account.

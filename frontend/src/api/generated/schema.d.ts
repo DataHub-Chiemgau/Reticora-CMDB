@@ -11707,7 +11707,7 @@ export interface paths {
     };
     /**
      * Get an ADMP connection
-     * @description ADM-07 (WP-930): a cached ADMP connection with carrier, contract, address, fetched_at, expires_at, stale and last_error_class, and its services with their ports. {id} is the Reticora id of the cache entry; the ADMP id is external_id. The holder and the address of a private connection appear only as holder_subject_id, address_subject_id and holder_present, never in plain text (E-243). CIs appear only as ci_id. refresh=true queues the job admp.refresh (at most one job per connection and minute; a second request in the minute names the same job) and answers 202 with the cached state and refresh_job_id; with an open circuit breaker of the account it answers 200 with refresh_skipped circuit_open. Reads only the cache, never ADMP. Requires admp:read.
+     * @description ADM-07 (WP-930, WP-1075): a cached ADMP connection with carrier, contract, address, address_form, removed_at, fetched_at, expires_at, stale and last_error_class, and its services with their ports. {id} is the Reticora id of the cache entry; the ADMP id is external_id. The holder and the address of a private connection appear only as holder_subject_id, address_subject_id and holder_present, never in plain text (E-243). CIs appear only as ci_id. refresh=true queues the job admp.refresh for exactly this connection (at most one job per connection and minute; a second request in the minute names the same job), which reads GET /V1/anschluss/{external_id} of ADMP and at most once GET /V1/organization/byIds; a 404 of ADMP deletes the cache entry with its surrogates. The route answers 202 with the cached state and refresh_job_id; with an open circuit breaker of the account it answers 200 with refresh_skipped circuit_open. Reads only the cache, never ADMP. Requires admp:read.
      */
     get: operations['getADMPConnection'];
     put?: never;
@@ -21744,7 +21744,7 @@ export interface components {
     ADMPAccountListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['ADMPAccount'][];
     };
-    /** @description The members of a cached ADMP connection (ADM-07, WP-930). The holder and the address of a private connection are pii_subject surrogates (E-243); at most one of address_text and address_subject_id is set. */
+    /** @description The members of a cached ADMP connection (ADM-07, WP-930, WP-1075). The holder and the address of a private connection are pii_subject surrogates (E-243); at most one of address_text and address_subject_id is set. WP-1075 fills carrier (Organization.name of the netzbetreiber), contract_id (vertragId) and the address (one line of street, number, postal code and city) from GET /V1/anschluss/{id} of ADMP (E-252); properties carry carrier_id, carrier_short_name, carrier_number, created_at and removed_at. */
     ADMPConnectionFields: {
       /**
        * Format: uuid
@@ -21755,15 +21755,26 @@ export interface components {
       account_id: string;
       /** @description The id of the connection in ADMP. */
       external_id: string;
+      /** @description The name of the carrier (netzbetreiber). */
       carrier?: string;
       contract_id?: string;
       /** @description The address of a business connection. */
       address_text?: string;
       /**
        * Format: uuid
-       * @description Surrogate of the address of a private connection.
+       * @description Surrogate of the address of a private connection; never resolved.
        */
       address_subject_id?: string;
+      /**
+       * @description Derived from the stored address (WP-1075, E-252): business for an address in plain text (all holders Gewerblich or Genossenschaft), private for an address kept as a surrogate (a holder Privat, or no holder information, E-243), none without an address.
+       * @enum {string}
+       */
+      address_form: 'business' | 'private' | 'none';
+      /**
+       * Format: date-time
+       * @description The time ADMP reports the connection as removed (removed, A-86); missing when not removed.
+       */
+      removed_at?: string;
       /**
        * Format: uuid
        * @description Surrogate of the holder.

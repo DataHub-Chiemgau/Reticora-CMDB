@@ -108,6 +108,10 @@ func operation(method, rel string) string {
 		return "getV1Dienst:id"
 	case method == http.MethodGet && len(segs) == 5 && segs[1] == "dienst" && segs[3] == "properties" && segs[4] == "public":
 		return "getV1Dienst:idPropertiesPublic"
+	case method == http.MethodGet && len(segs) == 3 && segs[1] == "anschluss":
+		return "getV1Anschluss:id"
+	case method == http.MethodGet && rel == organizationsPath:
+		return "getV1OrganizationByIds"
 	}
 	return ""
 }
@@ -138,7 +142,12 @@ func (m *fixtureADMP) serve(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	m.mu.Lock()
-	f, found := m.fixtures[op]
+	// A fixture of one object ("<operationId>#<id>", the last path
+	// segment) answers before the fixture of the operation.
+	f, found := m.fixtures[op+"#"+rel[strings.LastIndex(rel, "/")+1:]]
+	if !found {
+		f, found = m.fixtures[op]
+	}
 	m.mu.Unlock()
 	if !found {
 		w.WriteHeader(http.StatusNotFound)

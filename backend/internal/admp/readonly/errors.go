@@ -1,8 +1,10 @@
 package readonly
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // Error classes of a request (ADM-03): the label of the metrics, the
@@ -65,6 +67,11 @@ type Error struct {
 	Status int
 	// sentinel is one of the sentinels above (errors.Is), or nil.
 	sentinel error
+	// named: the answer was a 404 whose body is a NamedError of ADMP
+	// ({name, message?, child?} with a non-empty name). Only such a 404 is
+	// ADMP saying the object is gone; a 404 of a proxy, a gateway or a
+	// wrong base path is not (WP-1075). The body itself is not kept.
+	named bool
 }
 
 func (e *Error) Error() string {
@@ -95,6 +102,15 @@ func ClassOf(err error) string {
 	default:
 		return ClassNetwork
 	}
+}
+
+// namedError reports whether body is a NamedError of ADMP: a JSON object
+// with a non-empty string member name.
+func namedError(body []byte) bool {
+	var v struct {
+		Name *string `json:"name"`
+	}
+	return json.Unmarshal(body, &v) == nil && v.Name != nil && strings.TrimSpace(*v.Name) != ""
 }
 
 func classErr(class string, status int, sentinel error) *Error {

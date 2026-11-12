@@ -53,6 +53,10 @@ var (
 		"Service":    reflect.TypeFor[Service](),
 		// WP-1074.
 		"ServiceProperty": reflect.TypeFor[ServiceProperty](),
+		// WP-1075.
+		"Connection":   reflect.TypeFor[Connection](),
+		"Organization": reflect.TypeFor[Organization](),
+		"Holder":       reflect.TypeFor[Holder](),
 	}
 	exportedFuncs = map[string]any{
 		"New":             New,
@@ -68,6 +72,7 @@ var (
 		"ErrCircuitOpen":           reflect.TypeOf(&ErrCircuitOpen).Elem(),
 		"ErrInvalidConfig":         reflect.TypeOf(&ErrInvalidConfig).Elem(),
 		"ErrPathNotAllowed":        reflect.TypeOf(&ErrPathNotAllowed).Elem(),
+		"ErrNotFound":              reflect.TypeOf(&ErrNotFound).Elem(),
 	}
 )
 

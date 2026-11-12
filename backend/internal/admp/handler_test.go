@@ -302,11 +302,17 @@ func TestAdmpHandlerNoPersonalData(t *testing.T) {
 			}
 		}
 	}
-	// A personal key never reaches the cache, so no answer can carry it.
+	// A personal key reaches the cache only redacted (no vault without a
+	// database, WP-1075), so no answer can carry it.
 	bad := &admp.Connection{OrganizationID: handlerOrg, AccountID: e.account, ExternalID: "4712", ExpiresAt: e.now.Add(time.Hour),
-		Properties: map[string]any{"full_name": "Erika Mustermann"}}
-	if err := e.cache.UpsertConnection(e.ctx(), bad); err == nil {
-		t.Error("a personal property was stored")
+		Properties: map[string]any{"full_name": "Erika Mustermann"}, PrivateAddress: "Hauptstraße 3, 83313 Siegsdorf"}
+	if err := e.cache.UpsertConnection(e.ctx(), bad); err != nil {
+		t.Fatal(err)
+	}
+	rec := e.get("/api/v1/admp/connections/" + bad.ID)
+	if body := rec.Body.String(); rec.Code != http.StatusOK || strings.Contains(body, "Mustermann") || strings.Contains(body, "Hauptstraße") ||
+		!strings.Contains(body, `"address_form":"none"`) {
+		t.Errorf("connection with personal values: %d %s", rec.Code, body)
 	}
 }
 

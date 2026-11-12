@@ -43,3 +43,57 @@ func TestClientSourceMapsServiceAndProperties(t *testing.T) {
 		t.Errorf("values %v, want %v", values, wantValues)
 	}
 }
+
+// TestClientSourceMapsConnection: the address is one line of street,
+// number with suffix, postal code and city, empty parts left out; the form
+// is business only when every holder is Gewerblich or Genossenschaft, else
+// (also without holders) private; the carrier goes into carrier,
+// carrier_short_name and carrier_number (WP-1075, E-252).
+func TestClientSourceMapsConnection(t *testing.T) {
+	for _, tc := range []struct {
+		parts [5]string
+		want  string
+	}{
+		{[5]string{"Bahnhofstraße", "12", "a", "83278", "Traunstein"}, "Bahnhofstraße 12a, 83278 Traunstein"},
+		{[5]string{"Hauptstraße", "3", "", "83313", "Siegsdorf"}, "Hauptstraße 3, 83313 Siegsdorf"},
+		{[5]string{"", "", "", "83313", "Siegsdorf"}, "83313 Siegsdorf"},
+		{[5]string{"Seeweg", "", "", "", ""}, "Seeweg"},
+		{[5]string{" ", "", "", "", ""}, ""},
+	} {
+		p := tc.parts
+		if got := AddressLine(p[0], p[1], p[2], p[3], p[4]); got != tc.want {
+			t.Errorf("%q: %q, want %q", p, got, tc.want)
+		}
+	}
+	h := func(types ...string) []readonly.Holder {
+		out := []readonly.Holder{}
+		for _, typ := range types {
+			out = append(out, readonly.Holder{Type: typ})
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		holders []readonly.Holder
+		want    string
+	}{
+		{nil, AddressFormPrivate}, {h(), AddressFormPrivate}, {h("Gewerblich"), AddressFormBusiness},
+		{h("Gewerblich", "Genossenschaft"), AddressFormBusiness}, {h("Gewerblich", "Privat"), AddressFormPrivate},
+		{h("unbekannt"), AddressFormPrivate},
+	} {
+		if got := AddressFormOf(tc.holders); got != tc.want {
+			t.Errorf("%v: %s, want %s", tc.holders, got, tc.want)
+		}
+	}
+	number := 4711.0
+	d := connectionData(&readonly.Connection{ID: 4711, CarrierID: 9, ContractID: "V-1", Street: "Weg", HouseNumber: "1",
+		Holders: h("Gewerblich")}, &readonly.Organization{ID: 9, Name: "Netz AG", ShortName: "NA", Number: &number})
+	want := &ConnectionData{ExternalID: "4711", Carrier: "Netz AG", ContractID: "V-1", AddressText: "Weg 1",
+		Properties: map[string]any{"carrier_id": int64(9), "carrier_short_name": "NA", "carrier_number": 4711.0}}
+	if !reflect.DeepEqual(d, want) {
+		t.Errorf("business %+v, want %+v", d, want)
+	}
+	if d = connectionData(&readonly.Connection{ID: 1, CarrierID: 9, Street: "Weg"}, nil); d.AddressText != "" ||
+		d.PrivateAddress != "Weg" || d.Carrier != "" {
+		t.Errorf("private without carrier %+v", d)
+	}
+}

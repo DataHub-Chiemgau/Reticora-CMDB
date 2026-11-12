@@ -15,9 +15,6 @@ import (
 // Errors of the cache.
 var (
 	ErrCacheNotFound = errors.New("admp cache entry not found")
-	// ErrPersonalProperty: properties hold a personal key (pii.IsPersonalKey);
-	// personal values reach the cache only as surrogates (Konvention 16).
-	ErrPersonalProperty = errors.New("admp properties must not hold personal values")
 	// ErrInvalidCacheEntry: a required member is missing or invalid.
 	ErrInvalidCacheEntry = errors.New("invalid admp cache entry")
 )
@@ -30,8 +27,16 @@ type Repository interface {
 	// deleted (crypto-shredding). A new surrogate must have been created
 	// for the connection in the same transaction (the caller joins it,
 	// database.WithRequestTenantTx) and be linked to no other connection;
-	// anything else is ErrInvalidCacheEntry on PostgreSQL.
+	// anything else is ErrInvalidCacheEntry on PostgreSQL. PrivateAddress
+	// is sealed into the PII vault in the same transaction (an unchanged
+	// address keeps its surrogate, a changed one shreds the old); personal
+	// keys of the properties are sealed as with a service (WP-1075). The
+	// memory store keeps neither.
 	UpsertConnection(ctx context.Context, c *Connection) error
+	// DeleteConnection removes a connection with its personal surrogates
+	// (ADMP answered 404, WP-1075); its services keep their row without
+	// connection. Unknown or invisible: ErrCacheNotFound.
+	DeleteConnection(ctx context.Context, orgID, id string) error
 	// UpsertService stores a service by account and external id; its
 	// connection must belong to the same account (ErrInvalidCacheEntry).
 	// Personal values of its properties go into the PII vault in the same
@@ -115,30 +120,6 @@ type DueObject struct {
 	ExpiresAt  time.Time
 }
 
-// checkProperties refuses a personal key at any depth of properties.
-func checkProperties(props map[string]any) error {
-	var walk func(v any) bool
-	walk = func(v any) bool {
-		switch t := v.(type) {
-		case map[string]any:
-			for k, inner := range t {
-				if pii.IsPersonalKey(k) || walk(inner) {
-					return true
-				}
-			}
-		case []any:
-			if slices.ContainsFunc(t, walk) {
-				return true
-			}
-		}
-		return false
-	}
-	if walk(props) {
-		return ErrPersonalProperty
-	}
-	return nil
-}
-
 func checkSubject(id string) error {
 	if id != "" && !api.IsUUID(id) {
 		return ErrInvalidCacheEntry
@@ -146,13 +127,17 @@ func checkSubject(id string) error {
 	return nil
 }
 
-// checkConnection validates a connection before it is stored.
+// checkConnection validates a connection before it is stored; its
+// personal values are sealed by the store (sealProperties, PrivateAddress).
 func checkConnection(c *Connection) error {
 	c.ExternalID = strings.TrimSpace(c.ExternalID)
+	c.PrivateAddress = strings.TrimSpace(c.PrivateAddress)
 	switch {
 	case !api.IsUUID(c.OrganizationID) || !api.IsUUID(c.AccountID) || c.ExternalID == "" || c.ExpiresAt.IsZero():
 		return ErrInvalidCacheEntry
 	case c.AddressSubjectID != "" && c.AddressText != "":
+		return ErrInvalidCacheEntry
+	case c.PrivateAddress != "" && (c.AddressText != "" || c.AddressSubjectID != ""):
 		return ErrInvalidCacheEntry
 	}
 	if err := checkSubject(c.HolderSubjectID); err != nil {
@@ -167,7 +152,16 @@ func checkConnection(c *Connection) error {
 	if c.FetchedAt.IsZero() {
 		c.FetchedAt = time.Now().UTC()
 	}
-	return checkProperties(c.Properties)
+	generic, err := pii.Generic(c.Properties)
+	if err != nil {
+		return ErrInvalidCacheEntry
+	}
+	props, ok := generic.(map[string]any)
+	if !ok {
+		return ErrInvalidCacheEntry
+	}
+	c.Properties = props
+	return nil
 }
 
 // sealProperties replaces every value below a personal key

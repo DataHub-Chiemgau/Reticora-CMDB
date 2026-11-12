@@ -412,3 +412,131 @@ func TestAdmpAPIWithoutHolderInPlaintext(t *testing.T) {
 		t.Errorf("admp_connection holds the holder in plain text: %s", row)
 	}
 }
+
+// TestAdmpAPIConnectionSingleFetch: GET /api/v1/admp/connections/{id}
+// answers carrier, contract_id, address_text, removed_at and the derived
+// address_form (business for an address in plain text, private for a
+// surrogate, none without address); a private address appears only as
+// address_subject_id, never resolved (WP-1075, ADM-07).
+func TestAdmpAPIConnectionSingleFetch(t *testing.T) {
+	e := newAPIEnv(t)
+	prev := pii.Default()
+	pii.SetDefault(e.vault)
+	t.Cleanup(func() { pii.SetDefault(prev) })
+	store := func(external string, c *admp.Connection) *admp.Connection {
+		t.Helper()
+		c.OrganizationID, c.AccountID, c.ExternalID, c.Carrier, c.ContractID = e.f.OrgA, e.accountOrg, external, "Netz Chiemgau GmbH", "V-"+external
+		c.FetchedAt, c.ExpiresAt = e.now, e.now.Add(time.Hour)
+		if err := database.WithRequestTenantTx(e.org(), e.f.App, e.f.OrgA, func(ctx context.Context) error {
+			return e.cache.UpsertConnection(ctx, c)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	business := store("4711", &admp.Connection{AddressText: "Bahnhofstraße 12a, 83278 Traunstein",
+		Properties: map[string]any{"carrier_id": 9, "removed_at": "2023-11-14T22:13:20Z"}})
+	private := store("4712", &admp.Connection{PrivateAddress: "Hauptstraße 3, 83313 Siegsdorf"})
+	none := store("4713", &admp.Connection{})
+	type view struct {
+		Carrier          string         `json:"carrier"`
+		ContractID       string         `json:"contract_id"`
+		AddressText      string         `json:"address_text"`
+		AddressSubjectID string         `json:"address_subject_id"`
+		AddressForm      string         `json:"address_form"`
+		RemovedAt        string         `json:"removed_at"`
+		Properties       map[string]any `json:"properties"`
+	}
+	read := func(id string) (view, string) {
+		t.Helper()
+		rec := e.get(e.mux, "/api/v1/admp/connections/"+id, "")
+		var v view
+		if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &v) != nil {
+			t.Fatalf("connection %s: %d %s", id, rec.Code, rec.Body.String())
+		}
+		return v, rec.Body.String()
+	}
+	v, _ := read(business.ID)
+	if v.AddressForm != admp.AddressFormBusiness || v.AddressText != "Bahnhofstraße 12a, 83278 Traunstein" || v.Carrier != "Netz Chiemgau GmbH" ||
+		v.ContractID != "V-4711" || v.RemovedAt != "2023-11-14T22:13:20Z" || v.AddressSubjectID != "" {
+		t.Errorf("business connection %+v", v)
+	}
+	v, body := read(private.ID)
+	if v.AddressForm != admp.AddressFormPrivate || v.AddressText != "" || v.AddressSubjectID == "" || v.RemovedAt != "" ||
+		strings.Contains(body, "Hauptstraße") || strings.Contains(body, "Siegsdorf") {
+		t.Errorf("private connection %+v: %s", v, body)
+	}
+	if v, _ = read(none.ID); v.AddressForm != admp.AddressFormNone || v.AddressText != "" || v.AddressSubjectID != "" {
+		t.Errorf("connection without address %+v", v)
+	}
+}
+
+// directSubmitter queues on a job service and runs a created job at once.
+type directSubmitter struct {
+	svc  *jobs.Service
+	sync *admp.Sync
+}
+
+func (d *directSubmitter) Submit(ctx context.Context, orgID, kind string, params any, opts jobs.EnqueueOptions) (*jobs.Job, bool, error) {
+	job, created, err := d.svc.Enqueue(ctx, orgID, kind, params, opts)
+	if err != nil || !created {
+		return job, created, err
+	}
+	_, err = d.sync.RunRefreshJob(ctx, job)
+	return job, true, err
+}
+
+// TestAdmpAPIRefreshCallsConnectionEndpoint: refresh=true on a connection
+// queues admp.refresh for exactly this connection; the job reads exactly
+// one GET /V1/anschluss/{external_id} and at most one GET
+// /V1/organization/byIds at the mock of the documentation, no write; the
+// cache then holds carrier, contract and the private address as a
+// surrogate.
+func TestAdmpAPIRefreshCallsConnectionEndpoint(t *testing.T) {
+	e := newAPIEnv(t)
+	prev := pii.Default()
+	pii.SetDefault(e.vault)
+	t.Cleanup(func() { pii.SetDefault(prev) })
+	m := newDocADMP(t)
+	e.exec(`UPDATE admp_account SET base_url = $1 WHERE id = $2`, m.srv.URL, e.accountOrg)
+	c := e.line(e.accountOrg, "4712", "")
+	sync := admp.NewSync(&admp.SyncOptions{Accounts: e.accounts, Cache: e.cache, Pool: e.f.App,
+		Sources: admp.NewClientSources(docSecrets{}, egress.Options{AllowPrivate: true}), Now: func() time.Time { return e.now }})
+	svc := jobs.NewService(jobs.NewMemoryRepository())
+	svc.Register(jobs.Kind{Name: admp.RefreshJobKind, MaxAttempts: 3, Timeout: 2 * time.Minute})
+	mux := chi.NewRouter()
+	admp.NewDataHandler(e.cache, e.cache, admp.NewAccountService(e.accounts, nil, egress.Options{}),
+		sync.WithSubmitter(&directSubmitter{svc: svc, sync: sync})).RegisterRoutes(mux)
+	rec := e.get(mux, "/api/v1/admp/connections/"+c.ID+"?refresh=true", "")
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("refresh: %d %s", rec.Code, rec.Body.String())
+	}
+	if n := m.count("GET /V1/anschluss/4712"); n != 1 {
+		t.Errorf("GET /V1/anschluss/4712: %d, want 1 (%v)", n, m.hits)
+	}
+	if n := m.count("GET /V1/organization/byIds"); n > 1 {
+		t.Errorf("byIds reads %d, want at most 1", n)
+	}
+	m.mu.Lock()
+	for key := range m.hits {
+		method, path, _ := strings.Cut(key, " ")
+		if method == http.MethodGet && path != "/V1/anschluss/4712" && path != "/V1/organization/byIds" {
+			t.Errorf("the job read %s", key)
+		}
+	}
+	m.mu.Unlock()
+	if m.nonGet() != 0 {
+		t.Errorf("writes at the mock: %v", m.hits)
+	}
+	rec = e.get(e.mux, "/api/v1/admp/connections/"+c.ID, "")
+	var v struct {
+		Carrier          string `json:"carrier"`
+		ContractID       string `json:"contract_id"`
+		AddressForm      string `json:"address_form"`
+		AddressSubjectID string `json:"address_subject_id"`
+	}
+	if json.Unmarshal(rec.Body.Bytes(), &v) != nil || v.Carrier != "Netz Chiemgau GmbH" || v.ContractID != "V-2024-0816" ||
+		v.AddressForm != admp.AddressFormPrivate || v.AddressSubjectID == "" {
+		t.Errorf("after the refresh: %s", rec.Body.String())
+	}
+}
