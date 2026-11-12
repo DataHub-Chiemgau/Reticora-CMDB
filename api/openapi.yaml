@@ -9492,6 +9492,37 @@ paths:
             outside the caller's scope counts as root).
           schema:
             type: string
+        - name: section_id
+          in: query
+          description: Only subnets of this IPAM section (IPM-20).
+          schema: { type: string, format: uuid }
+        - name: vrf_id
+          in: query
+          description: Only subnets of this VRF (IPM-20).
+          schema: { type: string, format: uuid }
+        - name: vlan_id
+          in: query
+          description: Only subnets of this VLAN (IPM-20).
+          schema: { type: string, format: uuid }
+        - name: is_pool
+          in: query
+          description: Only pools (true) or only subnets that are no pool (false).
+          schema: { type: boolean }
+        - name: q
+          in: query
+          description: Part of name, description or CIDR, case-insensitive (IPM-20).
+          schema: { type: string, maxLength: 200 }
+        - name: contains
+          in: query
+          description: >-
+            The subnets of the VRF of vrf_id (without it the default VRF of
+            the organization) whose CIDR contains this address, the narrowest
+            first (IPM-20); the caller sees only its visible subnets of the
+            chain. No IP address is 422 with field contains.
+          schema: { type: string }
+      description: >-
+        All filters are joined with AND. A malformed id filter is 422 with
+        its field, an unknown one an empty list (IPM-20).
       responses:
         '200':
           description: Paginated list of subnets
@@ -9501,6 +9532,8 @@ paths:
                 $ref: '#/components/schemas/SubnetListResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
     post:
@@ -9934,6 +9967,27 @@ paths:
           description: Only gateway addresses (true) or no gateway addresses (false), IPM-04.
           schema:
             type: boolean
+        - name: type
+          in: query
+          description: Only addresses of this type (IPM-20); another value is 422 with field type.
+          schema:
+            $ref: '#/components/schemas/IPAddressType'
+        - name: client_id
+          in: query
+          description: Only addresses of this client (IPM-20).
+          schema: { type: string, format: uuid }
+        - name: vrf_id
+          in: query
+          description: Only addresses of this VRF (IPM-20).
+          schema: { type: string, format: uuid }
+        - name: ci_id
+          in: query
+          description: Only addresses on interfaces of this CI (IPM-20).
+          schema: { type: string, format: uuid }
+        - name: q
+          in: query
+          description: Prefix of the address or part of the DNS name (IPM-20).
+          schema: { type: string, maxLength: 200 }
       responses:
         '200':
           description: Paginated list of IP addresses
@@ -9998,6 +10052,27 @@ paths:
           description: Only gateway addresses (true) or no gateway addresses (false), IPM-04.
           schema:
             type: boolean
+        - name: type
+          in: query
+          description: Only addresses of this type (IPM-20); another value is 422 with field type.
+          schema:
+            $ref: '#/components/schemas/IPAddressType'
+        - name: client_id
+          in: query
+          description: Only addresses of this client (IPM-20).
+          schema: { type: string, format: uuid }
+        - name: vrf_id
+          in: query
+          description: Only addresses of this VRF (IPM-20).
+          schema: { type: string, format: uuid }
+        - name: ci_id
+          in: query
+          description: Only addresses on interfaces of this CI (IPM-20).
+          schema: { type: string, format: uuid }
+        - name: q
+          in: query
+          description: Prefix of the address or part of the DNS name (IPM-20).
+          schema: { type: string, maxLength: 200 }
       responses:
         '200':
           description: Paginated list of IP addresses
@@ -14170,7 +14245,12 @@ paths:
         - name: type
           in: query
           schema: { type: string }
-          description: Comma-separated entity type filter.
+          description: >-
+            Comma-separated entity type filter: ci, asset, document, ticket,
+            contact, compliance, location, reservation, subnet and
+            ip_address (IPM-20; subnets and addresses need ipam:read, their
+            hits link to /ipam/subnets/{id} and
+            /ipam/subnets/{subnet_id}?address={id}).
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
@@ -41302,7 +41382,7 @@ components:
         organization_id: { type: string }
         entity_type:
           type: string
-          enum: [ci, asset, document, ticket, contact, compliance, location, reservation]
+          enum: [ci, asset, document, ticket, contact, compliance, location, reservation, subnet, ip_address]
         entity_id: { type: string }
         title: { type: string }
         summary: { type: string }

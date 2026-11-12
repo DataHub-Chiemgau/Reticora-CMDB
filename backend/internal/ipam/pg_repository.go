@@ -165,38 +165,19 @@ func checkSubnetVLAN(ctx context.Context, tx pgx.Tx, orgID, id string, req *Upda
 	return checkVLAN(ctx, tx, orgID, vlanID, clientID)
 }
 
-func (r *PGRepository) ListSubnets(ctx context.Context, orgID string, f SubnetFilter, page api.PaginationParams) ([]Subnet, int, error) {
+func (r *PGRepository) ListSubnets(ctx context.Context, orgID string, f *SubnetFilter, page api.PaginationParams) ([]Subnet, int, error) {
+	if err := checkSubnetFilterIDs(f); err != nil {
+		return nil, 0, err
+	}
 	var out []Subnet
 	var total int
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		where := "organization_id = $1"
-		args := []any{orgID}
-		pos := 2
-		if f.ClientID != "" {
-			where += fmt.Sprintf(" AND client_id = $%d", pos)
-			args = append(args, f.ClientID)
-			pos++
-		}
-		if f.SiteID != "" {
-			where += fmt.Sprintf(" AND site_id = $%d", pos)
-			args = append(args, f.SiteID)
-			pos++
-		}
-		if f.ParentID != "" {
-			if !api.IsUUID(f.ParentID) {
-				return nil
-			}
-			where += fmt.Sprintf(" AND parent_id = $%d", pos)
-			args = append(args, f.ParentID)
-			pos++
-		}
-		if f.Root {
-			where += " AND " + subnetRootVisible
-		}
+		where, args, order := subnetFilterWhere(orgID, f)
+		pos := len(args) + 1
 		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM subnet WHERE "+where, args...).Scan(&total); err != nil {
 			return err
 		}
-		q := "SELECT " + subnetCols + " FROM subnet WHERE " + where + fmt.Sprintf(" ORDER BY created_at DESC LIMIT $%d OFFSET $%d", pos, pos+1)
+		q := "SELECT " + subnetCols + " FROM subnet WHERE " + where + fmt.Sprintf(" ORDER BY "+order+" LIMIT $%d OFFSET $%d", pos, pos+1)
 		args = append(args, page.Limit, page.Offset)
 		rows, err := tx.Query(ctx, q, args...)
 		if err != nil {
@@ -603,24 +584,14 @@ func scanIP(s scanner) (*IPAddress, error) {
 	return a, nil
 }
 
-func (r *PGRepository) ListIPAddresses(ctx context.Context, orgID string, f IPFilter, page api.PaginationParams) ([]IPAddress, int, error) {
+func (r *PGRepository) ListIPAddresses(ctx context.Context, orgID string, f *IPFilter, page api.PaginationParams) ([]IPAddress, int, error) {
+	if err := checkIPFilterIDs(f); err != nil {
+		return nil, 0, err
+	}
 	var out []IPAddress
 	var total int
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		where := "organization_id = $1 AND " + ipVisible
-		args := []any{orgID}
-		if f.SubnetID != "" {
-			args = append(args, f.SubnetID)
-			where += fmt.Sprintf(" AND subnet_id = $%d", len(args))
-		}
-		if f.State != "" {
-			args = append(args, f.State)
-			where += fmt.Sprintf(" AND state = $%d", len(args))
-		}
-		if f.IsGateway != nil {
-			args = append(args, *f.IsGateway)
-			where += fmt.Sprintf(" AND is_gateway = $%d", len(args))
-		}
+		where, args := ipFilterWhere(orgID, f)
 		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM ip_address WHERE "+where, args...).Scan(&total); err != nil {
 			return err
 		}

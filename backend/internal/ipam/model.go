@@ -141,11 +141,18 @@ type UpdateIPAddressRequest struct {
 }
 
 // IPFilter holds the optional filters of the address lists: the subnet,
-// the state and the gateway mark (IPM-04).
+// the state and the gateway mark (IPM-04); type, client, VRF, CI (through
+// the interfaces of the CI) and q (prefix of the host or part of the DNS
+// name) (IPM-20, filter.go).
 type IPFilter struct {
 	SubnetID  string
 	State     string
 	IsGateway *bool
+	Type      string
+	ClientID  string
+	VRFID     string
+	CIID      string
+	Q         string
 }
 
 // Address states of IPM-04 (E-211).

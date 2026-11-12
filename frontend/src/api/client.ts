@@ -638,6 +638,10 @@ export const SCOPED_LISTS: Record<string, readonly ('client_id' | 'site_id')[]> 
   '/buildings': ['site_id'],
   '/vlans': ['site_id'],
   '/subnets': ['client_id', 'site_id'],
+  // The address lists filter by client (IPM-20, WP-909); /ip-addresses is
+  // the path until its sunset (API-01).
+  '/ips': ['client_id'],
+  '/ip-addresses': ['client_id'],
   '/slas': ['client_id'],
   '/business-calendars': ['client_id'],
   '/forms': ['client_id'],

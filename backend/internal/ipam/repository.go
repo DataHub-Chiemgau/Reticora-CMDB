@@ -50,17 +50,27 @@ type SubnetFilter struct {
 	// subnets without a parent the caller can see.
 	ParentID string
 	Root     bool
+	// Section, VRF, VLAN, pool and q (part of name, description or CIDR)
+	// (IPM-20, filter.go).
+	SectionID string
+	VRFID     string
+	VLANID    string
+	IsPool    *bool
+	Q         string
+	// Contains lists the subnets of the VRF (VRFID, else the default VRF)
+	// that contain the address, the narrowest first.
+	Contains string
 }
 
 // Repository defines persistence operations for IPAM entities.
 type Repository interface {
-	ListSubnets(ctx context.Context, orgID string, f SubnetFilter, page api.PaginationParams) ([]Subnet, int, error)
+	ListSubnets(ctx context.Context, orgID string, f *SubnetFilter, page api.PaginationParams) ([]Subnet, int, error)
 	GetSubnet(ctx context.Context, orgID, id string) (*Subnet, error)
 	CreateSubnet(ctx context.Context, s *Subnet) error
 	UpdateSubnet(ctx context.Context, orgID, id string, req *UpdateSubnetRequest) (*Subnet, error)
 	DeleteSubnet(ctx context.Context, orgID, id string) error
 
-	ListIPAddresses(ctx context.Context, orgID string, f IPFilter, page api.PaginationParams) ([]IPAddress, int, error)
+	ListIPAddresses(ctx context.Context, orgID string, f *IPFilter, page api.PaginationParams) ([]IPAddress, int, error)
 	GetIPAddress(ctx context.Context, orgID, id string) (*IPAddress, error)
 	CreateIPAddress(ctx context.Context, a *IPAddress) error
 	UpdateIPAddress(ctx context.Context, orgID, id string, req UpdateIPAddressRequest) (*IPAddress, error)
@@ -140,7 +150,7 @@ func pageSlice[T any](items []T, page api.PaginationParams) (window []T, total i
 
 // --- Subnets ---
 
-func (r *MemoryRepository) ListSubnets(_ context.Context, orgID string, f SubnetFilter, page api.PaginationParams) ([]Subnet, int, error) {
+func (r *MemoryRepository) ListSubnets(_ context.Context, orgID string, f *SubnetFilter, page api.PaginationParams) ([]Subnet, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []Subnet
@@ -157,9 +167,15 @@ func (r *MemoryRepository) ListSubnets(_ context.Context, orgID string, f Subnet
 		if (f.ParentID != "" && s.ParentID != f.ParentID) || (f.Root && s.ParentID != "") {
 			continue
 		}
+		if !r.subnetMatches(s, f) {
+			continue
+		}
 		out = append(out, r.withChildCount(s))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	if f.Contains != "" {
+		sortNarrowestFirst(out)
+	}
 	items, total := pageSlice(out, page)
 	return items, total, nil
 }
@@ -443,7 +459,7 @@ func (r *MemoryRepository) DeleteSubnet(_ context.Context, orgID, id string) err
 
 // --- IP Addresses ---
 
-func (r *MemoryRepository) ListIPAddresses(_ context.Context, orgID string, f IPFilter, page api.PaginationParams) ([]IPAddress, int, error) {
+func (r *MemoryRepository) ListIPAddresses(_ context.Context, orgID string, f *IPFilter, page api.PaginationParams) ([]IPAddress, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []IPAddress
@@ -452,7 +468,7 @@ func (r *MemoryRepository) ListIPAddresses(_ context.Context, orgID string, f IP
 			continue
 		}
 		if (f.SubnetID != "" && a.SubnetID != f.SubnetID) || (f.State != "" && a.State != f.State) ||
-			(f.IsGateway != nil && a.IsGateway != *f.IsGateway) {
+			(f.IsGateway != nil && a.IsGateway != *f.IsGateway) || !r.addressMatches(a, f) {
 			continue
 		}
 		out = append(out, *a)

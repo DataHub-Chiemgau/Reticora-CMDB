@@ -121,7 +121,8 @@ func TestSearchReindexJob(t *testing.T) {
 		(SELECT count(*) FROM ci WHERE organization_id = $1 AND deleted_at IS NULL) + (SELECT count(*) FROM asset WHERE organization_id = $1)
 		+ (SELECT count(*) FROM document WHERE organization_id = $1 AND deleted_at IS NULL) + (SELECT count(*) FROM ticket WHERE organization_id = $1)
 		+ (SELECT count(*) FROM contact WHERE organization_id = $1) + (SELECT count(*) FROM location WHERE organization_id = $1)
-		+ (SELECT count(*) FROM reservation WHERE organization_id = $1)`, f.OrgA).Scan(&liveCIs, &live); err != nil {
+		+ (SELECT count(*) FROM reservation WHERE organization_id = $1)
+		+ (SELECT count(*) FROM subnet WHERE organization_id = $1) + (SELECT count(*) FROM ip_address WHERE organization_id = $1)`, f.OrgA).Scan(&liveCIs, &live); err != nil {
 		t.Fatal(err)
 	}
 	if indexed(gone) != 1 {

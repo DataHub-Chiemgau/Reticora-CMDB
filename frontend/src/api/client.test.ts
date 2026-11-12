@@ -575,6 +575,24 @@ describe('scoped lists match the API (WP-556, UI-01/UI-02)', () => {
   });
 });
 
+describe('withScope on the address list (WP-909, IPM-20)', () => {
+  const CLIENT_A = 'aaaaaaaa-0000-4000-8000-000000000001';
+  const CLIENT_B = 'aaaaaaaa-0000-4000-8000-000000000002';
+
+  it('sets client_id of /ips from the scope store, an explicit client_id stays', async () => {
+    vi.resetModules();
+    const { useScopeStore } = await import('../stores/scope');
+    const { withScope } = await import('./client');
+    useScopeStore.setState({ clientId: CLIENT_A, siteId: '' });
+    expect(withScope('/ips?state=active')).toBe(`/ips?state=active&client_id=${CLIENT_A}`);
+    expect(withScope(`/ips?client_id=${CLIENT_B}`)).toBe(`/ips?client_id=${CLIENT_B}`);
+    expect(withScope('/ips/ip-1')).toBe('/ips/ip-1');
+    expect(withScope('/ips', 'POST')).toBe('/ips');
+    useScopeStore.setState({ clientId: '', siteId: '' });
+    expect(withScope('/ips?state=active')).toBe('/ips?state=active');
+  });
+});
+
 describe('agentApi and the enrollment contract (WP-560, F-189, AGT-06)', () => {
   it('offers no enroll function without enrollment_token', async () => {
     const { agentApi } = await import('./client');

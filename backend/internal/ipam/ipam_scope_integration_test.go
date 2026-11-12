@@ -45,11 +45,11 @@ func TestIPAMRepositoryClientScope(t *testing.T) {
 
 	ctx := f.ClientCtx(f.Client1)
 	page := api.PaginationParams{Limit: 100}
-	subnets, _, err := repo.ListSubnets(ctx, f.OrgA, ipam.SubnetFilter{}, page)
+	subnets, _, err := repo.ListSubnets(ctx, f.OrgA, &ipam.SubnetFilter{}, page)
 	if err != nil || len(subnets) != 1 || subnets[0].ID != ownNet.ID {
 		t.Fatalf("client-1 subnets: %+v err=%v, want only the client-1 subnet", subnets, err)
 	}
-	ips, total, err := repo.ListIPAddresses(ctx, f.OrgA, ipam.IPFilter{}, page)
+	ips, total, err := repo.ListIPAddresses(ctx, f.OrgA, &ipam.IPFilter{}, page)
 	if err != nil || total != 0 || len(ips) != 0 {
 		t.Fatalf("client-1 addresses: total=%d %+v err=%v, want none", total, ips, err)
 	}
@@ -98,7 +98,7 @@ func TestIPAMRepositoryClientScope(t *testing.T) {
 	if count != 2 {
 		t.Fatal("client-2 address or interface was deleted")
 	}
-	if _, _, err = repo.ListSubnets(context.Background(), f.OrgA, ipam.SubnetFilter{}, page); !errors.Is(err, database.ErrNoTenantScope) {
+	if _, _, err = repo.ListSubnets(context.Background(), f.OrgA, &ipam.SubnetFilter{}, page); !errors.Is(err, database.ErrNoTenantScope) {
 		t.Fatalf("list without scope: got %v, want ErrNoTenantScope", err)
 	}
 }

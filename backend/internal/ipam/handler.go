@@ -145,22 +145,15 @@ func (h *Handler) ListSubnets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := api.ParsePagination(r)
-	f := SubnetFilter{
-		ClientID: r.URL.Query().Get("client_id"),
-		SiteID:   r.URL.Query().Get("site_id"),
+	f, ok := subnetFilter(w, r)
+	if !ok {
+		return
 	}
-	// parent_id=<id> lists the children of a subnet, parent_id=root the
-	// subnets without a parent the caller sees (IPM-02).
-	switch parent := r.URL.Query().Get("parent_id"); parent {
-	case "":
-	case "root":
-		f.Root = true
-	default:
-		f.ParentID = parent
-	}
-	items, total, err := h.repo.ListSubnets(r.Context(), orgID, f, page)
+	items, total, err := h.repo.ListSubnets(r.Context(), orgID, &f, page)
 	if err != nil {
-		api.WriteRepoError(w, err)
+		if !api.WriteFieldError(w, err) {
+			api.WriteRepoError(w, err)
+		}
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Subnet]{
@@ -347,7 +340,7 @@ func (h *Handler) ListSubnetChildren(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "subnet not found")
 		return
 	}
-	items, total, err := h.repo.ListSubnets(r.Context(), orgID, SubnetFilter{ParentID: subnetID}, page)
+	items, total, err := h.repo.ListSubnets(r.Context(), orgID, &SubnetFilter{ParentID: subnetID}, page)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
@@ -374,9 +367,11 @@ func (h *Handler) ListSubnetAddresses(w http.ResponseWriter, r *http.Request) {
 	}
 	f.SubnetID = subnetID
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListIPAddresses(r.Context(), orgID, f, page)
+	items, total, err := h.repo.ListIPAddresses(r.Context(), orgID, &f, page)
 	if err != nil {
-		api.WriteRepoError(w, err)
+		if !api.WriteFieldError(w, err) {
+			api.WriteRepoError(w, err)
+		}
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[IPAddress]{
@@ -387,8 +382,9 @@ func (h *Handler) ListSubnetAddresses(w http.ResponseWriter, r *http.Request) {
 
 // --- IP Addresses ---
 
-// ipFilter reads the filters state and is_gateway of the address lists
-// (IPM-04); an unknown state or a gateway flag that is no boolean is 422.
+// ipFilter reads the filters of the address lists: state and is_gateway
+// (IPM-04), type, client_id, vrf_id, ci_id and q (IPM-20, filter.go); an
+// unknown state or type or a gateway flag that is no boolean is 422.
 func ipFilter(w http.ResponseWriter, r *http.Request) (IPFilter, bool) {
 	var f IPFilter
 	q := r.URL.Query()
@@ -408,6 +404,9 @@ func ipFilter(w http.ResponseWriter, r *http.Request) (IPFilter, bool) {
 		}
 		f.IsGateway = &b
 	}
+	if !ipListFilter(w, r, &f) {
+		return f, false
+	}
 	return f, true
 }
 
@@ -423,9 +422,11 @@ func (h *Handler) ListIPAddresses(w http.ResponseWriter, r *http.Request) {
 	}
 	f.SubnetID = r.URL.Query().Get("subnet_id")
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListIPAddresses(r.Context(), orgID, f, page)
+	items, total, err := h.repo.ListIPAddresses(r.Context(), orgID, &f, page)
 	if err != nil {
-		api.WriteRepoError(w, err)
+		if !api.WriteFieldError(w, err) {
+			api.WriteRepoError(w, err)
+		}
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[IPAddress]{

@@ -4077,7 +4077,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List subnets */
+    /**
+     * List subnets
+     * @description All filters are joined with AND. A malformed id filter is 422 with its field, an unknown one an empty list (IPM-20).
+     */
     get: operations['listSubnets'];
     put?: never;
     /**
@@ -20673,7 +20676,9 @@ export interface components {
         | 'contact'
         | 'compliance'
         | 'location'
-        | 'reservation';
+        | 'reservation'
+        | 'subnet'
+        | 'ip_address';
       entity_id: string;
       title: string;
       summary?: string;
@@ -30864,6 +30869,18 @@ export interface operations {
         site_id?: string;
         /** @description The children of this subnet (IPM-02), or root for the subnets without a parent the caller can see (a subnet under a parent outside the caller's scope counts as root). */
         parent_id?: string;
+        /** @description Only subnets of this IPAM section (IPM-20). */
+        section_id?: string;
+        /** @description Only subnets of this VRF (IPM-20). */
+        vrf_id?: string;
+        /** @description Only subnets of this VLAN (IPM-20). */
+        vlan_id?: string;
+        /** @description Only pools (true) or only subnets that are no pool (false). */
+        is_pool?: boolean;
+        /** @description Part of name, description or CIDR, case-insensitive (IPM-20). */
+        q?: string;
+        /** @description The subnets of the VRF of vrf_id (without it the default VRF of the organization) whose CIDR contains this address, the narrowest first (IPM-20); the caller sees only its visible subnets of the chain. No IP address is 422 with field contains. */
+        contains?: string;
       };
       header?: never;
       path?: never;
@@ -30881,6 +30898,7 @@ export interface operations {
         };
       };
       401: components['responses']['Unauthorized'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -31306,6 +31324,16 @@ export interface operations {
         state?: components['schemas']['IPAddressState'];
         /** @description Only gateway addresses (true) or no gateway addresses (false), IPM-04. */
         is_gateway?: boolean;
+        /** @description Only addresses of this type (IPM-20); another value is 422 with field type. */
+        type?: components['schemas']['IPAddressType'];
+        /** @description Only addresses of this client (IPM-20). */
+        client_id?: string;
+        /** @description Only addresses of this VRF (IPM-20). */
+        vrf_id?: string;
+        /** @description Only addresses on interfaces of this CI (IPM-20). */
+        ci_id?: string;
+        /** @description Prefix of the address or part of the DNS name (IPM-20). */
+        q?: string;
       };
       header?: never;
       path?: never;
@@ -31377,6 +31405,16 @@ export interface operations {
         state?: components['schemas']['IPAddressState'];
         /** @description Only gateway addresses (true) or no gateway addresses (false), IPM-04. */
         is_gateway?: boolean;
+        /** @description Only addresses of this type (IPM-20); another value is 422 with field type. */
+        type?: components['schemas']['IPAddressType'];
+        /** @description Only addresses of this client (IPM-20). */
+        client_id?: string;
+        /** @description Only addresses of this VRF (IPM-20). */
+        vrf_id?: string;
+        /** @description Only addresses on interfaces of this CI (IPM-20). */
+        ci_id?: string;
+        /** @description Prefix of the address or part of the DNS name (IPM-20). */
+        q?: string;
       };
       header?: never;
       path?: never;
@@ -37401,7 +37439,7 @@ export interface operations {
     parameters: {
       query?: {
         q?: string;
-        /** @description Comma-separated entity type filter. */
+        /** @description Comma-separated entity type filter: ci, asset, document, ticket, contact, compliance, location, reservation, subnet and ip_address (IPM-20; subnets and addresses need ipam:read, their hits link to /ipam/subnets/{id} and /ipam/subnets/{subnet_id}?address={id}). */
         type?: string;
         /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];

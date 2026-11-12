@@ -1679,3 +1679,4 @@ ADM-02;[P3];G3;backend/internal/admp/readonly/readonly_mock_test.go;WP-927
 ADM-03;[P3];G3;backend/internal/admp/sync_integration_test.go;WP-929
 IPM-03;[P3];G3;backend/internal/ipam/allocate_integration_test.go;WP-904
 IPM-08;[P3];G3;backend/internal/ipam/history_integration_test.go;WP-908
+IPM-20;[P3];G3;backend/internal/ipam/filter_integration_test.go;WP-909

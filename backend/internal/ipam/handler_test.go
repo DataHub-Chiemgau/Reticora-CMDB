@@ -465,7 +465,7 @@ func TestSubnetGatewayInsideSubnet(t *testing.T) {
 	}
 	marked := func() []IPAddress {
 		gw := true
-		items, _, _ := repo.ListIPAddresses(context.Background(), "org-1", IPFilter{SubnetID: s.ID, IsGateway: &gw}, page)
+		items, _, _ := repo.ListIPAddresses(context.Background(), "org-1", &IPFilter{SubnetID: s.ID, IsGateway: &gw}, page)
 		return items
 	}
 	if m := marked(); len(m) != 1 || m[0].Address != "10.9.0.1" || m[0].Type != IPTypeStatic || m[0].State != IPStateUnknown {
@@ -506,7 +506,7 @@ func TestSubnetGatewayInsideSubnet(t *testing.T) {
 	if m := marked(); len(m) != 0 {
 		t.Errorf("gateway mark after clearing: %+v", m)
 	}
-	all, _, _ := repo.ListIPAddresses(context.Background(), "org-1", IPFilter{SubnetID: s.ID}, page)
+	all, _, _ := repo.ListIPAddresses(context.Background(), "org-1", &IPFilter{SubnetID: s.ID}, page)
 	if len(all) != 2 {
 		t.Fatalf("addresses after clearing the gateway: %+v, want both former gateways", all)
 	}

@@ -27,6 +27,12 @@
 // BUDGET_GATE (lib.js): G2 (default, the provisional budgets of E-146) or
 // G1 (the budgets of NFR-02 below).
 //
+// ipam_lists reads the IPAM lists with their filters (IPM-20, WP-909): the
+// subnet list of a section and the subnets containing an address
+// (contains), the address list by state, each with limit=200 and its
+// total. The value at 10,000 subnets and 100,000 addresses comes from the
+// load run of WP-1167 on the seed of WP-1162.
+//
 // No request may fail (F-388): http_req_failed is 0 in the run and in every
 // scenario, every bulk job succeeds (bulk_jobs_succeeded, the checks of
 // the scenario bulk), and bulk_500_duration records only bulk jobs that
@@ -89,6 +95,8 @@ const scenarios = {
   impact: { ...reads('impact'), vus: 2 },
   impact_full: { ...reads('impactFull'), vus: 2 },
   blast_radius: { ...reads('blastRadius'), vus: 2 },
+  // WP-909 (IPM-20): the filtered IPAM lists, two VUs.
+  ipam_lists: { ...reads('ipamLists'), vus: 2 },
   bulk: { executor: 'per-vu-iterations', exec: 'bulk', vus: 1, iterations: BULK_JOBS, maxDuration: '10m' },
   bulk_fields: { executor: 'per-vu-iterations', exec: 'bulkFields', vus: 1, iterations: BULK_JOBS, maxDuration: '10m' },
 };
@@ -113,6 +121,7 @@ const LATENCY_NAMES = [
   'impact',
   'impact_full',
   'blast_radius',
+  'ipam_lists',
 ];
 const latencyThresholds = Object.fromEntries(
   LATENCY_NAMES.filter(
@@ -175,6 +184,8 @@ export function setup() {
     // wait for each other's row locks.
     bulkFields: ids.slice(500, 1000),
     spread,
+    // The default IPAM section of the organization (IPM-01).
+    section: get('/ipam-sections?limit=1', 'setup').json('data')[0].id,
   };
 }
 
@@ -216,6 +227,18 @@ export function globalSearch() {
   const name = `srv-${pick(9000)}`;
   const res = get(`/search?q=${name}&limit=5`, 'global_search');
   check(res, { 'global search finds the CI': (r) => r.status === 200 && (r.json('data') || []).some((h) => h.title === name) });
+  sleep(0.2);
+}
+
+// ipamLists reads the subnet list of the default section, the subnets
+// containing an address and the address list by state (IPM-20, WP-909),
+// each page of 200 with its total.
+export function ipamLists(data) {
+  const hasTotal = (r) => r.status === 200 && typeof r.json('total') === 'number';
+  const third = Math.floor(Math.random() * 256);
+  check(get(`/subnets?limit=200&section_id=${data.section}`, 'ipam_lists'), { 'subnet list by section has total': hasTotal });
+  check(get(`/subnets?limit=200&contains=10.${third}.1.1`, 'ipam_lists'), { 'subnets containing an address have total': hasTotal });
+  check(get('/ips?limit=200&state=active', 'ipam_lists'), { 'address list by state has total': hasTotal });
   sleep(0.2);
 }
 
