@@ -575,6 +575,47 @@ const STOCKTAKE_HANDLERS: Handler[] = [
   },
 ];
 
+// WP-1115: the source ranks of serial numbers; snmp has an organization-wide
+// entry, every other source its system rank.
+const RANK_SOURCES_A11Y = [
+  ['import', 95],
+  ['workflow', 92],
+  ['redfish', 90],
+  ['ipmi', 90],
+  ['agent', 85],
+  ['snmp', 70],
+  ['api', 75],
+  ['integration', 75],
+  ['wmi', 70],
+  ['ssh', 60],
+  ['nas', 60],
+  ['sweep', 20],
+] as const;
+const SOURCE_RANKS: Handler = {
+  path: '/reconciliation/source-ranks',
+  reply: () => ({
+    body: {
+      entries: [{ attribute_key: 'a11y_serial', source: 'snmp', rank: 70, updated_at: AT }],
+      effective: [
+        {
+          attribute_key: 'a11y_serial',
+          ranks: RANK_SOURCES_A11Y.map(([source, rank]) => ({
+            source,
+            rank,
+            origin: source === 'snmp' ? 'org' : 'default',
+          })),
+        },
+      ],
+    },
+  }),
+};
+const SOURCE_RANK_PERMISSIONS: Handler = {
+  path: '/me/permissions',
+  reply: () => ({
+    body: { user_id: 'a11y-user', permissions: ['discovery:read', 'reconciliation:manage'] },
+  }),
+};
+
 const RELATIONSHIP_TYPES: Handler = {
   path: '/relationship-types',
   reply: () => ({
@@ -1043,6 +1084,15 @@ const ROUTES: A11yRoute[] = [
     url: '/rules',
     handlers: [TEMPLATE_PERMISSIONS, ...RULE_HANDLERS],
     ready: (page) => page.locator('#main-content tr').filter({ hasText: M.rule }),
+  },
+  {
+    // WP-1115: the source ranks per attribute with an organization-wide
+    // entry (origin Org), system ranks and the edit buttons of a holder of
+    // reconciliation:manage.
+    path: '/source-ranks',
+    url: '/source-ranks',
+    handlers: [SOURCE_RANK_PERMISSIONS, SOURCE_RANKS],
+    ready: (page) => page.locator('#main-content tr').filter({ hasText: 'a11y_serial' }),
   },
   { path: '/assignments', url: '/assignments', ready: text(M.assignment) },
   {

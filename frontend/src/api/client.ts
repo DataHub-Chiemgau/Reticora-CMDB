@@ -3743,3 +3743,53 @@ export const securityFindingApi = {
     });
   },
 };
+
+/** One stored source rank of the organization (REC-04, WP-1105). */
+export type SourceRankEntry = components['schemas']['SourceRankEntry'];
+/** The effective ranks of one attribute with their origin (type, org, default). */
+export type SourceRankEffective = components['schemas']['SourceRankEffective'];
+export type SourceRanks = components['schemas']['SourceRanks'];
+/** The automation sources whose rank an organization configures (WP-1105). */
+export type RankSource = SourceRankEntry['source'];
+export const RANK_SOURCES: readonly RankSource[] = [
+  'import',
+  'workflow',
+  'redfish',
+  'ipmi',
+  'agent',
+  'snmp',
+  'api',
+  'integration',
+  'wmi',
+  'ssh',
+  'nas',
+  'sweep',
+];
+
+export interface SourceRankParams {
+  /** Resolve the effective ranks for this CI type; empty: organization-wide. */
+  ci_type_id?: string;
+  /** Attributes whose effective tables are wanted. */
+  attribute_keys?: string[];
+}
+
+/**
+ * sourceRankApi reads and replaces the source ranks per attribute (REC-04,
+ * WP-1105, WP-1115). PUT replaces every entry of the organization, so the
+ * caller sends the complete list, also the entries of other CI types.
+ */
+export const sourceRankApi = {
+  get(params: SourceRankParams = {}): Promise<SourceRanks> {
+    const query = new URLSearchParams();
+    if (params.ci_type_id) query.set('ci_type_id', params.ci_type_id);
+    if (params.attribute_keys?.length) query.set('attribute_key', params.attribute_keys.join(','));
+    const search = query.toString();
+    return fetchAPI(`/reconciliation/source-ranks${search ? `?${search}` : ''}`);
+  },
+  replace(entries: SourceRankEntry[]): Promise<SourceRanks> {
+    return fetchAPI('/reconciliation/source-ranks', {
+      method: 'PUT',
+      body: JSON.stringify({ entries }),
+    });
+  },
+};

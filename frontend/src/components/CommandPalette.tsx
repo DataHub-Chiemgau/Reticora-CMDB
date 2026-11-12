@@ -52,6 +52,7 @@ export type AppPage =
   // Enterprise CMDB + asset/inventory extension (Phase E).
   | 'ci-types'
   | 'rules'
+  | 'source-ranks'
   | 'relationship-types'
   | 'locations'
   | 'inventory'
@@ -107,6 +108,7 @@ export const pageToPath: Record<AppPage, string> = {
   jobs: '/jobs',
   'ci-types': '/ci-types',
   rules: '/rules',
+  'source-ranks': '/source-ranks',
   'relationship-types': '/relationship-types',
   locations: '/locations',
   inventory: '/inventory',
@@ -500,6 +502,12 @@ export function CommandPalette({
         label: t('commandPalette.commands.rules'),
         keywords: ['rules regeln regelkatalog validation validierung bedingung condition'],
         action: () => onNavigate('rules'),
+      },
+      {
+        id: 'nav-source-ranks',
+        label: t('commandPalette.commands.source-ranks'),
+        keywords: ['source ranks quellränge quellpriorität priority rang reconciliation abgleich'],
+        action: () => onNavigate('source-ranks'),
       },
     ];
     const writtenIds = new Set(written.map((command) => command.id));

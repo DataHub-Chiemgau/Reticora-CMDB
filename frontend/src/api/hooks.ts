@@ -50,6 +50,9 @@ import {
   privacyApi,
   credentialApi,
   vrfApi,
+  sourceRankApi,
+  type SourceRankEntry,
+  type SourceRankParams,
   bffQueryPartial,
   ApiError,
 } from '../api/client';
@@ -2115,5 +2118,27 @@ export function useRotateCredentialKeys() {
   return useMutation({
     mutationFn: () => credentialApi.rotateKeys(),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['credentials'] }),
+  });
+}
+
+/**
+ * useSourceRanks reads the source ranks of the organization (GET
+ * /reconciliation/source-ranks, WP-1115): without parameters every stored
+ * entry, with ci_type_id and attribute_keys the effective tables.
+ */
+export function useSourceRanks(params: SourceRankParams = {}, enabled = true) {
+  return useQuery({
+    queryKey: ['source-ranks', params],
+    queryFn: () => sourceRankApi.get(params),
+    enabled,
+  });
+}
+
+/** useReplaceSourceRanks replaces every entry of the organization (PUT). */
+export function useReplaceSourceRanks() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (entries: SourceRankEntry[]) => sourceRankApi.replace(entries),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['source-ranks'] }),
   });
 }

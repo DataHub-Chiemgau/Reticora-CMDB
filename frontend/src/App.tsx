@@ -100,6 +100,7 @@ const RelationshipTypesPage = lazyPage(
 );
 const TemplatesPage = lazyPage(() => import('./pages/TemplatesPage'), 'TemplatesPage');
 const RulesPage = lazyPage(() => import('./pages/RulesPage'), 'RulesPage');
+const SourceRanksPage = lazyPage(() => import('./pages/SourceRanksPage'), 'SourceRanksPage');
 const FormBuilderPage = lazyPage(() => import('./pages/FormBuilderPage'), 'FormBuilderPage');
 const MetamodelDraftsPage = lazyPage(
   () => import('./pages/MetamodelDraftsPage'),
@@ -272,6 +273,7 @@ function App() {
           <Route path="/ci-types/drafts/:id" element={<MetamodelDraftsPage />} />
           <Route path="/ci-types/:id/form-builder" element={<FormBuilderPage />} />
           <Route path="/rules" element={<RulesPage />} />
+          <Route path="/source-ranks" element={<SourceRanksPage />} />
           <Route path="/relationship-types" element={<RelationshipTypesPage />} />
           <Route path="/assignments" element={<AssignmentListPage />} />
           <Route path="/contracts" element={<ContractsPage />} />

@@ -223,6 +223,9 @@ export const navPermissionFor: Record<string, string | undefined> = {
   plan: 'entitlement:read',
   // The client list reads with location:read; writing needs user:manage (WP-855).
   clients: 'location:read',
+  // The source ranks per attribute (REC-04, WP-1115) read with discovery:read;
+  // editing needs reconciliation:manage. Core page: no feature gate.
+  'source-ranks': 'discovery:read',
 };
 
 /**

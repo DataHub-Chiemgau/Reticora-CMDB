@@ -49,6 +49,7 @@
     "jobs": "Jobs",
     "tags": "Tags",
     "rules": "Rule catalog",
+    "source-ranks": "Source ranks",
     "import": "Import",
     "contracts": "Contracts",
     "suppliers": "Suppliers",
@@ -116,6 +117,7 @@
       "roomplan": "Open room plan",
       "tags": "Open tags",
       "rules": "Open rule catalog",
+      "source-ranks": "Open source ranks",
       "scan": "Scan",
       "import": "Open import assistant",
       "contracts": "Open contracts",
@@ -4978,6 +4980,47 @@
       "entitlement.grant": "Entitlement changed",
       "org.create": "Organization created",
       "login": "Sign-in"
+    }
+  },
+  "sourceRanks": {
+    "title": "Source ranks per attribute",
+    "description": "Which automation source may overwrite an attribute value.",
+    "ciType": "CI type",
+    "orgWide": "Organization-wide",
+    "attribute": "Attribute",
+    "addAttribute": "Add attribute",
+    "save": "Save",
+    "saved": "Source ranks saved.",
+    "saveFailed": "The source ranks could not be saved.",
+    "loadFailed": "The source ranks could not be loaded.",
+    "readOnly": "Read-only: editing needs the permission reconciliation:manage.",
+    "hintEdit": "Select a cell and press Enter to change the rank (1–99); Escape discards.",
+    "manualHint": "manual values always take precedence",
+    "rankInvalid": "The rank must be a whole number from 1 to 99.",
+    "empty": "No ranks per attribute yet",
+    "emptyHint": "Without own entries the system ranks of all sources apply.",
+    "caption": "Rank per attribute and source with origin",
+    "cellLabel": "Rank of {{source}} for {{attribute}}",
+    "reset": "Reset the rank of {{source}} for {{attribute}}",
+    "origins": {
+      "default": "System",
+      "org": "Org",
+      "type": "Type"
+    },
+    "sources": {
+      "manual": "Manual",
+      "import": "Import",
+      "workflow": "Workflow",
+      "redfish": "Redfish",
+      "ipmi": "IPMI",
+      "agent": "Agent",
+      "snmp": "SNMP",
+      "api": "API",
+      "integration": "Integration",
+      "wmi": "WMI",
+      "ssh": "SSH",
+      "nas": "NAS",
+      "sweep": "Network sweep"
     }
   }
 }

@@ -49,6 +49,7 @@
     "jobs": "Jobs",
     "tags": "Tags",
     "rules": "Regelkatalog",
+    "source-ranks": "Quellränge",
     "import": "Import",
     "contracts": "Verträge",
     "suppliers": "Lieferanten",
@@ -116,6 +117,7 @@
       "roomplan": "Raumplan öffnen",
       "tags": "Tags öffnen",
       "rules": "Regelkatalog öffnen",
+      "source-ranks": "Quellränge öffnen",
       "scan": "Scannen",
       "import": "Import-Assistent öffnen",
       "contracts": "Verträge öffnen",
@@ -4978,6 +4980,47 @@
       "entitlement.grant": "Freischaltung geändert",
       "org.create": "Organisation angelegt",
       "login": "Anmeldung"
+    }
+  },
+  "sourceRanks": {
+    "title": "Quellränge pro Attribut",
+    "description": "Welche Automationsquelle einen Attributwert überschreiben darf.",
+    "ciType": "CI-Typ",
+    "orgWide": "Organisationsweit",
+    "attribute": "Attribut",
+    "addAttribute": "Attribut hinzufügen",
+    "save": "Speichern",
+    "saved": "Quellränge gespeichert.",
+    "saveFailed": "Die Quellränge konnten nicht gespeichert werden.",
+    "loadFailed": "Die Quellränge konnten nicht geladen werden.",
+    "readOnly": "Nur lesend: Zum Bearbeiten fehlt das Recht reconciliation:manage.",
+    "hintEdit": "Zelle wählen und Enter drücken, um den Rang (1–99) zu ändern; Escape verwirft.",
+    "manualHint": "manuelle Werte haben immer Vorrang",
+    "rankInvalid": "Der Rang muss eine ganze Zahl von 1 bis 99 sein.",
+    "empty": "Noch keine Ränge pro Attribut",
+    "emptyHint": "Ohne eigene Einträge gelten die Systemränge aller Quellen.",
+    "caption": "Rang je Attribut und Quelle mit Herkunft",
+    "cellLabel": "Rang von {{source}} für {{attribute}}",
+    "reset": "Rang von {{source}} für {{attribute}} zurücksetzen",
+    "origins": {
+      "default": "System",
+      "org": "Org",
+      "type": "Typ"
+    },
+    "sources": {
+      "manual": "Manuell",
+      "import": "Import",
+      "workflow": "Workflow",
+      "redfish": "Redfish",
+      "ipmi": "IPMI",
+      "agent": "Agent",
+      "snmp": "SNMP",
+      "api": "API",
+      "integration": "Integration",
+      "wmi": "WMI",
+      "ssh": "SSH",
+      "nas": "NAS",
+      "sweep": "Netzscan"
     }
   }
 }
