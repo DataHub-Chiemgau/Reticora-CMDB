@@ -1695,3 +1695,5 @@ CRD-04;[P3];E;backend/internal/credential/device_group_integration_test.go;WP-93
 PRB-03;[P3];E;backend/internal/discovery/collector_group_schema_integration_test.go;WP-936
 COL-06;[B], Air-Gapped [O];E;backend/internal/discovery/collector_group_schema_integration_test.go;WP-936
 PRB-11;[P3];E;backend/internal/discovery/collector_group_schema_integration_test.go;WP-936
+ADM-07;[P3];G3;backend/internal/admp/api_integration_test.go;WP-930
+ADM-08;[P3];G3;backend/internal/admp/api_integration_test.go;WP-930

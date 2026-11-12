@@ -306,6 +306,50 @@ func (m *MemoryRepository) ListByCI(ctx context.Context, orgID, ciID string) ([]
 		}
 	}
 	slices.SortFunc(out, func(a, b Connection) int {
+		return cmp.Or(cmp.Compare(a.Carrier, b.Carrier), cmp.Compare(a.ExternalID, b.ExternalID), cmp.Compare(a.ID, b.ID))
+	})
+	return out, nil
+}
+
+// ListByConnection implements Repository.
+func (m *MemoryRepository) ListByConnection(ctx context.Context, orgID, connectionID string) ([]Service, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.refreshClients(ctx)
+	out := []Service{}
+	for id, s := range m.services {
+		if s.OrganizationID != orgID || s.ConnectionID != connectionID || connectionID == "" || !cacheVisible(ctx, s.ClientID) {
+			continue
+		}
+		row := cloneService(s)
+		for i := range m.ports[id] {
+			if p := m.ports[id][i]; cacheVisible(ctx, p.ClientID) {
+				row.Ports = append(row.Ports, p)
+			}
+		}
+		slices.SortFunc(row.Ports, func(a, b ServicePort) int { return cmp.Compare(a.PortKey, b.PortKey) })
+		out = append(out, row)
+	}
+	slices.SortFunc(out, func(a, b Service) int {
+		return cmp.Or(cmp.Compare(a.ExternalID, b.ExternalID), cmp.Compare(a.ID, b.ID))
+	})
+	return out, nil
+}
+
+// ConnectionsByID implements Repository.
+func (m *MemoryRepository) ConnectionsByID(ctx context.Context, orgID string, ids []string) ([]Connection, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.refreshClients(ctx)
+	out := []Connection{}
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if c, ok := m.connections[id]; ok && !seen[id] && c.OrganizationID == orgID && cacheVisible(ctx, c.ClientID) {
+			seen[id] = true
+			out = append(out, cloneConnection(c))
+		}
+	}
+	slices.SortFunc(out, func(a, b Connection) int {
 		return cmp.Or(cmp.Compare(a.ExternalID, b.ExternalID), cmp.Compare(a.ID, b.ID))
 	})
 	return out, nil

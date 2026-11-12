@@ -120,7 +120,6 @@ var unroutedKeys = map[string]string{
 var unroutedUntil = map[string]string{
 	"alert:acknowledge": "WP-982 (alarm acknowledgement)",
 	"workflow:approve":  "WP-1098 (workflow approvals)",
-	"admp:read":         "WP-929 (ADMP read paths)",
 	"escalation:manage": "WP-1145 (escalation policies)",
 	"org:export":        "WP-1151 (organization export)",
 	"org:delete":        "WP-1152 (organization deletion)",

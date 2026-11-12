@@ -307,6 +307,10 @@ var routeRules = []routeRule{
 	// admp:read (WP-866).
 	{"*", "admp/accounts", identity.PermADMPManage},
 	{"*", "admp/accounts/*", identity.PermADMPManage},
+	// The ADMP data at an interface and a CI read with admp:read, not with
+	// the ipam:read and ci:read of their first segments (WP-930).
+	{http.MethodGet, "network-interfaces/*/admp", identity.PermADMPRead},
+	{http.MethodGet, "cis/*/admp-connections", identity.PermADMPRead},
 	// Acknowledging alarms, incidents and notification escalations is its
 	// own right (RBA-05, E-161, WP-866).
 	{http.MethodPost, "monitoring/alarms/*/ack", identity.PermAlertAcknowledge},

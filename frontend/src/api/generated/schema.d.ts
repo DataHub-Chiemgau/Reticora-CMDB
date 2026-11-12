@@ -11406,7 +11406,7 @@ export interface paths {
     };
     /**
      * Get an ADMP connection
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description ADM-07 (WP-930): a cached ADMP connection with carrier, contract, address, fetched_at, expires_at, stale and last_error_class, and its services with their ports. {id} is the Reticora id of the cache entry; the ADMP id is external_id. The holder and the address of a private connection appear only as holder_subject_id, address_subject_id and holder_present, never in plain text (E-243). CIs appear only as ci_id. refresh=true queues the job admp.refresh (at most one job per connection and minute; a second request in the minute names the same job) and answers 202 with the cached state and refresh_job_id; with an open circuit breaker of the account it answers 200 with refresh_skipped circuit_open. Reads only the cache, never ADMP. Requires admp:read.
      */
     get: operations['getADMPConnection'];
     put?: never;
@@ -11452,7 +11452,7 @@ export interface paths {
     };
     /**
      * List the ADMP connections of a CI
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description ADM-08 (WP-930): the cached ADMP connections of the services with a port on the CI, ordered by carrier and external_id, each with stale and fetched_at. An unknown CI or one outside the caller's scope is 404. Reads only the cache. Requires admp:read.
      */
     get: operations['listCIADMPConnections'];
     put?: never;
@@ -11474,8 +11474,8 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Get the ADMP service of a port
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * List the ADMP services of a port
+     * @description ADM-07, ADM-08 (WP-930): the cached ADMP services with a port on the network interface, each with its ports there and its connection, with stale and fetched_at. An unknown interface or one outside the caller's scope is 404. refresh=true queues admp.refresh for the interface with the account of its CI's client, else the organization's (at most one job per interface and minute) and answers 202 with the cached state and refresh_job_id; an open circuit breaker answers 200 with refresh_skipped circuit_open, no enabled account with no_account. Requires admp:read.
      */
     get: operations['getNetworkInterfaceADMP'];
     put?: never;
@@ -20512,6 +20512,99 @@ export interface components {
     ADMPAccountListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['ADMPAccount'][];
     };
+    /** @description The members of a cached ADMP connection (ADM-07, WP-930). The holder and the address of a private connection are pii_subject surrogates (E-243); at most one of address_text and address_subject_id is set. */
+    ADMPConnectionFields: {
+      /**
+       * Format: uuid
+       * @description The Reticora id of the cache entry.
+       */
+      id: string;
+      /** Format: uuid */
+      account_id: string;
+      /** @description The id of the connection in ADMP. */
+      external_id: string;
+      carrier?: string;
+      contract_id?: string;
+      /** @description The address of a business connection. */
+      address_text?: string;
+      /**
+       * Format: uuid
+       * @description Surrogate of the address of a private connection.
+       */
+      address_subject_id?: string;
+      /**
+       * Format: uuid
+       * @description Surrogate of the holder.
+       */
+      holder_subject_id?: string;
+      holder_present: boolean;
+      properties: {
+        [key: string]: unknown;
+      };
+      /** Format: date-time */
+      fetched_at: string;
+      /** Format: date-time */
+      expires_at: string;
+      stale: boolean;
+      last_error_class?: string;
+      /** Format: uuid */
+      client_id?: string;
+    };
+    /** @description A port of an ADMP service (ADM-04); the CI only by its id. */
+    ADMPServicePort: {
+      port_key: string;
+      /** Format: uuid */
+      network_interface_id?: string;
+      /** Format: uuid */
+      ci_id?: string;
+      /** @enum {string} */
+      matched_by: 'rule' | 'manual' | 'none';
+    };
+    /** @description A cached ADMP service with its ports (WP-930). */
+    ADMPService: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      account_id: string;
+      external_id: string;
+      /** Format: uuid */
+      connection_id?: string;
+      kind: string;
+      properties: {
+        [key: string]: unknown;
+      };
+      /** Format: date-time */
+      fetched_at: string;
+      /** Format: date-time */
+      expires_at: string;
+      stale: boolean;
+      last_error_class?: string;
+      ports: components['schemas']['ADMPServicePort'][];
+    };
+    ADMPRefreshOutcome: {
+      /**
+       * Format: uuid
+       * @description The queued (or this minute's) admp.refresh job.
+       */
+      refresh_job_id?: string;
+      /** @enum {string} */
+      refresh_skipped?: 'circuit_open' | 'no_account';
+    };
+    ADMPConnection: components['schemas']['ADMPConnectionFields'] &
+      components['schemas']['ADMPRefreshOutcome'] & {
+        services: components['schemas']['ADMPService'][];
+      };
+    ADMPInterfaceService: components['schemas']['ADMPService'] & {
+      connection?: components['schemas']['ADMPConnectionFields'];
+    };
+    ADMPInterfaceServiceListResponse: components['schemas']['PaginationEnvelope'] &
+      components['schemas']['ADMPRefreshOutcome'] & {
+        data: components['schemas']['ADMPInterfaceService'][];
+      };
+    ADMPCIConnection: components['schemas']['ADMPConnectionFields'];
+    ADMPCIConnectionListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['ADMPCIConnection'][];
+    };
     /** @description Usage of a credential at a CI in a namespace (CRD-06, WP-898); never a secret. */
     CredentialUsage: {
       /** Format: uuid */
@@ -21190,6 +21283,8 @@ export interface components {
     };
   };
   parameters: {
+    /** @description true queues a refresh of the object from ADMP (job admp.refresh, at most one per object and minute) and answers 202 (WP-930). */
+    ADMPRefresh: boolean;
     /** @description Writes the change into this metamodel draft instead of the published metamodel (MET-53, WP-720): the request becomes an item of the draft as with POST /api/v1/metamodel/drafts/{id}/items and is answered with 202 and the item; nothing else changes (no event, no index job, no audit entry of the resource). Requires citype:manage in addition to the permission of the route. A value that is no UUID is 400, an unknown draft or one of another organization 404, a published or discarded draft 409, a server without database 503. With the module metamodel switched off the parameter is answered with 404 and nothing is written. At GET /api/v1/ci-types/{id}/form it resolves the preview with the items of the draft (E-113). Every other write route refuses the parameter with 400 (`urn:reticora:problem:draft-unsupported`). */
     DraftId: string;
     /**
@@ -49545,7 +49640,10 @@ export interface operations {
   };
   getADMPConnection: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description true queues a refresh of the object from ADMP (job admp.refresh, at most one per object and minute) and answers 202 (WP-930). */
+        refresh?: components['parameters']['ADMPRefresh'];
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -49555,17 +49653,30 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get an ADMP connection. The schema comes with the implementing work package. */
+      /** @description The connection from the cache */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ADMPConnection'];
+        };
       };
+      /** @description The connection from the cache; a refresh job is queued */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ADMPConnection'];
+        };
+      };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   getADMPConnectionHolder: {
@@ -49616,22 +49727,38 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the ADMP connections of a CI. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description ADMP connections of the CI */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ADMPCIConnectionListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
     };
   };
   getNetworkInterfaceADMP: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /** @description true queues a refresh of the object from ADMP (job admp.refresh, at most one per object and minute) and answers 202 (WP-930). */
+        refresh?: components['parameters']['ADMPRefresh'];
+      };
       header?: never;
       path: {
         /** @description Resource identifier. */
@@ -49641,17 +49768,30 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get the ADMP service of a port. The schema comes with the implementing work package. */
+      /** @description ADMP services of the interface */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['ADMPInterfaceServiceListResponse'];
+        };
       };
+      /** @description ADMP services of the interface; a refresh job is queued */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ADMPInterfaceServiceListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   listEscalationPolicies: {

@@ -262,7 +262,84 @@ func (r *PGRepository) ListByCI(ctx context.Context, orgID, ciID string) ([]Conn
 			WHERE c.id IN (SELECT s.connection_id FROM admp_service s
 				JOIN admp_service_port p ON p.service_id = s.id AND p.organization_id = s.organization_id
 				WHERE p.ci_id = $1)
-			ORDER BY c.external_id, c.id`, ciID)
+			ORDER BY COALESCE(c.carrier, '') COLLATE "C", c.external_id COLLATE "C", c.id`, ciID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			c, err := scanConnection(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, *c)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// ListByConnection implements Repository: one statement, the services
+// without ports included.
+func (r *PGRepository) ListByConnection(ctx context.Context, orgID, connectionID string) ([]Service, error) {
+	out := []Service{}
+	if !api.IsUUID(connectionID) {
+		return out, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT `+serviceColumns+`, p.id::text, p.port_key, COALESCE(p.network_interface_id::text, ''),
+				COALESCE(p.ci_id::text, ''), p.matched_by, COALESCE(p.client_id::text, ''), COALESCE(p.site_id::text, '')
+			FROM admp_service s LEFT JOIN admp_service_port p ON p.service_id = s.id AND p.organization_id = s.organization_id
+			WHERE s.connection_id = $1 ORDER BY s.external_id COLLATE "C", s.id, p.port_key COLLATE "C"`, connectionID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		index := map[string]int{}
+		for rows.Next() {
+			var sv Service
+			var props []byte
+			var portID, portKey, matchedBy *string
+			var p ServicePort
+			if err := rows.Scan(&sv.ID, &sv.OrganizationID, &sv.AccountID, &sv.ExternalID, &sv.ConnectionID, &sv.Kind, &props,
+				&sv.FetchedAt, &sv.ExpiresAt, &sv.Stale, &sv.LastErrorClass, &sv.ClientID,
+				&portID, &portKey, &p.NetworkInterfaceID, &p.CIID, &matchedBy, &p.ClientID, &p.SiteID); err != nil {
+				return err
+			}
+			i, seen := index[sv.ID]
+			if !seen {
+				if err := json.Unmarshal(props, &sv.Properties); err != nil {
+					return err
+				}
+				i = len(out)
+				index[sv.ID] = i
+				out = append(out, sv)
+			}
+			if portID != nil {
+				p.ID, p.OrganizationID, p.ServiceID, p.PortKey, p.MatchedBy = *portID, sv.OrganizationID, sv.ID, *portKey, *matchedBy
+				out[i].Ports = append(out[i].Ports, p)
+			}
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// ConnectionsByID implements Repository.
+func (r *PGRepository) ConnectionsByID(ctx context.Context, orgID string, ids []string) ([]Connection, error) {
+	out := []Connection{}
+	valid := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if api.IsUUID(id) {
+			valid = append(valid, id)
+		}
+	}
+	if len(valid) == 0 {
+		return out, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT `+connectionColumns+` FROM admp_connection c WHERE c.id = ANY($1::uuid[])
+			ORDER BY c.external_id COLLATE "C", c.id`, valid)
 		if err != nil {
 			return err
 		}
@@ -398,4 +475,38 @@ func (r *PGRepository) DeleteExpired(ctx context.Context, orgID string, before t
 		return nil
 	})
 	return out, err
+}
+
+var _ Targets = (*PGRepository)(nil)
+
+// InterfaceTarget implements Targets: the interface with its CI under the
+// caller's row level security; a deleted CI hides it.
+func (r *PGRepository) InterfaceTarget(ctx context.Context, orgID, id string) (*Target, error) {
+	return r.target(ctx, orgID, id, `SELECT ci.id::text, COALESCE(ci.client_id::text, '') FROM network_interface ni
+		JOIN ci ON ci.id = ni.ci_id AND ci.organization_id = ni.organization_id AND ci.deleted_at IS NULL
+		WHERE ni.id = $1`)
+}
+
+// CITarget implements Targets.
+func (r *PGRepository) CITarget(ctx context.Context, orgID, id string) (*Target, error) {
+	return r.target(ctx, orgID, id, `SELECT ci.id::text, COALESCE(ci.client_id::text, '') FROM ci
+		WHERE ci.id = $1 AND ci.deleted_at IS NULL`)
+}
+
+func (r *PGRepository) target(ctx context.Context, orgID, id, query string) (*Target, error) {
+	if !api.IsUUID(id) {
+		return nil, ErrTargetNotFound
+	}
+	var t Target
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, query, id).Scan(&t.CIID, &t.ClientID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrTargetNotFound
+		}
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
 }

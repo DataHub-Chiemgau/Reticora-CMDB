@@ -96,6 +96,7 @@ GET /api/v1/admin/orgs/{id}/usage operator
 GET /api/v1/admin/plans operator
 GET /api/v1/admp/accounts/ admp:manage
 GET /api/v1/admp/accounts/{id} admp:manage
+GET /api/v1/admp/connections/{id} admp:read
 GET /api/v1/agents agent:read
 GET /api/v1/ai/conversations ai:read
 GET /api/v1/api-keys apikey:manage
@@ -135,6 +136,7 @@ GET /api/v1/ci-types/{id}/form ci:read
 GET /api/v1/ci-types/{id}/versions ci:read
 GET /api/v1/cis ci:read
 GET /api/v1/cis/{id} ci:read
+GET /api/v1/cis/{id}/admp-connections admp:read
 GET /api/v1/cis/{id}/as-of ci:read
 GET /api/v1/cis/{id}/blast-radius topology:read
 GET /api/v1/cis/{id}/changes ci:read
@@ -274,6 +276,7 @@ GET /api/v1/mounts/{id} rack:read
 GET /api/v1/nameserver-sets ipam:read
 GET /api/v1/nameserver-sets/{id} ipam:read
 GET /api/v1/network-interfaces/{id} ipam:read
+GET /api/v1/network-interfaces/{id}/admp admp:read
 GET /api/v1/notification-channels notification:manage
 GET /api/v1/notification-channels/{id} notification:manage
 GET /api/v1/notification-deliveries notification:manage

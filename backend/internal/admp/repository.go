@@ -41,8 +41,15 @@ type Repository interface {
 	// each with its ports on it.
 	ListByInterface(ctx context.Context, orgID, interfaceID string) ([]Service, error)
 	// ListByCI returns the connections of the services with a port on the
-	// CI.
+	// CI, ordered by carrier and external id (WP-930: one set-based
+	// statement).
 	ListByCI(ctx context.Context, orgID, ciID string) ([]Connection, error)
+	// ListByConnection returns the services of a connection, each with all
+	// its ports, ordered by external id (WP-930).
+	ListByConnection(ctx context.Context, orgID, connectionID string) ([]Service, error)
+	// ConnectionsByID returns the visible connections among ids (WP-930);
+	// an id the caller does not see is left out.
+	ConnectionsByID(ctx context.Context, orgID string, ids []string) ([]Connection, error)
 	// MarkStale keeps an entry after a failed refresh with stale and the
 	// error class (ADM-03).
 	MarkStale(ctx context.Context, orgID, kind, id, errorClass string) error

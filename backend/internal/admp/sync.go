@@ -21,6 +21,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
 // The refresh of the ADMP cache (ADM-03, E-225, WP-929): on demand as the
@@ -229,6 +230,41 @@ func (s *Sync) Submit(ctx context.Context, orgID string, p RefreshParams, window
 		return nil, false, ErrNoRefreshJobs
 	}
 	return s.submitter.Submit(ctx, orgID, RefreshJobKind, p, jobs.EnqueueOptions{IdempotencyKey: RefreshKey(&p, window)})
+}
+
+// RequestRefresh queues admp.refresh asked for through the read API
+// (WP-930): at most one job per object and minute (MinuteWindow), a
+// second request in the minute gets the id of the first job. An open
+// circuit breaker of the account queues nothing (RefreshSkippedCircuitOpen).
+// The account is read organization-wide: a principal restricted to a
+// client refreshes its data with the organization's account, which it
+// does not see.
+func (s *Sync) RequestRefresh(ctx context.Context, orgID string, p RefreshParams) (jobID, skipped string, err error) {
+	if verr := p.validate(); verr != nil {
+		return "", "", verr
+	}
+	scope := database.OrgWideScope(orgID, tenant.FromContext(ctx).UserID)
+	orgWide := database.ContextWithTenantScope(database.WithoutTx(ctx), &scope)
+	a, err := s.o.Accounts.GetAccount(orgWide, orgID, p.AccountID)
+	if err != nil {
+		return "", "", err
+	}
+	if s.o.Sources.CircuitOpen(a) {
+		return "", RefreshSkippedCircuitOpen, nil
+	}
+	window := MinuteWindow(s.o.Now())
+	job, _, err := s.Submit(ctx, orgID, p, window)
+	if errors.Is(err, jobs.ErrNotFound) {
+		// The job of this minute was queued by a principal of another
+		// scope, which the caller does not see: the dedupe still holds,
+		// its id is read organization-wide (nothing is queued, the key is
+		// taken).
+		job, _, err = s.Submit(orgWide, orgID, p, window)
+	}
+	if err != nil {
+		return "", "", err
+	}
+	return job.ID, "", nil
 }
 
 // orgContext is the organization-wide context of the system refresh.

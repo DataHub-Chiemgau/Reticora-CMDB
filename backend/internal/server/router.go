@@ -516,6 +516,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	if admpSync == nil {
 		admpSync = NewADMPSync(&repos, opts.Credentials, opts.Egress, opts.AuditPool, 0)
 	}
+	admpAccounts := admp.NewAccountService(repos.ADMPAccounts, admp.CredentialsOf(opts.Credentials), opts.Egress)
 	// The draft handler (WP-260) runs the test run of a draft as a job
 	// (WP-721, metamodel.test) with the job service, like historyHandler.
 	draftHandler := metamodel.NewHandler(repos.MetamodelDraft)
@@ -955,7 +956,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		credentialHandler,
 		// ADMP accounts (ADM-01, WP-925): local configuration, the URLs
 		// checked against the egress policy of the router.
-		admp.NewHandler(admp.NewAccountService(repos.ADMPAccounts, admp.CredentialsOf(opts.Credentials), opts.Egress)),
+		admp.NewHandler(admpAccounts),
+		// The read API of the ADMP cache (ADM-07, ADM-08, WP-930);
+		// refresh=true queues admp.refresh through admpSync.
+		admp.NewDataHandler(repos.ADMP, admpTargetsOf(&repos), admpAccounts, admpSync),
 		ai.NewHandler(repos.AI, opts.AIProvider,
 			ai.NewRetriever(repos.AI, repos.Search, repos.Permission, opts.AIProvider).WithConsent(aiConsent)).
 			WithConsent(aiConsent),
@@ -1610,4 +1614,43 @@ func UsageCounters(repos *Repositories) entitlement.UsageCounters {
 		}
 	}
 	return counters
+}
+
+// admpTargetsOf resolves the interfaces and CIs of the ADMP read routes
+// (WP-930): the PostgreSQL cache reads them itself in one statement under
+// row level security; the memory cache of --no-db asks the IPAM and CI
+// stores.
+func admpTargetsOf(repos *Repositories) admp.Targets {
+	if t, ok := repos.ADMP.(admp.Targets); ok {
+		return t
+	}
+	ciTarget := func(ctx context.Context, orgID, id string) (*admp.Target, error) {
+		if repos.CI == nil {
+			return nil, admp.ErrTargetNotFound
+		}
+		item, err := repos.CI.GetByID(ctx, orgID, id)
+		if errors.Is(err, ci.ErrNotFound) {
+			return nil, admp.ErrTargetNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		return &admp.Target{CIID: item.ID, ClientID: item.ClientID}, nil
+	}
+	return admp.TargetFuncs{
+		CI: ciTarget,
+		Interface: func(ctx context.Context, orgID, id string) (*admp.Target, error) {
+			if repos.IPAM == nil {
+				return nil, admp.ErrTargetNotFound
+			}
+			ni, err := repos.IPAM.GetInterface(ctx, orgID, id)
+			if errors.Is(err, ipam.ErrNotFound) {
+				return nil, admp.ErrTargetNotFound
+			}
+			if err != nil {
+				return nil, err
+			}
+			return ciTarget(ctx, orgID, ni.CIID)
+		},
+	}
 }
