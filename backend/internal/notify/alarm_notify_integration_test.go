@@ -278,6 +278,55 @@ func TestAlarmNotifySuppressedNotDelivered(t *testing.T) {
 	}
 }
 
+// TestAlarmNotifyDisabledByRule covers MON-04 (WP-988): the alarms of a
+// rule with actions.notify.enabled false notify nobody on opening and
+// resolving, while alarm.opened and alarm.resolved stay in the outbox (and
+// carry the actions); an alarm of a rule with notify on is delivered.
+func TestAlarmNotifyDisabledByRule(t *testing.T) {
+	e := newAlarmEnv(t, "ae")
+	ctx := e.f.OrgCtx(e.f.OrgA)
+	ci := e.ci1
+	off := alarm.Actions{Notify: events.AlarmAction{Enabled: false}, Webhook: events.AlarmAction{Enabled: true}}
+	muted, err := e.svc.Raise(ctx, e.f.OrgA, &alarm.RaiseInput{SourceKind: alarm.SourceRule, SourceID: e.f.ID(),
+		SeriesKey: "s", CIID: &ci, Severity: "critical", Summary: "dashboard only", Details: map[string]any{"value": 1.0},
+		Actions: &off})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.process()
+	e.now = e.now.Add(10 * time.Minute)
+	if _, err := e.svc.Clear(ctx, e.f.OrgA, muted.DedupKey, e.now, ""); err != nil {
+		t.Fatal(err)
+	}
+	loud := e.raise(e.ci1, "critical")
+	e.process()
+	for _, typ := range []string{events.AlarmOpened, events.AlarmResolved} {
+		if got := e.sentTo(typ, muted.ID); len(got) != 0 {
+			t.Errorf("%s of a rule without notification delivered to %v", typ, got)
+		}
+		var n int
+		if err := e.f.Admin.QueryRow(context.Background(), `SELECT count(*) FROM event_outbox
+			WHERE organization_id = $1 AND type = $2 AND entity_id = $3
+			  AND data #>> '{actions,notify,enabled}' = 'false'`, e.f.OrgA, typ, muted.ID).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 1 {
+			t.Errorf("%s in the outbox with the actions: %d, want 1", typ, n)
+		}
+	}
+	var inapp int
+	if err := e.f.Admin.QueryRow(context.Background(), `SELECT count(*) FROM notification_delivery
+		WHERE organization_id = $1 AND category = 'alarm' AND data ->> 'id' = $2`, e.f.OrgA, muted.ID).Scan(&inapp); err != nil {
+		t.Fatal(err)
+	}
+	if inapp != 0 {
+		t.Errorf("deliveries of the muted alarm: %d, want 0", inapp)
+	}
+	if got := e.sentTo(events.AlarmOpened, loud.ID); len(got) == 0 {
+		t.Error("the alarm of a rule with notification reached nobody")
+	}
+}
+
 func TestAlarmNotifyOncePerTransition(t *testing.T) {
 	e := newAlarmEnv(t, "ab")
 	ctx := e.f.OrgCtx(e.f.OrgA)

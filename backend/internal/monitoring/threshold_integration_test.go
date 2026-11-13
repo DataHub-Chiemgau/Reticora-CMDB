@@ -98,3 +98,66 @@ func TestThresholdStagesOnPostgreSQL(t *testing.T) {
 		t.Fatalf("PATCH old form: %+v %v", updated, err)
 	}
 }
+
+// TestRuleActionsOnPostgreSQL covers MON-04 (WP-988): the actions of a rule
+// are stored with the defaults filled in, its alarms carry them in
+// details.actions, a PATCH replaces the object as a whole and a reserved
+// key is refused.
+func TestRuleActionsOnPostgreSQL(t *testing.T) {
+	e := newEvalEnv(t)
+	ctx := e.f.OrgCtx(e.f.OrgA)
+	ci := e.f.CI(t, e.f.OrgA, e.f.Client1, "wp988-actions")
+	var rule monitoring.AlertRule
+	if err := json.Unmarshal([]byte(`{"name":"wp988","metric_name":"wp988_cpu","enabled":true,
+		"critical_condition":{"op":"gt","field":"value","value":90},"actions":{"notify":{"enabled":false}}}`), &rule); err != nil {
+		t.Fatal(err)
+	}
+	rule.OrgID = e.f.OrgA
+	stored, err := e.store.AlertStore().CreateRule(ctx, &rule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := stored.Actions; a == nil || a.Notify.Enabled || !a.Webhook.Enabled {
+		t.Fatalf("stored actions %+v, want notify off, webhook on", stored.Actions)
+	}
+	var column string
+	if err = e.f.Admin.QueryRow(context.Background(), `SELECT actions::text FROM alert_rule WHERE id = $1`, stored.ID).Scan(&column); err != nil {
+		t.Fatal(err)
+	}
+	if column != `{"notify": {"enabled": false}, "webhook": {"enabled": true}}` {
+		t.Errorf("column actions %s", column)
+	}
+	e.sample(ci, "wp988_cpu", 95, nil, e.now)
+	e.evaluator().Evaluate(context.Background())
+	got := e.alarmsOf(stored.ID)[ci]
+	actions, _ := got.Details["actions"].(map[string]any)
+	if notify, _ := actions["notify"].(map[string]any); notify["enabled"] != false {
+		t.Errorf("details.actions of the alarm: %v", got.Details["actions"])
+	}
+
+	updated, err := e.store.AlertStore().UpdateRule(ctx, e.f.OrgA, stored.ID,
+		&monitoring.UpdateAlertRuleRequest{Actions: json.RawMessage(`{"webhook":{"enabled":false}}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := updated.Actions; !a.Notify.Enabled || a.Webhook.Enabled {
+		t.Errorf("PATCH replaces the object as a whole: %+v, want notify on (default), webhook off", a)
+	}
+	if _, err = e.store.AlertStore().UpdateRule(ctx, e.f.OrgA, stored.ID,
+		&monitoring.UpdateAlertRuleRequest{Actions: json.RawMessage(`{"workflow":{}}`)}); err == nil {
+		t.Error("PATCH with actions.workflow accepted")
+	}
+	// A rule without actions (before WP-988: {}) reads as the defaults.
+	if _, err = e.f.Admin.Exec(context.Background(), `UPDATE alert_rule SET actions = '{}' WHERE id = $1`, stored.ID); err != nil {
+		t.Fatal(err)
+	}
+	rules, err := e.store.AlertStore().ListRules(ctx, e.f.OrgA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rules {
+		if r.ID == stored.ID && (!r.Actions.Notify.Enabled || !r.Actions.Webhook.Enabled) {
+			t.Errorf("{} read as %+v, want the defaults", r.Actions)
+		}
+	}
+}

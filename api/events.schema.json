@@ -2735,6 +2735,25 @@
           "type": "string",
           "format": "date-time",
           "description": "When the alarm was resolved; only on alarm.resolved (WP-987)."
+        },
+        "actions": {
+          "type": "object",
+          "description": "Follow-up actions of the alarm (MON-04, WP-988): the actions of its alert rule, the defaults for the other sources. notify.enabled false notifies nobody, webhook.enabled false reaches no webhook subscription; the event stays in the outbox and the stream. Absent is both on.",
+          "additionalProperties": false,
+          "properties": {
+            "notify": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled"],
+              "properties": { "enabled": { "type": "boolean" } }
+            },
+            "webhook": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled"],
+              "properties": { "enabled": { "type": "boolean" } }
+            }
+          }
         }
       },
       "examples": [
@@ -2750,7 +2769,8 @@
           "source_kind": "rule",
           "summary": "if errors: ifInErrors critical (value 42)",
           "value": 42,
-          "opened_at": "2026-11-09T10:00:00Z"
+          "opened_at": "2026-11-09T10:00:00Z",
+          "actions": { "notify": { "enabled": true }, "webhook": { "enabled": false } }
         }
       ]
     },
@@ -2826,6 +2846,25 @@
           "type": "string",
           "format": "date-time",
           "description": "When the alarm was resolved; only on alarm.resolved (WP-987)."
+        },
+        "actions": {
+          "type": "object",
+          "description": "Follow-up actions of the alarm (MON-04, WP-988): the actions of its alert rule, the defaults for the other sources. notify.enabled false notifies nobody, webhook.enabled false reaches no webhook subscription; the event stays in the outbox and the stream. Absent is both on.",
+          "additionalProperties": false,
+          "properties": {
+            "notify": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled"],
+              "properties": { "enabled": { "type": "boolean" } }
+            },
+            "webhook": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled"],
+              "properties": { "enabled": { "type": "boolean" } }
+            }
+          }
         }
       },
       "examples": [
@@ -2913,6 +2952,25 @@
           "type": "string",
           "format": "date-time",
           "description": "When the alarm was resolved; only on alarm.resolved (WP-987)."
+        },
+        "actions": {
+          "type": "object",
+          "description": "Follow-up actions of the alarm (MON-04, WP-988): the actions of its alert rule, the defaults for the other sources. notify.enabled false notifies nobody, webhook.enabled false reaches no webhook subscription; the event stays in the outbox and the stream. Absent is both on.",
+          "additionalProperties": false,
+          "properties": {
+            "notify": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled"],
+              "properties": { "enabled": { "type": "boolean" } }
+            },
+            "webhook": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled"],
+              "properties": { "enabled": { "type": "boolean" } }
+            }
+          }
         }
       },
       "examples": [
@@ -3000,6 +3058,25 @@
           "type": "string",
           "format": "date-time",
           "description": "When the alarm was resolved; only on alarm.resolved (WP-987)."
+        },
+        "actions": {
+          "type": "object",
+          "description": "Follow-up actions of the alarm (MON-04, WP-988): the actions of its alert rule, the defaults for the other sources. notify.enabled false notifies nobody, webhook.enabled false reaches no webhook subscription; the event stays in the outbox and the stream. Absent is both on.",
+          "additionalProperties": false,
+          "properties": {
+            "notify": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled"],
+              "properties": { "enabled": { "type": "boolean" } }
+            },
+            "webhook": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled"],
+              "properties": { "enabled": { "type": "boolean" } }
+            }
+          }
         }
       },
       "examples": [
@@ -3087,6 +3164,25 @@
           "type": "string",
           "format": "date-time",
           "description": "When the alarm was resolved; only on alarm.resolved (WP-987)."
+        },
+        "actions": {
+          "type": "object",
+          "description": "Follow-up actions of the alarm (MON-04, WP-988): the actions of its alert rule, the defaults for the other sources. notify.enabled false notifies nobody, webhook.enabled false reaches no webhook subscription; the event stays in the outbox and the stream. Absent is both on.",
+          "additionalProperties": false,
+          "properties": {
+            "notify": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled"],
+              "properties": { "enabled": { "type": "boolean" } }
+            },
+            "webhook": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled"],
+              "properties": { "enabled": { "type": "boolean" } }
+            }
+          }
         }
       },
       "examples": [

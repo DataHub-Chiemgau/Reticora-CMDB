@@ -50,7 +50,8 @@ func (s *RuleSink) Active(ctx context.Context, orgID, ruleID string) (map[string
 // opening of the series' alarm (Raise).
 func (s *RuleSink) Raise(ctx context.Context, orgID string, in *monitoring.RuleAlarm) error {
 	raise := &RaiseInput{SourceKind: SourceRule, SourceID: strings.ToLower(in.RuleID), SeriesKey: in.SeriesKey,
-		Labels: in.Labels, Severity: in.Severity, Summary: in.Summary, Details: in.Details, ObservedAt: in.ObservedAt}
+		Labels: in.Labels, Severity: in.Severity, Summary: in.Summary, Details: in.Details, ObservedAt: in.ObservedAt,
+		Actions: in.Actions}
 	if in.CIID != "" {
 		ci := in.CIID
 		raise.CIID = &ci

@@ -54,9 +54,12 @@ func severityCritical(d map[string]any) bool { return str(d, "severity") == "cri
 // contacts of its CI in the roles operations and escalation, and every user
 // with monitoring:read whose scope covers its client and site. A suppressed
 // alarm (symptom, maintenance, flapping) has none: it is not delivered.
+// Neither has an alarm whose rule switched the notification off
+// (actions.notify.enabled false, WP-988); the event stays in the outbox
+// and the stream for the other consumers.
 func alarmAudience(ciKey string) func(d map[string]any) *Audience {
 	return func(d map[string]any) *Audience {
-		if str(d, "suppressed_reason") != "" {
+		if str(d, "suppressed_reason") != "" || !events.AlarmActionsOf(d).Notify.Enabled {
 			return nil
 		}
 		a := &Audience{Permission: identity.PermMonitoringRead, AllWithPermission: true,

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rules"
 )
 
@@ -344,6 +345,7 @@ func (r *AlertRule) hasStage() bool {
 // path), that at least one stage is set and eval_window.
 // validation: field errors with fixed texts.
 func normalizeRule(r *AlertRule) error {
+	r.Actions = ruleActions(r)
 	for _, f := range []string{FieldCriticalCondition, FieldWarningCondition, FieldInfoCondition, FieldClearCondition} {
 		if c := r.conditionOf(f); isNull(*c) {
 			*c = nil
@@ -442,6 +444,17 @@ func applyUpdate(rule *AlertRule, req *UpdateAlertRuleRequest) error {
 	}
 	if req.GroupBy != nil {
 		rule.GroupBy = append([]string{}, *req.GroupBy...)
+	}
+	switch {
+	case req.ParsedActions != nil:
+		a := *req.ParsedActions
+		rule.Actions = &a
+	case len(req.Actions) > 0:
+		a, err := events.ParseAlarmActions(req.Actions)
+		if err != nil {
+			return err
+		}
+		rule.Actions = &a
 	}
 	stageFields := map[string]json.RawMessage{FieldCriticalCondition: req.CriticalCondition,
 		FieldWarningCondition: req.WarningCondition, FieldInfoCondition: req.InfoCondition,

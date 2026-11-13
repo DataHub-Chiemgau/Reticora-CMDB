@@ -70,8 +70,19 @@ type RaiseInput struct {
 	Severity string
 	Summary  string
 	Details  map[string]any
+	// Actions are the follow-up actions (WP-988): those of the rule; nil
+	// is the defaults (notify and webhook on). The alarm keeps them in
+	// details.actions, its alarm.* events carry them.
+	Actions *Actions
 	// ObservedAt is when the source saw the breach; zero is now.
 	ObservedAt time.Time
+}
+
+// withDetailsActions is in with its actions in the details (a copy).
+func withDetailsActions(in *RaiseInput) *RaiseInput {
+	out := *in
+	out.Details = withActions(in.Details, in.Actions)
+	return &out
 }
 
 // EventSink takes the events of the lifecycle in the transaction of the
@@ -217,6 +228,7 @@ func severityRank(sev string) int { return slices.Index(Severities, sev) }
 // state pending, or one more occurrence of the alarm of the key. It writes
 // no event.
 func (s *Service) Pend(ctx context.Context, orgID string, in *RaiseInput) (*Alarm, error) {
+	in = withDetailsActions(in)
 	var out *Alarm
 	err := s.inTx(ctx, orgID, func(ctx context.Context) error {
 		a, created, err := s.store.UpsertOpen(ctx, orgID, upsertOf(in, StatePending, s.observed(in)))
@@ -239,6 +251,7 @@ func (s *Service) Pend(ctx context.Context, orgID string, in *RaiseInput) (*Alar
 // taken over (an acknowledged alarm goes back to open, its ack lapses), a
 // lower one changes nothing.
 func (s *Service) Raise(ctx context.Context, orgID string, in *RaiseInput) (*Alarm, error) {
+	in = withDetailsActions(in)
 	var out *Alarm
 	err := s.inTx(ctx, orgID, func(ctx context.Context) error {
 		at := s.observed(in)
@@ -387,7 +400,8 @@ func (s *Service) record(ctx context.Context, a *Alarm, tr *Transition, eventTyp
 // eventData is the data of an alarm.* event of a. ci_id, client_id and
 // site_id are absent when the alarm has none (the null convention of the
 // payload frames). Source, summary, value (details.value of a rule alarm),
-// suppression and the times serve the notifications (WP-987).
+// suppression and the times serve the notifications (WP-987); the actions
+// of details.actions (defaults without) decide notify and webhook (WP-988).
 func eventData(a *Alarm) events.AlarmData {
 	d := events.AlarmData{ID: a.ID, AlarmID: a.ID, DedupKey: a.DedupKey, CIID: deref(a.CIID),
 		ClientID: deref(a.ClientID), SiteID: deref(a.SiteID), Severity: a.Severity, IncidentID: deref(a.IncidentID),
@@ -396,6 +410,8 @@ func eventData(a *Alarm) events.AlarmData {
 	if v, ok := a.Details["value"].(float64); ok {
 		d.Value = &v
 	}
+	actions := actionsOf(a.Details)
+	d.Actions = &actions
 	return d
 }
 

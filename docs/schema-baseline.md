@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000357_subnet_scan
+Stand: Migration 000358_alert_rule_actions
 
 ## Prüfung
 
@@ -577,6 +577,17 @@ organization_id) REFERENCES ci (id, organization_id) ON DELETE CASCADE`,
 `propagate_monitoring_scope` mit (Version aus 000307 plus diese Tabelle). Die
 Policies folgen Konvention 5 (located-scope, USING und WITH CHECK, RESTRICTIVE
 für UPDATE und DELETE), dazu FORCE RLS und Truncate-Guard.
+
+### Folgeaktionen von Alarmregeln (WP-988)
+
+Migration 000358_alert_rule_actions (vorläufige Nummer) ergänzt
+`alert_rule.actions` (`jsonb NOT NULL DEFAULT '{}'`, `CONSTRAINT
+alert_rule_actions_check CHECK (jsonb_typeof(actions) = 'object')`) mit den
+Schlüsseln `notify` und `webhook` (`{"enabled": bool}`, Standard an); `'{}'`
+gilt als Standard. `ticket` (WP-1040) und `workflow` (WP-1110) sind
+reserviert und werden von der API abgewiesen; beim Lesen gelten unbekannte
+Schlüssel als Standard. Keine neue Tabelle; RLS und die Policies
+`alert_rule_isolation` und `alert_rule_system_select` bleiben unverändert.
 
 ## Indizes unter RLS (SR-04, K22, WP-836)
 

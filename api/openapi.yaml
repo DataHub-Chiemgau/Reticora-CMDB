@@ -7021,7 +7021,8 @@ paths:
             duration lies outside 0s..9600h (400 days, the retention of metric
             samples, MON-01), eval_window outside 0s..24h, or a stage, the
             clear condition or the old form is refused (field with the path,
-            e.g. warning_condition.rules[1].field).
+            e.g. warning_condition.rules[1].field), or the actions name a
+            reserved (actions.ticket, actions.workflow) or unknown key.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -7062,7 +7063,8 @@ paths:
             duration lies outside 0s..9600h (400 days, the retention of metric
             samples, MON-01), eval_window outside 0s..24h, or a stage, the
             clear condition or the old form is refused (field with the path,
-            e.g. warning_condition.rules[1].field).
+            e.g. warning_condition.rules[1].field), or the actions name a
+            reserved (actions.ticket, actions.workflow) or unknown key.
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -42048,6 +42050,40 @@ components:
           maxItems: 5
           description: At most five distinct label keys (422 group_by).
           items: { type: string }
+        actions:
+          description: >-
+            Replaces the actions object as a whole (WP-988): a key it does not
+            name returns to its default (on); null is the defaults.
+          oneOf:
+            - $ref: '#/components/schemas/AlertRuleActions'
+            - type: 'null'
+
+    AlertRuleActions:
+      type: object
+      additionalProperties: false
+      description: >-
+        Follow-up actions of the alarms of an alert rule (MON-04, WP-988). A
+        missing key is on. notify.enabled false: the alarm.* events of the rule
+        notify nobody; webhook.enabled false: they reach no webhook
+        subscription. The events stay in the outbox and the stream (audit,
+        workflow, correlation). The alarm carries the actions in
+        details.actions. The keys ticket (WP-1040) and workflow (WP-1110) are
+        reserved: 422 with field actions.ticket or actions.workflow; another
+        key is 422 too.
+      properties:
+        notify:
+          $ref: '#/components/schemas/AlertRuleAction'
+        webhook:
+          $ref: '#/components/schemas/AlertRuleAction'
+
+    AlertRuleAction:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled:
+          type: boolean
+          default: true
 
     AlertRuleCondition:
       description: >-
@@ -42066,7 +42102,7 @@ components:
     AlertRule:
       type: object
       required: [id, org_id, name, metric_name, duration, enabled, critical_condition, warning_condition,
-        info_condition, clear_condition, eval_window, scope, group_by]
+        info_condition, clear_condition, eval_window, scope, group_by, actions]
       description: >-
         An alert rule (MON-04, ALR-05). The first of the stages
         critical_condition, warning_condition and info_condition that holds
@@ -42128,6 +42164,8 @@ components:
             pending and firing state of a series is its alarm (GET
             /api/v1/monitoring/alarms, source_kind rule).
           items: { type: string }
+        actions:
+          $ref: '#/components/schemas/AlertRuleActions'
 
     AlertRuleListResponse:
       allOf:
@@ -42190,6 +42228,13 @@ components:
           maxItems: 5
           description: At most five distinct label keys (422 group_by).
           items: { type: string }
+        actions:
+          description: >-
+            Follow-up actions of the rule (WP-988); absent or null is the
+            defaults (notify and webhook on).
+          oneOf:
+            - $ref: '#/components/schemas/AlertRuleActions'
+            - type: 'null'
 
     AlertRuleScope:
       type: object

@@ -937,3 +937,35 @@ func TestBoundSubscriptionsReceiveP2EventsWithTheReadPermission(t *testing.T) {
 		t.Error("lifecycle read permission by entity_type")
 	}
 }
+
+// TestDispatcherSkipsAlarmWithWebhookDisabled covers MON-04 (WP-988): an
+// alarm.* event whose rule switched the webhooks off reaches no
+// subscription; one with webhook on, without actions (the defaults) or of
+// another type is delivered.
+func TestDispatcherSkipsAlarmWithWebhookDisabled(t *testing.T) {
+	subs := []Subscription{{Name: "alarms", Events: []string{events.AlarmOpened, events.AlarmResolved}}}
+	env := func(id, typ, actions string) *events.Envelope {
+		data := `{"id":"a-1","alarm_id":"a-1","dedup_key":"rule:r:s","severity":"critical"` + actions + `}`
+		return &events.Envelope{ID: id, Type: typ, OrgID: "org-1", EntityID: "a-1", EntitySeq: 1, Data: json.RawMessage(data)}
+	}
+	off := `,"actions":{"notify":{"enabled":true},"webhook":{"enabled":false}}`
+	on := `,"actions":{"notify":{"enabled":false},"webhook":{"enabled":true}}`
+	for _, tc := range []struct {
+		name string
+		env  *events.Envelope
+		want int
+	}{
+		{"opened, webhook off", env("e-1", events.AlarmOpened, off), 0},
+		{"resolved, webhook off", env("e-2", events.AlarmResolved, off), 0},
+		{"opened, webhook on", env("e-3", events.AlarmOpened, on), 1},
+		{"opened, without actions", env("e-4", events.AlarmOpened, ""), 1},
+	} {
+		got := deliverOnce(t, subs, DispatcherOptions{}, tc.env, "", nil)
+		if len(got["alarms"]) != tc.want {
+			t.Errorf("%s: delivered %v, want %d", tc.name, got, tc.want)
+		}
+	}
+	if webhookDisabled(&events.Envelope{Type: events.CIChanged, Data: json.RawMessage(`{"actions":{"webhook":{"enabled":false}}}`)}) {
+		t.Error("an event of another type is no alarm")
+	}
+}

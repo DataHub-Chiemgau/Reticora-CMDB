@@ -11,6 +11,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -37,13 +38,19 @@ func scanRule(row pgx.Row) (AlertRule, error) {
 		condition, severity          *string
 		threshold                    *float64
 		critical, warning, info, clr []byte
+		actions                      []byte
 	)
 	err := row.Scan(&r.ID, &r.OrgID, &r.Name, &r.MetricName, &condition,
 		&threshold, &duration, &severity, &r.Enabled, &scope, &r.GroupBy,
-		&critical, &warning, &info, &clr, &window)
+		&critical, &warning, &info, &clr, &window, &actions)
 	if err != nil {
 		return r, err
 	}
+	// The stored object is checked on write; on read it is lenient, so a
+	// key of a newer release does not stop the evaluator. {} (a rule
+	// before WP-988) is the defaults.
+	parsed := events.ParseStoredAlarmActions(actions)
+	r.Actions = &parsed
 	r.Duration, r.EvalWindow = duration, window
 	if condition != nil && threshold != nil && severity != nil {
 		r.Condition, r.Threshold, r.Severity = *condition, *threshold, *severity
@@ -91,11 +98,17 @@ func legacyArgs(r *AlertRule) (condition, threshold, severity any) {
 const ruleColumns = `id::text, organization_id::text, name, metric_name, condition, threshold,
 	EXTRACT(EPOCH FROM duration) * 1000000000, severity, enabled, scope, group_by,
 	critical_condition, warning_condition, info_condition, clear_condition,
-	EXTRACT(EPOCH FROM eval_window) * 1000000000`
+	EXTRACT(EPOCH FROM eval_window) * 1000000000, actions`
 
 // scopeJSON encodes a scope for the column scope.
 func scopeJSON(scope *RuleScope) ([]byte, error) {
 	return json.Marshal(scope)
+}
+
+// actionsJSON encodes the actions of a rule for the column actions: the
+// whole object with the defaults filled in.
+func actionsJSON(r *AlertRule) ([]byte, error) {
+	return json.Marshal(ruleActions(r))
 }
 
 // groupByOf is group_by for the column (never NULL).
@@ -181,6 +194,10 @@ func (s *PGAlertStore) CreateRule(ctx context.Context, in *AlertRule) (AlertRule
 	if err != nil {
 		return AlertRule{}, err
 	}
+	actions, err := actionsJSON(&rule)
+	if err != nil {
+		return AlertRule{}, err
+	}
 	condition, threshold, severity := legacyArgs(&rule)
 	err = database.WithRequestTenant(ctx, s.pool, rule.OrgID, func(ctx context.Context, tx pgx.Tx) error {
 		if serr := checkScopeVisible(ctx, tx, &rule.Scope); serr != nil {
@@ -189,14 +206,14 @@ func (s *PGAlertStore) CreateRule(ctx context.Context, in *AlertRule) (AlertRule
 		row := tx.QueryRow(ctx,
 			`INSERT INTO alert_rule (organization_id, name, metric_name, condition, threshold, duration, severity, enabled,
 			                         scope, group_by, critical_condition, warning_condition, info_condition,
-			                         clear_condition, eval_window)
+			                         clear_condition, eval_window, actions)
 			 VALUES ($1, $2, $3, $4, $5, $6::interval, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13::jsonb, $14::jsonb,
-			         $15::interval)
+			         $15::interval, $16::jsonb)
 			 RETURNING `+ruleColumns,
 			rule.OrgID, rule.Name, rule.MetricName, condition, threshold, intervalLiteral(rule.Duration), severity,
 			rule.Enabled, scope, groupByOf(rule.GroupBy), conditionArg(rule.CriticalCondition),
 			conditionArg(rule.WarningCondition), conditionArg(rule.InfoCondition), conditionArg(rule.ClearCondition),
-			intervalLiteral(rule.EvalWindow))
+			intervalLiteral(rule.EvalWindow), actions)
 		created, serr := scanRule(row)
 		if serr != nil {
 			return serr
@@ -246,6 +263,10 @@ func (s *PGAlertStore) UpdateRule(ctx context.Context, orgID, id string, req *Up
 		if err != nil {
 			return err
 		}
+		actions, err := actionsJSON(&current)
+		if err != nil {
+			return err
+		}
 		condition, threshold, severity := legacyArgs(&current)
 		// orgID scopes via RLS (set by withTenant); the WHERE clause filters
 		// the row by id only.
@@ -254,13 +275,13 @@ func (s *PGAlertStore) UpdateRule(ctx context.Context, orgID, id string, req *Up
 				name = $2, condition = $3, threshold = $4, duration = $5::interval, severity = $6, enabled = $7,
 				scope = $8::jsonb, group_by = $9::text[], critical_condition = $10::jsonb,
 				warning_condition = $11::jsonb, info_condition = $12::jsonb, clear_condition = $13::jsonb,
-				eval_window = $14::interval, updated_at = now()
+				eval_window = $14::interval, actions = $15::jsonb, updated_at = now()
 			 WHERE id = $1::uuid
 			 RETURNING `+ruleColumns,
 			id, current.Name, condition, threshold, intervalLiteral(current.Duration), severity, current.Enabled,
 			scope, groupByOf(current.GroupBy), conditionArg(current.CriticalCondition),
 			conditionArg(current.WarningCondition), conditionArg(current.InfoCondition),
-			conditionArg(current.ClearCondition), intervalLiteral(current.EvalWindow)))
+			conditionArg(current.ClearCondition), intervalLiteral(current.EvalWindow), actions))
 		return err
 	})
 	if err != nil {

@@ -20587,6 +20587,17 @@ export interface components {
       scope?: components['schemas']['AlertRuleScope'];
       /** @description At most five distinct label keys (422 group_by). */
       group_by?: string[];
+      /** @description Replaces the actions object as a whole (WP-988): a key it does not name returns to its default (on); null is the defaults. */
+      actions?: components['schemas']['AlertRuleActions'] | null;
+    };
+    /** @description Follow-up actions of the alarms of an alert rule (MON-04, WP-988). A missing key is on. notify.enabled false: the alarm.* events of the rule notify nobody; webhook.enabled false: they reach no webhook subscription. The events stay in the outbox and the stream (audit, workflow, correlation). The alarm carries the actions in details.actions. The keys ticket (WP-1040) and workflow (WP-1110) are reserved: 422 with field actions.ticket or actions.workflow; another key is 422 too. */
+    AlertRuleActions: {
+      notify?: components['schemas']['AlertRuleAction'];
+      webhook?: components['schemas']['AlertRuleAction'];
+    };
+    AlertRuleAction: {
+      /** @default true */
+      enabled: boolean;
     };
     /** @description A stage or the clear condition of an alert rule (ALR-05, MET-45, WP-985): a MET-45 condition ($defs/condition of api/rules.schema.json) over the metric context of a series in the rule's eval_window: value (latest value), avg, max, min, delta (latest minus first value) and rate (increase per second; a drop of the value is a counter reset, the rate is never negative; absent for a window of one sample). Another field is 422 with the path, e.g. warning_condition.rules[1].field; null is no condition. */
     AlertRuleCondition: components['schemas']['condition'] | null;
@@ -20625,6 +20636,7 @@ export interface components {
       scope: components['schemas']['AlertRuleScope'];
       /** @description Label keys that split the samples of a CI into series (WP-984). The rule is evaluated per series (CI and the values of these labels); the pending and firing state of a series is its alarm (GET /api/v1/monitoring/alarms, source_kind rule). */
       group_by: string[];
+      actions: components['schemas']['AlertRuleActions'];
     };
     AlertRuleListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['AlertRule'][];
@@ -20662,6 +20674,8 @@ export interface components {
       scope?: components['schemas']['AlertRuleScope'];
       /** @description At most five distinct label keys (422 group_by). */
       group_by?: string[];
+      /** @description Follow-up actions of the rule (WP-988); absent or null is the defaults (notify and webhook on). */
+      actions?: components['schemas']['AlertRuleActions'] | null;
     };
     /** @description The CIs an alert rule applies to (ALR-05, WP-984); every key is optional and {} is every CI of the organization. An unknown key, an id that is no UUID or that the organization does not see is 422 with the field (e.g. scope.ci_type_ids[1]). */
     AlertRuleScope: {
@@ -30519,7 +30533,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       409: components['responses']['Conflict'];
-      /** @description duration lies outside 0s..9600h (400 days, the retention of metric samples, MON-01), eval_window outside 0s..24h, or a stage, the clear condition or the old form is refused (field with the path, e.g. warning_condition.rules[1].field). */
+      /** @description duration lies outside 0s..9600h (400 days, the retention of metric samples, MON-01), eval_window outside 0s..24h, or a stage, the clear condition or the old form is refused (field with the path, e.g. warning_condition.rules[1].field), or the actions name a reserved (actions.ticket, actions.workflow) or unknown key. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -30581,7 +30595,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      /** @description duration lies outside 0s..9600h (400 days, the retention of metric samples, MON-01), eval_window outside 0s..24h, or a stage, the clear condition or the old form is refused (field with the path, e.g. warning_condition.rules[1].field). */
+      /** @description duration lies outside 0s..9600h (400 days, the retention of metric samples, MON-01), eval_window outside 0s..24h, or a stage, the clear condition or the old form is refused (field with the path, e.g. warning_condition.rules[1].field), or the actions name a reserved (actions.ticket, actions.workflow) or unknown key. */
       422: {
         headers: {
           [name: string]: unknown;

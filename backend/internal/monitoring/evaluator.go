@@ -19,6 +19,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 )
 
@@ -299,6 +300,8 @@ type RuleAlarm struct {
 	Pending bool
 	// ObservedAt is the start of the breach (pending) or the opening.
 	ObservedAt time.Time
+	// Actions are the follow-up actions of the rule (WP-988).
+	Actions *events.AlarmActions
 }
 
 // ActiveAlarm is the state of the alarm of a series that is not resolved.
@@ -653,7 +656,7 @@ func ruleAlarm(rule *AlertRule, key string, p *SeriesPoint, severity string, pen
 	}
 	return &RuleAlarm{
 		RuleID: rule.ID, SeriesKey: key, CIID: p.CIID, Labels: p.Labels, Severity: severity, Summary: summary,
-		Details: details, Pending: pending, ObservedAt: at,
+		Details: details, Pending: pending, ObservedAt: at, Actions: ruleActions(rule),
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -84,6 +85,11 @@ type AlertRule struct {
 	// series (at most MaxGroupBy). The pending and firing state of a series
 	// lives in its alarm (WP-981), not on the rule.
 	GroupBy []string `json:"group_by"`
+	// Actions are the follow-up actions of the alarms of the rule (MON-04,
+	// WP-988): notify and webhook, each on or off; nil is the defaults
+	// (both on). The alarm carries them in details.actions, alarm.* in
+	// their data.
+	Actions *events.AlarmActions `json:"actions"`
 }
 
 // MaxAlertDuration bounds the duration of an alert rule: the condition must
@@ -131,6 +137,11 @@ type UpdateAlertRuleRequest struct {
 	GroupBy *[]string       `json:"group_by"`
 	// ParsedScope is Scope after the handler checked it.
 	ParsedScope *RuleScope `json:"-"`
+	// Actions replaces the actions object as a whole (WP-988): a key it
+	// does not name returns to its default; null is the defaults.
+	Actions json.RawMessage `json:"actions"`
+	// ParsedActions is Actions after the handler checked it.
+	ParsedActions *events.AlarmActions `json:"-"`
 }
 
 // MarshalJSON encodes duration values as Go duration strings; the old form
@@ -140,6 +151,7 @@ func (r AlertRule) MarshalJSON() ([]byte, error) { //nolint:gocritic // value re
 	if r.GroupBy == nil {
 		r.GroupBy = []string{}
 	}
+	r.Actions = ruleActions(&r)
 	out := struct {
 		alias
 		Threshold  *float64 `json:"threshold,omitempty"`
@@ -200,8 +212,13 @@ func (r *AlertRule) UnmarshalJSON(data []byte) error {
 		EvalWindow        interface{}     `json:"eval_window"`
 		Scope             json.RawMessage `json:"scope"`
 		GroupBy           []string        `json:"group_by"`
+		Actions           json.RawMessage `json:"actions"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	actions, err := events.ParseAlarmActions(raw.Actions)
+	if err != nil {
 		return err
 	}
 
@@ -235,8 +252,19 @@ func (r *AlertRule) UnmarshalJSON(data []byte) error {
 		EvalWindow:        window,
 		Scope:             scope,
 		GroupBy:           raw.GroupBy,
+		Actions:           &actions,
 	}
 	return nil
+}
+
+// ruleActions are the actions of a rule: its own, the defaults without.
+func ruleActions(r *AlertRule) *events.AlarmActions {
+	if r.Actions != nil {
+		a := *r.Actions
+		return &a
+	}
+	a := events.DefaultAlarmActions()
+	return &a
 }
 
 // AlertManager manages in-memory alert rules. It implements AlertStore and
@@ -763,6 +791,14 @@ func (h *Handler) UpdateAlert(w http.ResponseWriter, r *http.Request) {
 			api.WriteFieldError(w, err)
 			return
 		}
+	}
+	if len(req.Actions) > 0 {
+		actions, err := events.ParseAlarmActions(req.Actions)
+		if err != nil {
+			api.WriteFieldError(w, err)
+			return
+		}
+		req.ParsedActions = &actions
 	}
 
 	rule, err := h.alerts.UpdateRule(r.Context(), orgID, chi.URLParam(r, "id"), &req)

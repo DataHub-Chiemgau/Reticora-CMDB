@@ -429,14 +429,32 @@ var legacyNames = map[string][]string{
 // delivery persistence is returned, so the publisher keeps the event
 // pending and hands it over again (at least once, F-151); the deliveries
 // are idempotent per event and subscription, a repeated hand-off adds none
-// (WP-506).
+// (WP-506). An alarm.* event whose rule switched the webhooks off
+// (actions.webhook.enabled false, WP-988) reaches no subscription; the
+// outbox and the stream keep it for the other consumers.
 func (d *Dispatcher) Consume(ctx context.Context, env *events.Envelope) error {
+	if webhookDisabled(env) {
+		return nil
+	}
 	aliases := legacyNames[env.Type]
 	var origin *eventOrigin
 	if env.ID != "" {
 		origin = &eventOrigin{id: env.ID, sequence: env.Sequence, entitySeq: env.EntitySeq}
 	}
 	return d.dispatchAs(ctx, env.OrgID, env.Type, aliases, env.Data, origin)
+}
+
+// webhookDisabled reports an alarm.* event with actions.webhook.enabled
+// false. Data that cannot be read keeps the default (delivered).
+func webhookDisabled(env *events.Envelope) bool {
+	if !strings.HasPrefix(env.Type, "alarm.") || len(env.Data) == 0 {
+		return false
+	}
+	var data map[string]any
+	if err := json.Unmarshal(env.Data, &data); err != nil {
+		return false
+	}
+	return !events.AlarmActionsOf(data).Webhook.Enabled
 }
 
 // dispatchAs stores and queues a delivery of the event for every

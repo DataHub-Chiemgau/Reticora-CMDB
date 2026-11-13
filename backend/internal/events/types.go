@@ -442,21 +442,25 @@ type ProbeStateChangedData struct {
 // of the alarm. source_kind, summary, value, suppressed_reason, opened_at
 // and resolved_at serve the notifications (WP-987): a suppressed alarm
 // notifies nobody, the texts name the summary, the value and the duration.
+// actions are the follow-up actions of the alarm (WP-988, AlarmActions):
+// notify.enabled false notifies nobody, webhook.enabled false reaches no
+// webhook subscription; absent is both on.
 type AlarmData struct {
-	ID               string     `json:"id"`
-	AlarmID          string     `json:"alarm_id"`
-	DedupKey         string     `json:"dedup_key"`
-	CIID             string     `json:"ci_id,omitempty"`
-	ClientID         string     `json:"client_id,omitempty"`
-	SiteID           string     `json:"site_id,omitempty"`
-	Severity         string     `json:"severity"`
-	IncidentID       string     `json:"incident_id,omitempty"`
-	SourceKind       string     `json:"source_kind,omitempty"`
-	Summary          string     `json:"summary,omitempty"`
-	Value            *float64   `json:"value,omitempty"`
-	SuppressedReason string     `json:"suppressed_reason,omitempty"`
-	OpenedAt         *time.Time `json:"opened_at,omitempty"`
-	ResolvedAt       *time.Time `json:"resolved_at,omitempty"`
+	ID               string        `json:"id"`
+	AlarmID          string        `json:"alarm_id"`
+	DedupKey         string        `json:"dedup_key"`
+	CIID             string        `json:"ci_id,omitempty"`
+	ClientID         string        `json:"client_id,omitempty"`
+	SiteID           string        `json:"site_id,omitempty"`
+	Severity         string        `json:"severity"`
+	IncidentID       string        `json:"incident_id,omitempty"`
+	SourceKind       string        `json:"source_kind,omitempty"`
+	Summary          string        `json:"summary,omitempty"`
+	Value            *float64      `json:"value,omitempty"`
+	SuppressedReason string        `json:"suppressed_reason,omitempty"`
+	OpenedAt         *time.Time    `json:"opened_at,omitempty"`
+	ResolvedAt       *time.Time    `json:"resolved_at,omitempty"`
+	Actions          *AlarmActions `json:"actions,omitempty"`
 }
 
 // IncidentData is the data of the incident.* types (ALR-03): the incident
