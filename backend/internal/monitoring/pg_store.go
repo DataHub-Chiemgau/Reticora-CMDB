@@ -78,47 +78,122 @@ func (h *PGHealthRefresher) RefreshHealth(ctx context.Context) error {
 // must belong to the caller's organization and name a CI visible under its
 // scope (or no CI). The batch is stored whole or not at all: a sample whose
 // CI is unknown, of another organization or outside the scope rolls back
-// the batch with an *UnknownCIError naming that ci_id (TEN-06, F-394).
+// the batch with an *UnknownCIError naming that ci_id (TEN-06, F-394). The
+// missing CIs are found with one statement first; the samples go in with
+// one bulk statement (InsertSamplesTx, WP-976).
 func (s *PGMetricStore) Ingest(ctx context.Context, metrics []Metric) error {
 	if len(metrics) == 0 {
 		return nil
 	}
 	orgID := metrics[0].OrgID
 	return database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		batch := &pgx.Batch{}
-		for _, m := range metrics {
+		// The ids in the canonical lower-case form that id::text returns
+		// (api.IsUUID also takes upper-case hex); errors name the id as
+		// the client sent it.
+		ids := make([]string, 0, len(metrics))
+		given := map[string]string{}
+		for i := range metrics {
+			m := &metrics[i]
 			if m.OrgID != orgID {
 				return fmt.Errorf("%w: %q", database.ErrTenantMismatch, m.OrgID)
 			}
-			ts := m.Timestamp
-			if ts.IsZero() {
-				ts = time.Now().UTC()
+			id := strings.ToLower(m.CIID)
+			if id == "" || given[id] != "" {
+				continue
 			}
-			labels := m.Labels
-			if labels == nil {
-				labels = map[string]string{}
+			if !api.IsUUID(m.CIID) {
+				// A malformed ci_id is a bad request (400), as with the
+				// cast of the former per-row insert, not an unknown CI.
+				return &InvalidMetricsError{Detail: "ci_id must be a UUID"}
 			}
-			batch.Queue(
-				`INSERT INTO metric_sample_v (time, organization_id, ci_id, metric_name, value, labels)
-				 SELECT $1, $2, NULLIF($3, '')::uuid, $4, $5, $6
-				 WHERE $3 = '' OR EXISTS (SELECT 1 FROM ci WHERE ci.id = NULLIF($3, '')::uuid)`,
-				ts.UTC(), m.OrgID, m.CIID, m.Name, m.Value, labels,
-			)
+			given[id] = m.CIID
+			ids = append(ids, id)
 		}
-		results := tx.SendBatch(ctx, batch)
-		for _, m := range metrics {
-			tag, err := results.Exec()
+		if len(ids) > 0 {
+			rows, err := tx.Query(ctx, `SELECT id::text FROM ci WHERE id = ANY ($1::uuid[])`, ids)
 			if err != nil {
-				_ = results.Close()
 				return fmt.Errorf("ingest metric sample: %w", err)
 			}
-			if tag.RowsAffected() == 0 {
-				_ = results.Close()
-				return &UnknownCIError{CIID: m.CIID}
+			visible, err := pgx.CollectRows(rows, pgx.RowTo[string])
+			if err != nil {
+				return fmt.Errorf("ingest metric sample: %w", err)
+			}
+			found := make(map[string]bool, len(visible))
+			for _, id := range visible {
+				found[id] = true
+			}
+			for _, id := range ids {
+				if !found[id] {
+					return &UnknownCIError{CIID: given[id]}
+				}
 			}
 		}
-		return results.Close()
+		n, err := InsertSamplesTx(ctx, tx, metrics)
+		if err != nil {
+			return err
+		}
+		if n != len(metrics) {
+			return &UnknownCIError{CIID: firstCI(metrics)}
+		}
+		return nil
 	})
+}
+
+// firstCI names the first ci_id of the samples (the refusal of a batch a
+// concurrent delete shortened).
+func firstCI(metrics []Metric) string {
+	for i := range metrics {
+		if metrics[i].CIID != "" {
+			return metrics[i].CIID
+		}
+	}
+	return ""
+}
+
+// InsertSamplesTx writes the samples in tx with one statement over
+// metric_sample_v (WP-976, MON-02): INSERT … SELECT … FROM unnest(…). A
+// sample whose CI the scope of the transaction does not see is not
+// written; it returns the number of written rows. Every sample belongs to
+// the organization of the first one.
+func InsertSamplesTx(ctx context.Context, tx pgx.Tx, metrics []Metric) (int, error) {
+	if len(metrics) == 0 {
+		return 0, nil
+	}
+	orgID := metrics[0].OrgID
+	times := make([]time.Time, len(metrics))
+	cis := make([]*string, len(metrics))
+	names := make([]string, len(metrics))
+	values := make([]float64, len(metrics))
+	labels := make([]map[string]string, len(metrics))
+	now := time.Now().UTC()
+	for i := range metrics {
+		m := &metrics[i]
+		if m.OrgID != orgID {
+			return 0, fmt.Errorf("%w: %q", database.ErrTenantMismatch, m.OrgID)
+		}
+		times[i] = m.Timestamp.UTC()
+		if m.Timestamp.IsZero() {
+			times[i] = now
+		}
+		if m.CIID != "" {
+			ci := m.CIID
+			cis[i] = &ci
+		}
+		names[i], values[i] = m.Name, m.Value
+		labels[i] = m.Labels
+		if labels[i] == nil {
+			labels[i] = map[string]string{}
+		}
+	}
+	tag, err := tx.Exec(ctx, `INSERT INTO metric_sample_v (time, organization_id, ci_id, metric_name, value, labels)
+		SELECT u.time, $1, u.ci_id, u.name, u.value, u.labels
+		  FROM unnest($2::timestamptz[], $3::uuid[], $4::text[], $5::float8[], $6::jsonb[]) AS u (time, ci_id, name, value, labels)
+		 WHERE u.ci_id IS NULL OR EXISTS (SELECT 1 FROM ci WHERE ci.id = u.ci_id)`,
+		orgID, times, cis, names, values, labels)
+	if err != nil {
+		return 0, fmt.Errorf("ingest metric samples: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
 }
 
 // Query returns raw samples in chronological order, or bucketed averages

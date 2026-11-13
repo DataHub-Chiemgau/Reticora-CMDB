@@ -73,7 +73,7 @@ var (
 
 // RegisterMetrics registers the metrics of the probe ingest.
 func RegisterMetrics(reg prometheus.Registerer) {
-	reg.MustRegister(ingestDiscarded, ingestDeadLetters, ingestRows, stateDropped, stateDeadLetters)
+	reg.MustRegister(ingestDiscarded, ingestDeadLetters, ingestRows, stateDropped, stateDeadLetters, bridgeDiscarded)
 }
 
 // ResultsMessage is one result batch of a collector as the stream holds it.
@@ -94,6 +94,8 @@ type IngestOutcome struct {
 	// Stale results carried another epoch than the assignment, or came
 	// from another collector than the assigned one.
 	Stale int
+	// Samples are the metric samples the bridge wrote (WP-976).
+	Samples int
 }
 
 // IngestStore writes the result batches of one organization in one

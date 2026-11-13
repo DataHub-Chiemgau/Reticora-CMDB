@@ -828,6 +828,17 @@ the server log (`probe edge publish failed`) means the stream did not
 acknowledge: check NATS, the stream's fill level
 (`nats stream info RETICORA_PROBE`) and the probe workers.
 
+## Probe values to metric_sample (WP-976)
+
+In the transaction of a result batch the worker `probe_ingest` also writes
+the `values` of the results its insert into `probe_result_v` actually wrote
+(`ON CONFLICT DO NOTHING … RETURNING`) to `metric_sample_v`, with one bulk
+statement (`monitoring.InsertSamplesTx`) and the CI of the probe: a repeated
+delivery gives no second sample, a rollback drops results and samples
+together. Value names the probe type does not declare, probes without CI
+and results of a stale epoch are counted in
+`reticora_probe_metrics_discarded_total{reason="unknown_metric|no_ci|stale_epoch"}`.
+
 ## Probe state changes (WP-961)
 
 The state changes of the stream (`probe.state.>`) are applied by the

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -13,6 +14,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 )
 
@@ -97,6 +99,7 @@ var _ IngestStore = (*PGIngestStore)(nil)
 
 // ingestProbe is a probe of a batch with its assignment.
 type ingestProbe struct {
+	typ       string
 	ciID      string
 	clientID  string
 	epoch     int64
@@ -148,6 +151,15 @@ func (s *PGIngestStore) WriteResults(ctx context.Context, orgID string, msgs []R
 		cursor := map[string][2]int64{} // collector → (last seq, its epoch)
 		var usage []credential.UsageReport
 		usageAt := map[int]time.Time{}
+		// The results with values, bridged to metric_sample once the
+		// insert says it wrote them (WP-976 AK4).
+		type bridged struct {
+			key    string
+			probe  BridgeProbe
+			result *probewire.Result
+			stale  bool
+		}
+		var withValues []bridged
 		for _, m := range msgs {
 			collectorClient, known := collectorClients[m.CollectorID]
 			for i := range m.Results {
@@ -178,6 +190,10 @@ func (s *PGIngestStore) WriteResults(ctx context.Context, orgID string, msgs []R
 				rows.losses = append(rows.losses, f32(r.Loss))
 				rows.values = append(rows.values, r.Value)
 				rows.stale = append(rows.stale, stale)
+				if len(r.Values) > 0 {
+					withValues = append(withValues, bridged{key: resultKey(r.ProbeID, m.CollectorID, seq, r.ObservedAt),
+						probe: BridgeProbe{ID: r.ProbeID, Type: p.typ, CIID: p.ciID}, result: r, stale: stale})
+				}
 				if c, seen := cursor[m.CollectorID]; !seen || seq > c[0] {
 					cursor[m.CollectorID] = [2]int64{seq, r.Epoch}
 				}
@@ -188,19 +204,54 @@ func (s *PGIngestStore) WriteResults(ctx context.Context, orgID string, msgs []R
 			}
 		}
 		if len(rows.times) > 0 {
-			tag, err := tx.Exec(ctx, `INSERT INTO probe_result_v (time, organization_id, probe_id, collector_id, seq, epoch,
+			inserted, err := tx.Query(ctx, `INSERT INTO probe_result_v (time, organization_id, probe_id, collector_id, seq, epoch,
 					status, code, rtt_ms, loss, value, stale_epoch)
 				SELECT u.time, $1, u.probe_id, u.collector_id, u.seq, u.epoch, u.status, u.code, u.rtt_ms, u.loss, u.value, u.stale
 				  FROM unnest($2::timestamptz[], $3::uuid[], $4::uuid[], $5::bigint[], $6::bigint[], $7::smallint[],
 					$8::smallint[], $9::real[], $10::real[], $11::double precision[], $12::boolean[])
 					AS u (time, probe_id, collector_id, seq, epoch, status, code, rtt_ms, loss, value, stale)
-				ON CONFLICT DO NOTHING`,
+				ON CONFLICT DO NOTHING
+				RETURNING probe_id::text, collector_id::text, seq, time`,
 				orgID, rows.times, rows.probes, rows.collectors, rows.seqs, rows.epochs, rows.statuses, rows.codes,
 				rows.rtts, rows.losses, rows.values, rows.stale)
 			if err != nil {
 				return fmt.Errorf("write probe results: %w", err)
 			}
-			out.Written = int(tag.RowsAffected())
+			// written counts the inserted rows per key (probe_result_key):
+			// a result twice in the same call is inserted once and
+			// bridged once.
+			written := map[string]int{}
+			for inserted.Next() {
+				var probeID, collectorID string
+				var seq int64
+				var at time.Time
+				if serr := inserted.Scan(&probeID, &collectorID, &seq, &at); serr != nil {
+					inserted.Close()
+					return fmt.Errorf("write probe results: %w", serr)
+				}
+				written[resultKey(probeID, collectorID, seq, at)]++
+				out.Written++
+			}
+			inserted.Close()
+			if err = inserted.Err(); err != nil {
+				return fmt.Errorf("write probe results: %w", err)
+			}
+			// The values of the written results go to metric_sample in
+			// the same transaction: a repeated delivery writes none, a
+			// rollback drops both.
+			var samples []monitoring.Metric
+			for i := range withValues {
+				b := &withValues[i]
+				if written[b.key] > 0 {
+					written[b.key]--
+					samples = append(samples, MetricsBridge{}.Samples(orgID, &b.probe, b.result, b.stale)...)
+				}
+			}
+			n, serr := monitoring.InsertSamplesTx(ctx, tx, samples)
+			if serr != nil {
+				return serr
+			}
+			out.Samples = n
 		}
 		if err := advanceCursors(ctx, tx, orgID, cursor); err != nil {
 			return err
@@ -227,7 +278,7 @@ func ingestProbes(ctx context.Context, tx pgx.Tx, orgID string, msgs []ResultsMe
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, err := tx.Query(ctx, `SELECT p.id::text, COALESCE(p.ci_id::text, ''), COALESCE(p.client_id::text, ''),
+	rows, err := tx.Query(ctx, `SELECT p.id::text, p.type, COALESCE(p.ci_id::text, ''), COALESCE(p.client_id::text, ''),
 			a.epoch, COALESCE(a.collector_id::text, '')
 		FROM probe p
 		LEFT JOIN probe_assignment a ON a.organization_id = p.organization_id AND a.probe_id = p.id
@@ -240,7 +291,7 @@ func ingestProbes(ctx context.Context, tx pgx.Tx, orgID string, msgs []ResultsMe
 		var id string
 		var p ingestProbe
 		var epoch *int64
-		if err := rows.Scan(&id, &p.ciID, &p.clientID, &epoch, &p.collector); err != nil {
+		if err := rows.Scan(&id, &p.typ, &p.ciID, &p.clientID, &epoch, &p.collector); err != nil {
 			return nil, fmt.Errorf("read probes of the results: %w", err)
 		}
 		if epoch != nil {
@@ -363,4 +414,11 @@ func recordUsage(ctx context.Context, tx pgx.Tx, orgID string, usage []credentia
 		}
 	}
 	return nil
+}
+
+// resultKey is the idempotency key of a result as probe_result_key
+// (probe, collector, seq, time; the organization is the transaction's),
+// with the time at the microseconds PostgreSQL stores.
+func resultKey(probeID, collectorID string, seq int64, at time.Time) string {
+	return fmt.Sprintf("%s|%s|%d|%d", strings.ToLower(probeID), strings.ToLower(collectorID), seq, at.UTC().Truncate(time.Microsecond).UnixMicro())
 }

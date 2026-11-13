@@ -6479,6 +6479,8 @@ PRB-11;[P3];E;collector/collectorcmd/probes_test.go;WP-956
 
 **Entscheidungsbedarf:** [E-183](entscheidungen.md#e-183) Ort und Schnittstelle der Probetypen im Collector (entschieden 2026-11-09, Option 1)
 
+**Nachtrag 2026-11-13 (aus WP-976):** Die Übernahme eines Satzes ruft nach jeder angewendeten Version `envPollDeprecation.observe(version, len(probes))` auf (`collector/collectorcmd/collectorcmd.go`, angelegt mit `newEnvPollDeprecation(cfg, logger)` in `run`), damit die Abkündigung des Umgebungs-Polls aus WP-976 AK6 greift; ein Test über den echten Übernahmepfad (Probes, Standardintervall) prüft die Warnung `collector.metrics.env_poll_deprecated`.
+
 **Nicht Bestandteil:**
 - Trap-Konfiguration im Zuweisungssatz: WP-977 (`p3-trap-config`).
 - Serverseitige Behandlung veralteter Epochen: WP-960 und WP-961; Split-Brain-Test: WP-963.
@@ -7801,6 +7803,8 @@ Gemeinsamer Ist-Stand für die Blöcke dieses Abschnitts (main 6d019370): Das Mo
 - docs/README.md
 - docs/ops/workers.md
 - docs/traceability.csv
+
+**Nachtrag 2026-11-13 (Umsetzung):** Die Dateiliste umfasst 14 Einträge. Hinzu kommen `edgecore/probewire/types.go` und `edgecore/probewire/types_test.go` (Wertnamen je Typ: `MetricNames`, `DeclaresMetric` für `icmp`, `http`, `dns`; das Typregister aus WP-934 führte sie noch nicht, AK3 deklariert sie hier, Test `TestTypesDeclareMetricNames`) und `backend/internal/probe/ingest.go` (`RegisterMetrics`, `IngestOutcome.Samples`). Präzisierung von AK4: Der Schlüssel der geschriebenen Ergebnisse ist der von `probe_result_key` (Probe, Collector, Sequenz, Zeit); ein Ergebnis, das in einem Aufruf zweimal vorkommt, ergibt eine Zeile und einen Satz Samples (`TestProbeValuesNotDuplicatedWithinOneCall`). Präzisierung von AK2: Eine `ci_id` in Großbuchstaben bezeichnet dasselbe CI wie vor der Umstellung. AK6 ist nur zum Teil erfüllt: Der Collector übernimmt noch keine Zuweisungssätze (WP-956, keine Voraussetzung dieses WPs). `newEnvPollDeprecation` und `observe` stehen bereit und sind getestet; die Übernahme des Satzes in WP-956 ruft `observe` je angewendeter Version auf. Bis dahin hält der Collector keinen Satz und loggt nichts.
 
 **Migration/RLS:** keine. `metric_sample` bleibt ohne RLS (`000020_metrics.up.sql:17-20`); geschrieben wird wie bisher über `metric_sample_v` mit der Org- und CI-Prüfung der Sicht. `TestRLSCatalog` bleibt ohne neue Ausnahme.
 

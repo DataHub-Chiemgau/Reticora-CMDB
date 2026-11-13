@@ -1090,6 +1090,26 @@ SNMP and uploads them to the monitoring ingest (labels `collector_id` and
   `phase`; bank rows are left out) and Raritan PX2/PX3 (PDU2-MIB inlet
   sensors, current and active power per `inlet`). PDUs of other vendors give
   no readings.
+- *Probe values (`kind=probe`, WP-976):* the values a server-side probe
+  reports (`values` of a result, e.g. `rtt_min_ms`, `jitter_ms` of `icmp`,
+  `connect_ms`, `ttfb_ms`, `cert_expiry_s` of `http`) are stored as metric
+  samples of the probe's CI (`probe.ci_id`, no address lookup, also for a CI
+  without management IP), labelled `kind=probe`, `probe_id` and the labels of
+  the result (at most 16), at the `observed_at` of the result. Only the value
+  names the probe type declares are kept; probes without CI and results of a
+  stale epoch give none (`reticora_probe_metrics_discarded_total{reason}`).
+  A repeated delivery writes no second sample.
+
+**Migration to server-side probes (MON-03):** the environment poll
+(`RETICORA_METRICS_INTERVAL`, `RETICORA_SNMP_POLL_METRICS`) is deprecated.
+A collector that runs it (also with the default interval) and holds an
+assignment set with at least one probe logs
+`collector.metrics.env_poll_deprecated` (warning) once per set version,
+as soon as the collector takes over assignment sets (WP-956); before that
+it holds none and logs nothing.
+Configure the probes on the server instead (`snmp_if`, `snmp_custom`,
+`redfish`, once available); their samples carry `kind=probe` and
+`probe_id` instead of `kind=snmp_poll` and `target`.
 
 Values a device does not answer (noSuchObject) or answers non-numerically are
 skipped, an unreachable target is skipped for the cycle, so one failing

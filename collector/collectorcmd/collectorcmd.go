@@ -1646,6 +1646,49 @@ type pduPoller interface {
 	PDUValues(ctx context.Context, target string, creds map[string]string, family string) ([]plugins.MetricSample, error)
 }
 
+// envPollDeprecation announces the end of the environment metric poll
+// (MON-03, WP-976 AK6): while the poll runs (MetricsInterval > 0, the
+// default included) and the collector holds an assignment set with at least
+// one probe, it logs collector.metrics.env_poll_deprecated once per set
+// version. The server-side probe types (snmp_if, snmp_custom, redfish)
+// replace the poll; switching it off with an assignment is WP-999. The
+// collector does not take over assignment sets yet: the adoption of WP-956
+// creates the notice with newEnvPollDeprecation and reports every applied
+// version to observe; until then nothing calls it.
+type envPollDeprecation struct {
+	mu      sync.Mutex
+	logged  map[int64]bool
+	logger  *slog.Logger
+	enabled func() time.Duration
+}
+
+// newEnvPollDeprecation returns the notice for the poll interval of cfg.
+func newEnvPollDeprecation(cfg *collectorConfig, logger *slog.Logger) *envPollDeprecation {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &envPollDeprecation{logged: map[int64]bool{}, logger: logger,
+		enabled: func() time.Duration { return cfg.MetricsInterval }}
+}
+
+// observe takes an applied assignment set: its version and the number of
+// its probes. It reports whether it logged.
+func (d *envPollDeprecation) observe(version int64, probes int) bool {
+	if probes == 0 || d.enabled() <= 0 {
+		return false
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.logged[version] {
+		return false
+	}
+	d.logged[version] = true
+	d.logger.Warn("the metric poll of the environment is deprecated: configure the probes on the server",
+		"event", "collector.metrics.env_poll_deprecated", "config_version", version, "probes", probes,
+		"interval", d.enabled().String(), "probe_types", "snmp_if, snmp_custom, redfish")
+	return true
+}
+
 // defaultMetricsInterval is the interval of the standard poll (MON-02).
 const defaultMetricsInterval = 5 * time.Minute
 

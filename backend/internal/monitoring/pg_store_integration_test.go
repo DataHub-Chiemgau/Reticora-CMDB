@@ -2,6 +2,7 @@ package monitoring_test
 
 import (
 	"context"
+	"errors"
 	"math"
 	"strings"
 	"testing"
@@ -133,5 +134,94 @@ func TestMetricStoreUsesBarrierViews(t *testing.T) {
 	}
 	if interval != 24*time.Hour {
 		t.Errorf("chunk interval %s, want 24h", interval)
+	}
+}
+
+// TestInsertSamplesTxBulk covers WP-976 AK1: 10,000 samples go in with one
+// statement in the caller's transaction; a sample of a CI the scope does
+// not see is not written.
+func TestInsertSamplesTxBulk(t *testing.T) {
+	f := scopetest.Seed(t, "53")
+	bg := context.Background()
+	t.Cleanup(func() {
+		_, _ = f.Admin.Exec(bg, `DELETE FROM metric_sample WHERE organization_id = ANY($1::uuid[])`, []string{f.OrgA, f.OrgB})
+	})
+	own := f.CI(t, f.OrgA, f.Client1, "wp976-bulk")
+	foreign := f.CI(t, f.OrgA, f.Client2, "wp976-bulk-c2")
+	base := time.Now().UTC().Add(-2 * time.Hour)
+	samples := make([]monitoring.Metric, 0, 10001)
+	for i := range 10000 {
+		samples = append(samples, monitoring.Metric{OrgID: f.OrgA, CIID: own, Name: "wp976_bulk", Value: float64(i),
+			Labels: map[string]string{"kind": "probe"}, Timestamp: base.Add(time.Duration(i) * time.Millisecond)})
+	}
+	samples = append(samples, monitoring.Metric{OrgID: f.OrgA, CIID: foreign, Name: "wp976_bulk", Value: 1, Timestamp: base})
+	scope := database.OrgWideScope(f.OrgA, f.User)
+	scope.Clients = database.ScopeIDs(f.Client1)
+	var written int
+	if err := database.WithTenant(bg, f.App, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		written, err = monitoring.InsertSamplesTx(ctx, tx, samples)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if written != 10000 {
+		t.Errorf("%d samples written, want the 10,000 of the visible CI", written)
+	}
+	var stored int
+	if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM metric_sample WHERE organization_id = $1 AND metric_name = 'wp976_bulk'`, f.OrgA).
+		Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != 10000 {
+		t.Errorf("%d samples stored, want 10000", stored)
+	}
+}
+
+// TestIngestKeepsUnknownCIError covers WP-976 AK2 (TEN-06, F-394): a batch
+// with an unknown, foreign or invisible CI is refused whole with the first
+// missing ci_id.
+func TestIngestKeepsUnknownCIError(t *testing.T) {
+	f := scopetest.Seed(t, "54")
+	bg := context.Background()
+	t.Cleanup(func() {
+		_, _ = f.Admin.Exec(bg, `DELETE FROM metric_sample WHERE organization_id = ANY($1::uuid[])`, []string{f.OrgA, f.OrgB})
+	})
+	own := f.CI(t, f.OrgA, f.Client1, "wp976-own")
+	other := f.CI(t, f.OrgB, "", "wp976-org-b")
+	unknown := "00000000-0000-4000-8000-000000000976"
+	store := monitoring.NewPGMetricStore(f.App)
+	at := time.Now().UTC()
+	for _, missing := range []string{other, unknown} {
+		err := store.Ingest(f.OrgCtx(f.OrgA), []monitoring.Metric{
+			{OrgID: f.OrgA, CIID: own, Name: "wp976_ingest", Value: 1, Timestamp: at},
+			{OrgID: f.OrgA, CIID: missing, Name: "wp976_ingest", Value: 2, Timestamp: at},
+		})
+		var unknownErr *monitoring.UnknownCIError
+		if !errors.As(err, &unknownErr) || unknownErr.CIID != missing {
+			t.Errorf("batch with %s: %v, want UnknownCIError naming it", missing, err)
+		}
+	}
+	var stored int
+	if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM metric_sample WHERE metric_name = 'wp976_ingest'`).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != 0 {
+		t.Errorf("%d samples stored of refused batches, want 0", stored)
+	}
+	if err := store.Ingest(f.OrgCtx(f.OrgA), []monitoring.Metric{{OrgID: f.OrgA, CIID: own, Name: "wp976_ingest", Value: 1, Timestamp: at}}); err != nil {
+		t.Errorf("valid batch: %v", err)
+	}
+	// A known CI in upper case is the same CI (the cast normalized it
+	// before the bulk insert, the contract stays, AK2).
+	if err := store.Ingest(f.OrgCtx(f.OrgA), []monitoring.Metric{{OrgID: f.OrgA, CIID: strings.ToUpper(own), Name: "wp976_ingest",
+		Value: 2, Timestamp: at.Add(time.Second)}}); err != nil {
+		t.Errorf("batch with the upper-case ci_id: %v", err)
+	}
+	if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM metric_sample WHERE metric_name = 'wp976_ingest' AND ci_id = $1`, own).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != 2 {
+		t.Errorf("%d samples of the CI, want 2", stored)
 	}
 }

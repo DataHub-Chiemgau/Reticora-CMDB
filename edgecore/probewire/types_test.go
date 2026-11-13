@@ -478,3 +478,25 @@ func TestHTTPLimits(t *testing.T) {
 		}
 	}
 }
+
+// TestTypesDeclareMetricNames covers the value names of the types (WP-976
+// AK3): icmp, http and dns declare theirs, an unknown type none, and
+// MetricNames returns a copy.
+func TestTypesDeclareMetricNames(t *testing.T) {
+	for typ, name := range map[string]string{"icmp": "jitter_ms", "http": "ttfb_ms", "dns": "probe_dns_rcode"} {
+		if !DeclaresMetric(typ, name) || !slices.Contains(MetricNames(typ), name) {
+			t.Errorf("%s does not declare %s", typ, name)
+		}
+	}
+	if DeclaresMetric("icmp", "ttfb_ms") || DeclaresMetric("tcp", "rtt_min_ms") || DeclaresMetric("unknown", "jitter_ms") {
+		t.Error("a name is declared for a type that does not produce it")
+	}
+	if names := MetricNames("unknown"); len(names) != 0 {
+		t.Errorf("unknown type declares %v", names)
+	}
+	names := MetricNames("icmp")
+	names[0] = "changed"
+	if !DeclaresMetric("icmp", "rtt_min_ms") || MetricNames("icmp")[0] != "rtt_min_ms" {
+		t.Error("MetricNames shares the register")
+	}
+}

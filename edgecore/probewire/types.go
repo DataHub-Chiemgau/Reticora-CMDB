@@ -229,6 +229,26 @@ func Lookup(key string) (Type, bool) {
 	return t, ok
 }
 
+// typeMetrics are the names of Result.values a probe type declares (WP-976,
+// E-179): the server stores only these as metric samples of the probe's
+// CI. The executors of the collector (collector/probe) produce them.
+var typeMetrics = map[string][]string{
+	"icmp": {"rtt_min_ms", "rtt_max_ms", "jitter_ms"},
+	"http": {"dns_ms", "connect_ms", "tls_ms", "ttfb_ms", "status_code", "cert_expiry_s"},
+	"dns":  {"probe_dns_response_seconds", "probe_dns_rcode", "probe_dns_answer_count", "probe_dns_soa_serial"},
+}
+
+// MetricNames returns the value names the type declares (none for an
+// unknown type).
+func MetricNames(typeKey string) []string {
+	return slices.Clone(typeMetrics[typeKey])
+}
+
+// DeclaresMetric reports whether the type declares the value name.
+func DeclaresMetric(typeKey, name string) bool {
+	return slices.Contains(typeMetrics[typeKey], name)
+}
+
 // FieldError names the field a validation error refers to (type,
 // interval_s, timeout_s, down_count, up_count, params.<name>,
 // thresholds.<name>), so that the API can answer 422 per field.
