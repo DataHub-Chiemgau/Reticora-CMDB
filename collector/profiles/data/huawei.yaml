@@ -1,0 +1,65 @@
+# Collector profiles (DIS-02): collection data of Huawei VRP devices.
+# The profile carries neither ciType nor catalog: it does not classify (the
+# CH30 profile list is unchanged until Huawei is confirmed as an inventory
+# profile, WP-1005); discovery takes only vendor and profile name from it.
+- name: huawei-vrp-snmp
+  vendor: Huawei
+  protocol: snmp
+  sysObjectIds:
+  - 1.3.6.1.4.1.2011
+  # Optics (DOM/DDM, WP-1005): HUAWEI-ENTITY-EXTENT-MIB,
+  # hwOpticalModuleInfoTable 1.3.6.1.4.1.2011.5.25.31.1.1.3, entry .1,
+  # index entPhysicalIndex (mapped to the interface over ENTITY-MIB like a
+  # sensor). Columns 1.3.6.1.4.1.2011.5.25.31.1.1.3.1.<n>:
+  # hwEntityOpticalTemperature (5, Celsius), hwEntityOpticalVoltage (6, mV),
+  # hwEntityOpticalBiasCurrent (7, uA), hwEntityOpticalRxPower (8) and
+  # hwEntityOpticalTxPower (9) in 0.01 dBm, the alarm thresholds
+  # hwEntityOpticalRxLowThreshold (13), RxHighThreshold (14),
+  # TxLowThreshold (15), TxHighThreshold (16) and the warning thresholds
+  # hwEntityOpticalRxLowWarnThreshold (20), RxHighWarnThreshold (21),
+  # TxLowWarnThreshold (22), TxHighWarnThreshold (23), all in 0.01 dBm.
+  # 2147483647 stands for an invalid reading and is left out.
+  monitor:
+    optical:
+      tables:
+        entity_power:
+          index: int
+          scale: 0.01
+          unit: dBm
+          columns:
+            rx: 1.3.6.1.4.1.2011.5.25.31.1.1.3.1.8
+            tx: 1.3.6.1.4.1.2011.5.25.31.1.1.3.1.9
+            rx_low_alarm: 1.3.6.1.4.1.2011.5.25.31.1.1.3.1.13
+            rx_high_alarm: 1.3.6.1.4.1.2011.5.25.31.1.1.3.1.14
+            tx_low_alarm: 1.3.6.1.4.1.2011.5.25.31.1.1.3.1.15
+            tx_high_alarm: 1.3.6.1.4.1.2011.5.25.31.1.1.3.1.16
+            rx_low_warn: 1.3.6.1.4.1.2011.5.25.31.1.1.3.1.20
+            rx_high_warn: 1.3.6.1.4.1.2011.5.25.31.1.1.3.1.21
+            tx_low_warn: 1.3.6.1.4.1.2011.5.25.31.1.1.3.1.22
+            tx_high_warn: 1.3.6.1.4.1.2011.5.25.31.1.1.3.1.23
+          threshold_columns:
+            rx_low_alarm: rx_low_alarm
+            rx_high_alarm: rx_high_alarm
+            tx_low_alarm: tx_low_alarm
+            tx_high_alarm: tx_high_alarm
+            rx_low_warn: rx_low_warn
+            rx_high_warn: rx_high_warn
+            tx_low_warn: tx_low_warn
+            tx_high_warn: tx_high_warn
+        entity_temperature:
+          index: int
+          unit: Celsius
+          columns:
+            temperature: 1.3.6.1.4.1.2011.5.25.31.1.1.3.1.5
+        entity_voltage:
+          index: int
+          scale: 0.001
+          unit: V
+          columns:
+            voltage: 1.3.6.1.4.1.2011.5.25.31.1.1.3.1.6
+        entity_bias:
+          index: int
+          scale: 0.001
+          unit: mA
+          columns:
+            bias: 1.3.6.1.4.1.2011.5.25.31.1.1.3.1.7

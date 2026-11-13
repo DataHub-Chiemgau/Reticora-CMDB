@@ -27,3 +27,28 @@
   attributes:
     category: network_device
     device_type: switch
+  # Optics (DOM/DDM, WP-1005): EOS reports the transceiver levels in
+  # entPhySensorTable of ENTITY-SENSOR-MIB (the core of the optical type:
+  # Rx/Tx power in watts, converted to dBm) and the device thresholds in
+  # aristaEntSensorThresholdTable of ARISTA-ENTITY-SENSOR-MIB
+  # (1.3.6.1.4.1.30065.3.12.1.1, entry .1, index entPhysicalIndex of the
+  # sensor; syntax EntitySensorValue, scaled like entPhySensorValue of the
+  # same sensor): aristaEntSensorThresholdLowWarning (1),
+  # aristaEntSensorThresholdLowCritical (2),
+  # aristaEntSensorThresholdHighWarning (3),
+  # aristaEntSensorThresholdHighCritical (4).
+  monitor:
+    optical:
+      tables:
+        sensor_thresholds:
+          index: int
+          columns:
+            low_warning: 1.3.6.1.4.1.30065.3.12.1.1.1.1
+            low_critical: 1.3.6.1.4.1.30065.3.12.1.1.1.2
+            high_warning: 1.3.6.1.4.1.30065.3.12.1.1.1.3
+            high_critical: 1.3.6.1.4.1.30065.3.12.1.1.1.4
+          threshold_columns:
+            low_warn: low_warning
+            low_alarm: low_critical
+            high_warn: high_warning
+            high_alarm: high_critical

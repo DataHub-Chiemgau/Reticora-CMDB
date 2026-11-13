@@ -31,6 +31,88 @@
   attributes:
     category: network_device
     device_type: switch
+  # Optics (DOM/DDM, WP-1005): JUNIPER-DOM-MIB, jnxDomCurrentTable
+  # 1.3.6.1.4.1.2636.3.60.1.1.1, entry jnxDomCurrentEntry .1, index ifIndex
+  # (IF-MIB), one row per transceiver. Units of the MIB: Rx/Tx power and
+  # their thresholds 0.01 dBm, bias 0.001 mA, temperature Celsius, voltage
+  # 0.001 V; one table per unit, merged per interface. Columns
+  # 1.3.6.1.4.1.2636.3.60.1.1.1.1.<n>: jnxDomCurrentRxLaserPower (5),
+  # jnxDomCurrentTxLaserBiasCurrent (6), jnxDomCurrentTxLaserOutputPower
+  # (7), jnxDomCurrentModuleTemperature (8), Rx power high/low alarm and
+  # high/low warning thresholds (9–12), bias (13–16), Tx power (17–20),
+  # temperature (21–24), jnxDomCurrentModuleVoltage (25) and its
+  # thresholds (26–29).
+  monitor:
+    optical:
+      tables:
+        interface_power:
+          index: int
+          scale: 0.01
+          unit: dBm
+          columns:
+            rx: 1.3.6.1.4.1.2636.3.60.1.1.1.1.5
+            tx: 1.3.6.1.4.1.2636.3.60.1.1.1.1.7
+            rx_high_alarm: 1.3.6.1.4.1.2636.3.60.1.1.1.1.9
+            rx_low_alarm: 1.3.6.1.4.1.2636.3.60.1.1.1.1.10
+            rx_high_warn: 1.3.6.1.4.1.2636.3.60.1.1.1.1.11
+            rx_low_warn: 1.3.6.1.4.1.2636.3.60.1.1.1.1.12
+            tx_high_alarm: 1.3.6.1.4.1.2636.3.60.1.1.1.1.17
+            tx_low_alarm: 1.3.6.1.4.1.2636.3.60.1.1.1.1.18
+            tx_high_warn: 1.3.6.1.4.1.2636.3.60.1.1.1.1.19
+            tx_low_warn: 1.3.6.1.4.1.2636.3.60.1.1.1.1.20
+          threshold_columns:
+            rx_high_alarm: rx_high_alarm
+            rx_low_alarm: rx_low_alarm
+            rx_high_warn: rx_high_warn
+            rx_low_warn: rx_low_warn
+            tx_high_alarm: tx_high_alarm
+            tx_low_alarm: tx_low_alarm
+            tx_high_warn: tx_high_warn
+            tx_low_warn: tx_low_warn
+        interface_bias:
+          index: int
+          scale: 0.001
+          unit: mA
+          columns:
+            bias: 1.3.6.1.4.1.2636.3.60.1.1.1.1.6
+            bias_high_alarm: 1.3.6.1.4.1.2636.3.60.1.1.1.1.13
+            bias_low_alarm: 1.3.6.1.4.1.2636.3.60.1.1.1.1.14
+            bias_high_warn: 1.3.6.1.4.1.2636.3.60.1.1.1.1.15
+            bias_low_warn: 1.3.6.1.4.1.2636.3.60.1.1.1.1.16
+          threshold_columns:
+            bias_high_alarm: bias_high_alarm
+            bias_low_alarm: bias_low_alarm
+            bias_high_warn: bias_high_warn
+            bias_low_warn: bias_low_warn
+        interface_temperature:
+          index: int
+          unit: Celsius
+          columns:
+            temperature: 1.3.6.1.4.1.2636.3.60.1.1.1.1.8
+            temperature_high_alarm: 1.3.6.1.4.1.2636.3.60.1.1.1.1.21
+            temperature_low_alarm: 1.3.6.1.4.1.2636.3.60.1.1.1.1.22
+            temperature_high_warn: 1.3.6.1.4.1.2636.3.60.1.1.1.1.23
+            temperature_low_warn: 1.3.6.1.4.1.2636.3.60.1.1.1.1.24
+          threshold_columns:
+            temperature_high_alarm: temperature_high_alarm
+            temperature_low_alarm: temperature_low_alarm
+            temperature_high_warn: temperature_high_warn
+            temperature_low_warn: temperature_low_warn
+        interface_voltage:
+          index: int
+          scale: 0.001
+          unit: V
+          columns:
+            voltage: 1.3.6.1.4.1.2636.3.60.1.1.1.1.25
+            voltage_high_alarm: 1.3.6.1.4.1.2636.3.60.1.1.1.1.26
+            voltage_low_alarm: 1.3.6.1.4.1.2636.3.60.1.1.1.1.27
+            voltage_high_warn: 1.3.6.1.4.1.2636.3.60.1.1.1.1.28
+            voltage_low_warn: 1.3.6.1.4.1.2636.3.60.1.1.1.1.29
+          threshold_columns:
+            voltage_high_alarm: voltage_high_alarm
+            voltage_low_alarm: voltage_low_alarm
+            voltage_high_warn: voltage_high_warn
+            voltage_low_warn: voltage_low_warn
 - name: juniper-junos-ssh
   vendor: Juniper
   model: JunOS

@@ -9807,6 +9807,8 @@ PRT-09;[P3];E;collector/probe/optical_vendors_test.go;WP-1005
 - Klassifikation von Huawei-Geräten (CI-Typ, Systemtemplate, CH30-Eintrag): erst nach Bestätigung durch den Auftraggeber, als eigenes WP.
 - gNMI-Quelle: WP-1017 (`p3-pt-gnmi-sources`).
 
+**Nachtrag 2026-11-13 (Prüfung):** Zusätzlich geändert: `collector/probe/optical.go` (Kern aus WP-1004 um die breiten Herstellertabellen `interface_*`/`entity_*` je Transceiver mit `scale` und `unit`, die Schwellwertspalten `threshold_columns` (`<größe>_<low|high>_<warn|alarm>`) und die breite Schwellentabelle `sensor_thresholds` je Sensor erweitert; ohne diese Erweiterung lassen sich JUNIPER-DOM-MIB, HUAWEI-ENTITY-EXTENT-MIB und ARISTA-ENTITY-SENSOR-MIB nicht über Profile abbilden) und `collector/plugins/snmp/snmp_test.go` (`TestApplyProfileHuaweiNamesVendorAndProfileOnly`); damit 10 Einträge. Das Huawei-Profil nennt kein Modell: Das Präfix `1.3.6.1.4.1.2011` deckt alle Huawei-Produkte ab, und VRP ist ein Betriebssystem, kein Modell (AK3). Ein Pegel einer Herstellertabelle mit dem Wert „ungültig“ (2147483647) zählt in `probe_optical_sensors_unavailable`; Rx aus einer Tabelle in 0,01 dBm gilt schon bei genau -40,00 dBm (Untergrenze der Tabelle) als LOS.
+
 ### WP-1006 – Probetyp bng: Subscriber-Sessions je BNG über Herstellerprofile
 
 **Schlüssel:** `p3-pt-bng` · **Meilenstein:** M3.10 Probetypen SNMP, Netzprotokolle, Dienste, gNMI, TR-069/USP, RPKI · **Epic (Traceability):** E · **Aufwand:** 1,5 PT · **G3-Umfang:** ja

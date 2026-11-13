@@ -568,3 +568,15 @@ func TestPollInterfacesWalksTableWithLimit(t *testing.T) {
 		}
 	})
 }
+
+// TestApplyProfileHuaweiNamesVendorAndProfileOnly covers WP-1005 AK3: the
+// embedded Huawei profile (prefix 1.3.6.1.4.1.2011, every Huawei product)
+// gives discovery the vendor and the profile name, never a model.
+func TestApplyProfileHuaweiNamesVendorAndProfileOnly(t *testing.T) {
+	p := &Plugin{}
+	result := plugins.Result{Attributes: map[string]any{}}
+	p.applyProfile(&result, "1.3.6.1.4.1.2011.2.224.67")
+	if result.Manufacturer != "Huawei" || result.Attributes["profile"] != "huawei-vrp-snmp" || result.Model != "" {
+		t.Fatalf("result %+v, want manufacturer Huawei, profile huawei-vrp-snmp and no model", result)
+	}
+}
