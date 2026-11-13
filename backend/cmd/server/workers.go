@@ -329,6 +329,11 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 	series, bySeries := d.repos.Metrics.(monitoring.SeriesStore)
 	if evaluating && bySeries && d.repos.Alarms != nil {
 		evaluator := monitoring.NewEvaluator(series, alertStore.AlertStore(), alarm.NewRuleSink(d.repos.Alarms))
+		// Threshold rules only for organizations with monitoring_network
+		// (E-151, WP-985); without entitlements (--no-db) every rule runs.
+		if d.entitlements != nil {
+			evaluator.WithFeatures(d.entitlements)
+		}
 		workers = append(workers, server.Worker{
 			Name: config.WorkerMonitoring,
 			Run:  func(ctx context.Context) { evaluator.Run(ctx, d.every(monitoring.EvaluationInterval)) },

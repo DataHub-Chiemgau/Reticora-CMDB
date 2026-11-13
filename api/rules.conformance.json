@@ -1539,6 +1539,230 @@
         "location": "a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d"
       },
       "result": true
+    },
+    {
+      "name": "metric: value gt above the threshold",
+      "condition": {
+        "op": "gt",
+        "field": "value",
+        "value": 90
+      },
+      "values": {
+        "value": 91,
+        "avg": 80,
+        "max": 91,
+        "min": 70,
+        "delta": 21,
+        "rate": 0.5
+      },
+      "result": true
+    },
+    {
+      "name": "metric: value gt at the threshold",
+      "condition": {
+        "op": "gt",
+        "field": "value",
+        "value": 90
+      },
+      "values": {
+        "value": 90,
+        "avg": 90,
+        "max": 90,
+        "min": 90,
+        "delta": 0
+      },
+      "result": false
+    },
+    {
+      "name": "metric: value lt below the clear threshold",
+      "condition": {
+        "op": "lt",
+        "field": "value",
+        "value": 85
+      },
+      "values": {
+        "value": 84,
+        "avg": 88
+      },
+      "result": true
+    },
+    {
+      "name": "metric: value eq the threshold",
+      "condition": {
+        "op": "eq",
+        "field": "value",
+        "value": 10
+      },
+      "values": {
+        "value": 10
+      },
+      "result": true
+    },
+    {
+      "name": "metric: avg gte over the window",
+      "condition": {
+        "op": "gte",
+        "field": "avg",
+        "value": 75.5
+      },
+      "values": {
+        "value": 60,
+        "avg": 75.5,
+        "max": 91,
+        "min": 60
+      },
+      "result": true
+    },
+    {
+      "name": "metric: rate gt per second",
+      "condition": {
+        "op": "gt",
+        "field": "rate",
+        "value": 1000
+      },
+      "values": {
+        "value": 100,
+        "rate": 10,
+        "delta": -4294967100
+      },
+      "result": false
+    },
+    {
+      "name": "metric: delta lt a drop",
+      "condition": {
+        "op": "lt",
+        "field": "delta",
+        "value": 0
+      },
+      "values": {
+        "value": 100,
+        "delta": -4294967100,
+        "rate": 10
+      },
+      "result": true
+    },
+    {
+      "name": "metric: all of avg and rate",
+      "condition": {
+        "op": "all",
+        "rules": [
+          {
+            "op": "gt",
+            "field": "avg",
+            "value": 50
+          },
+          {
+            "op": "lte",
+            "field": "rate",
+            "value": 5
+          }
+        ]
+      },
+      "values": {
+        "value": 70,
+        "avg": 60,
+        "rate": 2.5
+      },
+      "result": true
+    },
+    {
+      "name": "metric: all fails on one",
+      "condition": {
+        "op": "all",
+        "rules": [
+          {
+            "op": "gt",
+            "field": "avg",
+            "value": 50
+          },
+          {
+            "op": "lte",
+            "field": "rate",
+            "value": 5
+          }
+        ]
+      },
+      "values": {
+        "value": 70,
+        "avg": 60,
+        "rate": 7
+      },
+      "result": false
+    },
+    {
+      "name": "metric: any of value and delta",
+      "condition": {
+        "op": "any",
+        "rules": [
+          {
+            "op": "gt",
+            "field": "value",
+            "value": 90
+          },
+          {
+            "op": "gt",
+            "field": "delta",
+            "value": 20
+          }
+        ]
+      },
+      "values": {
+        "value": 80,
+        "delta": 25
+      },
+      "result": true
+    },
+    {
+      "name": "metric: not of rate",
+      "condition": {
+        "op": "not",
+        "rules": [
+          {
+            "op": "lt",
+            "field": "rate",
+            "value": 1
+          }
+        ]
+      },
+      "values": {
+        "value": 5,
+        "rate": 3
+      },
+      "result": true
+    },
+    {
+      "name": "metric: rate absent for one sample",
+      "condition": {
+        "op": "gte",
+        "field": "rate",
+        "value": 0
+      },
+      "values": {
+        "value": 5,
+        "avg": 5,
+        "max": 5,
+        "min": 5,
+        "delta": 0
+      },
+      "result": false
+    },
+    {
+      "name": "metric: not of an absent rate",
+      "condition": {
+        "op": "not",
+        "rules": [
+          {
+            "op": "gt",
+            "field": "rate",
+            "value": 0
+          }
+        ]
+      },
+      "values": {
+        "value": 5,
+        "delta": 0
+      },
+      "result": true
     }
   ],
   "invalid_conditions": [

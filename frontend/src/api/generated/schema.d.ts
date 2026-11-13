@@ -20101,34 +20101,68 @@ export interface components {
     MetricPointListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['MetricPoint'][];
     };
-    /** @description Partial alert rule update; every field is optional and only set fields are applied. */
+    /** @description Partial alert rule update; every field is optional and only set fields are applied. A stage or clear_condition set to null is removed; at least one stage must remain (422 critical_condition). The deprecated condition, threshold and severity replace the stages by the stage of the severity (what they do not name comes from the old form of the rule; a rule without one needs condition and threshold); the old form and the stages in one request are 422 condition. */
     UpdateAlertRuleRequest: {
       name?: string;
-      /** @enum {string} */
+      /**
+       * @deprecated
+       * @enum {string}
+       */
       condition?: 'gt' | 'lt' | 'eq';
+      /** @deprecated */
       threshold?: number;
       /** @description Go duration string between 0s and 9600h (400 days). */
       duration?: string;
-      /** @enum {string} */
+      /**
+       * @deprecated
+       * @enum {string}
+       */
       severity?: 'critical' | 'warning' | 'info';
       enabled?: boolean;
+      critical_condition?: components['schemas']['AlertRuleCondition'];
+      warning_condition?: components['schemas']['AlertRuleCondition'];
+      info_condition?: components['schemas']['AlertRuleCondition'];
+      clear_condition?: components['schemas']['AlertRuleCondition'];
+      /** @description Go duration string between 0s and 24h. */
+      eval_window?: string;
       scope?: components['schemas']['AlertRuleScope'];
       /** @description At most five distinct label keys (422 group_by). */
       group_by?: string[];
     };
+    /** @description A stage or the clear condition of an alert rule (ALR-05, MET-45, WP-985): a MET-45 condition ($defs/condition of api/rules.schema.json) over the metric context of a series in the rule's eval_window: value (latest value), avg, max, min, delta (latest minus first value) and rate (increase per second; a drop of the value is a counter reset, the rate is never negative; absent for a window of one sample). Another field is 422 with the path, e.g. warning_condition.rules[1].field; null is no condition. */
+    AlertRuleCondition: components['schemas']['condition'] | null;
+    /** @description An alert rule (MON-04, ALR-05). The first of the stages critical_condition, warning_condition and info_condition that holds for a series is the severity of its alarm; each must hold for duration. A higher stage raises the severity of the open alarm, a lower one does not lower it. An open alarm is resolved when clear_condition holds (hysteresis), without one when no stage holds any more. The rules of an organization without the feature monitoring_network are kept but raise no alarm (E-151). */
     AlertRule: {
       id: string;
       org_id: string;
       name: string;
       metric_name: string;
-      /** @enum {string} */
-      condition: 'gt' | 'lt' | 'eq';
-      threshold: number;
+      /**
+       * @deprecated
+       * @description Old form, only for a rule with one stage comparing value and no clear_condition; absent otherwise.
+       * @enum {string}
+       */
+      condition?: 'gt' | 'lt' | 'eq';
+      /**
+       * @deprecated
+       * @description Old form, with condition.
+       */
+      threshold?: number;
       /** @description Go duration string. */
       duration: string;
-      /** @enum {string} */
-      severity: 'critical' | 'warning' | 'info';
+      /**
+       * @deprecated
+       * @description Old form, with condition (the stage of the rule).
+       * @enum {string}
+       */
+      severity?: 'critical' | 'warning' | 'info';
       enabled: boolean;
+      critical_condition: components['schemas']['AlertRuleCondition'];
+      warning_condition: components['schemas']['AlertRuleCondition'];
+      info_condition: components['schemas']['AlertRuleCondition'];
+      clear_condition: components['schemas']['AlertRuleCondition'];
+      /** @description Go duration string, the window of the metric context. */
+      eval_window: string;
       scope: components['schemas']['AlertRuleScope'];
       /** @description Label keys that split the samples of a CI into series (WP-984). The rule is evaluated per series (CI and the values of these labels); the pending and firing state of a series is its alarm (GET /api/v1/monitoring/alarms, source_kind rule). */
       group_by: string[];
@@ -20136,19 +20170,36 @@ export interface components {
     AlertRuleListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['AlertRule'][];
     };
+    /** @description At least one stage, or the deprecated condition and threshold, which become the stage of severity (default warning). The old form next to the stages is 422 condition unless it is their own old form. */
     CreateAlertRuleRequest: {
       id?: string;
       name: string;
       metric_name: string;
-      /** @enum {string} */
-      condition: 'gt' | 'lt' | 'eq';
-      threshold: number;
+      /**
+       * @deprecated
+       * @enum {string}
+       */
+      condition?: 'gt' | 'lt' | 'eq';
+      /** @deprecated */
+      threshold?: number;
       /** @description Go duration string between 0s and 9600h (400 days); nanoseconds as a number are accepted too. */
       duration?: string;
-      /** @enum {string} */
+      /**
+       * @deprecated
+       * @enum {string}
+       */
       severity?: 'critical' | 'warning' | 'info';
       /** @default true */
       enabled: boolean;
+      critical_condition?: components['schemas']['AlertRuleCondition'];
+      warning_condition?: components['schemas']['AlertRuleCondition'];
+      info_condition?: components['schemas']['AlertRuleCondition'];
+      clear_condition?: components['schemas']['AlertRuleCondition'];
+      /**
+       * @description Go duration string between 0s and 24h; nanoseconds as a number are accepted too.
+       * @default 5m
+       */
+      eval_window: string;
       scope?: components['schemas']['AlertRuleScope'];
       /** @description At most five distinct label keys (422 group_by). */
       group_by?: string[];
@@ -22655,6 +22706,48 @@ export interface components {
       prompt_tokens: number;
       completion_tokens: number;
     };
+    /** @description A condition (WP-715): true or false for the values of a record. The field names are free; each user names its fields. Alerting rules (MON-04, ALR-05, WP-985) evaluate their stages (critical_condition, warning_condition, info_condition) and their clear_condition over the metric context of a series in the eval_window of the rule: value (latest value), avg, max and min (of the values in the window), delta (latest minus first value) and rate (increase per second over the window; a drop of the value is a counter reset from which the new value counts, so the rate is never negative; absent for a window of one sample). Other fields are refused there. */
+    condition:
+      | components['schemas']['condition_all']
+      | components['schemas']['any']
+      | components['schemas']['not']
+      | components['schemas']['compare'];
+    /** @description AND: every condition holds (no conditions: true). */
+    condition_all: {
+      /** @constant */
+      op: 'all';
+      rules: components['schemas']['condition'][];
+    };
+    /** @description OR: at least one condition holds (no conditions: false). */
+    any: {
+      /** @constant */
+      op: 'any';
+      rules: components['schemas']['condition'][];
+    };
+    /** @description NOT: the one condition does not hold. */
+    not: {
+      /** @constant */
+      op: 'not';
+      rules: components['schemas']['condition'][];
+    };
+    /** @description A comparison of the value of field (fieldmeta.Predicate). empty and not_empty take no value; in and not_in a non-empty array of strings, numbers and booleans; gt, gte, lt and lte a number; eq, ne and contains a string, number or boolean. */
+    compare: {
+      /** @enum {unknown} */
+      op:
+        | 'eq'
+        | 'ne'
+        | 'in'
+        | 'not_in'
+        | 'gt'
+        | 'gte'
+        | 'lt'
+        | 'lte'
+        | 'contains'
+        | 'empty'
+        | 'not_empty';
+      field: string;
+      value?: unknown;
+    } & (unknown & unknown & unknown & unknown);
     rule:
       | components['schemas']['all']
       | components['schemas']['required']
@@ -22769,48 +22862,6 @@ export interface components {
       op: 'coalesce';
       args: components['schemas']['expr'][];
     };
-    /** @description A condition (WP-715): true or false for the values of a record. */
-    condition:
-      | components['schemas']['condition_all']
-      | components['schemas']['any']
-      | components['schemas']['not']
-      | components['schemas']['compare'];
-    /** @description AND: every condition holds (no conditions: true). */
-    condition_all: {
-      /** @constant */
-      op: 'all';
-      rules: components['schemas']['condition'][];
-    };
-    /** @description OR: at least one condition holds (no conditions: false). */
-    any: {
-      /** @constant */
-      op: 'any';
-      rules: components['schemas']['condition'][];
-    };
-    /** @description NOT: the one condition does not hold. */
-    not: {
-      /** @constant */
-      op: 'not';
-      rules: components['schemas']['condition'][];
-    };
-    /** @description A comparison of the value of field (fieldmeta.Predicate). empty and not_empty take no value; in and not_in a non-empty array of strings, numbers and booleans; gt, gte, lt and lte a number; eq, ne and contains a string, number or boolean. */
-    compare: {
-      /** @enum {unknown} */
-      op:
-        | 'eq'
-        | 'ne'
-        | 'in'
-        | 'not_in'
-        | 'gt'
-        | 'gte'
-        | 'lt'
-        | 'lte'
-        | 'contains'
-        | 'empty'
-        | 'not_empty';
-      field: string;
-      value?: unknown;
-    } & (unknown & unknown & unknown & unknown);
   };
   responses: {
     /** @description Written into the metamodel draft named by `draft` (WP-720): the captured item; the resource is unchanged. 404 when the module metamodel is switched off. */
@@ -29927,7 +29978,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       409: components['responses']['Conflict'];
-      /** @description duration lies outside 0s..9600h (400 days, the retention of metric samples, MON-01). */
+      /** @description duration lies outside 0s..9600h (400 days, the retention of metric samples, MON-01), eval_window outside 0s..24h, or a stage, the clear condition or the old form is refused (field with the path, e.g. warning_condition.rules[1].field). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -29989,7 +30040,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      /** @description duration lies outside 0s..9600h (400 days, the retention of metric samples, MON-01). */
+      /** @description duration lies outside 0s..9600h (400 days, the retention of metric samples, MON-01), eval_window outside 0s..24h, or a stage, the clear condition or the old form is refused (field with the path, e.g. warning_condition.rules[1].field). */
       422: {
         headers: {
           [name: string]: unknown;

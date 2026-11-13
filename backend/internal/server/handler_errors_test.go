@@ -88,6 +88,7 @@ var handlerErrorAllowlist = []errorEchoAllowance{
 	{"locations/handler.go", "writeError", "err", 1, "", "validation: ErrInvalidInput with the fixed texts of model.go and mapError"},
 	{"locations/handler.go", "writeFieldProblem", "fe", 1, "", "validation: FieldError of the location rules and the RAISE texts of location_no_cycle, location_parent_matrix, location_root_is_site"},
 	{"monitoring/monitoring.go", "Handler.UpdateAlert", "err", 1, "", "validation: time.ParseDuration of the request's duration"},
+	{"monitoring/threshold.go", "ParseRuleCondition", "err", 1, "", "validation: the path and text of rules.ParseCondition (fixed texts naming the failing property of the condition, WP-985)"},
 	{"notify/handler.go", "writeError", "blocked.Err", 1, "", "validation: the egress refusal of the SMTP host or port (CheckEgress)"},
 	{"notify/handler.go", "writeError", "err", 3, "", "validation: ErrValidation with the rule texts of channel.go, notifier.go, smtp.go; ErrNotFound, ErrConflict unwrapped"},
 	{"operator/orgs.go", "Handler.CreateOrg", "err", 2, "", "validation: ErrCreationUnavailable, ErrSlugTaken, returned unwrapped"},

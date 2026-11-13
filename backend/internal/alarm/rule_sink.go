@@ -37,7 +37,7 @@ func (s *RuleSink) Active(ctx context.Context, orgID, ruleID string) (map[string
 		}
 		for i := range page.Items {
 			a := &page.Items[i]
-			out[a.SeriesKey] = monitoring.ActiveAlarm{State: a.State, FirstSeenAt: a.FirstSeenAt}
+			out[a.SeriesKey] = monitoring.ActiveAlarm{State: a.State, FirstSeenAt: a.FirstSeenAt, Severity: a.Severity}
 		}
 		if page.Next == nil {
 			return out, nil

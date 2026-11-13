@@ -342,15 +342,17 @@ func (s *PGMetricStore) CIVisible(ctx context.Context, orgID, ciID string) (bool
 	return visible, err
 }
 
-// LatestBySeries implements SeriesStore (WP-984): in one statement the
-// latest sample of every series (CI and the values of the group_by labels)
-// of the metric in the window, in the tenant transaction of the
-// organization through metric_sample_v. Samples without CI form no series;
-// the scope narrows the CIs (ids, types with their subtypes, client, site)
-// and the labels (equality), and only CIs visible under the scope of the
-// transaction count.
+// LatestBySeries implements SeriesStore (WP-984, WP-985): in one statement
+// the latest sample of every series (CI and the values of the group_by
+// labels) of the metric in the window and its metric context (value, avg,
+// max, min, delta, rate over q.Window back from the latest sample), in the
+// tenant transaction of the organization through metric_sample_v. Samples
+// without CI form no series; the scope narrows the CIs (ids, types with
+// their subtypes, client, site) and the labels (equality), and only CIs
+// visible under the scope of the transaction count. The increase of the
+// rate adds every rise and, on a drop (counter reset), the new value.
 func (s *PGMetricStore) LatestBySeries(ctx context.Context, q *SeriesQuery) ([]SeriesPoint, error) {
-	args := []any{q.OrgID, q.Name, q.From.UTC(), q.To.UTC(), groupByOf(q.GroupBy)}
+	args := []any{q.OrgID, q.Name, q.From.UTC(), q.To.UTC(), groupByOf(q.GroupBy), intervalLiteral(q.Window)}
 	arg := func(v any) string {
 		args = append(args, v)
 		return fmt.Sprintf("$%d", len(args))
@@ -376,13 +378,27 @@ func (s *PGMetricStore) LatestBySeries(ctx context.Context, q *SeriesQuery) ([]S
 	// The ci policy filters the semi-join, so samples of CIs outside the
 	// transaction's scope drop out (as in metricWhere).
 	where = append(where, "EXISTS (SELECT 1 FROM ci c WHERE "+strings.Join(ciWhere, " AND ")+")")
-	query := `SELECT DISTINCT ON (x.ci_id, x.series) x.ci_id::text, x.series, x.time, x.value FROM (
+	query := `WITH x AS (
 		SELECT s.ci_id, s.time, s.value,
 		       COALESCE((SELECT jsonb_object_agg(k, s.labels->>k) FROM unnest($5::text[]) AS k WHERE s.labels ? k),
 		                '{}'::jsonb) AS series
 		  FROM metric_sample_v s
 		 WHERE ` + strings.Join(where, " AND ") + `
-	) x ORDER BY x.ci_id, x.series, x.time DESC`
+	), w AS (
+		SELECT x.*, max(x.time) OVER (PARTITION BY x.ci_id, x.series) AS last_time FROM x
+	), y AS (
+		SELECT w.ci_id, w.series, w.time, w.value,
+		       lag(w.value) OVER (PARTITION BY w.ci_id, w.series ORDER BY w.time) AS prev
+		  FROM w WHERE w.time >= w.last_time - $6::interval
+	)
+	SELECT y.ci_id::text, y.series, max(y.time),
+	       (array_agg(y.value ORDER BY y.time DESC))[1],
+	       avg(y.value), max(y.value), min(y.value),
+	       (array_agg(y.value ORDER BY y.time DESC))[1] - (array_agg(y.value ORDER BY y.time ASC))[1],
+	       COALESCE(sum(CASE WHEN y.prev IS NULL THEN 0 WHEN y.value >= y.prev THEN y.value - y.prev ELSE y.value END), 0),
+	       EXTRACT(EPOCH FROM max(y.time) - min(y.time))::float8,
+	       count(*)
+	  FROM y GROUP BY y.ci_id, y.series ORDER BY y.ci_id, y.series`
 	var out []SeriesPoint
 	err := database.WithRequestTenant(ctx, s.pool, q.OrgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, query, args...)
@@ -391,9 +407,19 @@ func (s *PGMetricStore) LatestBySeries(ctx context.Context, q *SeriesQuery) ([]S
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var p SeriesPoint
-			if err := rows.Scan(&p.CIID, &p.Labels, &p.Timestamp, &p.Value); err != nil {
+			var (
+				p              SeriesPoint
+				increase, span float64
+			)
+			c := &p.Context
+			if err := rows.Scan(&p.CIID, &p.Labels, &p.Timestamp, &p.Value, &c.Avg, &c.Max, &c.Min, &c.Delta,
+				&increase, &span, &c.Samples); err != nil {
 				return fmt.Errorf("scan series sample: %w", err)
+			}
+			c.Value = p.Value
+			if span > 0 {
+				rate := increase / span
+				c.Rate = &rate
 			}
 			if p.Labels == nil {
 				p.Labels = map[string]string{}

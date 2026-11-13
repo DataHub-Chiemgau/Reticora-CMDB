@@ -7013,7 +7013,11 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
         '422':
-          description: duration lies outside 0s..9600h (400 days, the retention of metric samples, MON-01).
+          description: >-
+            duration lies outside 0s..9600h (400 days, the retention of metric
+            samples, MON-01), eval_window outside 0s..24h, or a stage, the
+            clear condition or the old form is refused (field with the path,
+            e.g. warning_condition.rules[1].field).
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -7050,7 +7054,11 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
-          description: duration lies outside 0s..9600h (400 days, the retention of metric samples, MON-01).
+          description: >-
+            duration lies outside 0s..9600h (400 days, the retention of metric
+            samples, MON-01), eval_window outside 0s..24h, or a stage, the
+            clear condition or the old form is refused (field with the path,
+            e.g. warning_condition.rules[1].field).
           content:
             application/problem+json:
               schema: { $ref: '#/components/schemas/ProblemDetail' }
@@ -41127,23 +41135,44 @@ components:
 
     UpdateAlertRuleRequest:
       type: object
-      description: Partial alert rule update; every field is optional and only set fields are applied.
+      description: >-
+        Partial alert rule update; every field is optional and only set fields
+        are applied. A stage or clear_condition set to null is removed; at
+        least one stage must remain (422 critical_condition). The deprecated
+        condition, threshold and severity replace the stages by the stage of
+        the severity (what they do not name comes from the old form of the
+        rule; a rule without one needs condition and threshold); the old form
+        and the stages in one request are 422 condition.
       properties:
         name:
           type: string
         condition:
           type: string
           enum: [gt, lt, eq]
+          deprecated: true
         threshold:
           type: number
+          deprecated: true
         duration:
           type: string
           description: Go duration string between 0s and 9600h (400 days).
         severity:
           type: string
           enum: [critical, warning, info]
+          deprecated: true
         enabled:
           type: boolean
+        critical_condition:
+          $ref: '#/components/schemas/AlertRuleCondition'
+        warning_condition:
+          $ref: '#/components/schemas/AlertRuleCondition'
+        info_condition:
+          $ref: '#/components/schemas/AlertRuleCondition'
+        clear_condition:
+          $ref: '#/components/schemas/AlertRuleCondition'
+        eval_window:
+          type: string
+          description: Go duration string between 0s and 24h.
         scope:
           $ref: '#/components/schemas/AlertRuleScope'
         group_by:
@@ -41152,9 +41181,33 @@ components:
           description: At most five distinct label keys (422 group_by).
           items: { type: string }
 
+    AlertRuleCondition:
+      description: >-
+        A stage or the clear condition of an alert rule (ALR-05, MET-45,
+        WP-985): a MET-45 condition ($defs/condition of api/rules.schema.json)
+        over the metric context of a series in the rule's eval_window: value
+        (latest value), avg, max, min, delta (latest minus first value) and
+        rate (increase per second; a drop of the value is a counter reset, the
+        rate is never negative; absent for a window of one sample). Another
+        field is 422 with the path, e.g. warning_condition.rules[1].field;
+        null is no condition.
+      oneOf:
+        - $ref: '#/components/schemas/RuleCondition'
+        - type: 'null'
+
     AlertRule:
       type: object
-      required: [id, org_id, name, metric_name, condition, threshold, duration, severity, enabled, scope, group_by]
+      required: [id, org_id, name, metric_name, duration, enabled, critical_condition, warning_condition,
+        info_condition, clear_condition, eval_window, scope, group_by]
+      description: >-
+        An alert rule (MON-04, ALR-05). The first of the stages
+        critical_condition, warning_condition and info_condition that holds
+        for a series is the severity of its alarm; each must hold for
+        duration. A higher stage raises the severity of the open alarm, a
+        lower one does not lower it. An open alarm is resolved when
+        clear_condition holds (hysteresis), without one when no stage holds
+        any more. The rules of an organization without the feature
+        monitoring_network are kept but raise no alarm (E-151).
       properties:
         id:
           type: string
@@ -41167,16 +41220,35 @@ components:
         condition:
           type: string
           enum: [gt, lt, eq]
+          deprecated: true
+          description: >-
+            Old form, only for a rule with one stage comparing value and no
+            clear_condition; absent otherwise.
         threshold:
           type: number
+          deprecated: true
+          description: Old form, with condition.
         duration:
           type: string
           description: Go duration string.
         severity:
           type: string
           enum: [critical, warning, info]
+          deprecated: true
+          description: Old form, with condition (the stage of the rule).
         enabled:
           type: boolean
+        critical_condition:
+          $ref: '#/components/schemas/AlertRuleCondition'
+        warning_condition:
+          $ref: '#/components/schemas/AlertRuleCondition'
+        info_condition:
+          $ref: '#/components/schemas/AlertRuleCondition'
+        clear_condition:
+          $ref: '#/components/schemas/AlertRuleCondition'
+        eval_window:
+          type: string
+          description: Go duration string, the window of the metric context.
         scope:
           $ref: '#/components/schemas/AlertRuleScope'
         group_by:
@@ -41202,7 +41274,11 @@ components:
 
     CreateAlertRuleRequest:
       type: object
-      required: [name, metric_name, condition, threshold]
+      required: [name, metric_name]
+      description: >-
+        At least one stage, or the deprecated condition and threshold, which
+        become the stage of severity (default warning). The old form next to
+        the stages is 422 condition unless it is their own old form.
       properties:
         id:
           type: string
@@ -41213,17 +41289,32 @@ components:
         condition:
           type: string
           enum: [gt, lt, eq]
+          deprecated: true
         threshold:
           type: number
+          deprecated: true
         duration:
           type: string
           description: Go duration string between 0s and 9600h (400 days); nanoseconds as a number are accepted too.
         severity:
           type: string
           enum: [critical, warning, info]
+          deprecated: true
         enabled:
           type: boolean
           default: true
+        critical_condition:
+          $ref: '#/components/schemas/AlertRuleCondition'
+        warning_condition:
+          $ref: '#/components/schemas/AlertRuleCondition'
+        info_condition:
+          $ref: '#/components/schemas/AlertRuleCondition'
+        clear_condition:
+          $ref: '#/components/schemas/AlertRuleCondition'
+        eval_window:
+          type: string
+          default: 5m
+          description: Go duration string between 0s and 24h; nanoseconds as a number are accepted too.
         scope:
           $ref: '#/components/schemas/AlertRuleScope'
         group_by:

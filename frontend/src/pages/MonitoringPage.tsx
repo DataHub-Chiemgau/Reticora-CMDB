@@ -7,7 +7,7 @@ import {
   useDeleteAlertRule,
   useMetricPoints,
 } from '../api/hooks';
-import type { AlertRuleCreateRequest } from '../api/client';
+import type { AlertRule, AlertRuleCreateRequest } from '../api/client';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -33,6 +33,14 @@ const severityVariants = {
   warning: 'warning',
   info: 'info',
 } as const;
+
+// The severity of a rule: its old form, else its highest stage (WP-985).
+function ruleSeverity(rule: AlertRule): 'critical' | 'warning' | 'info' {
+  if (rule.severity) return rule.severity;
+  if (rule.critical_condition) return 'critical';
+  if (rule.warning_condition) return 'warning';
+  return 'info';
+}
 
 const initialAlertForm: AlertRuleCreateRequest = {
   name: '',
@@ -240,12 +248,14 @@ export function MonitoringPage() {
                       <td className={tdPrimaryClasses}>{rule.name}</td>
                       <td className={tdMonoClasses}>{rule.metric_name}</td>
                       <td className={`${tdClasses} whitespace-nowrap font-mono text-xs`}>
-                        {rule.condition === 'gt' ? '>' : rule.condition === 'lt' ? '<' : '='}{' '}
-                        {rule.threshold} ({rule.duration})
+                        {rule.condition
+                          ? `${rule.condition === 'gt' ? '>' : rule.condition === 'lt' ? '<' : '='} ${rule.threshold}`
+                          : 'AST'}{' '}
+                        ({rule.duration})
                       </td>
                       <td className={tdClasses}>
-                        <Badge variant={severityVariants[rule.severity] ?? 'neutral'}>
-                          {t(`monitoring.severity_${rule.severity}`)}
+                        <Badge variant={severityVariants[ruleSeverity(rule)] ?? 'neutral'}>
+                          {t(`monitoring.severity_${ruleSeverity(rule)}`)}
                         </Badge>
                       </td>
                       <td className={tdClasses}>

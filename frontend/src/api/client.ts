@@ -2,6 +2,7 @@ import { clearSession, getSessionToken, refreshSession } from '../auth/session';
 import { useScopeStore } from '../stores/scope';
 import { useMetamodelDraftStore } from '../stores/metamodelDraft';
 import type { components } from './generated/schema';
+import type { Condition } from '../rules/rules';
 
 const API_BASE = '/api/v1';
 
@@ -3050,28 +3051,57 @@ export interface MetricQueryParams {
   step?: string;
 }
 
+/**
+ * A stage or the clear condition of an alert rule (WP-985): a MET-45
+ * condition over the metric context of a series (value, avg, max, min,
+ * delta, rate); null is no condition.
+ */
+export type AlertRuleCondition = Condition | null;
+
 export interface AlertRule {
   id: string;
   org_id: string;
   name: string;
   metric_name: string;
-  condition: 'gt' | 'lt' | 'eq';
-  threshold: number;
+  /** @deprecated Old form, only for a rule with one stage comparing value. */
+  condition?: 'gt' | 'lt' | 'eq';
+  /** @deprecated Old form, with condition. */
+  threshold?: number;
   duration: string;
-  severity: 'critical' | 'warning' | 'info';
+  /** @deprecated Old form, with condition. */
+  severity?: 'critical' | 'warning' | 'info';
   enabled: boolean;
-  pending_since?: string;
-  last_fired_at?: string;
+  critical_condition: AlertRuleCondition;
+  warning_condition: AlertRuleCondition;
+  info_condition: AlertRuleCondition;
+  clear_condition: AlertRuleCondition;
+  eval_window: string;
+  scope?: {
+    ci_ids?: string[];
+    ci_type_ids?: string[];
+    client_id?: string;
+    site_id?: string;
+    labels?: Record<string, string>;
+  };
+  group_by?: string[];
 }
 
 export interface AlertRuleCreateRequest {
   name: string;
   metric_name: string;
-  condition: 'gt' | 'lt' | 'eq';
-  threshold: number;
+  /** @deprecated Use the stages; the old form becomes the stage of severity. */
+  condition?: 'gt' | 'lt' | 'eq';
+  /** @deprecated Use the stages. */
+  threshold?: number;
   duration?: string;
+  /** @deprecated Use the stages. */
   severity?: 'critical' | 'warning' | 'info';
   enabled?: boolean;
+  critical_condition?: AlertRuleCondition;
+  warning_condition?: AlertRuleCondition;
+  info_condition?: AlertRuleCondition;
+  clear_condition?: AlertRuleCondition;
+  eval_window?: string;
 }
 
 export interface CIMetricSeries {

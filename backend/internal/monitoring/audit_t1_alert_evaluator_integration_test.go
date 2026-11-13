@@ -46,8 +46,10 @@ func TestAuditT1AlertEvaluatorPerOrganization(t *testing.T) {
 	rules := map[string]string{}
 	for _, org := range []string{f.OrgA, f.OrgB} {
 		var id string
-		if err := f.Admin.QueryRow(bg, `INSERT INTO alert_rule (organization_id, name, metric_name, condition, threshold, duration)
-			VALUES ($1, 't1-alert', 't1_alert_metric', 'gt', 50, '0 seconds') RETURNING id::text`, org).Scan(&id); err != nil {
+		if err := f.Admin.QueryRow(bg, `INSERT INTO alert_rule (organization_id, name, metric_name, condition, threshold, severity, duration,
+			                        warning_condition)
+			VALUES ($1, 't1-alert', 't1_alert_metric', 'gt', 50, 'warning', '0 seconds',
+			        '{"op":"gt","field":"value","value":50}') RETURNING id::text`, org).Scan(&id); err != nil {
 			t.Fatalf("seed rule: %v", err)
 		}
 		rules[org] = id

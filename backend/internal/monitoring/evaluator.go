@@ -13,10 +13,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 )
 
@@ -227,7 +229,8 @@ func ValidateGroupBy(groupBy []string) error {
 	return nil
 }
 
-// SeriesQuery selects the latest sample of every series of a rule.
+// SeriesQuery selects the latest sample of every series of a rule and its
+// metric context over Window.
 type SeriesQuery struct {
 	OrgID   string
 	Name    string
@@ -235,19 +238,25 @@ type SeriesQuery struct {
 	To      time.Time
 	Scope   RuleScope
 	GroupBy []string
+	// Window is the window of the metric context (eval_window, WP-985): the
+	// samples of a series from its latest sample back by Window (inside
+	// From..To); 0 is the latest sample alone.
+	Window time.Duration
 }
 
 // SeriesPoint is the latest sample of a series: its CI, the values of the
-// group_by labels it has, and the sample.
+// group_by labels it has, the sample and the metric context of the window.
 type SeriesPoint struct {
 	CIID      string
 	Labels    map[string]string
 	Timestamp time.Time
 	Value     float64
+	// Context aggregates the samples of the window (WP-985).
+	Context SeriesContext
 }
 
-// SeriesStore reads the latest sample of every series (PGMetricStore,
-// MemoryMetricStore).
+// SeriesStore reads the latest sample and the metric context of every
+// series in one query (PGMetricStore, MemoryMetricStore).
 type SeriesStore interface {
 	LatestBySeries(ctx context.Context, q *SeriesQuery) ([]SeriesPoint, error)
 }
@@ -293,6 +302,9 @@ type RuleAlarm struct {
 type ActiveAlarm struct {
 	State       string
 	FirstSeenAt time.Time
+	// Severity is the severity of the alarm (WP-985: a higher stage raises
+	// it, a lower one does not lower it).
+	Severity string
 }
 
 // Alarm states the evaluator reads.
@@ -311,32 +323,65 @@ type AlarmSink interface {
 	Clear(ctx context.Context, orgID, ruleID, seriesKey string, at time.Time, reason string) error
 }
 
-// conditionMet reports whether value satisfies the rule condition.
-func conditionMet(condition string, value, threshold float64) bool {
-	switch condition {
-	case "gt":
-		return value > threshold
-	case "lt":
-		return value < threshold
-	case "eq":
-		return value == threshold
-	}
-	return false
+// FeatureChecker reports whether an organization has a feature
+// (*entitlement.Service). Check separates "not entitled" (ok false, err
+// nil) from a failed lookup (err): only the first resolves the alarms of a
+// rule; a failed lookup skips the rule for the run so a short outage of
+// the entitlement store does not resolve and reopen every alarm.
+type FeatureChecker interface {
+	Check(ctx context.Context, orgID, featureKey string) (entitlement.Entitlement, bool, error)
 }
+
+// ThresholdFeature is the feature of the threshold rules (E-151,
+// WP-865): monitoring_network from pro on.
+func ThresholdFeature() string {
+	f, err := entitlement.SubFunctionFeature(entitlement.SubFunctionThresholds)
+	if err != nil {
+		// The sub-function is a constant of the entitlement package; the
+		// fallback is the feature of E-151.
+		return entitlement.FeatureMonitoringNetwork
+	}
+	return f
+}
+
+// ClearReasonNotEntitled resolves the alarms of a rule of an organization
+// without ThresholdFeature (a downgrade): the rule stays stored but raises
+// nothing.
+const ClearReasonNotEntitled = "not_entitled"
 
 // Evaluator evaluates the enabled alert rules per series on a ticker.
 type Evaluator struct {
-	series SeriesStore
-	alerts AlertStore
-	sink   AlarmSink
+	series   SeriesStore
+	alerts   AlertStore
+	sink     AlarmSink
+	features FeatureChecker
+	// escalations hold since when a higher stage than the severity of the
+	// open alarm of a series holds (by dedup key), for the duration of the
+	// stage; lost on a restart, which only delays the escalation.
+	mu          sync.Mutex
+	escalations map[string]escalation
 	// Now is overridable for tests.
 	Now func() time.Time
+}
+
+// escalation is a higher stage of an open alarm and since when it holds.
+type escalation struct {
+	severity string
+	since    time.Time
 }
 
 // NewEvaluator builds an evaluator over the series of series, the rules of
 // alerts and the alarm lifecycle sink.
 func NewEvaluator(series SeriesStore, alerts AlertStore, sink AlarmSink) *Evaluator {
-	return &Evaluator{series: series, alerts: alerts, sink: sink, Now: time.Now}
+	return &Evaluator{series: series, alerts: alerts, sink: sink, Now: time.Now, escalations: map[string]escalation{}}
+}
+
+// WithFeatures gates the rules by ThresholdFeature (E-151, AK8 of WP-985):
+// the rules of an organization without it are not evaluated. Without a
+// checker (--no-db, tests) every rule is evaluated.
+func (e *Evaluator) WithFeatures(features FeatureChecker) *Evaluator {
+	e.features = features
+	return e
 }
 
 // HealthRefresher recomputes ci.health from the monitoring state (DB-05).
@@ -425,11 +470,41 @@ func (e *Evaluator) Evaluate(ctx context.Context) {
 		slog.Error("alert evaluation: list rules failed", "error", err)
 		return
 	}
+	type gate struct {
+		ok  bool
+		err error
+	}
+	entitled := map[string]gate{}
 	for i := range rules {
 		if ctx.Err() != nil {
 			return
 		}
 		rule := &rules[i]
+		if e.features != nil {
+			g, seen := entitled[rule.OrgID]
+			if !seen {
+				_, g.ok, g.err = e.features.Check(ctx, rule.OrgID, ThresholdFeature())
+				entitled[rule.OrgID] = g
+			}
+			if g.err != nil {
+				// Unknown, not a downgrade: the rule is skipped this run
+				// and its alarms stay as they are.
+				failures++
+				slog.Error("alert evaluation: entitlement lookup failed, rule skipped",
+					"rule_id", rule.ID, "organization_id", rule.OrgID, "error", g.err)
+				continue
+			}
+			if !g.ok {
+				// Stored, but no alarm (E-151); an alarm of the time before
+				// a downgrade is resolved.
+				if err := ResolveRuleAlarms(ctx, e.sink, rule.OrgID, rule.ID, ClearReasonNotEntitled); err != nil {
+					failures++
+					slog.Error("alert evaluation: resolve alarms of a rule without entitlement failed",
+						"rule_id", rule.ID, "organization_id", rule.OrgID, "error", err)
+				}
+				continue
+			}
+		}
 		if err := e.evaluateRule(ctx, rule); err != nil {
 			failures++
 			slog.Error("alert evaluation failed", "rule_id", rule.ID, "organization_id", rule.OrgID, "rule", rule.Name, "error", err)
@@ -441,30 +516,43 @@ func (e *Evaluator) Evaluate(ctx context.Context) {
 // (OPS-02/05).
 const evaluatorWorker = "monitoring"
 
-// evaluateRule evaluates a rule per series:
-//   - the condition holds and the series has no alarm: a pending alarm from
-//     the sample on (an open one at once for a rule without duration);
-//   - the condition holds in a sample taken at least duration after the
-//     start of the pending alarm: it opens (a single breaching sample that
-//     is seen again on later runs does not open it);
-//   - the condition does not hold: the alarm of the series is resolved;
+// evaluateRule evaluates a rule per series over the metric context of the
+// rule's eval_window (WP-985):
+//   - the first stage that holds (critical, warning, info) is the severity;
+//   - a stage holds and the series has no alarm: a pending alarm from the
+//     sample on (an open one at once for a rule without duration);
+//   - a stage holds in a sample taken at least duration after the start of
+//     the pending alarm: it opens (a single breaching sample that is seen
+//     again on later runs does not open it);
+//   - a higher stage than the severity of the open alarm that holds for the
+//     duration raises it (severity_changed); a lower one does not lower it;
+//   - no stage holds: a pending alarm is resolved, an open one only when the
+//     clear condition holds (hysteresis), without one at once;
 //   - an alarm whose series has no sample in the window any more (or left
 //     the scope) is resolved as well (no_data).
 //
 // Each change happens once per series: an open alarm stays as it is while
-// the condition holds.
+// its stage holds.
 func (e *Evaluator) evaluateRule(ctx context.Context, rule *AlertRule) error {
 	if e.sink == nil {
 		return errors.New("no alarm sink")
+	}
+	stages, err := rule.stages()
+	if err != nil {
+		return err
 	}
 	// The evaluator runs outside a request and reads the metrics of the
 	// rule's organization org-wide (E-08).
 	scope := database.OrgWideScope(rule.OrgID, "")
 	ctx = database.ContextWithTenantScope(ctx, &scope)
 	now := e.Now().UTC()
+	lookback := rule.Duration + SeriesLookbackGrace
+	if rule.EvalWindow > lookback {
+		lookback = rule.EvalWindow
+	}
 	points, err := e.series.LatestBySeries(ctx, &SeriesQuery{
-		OrgID: rule.OrgID, Name: rule.MetricName, From: now.Add(-(rule.Duration + SeriesLookbackGrace)), To: now,
-		Scope: rule.Scope, GroupBy: rule.GroupBy,
+		OrgID: rule.OrgID, Name: rule.MetricName, From: now.Add(-lookback), To: now,
+		Scope: rule.Scope, GroupBy: rule.GroupBy, Window: rule.EvalWindow,
 	})
 	if err != nil {
 		return err
@@ -480,8 +568,11 @@ func (e *Evaluator) evaluateRule(ctx context.Context, rule *AlertRule) error {
 		key := SeriesKey(p.CIID, rule.GroupBy, p.Labels)
 		seen[key] = true
 		cur, has := active[key]
-		if !conditionMet(rule.Condition, p.Value, rule.Threshold) {
-			if has {
+		values := p.Context.Values()
+		severity := stages.match(values)
+		if severity == "" {
+			e.forgetEscalation(rule.ID, key)
+			if has && (cur.State == AlarmPending || stages.clears(values)) {
 				errs = append(errs, e.sink.Clear(ctx, rule.OrgID, rule.ID, key, now, ClearReasonCleared))
 			}
 			continue
@@ -490,35 +581,76 @@ func (e *Evaluator) evaluateRule(ctx context.Context, rule *AlertRule) error {
 		case !has:
 			// The breach starts with the sample; a rule with a duration
 			// pends first and opens on a later run.
-			errs = append(errs, e.sink.Raise(ctx, rule.OrgID, ruleAlarm(rule, key, p, rule.Duration > 0, p.Timestamp)))
-		case cur.State == AlarmPending && !p.Timestamp.Before(cur.FirstSeenAt.Add(rule.Duration)):
+			errs = append(errs, e.sink.Raise(ctx, rule.OrgID, ruleAlarm(rule, key, p, severity, rule.Duration > 0, p.Timestamp)))
+		case cur.State == AlarmPending:
 			// A sample at least duration after the start of the breach
 			// confirms it; the same stale sample seen on every run does not.
-			errs = append(errs, e.sink.Raise(ctx, rule.OrgID, ruleAlarm(rule, key, p, false, now)))
+			if !p.Timestamp.Before(cur.FirstSeenAt.Add(rule.Duration)) {
+				errs = append(errs, e.sink.Raise(ctx, rule.OrgID, ruleAlarm(rule, key, p, severity, false, now)))
+			}
+		case severityRank(severity) > severityRank(cur.Severity):
+			if e.escalationDue(rule, key, severity, p.Timestamp) {
+				errs = append(errs, e.sink.Raise(ctx, rule.OrgID, ruleAlarm(rule, key, p, severity, false, now)))
+				e.forgetEscalation(rule.ID, key)
+			}
+		default:
+			e.forgetEscalation(rule.ID, key)
 		}
 	}
 	for key := range active {
 		if !seen[key] {
+			e.forgetEscalation(rule.ID, key)
 			errs = append(errs, e.sink.Clear(ctx, rule.OrgID, rule.ID, key, now, ClearReasonNoData))
 		}
 	}
 	return errors.Join(errs...)
 }
 
+// escalationDue reports whether the higher stage severity of the open alarm
+// of a series has held for the duration of the rule at the sample time at.
+func (e *Evaluator) escalationDue(rule *AlertRule, key, severity string, at time.Time) bool {
+	if rule.Duration <= 0 {
+		return true
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	id := RuleDedupKey(rule.ID, key)
+	cur, ok := e.escalations[id]
+	if !ok || cur.severity != severity {
+		e.escalations[id] = escalation{severity: severity, since: at}
+		return false
+	}
+	return !at.Before(cur.since.Add(rule.Duration))
+}
+
+// forgetEscalation drops the pending escalation of a series.
+func (e *Evaluator) forgetEscalation(ruleID, key string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	delete(e.escalations, RuleDedupKey(ruleID, key))
+}
+
 // maxSummary is the longest summary of an alarm (alarm.SummaryMaxLen).
 const maxSummary = 500
 
-// ruleAlarm is the alarm of the series key of a rule for the sample p.
-func ruleAlarm(rule *AlertRule, key string, p *SeriesPoint, pending bool, at time.Time) *RuleAlarm {
-	summary := fmt.Sprintf("%s: %s %s %g (value %g)", rule.Name, rule.MetricName, rule.Condition, rule.Threshold, p.Value)
+// ruleAlarm is the alarm of the series key of a rule for the sample p in
+// the stage severity.
+func ruleAlarm(rule *AlertRule, key string, p *SeriesPoint, severity string, pending bool, at time.Time) *RuleAlarm {
+	summary := fmt.Sprintf("%s: %s %s (value %g)", rule.Name, rule.MetricName, severity, p.Value)
 	if r := []rune(summary); len(r) > maxSummary {
 		summary = string(r[:maxSummary])
 	}
+	details := map[string]any{"value": p.Value, "stage": severity, "metric_name": rule.MetricName,
+		"rule_id": rule.ID, "rule_name": rule.Name, "context": p.Context.Values()}
+	if raw := *rule.conditionOf(stageField(severity)); !isNull(raw) {
+		details["condition"] = raw
+	}
+	if rule.Condition != "" {
+		details["threshold"] = rule.Threshold
+	}
 	return &RuleAlarm{
-		RuleID: rule.ID, SeriesKey: key, CIID: p.CIID, Labels: p.Labels, Severity: rule.Severity, Summary: summary,
-		Details: map[string]any{"value": p.Value, "threshold": rule.Threshold, "condition": rule.Condition,
-			"metric_name": rule.MetricName, "rule_id": rule.ID, "rule_name": rule.Name},
-		Pending: pending, ObservedAt: at,
+		RuleID: rule.ID, SeriesKey: key, CIID: p.CIID, Labels: p.Labels, Severity: severity, Summary: summary,
+		Details: details, Pending: pending, ObservedAt: at,
 	}
 }
 
@@ -529,7 +661,11 @@ func (s *MemoryMetricStore) LatestBySeries(ctx context.Context, q *SeriesQuery) 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	type seriesID struct{ ci, labels string }
-	latest := map[seriesID]SeriesPoint{}
+	type series struct {
+		point   SeriesPoint
+		samples []timedValue
+	}
+	all := map[seriesID]*series{}
 	for i := range s.metrics {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -548,13 +684,30 @@ func (s *MemoryMetricStore) LatestBySeries(ctx context.Context, q *SeriesQuery) 
 			}
 		}
 		id := seriesID{ci: m.CIID, labels: SeriesKey("", q.GroupBy, labels)}
-		if cur, ok := latest[id]; !ok || m.Timestamp.After(cur.Timestamp) {
-			latest[id] = SeriesPoint{CIID: m.CIID, Labels: labels, Timestamp: m.Timestamp.UTC(), Value: m.Value}
+		cur, ok := all[id]
+		if !ok {
+			cur = &series{}
+			all[id] = cur
+		}
+		cur.samples = append(cur.samples, timedValue{at: m.Timestamp.UTC(), value: m.Value})
+		if !ok || m.Timestamp.After(cur.point.Timestamp) {
+			cur.point = SeriesPoint{CIID: m.CIID, Labels: labels, Timestamp: m.Timestamp.UTC(), Value: m.Value}
 		}
 	}
-	out := make([]SeriesPoint, 0, len(latest))
-	for _, p := range latest {
-		out = append(out, p)
+	out := make([]SeriesPoint, 0, len(all))
+	for _, sr := range all {
+		sort.SliceStable(sr.samples, func(i, j int) bool { return sr.samples[i].at.Before(sr.samples[j].at) })
+		from := sr.point.Timestamp.Add(-q.Window)
+		window := make([]timedValue, 0, len(sr.samples))
+		for _, v := range sr.samples {
+			if !v.at.Before(from) {
+				window = append(window, v)
+			}
+		}
+		sr.point.Context = contextOf(window)
+		// The latest sample is the value of the context, also on a tie.
+		sr.point.Context.Value = sr.point.Value
+		out = append(out, sr.point)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].CIID != out[j].CIID {

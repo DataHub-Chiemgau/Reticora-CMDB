@@ -201,7 +201,7 @@
       }
     },
     "condition": {
-      "description": "A condition (WP-715): true or false for the values of a record.",
+      "description": "A condition (WP-715): true or false for the values of a record. The field names are free; each user names its fields. Alerting rules (MON-04, ALR-05, WP-985) evaluate their stages (critical_condition, warning_condition, info_condition) and their clear_condition over the metric context of a series in the eval_window of the rule: value (latest value), avg, max and min (of the values in the window), delta (latest minus first value) and rate (increase per second over the window; a drop of the value is a counter reset from which the new value counts, so the rate is never negative; absent for a window of one sample). Other fields are refused there.",
       "oneOf": [
         { "$ref": "#/$defs/condition_all" },
         { "$ref": "#/$defs/any" },

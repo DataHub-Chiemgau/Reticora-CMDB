@@ -52,17 +52,31 @@ type MetricPoint struct {
 	Value     float64   `json:"value"`
 }
 
-// AlertRule describes a threshold-based alert.
+// AlertRule describes a threshold-based alert. Its stages (critical,
+// warning, info) and its clear condition are MET-45 conditions over the
+// metric context of a series (WP-985, threshold.go); Condition, Threshold
+// and Severity are the deprecated old form, set only for a rule that can be
+// expressed so (one stage comparing value, no clear condition).
 type AlertRule struct {
-	ID         string        `json:"id"`
-	OrgID      string        `json:"org_id"`
-	Name       string        `json:"name"`
-	MetricName string        `json:"metric_name"`
-	Condition  string        `json:"condition"`
-	Threshold  float64       `json:"threshold"`
-	Duration   time.Duration `json:"duration"`
-	Severity   string        `json:"severity"`
-	Enabled    bool          `json:"enabled"`
+	ID         string `json:"id"`
+	OrgID      string `json:"org_id"`
+	Name       string `json:"name"`
+	MetricName string `json:"metric_name"`
+	// Condition, Threshold and Severity: the old form (empty Condition: none).
+	Condition string        `json:"condition,omitempty"`
+	Threshold float64       `json:"threshold,omitempty"`
+	Duration  time.Duration `json:"duration"`
+	Severity  string        `json:"severity,omitempty"`
+	Enabled   bool          `json:"enabled"`
+	// CriticalCondition, WarningCondition and InfoCondition are the stages
+	// (nil: the rule has not this stage); ClearCondition resolves an open
+	// alarm (nil: once no stage holds).
+	CriticalCondition json.RawMessage `json:"critical_condition"`
+	WarningCondition  json.RawMessage `json:"warning_condition"`
+	InfoCondition     json.RawMessage `json:"info_condition"`
+	ClearCondition    json.RawMessage `json:"clear_condition"`
+	// EvalWindow is the window of the metric context (0 to 24 hours).
+	EvalWindow time.Duration `json:"eval_window"`
 	// Scope selects the CIs the rule applies to (ALR-05, WP-984); empty is
 	// every CI of the organization.
 	Scope RuleScope `json:"scope"`
@@ -97,12 +111,20 @@ type AlertStore interface {
 // pointers leave the stored value untouched, so a PATCH can toggle a single
 // field (typically enabled) without resending the whole rule.
 type UpdateAlertRuleRequest struct {
-	Name      *string  `json:"name"`
+	Name *string `json:"name"`
+	// Condition, Threshold and Severity are the deprecated old form; they
+	// replace the stages of a rule by the stage of the severity.
 	Condition *string  `json:"condition"`
 	Threshold *float64 `json:"threshold"`
 	Duration  *string  `json:"duration"`
 	Severity  *string  `json:"severity"`
 	Enabled   *bool    `json:"enabled"`
+	// The stages and the clear condition: absent keeps, null removes.
+	CriticalCondition json.RawMessage `json:"critical_condition"`
+	WarningCondition  json.RawMessage `json:"warning_condition"`
+	InfoCondition     json.RawMessage `json:"info_condition"`
+	ClearCondition    json.RawMessage `json:"clear_condition"`
+	EvalWindow        *string         `json:"eval_window"`
 	// Scope replaces the scope of the rule (ParseRuleScope); GroupBy the
 	// label keys of its series.
 	Scope   json.RawMessage `json:"scope"`
@@ -111,57 +133,85 @@ type UpdateAlertRuleRequest struct {
 	ParsedScope *RuleScope `json:"-"`
 }
 
-// MarshalJSON encodes duration values as Go duration strings.
+// MarshalJSON encodes duration values as Go duration strings; the old form
+// (condition, threshold, severity) only for a rule that has it.
 func (r AlertRule) MarshalJSON() ([]byte, error) { //nolint:gocritic // value receiver: json.Marshal of values and pointers
 	type alias AlertRule
 	if r.GroupBy == nil {
 		r.GroupBy = []string{}
 	}
-	return json.Marshal(struct {
+	out := struct {
 		alias
-		Duration string `json:"duration"`
+		Threshold  *float64 `json:"threshold,omitempty"`
+		Duration   string   `json:"duration"`
+		EvalWindow string   `json:"eval_window"`
 	}{
-		alias:    alias(r),
-		Duration: r.Duration.String(),
-	})
+		alias:      alias(r),
+		Duration:   r.Duration.String(),
+		EvalWindow: r.EvalWindow.String(),
+	}
+	if r.Condition != "" {
+		threshold := r.Threshold
+		out.Threshold = &threshold
+	}
+	return json.Marshal(out)
 }
 
-// UnmarshalJSON accepts duration values as a string or nanoseconds.
+// parseDurationValue reads a duration given as a Go duration string or as
+// nanoseconds; nil is def.
+// validation: fixed texts naming the field.
+func parseDurationValue(field string, value any, def, maxValue time.Duration) (time.Duration, error) {
+	switch v := value.(type) {
+	case nil:
+		return def, nil
+	case string:
+		parsed, err := time.ParseDuration(v)
+		if err != nil {
+			return 0, fmt.Errorf("invalid %s: %w", field, err)
+		}
+		return parsed, nil
+	case float64:
+		if v < 0 || v > float64(maxValue) {
+			return 0, &api.FieldError{Field: field, Message: "must be between 0s and " + maxValue.String(),
+				Status: http.StatusUnprocessableEntity}
+		}
+		return time.Duration(v), nil
+	}
+	return 0, errors.New(field + " must be a string or number")
+}
+
+// UnmarshalJSON accepts duration values as a string or nanoseconds; a rule
+// without eval_window gets DefaultEvalWindow.
 func (r *AlertRule) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		ID         string          `json:"id"`
-		OrgID      string          `json:"org_id"`
-		Name       string          `json:"name"`
-		MetricName string          `json:"metric_name"`
-		Condition  string          `json:"condition"`
-		Threshold  float64         `json:"threshold"`
-		Duration   interface{}     `json:"duration"`
-		Severity   string          `json:"severity"`
-		Enabled    bool            `json:"enabled"`
-		Scope      json.RawMessage `json:"scope"`
-		GroupBy    []string        `json:"group_by"`
+		ID                string          `json:"id"`
+		OrgID             string          `json:"org_id"`
+		Name              string          `json:"name"`
+		MetricName        string          `json:"metric_name"`
+		Condition         string          `json:"condition"`
+		Threshold         float64         `json:"threshold"`
+		Duration          interface{}     `json:"duration"`
+		Severity          string          `json:"severity"`
+		Enabled           bool            `json:"enabled"`
+		CriticalCondition json.RawMessage `json:"critical_condition"`
+		WarningCondition  json.RawMessage `json:"warning_condition"`
+		InfoCondition     json.RawMessage `json:"info_condition"`
+		ClearCondition    json.RawMessage `json:"clear_condition"`
+		EvalWindow        interface{}     `json:"eval_window"`
+		Scope             json.RawMessage `json:"scope"`
+		GroupBy           []string        `json:"group_by"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
 
-	var duration time.Duration
-	switch value := raw.Duration.(type) {
-	case nil:
-		duration = 0
-	case string:
-		parsed, err := time.ParseDuration(value)
-		if err != nil {
-			return fmt.Errorf("invalid duration: %w", err)
-		}
-		duration = parsed
-	case float64:
-		if value < 0 || value > float64(MaxAlertDuration) {
-			return durationRangeError()
-		}
-		duration = time.Duration(value)
-	default:
-		return errors.New("duration must be a string or number")
+	duration, err := parseDurationValue("duration", raw.Duration, 0, MaxAlertDuration)
+	if err != nil {
+		return err
+	}
+	window, err := parseDurationValue("eval_window", raw.EvalWindow, DefaultEvalWindow, MaxEvalWindow)
+	if err != nil {
+		return err
 	}
 
 	scope, err := ParseRuleScope(raw.Scope)
@@ -169,17 +219,22 @@ func (r *AlertRule) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*r = AlertRule{
-		ID:         raw.ID,
-		OrgID:      raw.OrgID,
-		Name:       raw.Name,
-		MetricName: raw.MetricName,
-		Condition:  raw.Condition,
-		Threshold:  raw.Threshold,
-		Duration:   duration,
-		Severity:   raw.Severity,
-		Enabled:    raw.Enabled,
-		Scope:      scope,
-		GroupBy:    raw.GroupBy,
+		ID:                raw.ID,
+		OrgID:             raw.OrgID,
+		Name:              raw.Name,
+		MetricName:        raw.MetricName,
+		Condition:         raw.Condition,
+		Threshold:         raw.Threshold,
+		Duration:          duration,
+		Severity:          raw.Severity,
+		Enabled:           raw.Enabled,
+		CriticalCondition: raw.CriticalCondition,
+		WarningCondition:  raw.WarningCondition,
+		InfoCondition:     raw.InfoCondition,
+		ClearCondition:    raw.ClearCondition,
+		EvalWindow:        window,
+		Scope:             scope,
+		GroupBy:           raw.GroupBy,
 	}
 	return nil
 }
@@ -225,6 +280,9 @@ func (m *AlertManager) CreateRule(_ context.Context, in *AlertRule) (AlertRule, 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	rule := *in
+	if err := normalizeRule(&rule); err != nil {
+		return AlertRule{}, err
+	}
 
 	if rule.ID == "" {
 		rule.ID = fmt.Sprintf("alert-%d", time.Now().UTC().UnixNano())
@@ -248,33 +306,8 @@ func (m *AlertManager) UpdateRule(_ context.Context, orgID, id string, req *Upda
 			continue
 		}
 		rule := m.rules[i]
-		if req.Name != nil {
-			rule.Name = *req.Name
-		}
-		if req.Condition != nil {
-			rule.Condition = *req.Condition
-		}
-		if req.Threshold != nil {
-			rule.Threshold = *req.Threshold
-		}
-		if req.Duration != nil {
-			d, err := time.ParseDuration(*req.Duration)
-			if err != nil {
-				return AlertRule{}, fmt.Errorf("invalid duration %q: %w", *req.Duration, err)
-			}
-			rule.Duration = d
-		}
-		if req.Severity != nil {
-			rule.Severity = *req.Severity
-		}
-		if req.Enabled != nil {
-			rule.Enabled = *req.Enabled
-		}
-		if req.ParsedScope != nil {
-			rule.Scope = *req.ParsedScope
-		}
-		if req.GroupBy != nil {
-			rule.GroupBy = append([]string{}, *req.GroupBy...)
+		if err := applyUpdate(&rule, req); err != nil {
+			return AlertRule{}, err
 		}
 		m.rules[i] = rule
 		return rule, nil
@@ -700,22 +733,6 @@ func (h *Handler) UpdateAlert(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	if req.Condition != nil {
-		switch *req.Condition {
-		case "gt", "lt", "eq":
-		default:
-			api.WriteError(w, http.StatusBadRequest, "Bad Request", "condition must be one of gt, lt or eq")
-			return
-		}
-	}
-	if req.Severity != nil {
-		switch *req.Severity {
-		case "critical", "warning", "info":
-		default:
-			api.WriteError(w, http.StatusBadRequest, "Bad Request", "severity must be one of critical, warning or info")
-			return
-		}
-	}
 	if req.Duration != nil {
 		d, err := time.ParseDuration(*req.Duration)
 		if err != nil {
@@ -906,8 +923,9 @@ func decodeJSON(body io.ReadCloser, dest any) error {
 }
 
 // validateAlertRule checks a new rule before it is stored: a 400 field error
-// for a missing or NUL-carrying text and an unknown condition or severity,
-// 422 for a duration out of range (API-03, F-047).
+// for a missing or NUL-carrying text, 422 for a duration out of range
+// (API-03, F-047) and for a refused stage, clear condition or old form
+// (normalizeRule, WP-985).
 func validateAlertRule(rule *AlertRule) error {
 	if strings.TrimSpace(rule.Name) == "" {
 		return &api.FieldError{Field: "name", Message: "is required"}
@@ -921,23 +939,13 @@ func validateAlertRule(rule *AlertRule) error {
 	if err := api.RejectNUL("metric_name", rule.MetricName); err != nil {
 		return err
 	}
-	switch rule.Condition {
-	case "gt", "lt", "eq":
-	default:
-		return &api.FieldError{Field: "condition", Message: "must be one of gt, lt or eq"}
-	}
-	if rule.Severity == "" {
-		rule.Severity = "warning"
-	}
-	switch rule.Severity {
-	case "critical", "warning", "info":
-	default:
-		return &api.FieldError{Field: "severity", Message: "must be one of critical, warning or info"}
-	}
 	if err := ValidateGroupBy(rule.GroupBy); err != nil {
 		return err
 	}
-	return checkAlertDuration(rule.Duration)
+	if err := checkAlertDuration(rule.Duration); err != nil {
+		return err
+	}
+	return normalizeRule(rule)
 }
 
 // checkAlertDuration refuses a duration outside 0..MaxAlertDuration (422).

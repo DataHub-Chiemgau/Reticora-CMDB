@@ -120,8 +120,10 @@ func TestLifecycleModelAndHealth(t *testing.T) {
 	healthy := f.CI(t, f.OrgA, "", "health-ok")
 	silent := f.CI(t, f.OrgA, "", "health-unknown")
 	stale := f.CI(t, f.OrgA, "", "health-stale")
-	if err := inTenant(`INSERT INTO alert_rule (organization_id, name, metric_name, condition, threshold, severity)
-		 VALUES ($1, 'cpu critical', 'cpu72', 'gt', 90, 'critical'), ($1, 'cpu warning', 'cpu72', 'gt', 50, 'warning')`,
+	if err := inTenant(`INSERT INTO alert_rule (organization_id, name, metric_name, condition, threshold, severity,
+		                         critical_condition, warning_condition)
+		 VALUES ($1, 'cpu critical', 'cpu72', 'gt', 90, 'critical', '{"op":"gt","field":"value","value":90}', NULL),
+		        ($1, 'cpu warning', 'cpu72', 'gt', 50, 'warning', NULL, '{"op":"gt","field":"value","value":50}')`,
 		f.OrgA); err != nil {
 		t.Fatal(err)
 	}
