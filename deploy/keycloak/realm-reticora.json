@@ -120,7 +120,8 @@
       "defaultClientScopes": [
         "profile",
         "email",
-        "acr"
+        "acr",
+        "basic"
       ],
       "protocolMappers": [
         {

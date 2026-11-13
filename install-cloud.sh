@@ -3444,8 +3444,9 @@ create_initial_admin() {
 # users, and `start --import-realm` skips an existing realm anyway.
 # ensure_admin_client creates it through the admin CLI (logged in by
 # create_initial_admin) on every run, before the server starts: missing
-# client, drifted settings, a secret that differs from .env and missing
-# roles are applied, an unchanged client is left alone. The secret travels
+# client, drifted settings, a secret that differs from .env, missing roles
+# and the missing default client scope kc-admin-api (Keycloak 26.8.2) are
+# applied, an unchanged client is left alone. The secret travels
 # only on kcadm's stdin (-f -) and in the environment of jq, never on a
 # command line or in the log.
 KC_ADMIN_CLIENT_ROLES=(manage-users view-users query-users)
@@ -3453,9 +3454,13 @@ KC_ADMIN_CLIENT_ROLES=(manage-users view-users query-users)
 # account only (no browser login, no password grant).
 KC_ADMIN_CLIENT_SPEC='{enabled: true, protocol: "openid-connect", publicClient: false, clientAuthenticatorType: "client-secret",
     serviceAccountsEnabled: true, standardFlowEnabled: false, implicitFlowEnabled: false, directAccessGrantsEnabled: false}'
+# The client scope that admits the client's tokens at the admin REST API
+# (Keycloak 26.8.2): a default client scope of the client.
+KC_ADMIN_API_SCOPE=kc-admin-api
 
 ensure_admin_client() {
     local id="$RETICORA_KEYCLOAK_ADMIN_CLIENT_ID" uuid current drift="" body field sa_id assigned role changed=0 missing=() args=()
+    local scope_id
     info "Ensuring the Keycloak admin client $id of the server (service account) …"
     uuid="$(kc_call get clients -r reticora -q clientId="$id" --fields id --format csv --noquotes </dev/null | head -n 1)" \
         || die "Could not look up the Keycloak client $id ($KC_ROTATION_TROUBLESHOOTING)."
@@ -3510,8 +3515,26 @@ ensure_admin_client() {
         success "Keycloak: service account of $id holds realm-management ${missing[*]}"
         changed=1
     fi
+
+    # Keycloak 26.8.2 admits a token at the admin REST API only with the
+    # audience and scope of the client scope kc-admin-api (audience check of
+    # the admin API, on by default); Keycloak gives that scope to admin-cli
+    # and security-admin-console only. Without it every admin call of the
+    # server answers 401 (self-signup, invitations, MFA binding).
+    scope_id="$(kc_call get client-scopes -r reticora --fields id,name </dev/null \
+        | jq -r --arg n "$KC_ADMIN_API_SCOPE" '[.[] | select(.name == $n) | .id] | first // empty')" \
+        || die "Could not read the client scopes of the Keycloak realm ($KC_ROTATION_TROUBLESHOOTING)."
+    [ -n "$scope_id" ] \
+        || die "The Keycloak realm has no client scope $KC_ADMIN_API_SCOPE, which Keycloak 26.8.2 creates in every realm ($KC_ROTATION_TROUBLESHOOTING)."
+    if ! kc_call get "clients/$uuid/default-client-scopes" -r reticora </dev/null \
+        | jq -e --arg s "$scope_id" 'any(.[]; .id == $s)' >/dev/null; then
+        kc_call update "clients/$uuid/default-client-scopes/$scope_id" -r reticora </dev/null >/dev/null \
+            || die "Could not add the default client scope $KC_ADMIN_API_SCOPE to the client $id ($KC_ROTATION_TROUBLESHOOTING)."
+        success "Keycloak: client $id has the default client scope $KC_ADMIN_API_SCOPE (admin REST API)"
+        changed=1
+    fi
     [ "$changed" -eq 1 ] \
-        || success "Keycloak admin client $id matches the configuration (service account: realm-management ${KC_ADMIN_CLIENT_ROLES[*]})"
+        || success "Keycloak admin client $id matches the configuration (service account: realm-management ${KC_ADMIN_CLIENT_ROLES[*]}, scope $KC_ADMIN_API_SCOPE)"
 }
 
 # apply_realm_smtp — gives the central SMTP server to the realm 'reticora'

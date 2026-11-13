@@ -54,7 +54,12 @@ after the initial administrator and before the server starts
 - the service account `service-account-reticora-server-admin` holds the
   client roles `manage-users`, `view-users` and `query-users` of
   `realm-management`; missing ones are added, drifted client settings are
-  reset, an unchanged client is not written.
+  reset, an unchanged client is not written;
+- the client has the default client scope `kc-admin-api`: Keycloak 26.8.2
+  accepts a token at the admin REST API only with its audience and scope
+  and gives it to `admin-cli` and `security-admin-console` only; without it
+  every admin call of the server answers 401 (self-signup
+  `keycloak: create user: status 401`, MFA binding at the sign-in).
 
 The realm files do not carry the client: the production realm ships without
 users (the service account is one), and `start --import-realm` skips an
@@ -153,6 +158,13 @@ Changes of the version that the compose file carries:
 - `/health/ready` is served on the management port 9000, not on 8080; the
   compose healthcheck probes 9000 inside the container (the port is not
   published).
+- The claims `sub` and `auth_time` of the access token come from the client
+  scope `basic` (Keycloak 25). The migration gives it to every existing
+  client; the realm file lists it among the default client scopes of
+  `reticora-app`, so a fresh installation issues the same tokens.
+- The admin REST API accepts only tokens with the client scope
+  `kc-admin-api` (Keycloak 26.8.2); the installer adds it to the server's
+  admin client (see Server admin client and realm SMTP).
 
 ## Policies (AUT-09, CH26)
 

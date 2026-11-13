@@ -4,7 +4,7 @@
 # E2E suite (WP-200):
 #   1. creates the confidential Keycloak client whose service account creates
 #      the accounts of self-signups (realm-management: manage-users,
-#      view-users, query-users),
+#      view-users, query-users; default client scope kc-admin-api),
 #   2. applies docker-compose.e2e.yml (mail catcher, signup configuration)
 #      and waits until the server answers again,
 #   3. builds the collector the suite enrolls (simulated fleet, SIM-02).
@@ -63,6 +63,12 @@ api -X POST "$kc/admin/realms/$realm/clients" -d "$(jq -n --arg id "$client_id" 
     clientAuthenticatorType: "client-secret", secret: $secret,
     serviceAccountsEnabled: true, standardFlowEnabled: false, directAccessGrantsEnabled: false}')"
 client_uuid=$(api "$kc/admin/realms/$realm/clients?clientId=$client_id" | jq -r '.[0].id')
+# Keycloak 26.8.2 admits a token at the admin REST API only with the client
+# scope kc-admin-api (audience and scope), which a new client does not get
+# by default; the installer's ensure_admin_client does the same.
+admin_scope=$(api "$kc/admin/realms/$realm/client-scopes" | jq -r '[.[] | select(.name == "kc-admin-api") | .id] | first // empty')
+[ -n "$admin_scope" ] || { echo "FAIL: the realm $realm has no client scope kc-admin-api"; exit 1; }
+api -X PUT "$kc/admin/realms/$realm/clients/$client_uuid/default-client-scopes/$admin_scope"
 service_user=$(api "$kc/admin/realms/$realm/clients/$client_uuid/service-account-user" | jq -r .id)
 rm_uuid=$(api "$kc/admin/realms/$realm/clients?clientId=realm-management" | jq -r '.[0].id')
 roles=$(api "$kc/admin/realms/$realm/clients/$rm_uuid/roles" |

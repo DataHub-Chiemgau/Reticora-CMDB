@@ -19,7 +19,9 @@
 #      version (26) on the database of step 1 with
 #      `start --import-realm` and the current realm export. Confirms F-061:
 #      Keycloak skips the existing realm, password policy, browser flow and
-#      groups stay those of step 1 (the observed state is printed);
+#      groups stay those of step 1 (the observed state is printed); the
+#      database migration of Keycloak only adds the default client scope
+#      basic to the clients;
 #   3. upgrade with the installer (configure_realm, keycloak up,
 #      validate_keycloak_bootstrap, create_initial_admin with
 #      apply_realm_settings): password policy, lockout, browser flow
@@ -241,8 +243,17 @@ export_realm "$TMP_ROOT/import.json"
 # grep reads the whole log: with pipefail, grep -q would end the pipe at the
 # first match and fail the check through SIGPIPE of compose logs.
 import_skipped() { compose logs keycloak 2>&1 | grep -F "Realm 'reticora' already exists. Import skipped" >/dev/null; }
+# The only change of step 2 is Keycloak's own database migration: its
+# migration to 25 gives every client the default client scope basic (the
+# claims sub and auth_time of the access token); --import-realm changes
+# nothing (F-061).
 unchanged_by_import() {
-    [ -n "$(settings "$TMP_ROOT/legacy.json")" ] && [ "$(settings "$TMP_ROOT/legacy.json")" = "$(settings "$TMP_ROOT/import.json")" ]
+    local want
+    want="$(settings "$TMP_ROOT/legacy.json" | jq -S '.default_scopes = ((.default_scopes + ["basic"]) | unique)')"
+    [ -n "$want" ] && [ "$want" = "$(settings "$TMP_ROOT/import.json")" ] || {
+        diff <(printf '%s\n' "$want") <(settings "$TMP_ROOT/import.json") | head -n 20
+        return 1
+    }
 }
 check "F-061: Keycloak skips the existing realm (\"Realm 'reticora' already exists. Import skipped\")" import_skipped
 check "F-061: password policy, browser flow and groups unchanged by --import-realm" unchanged_by_import
