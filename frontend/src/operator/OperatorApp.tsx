@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, Navigate, Route, Routes } from 'react-router-dom';
+import { Link, Navigate, Route, Routes } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { InsecureContextError, startAuthorizationCodeFlow } from '../auth/oidc';
 import { AuthCard } from '../components/shell/AuthCard';

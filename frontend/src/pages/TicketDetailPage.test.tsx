@@ -8,7 +8,7 @@
 // to the ticket and shows the SLA only with ticketing_standard (E-39).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { Route, Routes } from 'react-router-dom';
+import { Route, Routes } from 'react-router';
 import i18n from '../i18n';
 import { renderWithProviders } from '../test/utils';
 import { useAuthStore } from '../auth/authStore';

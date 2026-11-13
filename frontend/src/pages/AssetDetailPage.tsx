@@ -15,7 +15,7 @@ import { ChevronRight, Link2, Pencil, RotateCw, Unlink } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { TFunction } from 'i18next';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {

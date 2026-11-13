@@ -13,7 +13,7 @@
  * center (/jobs) has no deep link to one job, the dialog links the list.
  */
 import { useMemo, useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import {
   MIGRATION_MAX_IDS,

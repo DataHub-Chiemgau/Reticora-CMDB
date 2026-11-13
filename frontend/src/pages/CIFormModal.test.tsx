@@ -43,7 +43,7 @@ import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter } from 'react-router';
 import { I18nextProvider } from 'react-i18next';
 import i18n from '../i18n';
 import type { CI } from '../api/client';
@@ -354,7 +354,7 @@ describe('CIFormModal CI types come from the metamodel API (guided creation, WP-
     const wrapper = ({ children }: { children: ReactNode }) => (
       <I18nextProvider i18n={i18n}>
         <QueryClientProvider client={queryClient}>
-          <MemoryRouter>{children}</MemoryRouter>
+          <MemoryRouter useTransitions={false}>{children}</MemoryRouter>
         </QueryClientProvider>
       </I18nextProvider>
     );

@@ -1,7 +1,7 @@
 import { ChevronLeft, ChevronRight, ScrollText, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import type { AuditEntry } from '../api/client';
 import { useAuditLog, useVerifyAuditChain } from '../api/hooks';
 import { Badge } from '../components/ui/Badge';

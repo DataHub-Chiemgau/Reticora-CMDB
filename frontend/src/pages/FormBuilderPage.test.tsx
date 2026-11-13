@@ -26,7 +26,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { Route, Routes, useLocation } from 'react-router-dom';
+import { Route, Routes, useLocation } from 'react-router';
 import { renderWithProviders } from '../test/utils';
 import { useAuthStore } from '../auth/authStore';
 import { useMetamodelDraftStore } from '../stores/metamodelDraft';

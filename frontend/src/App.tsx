@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import type { ComponentProps } from 'react';
-import { Routes, Route, useNavigate, useLocation, Navigate, Outlet } from 'react-router-dom';
+import { Routes, Route, useNavigate, useLocation, Navigate, Outlet } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { CommandPalette } from './components/CommandPalette';
 import { EntitlementExpiryBanner } from './components/EntitlementExpiryBanner';

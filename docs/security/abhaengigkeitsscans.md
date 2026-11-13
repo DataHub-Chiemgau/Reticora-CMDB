@@ -205,6 +205,36 @@ Begründung der Schwellen:
 - **Container:** Funde ohne verfügbaren Fix lassen sich nicht innerhalb der SLA
   beheben. Sie stehen im Bericht und blockieren, sobald ein Fix erscheint.
 
+### npm-Overrides (Nachtrag 2026-11-13, Upd-05)
+
+`frontend/package.json` erzwingt transitive Versionen nur über `overrides`.
+Jeder Eintrag nennt den Grund und die Bedingung für seine Entfernung:
+
+| Override | Grund | Entfernen, sobald |
+|---|---|---|
+| `js-yaml` `^4.3.2` (bis Upd-05 `^4.3.1`) | GHSA-5p4m-2wfm-xmqj (Fix 4.3.1) und GHSA-2883-xcg3-v3hh (Fix 4.3.2); `@eslint/eslintrc` verlangt nur `^4.1.1` | `@eslint/eslintrc` `js-yaml` ≥ 4.3.2 selbst verlangt |
+| `@typescript-eslint/typescript-estree` → `minimatch` `^11.0.8` | GHSA-g3hv-75wg-m249 (CVE-2026-118764, Fix 11.0.1) sowie die Repository-Advisories GHSA-cf2h-pxjq-68xw, GHSA-hqmv-qgp3-jx75 und GHSA-c859-jr93-m5j4 (Fix 11.0.8); `typescript-estree` 8.72.2 verlangt noch `minimatch` `^10.2.2` | `typescript-estree` `minimatch` ≥ 11.0.8 selbst verlangt |
+
+`npm audit` liest nur die globale GitHub Advisory Database. Advisories, die
+ein Hersteller nur im eigenen Repository veröffentlicht, sieht der Job
+`npm-audit` nicht. Beispiele vom 2026-11-13: GHSA-p4f5-76q4-ffq7 (Vite,
+Critical, Fix 6.4.6), die drei `minimatch`-Advisories oben und
+GHSA-6jwq-xf8q-xcwh (`brace-expansion`, High, Fix 1.1.22/2.1.8/5.0.13) und
+GHSA-67xj-gfww-g738 (`postcss-selector-parser`, Moderate, Fix 6.1.6); Upd-05
+hebt alle auf die Fix-Versionen. Upd-05 hat dafür das Lockfile zusätzlich
+gegen die Repository-Advisories aller Pakete mit GitHub-Repository geprüft
+(`gh api repos/<owner>/<repo>/security-advisories`). Ein blockierender Job
+dafür ist Gegenstand von Upd-04.
+
+Offen nach diesem Abgleich (Stand 2026-11-13), jeweils nur mit einem
+Major-Sprung behebbar:
+
+| Paket | Advisory | Bewertung | Behebung |
+|---|---|---|---|
+| `i18next` 24.2.3 (Bundle) | GHSA-6jcc-5g8w-32mx (CVE-2026-63402, Moderate, Fix 26.3.4) | erreichbar nur über `addResourceBundle(…, deep, overwrite)` mit fremden Daten; `frontend/src` ruft die Funktion nicht auf, die Übersetzungen sind statisch | i18next 26 mit react-i18next 17 (Upd-11) |
+| `tldts` 6.1.86, `@asamuzakjp/css-color` 3.2.0 | GHSA-mf82-cgp5-3vmq, GHSA-6g4c-jm42-jc5r (Moderate) | nur Testumgebung (`jsdom` 25) | jsdom 31 (Upd-11) |
+| `esbuild` 0.25.12 | GHSA-gv7w-rqvm-qjhr (High) | betrifft nur das Deno-Modul von esbuild (`lib/deno/mod.ts`), nicht die npm-Installation mit Prüfsummenkontrolle | Vite 8 führt esbuild nur noch als optionalen Peer `^0.27.0 \|\| ^0.28.0` (Upd-11) |
+
 ## Ausnahmen und CVE-Fix-SLA
 
 Akzeptierte Funde stehen in `security/scan-exceptions.txt`, je Zeile:

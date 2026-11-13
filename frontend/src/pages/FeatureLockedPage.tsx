@@ -1,6 +1,6 @@
 import { Lock } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { useHasPermission } from '../api/hooks';
 import type { AppPage } from '../components/CommandPalette';
 import { lockedHint } from '../components/shell/navigation';

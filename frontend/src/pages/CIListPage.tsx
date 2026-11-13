@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight, Download, Plus, Search, Server } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 import { ApiError, exportApi, type ExportJob } from '../api/client';

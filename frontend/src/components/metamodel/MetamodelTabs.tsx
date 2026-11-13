@@ -7,7 +7,7 @@
  * metamodel (E-105) and are hidden while the module is off; an unknown
  * module counts as on.
  */
-import { NavLink } from 'react-router-dom';
+import { NavLink } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { useModules } from '../../hooks/useEntitlements';
 import { cn } from '../ui/utils';

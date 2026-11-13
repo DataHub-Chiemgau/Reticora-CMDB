@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { Route, Routes } from 'react-router-dom';
+import { Route, Routes } from 'react-router';
 import i18n from '../i18n';
 import { CIDetailPage, buildNeighborList } from './CIDetailPage';
 import type { TopologyGraphData } from '../api/client';

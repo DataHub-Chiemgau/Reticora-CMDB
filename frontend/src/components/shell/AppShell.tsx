@@ -3,7 +3,7 @@ import { Menu, PanelLeftClose, PanelLeftOpen, Search, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import { useShellStore } from '../../stores/shell';
 import type { ThemeMode } from '../../stores/theme';

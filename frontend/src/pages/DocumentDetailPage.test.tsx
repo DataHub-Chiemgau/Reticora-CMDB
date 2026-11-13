@@ -5,7 +5,7 @@
 // notice, and creates and removes a link to a CI.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { Route, Routes } from 'react-router-dom';
+import { Route, Routes } from 'react-router';
 import { renderWithProviders } from '../test/utils';
 import { SCAN_POLL_MS } from '../api/hooks';
 import { DocumentDetailPage } from './DocumentDetailPage';

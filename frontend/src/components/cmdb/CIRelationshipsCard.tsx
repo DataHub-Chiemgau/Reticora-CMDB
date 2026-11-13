@@ -32,7 +32,7 @@
 import { useId, useRef, useState } from 'react';
 import type { TFunction } from 'i18next';
 import { ArrowLeft, ArrowRight, ChevronDown, ChevronRight, GitFork, Plus } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { useQueries } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { ApiError, ciApi, verificationStates } from '../../api/client';

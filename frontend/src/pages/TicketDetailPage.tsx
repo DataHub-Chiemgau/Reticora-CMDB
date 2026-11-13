@@ -13,7 +13,7 @@ import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { Link2, Lock, MessageSquare, Pencil, Plus, X } from 'lucide-react';
 import {

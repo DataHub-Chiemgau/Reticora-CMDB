@@ -14,7 +14,7 @@ import { ArrowDown, ArrowUp, ChevronDown, Columns3, Package, Plus, Search } from
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import {
   ApiError,
   assetApi,

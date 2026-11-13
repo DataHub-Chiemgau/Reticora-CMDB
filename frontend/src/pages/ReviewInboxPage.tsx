@@ -24,7 +24,7 @@
 import { ChevronLeft, ChevronRight, Inbox, MousePointerClick, Ticket } from 'lucide-react';
 import { memo, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router';
 import {
   BULK_TICKET_LIMIT,
   useBulkCreateTicketsFromReviews,

@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useParams } from 'react-router-dom';
+import { useParams } from 'react-router';
 import { ApiError, type Consumable } from '../api/client';
 import { useConsumable, useConsumableAvailability, useHasPermission } from '../api/hooks';
 import { useReserveConsumable, useStockBooking, useStockLevels } from '../api/cmdbHooks';

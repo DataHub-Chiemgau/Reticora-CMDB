@@ -1,7 +1,7 @@
 import { Braces, Network, Pencil, Tags } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import type { TFunction } from 'i18next';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { ApiError } from '../api/client';
 import type { CI, CIAssetFacts, TopologyGraphData } from '../api/client';

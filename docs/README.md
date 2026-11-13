@@ -7,7 +7,7 @@ Reticora CMDB is a multi-tenant Configuration Management Database designed for M
 ### Technology Stack
 
 - **Backend**: Go 1.26.11+, chi v5 router, pgx v5 (hand-written SQL)
-- **Frontend**: React 18, TypeScript, Vite, TanStack Query v5, Zustand, React Router v6
+- **Frontend**: React 19, TypeScript, Vite, TanStack Query v5, Zustand, React Router v7
 - **Database**: PostgreSQL 16 with Row-Level Security
 - **Messaging**: NATS JetStream
 - **Cache**: Redis 7
@@ -1306,7 +1306,7 @@ The frontend is a **React 19 SPA** built with TypeScript and Vite.
 | React | 19 | UI framework |
 | TypeScript | 5.7 | Type safety |
 | Vite | 6 | Build tool and dev server |
-| React Router | 6 | Client-side routing |
+| React Router | 7 (package `react-router`, declarative mode, `useTransitions={false}`) | Client-side routing |
 | TanStack Query | 5 | Server-state management, caching, background refetch |
 | Zustand | 5 | Client-side state (lightweight, minimal boilerplate) |
 | Radix UI | latest | Accessible, unstyled component primitives |

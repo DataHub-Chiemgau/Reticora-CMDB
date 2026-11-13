@@ -17,7 +17,7 @@
  */
 import { act, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Route, Routes } from 'react-router-dom';
+import { Route, Routes } from 'react-router';
 import i18n from '../i18n';
 import { renderWithProviders } from '../test/utils';
 import { CIDetailPage } from './CIDetailPage';

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { Download, FileText, Link2, Plus } from 'lucide-react';
 import {

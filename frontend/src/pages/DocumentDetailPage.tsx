@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { Download, Link2, Plus, Upload, X } from 'lucide-react';
 import { assetApi, type Document, type DocumentLink, type DocumentLinkTarget } from '../api/client';

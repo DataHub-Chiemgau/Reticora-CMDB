@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router';
 import { CIListPage } from './CIListPage';
 import { ToastViewport } from '../components/ui/Toast';
 import { useScopeStore } from '../stores/scope';
