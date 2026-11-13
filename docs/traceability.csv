@@ -1790,3 +1790,7 @@ NFR-11;[P3];E;backend/internal/entitlement/probe_budget_test.go;WP-940
 PRT-01;[P3];E;backend/internal/entitlement/probe_budget_test.go;WP-940
 PRB-03;[P3];E;backend/internal/probe/assign_test.go;WP-941
 PRB-11;[P3];E;backend/internal/probe/assign_integration_test.go;WP-941
+NFR-11;[P3];E;collector/probe/icmp_mux_test.go;WP-953
+PRT-01;[P3];E;collector/probe/icmp_test.go;WP-953
+PRT-02;[P3];E;collector/probe/icmp_test.go;WP-953
+PRT-19;[P3];E;collector/probe/icmp_mux_test.go;WP-953

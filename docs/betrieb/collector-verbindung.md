@@ -266,6 +266,45 @@ Subject-Baum des Collectors (`collector.<org>.<id>.>`):
 
 Stream, Grenzen und Handler-Pool: [`docs/ops/workers.md`](../ops/workers.md#probe-edge-and-stream-reticora_probe-wp-959).
 
+## ICMP und ICMPv6 (Ping-Probes, WP-953)
+
+Der Collector pingt über **einen** ICMP-Socket je Adressfamilie für den
+ganzen Prozess (`collector/probe/icmp_mux.go`), nicht über einen Socket je
+Ping: Ein Leser je Socket ordnet jede Echo-Antwort über (Ziel, ID, Sequenz)
+der wartenden Anfrage zu, auf einem unprivilegierten Socket, dessen ID der
+Kernel umschreibt, über (Ziel, Sequenz); die ersten 8 Byte der Nutzlast
+tragen zusätzlich ein Kennzeichen der Anfrage, sodass eine verspätete
+Antwort nie eine spätere Anfrage mit derselben Sequenz beantwortet (bei
+`payload_bytes` unter 8 sendet der Collector 8 Byte). Link-Local-Ziele
+mit Zone (`fe80::1%eth0`) gehen über die Schnittstelle der Zone. Eine
+Prüfung des Typs `icmp` sendet standardmäßig 3 Echo-Anfragen im Abstand
+von 1 s innerhalb des Timeouts (`count` 1–5, `spacing_ms`,
+`payload_bytes` höchstens 1472 Byte über IPv4 und 1452 Byte über IPv6) und
+meldet `rtt_ms` (Mittel), `rtt_min_ms`, `rtt_max_ms`, `jitter_ms` und
+`loss`; ohne Antwort `fail` mit `timeout`. Auch der Sweep der Discovery
+pingt über diesen Socket.
+
+**Fähigkeiten.** Je Familie in dieser Reihenfolge:
+
+1. Unprivilegierter Datagram-Socket (`udp4` bzw. `udp6`): Linux erlaubt
+   ihn den Gruppen in `net.ipv4.ping_group_range`; der Schalter gilt auch
+   für ICMPv6. Docker setzt in Containern mit eigenem Netz-Namespace den
+   ganzen Bereich; bei Host-Netz gilt der Wert des Hosts
+   (`sysctl -w net.ipv4.ping_group_range="0 2147483647"`).
+2. Raw-Socket (`ip4:icmp` bzw. `ip6:ipv6-icmp`): braucht `CAP_NET_RAW`
+   (Unit von `install-vm.sh`: `AmbientCapabilities=CAP_NET_RAW`).
+
+Ohne beides ist ICMP der Familie aus: Ping-Probes melden `error` mit
+`icmp_unavailable` (Zustand `unknown`, nicht `down`), der Sweep arbeitet
+mit TCP und ARP. Fällt ein Socket aus (z. B. Netzwechsel), öffnet der
+nächste Ping ihn neu; wartende Anfragen enden spätestens mit ihrem
+Timeout.
+
+**Firewall.** Im Kundennetz müssen vom Collector zu den Zielen ICMP Echo
+Request (Typ 8) und zurück Echo Reply (Typ 0) erlaubt sein, für IPv6
+ICMPv6 Echo Request (Typ 128) und Echo Reply (Typ 129). Diese Pakete
+verlassen das Kundennetz nicht ([Firewall-Matrix](firewall-matrix.md)).
+
 ## Log-Ereignisse
 
 | Ereignis | Stufe | Bedeutung | Abhilfe |

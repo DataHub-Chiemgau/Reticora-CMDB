@@ -40,6 +40,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/ssh"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/sweep"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/wmi"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/probe"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/profiles"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/buffer"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/keystore"
@@ -2012,6 +2013,12 @@ func boolEnv(key string) bool {
 func newSweep(cfg *collectorConfig) *sweep.Plugin {
 	p := sweep.New()
 	p.Concurrency = cfg.SweepConcurrency
+	// The sweep pings over the shared ICMP socket of the process (WP-953
+	// AK6); without the capability it keeps its own pinger, which then
+	// reports that ICMP is unavailable.
+	if mux := probe.DefaultMux(); mux.Available(4) {
+		p.Pinger = probe.SweepPinger{Mux: mux}
+	}
 	return p
 }
 
