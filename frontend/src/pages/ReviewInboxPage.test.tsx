@@ -69,6 +69,27 @@ const duplicateSides: ReviewItem = {
   created_at: '2026-10-14T10:00:00Z',
 };
 
+const IP_PINNED = '99999999-9999-4999-8999-999999999999';
+const bindingConflictItem: ReviewItem = {
+  id: 'rev-8',
+  kind: 'ip_binding_conflict',
+  status: 'open',
+  payload: {
+    address: '10.77.0.9',
+    vrf_id: 'vrf-pin',
+    ip_address_id: IP_PINNED,
+    pinned_ci_id: CI_A,
+    pinned_interface_id: IF_A,
+    observed_ci_id: CI_B,
+    observed_interface_id: IF_B,
+    conflict: `${IP_PINNED}/${IF_B}`,
+  },
+  candidate_ci_ids: [CI_A, CI_B],
+  object_key: `ipbind:${IP_PINNED}/${IF_B}`,
+  escalated: false,
+  created_at: '2026-10-15T10:00:00Z',
+};
+
 const SERVER_TYPE = '33333333-3333-4333-8333-333333333333';
 const WIDGET_TYPE = '44444444-4444-4444-8444-444444444444';
 const ciTypes = [
@@ -350,6 +371,60 @@ describe('ReviewInboxPage', () => {
       expect(String(post?.[0])).toBe('/api/v1/review-items/rev-7/resolve');
       expect(JSON.parse(String(post?.[1]?.body))).toEqual({ action: 'accept', ci_id: CI_B });
     });
+  });
+
+  it('zeigt beide Seiten eines ip_binding_conflict und sendet accept (WP-917)', async () => {
+    const fetchMock = stubServer([bindingConflictItem]);
+    renderWithProviders(<ReviewInboxPage />);
+
+    const entry = await screen.findByRole('button', { name: /10\.77\.0\.9/ });
+    expect(within(entry).getByText('Konflikt der Adressbindung')).toBeInTheDocument();
+    fireEvent.click(entry);
+
+    const sides = await screen.findByRole('region', { name: 'Seiten des Bindungskonflikts' });
+    expect(within(sides).getByText('10.77.0.9')).toBeInTheDocument();
+    expect(within(sides).getByText('vrf-pin')).toBeInTheDocument();
+    const pinned = within(sides).getByTestId('binding-pinned');
+    expect(within(pinned).getByText('Gepinnt')).toBeInTheDocument();
+    expect(await within(pinned).findByRole('link', { name: 'sw-core-01' })).toHaveAttribute(
+      'href',
+      `/cmdb/${CI_A}`,
+    );
+    expect(within(pinned).getByRole('link', { name: IF_A })).toHaveAttribute(
+      'href',
+      `/cmdb/${CI_A}`,
+    );
+    const observed = within(sides).getByTestId('binding-observed');
+    expect(within(observed).getByText('Beobachtet')).toBeInTheDocument();
+    expect(await within(observed).findByRole('link', { name: 'sw-core-02' })).toHaveAttribute(
+      'href',
+      `/cmdb/${CI_B}`,
+    );
+    expect(within(observed).getByRole('link', { name: IF_B })).toBeInTheDocument();
+    // No candidate choice and no diff: accept needs no CI.
+    expect(screen.queryByLabelText('Kandidat')).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('table', { name: 'Vergleich von Beobachtung und CI' }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Übernehmen' }));
+    await waitFor(() => {
+      const post = fetchMock.mock.calls.find((call) => call[1]?.method === 'POST');
+      expect(String(post?.[0])).toBe('/api/v1/review-items/rev-8/resolve');
+      expect(JSON.parse(String(post?.[1]?.body))).toEqual({ action: 'accept' });
+    });
+    expect(screen.getByRole('button', { name: 'Verwerfen' })).toBeInTheDocument();
+  });
+
+  it('preselects the type filter from ?kind= (WP-917)', async () => {
+    const fetchMock = stubServer([bindingConflictItem]);
+    renderWithProviders(<ReviewInboxPage />, { route: '/reviews?kind=ip_binding_conflict' });
+
+    await screen.findByRole('button', { name: /10\.77\.0\.9/ });
+    const list = fetchMock.mock.calls
+      .map((call) => String(call[0]))
+      .find((url) => url.includes('/review-items?'));
+    expect(new URL(list!, 'http://localhost').searchParams.get('kind')).toBe('ip_binding_conflict');
   });
 
   it('resolves several items with one action and reports failures', async () => {

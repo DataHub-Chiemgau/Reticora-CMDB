@@ -36,7 +36,15 @@ import { LINK_ENTITY_TYPES } from '../pages/DocumentDetailPage';
 import { TICKET_CATEGORIES, TICKET_PRIORITIES, TICKET_STATUSES } from '../pages/TicketListPage';
 import { TICKET_TRANSITIONS } from '../pages/TicketDetailPage';
 import { NODE_KINDS, SCAN_STATUSES, relationshipChangeKinds } from '../api/client';
-import { CONSUMABLE_BOOKING_TYPES } from '../api/cmdb';
+import {
+  CONSUMABLE_BOOKING_TYPES,
+  IPAM_CHANGE_SOURCES,
+  IP_ADDRESS_ORIGINS,
+  IP_ADDRESS_ROLES,
+  IP_ADDRESS_STATES,
+  IP_ADDRESS_TYPES,
+} from '../api/cmdb';
+import { REVIEW_KINDS } from '../hooks/useReviews';
 import {
   CARDINALITIES,
   IMPACT_DIRECTIONS,
@@ -472,6 +480,20 @@ const enumerations: Array<[string, readonly string[]]> = [
   ['ticket.priorities', specEnum('CreateSLAPolicyRequest', 'priority')],
   ['sla.calendar.weekdays', WEEKDAYS],
   ['sla.calendar.weekdaysShort', WEEKDAYS],
+  // WP-917: state, type, role and origin of an address, the sources of the
+  // IPAM history and the review types of the inbox (ip_binding_conflict).
+  ['ipam.states', IP_ADDRESS_STATES],
+  ['ipam.states', specEnum('IPAddressState')],
+  ['ipam.types', IP_ADDRESS_TYPES],
+  ['ipam.types', specEnum('IPAddressType')],
+  ['ipam.roles', IP_ADDRESS_ROLES],
+  ['ipam.roles', specEnum('IPAddressRole')],
+  ['ipam.origins', IP_ADDRESS_ORIGINS],
+  ['ipam.origins', specEnum('IPAddressOrigin')],
+  ['ipam.history.sources', IPAM_CHANGE_SOURCES],
+  ['ipam.history.sources', specEnum('IPAMChange', 'source')],
+  ['ipam.history.changeTypes', specEnum('IPAMChange', 'change_type')],
+  ['reviews.kinds', REVIEW_KINDS],
   ...Object.values(IMPORT_TARGETS).map((targets): [string, readonly string[]] => [
     'savedviews.fields',
     targets,

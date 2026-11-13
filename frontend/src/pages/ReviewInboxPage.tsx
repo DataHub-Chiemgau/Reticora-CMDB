@@ -19,7 +19,12 @@
  * feature ticketing_essential and the rights ticket:write and
  * review:resolve the inbox opens a ticket for one item or for the selected
  * open items (WP-291, WP-814); that is no resolution, the item stays open,
- * and an item with a ticket links to it.
+ * and an item with a ticket links to it. An ip_binding_conflict item shows
+ * both sides: the address and its VRF, the pinned CI with its interface and
+ * the CI with the interface discovery observed it at, each linked; accept
+ * moves the address to the observed interface, dismiss keeps the pin
+ * (IPM-14, WP-917). ?kind= preselects the type filter (link of the address
+ * dialog).
  */
 import { ChevronLeft, ChevronRight, Inbox, MousePointerClick, Ticket } from 'lucide-react';
 import { memo, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
@@ -37,6 +42,7 @@ import {
 import { useEntitlements, useModules } from '../hooks/useEntitlements';
 import { useCITypes } from '../api/cmdbHooks';
 import { localizedText } from '../api/cmdb';
+import { useCIInterfaces, useIPAddress } from '../api/ipamHooks';
 import { ApiError, type CI } from '../api/client';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -143,10 +149,41 @@ export function duplicateHolders(item: ReviewItem): DuplicateHolder[] | null {
   );
 }
 
+/** BindingConflict is the payload of an ip_binding_conflict item (WP-914). */
+export interface BindingConflict {
+  address: string;
+  vrf_id: string;
+  ip_address_id: string;
+  pinned_ci_id: string;
+  pinned_interface_id?: string;
+  observed_ci_id: string;
+  observed_interface_id: string;
+}
+
+/** bindingConflict returns the sides of an ip_binding_conflict item, null for any other item. */
+export function bindingConflict(item: ReviewItem): BindingConflict | null {
+  const p = item.payload ?? {};
+  if (item.kind !== 'ip_binding_conflict' || typeof p.ip_address_id !== 'string') return null;
+  const str = (value: unknown) => (typeof value === 'string' ? value : '');
+  return {
+    address: str(p.address),
+    vrf_id: str(p.vrf_id),
+    ip_address_id: p.ip_address_id,
+    pinned_ci_id: str(p.pinned_ci_id),
+    pinned_interface_id: str(p.pinned_interface_id) || undefined,
+    observed_ci_id: str(p.observed_ci_id),
+    observed_interface_id: str(p.observed_interface_id),
+  };
+}
+
 /** summary is the one-line description of an item in the list. */
 function summary(item: ReviewItem): string {
   const p = item.payload ?? {};
-  if (item.kind === 'duplicate_ip' && typeof p.address === 'string' && p.address !== '') {
+  if (
+    (item.kind === 'duplicate_ip' || item.kind === 'ip_binding_conflict') &&
+    typeof p.address === 'string' &&
+    p.address !== ''
+  ) {
     return p.address;
   }
   return display(
@@ -348,8 +385,12 @@ function Age({ iso }: { iso: string }) {
 export function ReviewInboxPage() {
   const { t } = useTranslation();
   const [status, setStatus] = useState('open');
-  const [kind, setKind] = useState('');
   const [searchParams, setSearchParams] = useSearchParams();
+  // ?kind= of a link (the address dialog) preselects the type filter.
+  const [kind, setKind] = useState(() => {
+    const wanted = searchParams.get('kind') ?? '';
+    return (REVIEW_KINDS as readonly string[]).includes(wanted) ? wanted : '';
+  });
   const escalated = searchParams.get('escalated') === 'true';
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
@@ -800,10 +841,14 @@ function ReviewDetail({
   // The sides of duplicate observations replace the diff, which shows
   // scalar fields only (WP-773).
   const holders = duplicateHolders(item);
-  const candidateCIs = useMountedCIs(candidates.length > 1 || holders ? candidates : []);
-  const subject = holders
-    ? ''
-    : candidate || (typeof item.payload?.ci_id === 'string' ? item.payload.ci_id : '');
+  // The two sides of a binding conflict replace the diff and the
+  // candidate choice: accept needs no CI (WP-917).
+  const binding = bindingConflict(item);
+  const candidateCIs = useMountedCIs(candidates.length > 1 || holders || binding ? candidates : []);
+  const subject =
+    holders || binding
+      ? ''
+      : candidate || (typeof item.payload?.ci_id === 'string' ? item.payload.ci_id : '');
   const { data: ci } = useCI(subject);
   const rows = reviewDiff(item, subject ? ci : undefined);
   const actions = canResolve ? reviewActions(item) : [];
@@ -882,7 +927,7 @@ function ReviewDetail({
               : String(createTicket.error)}
           </p>
         ) : null}
-        {candidates.length > 1 ? (
+        {candidates.length > 1 && !binding ? (
           <Select
             label={holders ? t('reviews.holders.side') : t('reviews.candidate')}
             value={candidate}
@@ -895,6 +940,8 @@ function ReviewDetail({
         ) : null}
         {holders ? (
           <DuplicateSides item={item} holders={holders} cis={candidateCIs} />
+        ) : binding ? (
+          <BindingSides conflict={binding} cis={candidateCIs} />
         ) : (
           <DiffTable rows={rows} ci={ci} />
         )}
@@ -1071,6 +1118,120 @@ function DuplicateSides({
                 {holder.interface_id || '—'}
               </td>
               <td className={cn(detailTdClasses, 'pr-0')}>{holder.type}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+/**
+ * BindingSides shows an ip_binding_conflict item (IPM-14, WP-917): the
+ * address (linked to its subnet when the caller reads IPAM), the VRF and
+ * per side the CI and its interface, each linked to the CI.
+ */
+function BindingSides({ conflict, cis }: { conflict: BindingConflict; cis: Map<string, CI> }) {
+  const { t } = useTranslation();
+  const canReadIPAM = useHasPermission('ipam:read') === true;
+  const ip = useIPAddress(canReadIPAM ? conflict.ip_address_id : undefined);
+  const pinnedNICs = useCIInterfaces(
+    canReadIPAM && conflict.pinned_interface_id ? conflict.pinned_ci_id : undefined,
+  );
+  const observedNICs = useCIInterfaces(canReadIPAM ? conflict.observed_ci_id : undefined);
+  const nicName = (data: typeof pinnedNICs.data, id: string | undefined) =>
+    (Array.isArray(data?.data) ? data.data.find((nic) => nic.id === id)?.name : undefined) ?? id;
+  const sides = [
+    {
+      key: 'pinned',
+      label: t('reviews.binding.pinned'),
+      ci: conflict.pinned_ci_id,
+      nic: conflict.pinned_interface_id,
+      nicName: nicName(pinnedNICs.data, conflict.pinned_interface_id),
+    },
+    {
+      key: 'observed',
+      label: t('reviews.binding.observed'),
+      ci: conflict.observed_ci_id,
+      nic: conflict.observed_interface_id,
+      nicName: nicName(observedNICs.data, conflict.observed_interface_id),
+    },
+  ];
+  const subnetId = ip.data?.subnet_id;
+  return (
+    <section
+      className="space-y-3 text-sm [overflow-wrap:anywhere]"
+      aria-label={t('reviews.binding.title')}
+    >
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+        <dt className="text-fg-muted">{t('reviews.binding.address')}</dt>
+        <dd className="font-mono text-xs text-fg">
+          {subnetId ? (
+            <Link
+              to={`/ipam/subnets/${subnetId}?address=${conflict.ip_address_id}`}
+              className="text-accent hover:underline"
+              aria-label={`${t('reviews.binding.openAddress')} ${conflict.address}`}
+            >
+              {conflict.address}
+            </Link>
+          ) : (
+            conflict.address || '—'
+          )}
+        </dd>
+        <dt className="text-fg-muted">{t('reviews.binding.vrf')}</dt>
+        <dd className="font-mono text-xs text-fg">
+          {conflict.vrf_id && canReadIPAM ? (
+            <Link
+              to="/ipam?tab=vrfs"
+              className="text-accent hover:underline"
+              aria-label={`${t('reviews.binding.openVrf')} ${conflict.vrf_id}`}
+            >
+              {conflict.vrf_id}
+            </Link>
+          ) : (
+            conflict.vrf_id || '—'
+          )}
+        </dd>
+      </dl>
+      <table className="w-full table-fixed text-left">
+        <caption className="sr-only">{t('reviews.binding.title')}</caption>
+        <thead>
+          <tr>
+            <th scope="col" className={detailThClasses}>
+              <span className="sr-only">{t('reviews.binding.title')}</span>
+            </th>
+            <th scope="col" className={detailThClasses}>
+              {t('reviews.binding.ci')}
+            </th>
+            <th scope="col" className={cn(detailThClasses, 'pr-0')}>
+              {t('reviews.binding.interface')}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {sides.map((side) => (
+            <tr key={side.key} data-testid={`binding-${side.key}`}>
+              <th scope="row" className={cn(detailTdClasses, 'font-medium text-fg-muted')}>
+                {side.label}
+              </th>
+              <td className={detailTdClasses}>
+                {side.ci ? (
+                  <Link to={`/cmdb/${side.ci}`} className="text-accent hover:underline">
+                    {cis.get(side.ci)?.name ?? side.ci}
+                  </Link>
+                ) : (
+                  '—'
+                )}
+              </td>
+              <td className={cn(detailTdClasses, 'pr-0 font-mono text-xs')}>
+                {side.nic && side.ci ? (
+                  <Link to={`/cmdb/${side.ci}`} className="text-accent hover:underline">
+                    {side.nicName}
+                  </Link>
+                ) : (
+                  '—'
+                )}
+              </td>
             </tr>
           ))}
         </tbody>

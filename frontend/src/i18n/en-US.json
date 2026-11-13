@@ -3255,7 +3255,8 @@
       "scope_suggested": "Suggested scope",
       "serial_mismatch": "Serial number mismatch",
       "duplicate_ip": "Duplicate IP address",
-      "unknown_relationship": "Unknown relationship"
+      "unknown_relationship": "Unknown relationship",
+      "ip_binding_conflict": "Address binding conflict"
     },
     "escalatedOnly": "Escalated only",
     "escalated": "Escalated",
@@ -3321,6 +3322,17 @@
       "failedItem": "{{name}}: {{message}}",
       "linked": "Tickets",
       "limit": "At most {{limit}} items per bulk action."
+    },
+    "binding": {
+      "title": "Sides of the binding conflict",
+      "address": "Address",
+      "vrf": "VRF",
+      "pinned": "Pinned",
+      "observed": "Observed",
+      "ci": "CI",
+      "interface": "Interface",
+      "openAddress": "Open address",
+      "openVrf": "Open VRFs"
     }
   },
   "notifications": {
@@ -5194,7 +5206,10 @@
       "usage": "Usage",
       "usageFailed": "The usage could not be loaded.",
       "free": "Free",
-      "edit": "Edit subnet"
+      "edit": "Edit subnet",
+      "historyTitle": "History of the subnet",
+      "historyShow": "Show history",
+      "historyHide": "Hide history"
     },
     "actions": {
       "title": "Allocation",
@@ -5237,7 +5252,12 @@
       "previous": "Previous",
       "next": "Next",
       "range": "{{from}}–{{to}} of {{total}}",
-      "searchHit": "Search hit (other page)"
+      "searchHit": "Search hit (other page)",
+      "editLabel": "Edit address {{address}}",
+      "viewLabel": "View address {{address}}",
+      "create": "Create address",
+      "pinned": "Pinned",
+      "created": "Address {{address}} created."
     },
     "subnetForm": {
       "new": "New subnet",
@@ -5351,6 +5371,75 @@
       "nameRequired": "Enter a name.",
       "serversCount": "Enter one to eight servers.",
       "serversInvalid": "Not a valid IP address: {{servers}}"
+    },
+    "origins": {
+      "manual": "Manual",
+      "discovery": "Discovery",
+      "scan": "Scan",
+      "import": "Import"
+    },
+    "addressDialog": {
+      "createTitle": "Create address",
+      "editTitle": "Address {{address}}",
+      "tabsLabel": "Sections of the address",
+      "tabProperties": "Properties",
+      "tabHistory": "History",
+      "address": "Address",
+      "addressRequired": "Please enter an address.",
+      "type": "Type",
+      "state": "State",
+      "stateNone": "Not set",
+      "stateFromScan": "The scan sets the state.",
+      "role": "Role",
+      "dnsName": "DNS name",
+      "description": "Description",
+      "device": "Device",
+      "interface": "Interface",
+      "noInterface": "No interface",
+      "interfacesLoading": "Loading interfaces …",
+      "interfacesFailed": "The interfaces could not be loaded.",
+      "chooseDeviceFirst": "Choose a device first.",
+      "pinned": "Pin the binding",
+      "pinnedHint": "Discovery does not change a pinned binding and reports deviations as a review.",
+      "origin": "Origin",
+      "save": "Save",
+      "cancel": "Cancel",
+      "close": "Close",
+      "saveFailed": "The address could not be saved.",
+      "pinFailed": "The address was created, but the pin could not be set.",
+      "forbidden": "You lack the right for this change.",
+      "readOnly": "Read only: editing needs the right ipam:write.",
+      "conflictTitle": "Open conflict",
+      "conflict_duplicate_ip": "A review “Duplicate IP address” is open for this address.",
+      "conflict_ip_binding_conflict": "Discovery observed this pinned address at another device.",
+      "openInbox": "Open in the review inbox"
+    },
+    "history": {
+      "title": "History",
+      "label": "Change history",
+      "at": "Time",
+      "actor": "Actor",
+      "source": "Source",
+      "field": "Field",
+      "change": "Change",
+      "system": "System",
+      "empty": "No changes.",
+      "loadFailed": "The history could not be loaded.",
+      "previous": "Previous",
+      "next": "Next",
+      "range": "{{from}}–{{to}} of {{total}}",
+      "sources": {
+        "manual": "Manual",
+        "discovery": "Discovery",
+        "scan": "Scan",
+        "import": "Import",
+        "allocation": "Allocation"
+      },
+      "changeTypes": {
+        "create": "Created",
+        "update": "Changed",
+        "delete": "Deleted"
+      }
     }
   },
   "alarms": {

@@ -13,8 +13,11 @@
  * not on the loaded page it is shown as a marked row above the list.
  * Each subnet id mounts its own page, so the address page, the
  * reservation form and the chosen cell never carry over to another subnet.
+ * WP-917: the address of each row opens the AddressDialog (edit with
+ * ipam:write, else read only), "Adresse anlegen" opens it for a new address, and the
+ * card History shows GET /subnets/{id}/history on demand (HistoryList).
  */
-import { Pencil, Plus, Sparkles } from 'lucide-react';
+import { History, Pencil, Plus, Sparkles } from 'lucide-react';
 import { useMemo, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
@@ -41,7 +44,9 @@ import {
   useVRF,
 } from '../api/ipamHooks';
 import { ScrollRegion } from '../components/ScrollRegion';
+import { AddressDialog } from '../components/ipam/AddressDialog';
 import { AddressMap, mapSupported, type MapCell } from '../components/ipam/AddressMap';
+import { HistoryList } from '../components/ipam/HistoryList';
 import { SubnetFormModal } from '../components/ipam/SubnetFormModal';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -95,6 +100,7 @@ function SubnetDetail({ id }: { id: string }) {
         <SubnetActions subnet={s} address={reserveAddress} setAddress={setReserveAddress} />
       )}
       <Addresses subnet={s} canWrite={canWrite} onPickFree={setReserveAddress} />
+      <SubnetHistory subnet={s} />
       {editing && (
         <SubnetFormModal
           open
@@ -262,6 +268,7 @@ function SubnetActions({
   const [prefix, setPrefix] = useState('');
   const [prefixError, setPrefixError] = useState<string>();
   const [addressError, setAddressError] = useState<string>();
+  const [creating, setCreating] = useState(false);
 
   const problem = (err: unknown, fallback: string) => {
     if (err instanceof ApiError && err.type === PROBLEM_SUBNET_EXHAUSTED) {
@@ -349,6 +356,11 @@ function SubnetActions({
             {t('ipam.actions.allocate')}
           </Button>
         )}
+        {!subnet.is_pool && (
+          <Button variant="secondary" icon={<Plus />} onClick={() => setCreating(true)}>
+            {t('ipam.addresses.create')}
+          </Button>
+        )}
         <form onSubmit={onAllocateSubnet} className="flex items-end gap-2" noValidate>
           <Input
             label={t('ipam.actions.prefixLength')}
@@ -404,6 +416,16 @@ function SubnetActions({
           )}
         </p>
       )}
+      {creating && (
+        <AddressDialog
+          open
+          onOpenChange={(open) => !open && setCreating(false)}
+          subnet={subnet}
+          onSaved={(ip) =>
+            setStatus({ text: t('ipam.addresses.created', { address: ip.address }) })
+          }
+        />
+      )}
     </Card>
   );
 }
@@ -432,6 +454,8 @@ function Addresses({
   const { release } = useSubnetActions(subnet.id);
   const [chosen, setChosen] = useState<MapCell>();
   const [releaseError, setReleaseError] = useState<string>();
+  // The address the AddressDialog shows (edit, or read only without ipam:write).
+  const [opened, setOpened] = useState<IPAddress>();
   const rows = page.data?.data ?? [];
   const total = page.data?.total ?? 0;
   const hitOffPage = hit !== undefined && !rows.some((ip) => ip.id === hit.id);
@@ -452,7 +476,16 @@ function Addresses({
       data-testid={`address-row-${ip.id}`}
     >
       <td className={tdMonoClasses}>
-        {ip.address}
+        <button
+          type="button"
+          onClick={() => setOpened(ip)}
+          aria-label={t(canWrite ? 'ipam.addresses.editLabel' : 'ipam.addresses.viewLabel', {
+            address: ip.address,
+          })}
+          className="text-accent underline underline-offset-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+        >
+          {ip.address}
+        </button>
         {offPage && (
           <span className="ml-2 font-sans">
             <Badge>{t('ipam.addresses.searchHit')}</Badge>
@@ -465,7 +498,14 @@ function Addresses({
       <td className={tdClasses}>{t(`ipam.types.${ip.type}`)}</td>
       <td className={tdClasses}>{t(`ipam.roles.${ip.role}`)}</td>
       <td className={tdClasses}>{ip.is_gateway ? t('ipam.addresses.isGateway') : ''}</td>
-      <td className={tdClasses}>{ip.dns_name}</td>
+      <td className={tdClasses}>
+        {ip.dns_name}
+        {ip.pinned && (
+          <span className="ml-2">
+            <Badge>{t('ipam.addresses.pinned')}</Badge>
+          </span>
+        )}
+      </td>
       <td className={tdClasses}>
         {ip.ci_id ? (
           <Link to={`/cmdb/${ip.ci_id}`} className="text-accent underline underline-offset-2">
@@ -620,6 +660,41 @@ function Addresses({
           </div>
         )}
       </Card>
+      {opened && (
+        <AddressDialog
+          open
+          onOpenChange={(open) => !open && setOpened(undefined)}
+          subnet={subnet}
+          address={opened}
+        />
+      )}
     </>
+  );
+}
+
+/** SubnetHistory shows the change history of the subnet once it is opened. */
+function SubnetHistory({ subnet }: { subnet: Subnet }) {
+  const { t } = useTranslation();
+  const [shown, setShown] = useState(false);
+  const panelId = `subnet-history-${subnet.id}`;
+  return (
+    <Card className="space-y-3 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-base font-semibold text-fg">{t('ipam.detail.historyTitle')}</h2>
+        <Button
+          variant="secondary"
+          size="sm"
+          icon={<History />}
+          aria-expanded={shown}
+          aria-controls={panelId}
+          onClick={() => setShown((v) => !v)}
+        >
+          {shown ? t('ipam.detail.historyHide') : t('ipam.detail.historyShow')}
+        </Button>
+      </div>
+      <div id={panelId} hidden={!shown}>
+        {shown && <HistoryList kind="subnet" id={subnet.id} />}
+      </div>
+    </Card>
   );
 }

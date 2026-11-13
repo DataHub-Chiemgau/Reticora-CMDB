@@ -1870,6 +1870,33 @@ export const ipamApi = {
   getIPAddress(id: string): Promise<IPAddress> {
     return fetchAPI(`/ips/${id}`);
   },
+  // ─── Address dialog (IPM-13, IPM-14, IPM-19, WP-917) ──────────────────────
+  /** createIPAddress stores an address (origin manual); 422 names ci_id, role or vrf_id. */
+  createIPAddress(data: IPAddressCreate): Promise<IPAddress> {
+    return fetchAPI('/ips', { method: 'POST', body: JSON.stringify(data) });
+  },
+  /** updateIPAddress changes the fields sent; ci_id or interface_id "" clears them. */
+  updateIPAddress(id: string, data: IPAddressUpdate): Promise<IPAddress> {
+    return fetchAPI(`/ips/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  /** ipHistory reads one page of the change history of an address (IPM-08). */
+  ipHistory(
+    id: string,
+    params: { limit?: number; offset?: number } = {},
+  ): Promise<PaginatedResponse<IPAMChange>> {
+    return fetchAPI(`/ips/${id}/history${qs({ limit: IPAM_HISTORY_PAGE, ...params })}`);
+  },
+  /** subnetHistory reads one page of the change history of a subnet (IPM-08). */
+  subnetHistory(
+    id: string,
+    params: { limit?: number; offset?: number } = {},
+  ): Promise<PaginatedResponse<IPAMChange>> {
+    return fetchAPI(`/subnets/${id}/history${qs({ limit: IPAM_HISTORY_PAGE, ...params })}`);
+  },
+  /** ciInterfaces reads the network interfaces of a CI (NET-01), at most API_MAX_LIMIT. */
+  ciInterfaces(ciId: string): Promise<PaginatedResponse<NetworkInterface>> {
+    return fetchAPI(`/cis/${ciId}/interfaces${qs({ limit: API_MAX_LIMIT })}`);
+  },
   getVRF(id: string): Promise<IPAMVRF> {
     return fetchAPI(`/vrfs/${id}`);
   },
@@ -1950,6 +1977,14 @@ export type IPAddress = components['schemas']['IPAddress'];
 export type IPAddressState = components['schemas']['IPAddressState'];
 export type IPAddressType = components['schemas']['IPAddressType'];
 export type IPAddressRole = components['schemas']['IPAddressRole'];
+export type IPAddressOrigin = components['schemas']['IPAddressOrigin'];
+export type IPAddressCreate = components['schemas']['CreateIPAddressRequest'];
+export type IPAddressUpdate = components['schemas']['UpdateIPAddressRequest'];
+/** IPAMChange is one row of the IPAM change history (IPM-08). */
+export type IPAMChange = components['schemas']['IPAMChange'];
+export type NetworkInterface = components['schemas']['NetworkInterface'];
+/** IPAM_HISTORY_PAGE is the page size of the history list of an address or subnet. */
+export const IPAM_HISTORY_PAGE = 25;
 export type IPAllocate = components['schemas']['IPAllocateRequest'];
 export type SubnetAllocate = components['schemas']['SubnetAllocateRequest'];
 export type IPReservationCreate = components['schemas']['IPReservationCreateRequest'];
@@ -1991,6 +2026,21 @@ export const IP_ADDRESS_ROLES = [
   'loopback',
   'management',
 ] as const satisfies readonly IPAddressRole[];
+/** IP_ADDRESS_ORIGINS are the origins of an address row (IPM-14), labels ipam.origins.*. */
+export const IP_ADDRESS_ORIGINS = [
+  'manual',
+  'discovery',
+  'scan',
+  'import',
+] as const satisfies readonly IPAddressOrigin[];
+/** IPAM_CHANGE_SOURCES are the sources of a history row (IPM-08), labels ipam.history.sources.*. */
+export const IPAM_CHANGE_SOURCES = [
+  'manual',
+  'discovery',
+  'scan',
+  'import',
+  'allocation',
+] as const satisfies readonly IPAMChange['source'][];
 
 /** PROBLEM_SUBNET_EXHAUSTED is the problem type of a full subnet (IPM-03). */
 export const PROBLEM_SUBNET_EXHAUSTED = 'urn:reticora:problem:subnet-exhausted';

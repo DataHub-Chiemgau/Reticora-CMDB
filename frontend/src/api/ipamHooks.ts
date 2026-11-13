@@ -5,7 +5,9 @@
  * WP-916 adds the subnet detail: the subnet with its parent chain, its
  * addresses (one page for the list, all for the address map), the
  * allocation of the next free address and subnet, reservations and the
- * subnet form.
+ * subnet form. WP-917 adds the address dialog: saving an address, the
+ * interfaces of the chosen device, the change history of an address or a
+ * subnet and the open review items of an address.
  */
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { sessionApi, vrfApi, type PaginatedResponse } from './client';
@@ -28,7 +30,11 @@ import {
   type IPAMSectionLevel,
   type IPAMSectionUpdate,
   type SubnetQuery,
+  type IPAddress,
+  type IPAddressCreate,
+  type IPAddressUpdate,
 } from './cmdb';
+import { fetchAllReviewItems, type ReviewItem } from '../hooks/useReviews';
 
 const SECTIONS = ['ipam', 'sections'] as const;
 
@@ -436,4 +442,129 @@ export function useNameserverSetMutations() {
       onSuccess: refresh,
     }),
   };
+}
+
+// ─── Address dialog (IPM-13, IPM-14, IPM-19, WP-917) ────────────────────────
+
+/**
+ * IPAddressPinFailed reports that a new address was created but the pin that
+ * follows as PATCH failed; created is the stored address (unpinned).
+ */
+export class IPAddressPinFailed extends Error {
+  readonly created: IPAddress;
+
+  constructor(created: IPAddress) {
+    super('pin failed');
+    this.name = 'IPAddressPinFailed';
+    this.created = created;
+  }
+}
+
+/**
+ * useSaveIPAddress creates (no id) or changes an address; it refreshes the
+ * subnet detail, the address and the tree (usage). POST takes no pin: with
+ * pin set, a create is followed by PATCH pinned inside the same mutation, so
+ * isPending and the refresh cover both calls. A failed pin rejects with
+ * IPAddressPinFailed carrying the created address.
+ */
+export function useSaveIPAddress() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      id,
+      data,
+      pin,
+    }: {
+      id?: string;
+      data: IPAddressCreate | IPAddressUpdate;
+      pin?: boolean;
+    }): Promise<IPAddress> => {
+      if (id) return ipamApi.updateIPAddress(id, data);
+      const created = await ipamApi.createIPAddress(data as IPAddressCreate);
+      if (!pin) return created;
+      try {
+        return await ipamApi.updateIPAddress(created.id, { pinned: true });
+      } catch {
+        throw new IPAddressPinFailed(created);
+      }
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ['ipam'] });
+    },
+  });
+}
+
+/** useCIInterfaces reads the interfaces of the chosen device; nothing without a CI. */
+export function useCIInterfaces(ciId: string | undefined) {
+  return useQuery({
+    queryKey: ['ipam', 'ci-interfaces', ciId ?? ''],
+    queryFn: () => ipamApi.ciInterfaces(ciId ?? ''),
+    enabled: !!ciId,
+  });
+}
+
+/** IPAMHistoryKind is the object whose history HistoryList shows. */
+export type IPAMHistoryKind = 'ip' | 'subnet';
+
+/** useIPAMHistory reads one page of GET /ips/{id}/history or /subnets/{id}/history. */
+export function useIPAMHistory(kind: IPAMHistoryKind, id: string, offset: number, enabled = true) {
+  return useQuery({
+    queryKey: ['ipam', 'history', kind, id, offset],
+    queryFn: () =>
+      kind === 'ip' ? ipamApi.ipHistory(id, { offset }) : ipamApi.subnetHistory(id, { offset }),
+    placeholderData: (previous) => previous,
+    enabled: enabled && !!id,
+  });
+}
+
+/**
+ * addressReviewMatches reports whether an open review item concerns the
+ * address: a duplicate_ip item by its object key ip:<vrf>/<address> (or
+ * address and VRF of its payload), an ip_binding_conflict item by the
+ * address row of its payload (ip_address_id) or its object key
+ * ipbind:<id>/<interface>.
+ */
+export function addressReviewMatches(
+  item: Pick<ReviewItem, 'kind' | 'object_key' | 'payload'>,
+  address: { id: string; address: string; vrf_id: string },
+): boolean {
+  const p = item.payload ?? {};
+  if (item.kind === 'duplicate_ip') {
+    return (
+      item.object_key === `ip:${address.vrf_id}/${address.address}` ||
+      (p.address === address.address && p.vrf_id === address.vrf_id)
+    );
+  }
+  if (item.kind === 'ip_binding_conflict') {
+    return (
+      p.ip_address_id === address.id || (item.object_key ?? '').startsWith(`ipbind:${address.id}/`)
+    );
+  }
+  return false;
+}
+
+/**
+ * useAddressReviews reads the open duplicate_ip and ip_binding_conflict
+ * items (GET /review-items?status=open&kind=…, all pages) and keeps those of
+ * the address. GET /review-items filters neither by object key nor by
+ * payload, so the match runs here. enabled holds the request back without
+ * the right to read review items (discovery:read).
+ */
+export function useAddressReviews(
+  address: { id: string; address: string; vrf_id: string } | undefined,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ['review-items', 'address', address?.id ?? ''],
+    queryFn: async () => {
+      const [duplicates, conflicts] = await Promise.all([
+        fetchAllReviewItems({ status: 'open', kind: 'duplicate_ip' }),
+        fetchAllReviewItems({ status: 'open', kind: 'ip_binding_conflict' }),
+      ]);
+      return [...duplicates, ...conflicts].filter(
+        (item) => address !== undefined && addressReviewMatches(item, address),
+      );
+    },
+    enabled: enabled && !!address,
+  });
 }

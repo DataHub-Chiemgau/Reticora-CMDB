@@ -3255,7 +3255,8 @@
       "scope_suggested": "Scope-Vorschlag",
       "serial_mismatch": "Abweichende Seriennummer",
       "duplicate_ip": "Doppelte IP-Adresse",
-      "unknown_relationship": "Unbekannte Beziehung"
+      "unknown_relationship": "Unbekannte Beziehung",
+      "ip_binding_conflict": "Konflikt der Adressbindung"
     },
     "escalatedOnly": "Nur eskalierte",
     "escalated": "Eskaliert",
@@ -3321,6 +3322,17 @@
       "failedItem": "{{name}}: {{message}}",
       "linked": "Tickets",
       "limit": "Höchstens {{limit}} Einträge je Sammelaktion."
+    },
+    "binding": {
+      "title": "Seiten des Bindungskonflikts",
+      "address": "Adresse",
+      "vrf": "VRF",
+      "pinned": "Gepinnt",
+      "observed": "Beobachtet",
+      "ci": "CI",
+      "interface": "Interface",
+      "openAddress": "Adresse öffnen",
+      "openVrf": "VRFs öffnen"
     }
   },
   "notifications": {
@@ -5194,7 +5206,10 @@
       "usage": "Belegung",
       "usageFailed": "Die Belegung konnte nicht geladen werden.",
       "free": "Frei",
-      "edit": "Subnetz bearbeiten"
+      "edit": "Subnetz bearbeiten",
+      "historyTitle": "Verlauf des Subnetzes",
+      "historyShow": "Verlauf anzeigen",
+      "historyHide": "Verlauf ausblenden"
     },
     "actions": {
       "title": "Vergabe",
@@ -5237,7 +5252,12 @@
       "previous": "Zurück",
       "next": "Weiter",
       "range": "{{from}}–{{to}} von {{total}}",
-      "searchHit": "Suchtreffer (andere Seite)"
+      "searchHit": "Suchtreffer (andere Seite)",
+      "editLabel": "Adresse {{address}} bearbeiten",
+      "viewLabel": "Adresse {{address}} anzeigen",
+      "create": "Adresse anlegen",
+      "pinned": "Fixiert",
+      "created": "Adresse {{address}} angelegt."
     },
     "subnetForm": {
       "new": "Neues Subnetz",
@@ -5351,6 +5371,75 @@
       "nameRequired": "Bitte einen Namen angeben.",
       "serversCount": "Bitte ein bis acht Server angeben.",
       "serversInvalid": "Keine gültige IP-Adresse: {{servers}}"
+    },
+    "origins": {
+      "manual": "Manuell",
+      "discovery": "Discovery",
+      "scan": "Scan",
+      "import": "Import"
+    },
+    "addressDialog": {
+      "createTitle": "Adresse anlegen",
+      "editTitle": "Adresse {{address}}",
+      "tabsLabel": "Bereiche der Adresse",
+      "tabProperties": "Eigenschaften",
+      "tabHistory": "Verlauf",
+      "address": "Adresse",
+      "addressRequired": "Bitte eine Adresse angeben.",
+      "type": "Typ",
+      "state": "Zustand",
+      "stateNone": "Nicht gesetzt",
+      "stateFromScan": "Den Zustand setzt der Scan.",
+      "role": "Rolle",
+      "dnsName": "DNS-Name",
+      "description": "Beschreibung",
+      "device": "Gerät",
+      "interface": "Interface",
+      "noInterface": "Ohne Interface",
+      "interfacesLoading": "Interfaces werden geladen …",
+      "interfacesFailed": "Die Interfaces konnten nicht geladen werden.",
+      "chooseDeviceFirst": "Zuerst ein Gerät wählen.",
+      "pinned": "Bindung fixieren (Pin)",
+      "pinnedHint": "Discovery ändert eine fixierte Bindung nicht und meldet Abweichungen als Review.",
+      "origin": "Herkunft",
+      "save": "Speichern",
+      "cancel": "Abbrechen",
+      "close": "Schließen",
+      "saveFailed": "Die Adresse konnte nicht gespeichert werden.",
+      "pinFailed": "Die Adresse wurde angelegt, der Pin konnte nicht gesetzt werden.",
+      "forbidden": "Für diese Änderung fehlt das Recht.",
+      "readOnly": "Nur lesend: Zum Bearbeiten fehlt das Recht ipam:write.",
+      "conflictTitle": "Offener Konflikt",
+      "conflict_duplicate_ip": "Für diese Adresse ist ein Review „Doppelte IP-Adresse“ offen.",
+      "conflict_ip_binding_conflict": "Discovery hat diese fixierte Adresse an einem anderen Gerät beobachtet.",
+      "openInbox": "In der Review-Inbox öffnen"
+    },
+    "history": {
+      "title": "Verlauf",
+      "label": "Änderungsverlauf",
+      "at": "Zeitpunkt",
+      "actor": "Akteur",
+      "source": "Quelle",
+      "field": "Feld",
+      "change": "Änderung",
+      "system": "System",
+      "empty": "Keine Änderungen.",
+      "loadFailed": "Der Verlauf konnte nicht geladen werden.",
+      "previous": "Zurück",
+      "next": "Weiter",
+      "range": "{{from}}–{{to}} von {{total}}",
+      "sources": {
+        "manual": "Manuell",
+        "discovery": "Discovery",
+        "scan": "Scan",
+        "import": "Import",
+        "allocation": "Vergabe"
+      },
+      "changeTypes": {
+        "create": "Angelegt",
+        "update": "Geändert",
+        "delete": "Gelöscht"
+      }
     }
   },
   "alarms": {

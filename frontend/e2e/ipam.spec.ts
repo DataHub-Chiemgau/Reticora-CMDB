@@ -6,7 +6,8 @@ import { AT, ORG_ID, expect, list, mockBackend, signIn, test } from './support/b
 // address list; with ipam:write the next free address is allocated and an
 // address is reserved, both visible at once in the list and the usage.
 // Requests and mocks are checked against api/openapi.yaml
-// (support/contract.ts).
+// (support/contract.ts). WP-917: an address of the list opens the address
+// dialog; it binds the address to a device and its interface and pins it.
 
 test.use({ locale: 'de-DE' });
 
@@ -14,6 +15,8 @@ const USER = '00000000-0000-0000-0000-000000000001';
 const SECTION = 'a9160000-0000-4000-8000-000000000001';
 const VRF = 'a9160000-0000-4000-8000-000000000002';
 const NET = 'a9160000-0000-4000-8000-000000000003';
+const DEVICE = 'a9170000-0000-4000-8000-000000000001';
+const NIC = 'a9170000-0000-4000-8000-000000000002';
 
 interface StoredAddress {
   id: string;
@@ -27,6 +30,8 @@ interface StoredAddress {
   pinned: boolean;
   state: 'unknown';
   is_gateway?: boolean;
+  ci_id?: string;
+  interface_id?: string;
   created_at: string;
   updated_at: string;
 }
@@ -163,6 +168,62 @@ async function mockIpam(page: Page) {
       },
     },
     {
+      path: '/cis',
+      reply: (_request, url) => ({
+        body: list(
+          (url.searchParams.get('search') ?? '') !== ''
+            ? [
+                {
+                  id: DEVICE,
+                  organization_id: ORG_ID,
+                  ci_type_id: '5e1b0c3a-7d2f-4a10-9c01-000000000001',
+                  name: 'sw-e2e-01',
+                  hostname: 'sw-e2e-01.example',
+                  status: 'active',
+                  attributes: {},
+                  is_manual: true,
+                  version: 1,
+                  created_at: AT,
+                  updated_at: AT,
+                },
+              ]
+            : [],
+        ),
+      }),
+    },
+    {
+      path: `/cis/${DEVICE}/interfaces`,
+      reply: () => ({
+        body: list([
+          {
+            id: NIC,
+            organization_id: ORG_ID,
+            ci_id: DEVICE,
+            name: 'ge-0/0/7',
+            mac: '00:11:22:33:44:55',
+            if_type: 'ethernet',
+            is_management: false,
+            is_uplink: false,
+            admin_status: 'up',
+            oper_status: 'up',
+            miss_count: 0,
+            created_at: AT,
+            updated_at: AT,
+          },
+        ]),
+      }),
+    },
+    {
+      method: 'PATCH',
+      path: `/ips/${address(1, '', 'static').id}`,
+      reply: (request) => {
+        const body = request.postDataJSON() as Partial<StoredAddress>;
+        const row = stored[0]!;
+        Object.assign(row, body);
+        return { body: row };
+      },
+    },
+    {
       method: 'POST',
       path: `/subnets/${NET}/reservations`,
       reply: (request) => {
@@ -190,7 +251,7 @@ test('opens a subnet from the tree, allocates the next free address and reserves
 
   await page.getByRole('button', { name: 'Nächste freie Adresse zuweisen' }).click();
   await expect(page.getByText('Adresse 10.91.6.2 zugewiesen.')).toBeVisible();
-  await expect(page.getByRole('cell', { name: '10.91.6.2', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Adresse 10.91.6.2 bearbeiten' })).toBeVisible();
   await expect(page.getByTestId('subnet-usage')).toHaveText('2 von 254 belegt (0.8 %)');
 
   // A free cell of the map fills the reservation.
@@ -207,5 +268,42 @@ test('opens a subnet from the tree, allocates the next free address and reserves
   expect(writes).toEqual([
     [`/subnets/${NET}/allocate`, { type: 'static' }],
     [`/subnets/${NET}/reservations`, { address: '10.91.6.40' }],
+  ]);
+});
+
+test('binds an address to a device and its interface and pins it (WP-917)', async ({ page }) => {
+  const calls = await mockIpam(page);
+  await signIn(page);
+  await page.goto(`/ipam/subnets/${NET}`);
+  // Keyboard: in the touch emulation of mobile-chrome the pointer hit test
+  // lands on the address map and on the dialog overlay; the keyboard path
+  // reaches the same controls.
+  const open = page.getByRole('button', { name: 'Adresse 10.91.6.1 bearbeiten' });
+  await open.focus();
+  await open.press('Enter');
+
+  const dialog = page.getByRole('dialog', { name: 'Adresse 10.91.6.1' });
+  await expect(dialog.getByLabel('Interface')).toBeDisabled();
+  const device = dialog.getByRole('combobox', { name: 'Gerät' });
+  await device.fill('sw-e2e');
+  await expect(dialog.getByRole('option', { name: /sw-e2e-01/ })).toBeVisible();
+  // Enter takes the active (first) hit of the combobox (UI-10).
+  await device.press('Enter');
+  const nic = dialog.getByLabel('Interface');
+  await expect(nic).toBeEnabled();
+  await nic.selectOption({ label: 'ge-0/0/7 (00:11:22:33:44:55)' });
+  const pin = dialog.getByLabel('Bindung fixieren (Pin)');
+  await pin.focus();
+  await pin.press('Space');
+  await expect(pin).toBeChecked();
+  const save = dialog.getByRole('button', { name: 'Speichern' });
+  await save.focus();
+  await save.press('Enter');
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText('Fixiert')).toBeVisible();
+
+  const patches = calls.filter((c) => c.method === 'PATCH').map((c) => [c.path, c.body]);
+  expect(patches).toEqual([
+    [`/ips/${address(1, '', 'static').id}`, { interface_id: NIC, ci_id: DEVICE, pinned: true }],
   ]);
 });

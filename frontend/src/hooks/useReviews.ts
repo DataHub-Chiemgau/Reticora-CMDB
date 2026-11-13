@@ -14,6 +14,7 @@ export const REVIEW_KINDS = [
   'serial_mismatch',
   'duplicate_ip',
   'unknown_relationship',
+  'ip_binding_conflict',
 ] as const;
 
 export type ReviewAction = 'merge' | 'new' | 'dismiss' | 'accept';
@@ -31,6 +32,9 @@ export const REVIEW_ACTIONS: Record<string, ReviewAction[]> = {
   serial_mismatch: ['dismiss'],
   duplicate_ip: ['accept', 'dismiss'],
   unknown_relationship: ['accept', 'dismiss'],
+  // accept moves the pinned address to the observed interface and releases
+  // the pin, dismiss keeps the pinned binding (IPM-14, E-216, WP-914).
+  ip_binding_conflict: ['accept', 'dismiss'],
 };
 
 /**
