@@ -258,6 +258,7 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 		failingJob                         *jobs.Job
 		jobService                         *jobs.Service
 		warned, expired                    string
+		webhookWorkflow                    string
 		rotatedCredential, agedCredential  string
 		usageCredential, usageCollector    string
 		usageScope, usageCI                string
@@ -1254,6 +1255,51 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 					t.Errorf("alarm.resolved data %v", data)
 				}
 			}},
+		// The workflow action send_webhook (WP-1096): the event is written
+		// with the succeeded step; while the outbox refuses it the run
+		// reports the failed step, which stays without its event.
+		{typ: events.WorkflowWebhook,
+			setup: func(t *testing.T) {
+				r := call(t, admin, http.MethodPost, "/api/v1/workflows", `{"name": "evt02-webhook", "trigger": {"type": "manual"},
+					"actions": [{"type": "send_webhook", "topic": "evt02.webhook", "payload": {"host": "${data.host}"}}]}`)
+				answered(t, "create workflow", r, false, http.StatusCreated)
+				var def struct {
+					ID string `json:"id"`
+				}
+				if err := json.Unmarshal(r.Body, &def); err != nil || def.ID == "" {
+					t.Fatalf("workflow %s: %v", t6Short(r.Body), err)
+				}
+				webhookWorkflow = def.ID
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/workflows/"+webhookWorkflow+"/runs", `{"context": {"data": {"host": "srv-evt02"}}}`)
+				answered(t, "run workflow", r, false, http.StatusCreated)
+				var run struct {
+					ID     string `json:"id"`
+					Status string `json:"status"`
+					Steps  []struct {
+						Status string `json:"status"`
+					} `json:"steps"`
+				}
+				if err := json.Unmarshal(r.Body, &run); err != nil || run.ID == "" || len(run.Steps) != 1 {
+					t.Fatalf("run %s: %v", t6Short(r.Body), err)
+				}
+				if refused {
+					unchanged(t, "webhook step", run.Status+"/"+run.Steps[0].Status, "failed/failed")
+					return ""
+				}
+				if run.Status != "succeeded" {
+					t.Fatalf("run %s, want succeeded", t6Short(r.Body))
+				}
+				return run.ID
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				payload, _ := data["payload"].(map[string]any)
+				if data["id"] != entity || data["run_id"] != entity || data["workflow_id"] != webhookWorkflow || data["topic"] != "evt02.webhook" ||
+					data["step_index"] != 0.0 || payload["host"] != "srv-evt02" {
+					t.Errorf("workflow.webhook data %v", data)
+				}
+			}},
 	}
 
 	// The table covers every type of events.Types without a frame in
@@ -1668,7 +1714,6 @@ var plannedProducers = map[string]string{
 	"workflow.run_cancelled":        "WP-1092",
 	"workflow.approval_requested":   "WP-1098",
 	"workflow.approval_decided":     "WP-1098",
-	"workflow.webhook":              "WP-1096",
 	"notification.escalated":        "WP-1146",
 	"notification.acknowledged":     "WP-1146",
 	"org.export_completed":          "WP-1151",

@@ -69,14 +69,20 @@ func writeWorkflowError(w http.ResponseWriter, r *http.Request, err error) {
 	}
 }
 
-// validateWrite checks the trigger and the conditions a create or a PATCH
+// validateWrite checks trigger, conditions and actions a create or a PATCH
 // sends: filter and conditions after MET-45 (WP-1087), cron and time zone
-// of a schedule (WP-1091); each refusal is a 422 on its field.
-func validateWrite(trigger JSONMap, conditions []JSONMap) error {
+// of a schedule (WP-1091), the send_webhook actions (WP-1096); each
+// refusal is a 422 on its field.
+func validateWrite(trigger JSONMap, conditions, actions []JSONMap) error {
 	if err := ValidateSchedule(trigger); err != nil {
 		return err
 	}
-	return ValidateDefinition(trigger, conditions)
+	if err := ValidateDefinition(trigger, conditions); err != nil {
+		return err
+	}
+	// send_webhook names a topic and no target of its own (E-231,
+	// WP-1096).
+	return validateActions(actions)
 }
 
 func (h *Handler) ListDefinitions(w http.ResponseWriter, r *http.Request) {
@@ -123,7 +129,7 @@ func (h *Handler) CreateDefinition(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, 400, "Bad Request", "name, trigger and actions are required")
 		return
 	}
-	if err := validateWrite(req.Trigger, req.Conditions); err != nil {
+	if err := validateWrite(req.Trigger, req.Conditions, req.Actions); err != nil {
 		api.WriteFieldError(w, err)
 		return
 	}
@@ -159,7 +165,7 @@ func (h *Handler) UpdateDefinition(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, 400, "Bad Request", err.Error())
 		return
 	}
-	if err := validateWrite(req.Trigger, req.Conditions); err != nil {
+	if err := validateWrite(req.Trigger, req.Conditions, req.Actions); err != nil {
 		api.WriteFieldError(w, err)
 		return
 	}

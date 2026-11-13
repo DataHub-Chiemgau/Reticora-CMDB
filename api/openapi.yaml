@@ -39990,8 +39990,8 @@ components:
           items: { $ref: '#/components/schemas/JSONValue' }
           description: >-
             Actions executed in order, each {"type": "<action>", ...}: noop,
-            create_ticket, set_ci_field, require_approval, submit_form and
-            send_notification (NTF-05 [P3]): {"type": "send_notification",
+            create_ticket, set_ci_field, require_approval, submit_form,
+            send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
             "recipients": {"users": [<user id>], "teams": [<team id>],
             "roles": [<role name>], "contact_roles": [owner | escalation |
             operator | responsible | vendor of the run's CI],
@@ -40003,7 +40003,15 @@ components:
             workflow; users receive it only with ci:read in client and site
             of the run's CI (workflow:read without a CI). An unknown user,
             team or role or no recipient fails the step with "notification
-            has no recipient".
+            has no recipient". send_webhook (WP-1096, E-231): {"type":
+            "send_webhook", "topic": <^[a-z0-9_.-]{1,64}$>, "payload":
+            <object>} hands the event workflow.webhook (run_id, workflow_id,
+            definition_version_id, step_index, topic, ci_id, payload) to the
+            active webhook subscriptions of the organization; a string value
+            of payload that is exactly ${<path>} becomes the value of the run
+            context under that path, null for an unknown one. The action
+            names no target of its own: url, headers, secret and event are
+            refused with 422 on actions[i].<field>.
         active: { type: boolean }
         version: { type: integer, minimum: 1, description: Number of the current definition version (WFL-02); the ETag. }
         current_version_id: { type: string, description: The stored version that trigger, conditions and actions copy. }
@@ -40025,8 +40033,8 @@ components:
           items: { $ref: '#/components/schemas/JSONValue' }
           description: >-
             Actions executed in order, each {"type": "<action>", ...}: noop,
-            create_ticket, set_ci_field, require_approval, submit_form and
-            send_notification (NTF-05 [P3]): {"type": "send_notification",
+            create_ticket, set_ci_field, require_approval, submit_form,
+            send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
             "recipients": {"users": [<user id>], "teams": [<team id>],
             "roles": [<role name>], "contact_roles": [owner | escalation |
             operator | responsible | vendor of the run's CI],
@@ -40038,7 +40046,15 @@ components:
             workflow; users receive it only with ci:read in client and site
             of the run's CI (workflow:read without a CI). An unknown user,
             team or role or no recipient fails the step with "notification
-            has no recipient".
+            has no recipient". send_webhook (WP-1096, E-231): {"type":
+            "send_webhook", "topic": <^[a-z0-9_.-]{1,64}$>, "payload":
+            <object>} hands the event workflow.webhook (run_id, workflow_id,
+            definition_version_id, step_index, topic, ci_id, payload) to the
+            active webhook subscriptions of the organization; a string value
+            of payload that is exactly ${<path>} becomes the value of the run
+            context under that path, null for an unknown one. The action
+            names no target of its own: url, headers, secret and event are
+            refused with 422 on actions[i].<field>.
         created_by: { type: string, description: User who stored the version; absent for migrated versions and callers without a user. }
         created_at: { type: string, format: date-time }
     CreateWorkflowDefinitionRequest:
@@ -40073,8 +40089,8 @@ components:
           items: { $ref: '#/components/schemas/JSONValue' }
           description: >-
             Actions executed in order, each {"type": "<action>", ...}: noop,
-            create_ticket, set_ci_field, require_approval, submit_form and
-            send_notification (NTF-05 [P3]): {"type": "send_notification",
+            create_ticket, set_ci_field, require_approval, submit_form,
+            send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
             "recipients": {"users": [<user id>], "teams": [<team id>],
             "roles": [<role name>], "contact_roles": [owner | escalation |
             operator | responsible | vendor of the run's CI],
@@ -40086,7 +40102,15 @@ components:
             workflow; users receive it only with ci:read in client and site
             of the run's CI (workflow:read without a CI). An unknown user,
             team or role or no recipient fails the step with "notification
-            has no recipient".
+            has no recipient". send_webhook (WP-1096, E-231): {"type":
+            "send_webhook", "topic": <^[a-z0-9_.-]{1,64}$>, "payload":
+            <object>} hands the event workflow.webhook (run_id, workflow_id,
+            definition_version_id, step_index, topic, ci_id, payload) to the
+            active webhook subscriptions of the organization; a string value
+            of payload that is exactly ${<path>} becomes the value of the run
+            context under that path, null for an unknown one. The action
+            names no target of its own: url, headers, secret and event are
+            refused with 422 on actions[i].<field>.
         active: { type: boolean }
     UpdateWorkflowDefinitionRequest:
       type: object
@@ -40119,8 +40143,8 @@ components:
           items: { $ref: '#/components/schemas/JSONValue' }
           description: >-
             Actions executed in order, each {"type": "<action>", ...}: noop,
-            create_ticket, set_ci_field, require_approval, submit_form and
-            send_notification (NTF-05 [P3]): {"type": "send_notification",
+            create_ticket, set_ci_field, require_approval, submit_form,
+            send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
             "recipients": {"users": [<user id>], "teams": [<team id>],
             "roles": [<role name>], "contact_roles": [owner | escalation |
             operator | responsible | vendor of the run's CI],
@@ -40132,7 +40156,15 @@ components:
             workflow; users receive it only with ci:read in client and site
             of the run's CI (workflow:read without a CI). An unknown user,
             team or role or no recipient fails the step with "notification
-            has no recipient".
+            has no recipient". send_webhook (WP-1096, E-231): {"type":
+            "send_webhook", "topic": <^[a-z0-9_.-]{1,64}$>, "payload":
+            <object>} hands the event workflow.webhook (run_id, workflow_id,
+            definition_version_id, step_index, topic, ci_id, payload) to the
+            active webhook subscriptions of the organization; a string value
+            of payload that is exactly ${<path>} becomes the value of the run
+            context under that path, null for an unknown one. The action
+            names no target of its own: url, headers, secret and event are
+            refused with 422 on actions[i].<field>.
         active: { type: boolean }
     WorkflowStep:
       type: object

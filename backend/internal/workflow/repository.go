@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
@@ -31,6 +32,9 @@ var (
 	// organization or outside the scope of the trigger; all answer 404
 	// alike (TEN-04, WP-1089).
 	ErrCINotFound = errors.New("the CI of the workflow run was not found")
+	// ErrNoEventOutbox: the repository writes no event outbox (memory,
+	// --no-db; WP-1096).
+	ErrNoEventOutbox = errors.New("webhook events unavailable")
 )
 
 type Repository interface {
@@ -59,6 +63,12 @@ type Repository interface {
 	RecordAttempt(ctx context.Context, orgID, id string, a RunAttempt) error
 	AppendStep(ctx context.Context, step *Step) error
 	UpdateStep(ctx context.Context, orgID, id, status string, output JSONMap, errText string) (*Step, error)
+	// AppendEvent sets step id succeeded with output and writes event to
+	// the event outbox in the same transaction (database.BeforeCommit,
+	// last before the commit, WP-1096); it returns the event id. A
+	// rollback leaves the step and writes no event. A repository without
+	// an outbox returns ErrNoEventOutbox.
+	AppendEvent(ctx context.Context, orgID, id string, output JSONMap, event *events.Event) (string, error)
 	ListSteps(ctx context.Context, orgID, runID string) ([]Step, error)
 	// ClaimRun decides whether the job of enqueue may execute the run now
 	// (WP-1089 AK2): under the advisory lock of the run's serial key, a
@@ -347,6 +357,12 @@ func (r *MemoryRepository) UpdateStep(_ context.Context, orgID, id, status strin
 	s.UpdatedAt = time.Now().UTC()
 	cp := *s
 	return &cp, nil
+}
+
+// AppendEvent implements Repository: the memory repository has no event
+// outbox (--no-db); the executor hands the event to the dispatcher there.
+func (r *MemoryRepository) AppendEvent(context.Context, string, string, JSONMap, *events.Event) (string, error) {
+	return "", ErrNoEventOutbox
 }
 func (r *MemoryRepository) ListSteps(_ context.Context, orgID, runID string) ([]Step, error) {
 	r.mu.RLock()

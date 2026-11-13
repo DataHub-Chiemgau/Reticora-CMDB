@@ -467,8 +467,17 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 		// workflows; without the job queue the runs execute in the request
 		// and the sweep queues nothing.
 		if d.modules.Enabled("workflows") {
-			sweepRuns := workflow.NewExecutor(d.repos.Workflow, d.repos.Ticket, d.repos.CI, d.repos.Form, d.dispatcher).
+			sweepDispatcher := d.dispatcher
+			if d.repos.EventOutbox {
+				sweepDispatcher = nil
+			}
+			sweepRuns := workflow.NewExecutor(d.repos.Workflow, d.repos.Ticket, d.repos.CI, d.repos.Form, sweepDispatcher).
 				WithFieldGuard(override.NewGuard(d.repos.Override))
+			// send_webhook of a run executed here writes to the outbox
+			// like the runs of the router (WP-1096).
+			if d.repos.EventOutbox {
+				sweepRuns.WithEventOutbox()
+			}
 			if d.jobQueue != nil {
 				sweepRuns.WithQueue(d.jobQueue)
 			}

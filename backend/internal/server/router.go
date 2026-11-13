@@ -618,8 +618,18 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// One executor runs the runs of the workflow API and the run an IGA
 	// access request starts (WFL-04); with the job queue as the job
 	// workflow.run (WP-1088, registerJobKinds).
-	workflowRuns := workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher).
+	// send_webhook writes workflow.webhook to the event outbox of its step
+	// (WP-1096); only without the outbox (--no-db) the executor hands the
+	// event to the dispatcher directly (pattern ciHandler).
+	workflowDispatcher := opts.Dispatcher
+	if repos.EventOutbox {
+		workflowDispatcher = nil
+	}
+	workflowRuns := workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, workflowDispatcher).
 		WithFieldGuard(override.NewGuard(repos.Override))
+	if repos.EventOutbox {
+		workflowRuns.WithEventOutbox()
+	}
 	// send_notification queues on the notifier of the application with
 	// the recipients of the database (WP-1095); without them (--no-db) its
 	// step fails with "notifications unavailable".

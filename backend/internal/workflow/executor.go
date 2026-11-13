@@ -47,6 +47,10 @@ type Executor struct {
 	// send_notification (WithNotifier, WP-1095).
 	notifier   *notify.Notifier
 	recipients notify.Resolver
+	// eventOutbox makes send_webhook write workflow.webhook to the event
+	// outbox of the step's transaction (WithEventOutbox, WP-1096);
+	// without it the event goes to the dispatcher after the step.
+	eventOutbox bool
 	// afterStep is a test hook called after each succeeded step; an error
 	// ends the attempt there like a worker that dies.
 	afterStep func(index int) error
@@ -307,7 +311,16 @@ func (e *Executor) resume(ctx context.Context, orgID string, run *Run, at attemp
 		if err != nil || end {
 			return out, err
 		}
-		output, wait, err := e.executeAction(ctx, orgID, run, i, action)
+		var output JSONMap
+		var wait, completed bool
+		if typ == webhookActionType {
+			// The step is stored succeeded together with its event
+			// (WP-1096).
+			output, err = e.sendWebhook(ctx, orgID, run, step, action)
+			completed = err == nil
+		} else {
+			output, wait, err = e.executeAction(ctx, orgID, run, i, action)
+		}
 		if wait {
 			if _, markErr := e.repo.UpdateStep(ctx, orgID, step.ID, StatusWaitingApproval, output, ""); markErr != nil {
 				slog.Error("workflow: failed to mark step waiting for approval", "step_id", step.ID, "error", markErr)
@@ -321,8 +334,10 @@ func (e *Executor) resume(ctx context.Context, orgID string, run *Run, at attemp
 			}
 			return e.failAttempt(ctx, orgID, run, at, text)
 		}
-		if _, err := e.repo.UpdateStep(ctx, orgID, step.ID, StatusSucceeded, output, ""); err != nil {
-			return e.abort(ctx, orgID, run, at, fmt.Errorf("update workflow step: %w", err))
+		if !completed {
+			if _, err := e.repo.UpdateStep(ctx, orgID, step.ID, StatusSucceeded, output, ""); err != nil {
+				return e.abort(ctx, orgID, run, at, fmt.Errorf("update workflow step: %w", err))
+			}
 		}
 		if e.afterStep != nil {
 			// Test hook: the attempt ends after step i like a worker that
@@ -557,12 +572,6 @@ func (e *Executor) executeAction(ctx context.Context, orgID string, run *Run, in
 			return nil, false, err
 		}
 		return JSONMap{"ticket_id": t.ID}, false, nil
-	case "send_webhook":
-		event := str(action, "event", "workflow.event")
-		if e.dispatcher != nil {
-			e.dispatcher.Dispatch(ctx, orgID, event, map[string]any{"run_id": run.ID, "context": run.Context})
-		}
-		return JSONMap{"event": event}, false, nil
 	case "set_ci_field":
 		if e.cis == nil {
 			return nil, false, fmt.Errorf("ci repository unavailable")

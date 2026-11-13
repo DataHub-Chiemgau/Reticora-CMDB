@@ -72,8 +72,11 @@ func RegisterMetrics(reg prometheus.Registerer) { reg.MustRegister(serialWait, s
 // idempotentActions may be executed again when an attempt ended while
 // their step was running: a second execution has the effect of the first
 // (noop, set_ci_field writes the same value, require_approval waits again,
-// send_notification queues under the same dedup key, WP-1095).
-var idempotentActions = map[string]bool{"noop": true, "set_ci_field": true, "require_approval": true, "send_notification": true}
+// send_notification queues under the same dedup key, WP-1095; a running
+// send_webhook step has written no event, since the event commits with the
+// succeeded step, WP-1096).
+var idempotentActions = map[string]bool{"noop": true, "set_ci_field": true, "require_approval": true, "send_notification": true,
+	"send_webhook": true}
 
 // stepInterruptedText is the error of a non-idempotent step an attempt left
 // running: whether its action took effect is unknown, it is not repeated.

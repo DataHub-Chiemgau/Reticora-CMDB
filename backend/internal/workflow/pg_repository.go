@@ -10,6 +10,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -39,7 +40,12 @@ const serialLock = `SELECT pg_advisory_xact_lock(hashtextextended($1::text || ':
 const serialOrder = `ORDER BY entity_seq ASC NULLS LAST, created_at ASC, id ASC`
 const stepCols = `id::text, organization_id::text, run_id::text, step_index, action_type, status, input, output, error, created_at, updated_at`
 
-type PGRepository struct{ pool *pgxpool.Pool }
+type PGRepository struct {
+	pool *pgxpool.Pool
+	// afterAppend is a test hook: an error after the event of AppendEvent
+	// rolls its transaction back (WP-1096).
+	afterAppend func() error
+}
 
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository { return &PGRepository{pool: pool} }
 func (r *PGRepository) ListDefinitions(ctx context.Context, orgID string, activeOnly bool, page api.PaginationParams) ([]Definition, int, error) {
@@ -555,6 +561,58 @@ func (r *PGRepository) UpdateStep(ctx context.Context, orgID, id, status string,
 		return err
 	})
 	return s, err
+}
+
+// AppendEvent implements Repository (WP-1096 AK3): the step becomes
+// succeeded with output and, last before the commit (database.BeforeCommit,
+// convention 20), the event is written to the outbox; its id is added to
+// the step output. A failed write rolls back both.
+func (r *PGRepository) AppendEvent(ctx context.Context, orgID, id string, output JSONMap, event *events.Event) (string, error) {
+	if output == nil {
+		output = JSONMap{}
+	}
+	var eventID string
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		// Only a step that has not succeeded yet: of two attempts that
+		// execute the step at once, the second waits for the row lock of
+		// the first, finds the step succeeded and writes no second event.
+		tag, err := tx.Exec(ctx, "UPDATE workflow_step SET status=$3, output=$4, error='', updated_at=now() WHERE organization_id=$1 AND id=$2 AND status<>$3",
+			orgID, id, StatusSucceeded, output)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			var exists bool
+			if qerr := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM workflow_step WHERE organization_id=$1 AND id=$2)", orgID, id).Scan(&exists); qerr != nil {
+				return qerr
+			}
+			if exists {
+				return errStepSucceeded
+			}
+			return fmt.Errorf("workflow step not found")
+		}
+		return database.BeforeCommit(ctx, func() error {
+			env, aerr := events.NewOutbox().Append(ctx, tx, event)
+			if aerr != nil {
+				return fmt.Errorf("event of the workflow step: %w", aerr)
+			}
+			eventID = env.ID
+			// The event id belongs to the output of the step; the row was
+			// written above in this transaction.
+			if _, uerr := tx.Exec(ctx, `UPDATE workflow_step SET output = output || jsonb_build_object('event_id', $3::text)
+				WHERE organization_id=$1 AND id=$2`, orgID, id, env.ID); uerr != nil {
+				return uerr
+			}
+			if r.afterAppend != nil {
+				return r.afterAppend()
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		return "", err
+	}
+	return eventID, nil
 }
 func (r *PGRepository) ListSteps(ctx context.Context, orgID, runID string) ([]Step, error) {
 	var out []Step
