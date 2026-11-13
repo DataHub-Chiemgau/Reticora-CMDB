@@ -262,6 +262,31 @@ der Updater (`update.MinCosignVersion`, er lehnt das Update ab). Hinweise
 für bestehende Collector-Hosts mit cosign v2.4.1:
 [`docs/betrieb/collector-updates.md`](../betrieb/collector-updates.md),
 Abschnitt „cosign v3“.
+### Node-Werkzeuge der Workflows (Upd-07)
+
+`npx` lädt ein Paket, das nicht im Lockfile steht, bei jedem Lauf ungeprüft
+nach; `npm-audit` sieht es nicht. So lief bis 2026-11-13 in den E2E-Jobs
+`serve` (`ci.yml` ohne Version, `e2e-prev.yml` 14.2.6), das in jeder Version
+ab 10.1.0, auch in der aktuellen 14.2.7, `compression` exakt auf 1.8.1 pinnt
+(CVE-2026-87776 / GHSA-vc2v-76pw-4v95, High, behoben in 1.8.2), dazu
+`wait-on`. Seitdem gilt:
+
+- Die Jobs `e2e` (`ci.yml`) und `e2e-prev` (`e2e-prev.yml`) liefern den Build
+  mit `vite preview` aus `frontend/package-lock.json` aus
+  (`npm run preview -- --port 4173 --strictPort`, SPA-Fallback wie
+  `serve -s`; `e2e-prev` installiert dafür zusätzlich `frontend/` per
+  `npm ci`). Eine curl-Schleife (`--retry 20 --retry-all-errors`) wartet auf
+  den Server statt `wait-on`. Port und Basis-URL (`BASE_URL`) sind
+  unverändert.
+- Jedes `npx` der Workflows startet ein Programm eines Pakets aus
+  `frontend/package-lock.json` oder `frontend/e2e-prev/package-lock.json`;
+  `--yes`, `-p` und `<paket>@<version>` sind nicht zulässig.
+  `tests/ci-config.test.sh` (`workflow_npx_lockfile`, Job `gate`) prüft das
+  mit einer Negativ-Fixture (Stand vor Upd-07).
+- `vite` ist eine Entwicklungsabhängigkeit; seine Funde stehen im Bericht von
+  `npm-audit` (alle inkl. Entwicklung), blockieren nach der Regel oben aber
+  nicht. `vite preview` bindet nur an `localhost` und dient nur dem
+  CI-Testlauf.
 
 ## Ausnahmen und CVE-Fix-SLA
 

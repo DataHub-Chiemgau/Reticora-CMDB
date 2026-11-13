@@ -31,6 +31,11 @@
 #     (deploy compose stack, Kubernetes components) is pinned by version and
 #     digest, in the image-scan-thirdparty matrix and documented (SR-60,
 #     WP-873), with a negative fixture;
+#   - workflow_npx_lockfile: every npx of the workflows runs a binary of a
+#     package in the frontend lockfiles (no --yes, no <pkg>@<version>), and
+#     the E2E jobs serve the build with vite preview on port 4173 (Upd-07:
+#     serve pins compression 1.8.1, GHSA-vc2v-76pw-4v95), with a negative
+#     fixture;
 #   - release_images_documented: docs/README.md and
 #     docs/security/abhaengigkeitsscans.md name every release image (F-294).
 #   - release_publish: release.yml refuses a tag whose GitHub release already
@@ -633,6 +638,92 @@ if [ "$(grep -c . <<<"$problems")" -eq 3 ] \
     ok "thirdparty_image_pins_negative: a floating tag and an image without scan entry are reported"
 else
     fail "thirdparty_image_pins_negative: a floating tag and an image without scan entry are reported" "$problems"
+fi
+
+# ─── Upd-07: no npm package outside the lockfiles in the workflows ──────────
+# workflow_npx <root>: every npx of the workflows of <root> runs a binary of a
+# package in frontend/package-lock.json or frontend/e2e-prev/package-lock.json
+# (no --yes/-p, no <pkg>@<version>, nothing the lockfiles do not hold: npx
+# would fetch it unaudited, as serve with compression 1.8.1,
+# GHSA-vc2v-76pw-4v95), and the E2E jobs serve the build with vite preview on
+# the port of their BASE_URL. One line per problem.
+workflow_npx() {
+    python3 - "$1" <<'PY'
+import glob, json, os, re, shlex, sys, yaml
+root = sys.argv[1]
+bins = set()
+for lock in ("frontend/package-lock.json", "frontend/e2e-prev/package-lock.json"):
+    for pkg in json.load(open(os.path.join(root, lock)))["packages"].values():
+        bins.update((pkg.get("bin") or {}).keys())
+problems = []
+wfs = {}
+for path in sorted(glob.glob(os.path.join(root, ".github/workflows/*.yml"))):
+    name = os.path.basename(path)
+    wfs[name] = yaml.safe_load(open(path))
+    for job, spec in (wfs[name].get("jobs") or {}).items():
+        for step in spec.get("steps") or []:
+            run = re.sub(r"\\\n\s*", " ", step.get("run") or "")
+            for m in re.finditer(r"(?:^|[;&|(\s])npx\s+([^\n;&|)]*)", run):
+                args = shlex.split(m.group(1).replace("${{", "").replace("}}", ""))
+                opts = [a for a in args if a.startswith("-")]
+                cmd = next((a for a in args if not a.startswith("-")), "")
+                where = f"{name} {job}: npx {m.group(1).strip()}"
+                if set(opts) & {"--yes", "-y", "-p", "--package"}:
+                    problems.append(f"{where}: installs outside the lockfiles")
+                elif "@" in cmd.lstrip("@"):
+                    problems.append(f"{where}: versioned package outside the lockfiles")
+                elif cmd not in bins:
+                    problems.append(f"{where}: {cmd} is no binary of a lockfile package")
+def step(wf, job, name):
+    return next((s for s in wfs.get(wf, {}).get("jobs", {}).get(job, {}).get("steps", []) if s.get("name") == name), None)
+for wf, job, name in (("ci.yml", "e2e", "Run E2E tests"),
+                      ("e2e-prev.yml", "e2e-prev", "Run E2E tests (previous versions)")):
+    s = step(wf, job, name)
+    if not s:
+        problems.append(f"{wf} {job}: no step '{name}'")
+        continue
+    if "run preview -- --port 4173 --strictPort &" not in s["run"]:
+        problems.append(f"{wf} {job}: the build is not served by vite preview on port 4173 (--strictPort)")
+    if (s.get("env") or {}).get("BASE_URL") != "http://localhost:4173":
+        problems.append(f"{wf} {job}: BASE_URL is not http://localhost:4173")
+print("\n".join(problems))
+PY
+}
+npx_problems="$(workflow_npx .)"
+if [ -z "$npx_problems" ]; then
+    ok "workflow_npx_lockfile: every npx of the workflows runs a lockfile package; the E2E jobs serve the build with vite preview on 4173"
+else
+    fail "workflow_npx_lockfile: every npx of the workflows runs a lockfile package; the E2E jobs serve the build with vite preview on 4173" "$npx_problems"
+fi
+# Negative fixture (the state before Upd-07): unversioned serve and wait-on in
+# ci.yml, serve@14.2.6 and wait-on@9.5.1 with --yes in e2e-prev.yml.
+fx="$TMP_ROOT/npx-fixture"
+mkdir -p "$fx/.github/workflows" "$fx/frontend/e2e-prev"
+cp .github/workflows/*.yml "$fx/.github/workflows/"
+cp frontend/package-lock.json "$fx/frontend/"
+cp frontend/e2e-prev/package-lock.json "$fx/frontend/e2e-prev/"
+python3 - "$fx" <<'PY'
+import re, sys
+root = sys.argv[1] + "/.github/workflows/"
+for name, server, wait in (
+        ("ci.yml", "npx serve -s dist -l 4173 &", "npx wait-on http://localhost:4173 --timeout 10000"),
+        ("e2e-prev.yml", "npx --yes serve@14.2.6 -s ../dist -l 4173 &", "npx --yes wait-on@9.5.1 http://localhost:4173 --timeout 10000")):
+    s = open(root + name).read()
+    s, n = re.subn(r"(?m)^(\s*)\S.*run preview -- --port 4173 --strictPort &$", lambda m: m.group(1) + server + "\n" + m.group(1) + wait, s)
+    assert n == 1, name
+    open(root + name, "w").write(s)
+PY
+problems="$(workflow_npx "$fx")"
+if [ "$(grep -c . <<<"$problems")" -eq 6 ] \
+    && grep -q '^ci\.yml e2e: npx serve -s dist -l 4173: serve is no binary of a lockfile package$' <<<"$problems" \
+    && grep -q '^ci\.yml e2e: npx wait-on .*: wait-on is no binary of a lockfile package$' <<<"$problems" \
+    && grep -q '^e2e-prev\.yml e2e-prev: npx --yes serve@14\.2\.6 .*: installs outside the lockfiles$' <<<"$problems" \
+    && grep -q '^e2e-prev\.yml e2e-prev: npx --yes wait-on@9\.5\.1 .*: installs outside the lockfiles$' <<<"$problems" \
+    && grep -q '^ci\.yml e2e: the build is not served by vite preview' <<<"$problems" \
+    && grep -q '^e2e-prev\.yml e2e-prev: the build is not served by vite preview' <<<"$problems"; then
+    ok "workflow_npx_lockfile_negative: serve and wait-on fetched by npx are reported"
+else
+    fail "workflow_npx_lockfile_negative: serve and wait-on fetched by npx are reported" "$problems"
 fi
 
 # ─── F-294: documentation of the release images ─────────────────────────────

@@ -1385,13 +1385,19 @@ Safari (E-88). The evidence is automated, without an external browser grid:
 
 Both jobs run the same specs of `frontend/e2e/` (smoke, the axe WCAG 2.1 AA
 check `a11y.spec.ts`, keyboard and the core flows against the strict,
-contract-checked mock backend); no test is skipped per browser. Limitations:
+contract-checked mock backend); no test is skipped per browser. Both serve the
+build with `vite preview` of `frontend/package-lock.json`
+(`npm run preview -- --port 4173 --strictPort`, SPA fallback) and wait for it
+with a curl retry; no server package is fetched by `npx` outside the lockfiles
+(Upd-07: every `serve` ≥10.1.0 pins `compression` 1.8.1, GHSA-vc2v-76pw-4v95;
+checked by `tests/ci-config.test.sh`, `workflow_npx_lockfile`). Limitations:
 Edge n-1 is approximated by Chromium n-1 and Safari n-1 by WebKit n-1, since
 no previous Edge or Safari build is available on the Linux runners; the
 mobile projects are the desktop engines with a device profile (viewport,
 touch, user agent), so `mobile-safari` is WebKit, not iOS Safari. A local run
 of `e2e-prev`: `cd frontend/e2e-prev && npm ci && npx playwright install`,
-serve a build on port 4173, then
+serve a build with `npm run build && npm run preview -- --port 4173 --strictPort`
+in `frontend/`, then
 `CI=1 npx playwright test --config playwright.prev.config.ts --project=<name>`
 (`chrome-prev` needs `PW_CHROME_PREV_EXECUTABLE`).
 
