@@ -493,6 +493,9 @@ services:
       # Probe result ingest from the stream RETICORA_PROBE into probe_result
       # (NFR-11, PRB-07, WP-960); module monitoring.
       RETICORA_WORKER_PROBE_INGEST_ENABLED: "${RETICORA_WORKER_PROBE_INGEST_ENABLED:-true}"
+      # Workflows: the consumer workflow-triggers and the runs of the job
+      # kind workflow.run (OPS-02 [P3], WP-1114); module workflows.
+      RETICORA_WORKER_WORKFLOW_ENABLED: "${RETICORA_WORKER_WORKFLOW_ENABLED:-true}"
       RETICORA_PKI_DIR: "/pki"
       RETICORA_NATS_EDGE_URL: "tls://nats-edge:4222"
       # Names on the server certificate of nats-edge. A collector connects to
@@ -565,6 +568,7 @@ services:
       RETICORA_WORKER_COMPUTED_REFRESH_ENABLED: "${RETICORA_MONITORING_WORKER_COMPUTED_REFRESH_ENABLED:-false}"
       RETICORA_WORKER_PROBE_ASSIGN_ENABLED: "${RETICORA_MONITORING_WORKER_PROBE_ASSIGN_ENABLED:-true}"
       RETICORA_WORKER_PROBE_INGEST_ENABLED: "${RETICORA_MONITORING_WORKER_PROBE_INGEST_ENABLED:-true}"
+      RETICORA_WORKER_WORKFLOW_ENABLED: "${RETICORA_MONITORING_WORKER_WORKFLOW_ENABLED:-false}"
     volumes:
       - ./secrets/session-private.pem:/etc/reticora/session/private.pem:ro
       - ./letsencrypt:/etc/letsencrypt:ro

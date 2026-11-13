@@ -165,6 +165,9 @@ spec:
             # Probe result ingest into probe_result (NFR-11, WP-960).
             - name: RETICORA_WORKER_PROBE_INGEST_ENABLED
               value: "true"
+            # The workflows run on the main deployment (WP-1114).
+            - name: RETICORA_WORKER_WORKFLOW_ENABLED
+              value: "false"
           volumeMounts:
             - name: session-key
               mountPath: /etc/reticora/session

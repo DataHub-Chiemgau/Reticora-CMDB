@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -76,6 +77,9 @@ type Queue struct {
 
 	mu       sync.RWMutex
 	handlers map[string]Handler
+	// declared are the kinds this instance submits but does not consume
+	// (Declare, OPS-02, WP-1114): another instance runs their jobs.
+	declared map[string]bool
 	// failures counts what failed since the last sweep: storage errors,
 	// failed attempts and errors of the consumers (OPS-05).
 	failures atomic.Int64
@@ -86,7 +90,7 @@ type Queue struct {
 func NewQueue(svc *Service, js jetstream.JetStream) *Queue {
 	return &Queue{
 		svc: svc, js: js, Stream: DefaultStream, SubjectPrefix: DefaultSubjectPrefix,
-		AckMargin: DefaultAckMargin, SweepInterval: DefaultSweepInterval, handlers: map[string]Handler{},
+		AckMargin: DefaultAckMargin, SweepInterval: DefaultSweepInterval, handlers: map[string]Handler{}, declared: map[string]bool{},
 	}
 }
 
@@ -97,6 +101,47 @@ func (q *Queue) Handle(k Kind, h Handler) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	q.handlers[k.Name] = h
+}
+
+// Declare registers the kind with the service and makes it known to
+// Submit without a handler (OPS-02, WP-1114): the instance queues and
+// announces jobs of the kind but starts no consumer for it, so the instances
+// whose worker of the kind is switched on run them. A later Handle of the
+// kind makes the instance consume it.
+func (q *Queue) Declare(k Kind) {
+	q.svc.Register(k)
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.declared[k.Name] = true
+}
+
+// Knows reports whether the queue handles or declares kind (Declare): a
+// job of a declared kind is executed by another instance, so the reaper
+// requeues it after a lost worker like a handled one (WP-1114).
+func (q *Queue) Knows(kind string) bool {
+	return q.submittable(kind)
+}
+
+// submittable reports whether Submit accepts jobs of kind: it is handled
+// or declared.
+func (q *Queue) submittable(kind string) bool {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+	_, handled := q.handlers[kind]
+	return handled || q.declared[kind]
+}
+
+// consumedKinds are the kinds the instance starts a consumer for: those
+// with a handler, never the declared ones.
+func (q *Queue) consumedKinds() []string {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+	kinds := make([]string, 0, len(q.handlers))
+	for k := range q.handlers {
+		kinds = append(kinds, k)
+	}
+	sort.Strings(kinds)
+	return kinds
 }
 
 // IsCancelled reports whether the job was cancelled, the checkpoint of a
@@ -141,10 +186,11 @@ func (q *Queue) Setup(ctx context.Context) error {
 // Submit stores a job and announces it. A job that exists already (same
 // idempotency key) is announced again while it is queued; the claim keeps
 // it from running twice. A failed announcement leaves the job queued for
-// the sweep. A kind without a handler (Handle) is refused (ErrUnknownKind):
-// its job would stay queued, since no worker consumes it.
+// the sweep. A kind neither handled (Handle) nor declared (Declare) is
+// refused (ErrUnknownKind): its job would stay queued, since no worker
+// consumes it.
 func (q *Queue) Submit(ctx context.Context, orgID, kind string, params any, opts EnqueueOptions) (*Job, bool, error) {
-	if !q.Handles(kind) {
+	if !q.submittable(kind) {
 		return nil, false, fmt.Errorf("%w: %s has no handler on the job queue", ErrUnknownKind, kind)
 	}
 	job, created, err := q.svc.Enqueue(ctx, orgID, kind, params, opts)
@@ -343,15 +389,10 @@ func (q *Queue) cycle(ctx context.Context) {
 	observability.ObserveWorkerRun("jobs", failures+int(q.failures.Swap(0)))
 }
 
-// consume starts one durable consumer per registered kind.
+// consume starts one durable consumer per handled kind; a declared kind
+// gets none (WP-1114).
 func (q *Queue) consume(ctx context.Context) error {
-	q.mu.RLock()
-	kinds := make([]string, 0, len(q.handlers))
-	for k := range q.handlers {
-		kinds = append(kinds, k)
-	}
-	q.mu.RUnlock()
-	for _, name := range kinds {
+	for _, name := range q.consumedKinds() {
 		k, err := q.svc.kind(name)
 		if err != nil {
 			return err

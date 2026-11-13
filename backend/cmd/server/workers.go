@@ -123,6 +123,27 @@ func (d *workerDeps) workflowTriggers() *workflow.TriggerConsumer {
 	})
 }
 
+// workflowWorker is the worker workflow (OPS-02 [P3], WP-1114): it runs the
+// consumer workflow-triggers; its cycle checks that the consumer can run
+// (module, database, job queue and event stream present) and records a
+// failure otherwise, every interval while it runs.
+func (d *workerDeps) workflowWorker() server.Worker {
+	cycles := observability.NewCycles(config.WorkerWorkflow)
+	triggers := d.workflowTriggers()
+	if triggers == nil {
+		cycles.Check("workflow-triggers", func(context.Context) error {
+			return errors.New("the workflow trigger consumer needs the module workflows, the database, the job queue and the event stream")
+		})
+	}
+	return server.Worker{Name: config.WorkerWorkflow, Run: serving(cycles, d.every(serviceCycle), func(ctx context.Context) {
+		if triggers == nil {
+			<-ctx.Done()
+			return
+		}
+		triggers.Run(ctx)
+	})}
+}
+
 // probeIngester is the worker probe_ingest: the one main built for /readyz,
 // else one on the ingest queue's JetStream and the database; nil without
 // either.
@@ -332,19 +353,15 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 	// Run the jobs announced on the JOBS work queue (TEC-14); a cycle is a
 	// sweep, the backlog the due queued jobs of the kinds it runs.
 	if d.jobQueue != nil {
-		run := d.jobQueue.Run
-		// Event triggers of workflows (WFL-02, WP-1090, E-226): the durable
-		// consumer workflow-triggers on RETICORA_EVENTS starts the runs of
-		// the event definitions and queues them as workflow.run, with the
-		// module workflows; until WP-1114 in the worker jobs.
-		if triggers := d.workflowTriggers(); triggers != nil {
-			run = func(ctx context.Context) {
-				go triggers.Run(ctx)
-				d.jobQueue.Run(ctx)
-			}
-		}
-		workers = append(workers, server.Worker{Name: config.WorkerJobs, Run: run, Backlog: d.jobBacklog})
+		workers = append(workers, server.Worker{Name: config.WorkerJobs, Run: d.jobQueue.Run, Backlog: d.jobBacklog})
 	}
+	// Event triggers of workflows (WFL-02, WP-1090, E-226, OPS-02 [P3],
+	// WP-1114): the durable consumer workflow-triggers on RETICORA_EVENTS
+	// starts the runs of the event definitions and queues them as
+	// workflow.run; the consumer of workflow.run runs in the worker jobs of
+	// the instances where this worker is on (server.Options.
+	// WorkflowWorkerOff). Module workflows.
+	workers = append(workers, d.workflowWorker())
 	// Consume ingest.> (REC-01).
 	if d.ingestQueue != nil {
 		workers = append(workers, server.Worker{Name: config.WorkerIngest, Run: d.ingestQueue.Run, Backlog: d.ingestQueue.Backlog})
@@ -836,15 +853,17 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 // jobRequeues reports the job kinds the reaper puts back into the queue
 // after a lost worker, those with an executor that runs queued jobs again:
 // the kinds of the job queue on NATS and the attribute index jobs of the
-// scheduler and the backfill of computed attributes (WP-718). The other
-// kinds fail, among them the in-process jobs without NATS.
+// scheduler and the backfill of computed attributes (WP-718). A kind the
+// queue only declares (workflow.run with its worker off, WP-1114) is run
+// by another instance and requeued as well. The other kinds fail, among
+// them the in-process jobs without NATS.
 func jobRequeues(queue *jobs.Queue) func(kind string) bool {
 	return func(kind string) bool {
 		switch kind {
 		case citype.IndexJobKind, citype.RebuildJobKind, citype.KeyJobKind, ci.BackfillJobKind:
 			return true
 		}
-		return queue != nil && queue.Handles(kind)
+		return queue != nil && queue.Knows(kind)
 	}
 }
 

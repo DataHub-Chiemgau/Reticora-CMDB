@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -1149,5 +1150,82 @@ func TestVulnfeedCSAFJobRegistration(t *testing.T) {
 	t.Setenv("RETICORA_VULNFEED_CSAF_PROVIDERS", "https://csaf-mirror.internal.example/.well-known/csaf/provider-metadata.json")
 	if _, ok := kinds(true, findings)[vulnfeed.CSAFKind]; !ok {
 		t.Errorf("air-gapped with an own mirror %s is not registered", vulnfeed.CSAFKind)
+	}
+}
+
+// TestWorkflowWorkerRunsUnderItsWorkerSwitch covers OPS-02 [P3] (WP-1114):
+// the worker workflow starts only with its switch and the module workflows
+// (matrix switch on/off × module on/off); only on/on consumes workflow.run,
+// in every other case the instance declares the kind and still queues runs.
+// The workers monitoring and workflow switch independently.
+func TestWorkflowWorkerRunsUnderItsWorkerSwitch(t *testing.T) {
+	for _, tc := range []struct {
+		switchOn bool
+		modules  string
+	}{{true, "workflows"}, {false, "workflows"}, {true, ""}, {false, ""}} {
+		t.Run(fmt.Sprintf("switch %v modules %q", tc.switchOn, tc.modules), func(t *testing.T) {
+			t.Setenv(config.WorkerEnvKey(config.WorkerWorkflow), strconv.FormatBool(tc.switchOn))
+			t.Setenv(config.WorkerEnvKey(config.WorkerMonitoring), "true")
+			cfg := config.Load()
+			mods, err := server.ParseModules(tc.modules)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := tc.switchOn && tc.modules == "workflows"
+			enabled := workerSwitch(cfg, mods)
+			if enabled(config.WorkerWorkflow) != want {
+				t.Fatalf("worker workflow starts %v, want %v", enabled(config.WorkerWorkflow), want)
+			}
+			repos := server.MemoryRepositories()
+			built, err := buildWorkers(&workerDeps{cfg: cfg, repos: &repos, cycle: testCycle, modules: mods})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.ContainsFunc(built, func(w server.Worker) bool { return w.Name == config.WorkerWorkflow }) {
+				t.Fatal("buildWorkers builds no worker workflow")
+			}
+			svc := jobs.NewService(repos.Jobs)
+			queue := jobs.NewQueue(svc, nil)
+			key, err := crypto.GenerateMasterKey()
+			if err != nil {
+				t.Fatal(err)
+			}
+			enc, err := crypto.NewEnvelopeEncryptor(key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ents := entitlement.NewService(repos.Entitlement, entitlement.Options{})
+			if _, _, err = server.NewRouter(repos, server.Options{Version: "wp-1114", Modules: mods, JobQueue: queue, Entitlements: ents,
+				CIService: ci.NewServiceWithLimits(repos.CI, ents), Credentials: credential.NewService(repos.Credential, enc),
+				WorkflowWorkerOff: !enabled(config.WorkerWorkflow), OIDC: identity.NewOIDCProvider(identity.OIDCConfig{})}); err != nil {
+				t.Fatal(err)
+			}
+			if queue.Handles(workflow.RunJobKind) != want {
+				t.Errorf("workflow.run consumed %v, want %v", queue.Handles(workflow.RunJobKind), want)
+			}
+			if _, _, err = queue.Submit(context.Background(), "org-1", workflow.RunJobKind, workflow.RunJobParams{RunID: "r"}, jobs.EnqueueOptions{}); err != nil {
+				t.Errorf("submit workflow.run: %v, want it queued for another instance", err)
+			}
+			// The reaper of this instance requeues a run of a lost worker
+			// for another instance instead of failing it.
+			if !jobRequeues(queue)(workflow.RunJobKind) {
+				t.Error("the reaper does not requeue workflow.run, want it requeued in every case")
+			}
+		})
+	}
+	// monitoring and workflow switch independently.
+	all, err := server.ParseModules("workflows,monitoring")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(config.WorkerEnvKey(config.WorkerWorkflow), "false")
+	t.Setenv(config.WorkerEnvKey(config.WorkerMonitoring), "true")
+	if e := workerSwitch(config.Load(), all); e(config.WorkerWorkflow) || !e(config.WorkerMonitoring) {
+		t.Errorf("workflow off, monitoring on: workflow %v, monitoring %v", e(config.WorkerWorkflow), e(config.WorkerMonitoring))
+	}
+	t.Setenv(config.WorkerEnvKey(config.WorkerWorkflow), "true")
+	t.Setenv(config.WorkerEnvKey(config.WorkerMonitoring), "false")
+	if e := workerSwitch(config.Load(), all); !e(config.WorkerWorkflow) || e(config.WorkerMonitoring) {
+		t.Errorf("workflow on, monitoring off: workflow %v, monitoring %v", e(config.WorkerWorkflow), e(config.WorkerMonitoring))
 	}
 }

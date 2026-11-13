@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -305,4 +306,55 @@ func TestQueueSweepIsACycleOfTheJobsWorker(t *testing.T) {
 	js.down.Store(false)
 	answered := runs()
 	waitFor("a sweep after the stream answers again", func() bool { return runs() >= answered+2 })
+}
+
+// recordingJetStream is fakeJetStream that records the durable consumers
+// Run creates.
+type recordingJetStream struct {
+	fakeJetStream
+	mu        sync.Mutex
+	consumers []string
+}
+
+func (r *recordingJetStream) CreateOrUpdateConsumer(_ context.Context, _ string, cfg jetstream.ConsumerConfig) (jetstream.Consumer, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.consumers = append(r.consumers, cfg.Durable)
+	return fakeConsumer{}, nil
+}
+
+// TestDeclaredKindIsSubmittableButNotConsumed covers OPS-02 [P3] (WP-1114):
+// a declared kind is known to Submit (its job is stored and announced) but
+// the instance starts no consumer for it and does not run it; a kind
+// neither handled nor declared is still refused.
+func TestDeclaredKindIsSubmittableButNotConsumed(t *testing.T) {
+	s, _ := newService()
+	js := &recordingJetStream{}
+	q := NewQueue(s, js)
+	q.Handle(Kind{Name: "render", Timeout: time.Minute}, func(context.Context, *Job) (any, error) { return nil, nil })
+	q.Declare(Kind{Name: "workflow.run", Timeout: time.Minute})
+	ctx := context.Background()
+	job, created, err := q.Submit(ctx, "org-1", "workflow.run", nil, EnqueueOptions{})
+	if err != nil || !created || job.Status != StatusQueued {
+		t.Fatalf("submit of the declared kind: %+v %v %v", job, created, err)
+	}
+	if q.Handles("workflow.run") {
+		t.Error("the declared kind counts as handled")
+	}
+	if !q.Knows("workflow.run") || !q.Knows("render") || q.Knows("unknown") {
+		t.Error("Knows: want the handled and the declared kind, not an unknown one")
+	}
+	if _, _, err = q.Submit(ctx, "org-1", "unknown", nil, EnqueueOptions{}); !errors.Is(err, ErrUnknownKind) {
+		t.Errorf("submit of an unknown kind: %v, want ErrUnknownKind", err)
+	}
+	runCtx, cancel := context.WithCancel(ctx)
+	if err = q.consume(runCtx); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	js.mu.Lock()
+	defer js.mu.Unlock()
+	if len(js.consumers) != 1 || js.consumers[0] != "jobs-render" {
+		t.Errorf("consumers %v, want only jobs-render (none for the declared workflow.run)", js.consumers)
+	}
 }

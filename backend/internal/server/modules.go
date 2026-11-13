@@ -98,7 +98,7 @@ var LateModules = []Module{
 	{Key: "maintenance", Phase: "P3", Prefixes: []string{"/api/v1/maintenance-windows"}, Nav: []string{"maintenance"}},
 	{Key: "workflows", Phase: "P3", Prefixes: []string{
 		"/api/v1/forms", "/api/v1/form-submissions", "/api/v1/workflows", "/api/v1/workflow-runs", "/api/v1/workflow-approvals",
-	}, Nav: []string{"forms", "workflows"}},
+	}, Workers: []string{config.WorkerWorkflow}, Nav: []string{"forms", "workflows"}},
 	{Key: "compliance", Phase: "P3", Prefixes: []string{"/api/v1/compliance"}, Nav: []string{"compliance"}},
 	{Key: "findings", Phase: "P3", Prefixes: []string{"/api/v1/security"}, Nav: []string{"findings"}},
 	// Monitoring of phase 3 (E-160, WP-863): probes, alarms, incidents,

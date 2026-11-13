@@ -275,6 +275,10 @@ type Options struct {
 	// JobQueue runs the submitted job kinds on the JOBS work queue on NATS
 	// (TEC-14, jobkinds.go); nil runs them in the accepting process.
 	JobQueue *jobs.Queue
+	// WorkflowWorkerOff reports that the worker workflow does not run on
+	// this instance (switch or module off, OPS-02, WP-1114): the job kind
+	// workflow.run is declared on JobQueue, not consumed.
+	WorkflowWorkerOff bool
 	// Signup is the self-signup flow (TLC-01); nil answers 503.
 	Signup *signup.Service
 	// SignupProtection is the captcha, blocklist and per-IP limit of the
@@ -797,7 +801,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			export.NewOrgExporter(opts.AuditPool, opts.Blobs, jobService), subjectService, workflowRuns,
 			// The automatic ping probes (WP-949) on the probe store of
 			// PostgreSQL.
-			probeAutocreator(&repos), complianceJobs)
+			probeAutocreator(&repos), complianceJobs, !opts.WorkflowWorkerOff)
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker

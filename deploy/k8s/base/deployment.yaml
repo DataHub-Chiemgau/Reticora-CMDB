@@ -156,6 +156,10 @@ spec:
             # monitoring.
             - name: RETICORA_WORKER_PROBE_INGEST_ENABLED
               value: "true"
+            # Workflows: trigger consumer and workflow.run (OPS-02 [P3],
+            # WP-1114); module workflows.
+            - name: RETICORA_WORKER_WORKFLOW_ENABLED
+              value: "true"
           volumeMounts:
             - name: session-key
               mountPath: /etc/reticora/session

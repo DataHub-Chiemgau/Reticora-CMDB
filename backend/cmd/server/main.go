@@ -596,10 +596,13 @@ func main() {
 		ProbeEdgeWorkers:     cfg.ProbeEdgeWorkers,
 		ProbeStreamMaxBytes:  cfg.ProbeStreamMaxBytes,
 		JobQueue:             jobQueue,
-		Signup:               signupService(cfg, auditPool, smtpSender),
-		Notifications:        notifications,
-		Events:               emitterOf(auditPool),
-		SignupProtection:     signupProtection(cfg, cacheStore),
+		// The worker workflow consumes workflow.run only where it runs
+		// (OPS-02, WP-1114).
+		WorkflowWorkerOff: !workerEnabled(config.WorkerWorkflow),
+		Signup:            signupService(cfg, auditPool, smtpSender),
+		Notifications:     notifications,
+		Events:            emitterOf(auditPool),
+		SignupProtection:  signupProtection(cfg, cacheStore),
 		// Invitations need the database; in --no-db mode they answer 503.
 		InvitationAccounts:  invitationAccounts(cfg, smtpSender != nil),
 		InvitationMailer:    invitationMailer(smtpSender),

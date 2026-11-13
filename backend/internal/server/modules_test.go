@@ -782,7 +782,7 @@ func TestP3ModulePrefixesAreGated(t *testing.T) {
 // package that adds a worker of a P3 module (WP-980 monitoring, WP-1114
 // workflow) adds its name here, in LateModules[].Workers, in both
 // deployments (TestEveryWorkerSwitchIsDeployable) and in docs/ops/workers.md.
-var p3Workers = []string{config.WorkerMonitoring, config.WorkerProbeAssign, config.WorkerProbeIngest}
+var p3Workers = []string{config.WorkerMonitoring, config.WorkerProbeAssign, config.WorkerProbeIngest, config.WorkerWorkflow}
 
 // TestP3WorkersBelongToTheirModule covers OPS-02 [P3] (WP-869, E-162):
 // every worker of a P3 module is listed in LateModules[].Workers of a P3

@@ -124,7 +124,7 @@ var (
 	// workflowRunJobKind (WP-1088, WFL-02, E-226): one workflow run; a
 	// failed step is retried up to five attempts with backoff 10 s to
 	// 5 min, a succeeded step never runs twice (step key run_id,
-	// step_index). It runs in the worker jobs until WP-1114.
+	// step_index). Its consumer runs with the worker workflow (WP-1114).
 	workflowRunJobKind = workflow.RunJobKindConfig
 )
 
@@ -239,7 +239,7 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 	importHandler *importer.ImportHandler, scanner *document.Scanner, searchHandler *search.Handler,
 	labelBatch *labels.BatchHandler, assets *asset.Handler, assetRevert *asset.BulkRevert, credentials *credential.Handler,
 	admpSync *admp.Sync, management *ipam.ManagementSync, orgExport *export.OrgExporter, subjects *privacy.SubjectService,
-	workflowRuns *workflow.Executor, probeAutocreate *probe.Autocreator, complianceJobs *compliance.Jobs) {
+	workflowRuns *workflow.Executor, probeAutocreate *probe.Autocreator, complianceJobs *compliance.Jobs, workflowWorker bool) {
 	svc.Register(exportJobKind)
 	complianceJobs.WithJobs(svc)
 	subjects.WithJobs(svc)
@@ -257,7 +257,14 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 		scanner, searchHandler, labelBatch, assets, assetRevert, credentials, admpSync, management, orgExport, subjects, workflowRuns,
 		probeAutocreate, complianceJobs) {
 		svc.Register(k.kind)
-		if queue != nil {
+		switch {
+		case queue == nil:
+		case k.kind.Name == workflow.RunJobKind && !workflowWorker:
+			// The worker workflow is off on this instance (OPS-02,
+			// WP-1114): it queues runs, the instances with the worker
+			// execute them.
+			queue.Declare(k.kind)
+		default:
 			queue.Handle(k.kind, k.handler)
 		}
 	}

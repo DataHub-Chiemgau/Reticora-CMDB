@@ -564,6 +564,12 @@ const (
 	// RETICORA_PROBE and writes them to probe_result (NFR-11, PRB-07,
 	// WP-960; module monitoring).
 	WorkerProbeIngest = "probe_ingest"
+	// WorkerWorkflow runs the workflows (OPS-02 [P3], WP-1114; module
+	// workflows): the durable consumer workflow-triggers of the event
+	// triggers and the consumer of the job kind workflow.run. Switched off,
+	// the instance still queues runs (jobs.Queue.Declare), another instance
+	// executes them.
+	WorkerWorkflow = "workflow"
 )
 
 // WorkerNames lists every registered worker.
@@ -584,6 +590,7 @@ var WorkerNames = []string{
 	WorkerComputedRefresh,
 	WorkerProbeAssign,
 	WorkerProbeIngest,
+	WorkerWorkflow,
 }
 
 // OfflineDetectorAlias is the former switch of the offline detector (WP-157).
