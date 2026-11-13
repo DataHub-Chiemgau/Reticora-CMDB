@@ -1388,7 +1388,7 @@ jobs:
             exit 1
           fi
           if ! grep -qE -- "--- FAIL: ${positive} \(" "$log" \
-            || ! grep -q 'none of the expected identities matched' "$log"; then
+            || ! grep -qE 'no matching CertificateIdentity found|none of the expected identities matched' "$log"; then
             echo "::error::exit $rc, but not refused for the identity"
             exit 1
           fi

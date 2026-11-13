@@ -123,11 +123,33 @@ func TestCosignVerifierWithLegacyReleaseBundle(t *testing.T) {
 	t.Run("identity of another tag is refused", func(t *testing.T) {
 		v := CosignVerifier{Binary: cosignBin, IdentityRegexp: strings.Replace(legacyReleaseIdentity, `rc\.1`, `rc\.2`, 1)}
 		err := v.Verify(t.Context(), artifact, bundle)
-		if err == nil || !strings.Contains(err.Error(), "none of the expected identities matched") {
+		if err == nil || !isIdentityRefusal(err) {
 			t.Fatalf("not refused for the identity of v1.0.0-rc.2: %v", err)
 		}
 		t.Logf("refused: %v", err)
 	})
+}
+
+// identityRefusals are the messages of cosign's refusal for the signer
+// identity. cosign v3 checks a Sigstore bundle (v0.3) with sigstore-go
+// ("failed to verify certificate identity: no matching CertificateIdentity
+// found, last error: expected SAN value to match regex …") and a legacy
+// bundle (cosign v2) on its old path, worded as in cosign v2 ("none of the
+// expected identities matched what was in the certificate"). Both name the
+// identity; a load, network or signature error matches neither.
+var identityRefusals = []string{
+	"no matching CertificateIdentity found",
+	"none of the expected identities matched",
+}
+
+// isIdentityRefusal reports whether err is cosign's refusal for the identity.
+func isIdentityRefusal(err error) bool {
+	for _, msg := range identityRefusals {
+		if strings.Contains(err.Error(), msg) {
+			return true
+		}
+	}
+	return false
 }
 
 // otherIdentityRegexp is a signer no bundle of this repository carries.
@@ -194,7 +216,7 @@ func TestCosignVerifierWithRealCosign(t *testing.T) {
 			t.Fatalf("the signature was accepted for the identity %s", otherIdentityRegexp)
 		}
 		// The refusal names the identity, not a load or network error.
-		if !strings.Contains(err.Error(), "none of the expected identities matched") {
+		if !isIdentityRefusal(err) {
 			t.Fatalf("refused, but not for the identity: %v", err)
 		}
 		t.Logf("refused: %v", err)
