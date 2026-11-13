@@ -1,10 +1,10 @@
 import {
+  entitlements,
   expect,
   FEATURES,
   list,
   mainNavigation,
   mockBackend,
-  ORG_ID,
   signIn,
   test,
 } from './support/backend';
@@ -55,16 +55,7 @@ test('does not offer a page locked by the plan', async ({ page }) => {
     {
       path: '/entitlements',
       reply: () => ({
-        body: list(
-          FEATURES.map((feature_key) => ({
-            organization_id: ORG_ID,
-            feature_key,
-            plan: 'essential',
-            enabled: feature_key !== 'assets_basic',
-            limits: {},
-            source: 'manual',
-          })),
-        ),
+        body: entitlements('essential', FEATURES, (featureKey) => featureKey !== 'assets_basic'),
       }),
     },
   ]);

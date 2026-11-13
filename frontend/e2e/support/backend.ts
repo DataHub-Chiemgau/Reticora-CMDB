@@ -146,6 +146,38 @@ export const FEATURES = [
 
 export const ORG_ID = '00000000-0000-0000-0000-0000000000aa';
 
+// The add-ons no plan includes; their rows carry origin addon (PKG-01, WP-880).
+const ADDON_KEYS = new Set(['iga', 'ai', 'admp']);
+
+/**
+ * entitlements is the body of GET /entitlements (EntitlementListResponse)
+ * for an organization of the given plan: one row per feature with its origin
+ * and the leading plan with plan_changed_at at the top (PKG-01, WP-880).
+ * enabled decides per feature whether it is switched on (default: all).
+ */
+export function entitlements(
+  plan: 'essential' | 'standard' | 'pro' | 'enterprise',
+  features: readonly string[],
+  enabled: (featureKey: string) => boolean = () => true,
+  organizationId: string = ORG_ID,
+) {
+  return {
+    ...list(
+      features.map((feature_key) => ({
+        organization_id: organizationId,
+        feature_key,
+        plan,
+        enabled: enabled(feature_key),
+        limits: {},
+        source: 'manual',
+        origin: ADDON_KEYS.has(feature_key) ? 'addon' : 'plan',
+      })),
+    ),
+    plan,
+    plan_changed_at: null,
+  };
+}
+
 function ciType(id: string, key: string, de: string, en: string, system = true) {
   return {
     id,
@@ -208,18 +240,7 @@ const DEFAULTS: Handler[] = [
   { path: '/modules', reply: () => ({ body: { data: [] } }) },
   {
     path: '/entitlements',
-    reply: () => ({
-      body: list(
-        FEATURES.map((feature_key) => ({
-          organization_id: ORG_ID,
-          feature_key,
-          plan: 'enterprise',
-          enabled: true,
-          limits: {},
-          source: 'manual',
-        })),
-      ),
-    }),
+    reply: () => ({ body: entitlements('enterprise', FEATURES) }),
   },
   // Usage and plan matrix of the page "Paket und Add-ons" (WP-885, WP-886).
   {

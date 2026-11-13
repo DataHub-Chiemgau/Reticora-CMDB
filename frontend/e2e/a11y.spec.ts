@@ -16,7 +16,7 @@ import {
   TEMPLATE_PERMISSIONS,
   TOPOLOGY_TOO_LARGE,
 } from './support/a11y-fixtures';
-import { AT, EMPTY_LIST, ORG_ID, list, mockBackend, signIn } from './support/backend';
+import { AT, EMPTY_LIST, ORG_ID, entitlements, list, mockBackend, signIn } from './support/backend';
 import type { Handler } from './support/backend';
 
 // UI-18/NFR-07 (WP-193, WP-522, WP-631): every route of the router
@@ -904,6 +904,15 @@ const ROUTES: A11yRoute[] = [
     ready: (page) => page.locator('section h1'),
   },
   {
+    // The operator area (WP-887) without an operator session: its own
+    // sign-in. The organization list and detail behind it are checked with
+    // axe in operator.spec.ts (WP-888).
+    path: '/operator/*',
+    url: '/operator',
+    signedIn: false,
+    ready: (page) => page.getByRole('button', { name: /als operator anmelden|sign in as operator/i }),
+  },
+  {
     path: '/onboarding',
     url: '/onboarding',
     signedIn: false,
@@ -1387,18 +1396,7 @@ const FLOW_HANDLERS: Handler[] = [
   },
   {
     path: '/entitlements',
-    reply: () => ({
-      body: list(
-        ['assets_basic', 'stock'].map((feature_key) => ({
-          organization_id: ORG_ID,
-          feature_key,
-          plan: 'standard',
-          enabled: true,
-          limits: {},
-          source: 'manual',
-        })),
-      ),
-    }),
+    reply: () => ({ body: entitlements('standard', ['assets_basic', 'stock']) }),
   },
 ];
 
@@ -1409,18 +1407,7 @@ const SCAN_HANDLERS: Handler[] = [
   FLOW_HANDLERS[0]!,
   {
     path: '/entitlements',
-    reply: () => ({
-      body: list(
-        ['assets_basic', 'stock', 'barcode', 'signature'].map((feature_key) => ({
-          organization_id: ORG_ID,
-          feature_key,
-          plan: 'standard',
-          enabled: true,
-          limits: {},
-          source: 'manual',
-        })),
-      ),
-    }),
+    reply: () => ({ body: entitlements('standard', ['assets_basic', 'stock', 'barcode', 'signature']) }),
   },
 ];
 

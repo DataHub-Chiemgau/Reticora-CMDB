@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import Ajv2020 from 'ajv/dist/2020.js';
 import { parse } from 'yaml';
-import { FEATURES, expect, list, mockBackend, signIn, test } from './support/backend';
+import { FEATURES, entitlements, expect, list, mockBackend, signIn, test } from './support/backend';
 import type { Call, Handler, Reply } from './support/backend';
 
 // ABN-01 (c), metamodel scenario [P2] (WP-330, E-136). In the order of the
@@ -205,18 +205,7 @@ test('ABN-01 (c): metamodel from the type to the template migration', async ({ p
     },
     {
       path: '/entitlements',
-      reply: fixed(
-        list(
-          FEATURES.map((feature_key) => ({
-            organization_id: ORG,
-            feature_key,
-            plan: 'enterprise',
-            enabled: true,
-            limits: {},
-            source: 'manual',
-          })),
-        ),
-      ),
+      reply: fixed(entitlements('enterprise', FEATURES, undefined, ORG)),
     },
 
     // Types, attribute definitions and sets (steps 1, 2 and 8).
