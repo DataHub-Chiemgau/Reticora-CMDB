@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"reflect"
 	"sync"
+	"sync/atomic"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/buffer"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
@@ -20,8 +22,10 @@ import (
 // the current bundle of the result queue. The metric buffer of the
 // collector is not involved.
 //
-// The assignment set (WP-956) feeds Upsert and Remove; a removed probe
-// reports no more results from then on.
+// The assignment set (WP-956) feeds Apply, the diff into Upsert and
+// Remove; a removed probe reports no more results from then on. The
+// version of the applied set is the configuration version of the alive
+// message (ConfigVersion, WP-957).
 type Engine struct {
 	Scheduler *Scheduler
 	States    *StateMachine
@@ -30,6 +34,9 @@ type Engine struct {
 
 	mu    sync.RWMutex
 	specs map[string]probewire.ProbeSpec
+
+	applyMu       sync.Mutex
+	configVersion atomic.Int64
 }
 
 // EngineConfig configures an engine.
@@ -102,6 +109,57 @@ func (e *Engine) Remove(id string) {
 	e.Scheduler.Remove(id)
 }
 
+// ApplyStats counts the probes a diff of Apply added, changed and removed.
+type ApplyStats struct {
+	Added, Changed, Removed int
+}
+
+// Apply makes probes the set of the engine (WP-956 AK3, AK4): a probe
+// missing from it is removed (a check in progress is cancelled and not
+// reported), a new one is added, a changed one is upserted with its hash
+// phase kept; an unchanged one is left alone. A change of epoch takes
+// effect with the next check; the counters of the state machine stay.
+// version becomes the configuration version (ConfigVersion).
+func (e *Engine) Apply(version int64, probes []probewire.ProbeSpec) ApplyStats {
+	e.applyMu.Lock()
+	defer e.applyMu.Unlock()
+	next := make(map[string]*probewire.ProbeSpec, len(probes))
+	for i := range probes {
+		next[probes[i].ID] = &probes[i]
+	}
+	e.mu.RLock()
+	old := make(map[string]probewire.ProbeSpec, len(e.specs))
+	for id := range e.specs {
+		old[id] = e.specs[id]
+	}
+	e.mu.RUnlock()
+	var st ApplyStats
+	for id := range old {
+		if _, ok := next[id]; !ok {
+			e.Remove(id)
+			st.Removed++
+		}
+	}
+	for id, spec := range next {
+		prev, ok := old[id]
+		switch {
+		case !ok:
+			st.Added++
+		case reflect.DeepEqual(prev, *spec):
+			continue
+		default:
+			st.Changed++
+		}
+		e.Upsert(*spec)
+	}
+	e.configVersion.Store(version)
+	return st
+}
+
+// ConfigVersion is the version of the assignment set applied last (0:
+// none yet).
+func (e *Engine) ConfigVersion() int64 { return e.configVersion.Load() }
+
 // Probes returns the number of probes of the engine.
 func (e *Engine) Probes() int {
 	e.mu.RLock()
@@ -146,6 +204,11 @@ func (e *Engine) observe(r probewire.Result) { //nolint:gocritic // Sink signatu
 	spec, ok := e.specs[r.ProbeID]
 	if !ok {
 		return // removed meanwhile: no result any more (WP-956 AK3)
+	}
+	if r.Epoch != 0 {
+		// The result keeps the epoch its check started under; a newer
+		// epoch of the set takes effect with the next check (WP-956 AK4).
+		spec.Epoch = r.Epoch
 	}
 	if err := r.Validate(); err != nil {
 		// A value the wire cannot carry (NaN, ±Inf, unknown code) must not

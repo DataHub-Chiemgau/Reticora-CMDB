@@ -113,7 +113,7 @@ type Scheduler struct {
 	mu       sync.Mutex
 	ctx      context.Context
 	entries  map[string]*schedEntry
-	running  map[string]bool
+	running  map[string]*runningCheck
 	slots    [wheelSlots][]wheelRef
 	lastTick int64
 	started  bool
@@ -122,6 +122,14 @@ type Scheduler struct {
 	nStarted, nSkipped, nOverrun, nFinished atomic.Uint64
 
 	inflight sync.WaitGroup
+}
+
+// runningCheck is a check in progress: cancel ends its context, removed
+// marks a check whose probe was removed meanwhile (its result is dropped,
+// WP-956 AK3).
+type runningCheck struct {
+	cancel  context.CancelFunc
+	removed bool
 }
 
 type schedEntry struct {
@@ -143,7 +151,7 @@ type wheelRef struct {
 func (s *Scheduler) init() {
 	if s.entries == nil {
 		s.entries = map[string]*schedEntry{}
-		s.running = map[string]bool{}
+		s.running = map[string]*runningCheck{}
 	}
 	if s.Limits == nil {
 		s.Limits = NewLimits()
@@ -196,12 +204,16 @@ func (s *Scheduler) Upsert(spec probewire.ProbeSpec) { //nolint:gocritic // the 
 	s.scheduleLocked(e, NextStart(spec.ID, spec.IntervalMS, s.now()))
 }
 
-// Remove stops a probe; it is not started again. A check in progress
-// finishes and reports its result.
+// Remove stops a probe; it is not started again. A check in progress is
+// cancelled (its context ends) and its result is not reported (WP-956 AK3).
 func (s *Scheduler) Remove(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.entries, id)
+	if rc := s.running[id]; rc != nil {
+		rc.removed = true
+		rc.cancel()
+	}
 }
 
 // Len returns the number of scheduled probes.
@@ -276,6 +288,7 @@ func (s *Scheduler) Wait() { s.inflight.Wait() }
 // after it.
 type dueCheck struct {
 	spec probewire.ProbeSpec
+	ctx  context.Context
 }
 
 // Advance serves every tick up to now: it starts the due checks and puts
@@ -341,10 +354,12 @@ func (s *Scheduler) Advance(now time.Time) {
 	// cannot start the same probe twice.
 	var start []dueCheck
 	var releases []func()
+	var runs []*runningCheck
+	ctx := s.ctx
 	var skipped []probewire.Result
 	for i := range due {
 		d := &due[i]
-		if s.running[d.spec.ID] {
+		if s.running[d.spec.ID] != nil {
 			s.nOverrun.Add(1)
 			continue
 		}
@@ -359,11 +374,14 @@ func (s *Scheduler) Advance(now time.Time) {
 			})
 			continue
 		}
-		s.running[d.spec.ID] = true
+		rctx, cancel := context.WithCancel(ctx)
+		rc := &runningCheck{cancel: cancel}
+		s.running[d.spec.ID] = rc
+		d.ctx = rctx
 		start = append(start, *d)
 		releases = append(releases, release)
+		runs = append(runs, rc)
 	}
-	ctx := s.ctx
 	s.mu.Unlock()
 
 	if s.Sink != nil {
@@ -372,11 +390,11 @@ func (s *Scheduler) Advance(now time.Time) {
 		}
 	}
 	for i := range start {
-		s.start(ctx, start[i].spec, releases[i])
+		s.start(start[i].ctx, start[i].spec, releases[i], runs[i])
 	}
 }
 
-func (s *Scheduler) start(ctx context.Context, spec probewire.ProbeSpec, release func()) { //nolint:gocritic // the spec is copied into the job on purpose
+func (s *Scheduler) start(ctx context.Context, spec probewire.ProbeSpec, release func(), rc *runningCheck) { //nolint:gocritic // the spec is copied into the job on purpose
 	s.nStarted.Add(1)
 	runFn := s.Run
 	if runFn == nil {
@@ -393,9 +411,11 @@ func (s *Scheduler) start(ctx context.Context, spec probewire.ProbeSpec, release
 		release()
 		s.mu.Lock()
 		delete(s.running, spec.ID)
+		removed := rc.removed
 		s.mu.Unlock()
+		rc.cancel()
 		s.nFinished.Add(1)
-		if s.Sink != nil {
+		if s.Sink != nil && !removed {
 			s.Sink(r)
 		}
 	}

@@ -258,6 +258,17 @@ func Main() {
 		go runUpdateLoop(ctx, collectorCfg.UpdateInterval, newUpdateChecker(&collectorCfg), confirmed, restart)
 	}
 	go runAgentRelay(ctx, collectorCfg, uploader)
+	// The monitoring probes: scheduler, state machine, probe spool and
+	// uplink over the edge (WP-955). The engine starts with the saved
+	// assignment set and takes the sets of the NATS session (WP-956), so
+	// it is attached before the session starts.
+	engineDone := make(chan struct{})
+	if engine := startProbeEngine(&collectorCfg, uploader); engine != nil {
+		collectorProbes.attach(engine, collectorCfg.SpoolDir, newEnvPollDeprecation(&collectorCfg, nil))
+		go func() { defer close(engineDone); engine.Run(ctx) }()
+	} else {
+		close(engineDone)
+	}
 	// The collector's mTLS channel to the NATS endpoint (COL-08); a
 	// collector enrolled after its start takes the identity over from it.
 	go runNATS(ctx, collectorCfg, uploader.adoptIdentity)
@@ -266,14 +277,6 @@ func Main() {
 	}
 	if collectorCfg.MetricsInterval > 0 {
 		go runMetricsLoop(ctx, collectorCfg, uploader)
-	}
-	// The monitoring probes: scheduler, state machine, probe spool and
-	// uplink over the edge (WP-955).
-	engineDone := make(chan struct{})
-	if engine := startProbeEngine(&collectorCfg, uploader); engine != nil {
-		go func() { defer close(engineDone); engine.Run(ctx) }()
-	} else {
-		close(engineDone)
 	}
 
 	quit := make(chan os.Signal, 1)
@@ -1695,10 +1698,10 @@ type pduPoller interface {
 // default included) and the collector holds an assignment set with at least
 // one probe, it logs collector.metrics.env_poll_deprecated once per set
 // version. The server-side probe types (snmp_if, snmp_custom, redfish)
-// replace the poll; switching it off with an assignment is WP-999. The
-// collector does not take over assignment sets yet: the adoption of WP-956
-// creates the notice with newEnvPollDeprecation and reports every applied
-// version to observe; until then nothing calls it.
+// replace the poll; switching it off with an assignment is WP-999. run
+// creates the notice with newEnvPollDeprecation, and the adoption of the
+// assignment set (probeAssignment, WP-956) reports every applied version to
+// observe.
 type envPollDeprecation struct {
 	mu      sync.Mutex
 	logged  map[int64]bool
