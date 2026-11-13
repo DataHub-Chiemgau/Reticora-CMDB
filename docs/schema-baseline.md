@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000336_nat_translation
+Stand: Migration 000337_bgp_peering
 
 ## Prüfung
 
@@ -778,6 +778,27 @@ neu ab. ENABLE und FORCE RLS mit den Policies nach Konvention 5, `updated_at`
 und `reticora_truncate_guard`. Die Tabelle oben und die Zeile „Stand:“
 erzeugt `RETICORA_UPDATE_SCHEMA_BASELINE=1` beim Zusammenführen mit den
 endgültigen Migrationsnummern neu.
+
+Migration `bgp_peering` (WP-1068, IPM-17, vorläufige Nummer 000337) legt
+`bgp_peering` als Soll-Inventar an: Gerät, VRF, lokale ASN, entfernte
+AS-Nummer (`remote_asn_number`, 1 bis 4294967294, beim Lesen gegen `asn`
+aufgelöst), lokale Adresse, entfernte Adresse (`inet`), `expected_state`
+(established, admin_down) und Beschreibung. Eindeutig sind
+`bgp_peering_remote_key` (organization_id, device_ci_id, vrf_id,
+remote_address) und `bgp_peering_id_organization_key` (id, organization_id).
+Die Fremdschlüssel sind zusammengesetzt mit Organisation (Konvention 19):
+`bgp_peering_device_fkey` auf `ci` (ON DELETE CASCADE), `bgp_peering_vrf_fkey`
+auf `vrf` und `bgp_peering_local_asn_fkey` auf `asn` (ON DELETE RESTRICT),
+`bgp_peering_local_address_fkey` auf `ip_address` (ON DELETE SET NULL
+(local_address_id)); dazu `idx_bgp_peering_remote_asn`, `idx_bgp_peering_vrf`
+und Teilindizes für lokale ASN und Adresse. `ip_address_id_organization_key`
+entsteht nur, wenn noch kein eindeutiger Schlüssel über (id,
+organization_id) besteht; Down entfernt ihn nur ohne verbleibende Verweise.
+`client_id` und `site_id` folgen dem Gerät (`trg_bgp_peering_scope`),
+`propagate_ci_scope` leitet auch die Peerings eines CI neu ab. ENABLE und
+FORCE RLS mit den Policies nach Konvention 5, `updated_at` und
+`reticora_truncate_guard`. Die Tabelle oben und die Zeile „Stand:“ erzeugt
+`RETICORA_UPDATE_SCHEMA_BASELINE=1` beim Zusammenführen neu.
 
 `TestTenantReferencesCarryOrganization`
 (`backend/internal/tenant/rls/object_reference_integration_test.go`) prüft
@@ -1953,6 +1974,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `audit_log` | ja | ja | audit_isolation (ALL) |
 | `audit_route_intent` | ja | ja | audit_route_intent_isolation (ALL), audit_route_intent_system_select (SELECT) |
 | `barcode_registry` | ja | ja | barcode_registry_isolation (ALL), barcode_registry_scoped_delete (DELETE), barcode_registry_scoped_update (UPDATE) |
+| `bgp_peering` | ja | ja | bgp_peering_isolation (ALL), bgp_peering_scoped_delete (DELETE), bgp_peering_scoped_update (UPDATE) |
 | `building` | ja | ja | building_isolation (ALL) |
 | `bulk_change_set` | ja | ja | bulk_change_set_isolation (ALL), bulk_change_set_scoped_delete (DELETE), bulk_change_set_scoped_update (UPDATE) |
 | `business_calendar` | ja | ja | business_calendar_isolation (ALL), business_calendar_scoped_delete (DELETE), business_calendar_scoped_update (UPDATE) |

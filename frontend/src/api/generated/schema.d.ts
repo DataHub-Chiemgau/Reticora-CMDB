@@ -11320,13 +11320,13 @@ export interface paths {
     };
     /**
      * List BGP peerings
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description BGP peerings (target inventory, IPM-17, WP-1068) of the devices the caller sees, ordered by device and remote address; client and site follow the device. The peerings of a device are the list with ci_id. remote_asn is the visible AS number of the organization with remote_asn_number, resolved when read. Requires ipam:read; without PostgreSQL 501.
      */
     get: operations['listBGPPeerings'];
     put?: never;
     /**
      * Create a BGP peering
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description The device must be visible (422 device_ci_id); without vrf_id the default VRF of the organization, else a visible VRF (422 vrf_id). local_asn_id is visible and of the client of the device or org-wide (422); local_address_id is bound to the device (422) and of the address family of remote_address (422 remote_address). remote_asn_number in asplain or asdot (422). A second peering of the device with the remote address in the VRF is 409. Requires ipam:write; without PostgreSQL 501.
      */
     post: operations['createBgpPeering'];
     delete?: never;
@@ -11345,23 +11345,20 @@ export interface paths {
       };
       cookie?: never;
     };
-    /**
-     * Get a BGP peering
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
-     */
+    /** Get a BGP peering */
     get: operations['getBgpPeering'];
     put?: never;
     post?: never;
     /**
      * Delete a BGP peering
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Requires ipam:write; without PostgreSQL 501.
      */
     delete: operations['deleteBgpPeering'];
     options?: never;
     head?: never;
     /**
      * Update a BGP peering
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Changes the given fields; the result is checked as on create (422 per field, 409 for a duplicate). Requires ipam:write; without PostgreSQL 501.
      */
     patch: operations['updateBgpPeering'];
     trace?: never;
@@ -21231,6 +21228,87 @@ export interface components {
       inside_port?: number;
       /** @description 0 removes the port. */
       outside_port?: number;
+      description?: string;
+    };
+    /** @enum {string} */
+    BGPExpectedState: 'established' | 'admin_down';
+    /** @description BGP peering of a device as target inventory (IPM-17, E-217). client_id and site_id follow the device; remote_asn is resolved from remote_asn_number when read. */
+    BGPPeering: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      /** Format: uuid */
+      readonly client_id?: string;
+      /** Format: uuid */
+      readonly site_id?: string;
+      /** Format: uuid */
+      device_ci_id: string;
+      /** Format: uuid */
+      vrf_id: string;
+      /** Format: uuid */
+      local_asn_id?: string;
+      /** Format: int64 */
+      remote_asn_number: number;
+      /** @description The remote AS number in asdot (RFC 5396). */
+      readonly remote_asn_asdot: string;
+      /** @description The visible AS number of the organization with remote_asn_number; null without one. */
+      remote_asn: components['schemas']['BGPASNRef'] | null;
+      /** Format: uuid */
+      local_address_id?: string;
+      /** @description Host of the local address; absent when the caller does not see it. */
+      readonly local_address?: string;
+      /** @description IP address of the remote peer. */
+      remote_address: string;
+      expected_state: components['schemas']['BGPExpectedState'];
+      description?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    BGPASNRef: {
+      /** Format: uuid */
+      id: string;
+      name: string;
+      /** @enum {string} */
+      kind: 'own' | 'customer' | 'peer' | 'upstream' | 'ixp';
+    };
+    BGPPeeringListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['BGPPeering'][];
+    };
+    CreateBGPPeeringRequest: {
+      /** Format: uuid */
+      device_ci_id: string;
+      /**
+       * Format: uuid
+       * @description Without it the default VRF of the organization.
+       */
+      vrf_id?: string;
+      /** Format: uuid */
+      local_asn_id?: string;
+      /** @description asplain (65001), asdot (1.10) or with the prefix AS; a JSON number or a string. */
+      remote_asn_number: number | string;
+      /** Format: uuid */
+      local_address_id?: string;
+      /** @description IP address without prefix length. */
+      remote_address: string;
+      expected_state?: components['schemas']['BGPExpectedState'];
+      description?: string;
+    };
+    UpdateBGPPeeringRequest: {
+      /** Format: uuid */
+      device_ci_id?: string;
+      /** @description "" selects the default VRF of the organization. */
+      vrf_id?: string;
+      /** @description "" clears it. */
+      local_asn_id?: string;
+      /** @description asplain, asdot or with the prefix AS; a JSON number or a string. */
+      remote_asn_number?: number | string;
+      /** @description "" clears it. */
+      local_address_id?: string;
+      remote_address?: string;
+      expected_state?: components['schemas']['BGPExpectedState'];
       description?: string;
     };
     /**
@@ -50968,6 +51046,21 @@ export interface operations {
          *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /** @description Only peerings of this device. */
+        ci_id?: string;
+        /** @description Only peerings in this VRF. */
+        vrf_id?: string;
+        /** @description Only peerings with this local AS number. */
+        local_asn_id?: string;
+        /** @description Only peerings with this remote AS number (asplain or asdot); another value is 422. */
+        remote_asn_number?: string;
+        /** @description Only peerings with this expected state; another value is 422. */
+        expected_state?: components['schemas']['BGPExpectedState'];
       };
       header?: never;
       path?: never;
@@ -50975,17 +51068,21 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List BGP peerings. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description Paginated list of BGP peerings */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['BGPPeeringListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   createBgpPeering: {
@@ -50995,14 +51092,20 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateBGPPeeringRequest'];
+      };
+    };
     responses: {
-      /** @description Created. The schema comes with the implementing work package. */
+      /** @description BGP peering created */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['BGPPeering'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -51010,6 +51113,7 @@ export interface operations {
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   getBgpPeering: {
@@ -51024,17 +51128,20 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get a BGP peering. The schema comes with the implementing work package. */
+      /** @description BGP peering */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['BGPPeering'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   deleteBgpPeering: {
@@ -51049,7 +51156,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Done. */
+      /** @description BGP peering deleted */
       204: {
         headers: {
           [name: string]: unknown;
@@ -51059,8 +51166,8 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   updateBgpPeering: {
@@ -51073,14 +51180,20 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateBGPPeeringRequest'];
+      };
+    };
     responses: {
-      /** @description Update a BGP peering. The schema comes with the implementing work package. */
+      /** @description BGP peering updated */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['BGPPeering'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -51089,6 +51202,7 @@ export interface operations {
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   listNATTranslations: {

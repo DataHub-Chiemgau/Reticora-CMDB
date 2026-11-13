@@ -1782,3 +1782,4 @@ IPM-14;[P3];G3;backend/internal/ipam/binding_conflict_integration_test.go;WP-914
 IPM-20;[P3];G3;backend/internal/ipam/binding_conflict_integration_test.go;WP-914
 REC-04;[P3];G3;backend/internal/ipam/binding_conflict_integration_test.go;WP-914
 IPM-15;[P3];G3;backend/internal/ipam/nat_integration_test.go;WP-1071
+IPM-17;[P3];G3;backend/internal/ipam/bgp_integration_test.go;WP-1068

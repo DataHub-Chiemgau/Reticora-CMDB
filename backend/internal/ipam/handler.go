@@ -137,6 +137,10 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	// NAT translations (IPM-15, nat_handler.go): only with PostgreSQL,
 	// else 501.
 	h.registerNATRoutes(r)
+
+	// BGP peerings (IPM-17, bgp_handler.go): only with PostgreSQL, else
+	// 501.
+	h.registerBGPRoutes(r)
 }
 
 func org(w http.ResponseWriter, r *http.Request) (string, bool) {

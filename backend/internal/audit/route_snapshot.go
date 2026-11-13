@@ -356,7 +356,7 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	all := []string{"POST", "PATCH", "DELETE"}
 	for collection, table := range map[string]string{
 		"asns": "asn", "asn-ranges": "asn_range", // AS numbers and ranges (WP-1066)
-		"nat-translations": "nat_translation", "assets": "asset", "buildings": "building", "cables": "cable", "clients": "client",
+		"nat-translations": "nat_translation", "bgp-peerings": "bgp_peering", "assets": "asset", "buildings": "building", "cables": "cable", "clients": "client",
 		"compliance/rules": "compliance_rule", "consumables": "consumable",
 		"contacts": "contact", "contracts": "contract", "desks": "desk", "discovery-scopes": "discovery_scope",
 		"forms": "form_def", "iga/connectors": "iga_connector", "inventory/items": "consumable",

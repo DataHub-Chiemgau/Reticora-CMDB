@@ -133,6 +133,7 @@ var resourceTables = map[string][]string{
 	"asns":                  {"asn"},                                     // AS numbers (WP-1066)
 	"asn-ranges":            {"asn_range", "asn"},                        // AS number ranges (WP-1066), allocated AS numbers (WP-1067)
 	"nat-translations":      {"nat_translation"},                         // NAT translations (WP-1071)
+	"bgp-peerings":          {"bgp_peering"},                             // BGP peerings (WP-1068)
 	"jobs":                  {"job"},
 	"layouts":               {"form_layout"},
 	"keys":                  {"key_item"},

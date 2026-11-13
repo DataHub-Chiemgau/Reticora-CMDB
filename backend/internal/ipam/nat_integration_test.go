@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -352,6 +354,10 @@ func TestIPAddressKeyCreatedOnce(t *testing.T) {
 	if keys("ip_address") != 1 || keys("subnet") != 1 {
 		t.Errorf("after up over existing keys: %d keys of ip_address, %d of subnet, want one each", keys("ip_address"), keys("subnet"))
 	}
+	// Foreign keys of other tables on the key (bgp_peering, WP-1068) are
+	// dropped in the rolled-back transaction so that only nat_translation
+	// refers to it.
+	dropAddressKeyReferences(t, tx, "nat_translation")
 	if _, err = tx.Exec(bg, read("down")); err != nil {
 		t.Fatalf("down: %v", err)
 	}
@@ -391,5 +397,35 @@ func TestNATWithoutDatabase(t *testing.T) {
 	w = do(http.MethodGet, "/api/v1/ips/"+a.ID, "")
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"nat_translations":[]`) {
 		t.Errorf("GET /ips/{id} without database: %d %s, want an empty nat_translations", w.Code, w.Body.String())
+	}
+}
+
+// dropAddressKeyReferences drops, in the transaction tx, every foreign key
+// on ip_address_id_organization_key except those of the table keep, so a
+// test of a migration's down step sees only the references of its own
+// table.
+func dropAddressKeyReferences(t *testing.T, tx pgx.Tx, keep string) {
+	t.Helper()
+	bg := context.Background()
+	rows, err := tx.Query(bg, `SELECT f.conrelid::regclass::text, f.conname FROM pg_constraint f
+		JOIN pg_constraint k ON k.conindid = f.conindid AND k.conrelid = 'ip_address'::regclass
+		     AND k.conname = 'ip_address_id_organization_key'
+		WHERE f.contype = 'f' AND f.conrelid <> $1::regclass`, keep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var refs [][2]string
+	for rows.Next() {
+		var table, name string
+		if err = rows.Scan(&table, &name); err != nil {
+			t.Fatal(err)
+		}
+		refs = append(refs, [2]string{table, name})
+	}
+	rows.Close()
+	for _, ref := range refs {
+		if _, err = tx.Exec(bg, fmt.Sprintf("ALTER TABLE %s DROP CONSTRAINT %q", ref[0], ref[1])); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

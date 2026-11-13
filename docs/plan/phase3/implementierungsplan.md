@@ -14221,7 +14221,7 @@ Der Entwurf sah zusätzlich `remote_asn_id` als gespeicherten Verweis und `GET /
   - `TestBGPPeeringRemoteASNResolvedOnRead`: ASN nachträglich angelegt, erscheint ohne Schreibzugriff.
   - `TestBGPPeeringClientPrincipal`: fremdes Gerät unsichtbar, 404.
   - `TestBGPPeeringListByCI`.
-  - `TestIPAddressKeyCreatedOnce`: Bei vorhandenem Schlüssel legt die Migration keinen zweiten an; Down lässt ihn bei verbleibenden Verweisen stehen.
+  - `TestIPAddressKeyCreatedOnce` (umgesetzt als `TestBGPIPAddressKeyCreatedOnce`, weil WP-1071 den Namen im selben Paket `ipam` für die NAT-Migration belegt): Bei vorhandenem Schlüssel legt die Migration keinen zweiten an; Down lässt ihn bei verbleibenden Verweisen stehen.
 - `TestEveryWriteRouteIsAudited`, `TestEveryAuditedRouteHasAScopeRule`, `TestRoutesAndSpecificationAreInParity`, `TestMigrationsRoundtrip`.
 
 **Traceability (`docs/traceability.csv`):**
