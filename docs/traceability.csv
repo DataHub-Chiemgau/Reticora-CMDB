@@ -1872,3 +1872,4 @@ SEC-03;[P3];F;backend/internal/compliance/eval_job_integration_test.go;WP-1126
 SEC-04;[P3], Rechte-Doku AD/Entra [A];F;backend/internal/compliance/controls_integration_test.go;WP-1128
 IPM-19;[P3];G3;frontend/src/components/ipam/AddressDialog.test.tsx;WP-917
 IPM-13;[P3];G3;frontend/src/components/ipam/AddressDialog.test.tsx;WP-917
+IPM-09;[P3];G3;backend/internal/export/ipam_integration_test.go;WP-921

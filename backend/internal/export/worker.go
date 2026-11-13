@@ -98,6 +98,10 @@ type JobWorker struct {
 	// ErrAssetExportUnavailable (fail closed). Separate from Assets, the
 	// source of DATEV.
 	AssetRows AssetRows
+	// IPAMRows reads the subnets and addresses of a csv job with entity
+	// subnet or ip_address (WP-921, ipam.PGRepository); without it (memory
+	// profile) such a job fails with ErrIPAMExportUnavailable.
+	IPAMRows IPAMRows
 }
 
 // ManifestKey returns the blob key of the manifest of a rendered job, next
@@ -317,6 +321,8 @@ func (w *JobWorker) process(ctx context.Context, job *Job) {
 		rowCount, manifest, err = w.renderDATEV(renderCtx, job, policy, &buf, report)
 	case job.Filters.IsAsset():
 		rowCount, manifest, err = w.renderAssets(renderCtx, job, policy, &buf)
+	case job.Filters.IsIPAM():
+		rowCount, manifest, err = RenderIPAM(renderCtx, w.IPAMRows, job, policy, &buf)
 	default:
 		rowCount, manifest, err = RenderProjected(renderCtx, w.CIs, job.OrganizationID, job.Format, job.Filters, policy, &buf)
 	}

@@ -101,6 +101,12 @@ func (h *JobHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	// Subnets and addresses need ipam:read beside the route's export:run
+	// (WP-921): the export reads what GET /api/v1/subnets and /ips read.
+	if req.Filters.IsIPAM() && !canReadIPAM(r.Context()) {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", ErrIPAMReadRequired)
+		return
+	}
 	if !guardDATEV(w, r, h.datev, t.OrganizationID, req.Format) {
 		return
 	}
@@ -121,6 +127,12 @@ func (h *JobHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.WriteJSON(w, http.StatusAccepted, resp)
+}
+
+// canReadIPAM reports whether the principal of ctx holds ipam:read.
+func canReadIPAM(ctx context.Context) bool {
+	principal, ok := identity.PrincipalFromContext(ctx)
+	return ok && principal.Has(identity.PermIPAMRead)
 }
 
 // Errors of Enqueue.
@@ -278,6 +290,10 @@ func (h *JobHandler) manifest(r *http.Request, job *Job, preview *datevPreview) 
 	}
 	if job.Format == FormatDATEV {
 		return h.datevPreviewManifest(r, job.OrganizationID, preview, policy)
+	}
+	// An IPAM export lists its columns, nothing omitted (WP-921).
+	if job.Filters.IsIPAM() {
+		return IPAMManifest(job.Filters.Entity), nil
 	}
 	// An asset export lists the fields of the asset DTO (WP-782).
 	if job.Filters.IsAsset() {

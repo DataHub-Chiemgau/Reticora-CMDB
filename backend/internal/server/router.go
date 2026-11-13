@@ -792,6 +792,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// Asset jobs of POST /assets/bulk read the selection by id (WP-782);
 	// without the source they fail.
 	exportWorker.AssetRows, _ = repos.Asset.(export.AssetRows)
+	// Subnet and address jobs read IPAM under the job's scope (WP-921);
+	// the memory profile has no source and fails them.
+	exportWorker.IPAMRows, _ = repos.IPAM.(export.IPAMRows)
 	discoveryHandler := discovery.NewHandler(repos.Discovery, repos.CI, repos.Relationship).
 		WithProvenance(overrideProvenance{repo: repos.Override}).
 		WithInstanceFields(repos.CIType).

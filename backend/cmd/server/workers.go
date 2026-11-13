@@ -202,6 +202,8 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 		exportWorker.Orgs = d.repos.TenantHierarchy
 		// Asset jobs of POST /assets/bulk read the selection by id (WP-782).
 		exportWorker.AssetRows, _ = d.repos.Asset.(export.AssetRows)
+		// Subnet and address jobs read IPAM (WP-921).
+		exportWorker.IPAMRows, _ = d.repos.IPAM.(export.IPAMRows)
 		workers = append(workers, server.Worker{
 			Name: config.WorkerExport,
 			Run:  func(ctx context.Context) { exportWorker.Run(ctx, d.every(2*time.Second)) },

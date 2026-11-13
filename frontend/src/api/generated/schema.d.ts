@@ -1323,6 +1323,10 @@ export interface paths {
      *     feature-not-entitled) and permission asset:read (otherwise 403); the
      *     worker checks module and entitlements again and fails the job if
      *     one of them is gone.
+     *     With filters.entity subnet or ip_address the job exports subnets or
+     *     addresses as CSV (IPM-09, WP-921) with the columns of the IPAM
+     *     import; this needs the permission ipam:read beside export:run
+     *     (otherwise 403).
      */
     post: operations['createExportJobLegacy'];
     delete?: never;
@@ -16812,14 +16816,15 @@ export interface components {
       data: components['schemas']['CI'][];
       total: number;
     };
-    /** @description Filters of the export. csv and json export CIs (status, ci_type_id, client_id) or, with entity asset, a selection of assets by ids; datev exports assets (client_id, lifecycle_state), and status or ci_type_id with datev, lifecycle_state with csv or json are 400. */
+    /** @description Filters of the export. csv and json export CIs (status, ci_type_id, client_id) or, with entity asset, a selection of assets by ids; datev exports assets (client_id, lifecycle_state), and status or ci_type_id with datev, lifecycle_state with csv or json are 400. With entity subnet or ip_address (csv only) the filters are those of ipam; the CI filters status, ci_type_id, ids, client_id and lifecycle_state are 400 then. */
     ExportJobFilters: {
       /**
-       * @description What a csv or json export renders (WP-782). asset is set by the action export of POST /api/v1/assets/bulk only, with ids and without another filter; POST /api/v1/exports with entity asset is 400, so the asset export stays behind the module inventory and the entitlement of /api/v1/assets.
+       * @description What a csv or json export renders (WP-782). asset is set by the action export of POST /api/v1/assets/bulk only, with ids and without another filter; POST /api/v1/exports with entity asset is 400, so the asset export stays behind the module inventory and the entitlement of /api/v1/assets. subnet and ip_address export subnets or addresses as CSV (IPM-09, WP-921), another format is 400. The columns are id and the targets of the IPAM import (subnets: section, cidr, description, vlan, vrf, gateway, customer, nameserver; addresses: ip_addr, hostname, description, mac, state, is_gateway, vrf, subnet, type), so the file reads back as an import of the same entity; references the creator cannot see stay empty. Requires ipam:read.
        * @default ci
        * @enum {string}
        */
-      entity: 'ci' | 'asset';
+      entity: 'ci' | 'asset' | 'subnet' | 'ip_address';
+      ipam?: components['schemas']['ExportJobIPAMFilters'];
       status?: string;
       /** @description CI type id; includes the subtypes (MET-06), as the parameter ci_type_id of the CI list. */
       ci_type_id?: string;
@@ -16828,6 +16833,34 @@ export interface components {
       lifecycle_state?: string;
       /** @description Selection of CIs (with entity asset: of assets, WP-782) by id for csv and json (WP-780): the visible, not deleted ones among them, sorted by created_at and id. Not combinable with the other filters; more than 500 ids, an id that is no UUID and ids with datev are 400. */
       ids?: string[];
+    };
+    /** @description Filters of an export of subnets (section_id, vrf_id, vlan_id, client_id, site_id, parent_id, is_pool, q, contains) or addresses (subnet_id, state, type, origin, client_id, ci_id, q), as the lists GET /api/v1/subnets and GET /api/v1/ips (WP-909). A filter of the other entity, an id that is no UUID, an unknown state, type or origin and contains that is no IP address are 400. */
+    ExportJobIPAMFilters: {
+      /** Format: uuid */
+      section_id?: string;
+      /** Format: uuid */
+      vrf_id?: string;
+      /** Format: uuid */
+      vlan_id?: string;
+      /** Format: uuid */
+      site_id?: string;
+      /** @description Id of the parent subnet or root (the subnets without a visible parent). */
+      parent_id?: string;
+      is_pool?: boolean;
+      /** @description An IP address; the subnets of the VRF (vrf_id, else the default VRF) that contain it. */
+      contains?: string;
+      /** Format: uuid */
+      subnet_id?: string;
+      state?: components['schemas']['IPAddressState'];
+      type?: components['schemas']['IPAddressType'];
+      /** @enum {string} */
+      origin?: 'manual' | 'discovery' | 'scan' | 'import';
+      /** Format: uuid */
+      ci_id?: string;
+      /** Format: uuid */
+      client_id?: string;
+      /** @description Part of name, description or CIDR (subnets), of address or DNS name (addresses). */
+      q?: string;
     };
     CreateExportJobRequest: {
       /**
