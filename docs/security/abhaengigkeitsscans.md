@@ -185,7 +185,7 @@ reproduzierbar und integritätsgeprüft:
   Backup-CronJob in `deploy/k8s` (E-96).
 - Die Go-Hilfsprogramme des Basisimages tragen Funde ihrer Go-Toolchain. Die
   Stufe `go-tools` baut sie mit der Go-Toolchain des Repositorys neu
-  (`GO_IMAGE`, `golang:1.26.10-alpine` per Digest), in der Modulversion, die
+  (`GO_IMAGE`, `golang:1.26.11-alpine` per Digest), in der Modulversion, die
   das Basisimage ausliefert; `go install` prüft jedes Modul gegen
   sum.golang.org.
   - `timescaledb-tune` (`TIMESCALEDB_TUNE_VERSION`) stimmt beim ersten Init

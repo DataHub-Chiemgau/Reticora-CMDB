@@ -13,7 +13,7 @@
 # values anew.
 ARG TIMESCALE_IMAGE=timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
 # Go toolchain of the repository (backend/Dockerfile), pinned by digest.
-ARG GO_IMAGE=golang:1.26.10-alpine@sha256:9ce231b28998b32e116927c61aa5c406183061d4f3f2d61b292c88e7f6bdf7ca
+ARG GO_IMAGE=golang:1.26.11-alpine@sha256:ae52b5bc6ed045a9ed26ab03dc19327a802a9cc9aa8b27ed57f5c6b60579b0bb
 
 # The Go helpers of the base image carry fixable findings of their Go
 # toolchain (E-96); both are rebuilt here at the module version the base

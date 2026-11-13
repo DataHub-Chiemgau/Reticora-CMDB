@@ -169,7 +169,7 @@ jobs:
       # starts. The real cosign check runs in the ci.yml job cosign-verify.
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
           cache-dependency-path: collector/go.sum
 
       - name: Collector self-update with two versions (COL-06)
@@ -448,7 +448,7 @@ jobs:
       - uses: actions/setup-go@v5
         if: matrix.platform == 'ubuntu-24.04'
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
           cache-dependency-path: collector/go.sum
 
       - uses: actions/setup-node@v4
@@ -684,7 +684,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
           cache-dependency-path: collector/go.sum
 
       - uses: actions/setup-node@v4
@@ -994,7 +994,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
           cache-dependency-path: collector/go.sum
 
       - uses: actions/setup-node@v4

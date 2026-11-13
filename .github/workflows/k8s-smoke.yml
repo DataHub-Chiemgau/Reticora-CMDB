@@ -93,7 +93,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
 
       # The pins of ci.yml: kustomize of the job k8s-manifests, golang-migrate
       # of the job migrations.
