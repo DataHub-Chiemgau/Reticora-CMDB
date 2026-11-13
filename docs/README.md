@@ -926,8 +926,11 @@ and the server env patch. On every startup the server applies the index
 template and re-checks connectivity. PostgreSQL remains the source of truth:
 the hybrid backend rebuilds OpenSearch from `search_document` on
 `POST /api/v1/search/reindex`, so a lost or rebuilt index is recovered online
-and tenant-scoped. See `docs/opensearch.md` for the reindex runbook and
-troubleshooting (yellow status, disk watermark, unreachable backend).
+and tenant-scoped. The pinned version is OpenSearch 3.9.0 (Upd-02, before
+2.19.7); after the upgrade the index is rebuilt from PostgreSQL rather than
+taken over from a 2.x snapshot. See `docs/opensearch.md` for the reindex and
+upgrade runbook and troubleshooting (yellow status, disk watermark,
+unreachable backend).
 
 **Collector connectivity:** the collector authenticates uploads with mTLS when
 client-certificate material is available — from `RETICORA_TLS_CLIENT_CERT`/

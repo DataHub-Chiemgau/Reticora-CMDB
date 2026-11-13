@@ -300,19 +300,24 @@ services:
   #   docker compose --profile opensearch up -d
   # and set RETICORA_SEARCH_BACKEND=opensearch for the server (below).
   opensearch:
-    image: opensearchproject/opensearch:2.19.7@sha256:3bfa1ec74d56928c2e018033d45c460ce2c0ea65a5cedd577de3102326c31b89
+    image: opensearchproject/opensearch:3.9.0@sha256:3b55f6b6249cfdb92b52ee59adc8a266203ba9ef9f5d82544fad6f1af2f3609e
     restart: unless-stopped
     logging: *logging
     profiles: ["opensearch"]
     environment:
       discovery.type: single-node
-      # Single-node dev/staging default; the security plugin is disabled so
-      # the internal compose network is the trust boundary. For production
-      # enable the security plugin and set RETICORA_OPENSEARCH_USERNAME /
-      # RETICORA_OPENSEARCH_PASSWORD.
-      plugins.security.disabled: "true"
-      OPENSEARCH_INITIAL_ADMIN_PASSWORD: "${RETICORA_OPENSEARCH_PASSWORD:-}"
-      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+      # Single-node default; the security plugin is disabled so the internal
+      # compose network is the trust boundary (port 9200 only on loopback).
+      # The entrypoint of the image (since 2.12) runs the demo installer of
+      # the security plugin unless both switches are set, and that installer
+      # stops the container without OPENSEARCH_INITIAL_ADMIN_PASSWORD; its
+      # demo certificates are never meant for operation (Upd-02). To enable
+      # the security plugin, mount an own security configuration and set
+      # RETICORA_OPENSEARCH_USERNAME / RETICORA_OPENSEARCH_PASSWORD.
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      DISABLE_SECURITY_PLUGIN: "true"
+      # OpenSearch reads OPENSEARCH_JAVA_OPTS only (ES_JAVA_OPTS is ignored).
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
     ports:
       - "127.0.0.1:9200:9200"
     volumes:
@@ -321,12 +326,15 @@ services:
       memlock:
         soft: -1
         hard: -1
+    # OpenSearch 3 loads about 25 plugins before the HTTP port opens; the
+    # start period keeps failed checks of a slow start from counting (the
+    # service turns healthy with the first passing check).
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9200/_cluster/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 12
-      start_period: 30s
+      start_period: 180s
 
   # Malware scan of document uploads (SEC-09, E-42, WP-735): clamd for the
   # job kind document.scan of the module documents, which the release

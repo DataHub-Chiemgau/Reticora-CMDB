@@ -133,9 +133,12 @@ jobs:
       # TEC-12 (WP-534): the scope filters of the OpenSearch backend are
       # tested against a real OpenSearch, the version of deploy/ (single
       # node, security plugin off; internal/search/
-      # opensearch_real_integration_test.go).
+      # opensearch_real_integration_test.go), the field rows, identifiers
+      # and highlights of its own HTTP client too (Upd-02,
+      # opensearch_real_fields_integration_test.go). OpenSearch 3 loads
+      # about 25 plugins before the port opens, hence the start period.
       opensearch:
-        image: opensearchproject/opensearch:2.19.7@sha256:3bfa1ec74d56928c2e018033d45c460ce2c0ea65a5cedd577de3102326c31b89
+        image: opensearchproject/opensearch:3.9.0@sha256:3b55f6b6249cfdb92b52ee59adc8a266203ba9ef9f5d82544fad6f1af2f3609e
         env:
           discovery.type: single-node
           DISABLE_INSTALL_DEMO_CONFIG: "true"
@@ -150,6 +153,7 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 18
+          --health-start-period 120s
     env:
       PGPASSWORD: reticora
       DATABASE_URL: postgres://reticora:reticora@localhost:5432/reticora_migrations?sslmode=disable

@@ -144,6 +144,18 @@ dem eigenen Image `reticora-keycloak-db` (siehe unten, E-96, A-85), das
 seines Hersteller-`gosu` (Go 1.24.6, darunter CVE-2025-68121 Critical) sind
 aus `security/scan-exceptions-thirdparty.txt` entfernt: 15 Zeilen entfallen,
 11 gelten weiter nur für minio (60 IDs, 5 Critical).
+Nachtrag 2026-11-13 (Update-Plan Upd-02): OpenSearch läuft auf
+`opensearchproject/opensearch:3.9.0` (neuestes Release vom 2026-09-29, Docker
+Hub 2026-10-26; 3.10.0 ist noch nicht veröffentlicht). 3.9.0 enthält kein
+Bouncy Castle und kein `jetty-security` mehr: Die beiden Critical-Ausnahmen
+(CVE-2025-14813, CVE-2026-8763) und vier High-Ausnahmen (CVE-2026-10050,
+-13506, -5598, -68497) entfallen. Trivy 0.75.0 (DB vom 2026-11-13) meldet für
+3.9.0 0 Critical und 19 High-IDs (jackson 2.22.2 und 3.2.2, guava, lz4-java,
+snappy-java, jline, jsoup sowie die OS-Pakete rpm, sqlite-libs und glibc).
+Alle haben einen Fix nur in der Bibliothek bzw. in Amazon Linux 2023, nicht in
+einem Hersteller-Image; sie behalten ihr `since:` (Ablauf 2026-12-10 bzw.
+2026-12-13). Neu ist nur `jsoup` (CVE-2026-75140, Plugins von 3.x, bis
+2026-12-13). Stand: 70 IDs, 4 Critical (MinIO, keycloak-db).
 
 | Image | Ort | Scan |
 |---|---|---|
@@ -156,7 +168,7 @@ aus `security/scan-exceptions-thirdparty.txt` entfernt: 15 Zeilen entfallen,
 | `pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372` | Compose (`minio`) | `image-scan-thirdparty` (`minio`) |
 | `postgres:16.16-alpine@sha256:0adbf25a9e96d38823bb813f3ac0ed41fadb665c88f1df7fe6dbfb060cbdc106` | Basis von `reticora-keycloak-db` (Compose `keycloak-db`, eigenes Image seit 2026-11-13) | über `image-scan` (`keycloak-db`), `keycloak_db_image_pin` |
 | `quay.io/keycloak/keycloak:26.8.2@sha256:723b1d6e254c0fc96d5cffec860c7e0744d6a3277822b865bb538cf891575e41` | Compose (`keycloak`); vom Hersteller gepflegte Major-Version 26 | `image-scan-thirdparty` (`keycloak`) |
-| `opensearchproject/opensearch:2.19.7@sha256:3bfa1ec74d56928c2e018033d45c460ce2c0ea65a5cedd577de3102326c31b89` | Compose (`opensearch`), `deploy/k8s/base/components/opensearch/statefulset.yaml` | `image-scan-thirdparty` (`opensearch`) |
+| `opensearchproject/opensearch:3.9.0@sha256:3b55f6b6249cfdb92b52ee59adc8a266203ba9ef9f5d82544fad6f1af2f3609e` | Compose (`opensearch`), `deploy/k8s/base/components/opensearch/statefulset.yaml`, CI-Service des Jobs `migrations` | `image-scan-thirdparty` (`opensearch`) |
 | `certbot/certbot:v5.9.0@sha256:bc93cb710b413e6b456d622f9b0133b3e109c0a78c2ed9976af43d209b0a1805` | Compose (`certbot`, TLS-Zertifikate) | `image-scan-thirdparty` (`certbot`) |
 | Images von `docker-compose.yml` (Entwicklung) | Dev-Stack | Ausnahme: nur Entwicklung, nicht ausgeliefert; TimescaleDB, MinIO (Silo) und clamd tragen dieselben Pins wie der Betrieb (`timescale_image_refs`, `objectstorage_image_refs`) |
 

@@ -17,9 +17,18 @@ spec:
       labels:
         app.kubernetes.io/component: opensearch
     spec:
+      # opensearch of the image (uid and gid 1000). fsGroup makes the new
+      # data volume writable for it; with OnRootMismatch the ownership is
+      # changed only once.
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: opensearch
-          image: opensearchproject/opensearch:2.19.7@sha256:3bfa1ec74d56928c2e018033d45c460ce2c0ea65a5cedd577de3102326c31b89
+          image: opensearchproject/opensearch:3.9.0@sha256:3b55f6b6249cfdb92b52ee59adc8a266203ba9ef9f5d82544fad6f1af2f3609e
           ports:
             - containerPort: 9200
               name: http
@@ -27,24 +36,40 @@ spec:
             - name: discovery.type
               value: single-node
             # Single-node default; the security plugin is disabled so the
-            # cluster network is the trust boundary. Enable it for production
-            # and provide RETICORA_OPENSEARCH_USERNAME/PASSWORD via the
-            # reticora-opensearch secret.
-            - name: plugins.security.disabled
+            # cluster network is the trust boundary. The entrypoint of the
+            # image (since 2.12) runs the demo installer of the security
+            # plugin unless both switches are set, and that installer stops
+            # the container without OPENSEARCH_INITIAL_ADMIN_PASSWORD; its
+            # demo certificates are never meant for operation (Upd-02). To
+            # enable the security plugin, mount an own security
+            # configuration and provide RETICORA_OPENSEARCH_USERNAME/PASSWORD
+            # via the reticora-opensearch secret.
+            - name: DISABLE_INSTALL_DEMO_CONFIG
               value: "true"
-            - name: ES_JAVA_OPTS
+            - name: DISABLE_SECURITY_PLUGIN
+              value: "true"
+            # OpenSearch reads OPENSEARCH_JAVA_OPTS only (ES_JAVA_OPTS is
+            # ignored).
+            - name: OPENSEARCH_JAVA_OPTS
               value: "-Xms512m -Xmx512m"
+          # OpenSearch 3 loads about 25 plugins before the HTTP port opens;
+          # the startup probe holds the liveness probe back for up to 5
+          # minutes so a slow node is not restarted in a loop.
+          startupProbe:
+            httpGet:
+              path: /_cluster/health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 30
           readinessProbe:
             httpGet:
               path: /_cluster/health
               port: http
-            initialDelaySeconds: 15
             periodSeconds: 10
           livenessProbe:
             httpGet:
               path: /_cluster/health
               port: http
-            initialDelaySeconds: 30
             periodSeconds: 20
           resources:
             requests:

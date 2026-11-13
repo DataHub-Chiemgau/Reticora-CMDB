@@ -16,14 +16,15 @@
 # A-85), scanned by image-scan with security/scan-exceptions.txt only; the
 # vendor IDs of both left this file. On 2026-11-13
 # Amazon Linux 2023 published fixes for sqlite-libs and rpm that the pinned
-# opensearch 2.19.7 (newest 2.x release, digest unchanged) does not carry yet;
-# their since: is that first report. Otherwise since: is the first scan of the
+# opensearch image does not carry yet; their since: is that first report.
+# opensearch moved to 3.9.0 on 2026-11-13 (Upd-02, newest release; 3.10.0 is
+# not released): it drops Bouncy Castle and jetty-security, so their entries
+# are gone; the IDs it still carries keep the since: of their first report,
+# jsoup (plugins of 3.x only) is new. Otherwise since: is the first scan of the
 # image (WP-873), exp: the SLA limit of SEC-11 (critical 7, high 30 days).
 # The resolution per image is E-246 (docs/plan/phase3/entscheidungen.md).
 
 # critical
-CVE-2025-14813 exp:2026-11-17 since:2026-11-10 sev:critical # opensearch: org.bouncycastle:bcprov-jdk15to18
-CVE-2026-8763 exp:2026-11-17 since:2026-11-10 sev:critical # opensearch: org.bouncycastle:bcprov-jdk15to18
 # high
 CVE-2025-47273 exp:2026-12-10 since:2026-11-10 sev:high # certbot: setuptools
 CVE-2026-114613 exp:2026-12-10 since:2026-11-10 sev:high # certbot: msgpack
@@ -31,20 +32,16 @@ CVE-2026-97687 exp:2026-12-10 since:2026-11-10 sev:high # certbot: urllib3
 CVE-2026-97689 exp:2026-12-10 since:2026-11-10 sev:high # certbot: urllib3
 GHSA-6v7p-g79w-8964 exp:2026-12-10 since:2026-11-10 sev:high # certbot: msgpack
 CVE-2026-102554 exp:2026-12-10 since:2026-11-10 sev:high # keycloak: com.google.guava:guava; opensearch: com.google.guava:guava
-CVE-2026-10050 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: org.eclipse.jetty:jetty-security
 CVE-2026-103242 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: python3-rpm, rpm, rpm-build-libs, rpm-libs, rpm-sign-libs
 CVE-2026-106451 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: at.yawk.lz4:lz4-java
 CVE-2026-108106 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: org.xerial.snappy:snappy-java
-CVE-2026-13506 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: org.bouncycastle:bcprov-jdk15to18
-CVE-2026-5598 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: org.bouncycastle:bcprov-jdk15to18
-CVE-2026-68497 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: com.fasterxml.jackson.core:jackson-databind
 CVE-2026-77422 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: org.jline:jline-builtins
 CVE-2026-84837 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: python3-rpm, rpm, rpm-build-libs, rpm-libs, rpm-sign-libs
 CVE-2026-86805 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: glibc, glibc-common, glibc-minimal-langpack
 CVE-2026-89407 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: com.fasterxml.jackson.core:jackson-core
-CVE-2026-89425 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: com.fasterxml.jackson.core:jackson-core
-CVE-2026-91776 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: com.fasterxml.jackson.core:jackson-databind
-CVE-2026-91777 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: com.fasterxml.jackson.core:jackson-databind
+CVE-2026-89425 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: com.fasterxml.jackson.core:jackson-core, tools.jackson.core:jackson-core
+CVE-2026-91776 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: com.fasterxml.jackson.core:jackson-databind, tools.jackson.core:jackson-databind
+CVE-2026-91777 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: com.fasterxml.jackson.core:jackson-databind, tools.jackson.core:jackson-databind
 CVE-2026-93451 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: org.xerial.snappy:snappy-java
 CVE-2026-95519 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: python3-rpm, rpm, rpm-build-libs, rpm-libs, rpm-sign-libs
 CVE-2026-95520 exp:2026-12-13 since:2026-11-13 sev:high # opensearch: python3-rpm, rpm, rpm-build-libs, rpm-libs, rpm-sign-libs
@@ -52,3 +49,4 @@ CVE-2026-95521 exp:2026-12-13 since:2026-11-13 sev:high # opensearch: python3-rp
 CVE-2026-119371 exp:2026-12-13 since:2026-11-13 sev:high # opensearch: sqlite-libs
 CVE-2026-119372 exp:2026-12-13 since:2026-11-13 sev:high # opensearch: sqlite-libs
 CVE-2026-119373 exp:2026-12-13 since:2026-11-13 sev:high # opensearch: sqlite-libs
+CVE-2026-75140 exp:2026-12-13 since:2026-11-13 sev:high # opensearch: org.jsoup:jsoup
