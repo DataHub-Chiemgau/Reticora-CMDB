@@ -39,8 +39,8 @@ const (
 	testCollector = "6f0b6f0e-0000-4000-8000-0000000000bb"
 )
 
-// reply is the answer of a probe subject as the collector reads it.
-type reply struct {
+// edgeReply is the answer of a probe subject as the collector reads it.
+type edgeReply struct {
 	Status     int        `json:"status"`
 	Type       string     `json:"type"`
 	Error      string     `json:"error"`
@@ -49,13 +49,13 @@ type reply struct {
 	ServerTime *time.Time `json:"server_time"`
 }
 
-func asReply(t testing.TB, v any) reply {
+func asReply(t testing.TB, v any) edgeReply {
 	t.Helper()
 	raw, err := json.Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var r reply
+	var r edgeReply
 	if err = json.Unmarshal(raw, &r); err != nil {
 		t.Fatal(err)
 	}
@@ -412,7 +412,7 @@ func edgeServer(t testing.TB, nc *nats.Conn, repo *discovery.MemoryRepository, e
 
 // request sends a request to the edge and waits until the subscriptions of
 // the dispatcher are active.
-func request(t testing.TB, nc *nats.Conn, subject string, data []byte) reply {
+func request(t testing.TB, nc *nats.Conn, subject string, data []byte) edgeReply {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -424,7 +424,7 @@ func request(t testing.TB, nc *nats.Conn, subject string, data []byte) reply {
 		if err != nil {
 			t.Fatalf("request %s: %v", subject, err)
 		}
-		var r reply
+		var r edgeReply
 		if err = json.Unmarshal(msg.Data, &r); err != nil {
 			t.Fatalf("reply %s: %v", msg.Data, err)
 		}
@@ -621,7 +621,7 @@ func TestProbeEdgeBurstBeyondPoolIsAnswered(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%d of %d requests answered: %v", i, burst, err)
 		}
-		var r reply
+		var r edgeReply
 		if err = json.Unmarshal(msg.Data, &r); err != nil || r.Status != http.StatusOK {
 			t.Fatalf("reply %s: %v", msg.Data, err)
 		}
@@ -700,7 +700,7 @@ func BenchmarkProbeEdgeResults(b *testing.B) {
 				b.Error(err)
 				return
 			}
-			var r reply
+			var r edgeReply
 			if err = json.Unmarshal(msg.Data, &r); err != nil || r.Status != http.StatusAccepted {
 				b.Errorf("reply %s", msg.Data)
 				return
