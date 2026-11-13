@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -19,6 +21,8 @@ import (
 //	GET  /api/v1/monitoring/incidents/{id}        the incident with its members, reasons and timeline
 //	POST /api/v1/monitoring/incidents/{id}/ack    acknowledge it and its root alarm (alert:acknowledge)
 //	POST /api/v1/monitoring/incidents/{id}/root   set the root by hand (monitoring:write)
+//	POST /api/v1/monitoring/incidents/{id}/tickets/{ticket_id}
+//	                                              link an existing ticket (ticket:write and monitoring:read, ticketing_essential)
 //
 // The routes read in the caller's scope (row level security of incident,
 // incident_transition, alarm and alarm_transition): a foreign or invisible
@@ -65,6 +69,10 @@ type IncidentView struct {
 	Incident
 	Root         IncidentRoot `json:"root"`
 	SymptomCount int          `json:"symptom_count"`
+	// Ticket is the first ticket linked to the incident that is not closed
+	// (WP-1039); absent without one, without ticket:read or without
+	// ticketing_essential.
+	Ticket *TicketRef `json:"ticket,omitempty"`
 }
 
 // IncidentMember is an alarm of an incident with its role.
@@ -107,6 +115,7 @@ func (h *Handler) registerIncidentRoutes(r interface {
 	r.Get(incidentPath, h.getIncident)
 	r.Post(incidentPath+"/ack", h.ackIncident)
 	r.Post(incidentPath+"/root", h.setIncidentRoot)
+	r.Post(incidentPath+"/tickets/{ticket_id}", h.linkIncidentTicket)
 }
 
 // parseIncidentFilter reads the filters of the list.
@@ -178,10 +187,15 @@ func (h *Handler) views(ctx context.Context, org string, items []Incident) ([]In
 	if err != nil {
 		return nil, err
 	}
+	tickets, err := h.incidentTickets(ctx, org, items)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]IncidentView, 0, len(items))
 	for i := range items {
 		inc := items[i]
-		v := IncidentView{Incident: inc, Root: IncidentRoot{AlarmID: inc.RootAlarmID, CIID: inc.RootCIID}}
+		v := IncidentView{Incident: inc, Root: IncidentRoot{AlarmID: inc.RootAlarmID, CIID: inc.RootCIID},
+			Ticket: firstOpenTicket(tickets[inc.ID])}
 		if inc.RootCIID != nil {
 			if n, ok := names[*inc.RootCIID]; ok {
 				name := n
@@ -208,6 +222,19 @@ func (h *Handler) views(ctx context.Context, org string, items []Incident) ([]In
 		out = append(out, v)
 	}
 	return out, nil
+}
+
+// incidentTickets reads the tickets linked to the incidents (link type
+// incident) with one query; none without a ticket port.
+func (h *Handler) incidentTickets(ctx context.Context, org string, items []Incident) (map[string][]TicketRef, error) {
+	if h.tickets == nil || len(items) == 0 {
+		return nil, nil
+	}
+	ids := make([]string, len(items))
+	for i := range items {
+		ids[i] = items[i].ID
+	}
+	return h.tickets.LinkedTickets(ctx, org, TicketLinkIncident, ids)
 }
 
 func (h *Handler) listIncidents(w http.ResponseWriter, r *http.Request) {
@@ -483,4 +510,73 @@ func (h *Handler) setIncidentRoot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, out)
+}
+
+// linkIncidentTicket links an existing ticket to the incident (WP-1039,
+// ALR-09 d): ticket_link of type incident and an internal system comment
+// naming the incident, its root and its cause class, in one transaction.
+// A ticket linked already is 409, an invisible ticket or incident 404;
+// without ticketing_essential 403 feature-not-entitled (Konvention 12).
+// The route needs ticket:write (routeRules); the answer is the incident
+// detail, so the handler also needs monitoring:read (pattern
+// review-items/*/ticket with review:resolve); without it the incident is
+// not found (404, no existence oracle).
+func (h *Handler) linkIncidentTicket(w http.ResponseWriter, r *http.Request) {
+	org, ok := requireOrg(w, r)
+	if !ok {
+		return
+	}
+	// Without monitoring:read the caller reads no incident: 404 like an
+	// invisible one, so ticket:write alone tells no incident apart.
+	if p, found := identity.PrincipalFromContext(r.Context()); !found || !p.Has(identity.PermMonitoringRead) {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "incident not found")
+		return
+	}
+	id, ok := incidentID(w, r)
+	if !ok {
+		return
+	}
+	ticketID, ok := api.ParseUUIDParam(w, r, "ticket_id", "ticket not found")
+	if !ok {
+		return
+	}
+	if h.features != nil && !h.features.IsEnabled(r.Context(), org, entitlement.FeatureTicketingEssential) {
+		api.WriteEntitlementError(w, &entitlement.FeatureNotEntitledError{FeatureKey: entitlement.FeatureTicketingEssential})
+		return
+	}
+	if h.tickets == nil {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "ticket not found")
+		return
+	}
+	var out *IncidentDetailView
+	err := h.svc.InTx(r.Context(), org, func(ctx context.Context) error {
+		inc, gerr := h.svc.Store().GetIncident(ctx, org, id)
+		if gerr != nil {
+			return gerr
+		}
+		var rootName string
+		if inc.RootCIID != nil {
+			names, nerr := h.svc.Store().CINames(ctx, org, []string{*inc.RootCIID})
+			if nerr != nil {
+				return nerr
+			}
+			rootName = names[*inc.RootCIID]
+		}
+		if lerr := h.tickets.LinkIncident(ctx, org, ticketID, incidentTicketLink(inc, rootName)); lerr != nil {
+			return lerr
+		}
+		var derr error
+		out, derr = h.incidentDetail(ctx, org, id)
+		return derr
+	})
+	switch {
+	case errors.Is(err, ErrTicketNotFound):
+		api.WriteError(w, http.StatusNotFound, "Not Found", "ticket not found")
+	case errors.Is(err, ErrTicketLinked):
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrTicketLinked.Error())
+	case err != nil:
+		writeIncidentError(w, err)
+	default:
+		api.WriteJSON(w, http.StatusCreated, out)
+	}
 }

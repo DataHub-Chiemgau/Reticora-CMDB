@@ -343,6 +343,10 @@ var routeRules = []routeRule{
 	// monitoring:read of the prefix, POST monitoring/incidents/{id}/root
 	// writes with monitoring:write by the suffix rule
 	// (testdata/route_permissions.txt).
+	// Linking an existing ticket to an incident writes a ticket link and a
+	// system comment (WP-1039, pattern review-items/*/ticket); the handler
+	// also requires monitoring:read, because it answers the incident.
+	{http.MethodPost, "monitoring/incidents/*/tickets/*", identity.PermTicketWrite},
 	{http.MethodPost, "notification-escalations/*/acknowledge", identity.PermAlertAcknowledge},
 	// Deleting a CI is its own right; ci:write does not delete. Restoring
 	// undoes a deletion and needs the same right (CI-05).

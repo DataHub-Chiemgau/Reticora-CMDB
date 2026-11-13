@@ -1070,8 +1070,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		// The probe definitions and the probe type register (PRB-01,
 		// PRT-01, WP-939).
 		probe.NewHandler(probeStore(&repos, opts.Entitlements)),
-		// The alarms with ack and un-ack (ALR-01, WP-983, E-160).
-		alarm.NewHandler(alarmService(&repos)),
+		// The alarms with ack and un-ack (ALR-01, WP-983, E-160); the
+		// tickets of the incidents (WP-1039).
+		alarmHandler(&repos, tickets, &opts),
 		// The BFF gates the fields of late modules itself (WP-311): its
 		// route belongs to no module prefix.
 		graphqlbff.NewHandler(repos.CI, repos.Relationship).WithEntitlements(opts.Entitlements).
@@ -1285,6 +1286,80 @@ func (a reviewTickets) CIName(ctx context.Context, orgID, ciID string) (string, 
 		return "", nil
 	}
 	return item.Name, nil
+}
+
+// incidentTickets is the ticket side of the incidents (ALR-09 d, TKT-01
+// Monitoring [P3], WP-1039; alarm.TicketPort, pattern reviewTickets): the
+// tickets linked to incidents, alarms and CIs and the link of a ticket to
+// an incident with its system comment.
+type incidentTickets struct {
+	svc *ticket.Service
+	// features gates the tickets on ticketing_essential; nil checks none.
+	features *entitlement.Service
+}
+
+// NewIncidentTickets returns the ticket port of the incidents over svc
+// (tests of package alarm wire the router's adapter with it).
+func NewIncidentTickets(svc *ticket.Service, features *entitlement.Service) alarm.TicketPort {
+	return incidentTickets{svc: svc, features: features}
+}
+
+var _ alarm.TicketPort = incidentTickets{}
+
+// LinkedTickets names the tickets of the targets the caller sees, with one
+// query; none without ticket:read or without ticketing_essential.
+func (a incidentTickets) LinkedTickets(ctx context.Context, orgID, linkType string, ids []string) (map[string][]alarm.TicketRef, error) {
+	if p, ok := identity.PrincipalFromContext(ctx); !ok || !p.Has(identity.PermTicketRead) {
+		return nil, nil
+	}
+	if a.features != nil && !a.features.IsEnabled(ctx, orgID, entitlement.FeatureTicketingEssential) {
+		return nil, nil
+	}
+	linked, err := a.svc.LinkedTickets(ctx, orgID, linkType, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string][]alarm.TicketRef, len(linked))
+	for id, list := range linked {
+		refs := make([]alarm.TicketRef, len(list))
+		for i := range list {
+			refs[i] = alarm.TicketRef{TicketID: list[i].ID, TicketNumber: list[i].TicketNumber, Status: list[i].Status}
+		}
+		out[id] = refs
+	}
+	return out, nil
+}
+
+// LinkIncident links the visible ticket to the incident and writes the
+// internal system comment; with the transaction of ctx both commit
+// together. A ticket of a wider scope than the incident (org-wide, another
+// client or site) gets the comment without the root CI's name.
+func (a incidentTickets) LinkIncident(ctx context.Context, orgID, ticketID string, link *alarm.IncidentTicketLink) error {
+	t, err := a.svc.Repository().GetByID(ctx, orgID, ticketID)
+	switch {
+	case errors.Is(err, ticket.ErrNotFound):
+		return alarm.ErrTicketNotFound
+	case err != nil:
+		return err
+	}
+	err = a.svc.CreateLink(ctx, &ticket.Link{OrganizationID: orgID, TicketID: ticketID, EntityType: ticket.LinkIncident,
+		EntityID: link.Incident.ID})
+	switch {
+	case errors.Is(err, ticket.ErrLinkTargetNotFound):
+		return alarm.ErrIncidentNotFound
+	case errors.Is(err, ticket.ErrNotFound):
+		return alarm.ErrTicketNotFound
+	case errors.Is(err, ticket.ErrLinkExists):
+		return alarm.ErrTicketLinked
+	case err != nil:
+		return err
+	}
+	comment := link.NeutralComment
+	if link.WithinScope(t.ClientID, t.SiteID) {
+		comment = link.Comment
+	}
+	_, err = a.svc.AddSystemComment(ctx, orgID, ticketID, comment)
+	return err
 }
 
 // accessRequestRuns is the executor that starts the workflow run of an IGA
@@ -1780,6 +1855,21 @@ func UsageCounters(repos *Repositories) entitlement.UsageCounters {
 
 // alarmService returns the alarm lifecycle of the repositories; without one
 // a memory store (both profiles serve the same routes).
+// alarmHandler is the handler of the alarms and incidents. The incidents
+// name and link tickets only while the module ticketing is on (WP-1039,
+// like the review items); without it the port stays empty.
+func alarmHandler(repos *Repositories, tickets *ticket.Service, opts *Options) *alarm.Handler {
+	h := alarm.NewHandler(alarmService(repos))
+	if !opts.Modules.Enabled("ticketing") {
+		return h
+	}
+	var features entitlement.Checker
+	if opts.Entitlements != nil {
+		features = opts.Entitlements
+	}
+	return h.WithTickets(incidentTickets{svc: tickets, features: opts.Entitlements}, features)
+}
+
 func alarmService(repos *Repositories) *alarm.Service {
 	if repos.Alarms != nil {
 		return repos.Alarms

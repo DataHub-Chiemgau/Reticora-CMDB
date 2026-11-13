@@ -428,6 +428,10 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	// own transition.
 	m["POST "+v1+"monitoring/incidents/{id}/ack"] = row("incident")
 	m["POST "+v1+"monitoring/incidents/{id}/root"] = row("incident")
+	// The ticket linked to an incident (WP-1039): the link row of the
+	// ticket and the incident.
+	m["POST "+v1+"monitoring/incidents/{id}/tickets/{ticket_id}"] = RouteSnapshot{Table: "ticket_link",
+		Keys: []SnapshotKey{{"ticket_id", "ticket_id"}, {"incident_id", "id"}}}
 	// Collector groups (PRB-03, WP-947): the group row; adding or moving a
 	// member shows the members of the group, removing one the member row.
 	crud(m, v1+"collector-groups", "collector_group", all...)

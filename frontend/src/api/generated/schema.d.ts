@@ -9669,7 +9669,7 @@ export interface paths {
     put?: never;
     /**
      * Link an object to a ticket
-     * @description entity_type is one of asset, ci, contract, location and review_item; any other value answers 422. A ticket or target that does not exist or lies outside the caller's scope answers 404 (a review item is visible when all its candidate CIs are, one without candidates when its client and site lie in the scope), a second link of the same object 409. The link takes client, site and team of the ticket; a hard delete of the target or the ticket removes it. The transaction writes ticket.updated with change link, link_id, entity_type and entity_id.
+     * @description entity_type is one of alarm, asset, ci, contract, incident, location and review_item (incident and alarm: WP-1039); any other value answers 422. A ticket that does not exist or lies outside the caller's scope answers 404; a target that does not exist, belongs to another organization or lies outside the caller's scope answers 422 with field entity_id (SR-50, WP-879, no existence oracle; a review item is visible when all its candidate CIs are, one without candidates when its client and site lie in the scope), a second link of the same object 409. The link takes client, site and team of the ticket; a hard delete of the target or the ticket removes it. The transaction writes ticket.updated with change link, link_id, entity_type and entity_id.
      */
     post: operations['createTicketLink'];
     delete?: never;
@@ -10538,6 +10538,30 @@ export interface paths {
      * @description Sets the root by hand (manual_root): the alarm must be a member of the incident (422 alarm_id), the previous root becomes a symptom, the transition root_changed names actor and reason. The automatic correlation keeps a root set by hand. Writes incident.updated (change root_changed); a resolved incident is 409.
      */
     post: operations['setIncidentRoot'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/monitoring/incidents/{id}/tickets/{ticket_id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        ticket_id: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Link an existing ticket to an incident
+     * @description Links a ticket the caller sees to the incident (ticket link of type incident, ALR-09 d, WP-1039) and writes an internal system comment naming the incident, its root and its cause class, in one transaction (ticket:write and monitoring:read; without the latter the incident is not found, 404). The comment names the root CI by name only when the ticket's client and site lie within the incident's; a ticket of a wider scope (org-wide, another client or site) gets the root CI by id. A ticket linked already is 409, a ticket or incident that does not exist or lies outside the caller's scope 404. Without the feature ticketing_essential 403 feature-not-entitled.
+     */
+    post: operations['linkIncidentTicket'];
     delete?: never;
     options?: never;
     head?: never;
@@ -15267,6 +15291,14 @@ export interface components {
       };
       /** @description The visible member alarms besides the root. */
       symptom_count: number;
+      ticket?: components['schemas']['IncidentTicketRef'];
+    };
+    /** @description The first ticket linked to the incident that is not closed (link type incident, WP-1039), by ticket number. Absent without one, without ticket:read or without the feature ticketing_essential. */
+    IncidentTicketRef: {
+      /** Format: uuid */
+      ticket_id: string;
+      ticket_number: number;
+      status: string;
     };
     IncidentMember: components['schemas']['Alarm'] & {
       /** @enum {string} */
@@ -17904,7 +17936,7 @@ export interface components {
       organization_id: string;
       ticket_id: string;
       /** @enum {string} */
-      entity_type: 'asset' | 'ci' | 'contract' | 'location' | 'review_item';
+      entity_type: 'alarm' | 'asset' | 'ci' | 'contract' | 'incident' | 'location' | 'review_item';
       entity_id: string;
       /** Format: date-time */
       created_at: string;
@@ -17913,7 +17945,7 @@ export interface components {
       data: components['schemas']['TicketLink'][];
     };
     CreateTicketLinkRequest: {
-      /** @description asset, ci, contract, location or review_item; any other value answers 422. */
+      /** @description alarm, asset, ci, contract, incident, location or review_item; any other value answers 422. */
       entity_type: string;
       entity_id: string;
     };
@@ -50026,6 +50058,35 @@ export interface operations {
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  linkIncidentTicket: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+        ticket_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The incident; ticket names the linked ticket when it is the first open one. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['IncidentDetail'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
     };
   };

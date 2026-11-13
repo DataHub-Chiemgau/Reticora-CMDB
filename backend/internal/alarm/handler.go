@@ -18,6 +18,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
@@ -108,11 +109,26 @@ func viewOf(a *Alarm) View {
 // Handler serves the alarm routes on the lifecycle service.
 type Handler struct {
 	svc *Service
+	// tickets is the ticket side of the incidents (WP-1039); nil: no
+	// ticket is linked or named.
+	tickets TicketPort
+	// features gates linking a ticket on ticketing_essential; nil checks
+	// none.
+	features entitlement.Checker
 }
 
 // NewHandler returns the handler on svc. With a database the user actions
 // write their audit entry in the transaction of the change.
 func NewHandler(svc *Service) *Handler { return &Handler{svc: svc} }
+
+// WithTickets sets the ticket side of the incidents (WP-1039): the ticket
+// of the incident list and detail and POST
+// /monitoring/incidents/{id}/tickets/{ticket_id}, gated on the feature
+// ticketing_essential by features (nil checks none).
+func (h *Handler) WithTickets(port TicketPort, features entitlement.Checker) *Handler {
+	h.tickets, h.features = port, features
+	return h
+}
 
 // RegisterRoutes mounts the routes.
 func (h *Handler) RegisterRoutes(r chi.Router) {

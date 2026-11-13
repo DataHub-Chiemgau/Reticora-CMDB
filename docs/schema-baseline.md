@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000358_alert_rule_actions
+Stand: Migration 000359_ticket_link_incident
 
 ## Prüfung
 
@@ -1452,6 +1452,21 @@ NULL-Ausnahme, WITH CHECK ohne) und die RESTRICTIVE-Policies
 Organisation in `tag` (Schlüssel nach `tag_normalize_key`, leere Schlüssel
 entfallen, `display_name` de/en = Originalwert, bestehende Schlüssel
 bleiben) und `ticket_tag`; danach entfällt die Spalte `ticket.tags`.
+
+Link-Typen `incident` und `alarm` (ALR-09 d, TKT-01 Monitoring [P3],
+WP-1039, Migration 000359_ticket_link_incident, vorläufige Nummer):
+`ticket_link` erhält die Zielspalten `incident_id` und `alarm_id` (beide
+`uuid`). `ticket_link_entity_type_check` umfasst damit `ci`, `asset`,
+`location`, `contract`, `review_item`, `incident` und `alarm`,
+`ticket_link_target_check` verlangt `num_nonnulls` über die sieben
+Zielspalten gleich 1 mit den Zweigen `incident` → `incident_id` und `alarm`
+→ `alarm_id`. Verweise mit Organisation (K19): `ticket_link_incident_fkey`
+(`incident_id`, `organization_id`) → `incident` und `ticket_link_alarm_fkey`
+(`alarm_id`, `organization_id`) → `alarm`, beide ON DELETE CASCADE; dazu
+`ticket_link_ticket_id_incident_id_key` und
+`ticket_link_ticket_id_alarm_id_key` (UNIQUE) sowie die Teilindizes
+`idx_ticket_link_incident` und `idx_ticket_link_alarm`. Scope-Ableitung,
+Policies, FORCE RLS und Truncate-Guard aus 000230 bleiben unverändert.
 
 Asset-Kern nach AST-01 (WP-271, E-41, E-120, E-124, Migration 000229):
 `asset` erhält `manufacturer`, `model`, `cost_center`, `supplier_id`,
