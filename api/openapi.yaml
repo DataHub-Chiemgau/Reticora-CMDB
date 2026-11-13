@@ -7089,7 +7089,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [unclassified_device, ambiguous_identity, conflicting_values, probable_duplicate, override_conflict, resurrected_device, unlicensed_ci, scope_suggested, serial_mismatch, duplicate_ip, unknown_relationship]
+            enum: [unclassified_device, ambiguous_identity, conflicting_values, probable_duplicate, override_conflict, resurrected_device, unlicensed_ci, scope_suggested, serial_mismatch, duplicate_ip, unknown_relationship, ip_binding_conflict]
           description: Return items of this review type. Another value → 400 with field kind (F-426).
         - name: escalated
           in: query
@@ -7175,6 +7175,14 @@ paths:
         ci_id from candidate_ci_ids is required (400 otherwise, like merge),
         422 when that CI no longer holds the address next to another side;
         dismiss keeps every side; 501 without IPAM;
+        ip_binding_conflict accept|dismiss (IPM-14, E-216): discovery saw a
+        pinned address (payload address, vrf_id, ip_address_id,
+        pinned_ci_id, pinned_interface_id) at another device
+        (observed_ci_id, observed_interface_id), both CIs are candidates;
+        accept binds the address to the observed interface (its CI follows),
+        releases the pin and records the change in the IPAM history with
+        source discovery, 422 when the address or the interface is gone;
+        dismiss keeps the pinned binding; 501 without IPAM;
         serial_mismatch dismiss. Another action is 422.
         resolved_by and the audit actor are the caller; a body with
         resolved_by is 400. An item is resolved exactly once (F-404): the
@@ -7267,7 +7275,8 @@ paths:
         The priority follows the type (high: ambiguous_identity,
         probable_duplicate, resurrected_device, duplicate_ip,
         serial_mismatch, unlicensed_ci; medium: conflicting_values,
-        override_conflict, unclassified_device, unknown_relationship; low:
+        override_conflict, unclassified_device, unknown_relationship,
+        ip_binding_conflict; low:
         scope_suggested); priority of the body takes precedence. At most one
         ticket that is not closed is linked to an item: a second one is 409
         naming the id and ticket_number of the open ticket (a ticket the
@@ -7340,7 +7349,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [unclassified_device, ambiguous_identity, conflicting_values, probable_duplicate, override_conflict, resurrected_device, unlicensed_ci, scope_suggested, serial_mismatch, duplicate_ip, unknown_relationship]
+            enum: [unclassified_device, ambiguous_identity, conflicting_values, probable_duplicate, override_conflict, resurrected_device, unlicensed_ci, scope_suggested, serial_mismatch, duplicate_ip, unknown_relationship, ip_binding_conflict]
           description: Return items of this review type. Another value → 400 with field kind (F-426).
       responses:
         '200':
@@ -10233,6 +10242,16 @@ paths:
           in: query
           description: Only addresses bound to this CI (ip_address.ci_id, IPM-13, IPM-20).
           schema: { type: string, format: uuid }
+        - name: origin
+          in: query
+          description: Only addresses of this origin (IPM-14, IPM-20); another value is 422 with field origin.
+          schema:
+            $ref: '#/components/schemas/IPAddressOrigin'
+        - name: pinned
+          in: query
+          description: Only pinned (true) or not pinned (false) addresses (IPM-14); another value is 422 with field pinned.
+          schema:
+            type: boolean
         - name: q
           in: query
           description: Prefix of the address or part of the DNS name (IPM-20).
@@ -10324,6 +10343,16 @@ paths:
           in: query
           description: Only addresses on interfaces of this CI (IPM-20).
           schema: { type: string, format: uuid }
+        - name: origin
+          in: query
+          description: Only addresses of this origin (IPM-14, IPM-20); another value is 422 with field origin.
+          schema:
+            $ref: '#/components/schemas/IPAddressOrigin'
+        - name: pinned
+          in: query
+          description: Only pinned (true) or not pinned (false) addresses (IPM-14); another value is 422 with field pinned.
+          schema:
+            type: boolean
         - name: q
           in: query
           description: Prefix of the address or part of the DNS name (IPM-20).
@@ -40770,7 +40799,7 @@ components:
           type: string
         kind:
           type: string
-          enum: [unclassified_device, ambiguous_identity, conflicting_values, probable_duplicate, override_conflict, resurrected_device, unlicensed_ci, scope_suggested, serial_mismatch, duplicate_ip, unknown_relationship]
+          enum: [unclassified_device, ambiguous_identity, conflicting_values, probable_duplicate, override_conflict, resurrected_device, unlicensed_ci, scope_suggested, serial_mismatch, duplicate_ip, unknown_relationship, ip_binding_conflict]
         status:
           type: string
           enum: [open, resolved, dismissed]
@@ -42629,7 +42658,7 @@ components:
 
     IPAddress:
       type: object
-      required: [id, organization_id, address, vrf_id, type, role, created_at, updated_at]
+      required: [id, organization_id, address, vrf_id, type, role, origin, pinned, created_at, updated_at]
       properties:
         id:
           type: string
@@ -42682,12 +42711,31 @@ components:
             address) set directly.
         role:
           $ref: '#/components/schemas/IPAddressRole'
+        origin:
+          $ref: '#/components/schemas/IPAddressOrigin'
+        pinned:
+          type: boolean
+          description: >-
+            The binding is authoritative (IPM-14, E-216): discovery changes
+            only last_seen_at, miss_count and state of the row, never
+            removes it, and an observation of the address at another device
+            opens the review ip_binding_conflict. Set through PATCH.
         created_at:
           type: string
           format: date-time
         updated_at:
           type: string
           format: date-time
+
+    IPAddressOrigin:
+      type: string
+      enum: [manual, discovery, scan, import]
+      readOnly: true
+      description: >-
+        Where the address row came from (IPM-14): manual (POST, never set by
+        the client), discovery (discovery sync), scan or import. Discovery
+        overwrites no binding of origin manual and removes only rows of
+        origin discovery that are not pinned.
 
     IPAddressRole:
       type: string
@@ -42794,6 +42842,9 @@ components:
             the CI of the interface is 422 ci_id.
         role:
           $ref: '#/components/schemas/IPAddressRole'
+        pinned:
+          type: boolean
+          description: Pins (true) or releases (false) the binding of the address (IPM-14).
 
     IPAddressState:
       type: string

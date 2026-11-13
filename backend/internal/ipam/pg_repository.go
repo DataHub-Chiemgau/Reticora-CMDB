@@ -609,14 +609,14 @@ func (r *PGRepository) deleteByID(ctx context.Context, orgID, table, visible, id
 const ipCols = `id::text, organization_id::text, COALESCE(subnet_id::text,''), COALESCE(interface_id::text,''),
 	address::text, vrf_id::text, type, COALESCE(dns_name,''), COALESCE(description,''), last_seen_at,
 	reserved_until, COALESCE(reserved_by::text,''), state, state_changed_at, is_gateway,
-	COALESCE(ci_id::text,''), role, created_at, updated_at`
+	COALESCE(ci_id::text,''), role, origin, pinned, created_at, updated_at`
 
 func scanIP(s scanner) (*IPAddress, error) {
 	a := &IPAddress{}
 	var lastSeen *time.Time
 	if err := s.Scan(&a.ID, &a.OrganizationID, &a.SubnetID, &a.InterfaceID, &a.Address, &a.VRFID, &a.Type,
 		&a.DNSName, &a.Description, &lastSeen, &a.ReservedUntil, &a.ReservedBy,
-		&a.State, &a.StateChangedAt, &a.IsGateway, &a.CIID, &a.Role, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		&a.State, &a.StateChangedAt, &a.IsGateway, &a.CIID, &a.Role, &a.Origin, &a.Pinned, &a.CreatedAt, &a.UpdatedAt); err != nil {
 		return nil, err
 	}
 	normalizeIP(a, lastSeen)
@@ -708,10 +708,11 @@ func (r *PGRepository) CreateIPAddress(ctx context.Context, a *IPAddress) error 
 			 VALUES ($1, COALESCE($2::uuid, ipam_longest_prefix_subnet($1, COALESCE($10::uuid, default_vrf_of($1)), $4::inet)),
 			         $3, $4::inet, $5, $6, $7, $8, $9, $10)
 			 RETURNING id::text, COALESCE(subnet_id::text, ''), vrf_id::text, state, is_gateway, COALESCE(ci_id::text, ''), role,
-			           created_at, updated_at`,
+			           origin, pinned, created_at, updated_at`,
 			a.OrganizationID, nilIfEmpty(a.SubnetID), nilIfEmpty(a.InterfaceID), a.Address, a.Type,
 			nilIfEmpty(a.DNSName), nilIfEmpty(a.Description), nilIfEmpty(a.CIID), role, nilIfEmpty(a.VRFID),
-		).Scan(&a.ID, &a.SubnetID, &a.VRFID, &a.State, &a.IsGateway, &a.CIID, &a.Role, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		).Scan(&a.ID, &a.SubnetID, &a.VRFID, &a.State, &a.IsGateway, &a.CIID, &a.Role, &a.Origin, &a.Pinned,
+			&a.CreatedAt, &a.UpdatedAt); err != nil {
 			return addressCIError(err)
 		}
 		return requireVisible(ctx, tx, "ip_address", ipVisible, a.ID)
@@ -847,7 +848,7 @@ func (r *PGRepository) ListCIAddresses(ctx context.Context, orgID, ciID string, 
 			var lastSeen *time.Time
 			if err := rows.Scan(&a.ID, &a.OrganizationID, &a.SubnetID, &a.InterfaceID, &a.Address, &a.VRFID, &a.Type,
 				&a.DNSName, &a.Description, &lastSeen, &a.ReservedUntil, &a.ReservedBy, &a.State, &a.StateChangedAt, &a.IsGateway,
-				&a.CIID, &a.Role, &a.CreatedAt, &a.UpdatedAt, &c.InterfaceName, &c.SubnetCIDR); err != nil {
+				&a.CIID, &a.Role, &a.Origin, &a.Pinned, &a.CreatedAt, &a.UpdatedAt, &c.InterfaceName, &c.SubnetCIDR); err != nil {
 				return err
 			}
 			normalizeIP(a, lastSeen)
@@ -931,6 +932,11 @@ func (r *PGRepository) UpdateIPAddress(ctx context.Context, orgID, id string, re
 		if req.Role != nil {
 			sets = append(sets, fmt.Sprintf("role = $%d", pos))
 			args = append(args, *req.Role)
+			pos++
+		}
+		if req.Pinned != nil {
+			sets = append(sets, fmt.Sprintf("pinned = $%d", pos))
+			args = append(args, *req.Pinned)
 		}
 		var err error
 		if len(sets) == 0 {
@@ -1439,6 +1445,23 @@ type SyncResult struct {
 	// wrote (from RETURNING), for the duplicate check after the commit
 	// (NET-06, WP-300).
 	Observed []DuplicateKey
+	// BindingConflicts are the pinned addresses of another device the
+	// sync observed at an interface of its CI in the same VRF (IPM-14,
+	// E-216); the sync wrote no row for them.
+	BindingConflicts []BindingConflict
+}
+
+// BindingConflict is a pinned address (IPM-14) of another CI that discovery
+// observed at interface ObservedInterfaceID of CI ObservedCIID in the same
+// VRF; the pinned row is unchanged.
+type BindingConflict struct {
+	IPAddressID         string
+	Address             string
+	VRFID               string
+	PinnedCIID          string
+	PinnedInterfaceID   string
+	ObservedCIID        string
+	ObservedInterfaceID string
 }
 
 // ReservationConflict is a reservation of an address that discovery
@@ -1460,10 +1483,15 @@ const MaxMissedObservations = 3
 // SyncDiscoveredInterfaces applies one discovery observation of the
 // interfaces of a CI (REC-07, NET-01): reported interfaces and addresses are
 // created or updated and their miss_count is reset; a reported interface
-// becomes of origin discovered. Discovered interfaces and addresses of type
-// discovered the observation did not report count one miss and are removed
-// at the third consecutive miss, with an entry in the CI's history; manual
-// interfaces and reserved, static and dhcp addresses are kept (E-90). An
+// becomes of origin discovered. Discovered interfaces and addresses of origin
+// discovery that are not pinned the observation did not report count one
+// miss and are removed at the third consecutive miss, with an entry in the
+// CI's history; manual interfaces and manual or pinned addresses are kept
+// (E-90, E-216). Of a manual or pinned address of the CI the sync updates
+// only the observation (last_seen_at, miss_count); a pinned address of
+// another CI in the same VRF is not written again at the observed interface
+// but reported in BindingConflicts (IPM-14), found by one set-based query
+// per sync. An
 // interface that a manual or verified edge names is not removed and keeps
 // counting misses (REL-05, removeInterfaces). The caller syncs only observations that report
 // interfaces at all. Observed addresses take the VRF of the record
@@ -1496,8 +1524,13 @@ func (r *PGRepository) SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID
 			return rowsErr
 		}
 
+		pinnedElsewhere, err := pinnedAtOtherCI(ctx, tx, orgID, ciID, observed)
+		if err != nil {
+			return err
+		}
 		seenInterfaces := map[string]bool{}
 		var seenIPs []string
+		ord := 0
 		for i := range observed {
 			ifc := &observed[i]
 			id, ok := existing[ifc.Name]
@@ -1523,35 +1556,51 @@ func (r *PGRepository) SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID
 			}
 			seenInterfaces[id] = true
 			for _, address := range ifc.IPs {
+				ord++
+				// A pinned address of another CI in the same VRF: no row
+				// at the observed interface, a review instead (IPM-14).
+				if c, pinned := pinnedElsewhere[ord]; pinned {
+					c.ObservedCIID, c.ObservedInterfaceID = ciID, id
+					res.BindingConflicts = append(res.BindingConflicts, c)
+					continue
+				}
 				var ipID string
 				var key DuplicateKey
 				// The VRF of the record, resolved in the organization; an
 				// empty or unknown one leaves NULL and trg_ip_address_vrf
 				// sets the default VRF (WP-772). An address without subnet
 				// gets the longest prefix of that VRF in the same statement
-				// (IPM-14, WP-912).
+				// (IPM-14, WP-912). A manual or pinned row keeps its VRF
+				// and subnet; the sync records only the observation
+				// (E-216).
 				err = tx.QueryRow(ctx, `UPDATE ip_address SET miss_count = 0, last_seen_at = now(), updated_at = now(),
-					vrf_id = r.vrf, subnet_id = COALESCE(subnet_id, ipam_longest_prefix_subnet($4, COALESCE(r.vrf, default_vrf_of($4)), address))
+					vrf_id = CASE WHEN origin = 'discovery' AND NOT pinned THEN r.vrf ELSE vrf_id END,
+					subnet_id = CASE WHEN origin = 'discovery' AND NOT pinned
+						THEN COALESCE(subnet_id, ipam_longest_prefix_subnet($4, COALESCE(r.vrf, default_vrf_of($4)), address))
+						ELSE subnet_id END
 					FROM (SELECT (SELECT v.id FROM vrf v WHERE v.id = `+vrfParam(3)+` AND v.organization_id = $4) AS vrf) r
 					WHERE interface_id = $1 AND host(address) = host($2::inet) RETURNING id::text, vrf_id::text, host(address)`,
 					id, address, ifc.VRFID, orgID).Scan(&ipID, &key.VRFID, &key.Host)
 				// A new address at the interface: the CI's row without
 				// interface of the same host and VRF (its management
 				// address, WP-913, written before the interfaces) moves to
-				// the interface with its role and type; else a new row. One
-				// statement either way, through idx_ip_address_org_ci.
+				// the interface with its role and type, a pinned one stays
+				// where it is and records only the observation (E-216);
+				// else a new row of origin discovery. One statement either
+				// way, through idx_ip_address_org_ci.
 				if errors.Is(err, pgx.ErrNoRows) {
 					err = tx.QueryRow(ctx, `WITH r AS (
 							SELECT (SELECT v.id FROM vrf v WHERE v.id = `+vrfParam(4)+` AND v.organization_id = $1) AS vrf
 						), adopted AS (
-							UPDATE ip_address a SET interface_id = $2, miss_count = 0, last_seen_at = now(), updated_at = now()
+							UPDATE ip_address a SET interface_id = CASE WHEN a.pinned THEN a.interface_id ELSE $2 END,
+								miss_count = 0, last_seen_at = now(), updated_at = now()
 							  FROM r
 							 WHERE a.organization_id = $1 AND a.interface_id IS NULL AND a.ci_id = $5
 							   AND a.vrf_id = COALESCE(r.vrf, default_vrf_of($1)) AND host(a.address) = host($3::inet)
 							RETURNING a.id, a.vrf_id, host(a.address) AS host
 						), inserted AS (
-							INSERT INTO ip_address (organization_id, interface_id, address, type, last_seen_at, vrf_id, subnet_id)
-							SELECT $1, $2, $3::inet, 'discovered', now(), r.vrf,
+							INSERT INTO ip_address (organization_id, interface_id, address, type, origin, last_seen_at, vrf_id, subnet_id)
+							SELECT $1, $2, $3::inet, 'discovered', 'discovery', now(), r.vrf,
 								ipam_longest_prefix_subnet($1, COALESCE(r.vrf, default_vrf_of($1)), $3::inet)
 							FROM r WHERE NOT EXISTS (SELECT 1 FROM adopted)
 							RETURNING id, vrf_id, host(address) AS host
@@ -1568,11 +1617,13 @@ func (r *PGRepository) SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID
 			}
 		}
 
-		// Discovered addresses of the CI's interfaces the observation did not
-		// report; reserved, static and dhcp addresses are kept (E-90).
+		// Addresses of origin discovery of the CI's interfaces the
+		// observation did not report; manual and pinned addresses are kept
+		// (E-90, E-216).
 		removedIPs, err := missAndRemove(ctx, tx, `UPDATE ip_address a SET miss_count = a.miss_count + 1
 			FROM network_interface n
-			WHERE a.interface_id = n.id AND n.ci_id = $1 AND a.type = 'discovered' AND NOT (a.id::text = ANY($2::text[]))
+			WHERE a.interface_id = n.id AND n.ci_id = $1 AND a.origin = 'discovery' AND NOT a.pinned
+			  AND NOT (a.id::text = ANY($2::text[]))
 			RETURNING a.id::text, host(a.address), a.miss_count`, ciID, seenIPs, "ip_address", nil)
 		if err != nil {
 			return err
@@ -1611,6 +1662,126 @@ func (r *PGRepository) SyncDiscoveredInterfaces(ctx context.Context, orgID, ciID
 		return nil
 	})
 	return res, err
+}
+
+// BindObservedAddress carries out accept of an ip_binding_conflict item
+// (IPM-14, E-216) in the caller's transaction: the pinned address ipID moves
+// to the observed interface interfaceID (its CI follows through
+// ip_address_ci_bind, WP-911) and loses its pin; the history names the
+// source discovery (WP-908). A row of origin discovery of the same address
+// and VRF at that interface, observed before the pin, gives way. An address
+// or interface that is gone or invisible is ErrNotFound. An address that is
+// no longer pinned to pinnedCIID (the pin was released or the address moved
+// since the item opened), or an observed interface that already holds the
+// address in a manual or pinned row, is a field error (422, WP-676).
+func (r *PGRepository) BindObservedAddress(ctx context.Context, orgID, ipID, interfaceID, pinnedCIID string) error {
+	if !api.IsUUID(ipID) || !api.IsUUID(interfaceID) || !api.IsUUID(pinnedCIID) {
+		return ErrNotFound
+	}
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM network_interface WHERE organization_id = $1 AND id = $2)`,
+			orgID, interfaceID).Scan(&exists); err != nil {
+			return fmt.Errorf("read interface: %w", err)
+		}
+		if !exists {
+			return ErrNotFound
+		}
+		var pinnedThere bool
+		if err := tx.QueryRow(ctx, `SELECT pinned AND ci_id IS NOT DISTINCT FROM $3::uuid FROM ip_address
+			WHERE organization_id = $1 AND id = $2 AND `+ipVisible+` FOR UPDATE OF ip_address`,
+			orgID, ipID, pinnedCIID).Scan(&pinnedThere); errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
+			return fmt.Errorf("read address: %w", err)
+		}
+		if !pinnedThere {
+			return errBindingNotPinned
+		}
+		if err := setChangeSource(ctx, tx, ChangeSourceDiscovery); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM ip_address d USING ip_address a
+			WHERE a.organization_id = $1 AND a.id = $2 AND d.organization_id = $1 AND d.interface_id = $3
+			  AND d.vrf_id = a.vrf_id AND d.address_host = a.address_host AND d.id <> a.id
+			  AND d.origin = 'discovery' AND NOT d.pinned`, orgID, ipID, interfaceID); err != nil {
+			return fmt.Errorf("remove observed duplicate: %w", err)
+		}
+		tag, err := tx.Exec(ctx, `UPDATE ip_address SET interface_id = $3, pinned = false, updated_at = now()
+			WHERE organization_id = $1 AND id = $2 AND `+ipVisible, orgID, ipID, interfaceID)
+		if err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "uq_ip_address_org_vrf_interface_address" {
+				return errBindingInterfaceHolds
+			}
+			return addressCIError(err)
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		return requireVisible(ctx, tx, "ip_address", ipVisible, ipID)
+	})
+}
+
+// errBindingNotPinned: accept of an ip_binding_conflict item whose address
+// is no longer pinned to the CI the item names (WP-676).
+var errBindingNotPinned = &api.FieldError{Field: "ip_address_id",
+	Message: "the address is no longer pinned to that CI; dismiss the item", Status: http.StatusUnprocessableEntity}
+
+// errBindingInterfaceHolds: the observed interface already holds the
+// address in a manual or pinned row (uq_ip_address_org_vrf_interface_address).
+var errBindingInterfaceHolds = &api.FieldError{Field: "observed_interface_id",
+	Message: "the observed interface already holds the address; dismiss the item", Status: http.StatusUnprocessableEntity}
+
+// pinnedAtOtherCI finds, in one set-based query for all addresses of the
+// observation, the pinned addresses of another CI in the VRF of the
+// observation (IPM-14, E-216). The result is keyed by the position of the
+// address in the observation (1-based, interfaces and their addresses in
+// order). Without observed addresses it costs no statement.
+func pinnedAtOtherCI(ctx context.Context, tx pgx.Tx, orgID, ciID string, observed []ObservedInterface) (map[int]BindingConflict, error) {
+	var addrs, vrfs []string
+	for i := range observed {
+		for _, address := range observed[i].IPs {
+			addrs = append(addrs, address)
+			vrfs = append(vrfs, observed[i].VRFID)
+		}
+	}
+	if len(addrs) == 0 {
+		return nil, nil
+	}
+	// Through the partial index idx_ip_address_pinned, which holds only
+	// the pinned rows.
+	rows, err := tx.Query(ctx, `SELECT o.ord::int, a.id::text, a.address_host, a.vrf_id::text, a.ci_id::text,
+			COALESCE(a.interface_id::text, '')
+		FROM unnest($2::text[], $3::text[]) WITH ORDINALITY AS o(addr, vrf, ord)
+		JOIN ip_address a ON a.organization_id = $1 AND a.pinned AND a.ci_id IS NOT NULL AND a.ci_id <> $4
+		 AND a.vrf_id = COALESCE((SELECT v.id FROM vrf v WHERE v.organization_id = $1
+		         AND v.id = (CASE WHEN o.vrf ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN o.vrf::uuid END)),
+		       default_vrf_of($1))
+		 AND a.address_host = host(o.addr::inet)
+		ORDER BY o.ord, a.id`, orgID, addrs, vrfs, ciID)
+	if err != nil {
+		return nil, fmt.Errorf("find pinned addresses: %w", err)
+	}
+	type pinnedRow struct {
+		ord int
+		c   BindingConflict
+	}
+	found, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (pinnedRow, error) {
+		var p pinnedRow
+		scanErr := row.Scan(&p.ord, &p.c.IPAddressID, &p.c.Address, &p.c.VRFID, &p.c.PinnedCIID, &p.c.PinnedInterfaceID)
+		return p, scanErr
+	})
+	if err != nil {
+		return nil, fmt.Errorf("find pinned addresses: %w", err)
+	}
+	out := make(map[int]BindingConflict, len(found))
+	for _, p := range found {
+		if _, dup := out[p.ord]; !dup {
+			out[p.ord] = p.c
+		}
+	}
+	return out, nil
 }
 
 // vrfParam is the VRF id parameter $n as uuid: empty or not a UUID is NULL,

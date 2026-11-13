@@ -3164,7 +3164,7 @@ export interface paths {
     put?: never;
     /**
      * Resolve a review item
-     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge is the CI-12 merge, a ci.merge job, of the new CI into the chosen candidate: its references move, GET on it answers 301 and POST /cis/{id}/unmerge restores it within 30 days; 409 when another merge holds or has merged either CI, the item stays open); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI; 409 when it was merged into another CI, the item stays open); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and like POST /cis within max_cis: with max_cis reached new and the merge of a resurrected_device item are 403 entitlement-limit, no CI is created or reactivated and the item stays open with its device record (ENT-03, ENT-08); 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); its type is ci_type_id of the request or else the recorded type name resolved as the ingest resolves it, and without a type that resolves new is 422 with field ci_type_id ("choose a CI type for the new CI"), the item stays open; new of an unclassified_device item with reason no_profile_match is 409 (its generic_device CI exists: set the type on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage and the discovery feature, 403 otherwise, feature-not-entitled without discovery, the item stays open, F-400); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); duplicate_ip accept|dismiss: an item of a reservation conflict (payload reservation_ip_id) is accepted by releasing the reservation, 422 when it is already released or the item names none; an item of duplicate observations carries payload address, vrf_id, holders (every ip_address row of the address in the VRF with ip_address_id, interface_id, ci_id and type) and side_keys, and accept chooses a side: the address at the CI ci_id is stale and all its rows of the address are removed, with one CI involved that CI is the side, with several ci_id from candidate_ci_ids is required (400 otherwise, like merge), 422 when that CI no longer holds the address next to another side; dismiss keeps every side; 501 without IPAM; serial_mismatch dismiss. Another action is 422. resolved_by and the audit actor are the caller; a body with resolved_by is 400. An item is resolved exactly once (F-404): the effect of the action and the resolution commit together, so a refused or failed effect leaves the item open and writes nothing; of two concurrent resolutions of the same item one answers 200 and the other 409 (review item already resolved) without its effect, as a resolution of an item that is no longer open does. A refused effect answers as the resource it writes and leaves the item open (F-405): accept of scope_suggested is 409 with field target when the collector already has a scope for the CIDR and 422 with field collector_id or target for an unknown collector or an invalid value, as POST /discovery-scopes; accept of override_conflict is 404 when the CI (also one soft-deleted meanwhile, F-422) or the override of the field is gone, the override stays; new of unlicensed_ci is 422 when the item holds no device record; accept of unknown_relationship is 422 when the item names no CI ids or the type lists of connected_to (as POST /relationships checks them) do not allow their types and 404 when one of the CIs is gone (unknown, not visible or soft-deleted, also when the edge exists already; F-424); no edge is recorded or re-confirmed. A CI that new creates (also new of unlicensed_ci) or that the merge of a resurrected_device item reactivates is checked against the unique attributes like POST /cis (MET-15): a value another active CI holds is 409 urn:reticora:problem:conflict with `violations` naming the attributes, also before the unique index exists; no CI is created or reactivated and the item stays open. The adoption after max_cis was raised leaves such an item open and adopts the others.
+     * @description Requires review:resolve. The actions per type (REC-08): unclassified_device new|dismiss; ambiguous_identity merge|new|dismiss; conflicting_values accept|dismiss; probable_duplicate merge|dismiss (merge is the CI-12 merge, a ci.merge job, of the new CI into the chosen candidate: its references move, GET on it answers 301 and POST /cis/{id}/unmerge restores it within 30 days; 409 when another merge holds or has merged either CI, the item stays open); override_conflict accept|dismiss (accept removes the override and the CI takes the observed value; dismiss keeps the override and suppresses the value until the source reports another); conflicting_values accept applies the reported serial number or hardware UUID kept in payload.incoming; resurrected_device merge|new|dismiss (merge reactivates the deleted CI; 409 when it was merged into another CI, the item stays open); new of unclassified_device, ambiguous_identity and resurrected_device creates the CI as the ingest of the device kept in the payload would, with the client and site of the item (CI-13), and like POST /cis within max_cis: with max_cis reached new and the merge of a resurrected_device item are 403 entitlement-limit, no CI is created or reactivated and the item stays open with its device record (ENT-03, ENT-08); 422 when the item records no client and its candidate CIs share none (dismiss it and wait for the next sighting); its type is ci_type_id of the request or else the recorded type name resolved as the ingest resolves it, and without a type that resolves new is 422 with field ci_type_id ("choose a CI type for the new CI"), the item stays open; new of an unclassified_device item with reason no_profile_match is 409 (its generic_device CI exists: set the type on the CI and dismiss the item); unlicensed_ci new|dismiss (new adopts the device within max_cis, 403 entitlement-limit otherwise); scope_suggested accept|dismiss (accept creates the scope; both also need discovery:manage and the discovery feature, 403 otherwise, feature-not-entitled without discovery, the item stays open, F-400); unknown_relationship accept|dismiss (accept records the neighbor as connected_to); duplicate_ip accept|dismiss: an item of a reservation conflict (payload reservation_ip_id) is accepted by releasing the reservation, 422 when it is already released or the item names none; an item of duplicate observations carries payload address, vrf_id, holders (every ip_address row of the address in the VRF with ip_address_id, interface_id, ci_id and type) and side_keys, and accept chooses a side: the address at the CI ci_id is stale and all its rows of the address are removed, with one CI involved that CI is the side, with several ci_id from candidate_ci_ids is required (400 otherwise, like merge), 422 when that CI no longer holds the address next to another side; dismiss keeps every side; 501 without IPAM; ip_binding_conflict accept|dismiss (IPM-14, E-216): discovery saw a pinned address (payload address, vrf_id, ip_address_id, pinned_ci_id, pinned_interface_id) at another device (observed_ci_id, observed_interface_id), both CIs are candidates; accept binds the address to the observed interface (its CI follows), releases the pin and records the change in the IPAM history with source discovery, 422 when the address or the interface is gone; dismiss keeps the pinned binding; 501 without IPAM; serial_mismatch dismiss. Another action is 422. resolved_by and the audit actor are the caller; a body with resolved_by is 400. An item is resolved exactly once (F-404): the effect of the action and the resolution commit together, so a refused or failed effect leaves the item open and writes nothing; of two concurrent resolutions of the same item one answers 200 and the other 409 (review item already resolved) without its effect, as a resolution of an item that is no longer open does. A refused effect answers as the resource it writes and leaves the item open (F-405): accept of scope_suggested is 409 with field target when the collector already has a scope for the CIDR and 422 with field collector_id or target for an unknown collector or an invalid value, as POST /discovery-scopes; accept of override_conflict is 404 when the CI (also one soft-deleted meanwhile, F-422) or the override of the field is gone, the override stays; new of unlicensed_ci is 422 when the item holds no device record; accept of unknown_relationship is 422 when the item names no CI ids or the type lists of connected_to (as POST /relationships checks them) do not allow their types and 404 when one of the CIs is gone (unknown, not visible or soft-deleted, also when the edge exists already; F-424); no edge is recorded or re-confirmed. A CI that new creates (also new of unlicensed_ci) or that the merge of a resurrected_device item reactivates is checked against the unique attributes like POST /cis (MET-15): a value another active CI holds is 409 urn:reticora:problem:conflict with `violations` naming the attributes, also before the unique index exists; no CI is created or reactivated and the item stays open. The adoption after max_cis was raised leaves such an item open and adopts the others.
      */
     post: operations['resolveReviewItem'];
     delete?: never;
@@ -3187,7 +3187,7 @@ export interface paths {
     put?: never;
     /**
      * Open a ticket for a review item
-     * @description Opens a ticket for an open review item through the ticket service (TKT-01, WP-291); the item stays open. Requires ticket:write (route) and review:resolve (403 otherwise), the module ticketing (404 while it is off) and the feature ticketing_essential (403 feature-not-entitled). The ticket is linked to the item (ticket_link review_item), to every candidate CI (ci) and, for serial_mismatch, to the asset of payload.asset_id (asset, also related_asset_id). The first candidate CI (else payload.ci_id or payload.matched_ci_id) is related_ci_id, so the ticket takes its client and site; an item without candidates opens an organization-wide ticket, which a client- or site-restricted caller cannot create (403), and a team-restricted caller must name a team_id of its scope (403 otherwise). Title "<kind>: <payload.name | payload.cidr | CI name>", the description names object_key and the payload fields without raw_data and fingerprint, category task, status as POST /tickets. The priority follows the type (high: ambiguous_identity, probable_duplicate, resurrected_device, duplicate_ip, serial_mismatch, unlicensed_ci; medium: conflicting_values, override_conflict, unclassified_device, unknown_relationship; low: scope_suggested); priority of the body takes precedence. At most one ticket that is not closed is linked to an item: a second one is 409 naming the id and ticket_number of the open ticket (a ticket the caller does not see does not count and is not named). One audit entry ticket.create names the ticket and the review item. The endpoint is idempotent per item, so the inbox can open tickets for many items with one request each.
+     * @description Opens a ticket for an open review item through the ticket service (TKT-01, WP-291); the item stays open. Requires ticket:write (route) and review:resolve (403 otherwise), the module ticketing (404 while it is off) and the feature ticketing_essential (403 feature-not-entitled). The ticket is linked to the item (ticket_link review_item), to every candidate CI (ci) and, for serial_mismatch, to the asset of payload.asset_id (asset, also related_asset_id). The first candidate CI (else payload.ci_id or payload.matched_ci_id) is related_ci_id, so the ticket takes its client and site; an item without candidates opens an organization-wide ticket, which a client- or site-restricted caller cannot create (403), and a team-restricted caller must name a team_id of its scope (403 otherwise). Title "<kind>: <payload.name | payload.cidr | CI name>", the description names object_key and the payload fields without raw_data and fingerprint, category task, status as POST /tickets. The priority follows the type (high: ambiguous_identity, probable_duplicate, resurrected_device, duplicate_ip, serial_mismatch, unlicensed_ci; medium: conflicting_values, override_conflict, unclassified_device, unknown_relationship, ip_binding_conflict; low: scope_suggested); priority of the body takes precedence. At most one ticket that is not closed is linked to an item: a second one is 409 naming the id and ticket_number of the open ticket (a ticket the caller does not see does not count and is not named). One audit entry ticket.create names the ticket and the review item. The endpoint is idempotent per item, so the inbox can open tickets for many items with one request each.
      */
     post: operations['createReviewItemTicket'];
     delete?: never;
@@ -20081,7 +20081,8 @@ export interface components {
         | 'scope_suggested'
         | 'serial_mismatch'
         | 'duplicate_ip'
-        | 'unknown_relationship';
+        | 'unknown_relationship'
+        | 'ip_binding_conflict';
       /** @enum {string} */
       status: 'open' | 'resolved' | 'dismissed';
       payload: {
@@ -21145,11 +21146,19 @@ export interface components {
       /** @description Device of the address (IPM-13, E-215). With an interface always the CI of the interface; without one (VIP, anycast, a management address) set directly. */
       ci_id?: string;
       role: components['schemas']['IPAddressRole'];
+      origin: components['schemas']['IPAddressOrigin'];
+      /** @description The binding is authoritative (IPM-14, E-216): discovery changes only last_seen_at, miss_count and state of the row, never removes it, and an observation of the address at another device opens the review ip_binding_conflict. Set through PATCH. */
+      pinned: boolean;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
       updated_at: string;
     };
+    /**
+     * @description Where the address row came from (IPM-14): manual (POST, never set by the client), discovery (discovery sync), scan or import. Discovery overwrites no binding of origin manual and removes only rows of origin discovery that are not pinned.
+     * @enum {string}
+     */
+    IPAddressOrigin: 'manual' | 'discovery' | 'scan' | 'import';
     /**
      * @description Role of an address at its device (IPM-13); default primary.
      * @enum {string}
@@ -21197,6 +21206,8 @@ export interface components {
       /** @description Sets ("" clears) the device of the address (IPM-13); a new interface_id takes the CI of the interface along. A CI other than the CI of the interface is 422 ci_id. */
       ci_id?: string;
       role?: components['schemas']['IPAddressRole'];
+      /** @description Pins (true) or releases (false) the binding of the address (IPM-14). */
+      pinned?: boolean;
     };
     /**
      * @description Reachability of the address (IPM-04, E-211), apart from its type (NET-03). A change sets state_changed_at and writes ipam.address.state_changed. phpIPAM tags map onto it: Used → active, Offline → offline, Reserved → type reserved, DHCP → type dhcp.
@@ -29714,7 +29725,8 @@ export interface operations {
           | 'scope_suggested'
           | 'serial_mismatch'
           | 'duplicate_ip'
-          | 'unknown_relationship';
+          | 'unknown_relationship'
+          | 'ip_binding_conflict';
         escalated?: boolean;
       };
       header?: never;
@@ -29886,7 +29898,8 @@ export interface operations {
           | 'scope_suggested'
           | 'serial_mismatch'
           | 'duplicate_ip'
-          | 'unknown_relationship';
+          | 'unknown_relationship'
+          | 'ip_binding_conflict';
       };
       header?: never;
       path?: never;
@@ -33068,6 +33081,10 @@ export interface operations {
         vrf_id?: string;
         /** @description Only addresses bound to this CI (ip_address.ci_id, IPM-13, IPM-20). */
         ci_id?: string;
+        /** @description Only addresses of this origin (IPM-14, IPM-20); another value is 422 with field origin. */
+        origin?: components['schemas']['IPAddressOrigin'];
+        /** @description Only pinned (true) or not pinned (false) addresses (IPM-14); another value is 422 with field pinned. */
+        pinned?: boolean;
         /** @description Prefix of the address or part of the DNS name (IPM-20). */
         q?: string;
       };
@@ -33152,6 +33169,10 @@ export interface operations {
         vrf_id?: string;
         /** @description Only addresses on interfaces of this CI (IPM-20). */
         ci_id?: string;
+        /** @description Only addresses of this origin (IPM-14, IPM-20); another value is 422 with field origin. */
+        origin?: components['schemas']['IPAddressOrigin'];
+        /** @description Only pinned (true) or not pinned (false) addresses (IPM-14); another value is 422 with field pinned. */
+        pinned?: boolean;
         /** @description Prefix of the address or part of the DNS name (IPM-20). */
         q?: string;
       };

@@ -352,7 +352,7 @@ func (r *MemoryRepository) syncGateway(s *Subnet) {
 	}
 	r.seq++
 	a := &IPAddress{ID: fmt.Sprintf("ip-%d", r.seq), OrganizationID: s.OrganizationID, SubnetID: s.ID, Address: s.Gateway,
-		VRFID: s.VRFID, Type: IPTypeStatic, State: IPStateUnknown, IsGateway: true, CreatedAt: now, UpdatedAt: now}
+		VRFID: s.VRFID, Type: IPTypeStatic, State: IPStateUnknown, IsGateway: true, Origin: IPOriginManual, CreatedAt: now, UpdatedAt: now}
 	r.addresses[a.ID] = a
 }
 
@@ -555,6 +555,9 @@ func (r *MemoryRepository) CreateIPAddress(_ context.Context, a *IPAddress) erro
 	if a.State == "" {
 		a.State = IPStateUnknown
 	}
+	if a.Origin == "" {
+		a.Origin = IPOriginManual
+	}
 	now := time.Now().UTC()
 	a.CreatedAt, a.UpdatedAt = now, now
 	stored := *a
@@ -601,6 +604,9 @@ func (r *MemoryRepository) UpdateIPAddress(_ context.Context, orgID, id string, 
 	}
 	if req.Description != nil {
 		a.Description = *req.Description
+	}
+	if req.Pinned != nil {
+		a.Pinned = *req.Pinned
 	}
 	a.UpdatedAt = time.Now().UTC()
 	cp := *a

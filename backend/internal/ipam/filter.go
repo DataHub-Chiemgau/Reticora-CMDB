@@ -76,6 +76,23 @@ func ipListFilter(w http.ResponseWriter, r *http.Request, f *IPFilter) bool {
 		}
 		f.Type = v
 	}
+	if v := q.Get("origin"); v != "" {
+		if !ValidIPOrigins[v] {
+			api.WriteFieldError(w, &api.FieldError{Field: "origin", Message: "invalid ip address origin",
+				Status: http.StatusUnprocessableEntity})
+			return false
+		}
+		f.Origin = v
+	}
+	if v := q.Get("pinned"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			api.WriteFieldError(w, &api.FieldError{Field: "pinned", Message: "pinned must be true or false",
+				Status: http.StatusUnprocessableEntity})
+			return false
+		}
+		f.Pinned = &b
+	}
 	f.ClientID, f.VRFID, f.CIID = q.Get("client_id"), q.Get("vrf_id"), q.Get("ci_id")
 	f.Q = strings.TrimSpace(q.Get("q"))
 	return true
@@ -194,6 +211,12 @@ func ipFilterWhere(orgID string, f *IPFilter) (where string, args []any) {
 		// The device of the address (IPM-13, idx_ip_address_org_ci).
 		add("ci_id = $?", f.CIID)
 	}
+	if f.Origin != "" {
+		add("origin = $?", f.Origin)
+	}
+	if f.Pinned != nil {
+		add("pinned = $?", *f.Pinned)
+	}
 	if f.Q != "" {
 		// host() writes IPv6 in lower case: the prefix is compared in
 		// lower case as well (a B-tree prefix match, no ILIKE).
@@ -275,7 +298,8 @@ func (r *MemoryRepository) addressMatches(a *IPAddress, f *IPFilter) bool {
 			return false
 		}
 	}
-	if f.CIID != "" && a.CIID != f.CIID {
+	if (f.CIID != "" && a.CIID != f.CIID) || (f.Origin != "" && a.Origin != f.Origin) ||
+		(f.Pinned != nil && a.Pinned != *f.Pinned) {
 		return false
 	}
 	if f.Q != "" {

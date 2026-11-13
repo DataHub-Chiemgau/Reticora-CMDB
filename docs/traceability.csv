@@ -1778,3 +1778,6 @@ SEC-03;[P3];F;backend/internal/compliance/evaluator_test.go;WP-1125
 CMP-02;[P3];F;backend/internal/compliance/evaluator_test.go;WP-1125
 SEC-02;[P3];F;backend/internal/vulnfeed/repository_integration_test.go;WP-1117
 REC-04;[P3];F;frontend/src/pages/SourceRanksPage.test.tsx;WP-1115
+IPM-14;[P3];G3;backend/internal/ipam/binding_conflict_integration_test.go;WP-914
+IPM-20;[P3];G3;backend/internal/ipam/binding_conflict_integration_test.go;WP-914
+REC-04;[P3];G3;backend/internal/ipam/binding_conflict_integration_test.go;WP-914

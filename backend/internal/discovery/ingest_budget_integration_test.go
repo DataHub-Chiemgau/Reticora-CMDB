@@ -1068,15 +1068,16 @@ func withoutVarying(v any, ids ...string) any {
 // topology and the ledger), BEGIN with the tenant GUCs counted once. The
 // window updates the known devices under its identity locks: per device
 // the observed-value check (3), the row lock, the instance fields, the
-// update with its reads (4), history, interfaces and addresses (5) and
-// audit and outbox under their locks (3); the changed devices of a window
-// are indexed together after its commit (WP-489), a sighting is not
-// indexed. About 20.7 on the first re-discovery of the load test (eth1
-// new), 16.6 after it. Before
+// update with its reads (4), history, interfaces and addresses (5, plus the
+// one set-based lookup of pinned addresses of other devices, WP-914 AK4)
+// and audit and outbox under their locks (3); the changed devices of a
+// window are indexed together after its commit (WP-489), a sighting is not
+// indexed. About 21.7 on the first re-discovery of the load test (eth1
+// new), 17.6 after it. Before
 // WP-608 every known device had a transaction of its own that took its
 // identity locks and read its candidates again, and its neighbor and its
 // edge three transactions more: 36 statements per device.
-const rediscoverBudget = 22
+const rediscoverBudget = 23
 
 // TestRediscoverStatementBudget covers WP-608 (NFR-03, F-118) against
 // PostgreSQL with the write path of the server (audit, outbox, search index,

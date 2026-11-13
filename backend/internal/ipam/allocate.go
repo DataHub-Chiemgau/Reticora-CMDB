@@ -457,7 +457,7 @@ func (r *MemoryRepository) AllocateAddress(_ context.Context, a *IPAddress) erro
 	now := time.Now().UTC()
 	stored := IPAddress{ID: fmt.Sprintf("ip-%d", r.seq), OrganizationID: a.OrganizationID, SubnetID: a.SubnetID,
 		InterfaceID: a.InterfaceID, Address: address, VRFID: vrfID, Type: a.Type, State: IPStateUnknown,
-		DNSName: a.DNSName, Description: a.Description, ReservedBy: a.ReservedBy, CreatedAt: now, UpdatedAt: now}
+		DNSName: a.DNSName, Description: a.Description, ReservedBy: a.ReservedBy, Origin: IPOriginManual, CreatedAt: now, UpdatedAt: now}
 	r.addresses[stored.ID] = &stored
 	*a = stored
 	return nil

@@ -106,9 +106,9 @@ func (m *ManagementSync) SyncManagementAddressTx(ctx context.Context, tx pgx.Tx,
 // (app.ipam_change_source): the CI write paths write no other IPAM rows
 // after it but those of the same source.
 func (m *ManagementSync) SyncManagementAddressesTx(ctx context.Context, tx pgx.Tx, orgID string, ciIDs, vrfIDs, ips []string, discovered bool) error {
-	source, ipType := ChangeSourceManual, IPTypeStatic
+	source, ipType, origin := ChangeSourceManual, IPTypeStatic, IPOriginManual
 	if discovered {
-		source, ipType = ChangeSourceDiscovery, IPTypeDiscovered
+		source, ipType, origin = ChangeSourceDiscovery, IPTypeDiscovered, IPOriginDiscovery
 	}
 	var cleared, setCIs, setVRFs, setHosts []string
 	seen := make(map[string]bool, len(ciIDs))
@@ -184,8 +184,8 @@ func (m *ManagementSync) SyncManagementAddressesTx(ctx context.Context, tx pgx.T
 				 WHERE a.organization_id = $1 AND a.id = t.id AND (a.role <> 'management' OR a.ci_id IS DISTINCT FROM t.ci)
 				RETURNING a.id
 			), inserted AS (
-				INSERT INTO ip_address (organization_id, ci_id, role, address, vrf_id, type, subnet_id)
-				SELECT $1, k.ci, 'management', k.host::inet, k.vrf, $5, ipam_longest_prefix_subnet($1, k.vrf, k.host::inet)
+				INSERT INTO ip_address (organization_id, ci_id, role, address, vrf_id, type, origin, subnet_id)
+				SELECT $1, k.ci, 'management', k.host::inet, k.vrf, $5, $6, ipam_longest_prefix_subnet($1, k.vrf, k.host::inet)
 				  FROM k WHERE NOT EXISTS (SELECT 1 FROM target t WHERE t.ci = k.ci)
 				ON CONFLICT (organization_id, vrf_id, address) WHERE interface_id IS NULL DO NOTHING
 				RETURNING ci_id
@@ -202,7 +202,7 @@ func (m *ManagementSync) SyncManagementAddressesTx(ctx context.Context, tx pgx.T
 			                  AND a.interface_id IS NULL AND a.ci_id IS DISTINCT FROM k.ci)
 			  FROM k
 			 WHERE (SELECT count(*) FROM claimed) + (SELECT count(*) FROM demoted) >= 0`,
-			orgID, setCIs, resolved, setHosts, ipType)
+			orgID, setCIs, resolved, setHosts, ipType, origin)
 		if qerr != nil {
 			return qerr
 		}

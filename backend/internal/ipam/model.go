@@ -142,11 +142,29 @@ type IPAddress struct {
 	// always the CI of the interface, without one (VIP, anycast, a
 	// management address) set directly. Role is primary, secondary, vip,
 	// anycast, loopback or management.
-	CIID      string    `json:"ci_id,omitempty"`
-	Role      string    `json:"role"`
+	CIID string `json:"ci_id,omitempty"`
+	Role string `json:"role"`
+	// Origin is where the row came from: manual (API), discovery, scan or
+	// import (IPM-14, E-216); the API never sets it. Pinned marks the
+	// binding as authoritative: discovery neither moves nor removes the
+	// row, and an observation of the address at another device opens the
+	// review ip_binding_conflict.
+	Origin    string    `json:"origin"`
+	Pinned    bool      `json:"pinned"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+// Origins of an address (IPM-14, ip_address_origin_check).
+const (
+	IPOriginManual    = "manual"
+	IPOriginDiscovery = "discovery"
+	IPOriginScan      = "scan"
+	IPOriginImport    = "import"
+)
+
+// ValidIPOrigins lists the origins of an address.
+var ValidIPOrigins = map[string]bool{IPOriginManual: true, IPOriginDiscovery: true, IPOriginScan: true, IPOriginImport: true}
 
 // CIAddress is an address of a CI in GET /api/v1/cis/{id}/addresses
 // (IPM-13): the address with the name of its interface and the CIDR of
@@ -190,6 +208,8 @@ type UpdateIPAddressRequest struct {
 	CIID *string `json:"ci_id,omitempty"`
 	// Role changes the role of the address (IPM-13).
 	Role *string `json:"role,omitempty"`
+	// Pinned pins or releases the binding of the address (IPM-14).
+	Pinned *bool `json:"pinned,omitempty"`
 }
 
 // Roles of an address (IPM-13, E-215).
@@ -219,6 +239,9 @@ type IPFilter struct {
 	VRFID     string
 	CIID      string
 	Q         string
+	// Origin and Pinned filter by origin and pin (IPM-14, IPM-20).
+	Origin string
+	Pinned *bool
 }
 
 // Address states of IPM-04 (E-211).

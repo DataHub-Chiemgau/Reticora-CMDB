@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -26,9 +27,16 @@ func (n *recordingNotifier) ReviewOpened(_ context.Context, item *Item) {
 // the notification when an item is opened, the 14-day escalation and the
 // review-items resource with its deprecated discovery path.
 func TestReviewModel(t *testing.T) {
-	// The ten types of REC-08 plus unknown_relationship (TOP-01, WP-158).
-	if len(Kinds) != 11 || len(AllowedActions) != 11 {
+	// The ten types of REC-08 plus unknown_relationship (TOP-01, WP-158)
+	// and ip_binding_conflict (IPM-14, WP-914).
+	if len(Kinds) != 12 || len(AllowedActions) != 12 {
 		t.Fatalf("types: %d, action table: %d", len(Kinds), len(AllowedActions))
+	}
+	if got := AllowedActions[KindIPBindingConflict]; !slices.Equal(got, []string{ActionAccept, ActionDismiss}) {
+		t.Errorf("ip_binding_conflict: actions %v, want accept and dismiss", got)
+	}
+	if Allowed(KindIPBindingConflict, ActionMerge) || Allowed(KindIPBindingConflict, ActionNew) {
+		t.Error("ip_binding_conflict: merge or new allowed")
 	}
 	for _, kind := range Kinds {
 		actions := AllowedActions[kind]
