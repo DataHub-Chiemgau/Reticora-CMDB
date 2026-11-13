@@ -25,6 +25,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/privacy"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/probe"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/security"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
 )
 
@@ -165,7 +166,7 @@ func applicationJobKinds(ciService *ci.Service, bulkRevert *ci.BulkRevert, histo
 	scanner *document.Scanner, searchHandler *search.Handler, labelBatch *labels.BatchHandler, assets *asset.Handler,
 	assetRevert *asset.BulkRevert, credentials *credential.Handler, admpSync *admp.Sync, management *ipam.ManagementSync,
 	orgExport *export.OrgExporter, subjects *privacy.SubjectService, workflowRuns *workflow.Executor,
-	probeAutocreate *probe.Autocreator, complianceJobs *compliance.Jobs) []jobKind {
+	probeAutocreate *probe.Autocreator, complianceJobs *compliance.Jobs, matcher *security.Matcher) []jobKind {
 	runWorker := workflow.NewWorker(workflowRuns)
 	kinds := []jobKind{{kind: snapshotJobKind, handler: historyHandler.RunSnapshotJob},
 		{kind: metamodelTestJobKind, handler: draftHandler.RunTestJob},
@@ -183,6 +184,11 @@ func applicationJobKinds(ciService *ci.Service, bulkRevert *ci.BulkRevert, histo
 		// of 500 CIs with one upsert each; a retry evaluates again, a
 		// running evaluation can be cancelled between two pages.
 		{kind: compliance.EvaluateJobKindConfig, handler: complianceJobs.RunJob}}
+	// The version match CI → findings (SEC-02, WP-1121); without the
+	// database there is none.
+	if matcher != nil {
+		kinds = append(kinds, jobKind{kind: security.MatchJobKindConfig, handler: matcher.RunJob})
+	}
 	if ciService != nil {
 		kinds = append(kinds, jobKind{kind: bulkJobKind, handler: ciService.RunBulkJob})
 	}
@@ -239,9 +245,13 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 	importHandler *importer.ImportHandler, scanner *document.Scanner, searchHandler *search.Handler,
 	labelBatch *labels.BatchHandler, assets *asset.Handler, assetRevert *asset.BulkRevert, credentials *credential.Handler,
 	admpSync *admp.Sync, management *ipam.ManagementSync, orgExport *export.OrgExporter, subjects *privacy.SubjectService,
-	workflowRuns *workflow.Executor, probeAutocreate *probe.Autocreator, complianceJobs *compliance.Jobs, workflowWorker bool) {
+	workflowRuns *workflow.Executor, probeAutocreate *probe.Autocreator, complianceJobs *compliance.Jobs, workflowWorker bool,
+	matcher *security.Matcher) {
 	svc.Register(exportJobKind)
 	complianceJobs.WithJobs(svc)
+	if matcher != nil {
+		matcher.WithJobs(svc)
+	}
 	subjects.WithJobs(svc)
 	importHandler.WithJobs(svc)
 	labelBatch.WithJobs(svc)
@@ -255,7 +265,7 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 	}
 	for _, k := range applicationJobKinds(ciService, bulkRevert, historyHandler, templateJobs, draftHandler, importHandler,
 		scanner, searchHandler, labelBatch, assets, assetRevert, credentials, admpSync, management, orgExport, subjects, workflowRuns,
-		probeAutocreate, complianceJobs) {
+		probeAutocreate, complianceJobs, matcher) {
 		svc.Register(k.kind)
 		switch {
 		case queue == nil:
@@ -282,6 +292,9 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 		// request (WP-1088); without the queue it runs in the request.
 		workflowRuns.WithQueue(queue)
 		complianceJobs.WithQueue(queue)
+		if matcher != nil {
+			matcher.WithQueue(queue)
+		}
 		if templateJobs != nil {
 			templateJobs.WithQueue(queue)
 		}

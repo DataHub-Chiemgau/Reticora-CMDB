@@ -395,6 +395,17 @@ func NewFieldResolver(repos *Repositories, store cache.Store) *permission.FieldR
 	return permission.NewFieldResolver(repos.Permission, serviceAccounts, repos.FieldGrants, store)
 }
 
+// versionMatcher is the version match CI → findings of the job kind
+// vulnfeed.match (SEC-02, WP-1121) on the application pool; without the
+// database its jobs fail (the kind stays registered, so no submit is
+// refused).
+func versionMatcher(opts *Options) *security.Matcher {
+	if opts.AuditPool == nil {
+		return security.NewMatcher(nil, nil, nil)
+	}
+	return security.NewMatcher(opts.AuditPool, vulnfeed.NewPGRepository(opts.AuditPool), security.NewPGRepository(opts.AuditPool))
+}
+
 // operatorHandler builds the operator path; organizations are created with
 // the creation chain of the self-signup (TLC-02).
 func operatorHandler(opts *Options) *operator.Handler {
@@ -818,7 +829,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			export.NewOrgExporter(opts.AuditPool, opts.Blobs, jobService), subjectService, workflowRuns,
 			// The automatic ping probes (WP-949) on the probe store of
 			// PostgreSQL.
-			probeAutocreator(&repos), complianceJobs, !opts.WorkflowWorkerOff)
+			probeAutocreator(&repos), complianceJobs, !opts.WorkflowWorkerOff, versionMatcher(&opts))
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -1531,6 +1542,8 @@ func metricsHandler(version string, includeTenantLabel bool) (handler http.Handl
 	// The vulnerability feeds (SEC-02, WP-1118): documents, failed syncs
 	// and the age of the last sync per source.
 	vulnfeed.RegisterMetrics(registry)
+	// The version match (WP-1121): duration of vulnfeed.match.
+	security.RegisterMatchMetrics(registry)
 	workflow.RegisterMetrics(registry)
 
 	httpMetrics := middleware.RegisterHTTPMetrics(registry, includeTenantLabel)

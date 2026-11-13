@@ -45,6 +45,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/probe"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/security"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/sla"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenantapi"
@@ -121,6 +122,18 @@ func (d *workerDeps) workflowTriggers() *workflow.TriggerConsumer {
 	return workflow.NewTriggerConsumer(exec, store, d.eventStream, func(ctx context.Context, orgID string) bool {
 		return ents != nil && ents.IsEnabled(ctx, orgID, entitlement.FeatureWorkflows)
 	})
+}
+
+// versionMatcher is the version match on pool; its jobs go to the job queue,
+// without it they run in this process (WP-1121).
+func versionMatcher(pool *pgxpool.Pool, queue *jobs.Queue, repos *server.Repositories) *security.Matcher {
+	m := security.NewMatcher(pool, vulnfeed.NewPGRepository(pool), security.NewPGRepository(pool))
+	if queue != nil {
+		return m.WithQueue(queue)
+	}
+	svc := jobs.NewService(repos.Jobs)
+	svc.Register(security.MatchJobKindConfig)
+	return m.WithJobs(svc)
 }
 
 // workflowWorker is the worker workflow (OPS-02 [P3], WP-1114): it runs the
@@ -250,6 +263,16 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 		if d.modules != nil && d.modules.Enabled("compliance") {
 			ents := d.entitlements
 			consumers = append(consumers, compliance.NewIncrementalConsumer(compliance.NewEvaluator(d.repos.Compliance, d.repos.CI),
+				func(ctx context.Context, orgID string) bool {
+					return ents != nil && ents.IsEnabled(ctx, orgID, entitlement.FeatureComplianceFindings)
+				}))
+		}
+		// A created CI and a change of its product fields queue the version
+		// match of the CI (SEC-02, WP-1121), with the module findings and
+		// the feature compliance_findings.
+		if d.modules != nil && d.modules.Enabled("findings") {
+			ents := d.entitlements
+			consumers = append(consumers, security.NewMatchConsumer(versionMatcher(d.pool, d.jobQueue, d.repos),
 				func(ctx context.Context, orgID string) bool {
 					return ents != nil && ents.IsEnabled(ctx, orgID, entitlement.FeatureComplianceFindings)
 				}))
@@ -717,6 +740,15 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 		// with an explicit provider list (E-235).
 		if d.modules.Enabled("findings") {
 			systemJobs = append(systemJobs, vulnfeedJobs(d.cfg, vulnfeed.NewPGRepository(pool))...)
+			// The full version match after a sync of the catalog (SEC-02,
+			// WP-1121): every 15 minutes per organization with the feature
+			// compliance_findings one job vulnfeed.match per sync.
+			ents := d.entitlements
+			orgs := func(ctx context.Context) ([]string, error) { return database.OrganizationIDs(ctx, pool) }
+			systemJobs = append(systemJobs, security.NewMatchSchedule(versionMatcher(pool, d.jobQueue, d.repos), vulnfeed.NewPGRepository(pool), orgs,
+				func(ctx context.Context, orgID string) bool {
+					return ents != nil && ents.IsEnabled(ctx, orgID, entitlement.FeatureComplianceFindings)
+				}).Schedule())
 		}
 		// The full exports of an organization can be downloaded for 24
 		// hours (TLC-05, WP-1151): hourly org.export_cleanup removes the

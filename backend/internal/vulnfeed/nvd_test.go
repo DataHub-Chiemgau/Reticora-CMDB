@@ -582,3 +582,20 @@ func TestNVDCursorStoredAfterEachWindow(t *testing.T) {
 		t.Fatalf("source %+v, want the cursor %s after the first window and the error", src, want)
 	}
 }
+
+// TestNVDJunosCPEKeepsTheRelease: a Junos CPE carries its release in the
+// update field; the version is both (22.4R3-S1), the version the Junos
+// scheme of the version match reads (WP-1121). Other products keep the
+// version field alone.
+func TestNVDJunosCPEKeepsTheRelease(t *testing.T) {
+	for cpe, want := range map[string]string{
+		"cpe:2.3:o:juniper:junos:22.4:r3-s1:*:*:*:*:*:*":    "22.4R3-S1",
+		"cpe:2.3:o:juniper:junos:22.4:-:*:*:*:*:*:*":        "22.4",
+		"cpe:2.3:o:juniper:junos:*:*:*:*:*:*:*:*":           "",
+		"cpe:2.3:a:oracle:jdk:1.8.0:update_151:*:*:*:*:*:*": "1.8.0",
+	} {
+		if _, _, got, ok := parseCPE(cpe); !ok || got != want {
+			t.Errorf("%s: version %q (%v), want %q", cpe, got, ok, want)
+		}
+	}
+}

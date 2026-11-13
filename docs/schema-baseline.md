@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000362_lifecycle_locked_fields
+Stand: Migration 000363_cpe_mapping
 
 ## Prüfung
 
@@ -911,6 +911,19 @@ readonly-Katalogregel mit der Bedingung `lifecycle_state = <zustand>` ab
 (gelesen mit der Typkette, keine eigene Anweisung), die Schreibentscheidung
 der Automationsquellen liest die Sperre mit der Provenienz. Keine neue
 Tabelle, RLS unverändert. Die Zeile „Stand:“ erzeugt
+`RETICORA_UPDATE_SCHEMA_BASELINE=1` beim Zusammenführen neu.
+
+Migration `cpe_mapping` (WP-1121, SEC-02, E-236, vorläufige Nummer 000363)
+legt `cpe_mapping` an: die Produktzuordnung der CIs einer Organisation für
+den Versionsabgleich (`match_kind` manufacturer_model mit Glob-Mustern oder
+sys_object_id mit Präfix, `vendor`, `products text[]` mit mindestens einem
+Eintrag, `version_field`, `version_scheme`, `priority`, `created_by` ohne
+Fremdschlüssel). Checks je `match_kind` (`cpe_mapping_pattern_check`),
+`UNIQUE (id, organization_id)` für spätere Verweise, Index
+`idx_cpe_mapping_kind_priority` (organization_id, match_kind, priority).
+Organisationsweite Konfiguration: ENABLE und FORCE RLS, Policy
+`cpe_mapping_isolation` über `app.org_id` in USING und WITH CHECK, dazu
+`reticora_truncate_guard`. Die Tabelle oben und die Zeile „Stand:“ erzeugt
 `RETICORA_UPDATE_SCHEMA_BASELINE=1` beim Zusammenführen neu.
 
 `TestTenantReferencesCarryOrganization`
@@ -2142,6 +2155,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `consumable` | ja | ja | consumable_isolation (ALL), consumable_scoped_delete (DELETE), consumable_scoped_update (UPDATE) |
 | `contact` | ja | ja | contact_scoped_delete (DELETE), contact_scoped_update (UPDATE), org_isolation (ALL) |
 | `contract` | ja | ja | contract_isolation (ALL), contract_scoped_delete (DELETE), contract_scoped_update (UPDATE) |
+| `cpe_mapping` | ja | ja | cpe_mapping_isolation (ALL) |
 | `credential` | ja | ja | credential_isolation (ALL), credential_scoped_delete (DELETE), credential_scoped_update (UPDATE) |
 | `credential_binding` | ja | ja | credential_binding_isolation (ALL), credential_binding_scoped_delete (DELETE), credential_binding_scoped_update (UPDATE) |
 | `credential_usage` | ja | ja | credential_usage_isolation (ALL), credential_usage_scoped_delete (DELETE), credential_usage_scoped_update (UPDATE) |

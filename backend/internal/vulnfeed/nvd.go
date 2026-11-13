@@ -544,5 +544,13 @@ func parseCPE(cpe string) (vendor, product, version string, ok bool) {
 	if version == "*" || version == "-" {
 		version = ""
 	}
+	// Junos keeps its release in the update field of the CPE
+	// (cpe:2.3:o:juniper:junos:22.4:r3-s1:...): the version of the Junos
+	// scheme is both, 22.4R3-S1 (WP-1121).
+	if version != "" && vendor == "juniper" && product == "junos" && len(parts) > 6 {
+		if update := parts[6]; update != "" && update != "*" && update != "-" {
+			version += strings.ToUpper(update)
+		}
+	}
 	return vendor, product, version, true
 }

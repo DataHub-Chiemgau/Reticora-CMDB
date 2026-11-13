@@ -155,6 +155,9 @@ var matrixOverrides = map[string]map[string]string{
 	// A NAT translation names exactly one inside and one outside side
 	// (nat_translation_inside_check, nat_translation_outside_check, WP-1071).
 	"nat_translation": {"inside_address_id": "@uuid", "outside_address_id": "@uuid"},
+	// A product mapping names the pattern of its match kind
+	// (cpe_mapping_pattern_check, WP-1121).
+	"cpe_mapping": {"match_kind": "sys_object_id", "sys_object_id_prefix": "@text", "products": "{matrix}"},
 }
 
 var anyArrayCheck = regexp.MustCompile(`^CHECK \(\((\w+) = ANY \(\(?ARRAY\['([^']*)'`)
