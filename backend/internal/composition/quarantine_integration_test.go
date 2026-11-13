@@ -174,7 +174,9 @@ const dropLaterReferences = `
 	ALTER TABLE admp_service_port DROP CONSTRAINT admp_service_port_ci_fkey;
 	ALTER TABLE probe_state_change DROP CONSTRAINT probe_state_change_ci_fkey;
 	ALTER TABLE alarm DROP CONSTRAINT alarm_ci_fkey;
-	ALTER TABLE config_snapshot DROP CONSTRAINT config_snapshot_ci_fkey;`
+	ALTER TABLE config_snapshot DROP CONSTRAINT config_snapshot_ci_fkey;
+	ALTER TABLE incident DROP CONSTRAINT incident_root_ci_fkey;
+	ALTER TABLE ip_address DROP CONSTRAINT ip_address_ci_fkey;`
 
 func TestMigration56QuarantinesInconsistentRows(t *testing.T) {
 	dsn := os.Getenv("TEST_DATABASE_URL")

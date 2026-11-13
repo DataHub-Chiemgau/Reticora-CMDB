@@ -752,11 +752,14 @@ func TestLocationDeleteReferencesMapToSpecKinds(t *testing.T) {
 	// change set row keeps its revert data and loses only the site of its
 	// scope snapshot (WP-305); the register row of a location barcode goes
 	// with its location, it only mirrors the code of the deleted node
-	// (WP-289).
+	// (WP-289); an incident keeps its history and loses only its site, which
+	// it derives from its root CI (WP-1027) – a site with CIs is not deleted
+	// anyway.
 	follow := map[string]string{
 		"site_location_fkey": "c", "building_location_fkey": "c", "room_location_fkey": "c", "rack_location_fkey": "c",
 		"desk_room_id_fkey": "n", "review_item_site_id_fkey": "n", "ticket_link_location_fkey": "c",
 		"bulk_change_set_site_fkey": "n", "barcode_registry_location_fkey": "c",
+		"incident_site_fkey": "n",
 	}
 	tree := []string{"location", "building", "room", "rack"}
 	seen := 0
