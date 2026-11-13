@@ -320,7 +320,7 @@ func TestDNSLimits(t *testing.T) {
 		{"unknown severity", dnsSpec(s, map[string]any{"qname": "a.example.net", "severity": "warning"}), "params.severity"},
 	}
 	for _, c := range cases {
-		errs := probewire.Validate(c.spec)
+		errs := probewire.Validate(&c.spec)
 		if !slices.ContainsFunc(errs, func(e probewire.FieldError) bool { return e.Field == c.field }) {
 			t.Errorf("%s: errs = %v, want field %s", c.name, errs, c.field)
 		}

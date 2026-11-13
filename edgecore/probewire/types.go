@@ -60,10 +60,10 @@ type Type struct {
 }
 
 // Available reports whether probes of the type may be created.
-func (t Type) Available() bool { return t.Status == TypeAvailable }
+func (t *Type) Available() bool { return t.Status == TypeAvailable }
 
 // ParamDefault returns the default of a parameter from the parameter schema.
-func (t Type) ParamDefault(name string) (any, bool) {
+func (t *Type) ParamDefault(name string) (any, bool) {
 	var s schema
 	if err := json.Unmarshal(t.Params, &s); err != nil {
 		return nil, false
@@ -82,7 +82,7 @@ func (t Type) ParamDefault(name string) (any, bool) {
 // Check checks the consistency rules of an entry (WP-934 AK2): the
 // interval and timeout ranges are ordered, the default timeout lies below
 // the default interval and every limit is positive.
-func (t Type) Check() error {
+func (t *Type) Check() error {
 	var errs []string
 	for name, v := range map[string]int64{
 		"min_interval_s": t.MinIntervalS, "default_interval_s": t.DefaultIntervalS, "max_interval_s": t.MaxIntervalS,
@@ -212,9 +212,10 @@ func Types() []Type {
 
 // TypeKeys returns the keys of every registered probe type.
 func TypeKeys() []string {
-	out := make([]string, 0, len(mustLoad().types))
-	for _, t := range mustLoad().types {
-		out = append(out, t.Key)
+	types := mustLoad().types
+	out := make([]string, 0, len(types))
+	for i := range types {
+		out = append(out, types[i].Key)
 	}
 	return out
 }
@@ -240,7 +241,7 @@ func (e FieldError) Error() string { return e.Field + ": " + e.Message }
 // timeout below the interval, down and up count between 1 and 20, and
 // params and thresholds against the parameter schema of the type. It
 // reports every violation; an unknown type stops the checks after the type.
-func Validate(spec ProbeSpec) []FieldError {
+func Validate(spec *ProbeSpec) []FieldError {
 	t, ok := Lookup(spec.Type)
 	if !ok {
 		return []FieldError{{Field: "type", Message: fmt.Sprintf("unknown probe type %q", spec.Type)}}

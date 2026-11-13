@@ -157,7 +157,7 @@ func TestValidateLimits(t *testing.T) {
 	for _, typ := range Types() {
 		t.Run(typ.Key, func(t *testing.T) {
 			ok := validSpec(typ)
-			errs := Validate(ok)
+			errs := Validate(&ok)
 			if typ.Available() {
 				if len(errs) > 0 {
 					t.Fatalf("default spec rejected: %v", errs)
@@ -189,7 +189,7 @@ func TestValidateLimits(t *testing.T) {
 			for _, c := range cases {
 				s := validSpec(typ)
 				c.mutate(&s)
-				if errs := Validate(s); !hasField(errs, c.field) {
+				if errs := Validate(&s); !hasField(errs, c.field) {
 					t.Errorf("%s: errs = %v, want field %s", c.name, errs, c.field)
 				}
 			}
@@ -201,7 +201,7 @@ func TestValidateLimits(t *testing.T) {
 				s := validSpec(typ)
 				s.IntervalMS, s.TimeoutMS = v*1000, v*1000
 				var errs []FieldError
-				for _, e := range Validate(s) {
+				for _, e := range Validate(&s) {
 					if e.Field != "type" { // planned types also report type
 						errs = append(errs, e)
 					}
@@ -217,12 +217,12 @@ func TestValidateLimits(t *testing.T) {
 			edge.IntervalMS = typ.MaxIntervalS * 1000
 			edge.TimeoutMS = typ.MaxTimeoutS * 1000
 			edge.DownCount, edge.UpCount = MaxCount, MinCount
-			if errs := Validate(edge); hasField(errs, "interval_s") || hasField(errs, "timeout_s") || hasField(errs, "down_count") {
+			if errs := Validate(&edge); hasField(errs, "interval_s") || hasField(errs, "timeout_s") || hasField(errs, "down_count") {
 				t.Errorf("upper edges rejected: %v", errs)
 			}
 		})
 	}
-	if errs := Validate(ProbeSpec{Type: "icmp_ping"}); !hasField(errs, "type") {
+	if errs := Validate(&ProbeSpec{Type: "icmp_ping"}); !hasField(errs, "type") {
 		t.Fatalf("unknown type: %v", errs)
 	}
 }
@@ -253,21 +253,21 @@ func TestIcmpDefaults(t *testing.T) {
 	}
 	spec := validSpec(typ)
 	spec.Params = json.RawMessage(`{"count":6}`)
-	if errs := Validate(spec); !hasField(errs, "params.count") {
+	if errs := Validate(&spec); !hasField(errs, "params.count") {
 		t.Fatalf("count 6: %v", errs)
 	}
 	spec.Params = json.RawMessage(`{"count":5,"spacing_ms":1000,"rtt_warn_ms":200,"loss_warn":0.25}`)
-	if errs := Validate(spec); len(errs) > 0 {
+	if errs := Validate(&spec); len(errs) > 0 {
 		t.Fatalf("valid params: %v", errs)
 	}
 	// Interval 10 s: timeout at most 9 s (timeout < interval).
 	spec.Params = nil
 	spec.IntervalMS, spec.TimeoutMS = 10000, 10000
-	if errs := Validate(spec); !hasField(errs, "timeout_s") {
+	if errs := Validate(&spec); !hasField(errs, "timeout_s") {
 		t.Fatalf("timeout = interval at 10 s: %v", errs)
 	}
 	spec.TimeoutMS = 9000
-	if errs := Validate(spec); len(errs) > 0 {
+	if errs := Validate(&spec); len(errs) > 0 {
 		t.Fatalf("9 s / 10 s: %v", errs)
 	}
 }
@@ -348,9 +348,17 @@ func TestTCPLimits(t *testing.T) {
 		{"port missing with other params", func(s *ProbeSpec) { s.Params = json.RawMessage(`{"expect":"x"}`) }, []string{"params.port"}},
 		{"port 0", func(s *ProbeSpec) { s.Params = json.RawMessage(`{"port":0}`) }, []string{"params.port"}},
 		{"port 65536", func(s *ProbeSpec) { s.Params = json.RawMessage(`{"port":65536}`) }, []string{"params.port"}},
-		{"interval 9 s", func(s *ProbeSpec) { s.Params = json.RawMessage(`{"port":22}`); s.IntervalMS = 9_000; s.TimeoutMS = 1_000 }, []string{"interval_s"}},
+		{"interval 9 s", func(s *ProbeSpec) {
+			s.Params = json.RawMessage(`{"port":22}`)
+			s.IntervalMS = 9_000
+			s.TimeoutMS = 1_000
+		}, []string{"interval_s"}},
 		{"timeout 31 s", func(s *ProbeSpec) { s.Params = json.RawMessage(`{"port":22}`); s.TimeoutMS = 31_000 }, []string{"timeout_s"}},
-		{"timeout = interval", func(s *ProbeSpec) { s.Params = json.RawMessage(`{"port":22}`); s.IntervalMS = 10_000; s.TimeoutMS = 10_000 }, []string{"timeout_s"}},
+		{"timeout = interval", func(s *ProbeSpec) {
+			s.Params = json.RawMessage(`{"port":22}`)
+			s.IntervalMS = 10_000
+			s.TimeoutMS = 10_000
+		}, []string{"timeout_s"}},
 		{"send 257 bytes", func(s *ProbeSpec) {
 			s.Params = json.RawMessage(`{"port":22,"send":"` + strings.Repeat("a", 257) + `"}`)
 		}, []string{"params.send"}},
@@ -381,7 +389,7 @@ func TestTCPLimits(t *testing.T) {
 		spec := base
 		c.mutate(&spec)
 		var got []string
-		for _, e := range Validate(spec) {
+		for _, e := range Validate(&spec) {
 			got = append(got, e.Field)
 		}
 		if !slices.Equal(got, c.fields) {

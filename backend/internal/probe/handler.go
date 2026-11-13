@@ -670,7 +670,7 @@ func validateEffective(p *Probe, layers Layers) error {
 	spec := e.ProbeSpec(0)
 	r := resolver{own: own, layers: layers, groups: rankedGroups(layers.Groups)}
 	spec.TimeoutMS = r.intField(KeyTimeoutS, t.DefaultTimeoutS, t.MinTimeoutS, t.MaxTimeoutS).Int() * 1000
-	errs := probewire.Validate(spec)
+	errs := probewire.Validate(&spec)
 	if fe := checkTarget(p.Type, p.Target, e.Params); fe != nil {
 		errs = append(errs, *fe)
 	}

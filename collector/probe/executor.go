@@ -124,7 +124,7 @@ func Run(ctx context.Context, spec *probewire.ProbeSpec, creds map[string]string
 		base.Status, base.Code = probewire.StatusError, probewire.ReasonUnsupported
 		return base
 	}
-	if errs := probewire.Validate(*spec); len(errs) > 0 {
+	if errs := probewire.Validate(spec); len(errs) > 0 {
 		base.Status, base.Code = probewire.StatusError, probewire.ReasonConfig
 		base.Labels = fieldLabels(errs)
 		return base

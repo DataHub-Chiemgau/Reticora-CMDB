@@ -589,7 +589,7 @@ func ValidateLayer(typeKey string, params json.RawMessage) []probewire.FieldErro
 		b, _ := json.Marshal(typeParams)
 		spec.Params = b
 	}
-	for _, fe := range probewire.Validate(spec) {
+	for _, fe := range probewire.Validate(&spec) {
 		if layerHasField(fe.Field, present, typeParams) {
 			errs = append(errs, fe)
 		}

@@ -130,7 +130,7 @@ func TestResolveIcmpDefaults(t *testing.T) {
 	if spec.IntervalMS != 30000 || spec.TimeoutMS != 10000 || spec.DownCount != 5 || spec.UpCount != 1 || spec.Epoch != 7 {
 		t.Errorf("probe spec = %+v", spec)
 	}
-	if errs := probewire.Validate(spec); len(errs) != 0 {
+	if errs := probewire.Validate(&spec); len(errs) != 0 {
 		t.Errorf("probe spec of the defaults invalid: %v", errs)
 	}
 }
@@ -221,7 +221,8 @@ func TestResolveClampsAfterLimitChange(t *testing.T) {
 	if e.IntervalS.Int() != 10 || e.TimeoutS.Int() != 9 || !e.TimeoutS.Clamped || e.IntervalS.Clamped {
 		t.Errorf("interval/timeout = %+v / %+v, want 10 / 9 clamped", e.IntervalS, e.TimeoutS)
 	}
-	if errs := probewire.Validate(e.ProbeSpec(1)); len(errs) != 0 {
+	clamped := e.ProbeSpec(1)
+	if errs := probewire.Validate(&clamped); len(errs) != 0 {
 		t.Errorf("clamped spec invalid: %v", errs)
 	}
 	// Counts are clamped to 1..20.
