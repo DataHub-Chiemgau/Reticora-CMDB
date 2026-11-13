@@ -128,7 +128,7 @@
     },
     "data": {
       "type": "object",
-      "description": "The event data; for ci.* the CI, for ci.changed with changed_fields; for a phase 2 type the frame of its $defs entry."
+      "description": "The event data; for ci.* the CI, for ci.changed with changed_fields; for a phase 2 type the frame of its $defs entry. entitlement.warning carries feature, valid_until and days_left, or, when the workflow worker delays runs above the hourly limit (WFL-08, WP-1112), feature, quota (max_workflow_runs_per_hour), limit and delayed_until."
     },
     "origin": {
       "type": "object",

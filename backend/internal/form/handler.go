@@ -1,6 +1,7 @@
 package form
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -11,9 +12,27 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-type Handler struct{ repo Repository }
+type Handler struct {
+	repo Repository
+	// quota admits a form definition (max_form_definitions, WithQuota,
+	// WFL-08); nil admits all.
+	quota DefinitionQuota
+}
+
+// DefinitionQuota admits one more form definition of the organization
+// (WFL-08, WP-1112).
+type DefinitionQuota interface {
+	AllowFormDefinition(ctx context.Context, orgID string) error
+}
 
 func NewHandler(repo Repository) *Handler { return &Handler{repo: repo} }
+
+// WithQuota checks max_form_definitions on POST /api/v1/forms: above the
+// limit 403 entitlement-limit.
+func (h *Handler) WithQuota(q DefinitionQuota) *Handler {
+	h.quota = q
+	return h
+}
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/forms", h.ListDefinitions)
 	r.Post("/api/v1/forms", h.CreateDefinition)
@@ -134,6 +153,14 @@ func (h *Handler) CreateDefinition(w http.ResponseWriter, r *http.Request) {
 	}
 	if !requireUUIDs(w, http.StatusUnprocessableEntity, "client_id", req.ClientID) {
 		return
+	}
+	if h.quota != nil {
+		if err := h.quota.AllowFormDefinition(r.Context(), t.OrganizationID); err != nil {
+			if !api.WriteEntitlementError(w, err) {
+				writeFormError(w, r, err)
+			}
+			return
+		}
 	}
 	item := &Definition{OrganizationID: t.OrganizationID, ClientID: req.ClientID, Name: req.Name, Description: req.Description, Schema: req.Schema, UIHints: req.UIHints, Active: active}
 	if item.UIHints == nil {

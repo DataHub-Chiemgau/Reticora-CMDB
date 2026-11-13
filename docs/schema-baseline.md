@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000352_workflow_trigger_event
+Stand: Migration 000353_workflow_run_started_idx
 
 ## Prüfung
 
@@ -486,6 +486,11 @@ Ableitungspfad, Begründung und prüfendem Test in `rls.DerivedScopeTables`
 `form_submission` tragen seit Migration 000351 (WP-1093) eigene Spalten
 `client_id`/`site_id` (aus CI, Run bzw. Formular abgeleitet) mit
 Scope-Policies; Runs und Schritte ohne Client sind nur org-weit sichtbar.
+`workflow_run.started_at` ist seit Migration 000353 (WP-1112) NULL-fähig
+ohne Standardwert: NULL, solange ein eingereihter Run wartet; gesetzt beim
+Start im Request bzw. beim ersten Claim seines Jobs. Der Index
+`idx_workflow_run_org_started (organization_id, started_at)` trägt das
+Stundenfenster von `max_workflow_runs_per_hour` (WFL-08); RLS unverändert.
 `TestRLSCatalog` scheitert für einen Eintrag ohne
 vorhandenen Test und für einen Eintrag, den die Regel nicht meldet.
 

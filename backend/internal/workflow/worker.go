@@ -68,7 +68,7 @@ var serialWait = prometheus.NewHistogram(prometheus.HistogramOpts{
 
 // RegisterMetrics registers the workflow metrics on reg.
 func RegisterMetrics(reg prometheus.Registerer) {
-	reg.MustRegister(serialWait, scheduleSkipped, triggerDead, triggerLoop)
+	reg.MustRegister(serialWait, scheduleSkipped, triggerDead, triggerLoop, runsDelayed)
 }
 
 // idempotentActions may be executed again when an attempt ended while
@@ -164,9 +164,18 @@ func (w *Worker) Run(ctx context.Context, job *jobs.Job) (any, error) {
 	default:
 		return RunResult{RunID: run.ID, Status: run.Status}, nil
 	}
-	claim, err := repo.ClaimRun(ctx, job.OrganizationID, run.ID, p.Enqueue)
+	if run.Enqueues != p.Enqueue {
+		// An older job of the run: the job of the last enqueue runs it.
+		return RunResult{RunID: run.ID, Status: run.Status}, nil
+	}
+	// Above max_workflow_runs_per_hour the run waits for its slot
+	// (WFL-08, WP-1112): it stays pending, its job is queued for then.
+	claim, err := w.exec.claimRun(ctx, job.OrganizationID, run, p.Enqueue)
 	if err != nil {
 		return nil, err
+	}
+	if claim.Delayed {
+		return RunResult{RunID: run.ID, Status: StatusPending}, nil
 	}
 	if !claim.Claimed {
 		// An older job of the run, or a run of its CI is ahead of it:
@@ -278,10 +287,16 @@ func (e *Executor) releaseKey(ctx context.Context, orgID, key string) {
 }
 
 // requeue queues run, whose enqueues was raised, as a new job
-// workflow.run. The job runs like the first job of the run under the
+// workflow.run (requeueAt without delay).
+func (e *Executor) requeue(ctx context.Context, orgID string, run *Run) {
+	e.requeueAt(ctx, orgID, run, time.Time{})
+}
+
+// requeueAt queues run, whose enqueues was raised, as a new job
+// workflow.run whose first attempt waits until runAfter (zero: at once). The job runs like the first job of the run under the
 // scope snapshot and as the creator of that job (TEN-09), whichever job
 // queues it; a run without a first job gets an empty scope (fail closed).
-func (e *Executor) requeue(ctx context.Context, orgID string, run *Run) {
+func (e *Executor) requeueAt(ctx context.Context, orgID string, run *Run, runAfter time.Time) {
 	if e.queue == nil {
 		return
 	}
@@ -290,21 +305,21 @@ func (e *Executor) requeue(ctx context.Context, orgID string, run *Run) {
 		slog.Error("workflow: failed to read the first job of a run", "run_id", run.ID, "error", err)
 		return
 	}
-	if err := e.submitRun(ctx, orgID, run, origin); err != nil {
+	if err := e.submitRun(ctx, orgID, run, origin, runAfter); err != nil {
 		slog.Error("workflow: failed to queue a run", "run_id", run.ID, "error", err)
 	}
 }
 
 // submitRun submits the job workflow.run of run's current enqueue under
 // the first job origin of the run (nil: an empty scope, fail closed).
-func (e *Executor) submitRun(ctx context.Context, orgID string, run *Run, origin *jobs.Job) error {
+func (e *Executor) submitRun(ctx context.Context, orgID string, run *Run, origin *jobs.Job, runAfter time.Time) error {
 	if origin == nil {
 		origin = &jobs.Job{OrganizationID: orgID, CreatedBy: run.InitiatedBy,
 			Scope: &jobs.Scope{Clients: []string{}, Sites: []string{}, Teams: []string{}}}
 	}
 	jctx := jobs.CreatorContext(database.WithoutTx(context.WithoutCancel(ctx)), origin)
 	_, _, err := e.queue.Submit(jctx, orgID, RunJobKind, RunJobParams{RunID: run.ID, Enqueue: run.Enqueues},
-		jobs.EnqueueOptions{IdempotencyKey: RunJobKey(run.ID, run.Enqueues), CreatedBy: origin.CreatedBy})
+		jobs.EnqueueOptions{IdempotencyKey: RunJobKey(run.ID, run.Enqueues), CreatedBy: origin.CreatedBy, RunAfter: runAfter})
 	return err
 }
 

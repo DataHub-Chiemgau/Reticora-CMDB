@@ -5616,7 +5616,10 @@ export interface paths {
     /** List form definitions */
     get: operations['listFormDefinitions'];
     put?: never;
-    /** Create a form definition */
+    /**
+     * Create a form definition
+     * @description A form definition counts against max_form_definitions of the organization (WFL-08, WP-1112; plan default pro 50, enterprise 500): above the limit 403 entitlement-limit.
+     */
     post: operations['createFormDefinition'];
     delete?: never;
     options?: never;
@@ -5765,7 +5768,10 @@ export interface paths {
     /** List workflow definitions */
     get: operations['listWorkflows'];
     put?: never;
-    /** Create a workflow definition */
+    /**
+     * Create a workflow definition
+     * @description An active definition counts against max_workflow_definitions of the organization (WFL-08, WP-1112; plan default pro 50, enterprise 500, a value on the workflows entitlement overrides it): above the limit 403 entitlement-limit with quota and limit. An inactive definition does not count; switching it on with PATCH is checked alike.
+     */
     post: operations['createWorkflow'];
     delete?: never;
     options?: never;
@@ -5793,7 +5799,7 @@ export interface paths {
     head?: never;
     /**
      * Update a workflow definition
-     * @description A change of trigger, conditions or actions stores a new immutable version (n+1) and makes it current; name, description and active change no version (WFL-02, E-228). Runs keep the version they started with. If-Match names the version the change is based on; a different one is 412 (API-07), without the header the change is applied as before.
+     * @description A change of trigger, conditions or actions stores a new immutable version (n+1) and makes it current; name, description and active change no version (WFL-02, E-228). Runs keep the version they started with. If-Match names the version the change is based on; a different one is 412 (API-07), without the header the change is applied as before. Switching an inactive definition on (active true) counts against max_workflow_definitions of the workflows entitlement: at the limit 403 entitlement-limit with quota and limit (WFL-08, WP-1112).
      */
     patch: operations['updateWorkflow'];
     trace?: never;
@@ -13637,6 +13643,21 @@ export interface components {
          * @description Shortest probe interval in seconds (PKG-04), stored on monitoring; a shorter interval is refused with 422, 0 sets no minimum.
          */
         min_probe_interval_s?: number;
+        /**
+         * Format: int64
+         * @description Active workflow definitions (WFL-08), stored on workflows; the plan must include workflows.
+         */
+        max_workflow_definitions?: number;
+        /**
+         * Format: int64
+         * @description Workflow runs started per hour (WFL-08), stored on workflows; runs above it wait instead of failing.
+         */
+        max_workflow_runs_per_hour?: number;
+        /**
+         * Format: int64
+         * @description Form definitions (WFL-08), stored on workflows.
+         */
+        max_form_definitions?: number;
       } & {
         [key: string]: number;
       };
@@ -16936,7 +16957,7 @@ export interface components {
       plan?: components['schemas']['EntitlementPlan'];
       /** @description cmdb_core cannot be disabled (422). */
       enabled?: boolean;
-      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys, max_storage_mb (MiB, on documents; MGT-01), the monitoring quotas max_monitored_targets, max_probes_per_minute, min_probe_interval_s and max_targets_<type> (PKG-04, WP-881); any other key is 422 with `field` limits (F-209). A missing quota is unlimited; the plan defaults (E-153) are stored at creation. */
+      /** @description Named quotas (ENT-02): max_cis, max_collectors, max_users, max_api_keys, max_storage_mb (MiB, on documents; MGT-01), the monitoring quotas max_monitored_targets, max_probes_per_minute, min_probe_interval_s and max_targets_<type> (PKG-04, WP-881), the workflow quotas max_workflow_definitions (active definitions), max_workflow_runs_per_hour and max_form_definitions on workflows (WFL-08, WP-1112; without a stored value the plan default, pro 50 / 2000 / 50, enterprise 500 / 20000 / 500); any other key is 422 with `field` limits (F-209). A missing quota is unlimited; the plan defaults (E-153) are stored at creation. */
       limits?: {
         [key: string]: number;
       };
@@ -19851,8 +19872,11 @@ export interface components {
         | 'cancelled';
       trigger: string;
       context: components['schemas']['JSONValue'];
-      /** Format: date-time */
-      started_at: string;
+      /**
+       * Format: date-time
+       * @description When the run started: in the request, or at the first claim of its job workflow.run (WFL-08, WP-1112); absent while a queued run waits. Above max_workflow_runs_per_hour of the organization a queued run stays pending with next_attempt_at until a slot of the hour is free and is executed then, never dropped; the organization gets one entitlement.warning per hour. This applies with the job queue only; without a database the runs execute in the request and only the definition limits apply.
+       */
+      started_at?: string;
       /** Format: date-time */
       finished_at?: string;
       /** @description Attempts of the job workflow.run that executes the run (WFL-02); 0 for a run executed in the request. */
@@ -37056,7 +37080,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      /** @description client_id lies outside the caller's scope, or a client-scoped caller names no client (E-09). */
+      /** @description client_id lies outside the caller's scope, or a client-scoped caller names no client (E-09); or max_form_definitions is reached (entitlement-limit, WFL-08). */
       403: {
         headers: {
           [name: string]: unknown;
@@ -37489,6 +37513,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
@@ -37575,6 +37600,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       /** @description If-Match does not name the current version of the workflow definition */
       412: {

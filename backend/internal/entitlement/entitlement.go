@@ -253,7 +253,19 @@ const (
 	LimitMaxMonitoredTargets = "max_monitored_targets"
 	LimitMaxProbesPerMinute  = "max_probes_per_minute"
 	LimitMinProbeIntervalS   = "min_probe_interval_s"
+	// Workflow quotas (WFL-08, WP-1112) on the workflows row: the active
+	// workflow definitions, the runs started per hour and the form
+	// definitions. Without a stored value the plan default applies
+	// (planDefaultedQuotas).
+	LimitMaxWorkflowDefinitions = "max_workflow_definitions"
+	LimitMaxWorkflowRunsPerHour = "max_workflow_runs_per_hour"
+	LimitMaxFormDefinitions     = "max_form_definitions"
 )
+
+// planDefaultedQuotas are the quotas whose plan default applies when the
+// entitlement row stores no value (WFL-08); every other quota without a
+// stored value is unlimited (E-34).
+var planDefaultedQuotas = map[string]bool{LimitMaxWorkflowDefinitions: true, LimitMaxWorkflowRunsPerHour: true, LimitMaxFormDefinitions: true}
 
 // targetTypeQuota is the optional cap of the probe targets of one probe
 // type, max_targets_<type> (E-154); <type> must be a key of the probe type
@@ -297,15 +309,21 @@ func IsTargetTypeQuota(quota string) bool {
 // max_storage_mb 1,000 / 10,000 / 50,000 / - (MiB, E-44);
 // max_monitored_targets - / 500 / 5,000 / 25,000; max_probes_per_minute
 // - / 1,000 / 10,000 / 30,000; min_probe_interval_s - / 30 / 30 / 10. The
-// monitoring values hold only for plans with monitoring (WP-862).
+// monitoring values hold only for plans with monitoring (WP-862). Workflow
+// quotas (WFL-08, proposal to confirm with E-153): max_workflow_definitions
+// - / - / 50 / 500, max_workflow_runs_per_hour - / - / 2,000 / 20,000,
+// max_form_definitions - / - / 50 / 500; Essential and Standard have no
+// workflows.
 var planQuotaDefaults = map[Plan]map[string]int64{
 	PlanEssential: {LimitMaxCIs: 500, LimitMaxCollectors: 2, LimitMaxUsers: 5, LimitMaxStorageMB: 1000},
 	PlanStandard: {LimitMaxCIs: 2500, LimitMaxCollectors: 5, LimitMaxUsers: 25, LimitMaxStorageMB: 10000,
 		LimitMaxMonitoredTargets: 500, LimitMaxProbesPerMinute: 1000, LimitMinProbeIntervalS: 30},
 	PlanPro: {LimitMaxCIs: 10000, LimitMaxCollectors: 20, LimitMaxUsers: 100, LimitMaxStorageMB: 50000,
-		LimitMaxMonitoredTargets: 5000, LimitMaxProbesPerMinute: 10000, LimitMinProbeIntervalS: 30},
+		LimitMaxMonitoredTargets: 5000, LimitMaxProbesPerMinute: 10000, LimitMinProbeIntervalS: 30,
+		LimitMaxWorkflowDefinitions: 50, LimitMaxWorkflowRunsPerHour: 2000, LimitMaxFormDefinitions: 50},
 	PlanEnterprise: {LimitMaxCIs: 50000,
-		LimitMaxMonitoredTargets: 25000, LimitMaxProbesPerMinute: 30000, LimitMinProbeIntervalS: 10},
+		LimitMaxMonitoredTargets: 25000, LimitMaxProbesPerMinute: 30000, LimitMinProbeIntervalS: 10,
+		LimitMaxWorkflowDefinitions: 500, LimitMaxWorkflowRunsPerHour: 20000, LimitMaxFormDefinitions: 500},
 }
 
 // PlanQuotaDefaults returns the default limits of the plan (E-153); a quota
@@ -339,7 +357,8 @@ func LimitOrigin(plan Plan, quota string, value *int64) string {
 // Quotas are the quota keys an entitlement row may carry; the optional
 // caps max_targets_<type> (E-154) match targetTypeQuota.
 var Quotas = []string{LimitMaxCIs, LimitMaxCollectors, LimitMaxUsers, LimitMaxAPIKeys, LimitMaxStorageMB,
-	LimitMaxMonitoredTargets, LimitMaxProbesPerMinute, LimitMinProbeIntervalS}
+	LimitMaxMonitoredTargets, LimitMaxProbesPerMinute, LimitMinProbeIntervalS,
+	LimitMaxWorkflowDefinitions, LimitMaxWorkflowRunsPerHour, LimitMaxFormDefinitions}
 
 // QuotaFeature is the feature a quota belongs to: the quota is stored in the
 // limits of that feature's row, and a quota of a feature the organization is
@@ -354,6 +373,10 @@ var QuotaFeature = map[string]string{
 	LimitMaxMonitoredTargets: FeatureMonitoring,
 	LimitMaxProbesPerMinute:  FeatureMonitoring,
 	LimitMinProbeIntervalS:   FeatureMonitoring,
+	// Workflow quotas (WFL-08, WP-1112).
+	LimitMaxWorkflowDefinitions: FeatureWorkflows,
+	LimitMaxWorkflowRunsPerHour: FeatureWorkflows,
+	LimitMaxFormDefinitions:     FeatureWorkflows,
 }
 
 // Origins of an entitlement row (PKG-01, E-155): a feature of the
@@ -861,8 +884,18 @@ func (s *Service) Quota(ctx context.Context, orgID, quota string) (*int64, error
 	if v, ok := ent.Limits[quota]; ok {
 		return &v, nil
 	}
+	// The workflow quotas fall back to the plan default (WFL-08).
+	if planDefaultedQuotas[quota] {
+		if v, ok := PlanQuotaDefaults(ent.Plan)[quota]; ok {
+			return &v, nil
+		}
+	}
 	return nil, nil
 }
+
+// Enforcing reports whether the service enforces entitlements and quotas
+// (Options.Enforce).
+func (s *Service) Enforcing() bool { return s.opts.Enforce }
 
 // StorageLimitBytes returns the document storage limit of the organization
 // in bytes (max_storage_mb · 2^20, MGT-01): the value stored in the limits

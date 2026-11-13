@@ -352,14 +352,11 @@ func (r *PGRepository) CreateRun(ctx context.Context, run *Run) error {
 		if run.Context == nil {
 			run.Context = JSONMap{}
 		}
-		if run.StartedAt.IsZero() {
-			run.StartedAt = time.Now().UTC()
-		}
 		run.SerialKey = serialKeyOf(run.CIID)
 		return tx.QueryRow(ctx, `INSERT INTO workflow_run (organization_id,workflow_id,definition_version_id,status,trigger,context,started_at,initiated_by,ci_id,serial_key,entity_seq)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,(SELECT u.id FROM app_user u WHERE u.organization_id=$1 AND u.id::text=NULLIF($8,'')),NULLIF($9,'')::uuid,NULLIF($10,''),$11)
 			RETURNING id::text, COALESCE(initiated_by::text, ''), created_at, updated_at`,
-			run.OrganizationID, run.WorkflowID, run.DefinitionVersionID, run.Status, run.Trigger, run.Context, run.StartedAt, run.InitiatedBy,
+			run.OrganizationID, run.WorkflowID, run.DefinitionVersionID, run.Status, run.Trigger, run.Context, nullTime(run.StartedAt), run.InitiatedBy,
 			run.CIID, run.SerialKey, run.EntitySeq).Scan(&run.ID, &run.InitiatedBy, &run.CreatedAt, &run.UpdatedAt)
 	})
 }
@@ -605,13 +602,17 @@ func (r *PGRepository) ClaimRun(ctx context.Context, orgID, id string, enqueue i
 	var c RunClaim
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		c, err = claimRunTx(ctx, tx, orgID, id, enqueue)
+		c, err = claimRunTx(ctx, tx, orgID, id, enqueue, nil)
 		return err
 	})
 	return c, err
 }
 
-func claimRunTx(ctx context.Context, tx pgx.Tx, orgID, id string, enqueue int) (RunClaim, error) {
+// claimRunTx claims the run in tx; with limit (max_workflow_runs_per_hour)
+// a run that has not started yet is counted against the runs of the
+// organization started within the last hour under the organization's quota
+// lock, and delayed instead of claimed at the limit (WP-1112 AK3).
+func claimRunTx(ctx context.Context, tx pgx.Tx, orgID, id string, enqueue int, limit *int64) (RunClaim, error) {
 	var key string
 	err := tx.QueryRow(ctx, "SELECT COALESCE(serial_key, '') FROM workflow_run WHERE organization_id=$1 AND id=$2", orgID, id).Scan(&key)
 	if err == pgx.ErrNoRows {
@@ -627,7 +628,9 @@ func claimRunTx(ctx context.Context, tx pgx.Tx, orgID, id string, enqueue int) (
 	}
 	var status string
 	var enqueues int
-	if serr := tx.QueryRow(ctx, "SELECT status, enqueues FROM workflow_run WHERE organization_id=$1 AND id=$2 FOR UPDATE", orgID, id).Scan(&status, &enqueues); serr != nil {
+	var started bool
+	if serr := tx.QueryRow(ctx, "SELECT status, enqueues, started_at IS NOT NULL FROM workflow_run WHERE organization_id=$1 AND id=$2 FOR UPDATE", orgID, id).
+		Scan(&status, &enqueues, &started); serr != nil {
 		return RunClaim{}, serr
 	}
 	switch {
@@ -644,8 +647,15 @@ func claimRunTx(ctx context.Context, tx pgx.Tx, orgID, id string, enqueue int) (
 			return RunClaim{}, terr
 		}
 	}
+	if limit != nil && !started {
+		if c, delayed, qerr := delayAtQuota(ctx, tx, orgID, id, *limit); qerr != nil || delayed {
+			return c, qerr
+		}
+	}
 	var waited float64
-	if uerr := tx.QueryRow(ctx, `UPDATE workflow_run SET status='running', updated_at=now() WHERE organization_id=$1 AND id=$2
+	// The first claim starts the run (started_at, WP-1112).
+	if uerr := tx.QueryRow(ctx, `UPDATE workflow_run SET status='running', started_at=COALESCE(started_at, now()), updated_at=now()
+		WHERE organization_id=$1 AND id=$2
 		RETURNING GREATEST(EXTRACT(EPOCH FROM now() - created_at), 0)::float8`, orgID, id).Scan(&waited); uerr != nil {
 		return RunClaim{}, uerr
 	}
@@ -715,15 +725,18 @@ func (r *PGRepository) RequeueRun(ctx context.Context, orgID, id string) (*Run, 
 // StrandedSerialKeys implements Repository; the age is measured on the
 // clock of the database, on the head of the key (its first pending run in
 // serialOrder, the run NextSerialRun picks): a head queued just now keeps
-// its job even when a later run of the key waits longer.
+// its job even when a later run of the key waits longer. A head delayed by
+// max_workflow_runs_per_hour (next_attempt_at ahead, WP-1112) counts from
+// its next attempt: its job queued for then is not stranded before.
 func (r *PGRepository) StrandedSerialKeys(ctx context.Context, orgID string, age time.Duration) ([]string, error) {
 	out := []string{}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT h.serial_key FROM (
-				SELECT DISTINCT ON (p.serial_key) p.serial_key, p.updated_at FROM workflow_run p
+				SELECT DISTINCT ON (p.serial_key) p.serial_key, GREATEST(p.updated_at, COALESCE(p.next_attempt_at, p.updated_at)) AS since
+				FROM workflow_run p
 				WHERE p.organization_id=$1 AND p.serial_key IS NOT NULL AND p.status='pending'
 				ORDER BY p.serial_key, p.entity_seq ASC NULLS LAST, p.created_at ASC, p.id ASC) h
-			WHERE h.updated_at < now() - make_interval(secs => $2)
+			WHERE h.since < now() - make_interval(secs => $2)
 			AND NOT EXISTS (SELECT 1 FROM workflow_run o WHERE o.organization_id=$1 AND o.serial_key=h.serial_key AND o.status='running')
 			ORDER BY h.serial_key`, orgID, age.Seconds())
 		if err != nil {
@@ -880,6 +893,14 @@ func listSteps(ctx context.Context, tx pgx.Tx, orgID, runID string) ([]Step, err
 
 type scanner interface{ Scan(dest ...any) error }
 
+// nullTime stores a zero time as NULL (a run not started yet).
+func nullTime(t time.Time) any {
+	if t.IsZero() {
+		return nil
+	}
+	return t
+}
+
 func asMap(b []byte) JSONMap {
 	var m JSONMap
 	_ = json.Unmarshal(b, &m)
@@ -921,9 +942,9 @@ func scanVersion(s scanner) (*DefinitionVersion, error) {
 func scanRun(s scanner) (*Run, error) {
 	r := &Run{}
 	var ctxb []byte
-	var fin, next sql.NullTime
+	var fin, next, started sql.NullTime
 	var seq sql.NullInt64
-	if err := s.Scan(&r.ID, &r.OrganizationID, &r.WorkflowID, &r.DefinitionVersionID, &r.Status, &r.Trigger, &ctxb, &r.StartedAt, &fin,
+	if err := s.Scan(&r.ID, &r.OrganizationID, &r.WorkflowID, &r.DefinitionVersionID, &r.Status, &r.Trigger, &ctxb, &started, &fin,
 		&r.Attempts, &next, &r.LastError, &r.InitiatedBy, &r.CIID, &r.SerialKey, &seq, &r.Enqueues, &r.TriggerEventID, &r.TriggerDepth,
 		&r.CreatedAt, &r.UpdatedAt); err != nil {
 		return nil, err
@@ -931,6 +952,9 @@ func scanRun(s scanner) (*Run, error) {
 	if seq.Valid {
 		v := seq.Int64
 		r.EntitySeq = &v
+	}
+	if started.Valid {
+		r.StartedAt = started.Time.UTC()
 	}
 	if next.Valid {
 		v := next.Time.UTC()

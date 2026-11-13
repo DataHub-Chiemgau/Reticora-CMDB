@@ -641,6 +641,14 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	if opts.CIService != nil {
 		workflowRuns.WithCIService(opts.CIService)
 	}
+	// The package limits of the workflow engine (WFL-08, WP-1112): active
+	// definitions and form definitions on create and switch-on, runs per
+	// hour in the worker of workflow.run.
+	var workflowQuotas *workflow.Quotas
+	if opts.Entitlements != nil {
+		workflowQuotas = workflow.NewQuotas(opts.Entitlements, repos.Workflow, repos.Form)
+		workflowRuns.WithRunQuota(workflowQuotas)
+	}
 	if repos.EventOutbox {
 		workflowRuns.WithEventOutbox()
 	}
@@ -1014,8 +1022,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		sla.NewHandler(repos.SLA, repos.Ticket),
 		// The availability targets under /api/v1/monitoring/sla (WP-1048).
 		sla.NewAvailabilityHandler(repos.AvailabilityTargets),
-		form.NewHandler(repos.Form),
-		workflow.NewHandler(repos.Workflow, workflowRuns),
+		form.NewHandler(repos.Form).WithQuota(workflowQuotas),
+		workflow.NewHandler(repos.Workflow, workflowRuns).WithQuota(workflowQuotas),
 		compliance.NewHandler(repos.Compliance, compliance.NewEvaluator(repos.Compliance, repos.CI)).
 			WithReports(compliance.NewReportService(repos.Compliance, reportAuditVerifier(&opts), entitlementLister{svc: opts.Entitlements})),
 		iga.NewHandler(repos.IGA, repos.User, opts.Credentials, repos.Discovery, repos.Workflow).

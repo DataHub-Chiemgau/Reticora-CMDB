@@ -13474,6 +13474,10 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
     post:
       operationId: createFormDefinition
+      description: >-
+        A form definition counts against max_form_definitions of the
+        organization (WFL-08, WP-1112; plan default pro 50, enterprise 500):
+        above the limit 403 entitlement-limit.
       tags: [Forms]
       summary: Create a form definition
       requestBody:
@@ -13483,7 +13487,7 @@ paths:
         '201': { description: Form definition created, content: { application/json: { schema: { $ref: '#/components/schemas/FormDefinition' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { description: "client_id lies outside the caller's scope, or a client-scoped caller names no client (E-09).", content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
+        '403': { description: "client_id lies outside the caller's scope, or a client-scoped caller names no client (E-09); or max_form_definitions is reached (entitlement-limit, WFL-08).", content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
         '422': { description: client_id is no UUID or names no client of the organization., content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/forms/{id}:
@@ -13688,6 +13692,12 @@ paths:
         '500': { $ref: '#/components/responses/InternalServerError' }
     post:
       operationId: createWorkflow
+      description: >-
+        An active definition counts against max_workflow_definitions of the
+        organization (WFL-08, WP-1112; plan default pro 50, enterprise 500, a
+        value on the workflows entitlement overrides it): above the limit 403
+        entitlement-limit with quota and limit. An inactive definition does
+        not count; switching it on with PATCH is checked alike.
       tags: [Workflows]
       summary: Create a workflow definition
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/CreateWorkflowDefinitionRequest' } } } }
@@ -13695,6 +13705,7 @@ paths:
         '201': { description: Workflow created, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowDefinition' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/workflows/{id}:
@@ -13725,7 +13736,10 @@ paths:
         change no version (WFL-02, E-228). Runs keep the version they
         started with. If-Match names the version the change is based on; a
         different one is 412 (API-07), without the header the change is
-        applied as before.
+        applied as before. Switching an inactive definition on (active
+        true) counts against max_workflow_definitions of the workflows
+        entitlement: at the limit 403 entitlement-limit with quota and limit
+        (WFL-08, WP-1112).
       parameters:
         - name: If-Match
           in: header
@@ -13743,6 +13757,7 @@ paths:
           content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowDefinition' } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/UnprocessableEntity' }
         '412':
@@ -30994,6 +31009,21 @@ components:
               format: int64
               minimum: 0
               description: Shortest probe interval in seconds (PKG-04), stored on monitoring; a shorter interval is refused with 422, 0 sets no minimum.
+            max_workflow_definitions:
+              type: integer
+              format: int64
+              minimum: 0
+              description: Active workflow definitions (WFL-08), stored on workflows; the plan must include workflows.
+            max_workflow_runs_per_hour:
+              type: integer
+              format: int64
+              minimum: 0
+              description: Workflow runs started per hour (WFL-08), stored on workflows; runs above it wait instead of failing.
+            max_form_definitions:
+              type: integer
+              format: int64
+              minimum: 0
+              description: Form definitions (WFL-08), stored on workflows.
         admin_email: { type: string, maxLength: 254 }
         admin_display_name: { type: string, maxLength: 200 }
     QuotaUsage:
@@ -36207,12 +36237,16 @@ components:
             Named quotas (ENT-02): max_cis, max_collectors, max_users,
             max_api_keys, max_storage_mb (MiB, on documents; MGT-01), the
             monitoring quotas max_monitored_targets, max_probes_per_minute,
-            min_probe_interval_s and max_targets_<type> (PKG-04, WP-881);
-            any other key is 422 with `field` limits (F-209). A missing quota
-            is unlimited; the plan defaults (E-153) are stored at creation.
+            min_probe_interval_s and max_targets_<type> (PKG-04, WP-881), the
+            workflow quotas max_workflow_definitions (active definitions),
+            max_workflow_runs_per_hour and max_form_definitions on workflows
+            (WFL-08, WP-1112; without a stored value the plan default, pro
+            50 / 2000 / 50, enterprise 500 / 20000 / 500); any other key is
+            422 with `field` limits (F-209). A missing quota is unlimited;
+            the plan defaults (E-153) are stored at creation.
           propertyNames:
             anyOf:
-              - enum: [max_cis, max_collectors, max_users, max_api_keys, max_storage_mb, max_monitored_targets, max_probes_per_minute, min_probe_interval_s]
+              - enum: [max_cis, max_collectors, max_users, max_api_keys, max_storage_mb, max_monitored_targets, max_probes_per_minute, min_probe_interval_s, max_workflow_definitions, max_workflow_runs_per_hour, max_form_definitions]
               - pattern: '^max_targets_[a-z][a-z0-9_]{1,30}$'
           additionalProperties:
             type: integer
@@ -40765,7 +40799,7 @@ components:
         updated_at: { type: string, format: date-time }
     WorkflowRun:
       type: object
-      required: [id, organization_id, workflow_id, definition_version_id, status, trigger, context, started_at, attempts, created_at, updated_at]
+      required: [id, organization_id, workflow_id, definition_version_id, status, trigger, context, attempts, created_at, updated_at]
       properties:
         id: { type: string }
         organization_id: { type: string }
@@ -40774,7 +40808,18 @@ components:
         status: { type: string, enum: [pending, running, waiting_approval, waiting_input, succeeded, failed, cancelled] }
         trigger: { type: string }
         context: { $ref: '#/components/schemas/JSONValue' }
-        started_at: { type: string, format: date-time }
+        started_at:
+          type: string
+          format: date-time
+          description: >-
+            When the run started: in the request, or at the first claim of
+            its job workflow.run (WFL-08, WP-1112); absent while a queued run
+            waits. Above max_workflow_runs_per_hour of the organization a
+            queued run stays pending with next_attempt_at until a slot of
+            the hour is free and is executed then, never dropped; the
+            organization gets one entitlement.warning per hour. This applies
+            with the job queue only; without a database the runs execute in
+            the request and only the definition limits apply.
         finished_at: { type: string, format: date-time }
         attempts: { type: integer, minimum: 0, description: Attempts of the job workflow.run that executes the run (WFL-02); 0 for a run executed in the request. }
         next_attempt_at: { type: string, format: date-time, description: When the job retries the run after a failed attempt; absent otherwise. }

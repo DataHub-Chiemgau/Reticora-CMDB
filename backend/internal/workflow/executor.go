@@ -63,6 +63,8 @@ type Executor struct {
 	lifecycle LifecycleTransitioner
 	// ciWriter writes the CIs of set_ci_field (WithCIService).
 	ciWriter CIWriter
+	// runQuota is max_workflow_runs_per_hour (WithRunQuota, WP-1112).
+	runQuota RunQuota
 	// afterStep is a test hook called after each succeeded step; an error
 	// ends the attempt there like a worker that dies.
 	afterStep func(index int) error
@@ -159,7 +161,12 @@ func (e *Executor) start(ctx context.Context, orgID string, def *Definition, tri
 		return nil, err
 	}
 	run := &Run{OrganizationID: orgID, WorkflowID: def.ID, DefinitionVersionID: versionID, Status: StatusPending, Trigger: trigger, Context: payload,
-		StartedAt: time.Now().UTC(), InitiatedBy: tenant.FromContext(ctx).UserID, CIID: ciID, EntitySeq: entitySeq}
+		InitiatedBy: tenant.FromContext(ctx).UserID, CIID: ciID, EntitySeq: entitySeq}
+	// A run executed in the request starts now; a queued one with the
+	// first claim of its job (WP-1112).
+	if e.queue == nil {
+		run.StartedAt = time.Now().UTC()
+	}
 	if err := e.repo.CreateRun(ctx, run); err != nil {
 		return nil, err
 	}
@@ -252,7 +259,7 @@ func (e *Executor) Retry(ctx context.Context, orgID, runID string) (*Run, error)
 	if origin == nil {
 		return e.Execute(ctx, orgID, nil, run)
 	}
-	if err := e.submitRun(ctx, orgID, run, origin); err != nil {
+	if err := e.submitRun(ctx, orgID, run, origin, time.Time{}); err != nil {
 		// No job runs the pending run: it is failed again, retryable, and
 		// the route answers 500 instead of a run nobody executes.
 		e.failRun(ctx, orgID, run, err)

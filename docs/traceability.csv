@@ -1867,3 +1867,4 @@ WFL-02;[P3];F;backend/internal/workflow/set_ci_field_integration_test.go;WP-1097
 LCY-04;[P3];F;backend/internal/workflow/lifecycle_action_integration_test.go;WP-1097
 WFL-02;[P3];F;backend/internal/workflow/trigger_integration_test.go;WP-1090
 WFL-03;[P3];F;backend/internal/workflow/trigger_integration_test.go;WP-1090
+WFL-08;[P3];F;backend/internal/workflow/quota_integration_test.go;WP-1112

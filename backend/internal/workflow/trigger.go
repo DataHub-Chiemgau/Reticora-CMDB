@@ -238,7 +238,10 @@ func (c *TriggerConsumer) Handle(ctx context.Context, env *events.Envelope) erro
 			continue
 		}
 		run := &Run{OrganizationID: env.OrgID, WorkflowID: def.ID, DefinitionVersionID: def.CurrentVersionID, Status: StatusPending,
-			Trigger: env.Type, Context: payload, StartedAt: time.Now().UTC(), CIID: ciID, TriggerEventID: env.ID, TriggerDepth: depth}
+			Trigger: env.Type, Context: payload, CIID: ciID, TriggerEventID: env.ID, TriggerDepth: depth}
+		if c.exec.queue == nil {
+			run.StartedAt = time.Now().UTC()
+		}
 		if ciID != "" && env.EntityID == ciID && env.EntitySeq > 0 {
 			seq := env.EntitySeq
 			run.EntitySeq = &seq
@@ -403,7 +406,7 @@ func (r *PGRepository) CreateEventRun(ctx context.Context, run *Run) (bool, erro
 			VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, '')::uuid, NULLIF($9, ''), $10, $11, $12)
 			ON CONFLICT (organization_id, definition_version_id, trigger_event_id) WHERE trigger_event_id IS NOT NULL DO NOTHING
 			RETURNING id::text, created_at, updated_at`,
-			run.OrganizationID, run.WorkflowID, run.DefinitionVersionID, run.Status, run.Trigger, run.Context, run.StartedAt,
+			run.OrganizationID, run.WorkflowID, run.DefinitionVersionID, run.Status, run.Trigger, run.Context, nullTime(run.StartedAt),
 			run.CIID, run.SerialKey, run.EntitySeq, run.TriggerEventID, run.TriggerDepth).Scan(&run.ID, &run.CreatedAt, &run.UpdatedAt)
 		if err == pgx.ErrNoRows {
 			return nil

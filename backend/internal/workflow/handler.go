@@ -18,6 +18,30 @@ import (
 type Handler struct {
 	repo Repository
 	exec *Executor
+	// quota admits an active definition (max_workflow_definitions,
+	// WithQuota, WP-1112); nil admits all.
+	quota DefinitionQuota
+}
+
+// WithQuota checks max_workflow_definitions when a definition is created
+// active or switched on (WFL-08): above the limit 403 entitlement-limit.
+func (h *Handler) WithQuota(q DefinitionQuota) *Handler {
+	h.quota = q
+	return h
+}
+
+// allowActive checks the definition quota; a refusal is answered.
+func (h *Handler) allowActive(w http.ResponseWriter, r *http.Request, orgID string) bool {
+	if h.quota == nil {
+		return true
+	}
+	if err := h.quota.AllowActiveDefinition(r.Context(), orgID); err != nil {
+		if !api.WriteEntitlementError(w, err) {
+			writeWorkflowError(w, r, err)
+		}
+		return false
+	}
+	return true
 }
 
 func NewHandler(repo Repository, exec *Executor) *Handler { return &Handler{repo: repo, exec: exec} }
@@ -147,6 +171,10 @@ func (h *Handler) CreateDefinition(w http.ResponseWriter, r *http.Request) {
 	if req.Active != nil {
 		active = *req.Active
 	}
+	// An inactive definition does not count (WFL-08).
+	if active && !h.allowActive(w, r, t.OrganizationID) {
+		return
+	}
 	item := &Definition{OrganizationID: t.OrganizationID, Name: req.Name, Description: req.Description, Trigger: req.Trigger, Conditions: req.Conditions, Actions: req.Actions, Active: active}
 	if err := h.repo.CreateDefinition(r.Context(), item); err != nil {
 		writeWorkflowError(w, r, err)
@@ -181,6 +209,18 @@ func (h *Handler) UpdateDefinition(w http.ResponseWriter, r *http.Request) {
 	}
 	if sent {
 		req.IfMatch = &version
+	}
+	// Switching a definition on counts against max_workflow_definitions
+	// (WFL-08); an active one stays admitted.
+	if req.Active != nil && *req.Active && h.quota != nil {
+		current, gerr := h.repo.GetDefinition(r.Context(), t.OrganizationID, id)
+		if gerr != nil {
+			writeWorkflowError(w, r, gerr)
+			return
+		}
+		if !current.Active && !h.allowActive(w, r, t.OrganizationID) {
+			return
+		}
 	}
 	req.CreatedBy = t.UserID
 	item, err := h.repo.UpdateDefinition(r.Context(), t.OrganizationID, id, &req)

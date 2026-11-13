@@ -453,7 +453,8 @@ func TestPhase1FeaturesAndQuotas(t *testing.T) {
 		}
 	}
 	if !slices.Equal(Quotas, []string{"max_cis", "max_collectors", "max_users", "max_api_keys", "max_storage_mb",
-		"max_monitored_targets", "max_probes_per_minute", "min_probe_interval_s"}) {
+		"max_monitored_targets", "max_probes_per_minute", "min_probe_interval_s",
+		"max_workflow_definitions", "max_workflow_runs_per_hour", "max_form_definitions"}) {
 		t.Errorf("quotas %v", Quotas)
 	}
 
@@ -917,8 +918,10 @@ func TestPlanQuotaDefaultsFollowE151(t *testing.T) {
 		PlanStandard: {LimitMaxCIs: 2500, LimitMaxCollectors: 5, LimitMaxUsers: 25, LimitMaxStorageMB: 10000,
 			LimitMaxMonitoredTargets: 500, LimitMaxProbesPerMinute: 1000, LimitMinProbeIntervalS: 30},
 		PlanPro: {LimitMaxCIs: 10000, LimitMaxCollectors: 20, LimitMaxUsers: 100, LimitMaxStorageMB: 50000,
-			LimitMaxMonitoredTargets: 5000, LimitMaxProbesPerMinute: 10000, LimitMinProbeIntervalS: 30},
-		PlanEnterprise: {LimitMaxCIs: 50000, LimitMaxMonitoredTargets: 25000, LimitMaxProbesPerMinute: 30000, LimitMinProbeIntervalS: 10},
+			LimitMaxMonitoredTargets: 5000, LimitMaxProbesPerMinute: 10000, LimitMinProbeIntervalS: 30,
+			LimitMaxWorkflowDefinitions: 50, LimitMaxWorkflowRunsPerHour: 2000, LimitMaxFormDefinitions: 50},
+		PlanEnterprise: {LimitMaxCIs: 50000, LimitMaxMonitoredTargets: 25000, LimitMaxProbesPerMinute: 30000, LimitMinProbeIntervalS: 10,
+			LimitMaxWorkflowDefinitions: 500, LimitMaxWorkflowRunsPerHour: 20000, LimitMaxFormDefinitions: 500},
 	}
 	for plan, w := range want {
 		got := PlanQuotaDefaults(plan)

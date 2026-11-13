@@ -17623,6 +17623,8 @@ WFL-07;[P3];F;backend/internal/workflow/recommend_integration_test.go;WP-1111
 - backend/internal/workflow/quota_integration_test.go (neu)
 - docs/traceability.csv
 
+**Nachtrag 2026-11-13 (Prüfung zu AK3):** Zählung und Claim bzw. Verzögerung geschehen atomar in einer Transaktion unter der Advisory-Sperre `workflow_run_quota:<Organisation>` (`RunQuotaStore.ClaimRunWithinQuota`, gezählt organisationsweit auf der Datenbankuhr), damit parallele Worker das Limit nicht überschreiten (`TestWorkflowRunQuotaHoldsUnderParallelClaims`). Der Serial-Sweep misst das Alter eines verzögerten Kopfs ab `next_attempt_at` und reiht ihn nicht alle fünf Minuten neu ein (`TestSerialSweepSkipsQuotaDelayedHead`). `PATCH /api/v1/workflows/{id}` dokumentiert die 403 aus AK2.
+
 **Migration/RLS:** Index `idx_workflow_run_org_started ON workflow_run (organization_id, started_at)`; `started_at` wird `NULL`-fähig ohne Standardwert, bestehende Zeilen behalten ihren Wert. Keine neue Tabelle, RLS unverändert.
 
 **Tests:**

@@ -44,12 +44,14 @@ type Run struct {
 	WorkflowID     string `json:"workflow_id"`
 	// DefinitionVersionID is the version of the definition the run
 	// executes (WFL-02); a later change of the definition does not touch it.
-	DefinitionVersionID string     `json:"definition_version_id"`
-	Status              string     `json:"status"`
-	Trigger             string     `json:"trigger"`
-	Context             JSONMap    `json:"context"`
-	StartedAt           time.Time  `json:"started_at"`
-	FinishedAt          *time.Time `json:"finished_at,omitempty"`
+	DefinitionVersionID string  `json:"definition_version_id"`
+	Status              string  `json:"status"`
+	Trigger             string  `json:"trigger"`
+	Context             JSONMap `json:"context"`
+	// StartedAt is when the run started: in the request, or at the first
+	// claim of its job (WP-1112); absent while a queued run waits.
+	StartedAt  time.Time  `json:"started_at,omitzero"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
 	// Attempts counts the attempts of the job workflow.run that executed
 	// the run (WFL-02, WP-1088); 0 for a run executed in the request.
 	Attempts int `json:"attempts"`
@@ -97,6 +99,13 @@ type RunClaim struct {
 	// running; Waited is then the time since the run was created.
 	Started bool
 	Waited  time.Duration
+	// Delayed reports that the organization reached
+	// max_workflow_runs_per_hour (ClaimRunWithinQuota, WP-1112): the run
+	// stays pending until Until (next_attempt_at), Run is the run with its
+	// raised enqueues, whose job is queued for Until.
+	Delayed bool
+	Until   time.Time
+	Run     *Run
 }
 
 // RunAttempt is the state of the job attempt a worker records on a run.

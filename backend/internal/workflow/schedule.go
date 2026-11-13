@@ -336,8 +336,12 @@ func (s *Scheduler) startDue(ctx context.Context, orgID string, def *Definition,
 		scheduleSkipped.Add(float64(skipped))
 	}
 	run := &Run{OrganizationID: orgID, WorkflowID: def.ID, DefinitionVersionID: def.CurrentVersionID, Status: StatusPending,
-		Trigger: TriggerSchedule, StartedAt: now,
+		Trigger: TriggerSchedule,
 		Context: JSONMap{"schedule": map[string]any{"slot": slot.Format(time.RFC3339), "cron": expr}}}
+	// A queued run starts with the claim of its job (WP-1112).
+	if s.exec.queue == nil {
+		run.StartedAt = now
+	}
 	created, err := s.store.CreateScheduledRun(ctx, run, slot)
 	if err != nil || !created {
 		return false, err
@@ -404,7 +408,7 @@ func (r *PGRepository) CreateScheduledRun(ctx context.Context, run *Run, slot ti
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 			ON CONFLICT (organization_id, workflow_id, schedule_slot) WHERE schedule_slot IS NOT NULL DO NOTHING
 			RETURNING id::text, created_at, updated_at`,
-			run.OrganizationID, run.WorkflowID, run.DefinitionVersionID, run.Status, run.Trigger, run.Context, run.StartedAt, slot).
+			run.OrganizationID, run.WorkflowID, run.DefinitionVersionID, run.Status, run.Trigger, run.Context, nullTime(run.StartedAt), slot).
 			Scan(&run.ID, &run.CreatedAt, &run.UpdatedAt)
 		if err == pgx.ErrNoRows {
 			return nil
