@@ -79,6 +79,13 @@ type Store interface {
 	TransitionIncident(ctx context.Context, orgID, id, to string, actorID *string) (*Incident, error)
 	// IncidentTransitions returns the log of an incident, oldest first.
 	IncidentTransitions(ctx context.Context, orgID, incidentID string) ([]IncidentTransition, error)
+
+	// Settings returns the alarm settings of the organization; without a
+	// row the Defaults (WP-1030).
+	Settings(ctx context.Context, orgID string) (Settings, error)
+	// PutSettings replaces the alarm settings of the organization (checked
+	// with Settings.Validate); actor is the acting user or nil.
+	PutSettings(ctx context.Context, orgID string, s *Settings, actor *string) (Settings, error)
 }
 
 // ValidateUpsert checks the input of UpsertOpen against the value sets of

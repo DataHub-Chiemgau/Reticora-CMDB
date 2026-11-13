@@ -10457,12 +10457,12 @@ export interface paths {
     };
     /**
      * Get the alarm settings of the organization
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description The alarm settings of the organization (ALR-02, ALR-04, ALR-06, ALR-12, WP-1030): correlation window, flapping parameters, the limit of alarm notifications, how unknown counts in availability (E-181) and the notification after a maintenance window. Without stored settings the defaults; updated_at and updated_by are then null.
      */
     get: operations['getAlarmSettings'];
     /**
      * Replace the alarm settings of the organization
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Replaces the settings; an absent member takes its default. monitoring:write held organization-wide only: a principal restricted to clients or sites is 403. A value out of its bounds is 422 with the field; the route audit records the old and the new values.
      */
     put: operations['replaceAlarmSettings'];
     post?: never;
@@ -15046,6 +15046,62 @@ export interface components {
     };
     AlarmActionRequest: {
       comment?: string;
+    };
+    /** @description The alarm settings to store (WP-1030); an absent member takes its default. */
+    AlarmSettingsRequest: {
+      /**
+       * @description Correlation window before the root notification (ALR-02).
+       * @default 30
+       */
+      settle_seconds: number;
+      /**
+       * @description Flapping after N state changes of a series ... (ALR-04)
+       * @default 5
+       */
+      flap_transitions: number;
+      /**
+       * @description ... within the window W.
+       * @default 900
+       */
+      flap_window_seconds: number;
+      /**
+       * @description Stable phase H without a change that ends flapping.
+       * @default 900
+       */
+      flap_hold_seconds: number;
+      /**
+       * @description Alarm notifications per minute before a summary notification (ALR-12).
+       * @default 60
+       */
+      notify_rate_per_min: number;
+      /**
+       * @description How unknown counts in availability and SLA (ALR-06, E-181).
+       * @default excluded
+       * @enum {string}
+       */
+      unknown_mode: 'excluded' | 'down' | 'up';
+      /**
+       * @description Notify alarms still open when a maintenance window ends.
+       * @default true
+       */
+      notify_after_maintenance: boolean;
+    };
+    AlarmSettings: {
+      settle_seconds: number;
+      flap_transitions: number;
+      flap_window_seconds: number;
+      flap_hold_seconds: number;
+      notify_rate_per_min: number;
+      /** @enum {string} */
+      unknown_mode: 'excluded' | 'down' | 'up';
+      notify_after_maintenance: boolean;
+      /**
+       * Format: date-time
+       * @description Null while the defaults apply.
+       */
+      updated_at: string | null;
+      /** @description The user who stored the settings; null for the defaults or a non-user principal. */
+      updated_by: string | null;
     };
     AlarmListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Alarm'][];
@@ -49324,12 +49380,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get the alarm settings of the organization. The schema comes with the implementing work package. */
+      /** @description The alarm settings */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['AlarmSettings'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -49343,14 +49401,20 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AlarmSettingsRequest'];
+      };
+    };
     responses: {
-      /** @description Replace the alarm settings of the organization. The schema comes with the implementing work package. */
+      /** @description The stored alarm settings */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['AlarmSettings'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];

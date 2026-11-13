@@ -120,6 +120,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get(alarmPath, h.get)
 	r.Post(alarmPath+"/ack", h.ack)
 	r.Post(alarmPath+"/unack", h.unack)
+	r.Get(settingsPath, h.getSettings)
+	r.Put(settingsPath, h.putSettings)
 }
 
 // unprocessable is the 422 of a field.

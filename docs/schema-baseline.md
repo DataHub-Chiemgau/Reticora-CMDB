@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000348_alert_rule_ast
+Stand: Migration 000349_alarm_settings
 
 ## Prüfung
 
@@ -1978,6 +1978,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `ai_conversation` | ja | ja | ai_conversation_tenant_isolation (ALL) |
 | `ai_message` | ja | ja | ai_message_tenant_isolation (ALL) |
 | `alarm` | ja | ja | alarm_isolation (ALL), alarm_scoped_delete (DELETE), alarm_scoped_update (UPDATE) |
+| `alarm_settings` | ja | ja | alarm_settings_isolation (ALL) |
 | `alarm_transition` | ja | ja | alarm_transition_isolation (ALL), alarm_transition_scoped_delete (DELETE), alarm_transition_scoped_update (UPDATE) |
 | `alert_rule` | ja | ja | alert_rule_isolation (ALL), alert_rule_system_select (SELECT) |
 | `api_key` | ja | ja | api_key_system_select (SELECT), org_isolation (ALL) |

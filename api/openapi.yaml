@@ -24580,17 +24580,22 @@ paths:
   /api/v1/monitoring/alarm-settings:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     get:
       operationId: getAlarmSettings
       tags: [Monitoring]
       summary: Get the alarm settings of the organization
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        The alarm settings of the organization (ALR-02, ALR-04, ALR-06,
+        ALR-12, WP-1030): correlation window, flapping parameters, the limit
+        of alarm notifications, how unknown counts in availability (E-181)
+        and the notification after a maintenance window. Without stored
+        settings the defaults; updated_at and updated_by are then null.
       responses:
         '200':
-          description: Get the alarm settings of the organization. The schema comes with the implementing work package.
+          description: The alarm settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlarmSettings' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -24602,11 +24607,21 @@ paths:
       tags: [Monitoring]
       summary: Replace the alarm settings of the organization
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Replaces the settings; an absent member takes its default.
+        monitoring:write held organization-wide only: a principal restricted
+        to clients or sites is 403. A value out of its bounds is 422 with
+        the field; the route audit records the old and the new values.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AlarmSettingsRequest' }
       responses:
         '200':
-          description: Replace the alarm settings of the organization. The schema comes with the implementing work package.
+          description: The stored alarm settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlarmSettings' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -32837,6 +32852,71 @@ components:
         comment:
           type: string
           maxLength: 1000
+    AlarmSettingsRequest:
+      type: object
+      additionalProperties: false
+      description: The alarm settings to store (WP-1030); an absent member takes its default.
+      properties:
+        settle_seconds:
+          type: integer
+          minimum: 0
+          maximum: 300
+          default: 30
+          description: Correlation window before the root notification (ALR-02).
+        flap_transitions:
+          type: integer
+          minimum: 2
+          maximum: 100
+          default: 5
+          description: Flapping after N state changes of a series ... (ALR-04)
+        flap_window_seconds:
+          type: integer
+          minimum: 60
+          maximum: 86400
+          default: 900
+          description: ... within the window W.
+        flap_hold_seconds:
+          type: integer
+          minimum: 60
+          maximum: 86400
+          default: 900
+          description: Stable phase H without a change that ends flapping.
+        notify_rate_per_min:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          default: 60
+          description: Alarm notifications per minute before a summary notification (ALR-12).
+        unknown_mode:
+          type: string
+          enum: [excluded, down, up]
+          default: excluded
+          description: How unknown counts in availability and SLA (ALR-06, E-181).
+        notify_after_maintenance:
+          type: boolean
+          default: true
+          description: Notify alarms still open when a maintenance window ends.
+    AlarmSettings:
+      type: object
+      required: [settle_seconds, flap_transitions, flap_window_seconds, flap_hold_seconds, notify_rate_per_min,
+        unknown_mode, notify_after_maintenance, updated_at, updated_by]
+      properties:
+        settle_seconds: { type: integer }
+        flap_transitions: { type: integer }
+        flap_window_seconds: { type: integer }
+        flap_hold_seconds: { type: integer }
+        notify_rate_per_min: { type: integer }
+        unknown_mode:
+          type: string
+          enum: [excluded, down, up]
+        notify_after_maintenance: { type: boolean }
+        updated_at:
+          type: [string, 'null']
+          format: date-time
+          description: Null while the defaults apply.
+        updated_by:
+          type: [string, 'null']
+          description: The user who stored the settings; null for the defaults or a non-user principal.
     AlarmListResponse:
       allOf:
         - $ref: '#/components/schemas/PaginationEnvelope'

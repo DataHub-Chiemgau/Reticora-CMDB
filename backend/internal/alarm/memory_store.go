@@ -22,6 +22,8 @@ type MemoryStore struct {
 	// incidents and incidentTransitions are the incidents (WP-1027).
 	incidents           map[string]*Incident
 	incidentTransitions []IncidentTransition
+	// settings are the alarm settings by organization (WP-1030).
+	settings map[string]Settings
 }
 
 // NewMemoryStore returns an empty memory store.

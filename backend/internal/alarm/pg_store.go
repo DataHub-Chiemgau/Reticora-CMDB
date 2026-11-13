@@ -371,3 +371,61 @@ func (s *PGStore) TransitionsUpTo(ctx context.Context, orgID, alarmID string, li
 // now is the clock of the memory store and the retention (tests replace it
 // through their own constructors).
 func now() time.Time { return time.Now().UTC() }
+
+const settingsColumns = `settle_seconds, flap_transitions, flap_window_seconds, flap_hold_seconds,
+	notify_rate_per_min, unknown_mode, notify_after_maintenance, updated_at, updated_by::text`
+
+func scanSettings(row pgx.Row) (Settings, error) {
+	var s Settings
+	err := row.Scan(&s.SettleSeconds, &s.FlapTransitions, &s.FlapWindowSeconds, &s.FlapHoldSeconds,
+		&s.NotifyRatePerMin, &s.UnknownMode, &s.NotifyAfterMaintenance, &s.UpdatedAt, &s.UpdatedBy)
+	return s, err
+}
+
+// Settings implements Store: the row of the organization, without one the
+// Defaults.
+func (s *PGStore) Settings(ctx context.Context, orgID string) (Settings, error) {
+	out := Defaults()
+	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		got, err := scanSettings(tx.QueryRow(ctx, `SELECT `+settingsColumns+` FROM alarm_settings WHERE organization_id = $1`, orgID))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("alarm: read settings: %w", err)
+		}
+		out = got
+		return nil
+	})
+	return out, err
+}
+
+// PutSettings implements Store: replaces the row of the organization.
+func (s *PGStore) PutSettings(ctx context.Context, orgID string, in *Settings, actor *string) (Settings, error) {
+	if err := in.Validate(); err != nil {
+		return Settings{}, err
+	}
+	var out Settings
+	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		out, err = scanSettings(tx.QueryRow(ctx, `
+			INSERT INTO alarm_settings (organization_id, settle_seconds, flap_transitions, flap_window_seconds,
+			                            flap_hold_seconds, notify_rate_per_min, unknown_mode, notify_after_maintenance,
+			                            updated_by)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid)
+			ON CONFLICT (organization_id) DO UPDATE SET
+			    settle_seconds = EXCLUDED.settle_seconds, flap_transitions = EXCLUDED.flap_transitions,
+			    flap_window_seconds = EXCLUDED.flap_window_seconds, flap_hold_seconds = EXCLUDED.flap_hold_seconds,
+			    notify_rate_per_min = EXCLUDED.notify_rate_per_min, unknown_mode = EXCLUDED.unknown_mode,
+			    notify_after_maintenance = EXCLUDED.notify_after_maintenance, updated_by = EXCLUDED.updated_by,
+			    updated_at = now()
+			RETURNING `+settingsColumns,
+			orgID, in.SettleSeconds, in.FlapTransitions, in.FlapWindowSeconds, in.FlapHoldSeconds, in.NotifyRatePerMin,
+			in.UnknownMode, in.NotifyAfterMaintenance, actor))
+		if err != nil {
+			return fmt.Errorf("alarm: write settings: %w", err)
+		}
+		return nil
+	})
+	return out, err
+}

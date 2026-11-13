@@ -1851,3 +1851,7 @@ MON-04;[P3];E;backend/internal/notify/alarm_notify_integration_test.go;WP-987
 ALR-02;[P3];E;backend/internal/notify/alarm_notify_integration_test.go;WP-987
 ALR-01;[P3];E;frontend/src/pages/AlarmsPage.test.tsx;WP-991
 ALR-10;[P3];E;frontend/src/pages/AlarmsPage.test.tsx;WP-991
+ALR-02;[P3];E;backend/internal/alarm/settings_test.go;WP-1030
+ALR-04;[P3];E;backend/internal/alarm/settings_test.go;WP-1030
+ALR-06;[P3];E;backend/internal/alarm/settings_test.go;WP-1030
+ALR-12;[P3];E;backend/internal/alarm/settings_integration_test.go;WP-1030
