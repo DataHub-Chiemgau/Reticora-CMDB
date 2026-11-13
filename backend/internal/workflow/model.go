@@ -60,10 +60,37 @@ type Run struct {
 	LastError string `json:"last_error,omitempty"`
 	// InitiatedBy is the user who started the run; the worker executes
 	// the run as this user (submitted_by, reporter). Empty without one.
-	InitiatedBy string    `json:"initiated_by,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-	Steps       []Step    `json:"steps,omitempty"`
+	InitiatedBy string `json:"initiated_by,omitempty"`
+	// CIID is the CI the run refers to (ci_id or ci.id of the context,
+	// read in the scope of the trigger, WP-1089); empty without one.
+	CIID string `json:"-"`
+	// SerialKey is "ci:<ci_id>" for a run with a CI: the runs of one key
+	// are executed one after the other (EVT-01, E-227). Empty otherwise.
+	SerialKey string `json:"-"`
+	// EntitySeq is the sequence number of the event of the object that
+	// started the run (WP-1090); the runs of a key are executed in this
+	// order. Nil without one.
+	EntitySeq *int64 `json:"-"`
+	// Enqueues counts how often the run was queued as the job
+	// workflow.run; only the job of the last enqueue executes it.
+	Enqueues  int       `json:"-"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Steps     []Step    `json:"steps,omitempty"`
+}
+
+// RunClaim is the decision of Repository.ClaimRun about a job of a run
+// (WP-1089 AK2).
+type RunClaim struct {
+	// Claimed reports that the job executes the run now: it is the job of
+	// the last enqueue, and the run is running already (a retry) or the
+	// oldest pending run of its serial key while no other run of the key
+	// is running. Otherwise the job ends without effect.
+	Claimed bool
+	// Started reports that the claim moved the run from pending to
+	// running; Waited is then the time since the run was created.
+	Started bool
+	Waited  time.Duration
 }
 
 // RunAttempt is the state of the job attempt a worker records on a run.

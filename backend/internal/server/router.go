@@ -1337,6 +1337,7 @@ func metricsHandler(version string, includeTenantLabel bool) (handler http.Handl
 	ipam.RegisterMetrics(registry)
 	credential.RegisterMetrics(registry)
 	admp.RegisterMetrics(registry)
+	workflow.RegisterMetrics(registry)
 
 	httpMetrics := middleware.RegisterHTTPMetrics(registry, includeTenantLabel)
 

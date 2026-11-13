@@ -10,13 +10,33 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const defCols = `id::text, organization_id::text, name, description, trigger, conditions, actions, active, version, current_version_id::text, created_at, updated_at`
 const versionCols = `id::text, organization_id::text, workflow_id::text, version, trigger, conditions, actions, COALESCE(created_by::text, ''), created_at`
-const runCols = `id::text, organization_id::text, workflow_id::text, definition_version_id::text, status, trigger, context, started_at, finished_at, attempts, next_attempt_at, COALESCE(last_error, ''), COALESCE(initiated_by::text, ''), created_at, updated_at`
+const runCols = `id::text, organization_id::text, workflow_id::text, definition_version_id::text, status, trigger, context, started_at, finished_at, attempts, next_attempt_at, COALESCE(last_error, ''), COALESCE(initiated_by::text, ''), COALESCE(ci_id::text, ''), COALESCE(serial_key, ''), entity_seq, enqueues, created_at, updated_at`
+
+// runVisible restricts runs to those whose CI is visible under the
+// transaction's tenant scope (WP-1089 AK6, the pattern of
+// form.submissionVisible): until WP-1093 workflow_run carries no scope
+// columns of its own, its scope follows its CI (rls.DerivedScopeTables).
+// A run started without a CI has no serial key and is visible to all. A
+// run whose CI was deleted (ci_id set NULL, serial_key kept) fails closed:
+// only an organization-wide scope sees it.
+const runVisible = `(workflow_run.serial_key IS NULL OR EXISTS (SELECT 1 FROM ci WHERE ci.id = workflow_run.ci_id) OR ` +
+	database.OrgWideScopeSQL + `)`
+
+// serialLock takes the transaction advisory lock of a serial key of the
+// organization (WP-1089 AK2); claims and the pick of the next run of a key
+// wait for each other.
+const serialLock = `SELECT pg_advisory_xact_lock(hashtextextended($1::text || ':' || $2::text, 0))`
+
+// serialOrder is the order in which the pending runs of a serial key are
+// executed: the sequence of their events, then their creation.
+const serialOrder = `ORDER BY entity_seq ASC NULLS LAST, created_at ASC, id ASC`
 const stepCols = `id::text, organization_id::text, run_id::text, step_index, action_type, status, input, output, error, created_at, updated_at`
 
 type PGRepository struct{ pool *pgxpool.Pool }
@@ -211,7 +231,7 @@ func (r *PGRepository) ListRuns(ctx context.Context, orgID, wid, status string, 
 	var out []Run
 	var total int
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		where := []string{"organization_id=$1"}
+		where := []string{"organization_id=$1", runVisible}
 		args := []any{orgID}
 		pos := 2
 		if wid != "" {
@@ -264,6 +284,27 @@ func (r *PGRepository) GetRun(ctx context.Context, orgID, id string) (*Run, erro
 	var run *Run
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
+		run, err = scanRun(tx.QueryRow(ctx, "SELECT "+runCols+" FROM workflow_run WHERE organization_id=$1 AND id=$2 AND "+runVisible, orgID, id))
+		if err == pgx.ErrNoRows {
+			return ErrRunNotFound
+		}
+		if err != nil {
+			return err
+		}
+		run.Steps, err = r.listStepsTx(ctx, tx, orgID, id)
+		return err
+	})
+	return run, err
+}
+
+// GetRunForJob implements Repository: the run with its steps, read
+// organization-wide whatever the scope of the caller (the pattern of
+// RunJobOrigin).
+func (r *PGRepository) GetRunForJob(ctx context.Context, orgID, id string) (*Run, error) {
+	var run *Run
+	scope := database.OrgWideScope(orgID, "")
+	err := database.WithTenant(database.WithoutTx(ctx), r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
 		run, err = scanRun(tx.QueryRow(ctx, "SELECT "+runCols+" FROM workflow_run WHERE organization_id=$1 AND id=$2", orgID, id))
 		if err == pgx.ErrNoRows {
 			return ErrRunNotFound
@@ -288,7 +329,12 @@ func (r *PGRepository) CreateRun(ctx context.Context, run *Run) error {
 		if run.StartedAt.IsZero() {
 			run.StartedAt = time.Now().UTC()
 		}
-		return tx.QueryRow(ctx, `INSERT INTO workflow_run (organization_id,workflow_id,definition_version_id,status,trigger,context,started_at,initiated_by) VALUES ($1,$2,$3,$4,$5,$6,$7,(SELECT u.id FROM app_user u WHERE u.organization_id=$1 AND u.id::text=NULLIF($8,''))) RETURNING id::text, COALESCE(initiated_by::text, ''), created_at, updated_at`, run.OrganizationID, run.WorkflowID, run.DefinitionVersionID, run.Status, run.Trigger, run.Context, run.StartedAt, run.InitiatedBy).Scan(&run.ID, &run.InitiatedBy, &run.CreatedAt, &run.UpdatedAt)
+		run.SerialKey = serialKeyOf(run.CIID)
+		return tx.QueryRow(ctx, `INSERT INTO workflow_run (organization_id,workflow_id,definition_version_id,status,trigger,context,started_at,initiated_by,ci_id,serial_key,entity_seq)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,(SELECT u.id FROM app_user u WHERE u.organization_id=$1 AND u.id::text=NULLIF($8,'')),NULLIF($9,'')::uuid,NULLIF($10,''),$11)
+			RETURNING id::text, COALESCE(initiated_by::text, ''), created_at, updated_at`,
+			run.OrganizationID, run.WorkflowID, run.DefinitionVersionID, run.Status, run.Trigger, run.Context, run.StartedAt, run.InitiatedBy,
+			run.CIID, run.SerialKey, run.EntitySeq).Scan(&run.ID, &run.InitiatedBy, &run.CreatedAt, &run.UpdatedAt)
 	})
 }
 func (r *PGRepository) UpdateRunStatus(ctx context.Context, orgID, id, status string, finished *time.Time, ctxm JSONMap) (*Run, error) {
@@ -317,6 +363,167 @@ func (r *PGRepository) RecordAttempt(ctx context.Context, orgID, id string, a Ru
 		return nil
 	})
 }
+
+// ClaimRun implements Repository (WP-1089 AK2). The serial key of a run
+// never changes, so it is read before the advisory lock is taken; the run
+// row is locked after it, in the order every claim and pick takes them.
+func (r *PGRepository) ClaimRun(ctx context.Context, orgID, id string, enqueue int) (RunClaim, error) {
+	var c RunClaim
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		c, err = claimRunTx(ctx, tx, orgID, id, enqueue)
+		return err
+	})
+	return c, err
+}
+
+func claimRunTx(ctx context.Context, tx pgx.Tx, orgID, id string, enqueue int) (RunClaim, error) {
+	var key string
+	err := tx.QueryRow(ctx, "SELECT COALESCE(serial_key, '') FROM workflow_run WHERE organization_id=$1 AND id=$2", orgID, id).Scan(&key)
+	if err == pgx.ErrNoRows {
+		return RunClaim{}, ErrRunNotFound
+	}
+	if err != nil {
+		return RunClaim{}, err
+	}
+	if key != "" {
+		if _, lerr := tx.Exec(ctx, serialLock, orgID, key); lerr != nil {
+			return RunClaim{}, lerr
+		}
+	}
+	var status string
+	var enqueues int
+	if serr := tx.QueryRow(ctx, "SELECT status, enqueues FROM workflow_run WHERE organization_id=$1 AND id=$2 FOR UPDATE", orgID, id).Scan(&status, &enqueues); serr != nil {
+		return RunClaim{}, serr
+	}
+	switch {
+	case enqueues != enqueue:
+		return RunClaim{}, nil
+	case status == StatusRunning:
+		return RunClaim{Claimed: true}, nil
+	case status != StatusPending:
+		return RunClaim{}, nil
+	}
+	if key != "" {
+		turn, terr := serialTurn(ctx, tx, orgID, key, id)
+		if terr != nil || !turn {
+			return RunClaim{}, terr
+		}
+	}
+	var waited float64
+	if uerr := tx.QueryRow(ctx, `UPDATE workflow_run SET status='running', updated_at=now() WHERE organization_id=$1 AND id=$2
+		RETURNING GREATEST(EXTRACT(EPOCH FROM now() - created_at), 0)::float8`, orgID, id).Scan(&waited); uerr != nil {
+		return RunClaim{}, uerr
+	}
+	return RunClaim{Claimed: true, Started: true, Waited: time.Duration(waited * float64(time.Second))}, nil
+}
+
+// serialTurn reports whether the pending run id is the oldest pending run
+// of key while no other run of key is running.
+func serialTurn(ctx context.Context, tx pgx.Tx, orgID, key, id string) (bool, error) {
+	var first string
+	err := tx.QueryRow(ctx, `SELECT id::text FROM workflow_run WHERE organization_id=$1 AND serial_key=$2 AND status='pending'
+		AND NOT EXISTS (SELECT 1 FROM workflow_run o WHERE o.organization_id=$1 AND o.serial_key=$2 AND o.status='running' AND o.id<>$3::uuid)
+		`+serialOrder+` LIMIT 1`, orgID, key, id).Scan(&first)
+	if err == pgx.ErrNoRows {
+		return false, nil
+	}
+	return err == nil && first == id, err
+}
+
+// NextSerialRun implements Repository (WP-1089 AK3).
+func (r *PGRepository) NextSerialRun(ctx context.Context, orgID, key string, then func(ctx context.Context, run *Run)) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, serialLock, orgID, key); err != nil {
+			return err
+		}
+		run, err := scanRun(tx.QueryRow(ctx, `UPDATE workflow_run SET enqueues = enqueues + 1 WHERE organization_id=$1 AND id = (
+			SELECT id FROM workflow_run WHERE organization_id=$1 AND serial_key=$2 AND status='pending'
+				AND NOT EXISTS (SELECT 1 FROM workflow_run o WHERE o.organization_id=$1 AND o.serial_key=$2 AND o.status='running')
+				`+serialOrder+` LIMIT 1) RETURNING `+runCols, orgID, key))
+		if err == pgx.ErrNoRows {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		database.AfterCommit(ctx, func(ctx context.Context) { then(ctx, run) })
+		return nil
+	})
+}
+
+// RequeueRun implements Repository.
+func (r *PGRepository) RequeueRun(ctx context.Context, orgID, id string) (*Run, error) {
+	var run *Run
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		run, err = scanRun(tx.QueryRow(ctx, "UPDATE workflow_run SET enqueues = enqueues + 1 WHERE organization_id=$1 AND id=$2 AND status='pending' RETURNING "+runCols, orgID, id))
+		if err == pgx.ErrNoRows {
+			return ErrRunNotFound
+		}
+		return err
+	})
+	return run, err
+}
+
+// StrandedSerialKeys implements Repository; the age is measured on the
+// clock of the database, on the head of the key (its first pending run in
+// serialOrder, the run NextSerialRun picks): a head queued just now keeps
+// its job even when a later run of the key waits longer.
+func (r *PGRepository) StrandedSerialKeys(ctx context.Context, orgID string, age time.Duration) ([]string, error) {
+	out := []string{}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT h.serial_key FROM (
+				SELECT DISTINCT ON (p.serial_key) p.serial_key, p.updated_at FROM workflow_run p
+				WHERE p.organization_id=$1 AND p.serial_key IS NOT NULL AND p.status='pending'
+				ORDER BY p.serial_key, p.entity_seq ASC NULLS LAST, p.created_at ASC, p.id ASC) h
+			WHERE h.updated_at < now() - make_interval(secs => $2)
+			AND NOT EXISTS (SELECT 1 FROM workflow_run o WHERE o.organization_id=$1 AND o.serial_key=h.serial_key AND o.status='running')
+			ORDER BY h.serial_key`, orgID, age.Seconds())
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var k string
+			if err := rows.Scan(&k); err != nil {
+				return err
+			}
+			out = append(out, k)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// RunJobOrigin implements Repository: it reads the job the run was first
+// queued with organization-wide, whatever the scope of the caller, since a
+// job of one run queues the job of another run of its CI.
+func (r *PGRepository) RunJobOrigin(ctx context.Context, orgID, runID string) (*jobs.Job, error) {
+	var job *jobs.Job
+	scope := database.OrgWideScope(orgID, "")
+	err := database.WithTenant(database.WithoutTx(ctx), r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		j := &jobs.Job{OrganizationID: orgID, Kind: RunJobKind}
+		var recorded bool
+		var s jobs.Scope
+		err := tx.QueryRow(ctx, `SELECT id::text, COALESCE(created_by::text, ''), scope_recorded, scope_clients::text[], scope_sites::text[], scope_teams::text[]
+			FROM job WHERE organization_id=$1 AND kind=$2 AND idempotency_key IN ($3, $4) ORDER BY created_at LIMIT 1`,
+			orgID, RunJobKind, RunJobKey(runID, 0), legacyRunJobKey(runID)).Scan(&j.ID, &j.CreatedBy, &recorded, &s.Clients, &s.Sites, &s.Teams)
+		if err == pgx.ErrNoRows {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if recorded {
+			j.Scope = &s
+		}
+		job = j
+		return nil
+	})
+	return job, err
+}
+
 func (r *PGRepository) AppendStep(ctx context.Context, s *Step) error {
 	return database.WithRequestTenant(ctx, r.pool, s.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if s.Input == nil {
@@ -413,9 +620,14 @@ func scanRun(s scanner) (*Run, error) {
 	r := &Run{}
 	var ctxb []byte
 	var fin, next sql.NullTime
+	var seq sql.NullInt64
 	if err := s.Scan(&r.ID, &r.OrganizationID, &r.WorkflowID, &r.DefinitionVersionID, &r.Status, &r.Trigger, &ctxb, &r.StartedAt, &fin,
-		&r.Attempts, &next, &r.LastError, &r.InitiatedBy, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		&r.Attempts, &next, &r.LastError, &r.InitiatedBy, &r.CIID, &r.SerialKey, &seq, &r.Enqueues, &r.CreatedAt, &r.UpdatedAt); err != nil {
 		return nil, err
+	}
+	if seq.Valid {
+		v := seq.Int64
+		r.EntitySeq = &v
 	}
 	if next.Valid {
 		v := next.Time.UTC()

@@ -117,6 +117,11 @@ var DerivedScopeTables = map[string]DerivedScope{
 			"the visibility of the order follows its client_id",
 		TestFile: "internal/order/order_target_integration_test.go", TestName: "TestOrderTargetBinMatchesClient",
 	},
+	"workflow_run": {
+		Path:     "ci_id -> ci (workflow.runVisible in ListRuns and GetRun)",
+		Reason:   "a run is visible only when its CI is; own scope columns follow with WP-1093",
+		TestFile: "internal/workflow/workflow_scope_integration_test.go", TestName: "TestWorkflowRunCIScope",
+	},
 	"metric_sample": {
 		Path:     "ci_id -> ci (security-barrier views metric_sample_v and metric_sample_1h_v, migration 000143)",
 		Reason:   "TimescaleDB hypertable without row level security (ViewProtectedTables)",

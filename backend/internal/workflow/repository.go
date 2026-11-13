@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -26,6 +27,10 @@ var (
 	// ErrPreconditionFailed: If-Match names another version than the
 	// current one of the definition (412, API-07).
 	ErrPreconditionFailed = errors.New("the workflow definition has changed since the If-Match version")
+	// ErrCINotFound: the CI of a run's context is unknown, of another
+	// organization or outside the scope of the trigger; all answer 404
+	// alike (TEN-04, WP-1089).
+	ErrCINotFound = errors.New("the CI of the workflow run was not found")
 )
 
 type Repository interface {
@@ -43,6 +48,10 @@ type Repository interface {
 	GetVersionByID(ctx context.Context, orgID, id string) (*DefinitionVersion, error)
 	ListRuns(ctx context.Context, orgID, workflowID, status string, page api.PaginationParams) ([]Run, int, error)
 	GetRun(ctx context.Context, orgID, id string) (*Run, error)
+	// GetRunForJob returns the run organization-wide, whatever the scope
+	// of ctx: the worker closes a run whose CI left the scope of its job
+	// (WP-1089).
+	GetRunForJob(ctx context.Context, orgID, id string) (*Run, error)
 	CreateRun(ctx context.Context, run *Run) error
 	UpdateRunStatus(ctx context.Context, orgID, id, status string, finished *time.Time, runCtx JSONMap) (*Run, error)
 	// RecordAttempt stores attempts, next_attempt_at and last_error of the
@@ -51,6 +60,30 @@ type Repository interface {
 	AppendStep(ctx context.Context, step *Step) error
 	UpdateStep(ctx context.Context, orgID, id, status string, output JSONMap, errText string) (*Step, error)
 	ListSteps(ctx context.Context, orgID, runID string) ([]Step, error)
+	// ClaimRun decides whether the job of enqueue may execute the run now
+	// (WP-1089 AK2): under the advisory lock of the run's serial key, a
+	// pending run is claimed only when it is the oldest pending run of the
+	// key (entity_seq NULLS LAST, created_at, id) and no other run of the
+	// key is running; it becomes running in the same transaction. A run
+	// without a serial key is claimed at once, a running one (a retry of
+	// its job) as well. The job of an older enqueue claims nothing.
+	ClaimRun(ctx context.Context, orgID, id string, enqueue int) (RunClaim, error)
+	// NextSerialRun picks under the advisory lock of key the oldest pending
+	// run of key while no run of key is running, raises its enqueues and
+	// calls then with it once the transaction has committed
+	// (database.AfterCommit, WP-1089 AK3). Without such a run then is not
+	// called.
+	NextSerialRun(ctx context.Context, orgID, key string, then func(ctx context.Context, run *Run)) error
+	// RequeueRun raises the enqueues of a pending run and returns it: its
+	// next job is the only one that executes it.
+	RequeueRun(ctx context.Context, orgID, id string) (*Run, error)
+	// StrandedSerialKeys lists the serial keys with a pending run unchanged
+	// for longer than age while no run of the key is running (the system
+	// job workflow.serial_sweep, WP-1089 AK4).
+	StrandedSerialKeys(ctx context.Context, orgID string, age time.Duration) ([]string, error)
+	// RunJobOrigin returns the first job workflow.run of a run with its
+	// creator and scope snapshot (TEN-09); nil when there is none.
+	RunJobOrigin(ctx context.Context, orgID, runID string) (*jobs.Job, error)
 }
 
 type MemoryRepository struct {
@@ -230,6 +263,12 @@ func (r *MemoryRepository) GetRun(_ context.Context, orgID, id string) (*Run, er
 	cp.Steps = r.stepsForLocked(orgID, id)
 	return &cp, nil
 }
+
+// GetRunForJob implements Repository: the memory repository knows no
+// scope.
+func (r *MemoryRepository) GetRunForJob(ctx context.Context, orgID, id string) (*Run, error) {
+	return r.GetRun(ctx, orgID, id)
+}
 func (r *MemoryRepository) CreateRun(_ context.Context, run *Run) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -239,6 +278,7 @@ func (r *MemoryRepository) CreateRun(_ context.Context, run *Run) error {
 		return fmt.Errorf("workflow run needs a version of its definition")
 	}
 	run.ID = r.nextID("run")
+	run.SerialKey = serialKeyOf(run.CIID)
 	now := time.Now().UTC()
 	run.CreatedAt = now
 	run.UpdatedAt = now
@@ -307,6 +347,138 @@ func (r *MemoryRepository) ListSteps(_ context.Context, orgID, runID string) ([]
 	defer r.mu.RUnlock()
 	return r.stepsForLocked(orgID, runID), nil
 }
+func (r *MemoryRepository) ClaimRun(_ context.Context, orgID, id string, enqueue int) (RunClaim, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	run := r.runs[id]
+	if run == nil || run.OrganizationID != orgID {
+		return RunClaim{}, ErrRunNotFound
+	}
+	if run.Enqueues != enqueue {
+		return RunClaim{}, nil
+	}
+	switch run.Status {
+	case StatusRunning:
+		return RunClaim{Claimed: true}, nil
+	case StatusPending:
+	default:
+		return RunClaim{}, nil
+	}
+	if run.SerialKey != "" {
+		if r.runningLocked(orgID, run.SerialKey, id) {
+			return RunClaim{}, nil
+		}
+		if first := r.oldestPendingLocked(orgID, run.SerialKey); first == nil || first.ID != id {
+			return RunClaim{}, nil
+		}
+	}
+	now := time.Now().UTC()
+	run.Status, run.UpdatedAt = StatusRunning, now
+	return RunClaim{Claimed: true, Started: true, Waited: now.Sub(run.CreatedAt)}, nil
+}
+func (r *MemoryRepository) NextSerialRun(ctx context.Context, orgID, key string, then func(ctx context.Context, run *Run)) error {
+	r.mu.Lock()
+	var next *Run
+	if !r.runningLocked(orgID, key, "") {
+		if first := r.oldestPendingLocked(orgID, key); first != nil {
+			first.Enqueues++
+			cp := *first
+			next = &cp
+		}
+	}
+	r.mu.Unlock()
+	if next != nil {
+		then(ctx, next)
+	}
+	return nil
+}
+func (r *MemoryRepository) RequeueRun(_ context.Context, orgID, id string) (*Run, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	run := r.runs[id]
+	if run == nil || run.OrganizationID != orgID || run.Status != StatusPending {
+		return nil, ErrRunNotFound
+	}
+	run.Enqueues++
+	cp := *run
+	return &cp, nil
+}
+func (r *MemoryRepository) StrandedSerialKeys(_ context.Context, orgID string, age time.Duration) ([]string, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	cutoff := time.Now().UTC().Add(-age)
+	seen := map[string]bool{}
+	out := []string{}
+	for _, run := range r.runs {
+		if run.OrganizationID != orgID || run.SerialKey == "" || run.Status != StatusPending || seen[run.SerialKey] {
+			continue
+		}
+		seen[run.SerialKey] = true
+		// The age counts on the head of the key, the run NextSerialRun
+		// picks.
+		head := r.oldestPendingLocked(orgID, run.SerialKey)
+		if head != nil && head.UpdatedAt.Before(cutoff) && !r.runningLocked(orgID, run.SerialKey, "") {
+			out = append(out, run.SerialKey)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// RunJobOrigin: the memory repository keeps no jobs.
+func (r *MemoryRepository) RunJobOrigin(context.Context, string, string) (*jobs.Job, error) {
+	return nil, nil
+}
+
+// runningLocked reports whether a run of key other than except is running.
+func (r *MemoryRepository) runningLocked(orgID, key, except string) bool {
+	for _, run := range r.runs {
+		if run.OrganizationID == orgID && run.SerialKey == key && run.ID != except && run.Status == StatusRunning {
+			return true
+		}
+	}
+	return false
+}
+
+// oldestPendingLocked returns the pending run of key that is executed
+// next: entity_seq NULLS LAST, then created_at, then id.
+func (r *MemoryRepository) oldestPendingLocked(orgID, key string) *Run {
+	var first *Run
+	for _, run := range r.runs {
+		if run.OrganizationID != orgID || run.SerialKey != key || run.Status != StatusPending {
+			continue
+		}
+		if first == nil || serialBefore(run, first) {
+			first = run
+		}
+	}
+	return first
+}
+
+// serialBefore orders the pending runs of a serial key (WP-1089 AK2).
+func serialBefore(a, b *Run) bool {
+	switch {
+	case a.EntitySeq != nil && b.EntitySeq == nil:
+		return true
+	case a.EntitySeq == nil && b.EntitySeq != nil:
+		return false
+	case a.EntitySeq != nil && *a.EntitySeq != *b.EntitySeq:
+		return *a.EntitySeq < *b.EntitySeq
+	case !a.CreatedAt.Equal(b.CreatedAt):
+		return a.CreatedAt.Before(b.CreatedAt)
+	}
+	return a.ID < b.ID
+}
+
+// serialKeyOf is the serial key of a run on ciID: "ci:<ci_id>", empty
+// without a CI (such runs are executed in parallel).
+func serialKeyOf(ciID string) string {
+	if ciID == "" {
+		return ""
+	}
+	return "ci:" + ciID
+}
+
 func (r *MemoryRepository) stepsForLocked(orgID, runID string) []Step {
 	out := []Step{}
 	for _, s := range r.steps {

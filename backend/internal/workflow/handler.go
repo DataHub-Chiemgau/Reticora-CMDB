@@ -56,6 +56,8 @@ func writeWorkflowError(w http.ResponseWriter, r *http.Request, err error) {
 		api.WriteError(w, 404, "Not Found", ErrNotFound.Error())
 	case errors.Is(err, ErrRunNotFound):
 		api.WriteError(w, 404, "Not Found", ErrRunNotFound.Error())
+	case errors.Is(err, ErrCINotFound):
+		api.WriteError(w, 404, "Not Found", ErrCINotFound.Error())
 	case errors.Is(err, ErrVersionNotFound):
 		api.WriteError(w, 404, "Not Found", ErrVersionNotFound.Error())
 	case errors.Is(err, ErrPreconditionFailed):

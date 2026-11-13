@@ -44,6 +44,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/sla"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
 )
 
 // serviceCycle is how often a worker that answers requests records a cycle
@@ -457,6 +458,19 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 			return status == entitlement.StatusActive, serr
 		}
 		systemJobs = append(systemJobs, collectorStatus.Schedule())
+		// Workflow runs of a CI whose wake-up was lost (WP-1089, EVT-01):
+		// every minute the next pending run of each free CI that waited
+		// longer than five minutes is queued again, with the module
+		// workflows; without the job queue the runs execute in the request
+		// and the sweep queues nothing.
+		if d.modules.Enabled("workflows") {
+			sweepRuns := workflow.NewExecutor(d.repos.Workflow, nil, nil, nil, nil)
+			if d.jobQueue != nil {
+				sweepRuns.WithQueue(d.jobQueue)
+			}
+			systemJobs = append(systemJobs, workflow.NewSerialSweep(sweepRuns,
+				func(ctx context.Context) ([]string, error) { return database.OrganizationIDs(ctx, pool) }).Schedule())
+		}
 		// Alarm retention (ALR-01, WP-981): daily the resolved alarms
 		// older than 400 days with their transitions, with the module
 		// monitoring.

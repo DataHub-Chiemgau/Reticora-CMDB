@@ -46,6 +46,7 @@ type workerEnv struct {
 	exec  *Executor
 	jobs  *jobs.PGRepository
 	queue *jobs.Queue
+	js    jetstream.JetStream
 	user  string
 	ctx   context.Context // the user, org-wide
 }
@@ -111,6 +112,7 @@ func newWorkerEnv(t *testing.T, maxAttempts int, run bool) *workerEnv {
 		t.Fatal(err)
 	}
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	e.js = js
 	e.queue = jobs.NewQueue(jobs.NewService(e.jobs), js)
 	e.queue.Stream, e.queue.SubjectPrefix = "JOBS_WP1088_"+suffix, "wp1088_"+suffix+"."
 	e.queue.AckMargin, e.queue.SweepInterval = 500*time.Millisecond, time.Hour
@@ -183,7 +185,7 @@ func (e *workerEnv) job(t *testing.T, runID string) *jobs.Job {
 	t.Helper()
 	var id string
 	if err := e.f.Admin.QueryRow(context.Background(), `SELECT id::text FROM job WHERE organization_id = $1 AND idempotency_key = $2`,
-		e.f.OrgA, RunJobKey(runID)).Scan(&id); err != nil {
+		e.f.OrgA, RunJobKey(runID, 0)).Scan(&id); err != nil {
 		t.Fatalf("job of run %s: %v", runID, err)
 	}
 	j, err := e.jobs.Get(context.Background(), e.f.OrgA, id)
@@ -409,7 +411,7 @@ func TestTriggerRunReturnsPendingRun(t *testing.T) {
 	}
 	var n int
 	if err := e.f.Admin.QueryRow(context.Background(), `SELECT count(*) FROM job WHERE organization_id = $1 AND kind = $2 AND idempotency_key = $3`,
-		e.f.OrgA, RunJobKind, RunJobKey(run.ID)).Scan(&n); err != nil || n != 1 {
+		e.f.OrgA, RunJobKind, RunJobKey(run.ID, 0)).Scan(&n); err != nil || n != 1 {
 		t.Errorf("jobs of the run after a second Execute: %d %v, want 1", n, err)
 	}
 	if got, _ := e.repo.GetRun(e.ctx, e.f.OrgA, run.ID); got == nil || got.Status != StatusPending || len(got.Steps) != 0 {

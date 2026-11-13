@@ -46,6 +46,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
 )
 
 func testSessionKeyPath(t *testing.T) string {
@@ -532,6 +533,29 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 	offDeps.modules = monitoringModules
 	if registeredSystemJobs(t, offDeps)[probe.AssignKind] {
 		t.Errorf("%s is registered with %s=false", probe.AssignKind, config.WorkerEnvKey(config.WorkerProbeAssign))
+	}
+
+	// The serial sweep of the workflow runs (WFL-02, EVT-01, WP-1089):
+	// workflow.serial_sweep every minute with the module workflows and the
+	// database; without the module or the database not.
+	if registered[workflow.SerialSweepKind] {
+		t.Errorf("without the module workflows %s is registered", workflow.SerialSweepKind)
+	}
+	workflowModules, err := server.ParseModules("workflows")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, withDB := range []bool{true, false} {
+		deps := systemJobTestDeps(t, cfg, withDB)
+		deps.modules = workflowModules
+		if kinds := registeredSystemJobs(t, deps); kinds[workflow.SerialSweepKind] != withDB {
+			t.Errorf("JOB-02 workflow serial sweep (database %v): registered %v", withDB, kinds[workflow.SerialSweepKind])
+		}
+		for _, job := range systemJobs(deps) {
+			if job.Kind == workflow.SerialSweepKind && (job.Spec != "* * * * *" || job.MaxCatchUp != 1) {
+				t.Errorf("%s: spec %q, max catch-up %d; want every minute and 1", job.Kind, job.Spec, job.MaxCatchUp)
+			}
+		}
 	}
 
 	// The ADMP cache (ADM-03, WP-929): admp.refresh_linked every 15

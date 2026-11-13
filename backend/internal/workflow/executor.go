@@ -99,7 +99,24 @@ func (e *Executor) Trigger(ctx context.Context, orgID string, def *Definition, t
 // rows in one transaction (database.ContextWithTx) executes it with Execute
 // after the commit, so a failing action never rolls back the run that
 // records the failure (WFL-04).
+//
+// A context that names a CI (ci_id, or id in ci) binds the run to it: the
+// CI is read in the scope of ctx, the trigger's, and one that is unknown,
+// of another organization or outside that scope is ErrCINotFound (404,
+// TEN-04). The runs of one CI are executed one after the other (EVT-01,
+// WP-1089).
 func (e *Executor) Start(ctx context.Context, orgID string, def *Definition, trigger string, payload JSONMap) (*Run, error) {
+	return e.start(ctx, orgID, def, trigger, payload, nil)
+}
+
+// StartSequenced is Start for a run started by the event with sequence
+// number entitySeq of its object (Envelope.EntitySeq): the runs of a CI
+// are executed in the order of these numbers (EVT-01, WP-1090).
+func (e *Executor) StartSequenced(ctx context.Context, orgID string, def *Definition, trigger string, payload JSONMap, entitySeq int64) (*Run, error) {
+	return e.start(ctx, orgID, def, trigger, payload, &entitySeq)
+}
+
+func (e *Executor) start(ctx context.Context, orgID string, def *Definition, trigger string, payload JSONMap, entitySeq *int64) (*Run, error) {
 	if def == nil {
 		return nil, fmt.Errorf("workflow definition is required")
 	}
@@ -116,8 +133,12 @@ func (e *Executor) Start(ctx context.Context, orgID string, def *Definition, tri
 		}
 		versionID = stored.CurrentVersionID
 	}
+	ciID, err := e.runCI(ctx, orgID, payload)
+	if err != nil {
+		return nil, err
+	}
 	run := &Run{OrganizationID: orgID, WorkflowID: def.ID, DefinitionVersionID: versionID, Status: StatusPending, Trigger: trigger, Context: payload,
-		StartedAt: time.Now().UTC(), InitiatedBy: tenant.FromContext(ctx).UserID}
+		StartedAt: time.Now().UTC(), InitiatedBy: tenant.FromContext(ctx).UserID, CIID: ciID, EntitySeq: entitySeq}
 	if err := e.repo.CreateRun(ctx, run); err != nil {
 		return nil, err
 	}
@@ -133,8 +154,8 @@ func (e *Executor) Execute(ctx context.Context, orgID string, _ *Definition, run
 		// executed in the request, as before (parity).
 		return e.resume(ctx, orgID, run, attempt{})
 	}
-	if _, _, err := e.queue.Submit(ctx, orgID, RunJobKind, RunJobParams{RunID: run.ID},
-		jobs.EnqueueOptions{IdempotencyKey: RunJobKey(run.ID), CreatedBy: run.InitiatedBy}); err != nil {
+	if _, _, err := e.queue.Submit(ctx, orgID, RunJobKind, RunJobParams{RunID: run.ID, Enqueue: run.Enqueues},
+		jobs.EnqueueOptions{IdempotencyKey: RunJobKey(run.ID, run.Enqueues), CreatedBy: run.InitiatedBy}); err != nil {
 		e.failRun(ctx, orgID, run, err)
 		return nil, fmt.Errorf("queue workflow run: %w", err)
 	}
@@ -184,7 +205,55 @@ func (e *Executor) Approve(ctx context.Context, orgID, runID, decision, comment 
 	if _, err := e.repo.UpdateStep(ctx, orgID, waiting.ID, StatusSucceeded, out, ""); err != nil {
 		return nil, fmt.Errorf("complete approval step: %w", err)
 	}
-	return e.resume(ctx, orgID, run, attempt{})
+	if e.queue == nil {
+		return e.resume(ctx, orgID, run, attempt{})
+	}
+	return e.continueApproved(ctx, orgID, run)
+}
+
+// continueApproved queues an approved run with the job queue like a new
+// run (WP-1089 AK3): it waits for the runs ahead of it on its CI.
+func (e *Executor) continueApproved(ctx context.Context, orgID string, run *Run) (*Run, error) {
+	if _, err := e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusPending, nil, run.Context); err != nil {
+		return nil, fmt.Errorf("continue approved run: %w", err)
+	}
+	next, err := e.repo.RequeueRun(ctx, orgID, run.ID)
+	if err != nil {
+		return nil, fmt.Errorf("continue approved run: %w", err)
+	}
+	e.requeue(ctx, orgID, next)
+	return e.repo.GetRun(ctx, orgID, run.ID)
+}
+
+// runCI returns the CI a run's context names (ci_id, or id in ci), read in
+// the scope of ctx; empty without one (WP-1089 AK1).
+func (e *Executor) runCI(ctx context.Context, orgID string, payload JSONMap) (string, error) {
+	id := str(payload, "ci_id", "")
+	if id == "" {
+		switch c := payload["ci"].(type) {
+		case map[string]any:
+			id = str(c, "id", "")
+		case JSONMap:
+			id = str(c, "id", "")
+		}
+	}
+	if id == "" {
+		return "", nil
+	}
+	if !api.IsUUID(id) {
+		return "", ErrCINotFound
+	}
+	if e.cis == nil {
+		return "", fmt.Errorf("ci repository unavailable")
+	}
+	item, err := e.cis.GetByID(ctx, orgID, id)
+	if errors.Is(err, ci.ErrNotFound) {
+		return "", ErrCINotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("read the CI of the run: %w", err)
+	}
+	return item.ID, nil
 }
 
 // resume executes the actions of the run's definition version (WFL-02): a
