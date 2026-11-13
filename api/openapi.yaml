@@ -14212,6 +14212,63 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalServerError' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/v1/compliance/rule-templates:
+    x-phase: P3
+    x-feature: compliance_findings
+    get:
+      operationId: listComplianceRuleTemplates
+      tags: [Compliance]
+      summary: List the shipped compliance rule templates
+      description: >-
+        The catalog of the shipped rule templates (SEC-03, WP-1130, E-240):
+        firmware version maintained, no open critical finding, no open
+        unauthorized change, management IP set on network devices, no active
+        CI at end of life. Name, description and remediation in the language
+        of Accept-Language (de or en, fallback de); expression and
+        applies_when are MET-45 conditions, controls name the catalog of
+        GET /api/v1/compliance/controls.
+      responses:
+        '200':
+          description: The templates
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { type: array, items: { $ref: '#/components/schemas/ComplianceRuleTemplate' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/v1/compliance/rule-templates/{key}/instantiate:
+    x-phase: P3
+    x-feature: compliance_findings
+    parameters:
+      - name: key
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: instantiateComplianceRuleTemplate
+      tags: [Compliance]
+      summary: Create an inactive rule from a template
+      description: >-
+        Creates the rule of the template inactive (active false) with its
+        controls, texts in the language of Accept-Language; the description
+        ends with the template key and version, which the audit entry of the
+        route keeps with the row. An unknown key is 404, a CI type of the
+        template the organization lacks 422 on ci_type, a rule of the same
+        name 409. The memory profile has no control catalog (503).
+      responses:
+        '201':
+          description: The created rule with its controls
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ComplianceRuleDetail' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/v1/compliance/settings:
     x-phase: P3
     x-feature: compliance_findings
@@ -41454,6 +41511,36 @@ components:
         failed: { type: integer }
         not_applicable: { type: integer }
         score: { type: number }
+    ComplianceRuleTemplate:
+      type: object
+      required: [key, version, name, description, severity, category, expression, remediation_hint, controls]
+      properties:
+        key: { type: string }
+        version: { type: integer }
+        name: { type: string }
+        description: { type: string }
+        severity: { type: string, enum: [low, medium, high, critical] }
+        category: { type: string }
+        ci_type_key: { type: string, description: The CI type the rule applies to; absent for every type. }
+        ci_type_keys:
+          type: array
+          items: { type: string }
+          description: >-
+            Several CI types the rule applies to (management_ip_set: switch,
+            router, firewall, access_point); instantiate sets applies_when to
+            ci_type_id in the ids the organization has, none of them is 422 on
+            ci_type. Absent with ci_type_key or for every type.
+        expression: { type: object, additionalProperties: true, description: MET-45 condition. }
+        applies_when: { type: object, additionalProperties: true, description: MET-45 condition; absent without one. }
+        remediation_hint: { type: string }
+        controls:
+          type: array
+          items:
+            type: object
+            required: [standard, control_id]
+            properties:
+              standard: { type: string, enum: [iso27001, nis2, kritis] }
+              control_id: { type: string }
     ComplianceScoreGroup:
       type: object
       required: [key, label, passed, failed, not_applicable, score]

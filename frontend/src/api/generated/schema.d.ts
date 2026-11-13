@@ -6162,6 +6162,48 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/compliance/rule-templates': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the shipped compliance rule templates
+     * @description The catalog of the shipped rule templates (SEC-03, WP-1130, E-240): firmware version maintained, no open critical finding, no open unauthorized change, management IP set on network devices, no active CI at end of life. Name, description and remediation in the language of Accept-Language (de or en, fallback de); expression and applies_when are MET-45 conditions, controls name the catalog of GET /api/v1/compliance/controls.
+     */
+    get: operations['listComplianceRuleTemplates'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/compliance/rule-templates/{key}/instantiate': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        key: string;
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create an inactive rule from a template
+     * @description Creates the rule of the template inactive (active false) with its controls, texts in the language of Accept-Language; the description ends with the template key and version, which the audit entry of the route keeps with the row. An unknown key is 404, a CI type of the template the organization lacks 422 on ci_type, a rule of the same name 409. The memory profile has no control catalog (503).
+     */
+    post: operations['instantiateComplianceRuleTemplate'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/compliance/settings': {
     parameters: {
       query?: never;
@@ -20236,6 +20278,33 @@ export interface components {
       failed: number;
       not_applicable: number;
       score: number;
+    };
+    ComplianceRuleTemplate: {
+      key: string;
+      version: number;
+      name: string;
+      description: string;
+      /** @enum {string} */
+      severity: 'low' | 'medium' | 'high' | 'critical';
+      category: string;
+      /** @description The CI type the rule applies to; absent for every type. */
+      ci_type_key?: string;
+      /** @description Several CI types the rule applies to (management_ip_set: switch, router, firewall, access_point); instantiate sets applies_when to ci_type_id in the ids the organization has, none of them is 422 on ci_type. Absent with ci_type_key or for every type. */
+      ci_type_keys?: string[];
+      /** @description MET-45 condition. */
+      expression: {
+        [key: string]: unknown;
+      };
+      /** @description MET-45 condition; absent without one. */
+      applies_when?: {
+        [key: string]: unknown;
+      };
+      remediation_hint: string;
+      controls: {
+        /** @enum {string} */
+        standard: 'iso27001' | 'nis2' | 'kritis';
+        control_id: string;
+      }[];
     };
     /** @description One group of the compliance score; key is empty for results without client, site or CI type. */
     ComplianceScoreGroup: {
@@ -38657,6 +38726,57 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  listComplianceRuleTemplates: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The templates */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            data: components['schemas']['ComplianceRuleTemplate'][];
+          };
+        };
+      };
+      401: components['responses']['Unauthorized'];
+    };
+  };
+  instantiateComplianceRuleTemplate: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        key: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The created rule with its controls */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ComplianceRuleDetail'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
       503: components['responses']['ServiceUnavailable'];
     };

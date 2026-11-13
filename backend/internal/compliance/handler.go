@@ -46,6 +46,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/compliance/score/history", h.ScoreHistory)
 	r.Get("/api/v1/compliance/settings", h.GetSettings)
 	r.Put("/api/v1/compliance/settings", h.PutSettings)
+	r.Get("/api/v1/compliance/rule-templates", h.ListRuleTemplates)
+	r.Post("/api/v1/compliance/rule-templates/{key}/instantiate", h.InstantiateRuleTemplate)
 	r.Get("/api/v1/compliance/report", h.Report)
 	r.Get("/api/v1/compliance/controls", h.ListControls)
 	r.Get("/api/v1/compliance/controls/coverage", h.ControlCoverage)

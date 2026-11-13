@@ -423,6 +423,9 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	// organization, absent while the defaults apply.
 	// The severity weights of the compliance score (WP-1127): the row of
 	// the organization, absent while the defaults apply.
+	// The inactive rule a template creates (WP-1130); its description
+	// names template and version.
+	m["POST "+v1+"compliance/rule-templates/{key}/instantiate"] = created("compliance_rule")
 	m["PUT "+v1+"compliance/settings"] = RouteSnapshot{Table: "compliance_settings",
 		Keys: []SnapshotKey{{"organization_id", "$org"}}}
 	m["PUT "+v1+"monitoring/alarm-settings"] = RouteSnapshot{Table: "alarm_settings",

@@ -49,6 +49,8 @@ type Repository interface {
 	// snapshots (WP-1127); the memory profile keeps no snapshots
 	// (ErrScoreHistoryUnavailable).
 	ScoreStore
+	// TemplateStore instantiates the shipped rule templates (WP-1130).
+	TemplateStore
 }
 
 // FindingSource lists the findings of an organization (security.Repository

@@ -190,6 +190,7 @@ GET /api/v1/compliance/controls compliance:read
 GET /api/v1/compliance/controls/coverage compliance:read
 GET /api/v1/compliance/report compliance:read
 GET /api/v1/compliance/results compliance:read
+GET /api/v1/compliance/rule-templates compliance:read
 GET /api/v1/compliance/rules compliance:read
 GET /api/v1/compliance/rules/{id} compliance:read
 GET /api/v1/compliance/score compliance:read
@@ -598,6 +599,7 @@ POST /api/v1/collectors/enroll public
 POST /api/v1/collectors/enrollment-codes collector:manage
 POST /api/v1/collectors/{id}/heartbeat discovery:ingest
 POST /api/v1/compliance/evaluations compliance:write
+POST /api/v1/compliance/rule-templates/{key}/instantiate compliance:write
 POST /api/v1/compliance/rules compliance:write
 POST /api/v1/consumables stock:write
 POST /api/v1/consumables/{id}/movements stock:write
