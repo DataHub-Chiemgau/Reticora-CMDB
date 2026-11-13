@@ -1893,3 +1893,4 @@ WFL-02;[P3];F;backend/internal/workflow/approval_integration_test.go;WP-1098
 RBA-05;[P2–P4], [A];F;backend/internal/workflow/approval_integration_test.go;WP-1098
 NTF-05;[B], Zusätze [P2], [P3];F;backend/internal/workflow/approval_integration_test.go;WP-1098
 WFL-01;[P3];F;backend/internal/form/conditions_test.go;WP-1101
+LCY-04;[P3];F;backend/internal/ci/lifecycle_lock_integration_test.go;WP-1103

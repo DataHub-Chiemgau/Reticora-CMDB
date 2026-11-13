@@ -295,11 +295,13 @@ type rankTabler interface {
 }
 
 // typedDecisionReader reads the provenance of the field (nil without a
-// row; ErrNotFound never) and the CI type of the CI in one statement
-// (PGRepository). A reader without it is read through Get, and only the
-// organization-wide entries apply (the memory profile keeps no CI types).
+// row; ErrNotFound never), the CI type of the CI and whether the lifecycle
+// state of the CI locks the field (locked_fields, WP-1103) in one
+// statement (PGRepository). A reader without it is read through Get, and
+// only the organization-wide entries apply (the memory profile keeps no CI
+// types and no lifecycle locks).
 type typedDecisionReader interface {
-	decisionState(ctx context.Context, orgID, ciID, fieldName string) (fv *FieldValue, ciTypeID string, err error)
+	decisionState(ctx context.Context, orgID, ciID, fieldName string) (fv *FieldValue, ciTypeID string, locked bool, err error)
 }
 
 // rankCacheTTL is how long a rank table stays cached on an instance;

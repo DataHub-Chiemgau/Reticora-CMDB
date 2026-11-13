@@ -1265,28 +1265,31 @@ const recordOrgParam = "$1::uuid"
 // FieldValue with only InstanceAttribute set for an instance attribute
 // without one (as Get), and the CI type is empty for a CI the scope does
 // not show.
-func (r *PGRepository) decisionState(ctx context.Context, orgID, ciID, fieldName string) (*FieldValue, string, error) {
-	var out *FieldValue
-	var ciType string
-	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+func (r *PGRepository) decisionState(ctx context.Context, orgID, ciID, fieldName string) (out *FieldValue, ciType string, locked bool, err error) {
+	err = database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var instance bool
-		fv, err := scan(decisionScanner{row: tx.QueryRow(ctx, fmt.Sprintf(`
+		// lk: the lifecycle state of the CI locks the field (WP-1103 AK5).
+		fv, serr := scan(decisionScanner{row: tx.QueryRow(ctx, fmt.Sprintf(`
 			WITH ct AS (
 				SELECT COALESCE(ci.ci_type_id::text, '') AS type_id FROM ci WHERE ci.id = $1
 			), inst AS (
 				SELECT EXISTS (SELECT 1 FROM ci_instance_field_definition d
 					WHERE d.ci_id = $1 AND d.name = $2 AND EXISTS (SELECT 1 FROM ci WHERE ci.id = d.ci_id)) AS instance
+			), lk AS (
+				SELECT EXISTS (SELECT 1 FROM ci c JOIN lifecycle_state ls
+					ON ls.definition_id = lifecycle_model_effective(c.ci_type_id, 'ci') AND ls.key = c.lifecycle_state
+					WHERE c.id = $1 AND ls.locked_fields ? $2) AS locked
 			)
-			SELECT %[1]s, inst.instance, COALESCE((SELECT type_id FROM ct), '') FROM ci_field_value, inst
+			SELECT %[1]s, inst.instance, COALESCE((SELECT type_id FROM ct), ''), (SELECT locked FROM lk) FROM ci_field_value, inst
 			WHERE ci_id = $1 AND field_name = $2 AND %[2]s
 			UNION ALL
 			SELECT '', '', '', '', NULL::jsonb, '', NULL::timestamptz, NULL::jsonb, '', '', NULL::timestamptz, false,
-				now(), now(), 0, NULL::timestamptz, inst.instance, COALESCE((SELECT type_id FROM ct), '')
+				now(), now(), 0, NULL::timestamptz, inst.instance, COALESCE((SELECT type_id FROM ct), ''), (SELECT locked FROM lk)
 			FROM inst WHERE NOT EXISTS (
 				SELECT 1 FROM ci_field_value WHERE ci_id = $1 AND field_name = $2 AND %[2]s)`,
-			selectColumns, visibleCI), ciID, fieldName), instance: &instance, ciType: &ciType})
-		if err != nil {
-			return fmt.Errorf("get field value for decision: %w", err)
+			selectColumns, visibleCI), ciID, fieldName), instance: &instance, ciType: &ciType, locked: &locked})
+		if serr != nil {
+			return fmt.Errorf("get field value for decision: %w", serr)
 		}
 		switch {
 		case fv.ID != "":
@@ -1297,19 +1300,21 @@ func (r *PGRepository) decisionState(ctx context.Context, orgID, ciID, fieldName
 		}
 		return nil
 	})
-	return out, ciType, err
+	return out, ciType, locked, err
 }
 
 // decisionScanner scans a row of selectColumns followed by the instance
-// attribute flag and the CI type (decisionState).
+// attribute flag, the CI type and the lifecycle lock of the field
+// (decisionState).
 type decisionScanner struct {
 	row      pgx.Row
 	instance *bool
 	ciType   *string
+	locked   *bool
 }
 
 func (s decisionScanner) Scan(dest ...any) error {
-	return s.row.Scan(append(dest, s.instance, s.ciType)...)
+	return s.row.Scan(append(dest, s.instance, s.ciType, s.locked)...)
 }
 
 // rankTable returns the rank table of the organization from the cache of

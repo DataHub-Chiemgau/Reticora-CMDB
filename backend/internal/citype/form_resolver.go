@@ -654,11 +654,13 @@ func (r *PGRepository) FormCI(ctx context.Context, orgID, ciID string) (*FormSub
 	s := &FormSubject{}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var raw []byte
+		var state string
 		err := tx.QueryRow(ctx, `SELECT c.ci_type_id::text, c.attributes,
 				ARRAY(SELECT a.id::text FROM ci_type_ancestors(c.ci_type_id) a ORDER BY a.level),
 				ARRAY(SELECT ct.template_id::text FROM ci_template ct WHERE ct.ci_id = c.id ORDER BY ct.position),
-				ARRAY(SELECT d.name FROM ci_instance_field_definition d WHERE d.ci_id = c.id ORDER BY d.name)
-			FROM ci c WHERE c.id = $1`, ciID).Scan(&s.CITypeID, &raw, &s.Chain, &s.Templates, &s.Instance)
+				ARRAY(SELECT d.name FROM ci_instance_field_definition d WHERE d.ci_id = c.id ORDER BY d.name),
+				COALESCE(c.lifecycle_state, '')
+			FROM ci c WHERE c.id = $1`, ciID).Scan(&s.CITypeID, &raw, &s.Chain, &s.Templates, &s.Instance, &state)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrFormCINotFound
 		}
@@ -672,6 +674,11 @@ func (r *PGRepository) FormCI(ctx context.Context, orgID, ciID string) (*FormSub
 			}
 		}
 		s.Values = formValues(stored)
+		if state != "" {
+			// The lifecycle locks are readonly rules on the state
+			// (WP-1103): the form shows the locked fields read-only.
+			s.Values[lifecycleStateField] = state
+		}
 		return nil
 	})
 	if err != nil {

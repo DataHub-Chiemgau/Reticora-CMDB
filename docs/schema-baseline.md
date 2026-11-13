@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000361_workflow_approval
+Stand: Migration 000362_lifecycle_locked_fields
 
 ## Prüfung
 
@@ -899,6 +899,18 @@ restriktiven `workflow_approval_scoped_update`/`_scoped_delete` (E-09, Muster
 erhält `due_at` und `reminded_at` (Frist und Erinnerung, WP-1099) und den
 Teilindex `idx_workflow_step_due` (organization_id, due_at) WHERE status =
 'waiting_approval'. Die Tabelle oben und die Zeile „Stand:“ erzeugt
+`RETICORA_UPDATE_SCHEMA_BASELINE=1` beim Zusammenführen neu.
+
+Migration `lifecycle_locked_fields` (WP-1103, LCY-04, E-232, vorläufige
+Nummer 000362) gibt `lifecycle_state` die Spalte `locked_fields` (`jsonb NOT
+NULL DEFAULT '[]'`, `lifecycle_state_locked_fields_check`:
+`jsonb_typeof(locked_fields) = 'array'`): die Attributschlüssel und
+typisierten CI-Spalten, die ein CI im Zustand nicht ändern darf. Der
+CI-Service leitet daraus beim Auflösen der Regeln eines CIs je Feld eine
+readonly-Katalogregel mit der Bedingung `lifecycle_state = <zustand>` ab
+(gelesen mit der Typkette, keine eigene Anweisung), die Schreibentscheidung
+der Automationsquellen liest die Sperre mit der Provenienz. Keine neue
+Tabelle, RLS unverändert. Die Zeile „Stand:“ erzeugt
 `RETICORA_UPDATE_SCHEMA_BASELINE=1` beim Zusammenführen neu.
 
 `TestTenantReferencesCarryOrganization`

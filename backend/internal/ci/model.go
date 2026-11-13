@@ -288,6 +288,12 @@ type UpdateRequest struct {
 	// Authoritative marks an automated write of rank >= 92 (workflow,
 	// import), which raises the version like a manual change does.
 	Authoritative bool `json:"-"`
+	// ExpectedLifecycleState is the lifecycle state the service validated
+	// the locked fields against (WP-1103); nil: none. The PostgreSQL
+	// repository compares it on the locked row: a transition that
+	// committed in between is 409 on lifecycle_state, never a write the
+	// new state locks.
+	ExpectedLifecycleState *string `json:"-"`
 	// Sighting marks the write of a discovery record that saw the CI at
 	// LastSeenAt (REC-07, REC-09): a CI that is unknown in the locked row
 	// and was last seen before is active again in the same UPDATE. The

@@ -1558,6 +1558,12 @@ func (r *PGRepository) updateRow(ctx context.Context, tx pgx.Tx, orgID, id strin
 		}
 		return nil, fmt.Errorf("get ci before update: %w", err)
 	}
+	// The service checked the locked fields against the state it read; a
+	// transition committed since is a conflict (WP-1103).
+	if req.ExpectedLifecycleState != nil && *req.ExpectedLifecycleState != before.LifecycleState {
+		return nil, &api.FieldError{Field: "lifecycle_state", Status: http.StatusConflict,
+			Message: "the lifecycle state of the CI changed during the write; read the CI and retry"}
+	}
 	// A bulk revert leaves every field whose value changed since the bulk
 	// (WP-305), decided on the locked row.
 	if revertErr := applyRevertExpectation(ctx, tx, orgID, before, &req); revertErr != nil {

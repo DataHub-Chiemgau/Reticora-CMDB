@@ -447,8 +447,13 @@ type writeScope struct {
 // nil) any computed key of the patch is a violation; on an update a
 // computed key with the stored value is no change and returned in drop,
 // any other value a violation (attributes.<key>, computed).
+// lifecycleState is the lifecycle state of the stored CI (empty for a new
+// CI without one): the conditions see it as lifecycle_state, so the locked
+// fields of the state are read-only (LCY-04, WP-1103). A write never
+// changes the state, a transition does; a field changed after a transition
+// is checked against the new state.
 func (s *Service) validate(ctx context.Context, orgID, ciTypeID, ciID string, scope writeScope, existing, patch map[string]any,
-	templates *[]citype.CITemplate) (drop []string, err error) {
+	templates *[]citype.CITemplate, lifecycleState string) (drop []string, err error) {
 	if s.fields == nil {
 		if templates != nil {
 			return nil, ErrTemplatesUnavailable
@@ -473,11 +478,21 @@ func (s *Service) validate(ctx context.Context, orgID, ciTypeID, ciID string, sc
 		patch = rest
 	}
 	values := MergePatch(existing, patch)
+	if lifecycleState != "" {
+		if values == nil {
+			values = map[string]any{}
+		}
+		values[lifecycleStateField] = lifecycleState
+	}
 	if verr := validateWithRules(defs, catalog, values, patch, existing); verr != nil {
 		return nil, verr
 	}
 	return drop, checkReferences(ctx, s.referenceLookup(), orgID, defs, scope, values, patch, existing)
 }
+
+// lifecycleStateField is the condition input of the lifecycle state of the
+// CI (citype lock rules, WP-1103).
+const lifecycleStateField = "lifecycle_state"
 
 // withoutKeys returns attrs without the keys drop; nil when nothing is
 // left, so a patch of computed keys alone writes no attributes.
@@ -663,7 +678,7 @@ func (s *Service) create(ctx context.Context, item *Item) error {
 		templates = &item.Templates
 	}
 	if _, err := s.validate(ctx, item.OrganizationID, item.CITypeID, "", writeScope{clientID: item.ClientID},
-		nil, withTyped(item.Attributes, typed), templates); err != nil {
+		nil, withTyped(item.Attributes, typed), templates, item.LifecycleState); err != nil {
 		return err
 	}
 	if item.AssetID != "" && item.LocationID != "" {
@@ -795,9 +810,15 @@ func (s *Service) Update(ctx context.Context, orgID, id string, req UpdateReques
 		}
 		scope := writeScope{clientID: clientID, clientChanged: !strings.EqualFold(clientID, before.ClientID)}
 		drop, validateErr := s.validate(ctx, orgID, before.CITypeID, id, scope,
-			withTyped(before.Attributes, typedValues(before)), withTyped(req.Attributes, typed), req.Templates)
+			withTyped(before.Attributes, typedValues(before)), withTyped(req.Attributes, typed), req.Templates, before.LifecycleState)
 		if validateErr != nil {
 			return nil, validateErr
+		}
+		// The locked fields were checked against this state; the write
+		// holds only while the row still has it (WP-1103, AK3).
+		if s.fields != nil {
+			state := before.LifecycleState
+			req.ExpectedLifecycleState = &state
 		}
 		// A computed key with its stored value is no change (WP-717).
 		req.Attributes = withoutKeys(req.Attributes, drop)

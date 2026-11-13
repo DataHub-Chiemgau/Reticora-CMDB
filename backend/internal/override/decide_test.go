@@ -258,6 +258,8 @@ type rankStub struct {
 	fv      *FieldValue
 	ciType  string
 	entries []RankEntry
+	// locked: the lifecycle state of the CI locks the field (WP-1103).
+	locked bool
 }
 
 func (s rankStub) Get(context.Context, string, string, string) (*FieldValue, error) {
@@ -267,8 +269,8 @@ func (s rankStub) Get(context.Context, string, string, string) (*FieldValue, err
 	return s.fv, nil
 }
 
-func (s rankStub) decisionState(context.Context, string, string, string) (*FieldValue, string, error) {
-	return s.fv, s.ciType, nil
+func (s rankStub) decisionState(context.Context, string, string, string) (*FieldValue, string, bool, error) {
+	return s.fv, s.ciType, s.locked, nil
 }
 
 func (s rankStub) rankTable(context.Context, string) (*RankTable, error) {
@@ -421,5 +423,47 @@ func TestRankCacheSkipsStaleFill(t *testing.T) {
 	}
 	if _, _, ok = c.get("org"); !ok {
 		t.Fatal("the fresh table is not cached")
+	}
+}
+
+// TestLifecycleLockedDecision: a field the lifecycle state locks (WP-1103
+// AK5) is a conflict with reason lifecycle_locked for a source below rank
+// 92 with a differing value, no write with an equal one; the workflow
+// (rank 92) and the import decide as before.
+func TestLifecycleLockedDecision(t *testing.T) {
+	stub := rankStub{locked: true, ciType: "type-1"}
+	for _, tc := range []struct {
+		source  string
+		value   any
+		want    Decision
+		comment string
+	}{
+		{"snmp", "SN-2", Decision{Conflict: true, Reason: ReasonLifecycleLocked}, "differing value of snmp"},
+		{"agent", "SN-1", Decision{Reason: ReasonLifecycleLocked}, "equal value of the agent"},
+		{"workflow", "SN-2", Decision{Write: true, Reason: ReasonAllowed}, "workflow decides as before"},
+		{"import", "SN-2", Decision{Write: true, Reason: ReasonAllowed}, "import decides as before"},
+	} {
+		got := DecideAutomatedWrite(context.Background(), stub, &Write{OrganizationID: "org", CIID: "ci", Field: "serial_number",
+			Value: tc.value, Current: "SN-1", Source: tc.source, FallbackSource: "snmp", ObservedAt: time.Now()})
+		if got != tc.want {
+			t.Errorf("%s: %+v, want %+v", tc.comment, got, tc.want)
+		}
+	}
+	// A rank table that lifts a discovery source above the workflow does
+	// not lift it past the lock: discovery writes past the CI service.
+	lifted := rankStub{locked: true, ciType: "type-1", entries: []RankEntry{
+		{AttributeKey: "serial_number", Source: "redfish", Rank: 95},
+		{CITypeID: "type-1", AttributeKey: "serial_number", Source: "snmp", Rank: 99},
+	}}
+	for _, source := range []string{"redfish", "snmp"} {
+		if got := DecideAutomatedWrite(context.Background(), lifted, &Write{OrganizationID: "org", CIID: "ci", Field: "serial_number",
+			Value: "SN-2", Current: "SN-1", Source: source, FallbackSource: "snmp", ObservedAt: time.Now()}); got != (Decision{Conflict: true, Reason: ReasonLifecycleLocked}) {
+			t.Errorf("%s lifted to rank >= 92: %+v, want a lifecycle_locked conflict", source, got)
+		}
+	}
+	stub.locked = false
+	if got := DecideAutomatedWrite(context.Background(), stub, &Write{OrganizationID: "org", CIID: "ci", Field: "serial_number",
+		Value: "SN-2", Current: "SN-1", Source: "snmp", FallbackSource: "snmp", ObservedAt: time.Now()}); got.Reason == ReasonLifecycleLocked {
+		t.Errorf("unlocked field: %+v", got)
 	}
 }

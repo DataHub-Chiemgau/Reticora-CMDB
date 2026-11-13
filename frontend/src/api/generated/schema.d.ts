@@ -15603,7 +15603,7 @@ export interface components {
       /** @description Machine-readable code of the failing rule, set where one is defined. A composition conflict of attribute definitions (MET-16, 422 with `field` = `key`) carries `datatype-conflict` (data type, reference target or `multi_value` differ), `enum-empty` (no allowed value is left), `range-empty` (`min` > `max`), `length-range-empty` (`min_length` > `max_length`), `computed-conflict` (different expressions of a computed attribute) or `computed-constraint` (a computed attribute made required, given a default or made unique by another layer). */
       code?: string;
     };
-    /** @description A lifecycle model (LCY-02, MET-01): states and guarded transitions for CIs or assets. System models (is_system, no organization_id) are read-only. */
+    /** @description A lifecycle model (LCY-02, MET-01): states and guarded transitions for CIs or assets. System models (is_system, no organization_id) are read-only. A state of a CI model may lock fields (locked_fields, LCY-04, WP-1103): while a CI is in the state, a manual write (PATCH /cis/{id}), a bulk field change, an import and the workflow action set_ci_field refuse a changed value with code read_only; automation sources below rank 92 (discovery, agent, SNMP, ...) keep their value only in the provenance and open the review override_conflict (reason lifecycle_locked). A transition checks no lock; the order is transition, then lock: a field changed after a transition is checked against the new state. A new CI is checked against the state it names, else the initial state of the model. The field catalog (GET /cis/{id}/form) shows the locked fields read-only. */
     LifecycleModel: {
       /** Format: uuid */
       id: string;
@@ -15644,6 +15644,8 @@ export interface components {
       is_terminal: boolean;
       sort_order: number;
       required_fields: string[];
+      /** @description Attribute keys and typed CI columns a CI in this state may not change (LCY-04, WP-1103). */
+      locked_fields: string[];
     };
     LifecycleModelTransition: {
       id: string;
@@ -15675,6 +15677,8 @@ export interface components {
       is_terminal?: boolean;
       sort_order?: number;
       required_fields?: string[];
+      /** @description Fields the state locks (LCY-04, WP-1103): attribute keys or typed CI columns. An empty or duplicate name, a reserved namespace (_overrides, _observed, _provenance, _instance) and lifecycle_state itself are 422 on states[i].locked_fields[j]. Only the states of a CI model lock fields: locked fields on a state of an asset model are 422 on states[i].locked_fields. */
+      locked_fields?: string[];
     };
     LifecycleModelTransitionSpec: {
       /** @description Empty for a transition from any state. */
