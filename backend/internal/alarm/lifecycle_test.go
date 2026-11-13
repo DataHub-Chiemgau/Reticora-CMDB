@@ -260,3 +260,64 @@ func TestTransitionTextLimits(t *testing.T) {
 		t.Errorf("store append with a long comment: %v, want ErrInvalidTransitionInput", err)
 	}
 }
+
+// TestEventDataForNotifications: alarm.opened and alarm.resolved carry
+// source, summary, value, suppression and the times the notifications name
+// (WP-987); the log sink of the operation without database records them.
+func TestEventDataForNotifications(t *testing.T) {
+	ctx := context.Background()
+	sink := &alarm.LogSink{}
+	s := alarm.NewService(alarm.NewMemoryStore(), nil, sink)
+	in := raiseIn("eth0", alarm.SeverityCritical)
+	in.Details = map[string]any{"value": 97.5}
+	a, err := s.Raise(ctx, memOrg, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().UTC().Add(time.Minute)
+	if _, err = s.Clear(ctx, memOrg, a.DedupKey, at, ""); err != nil {
+		t.Fatal(err)
+	}
+	evs := sink.Events()
+	if len(evs) != 2 || evs[0].Type != events.AlarmOpened || evs[1].Type != events.AlarmResolved {
+		t.Fatalf("events %+v", evs)
+	}
+	opened := evs[0].Data.(events.AlarmData)
+	if opened.SourceKind != alarm.SourceRule || opened.Summary != "cpu high" || opened.Value == nil || *opened.Value != 97.5 ||
+		opened.SuppressedReason != "" || opened.OpenedAt == nil || opened.ResolvedAt != nil {
+		t.Errorf("alarm.opened data %+v", opened)
+	}
+	resolved := evs[1].Data.(events.AlarmData)
+	if resolved.ResolvedAt == nil || !resolved.ResolvedAt.Equal(at) || resolved.OpenedAt == nil {
+		t.Errorf("alarm.resolved data %+v", resolved)
+	}
+}
+
+// TestEventDataValueOfOpeningObservation: an alarm that was pending opens
+// with the value of the observation that opens it, not of the first one of
+// the pending phase (WP-987, AK4); an escalation carries its own value.
+func TestEventDataValueOfOpeningObservation(t *testing.T) {
+	ctx := context.Background()
+	sink := &alarm.LogSink{}
+	s := alarm.NewService(alarm.NewMemoryStore(), nil, sink)
+	in := raiseIn("eth9", alarm.SeverityWarning)
+	in.Details = map[string]any{"value": 82.0}
+	if _, err := s.Pend(ctx, memOrg, in); err != nil {
+		t.Fatal(err)
+	}
+	in.Severity, in.Details = alarm.SeverityCritical, map[string]any{"value": 97.5}
+	a, err := s.Raise(ctx, memOrg, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := a.Details["value"].(float64); v != 97.5 {
+		t.Errorf("details of the opened alarm %v, want value 97.5", a.Details)
+	}
+	evs := sink.Events()
+	if len(evs) != 1 || evs[0].Type != events.AlarmOpened {
+		t.Fatalf("events %+v", evs)
+	}
+	if d := evs[0].Data.(events.AlarmData); d.Value == nil || *d.Value != 97.5 || d.Severity != alarm.SeverityCritical {
+		t.Errorf("alarm.opened data %+v, want value 97.5 and critical", d)
+	}
+}

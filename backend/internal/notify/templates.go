@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
@@ -96,6 +97,71 @@ var Templates = map[string]map[string]render{
 		LocaleEN: func(d map[string]any) Text {
 			return Text{"Workflow: " + str(d, "subject"),
 				str(d, "body") + "\n\nSent by the workflow " + str(d, "workflow_name") + " (run " + str(d, "run_id") + ")."}
+		},
+	},
+	// Alarms and incidents (WP-987): CI, severity, summary, value and the
+	// link (only with a configured frontend); the resolution names the
+	// duration.
+	events.AlarmOpened: {
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Alarm " + severityLabel(d, LocaleDE) + ": " + alarmSubject(d),
+				"Alarm geöffnet" + onCI(d, LocaleDE) + ".\nSchwere: " + severityLabel(d, LocaleDE) +
+					"\nZusammenfassung: " + orDash(str(d, "summary")) + valueLine(d, "Wert") + linkLine(d, "Details")}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Alarm " + severityLabel(d, LocaleEN) + ": " + alarmSubject(d),
+				"Alarm opened" + onCI(d, LocaleEN) + ".\nSeverity: " + severityLabel(d, LocaleEN) +
+					"\nSummary: " + orDash(str(d, "summary")) + valueLine(d, "Value") + linkLine(d, "Details")}
+		},
+	},
+	events.AlarmSeverityChanged: {
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Alarm eskaliert auf " + severityLabel(d, LocaleDE) + ": " + alarmSubject(d),
+				"Alarm eskaliert" + onCI(d, LocaleDE) + ".\nSchwere: " + severityLabel(d, LocaleDE) +
+					"\nZusammenfassung: " + orDash(str(d, "summary")) + valueLine(d, "Wert") + linkLine(d, "Details")}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Alarm escalated to " + severityLabel(d, LocaleEN) + ": " + alarmSubject(d),
+				"Alarm escalated" + onCI(d, LocaleEN) + ".\nSeverity: " + severityLabel(d, LocaleEN) +
+					"\nSummary: " + orDash(str(d, "summary")) + valueLine(d, "Value") + linkLine(d, "Details")}
+		},
+	},
+	events.AlarmResolved: {
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Alarm aufgelöst: " + alarmSubject(d),
+				"Alarm aufgelöst" + onCI(d, LocaleDE) + ".\nSchwere: " + severityLabel(d, LocaleDE) +
+					"\nZusammenfassung: " + orDash(str(d, "summary")) + valueLine(d, "Wert") +
+					"\nDauer: " + alarmDuration(d) + linkLine(d, "Details")}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Alarm resolved: " + alarmSubject(d),
+				"Alarm resolved" + onCI(d, LocaleEN) + ".\nSeverity: " + severityLabel(d, LocaleEN) +
+					"\nSummary: " + orDash(str(d, "summary")) + valueLine(d, "Value") +
+					"\nDuration: " + alarmDuration(d) + linkLine(d, "Details")}
+		},
+	},
+	events.IncidentOpened: {
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Störung " + severityLabel(d, LocaleDE) + incidentOn(d),
+				"Störung geöffnet" + onCI(d, LocaleDE) + ".\nSchwere: " + severityLabel(d, LocaleDE) +
+					causeLine(d, "Ursache") + linkLine(d, "Details")}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Incident " + severityLabel(d, LocaleEN) + incidentOn(d),
+				"Incident opened" + onCI(d, LocaleEN) + ".\nSeverity: " + severityLabel(d, LocaleEN) +
+					causeLine(d, "Cause") + linkLine(d, "Details")}
+		},
+	},
+	events.IncidentResolved: {
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Störung aufgelöst" + incidentOn(d),
+				"Störung aufgelöst" + onCI(d, LocaleDE) + ".\nSchwere: " + severityLabel(d, LocaleDE) +
+					causeLine(d, "Ursache") + linkLine(d, "Details")}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Incident resolved" + incidentOn(d),
+				"Incident resolved" + onCI(d, LocaleEN) + ".\nSeverity: " + severityLabel(d, LocaleEN) +
+					causeLine(d, "Cause") + linkLine(d, "Details")}
 		},
 	},
 	events.ReviewCreated: {
@@ -507,4 +573,91 @@ func strList(v any) string {
 		return "–"
 	}
 	return strings.Join(parts, ", ")
+}
+
+// severityLabels are the severities of alarms and incidents per locale.
+var severityLabels = map[string]map[string]string{
+	LocaleDE: {"critical": "kritisch", "warning": "Warnung", "info": "Info"},
+	LocaleEN: {"critical": "critical", "warning": "warning", "info": "info"},
+}
+
+// severityLabel names the severity of an alarm or incident.
+func severityLabel(d map[string]any, locale string) string {
+	if l, ok := severityLabels[locale][str(d, "severity")]; ok {
+		return l
+	}
+	return orDash(str(d, "severity"))
+}
+
+// alarmSubject is the CI name of an alarm, else its summary, else its id.
+func alarmSubject(d map[string]any) string {
+	for _, k := range []string{"ci_name", "summary", "id"} {
+		if v := oneLine(str(d, k)); v != "" {
+			return v
+		}
+	}
+	return "–"
+}
+
+// onCI names the CI of an alarm or incident ("on CI x"); nothing without.
+func onCI(d map[string]any, locale string) string {
+	name := oneLine(str(d, "ci_name"))
+	if name == "" {
+		return ""
+	}
+	if locale == LocaleEN {
+		return " on " + name
+	}
+	return " auf " + name
+}
+
+// incidentOn is ": <CI name>" of an incident's root CI; nothing without.
+func incidentOn(d map[string]any) string {
+	if name := oneLine(str(d, "ci_name")); name != "" {
+		return ": " + name
+	}
+	return ""
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "–"
+	}
+	return s
+}
+
+// valueLine is the line of the measured value; nothing without one.
+func valueLine(d map[string]any, label string) string {
+	v, ok := d["value"].(float64)
+	if !ok {
+		return ""
+	}
+	return "\n" + label + ": " + strconv.FormatFloat(v, 'g', -1, 64)
+}
+
+// causeLine is the line of the cause class of an incident; nothing without.
+func causeLine(d map[string]any, label string) string {
+	if c := str(d, "cause_class"); c != "" {
+		return "\n" + label + ": " + c
+	}
+	return ""
+}
+
+// linkLine is the line of the link; nothing without a configured frontend.
+func linkLine(d map[string]any, label string) string {
+	if l := str(d, "link"); l != "" {
+		return "\n" + label + ": " + l
+	}
+	return ""
+}
+
+// alarmDuration is the time from opened_at to resolved_at of an alarm,
+// rounded to the second; "–" when one is missing.
+func alarmDuration(d map[string]any) string {
+	opened, err1 := time.Parse(time.RFC3339Nano, str(d, "opened_at"))
+	resolved, err2 := time.Parse(time.RFC3339Nano, str(d, "resolved_at"))
+	if err1 != nil || err2 != nil || resolved.Before(opened) {
+		return "–"
+	}
+	return resolved.Sub(opened).Round(time.Second).String()
 }

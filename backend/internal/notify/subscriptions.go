@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"net/url"
 	"slices"
 	"sort"
 	"strings"
@@ -25,6 +26,9 @@ type Subscription struct {
 	Category string
 	// Critical notifications ignore quiet hours and muted categories.
 	Critical bool
+	// CriticalIf makes a single event critical by its data (an alarm of
+	// severity critical, WP-987); nil: Critical alone decides.
+	CriticalIf func(data map[string]any) bool
 	// Personal notifications carry a credential of their recipients (the
 	// invitation link): they reach the recipients only, no webhook channel.
 	Personal bool
@@ -38,8 +42,57 @@ func str(data map[string]any, key string) string {
 	return v
 }
 
+// CategoryAlarm is the category of the alarm and incident notifications
+// (NTF-05 [P3], MON-04, ALR-02, WP-987).
+const CategoryAlarm = "alarm"
+
+// severityCritical makes an alarm or incident of severity critical a
+// critical notification: it ignores quiet hours and muted categories.
+func severityCritical(d map[string]any) bool { return str(d, "severity") == "critical" }
+
+// alarmAudience is the audience of an alarm or incident (WP-987): the
+// contacts of its CI in the roles operations and escalation, and every user
+// with monitoring:read whose scope covers its client and site. A suppressed
+// alarm (symptom, maintenance, flapping) has none: it is not delivered.
+func alarmAudience(ciKey string) func(d map[string]any) *Audience {
+	return func(d map[string]any) *Audience {
+		if str(d, "suppressed_reason") != "" {
+			return nil
+		}
+		a := &Audience{Permission: identity.PermMonitoringRead, AllWithPermission: true,
+			ClientID: str(d, "client_id"), SiteID: str(d, "site_id")}
+		if ci := str(d, ciKey); ci != "" {
+			a.CIID, a.ContactRoles = ci, []string{"operations", "escalation"}
+		}
+		return a
+	}
+}
+
+// escalationAudience is the audience of alarm.severity_changed: only an
+// escalation to critical is delivered (critical, past quiet hours), so an
+// alarm that opened as warning during quiet hours still reaches the
+// on-call staff once it becomes critical (AK1 of WP-987); lower
+// escalations wait for the next opening or resolving.
+func escalationAudience(d map[string]any) *Audience {
+	if !severityCritical(d) {
+		return nil
+	}
+	return alarmAudience("ci_id")(d)
+}
+
 // Subscriptions are the phase-1 notification events of NTF-05.
 var Subscriptions = map[string]Subscription{
+	// Alarms and incidents (NTF-05 [P3], MON-04, ALR-02, E-161, WP-987):
+	// opening and resolving; critical by severity.
+	events.AlarmOpened: {Category: CategoryAlarm, CriticalIf: severityCritical, Audience: alarmAudience("ci_id")},
+	events.AlarmResolved: {Category: CategoryAlarm, CriticalIf: severityCritical,
+		Audience: alarmAudience("ci_id")},
+	events.AlarmSeverityChanged: {Category: CategoryAlarm, CriticalIf: severityCritical,
+		Audience: escalationAudience},
+	events.IncidentOpened: {Category: CategoryAlarm, CriticalIf: severityCritical,
+		Audience: alarmAudience("root_ci_id")},
+	events.IncidentResolved: {Category: CategoryAlarm, CriticalIf: severityCritical,
+		Audience: alarmAudience("root_ci_id")},
 	events.ReviewCreated: {
 		Category: "review",
 		Audience: func(d map[string]any) *Audience {
@@ -264,6 +317,62 @@ var Subscriptions = map[string]Subscription{
 type EventConsumer struct {
 	resolver Resolver
 	notifier *Notifier
+	// linkBase is the origin (scheme and host) of the links of the alarm
+	// texts; empty: the texts carry no link.
+	linkBase string
+}
+
+// CINamer names the CI of an event for the texts (ci_name); the PGResolver
+// is one.
+type CINamer interface {
+	CIName(ctx context.Context, orgID, ciID string) (string, error)
+}
+
+// WithLinkBase sets the origin of the links in the alarm and incident texts
+// from a URL of the frontend (config.InvitationAcceptURL): its scheme and
+// host. A URL without both leaves the texts without link.
+func (c *EventConsumer) WithLinkBase(frontendURL string) *EventConsumer {
+	c.linkBase = LinkOrigin(frontendURL)
+	return c
+}
+
+// LinkOrigin is scheme://host of a URL; empty for a URL without both.
+func LinkOrigin(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host
+}
+
+// alarmLinks are the paths of the links of the alarm and incident texts.
+var alarmLinks = map[string]string{
+	events.AlarmOpened: "/alarms?id=", events.AlarmResolved: "/alarms?id=", events.AlarmSeverityChanged: "/alarms?id=",
+	events.IncidentOpened: "/alarms?incident_id=", events.IncidentResolved: "/alarms?incident_id=",
+}
+
+// enrich adds what the texts of an alarm or incident name beyond the event
+// data: the name of the CI and the link.
+func (c *EventConsumer) enrich(ctx context.Context, env *events.Envelope, data map[string]any) error {
+	path, ok := alarmLinks[env.Type]
+	if !ok {
+		return nil
+	}
+	if c.linkBase != "" && str(data, "id") != "" {
+		data["link"] = c.linkBase + path + url.QueryEscape(str(data, "id"))
+	}
+	ci := str(data, "ci_id")
+	if ci == "" {
+		ci = str(data, "root_ci_id")
+	}
+	if namer, ok := c.resolver.(CINamer); ok && ci != "" {
+		name, err := namer.CIName(ctx, env.OrgID, ci)
+		if err != nil {
+			return err
+		}
+		data["ci_name"] = name
+	}
+	return nil
 }
 
 // NewEventConsumer creates the consumer.
@@ -286,6 +395,9 @@ func (c *EventConsumer) Consume(ctx context.Context, env *events.Envelope) error
 	audience := sub.Audience(data)
 	if audience == nil {
 		return nil
+	}
+	if err := c.enrich(ctx, env, data); err != nil {
+		return err
 	}
 	recipients, err := c.resolver.Resolve(ctx, env.OrgID, audience)
 	if err != nil {
@@ -311,7 +423,8 @@ func (c *EventConsumer) Consume(ctx context.Context, env *events.Envelope) error
 		}
 	}
 	data["event_id"], data["event_type"] = env.ID, env.Type
-	_, err = c.notifier.Notify(ctx, env.OrgID, &Request{Category: sub.Category, Critical: sub.Critical, Personal: sub.Personal,
+	critical := sub.Critical || (sub.CriticalIf != nil && sub.CriticalIf(data))
+	_, err = c.notifier.Notify(ctx, env.OrgID, &Request{Category: sub.Category, Critical: critical, Personal: sub.Personal,
 		Subject: texts[orgLocale].Subject, Body: texts[orgLocale].Body, Texts: texts, Branding: brand, Data: data,
 		DedupKey: env.Type + ":" + env.ID, Recipients: recipients})
 	return err

@@ -205,6 +205,9 @@ func (m *MemoryStore) UpdateState(_ context.Context, orgID, id string, u *StateU
 	}
 	a.State, a.Severity, a.SuppressedReason, a.IncidentID = u.State, u.Severity, u.SuppressedReason, u.IncidentID
 	a.OpenedAt, a.AcknowledgedAt, a.AcknowledgedBy, a.ResolvedAt = u.OpenedAt, u.AcknowledgedAt, u.AcknowledgedBy, u.ResolvedAt
+	if u.Details != nil {
+		a.Details = maps.Clone(u.Details)
+	}
 	a.UpdatedAt = m.clock()
 	return clone(a), nil
 }

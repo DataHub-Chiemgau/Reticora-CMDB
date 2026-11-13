@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"sync"
 	"time"
@@ -125,6 +126,27 @@ func (m *MemorySink) Events() []events.Event {
 	return slices.Clone(m.events)
 }
 
+// LogSink records the events in memory and logs the opening and the
+// resolution of an alarm: the notification of the operation without a
+// database (--no-db), which has no outbox and no notify consumer (WP-987).
+// With a database the events go through the outbox to notify.
+type LogSink struct {
+	MemorySink
+}
+
+// Append implements EventSink.
+func (l *LogSink) Append(ctx context.Context, e *events.Event) error {
+	if err := l.MemorySink.Append(ctx, e); err != nil {
+		return err
+	}
+	if e.Type == events.AlarmOpened || e.Type == events.AlarmResolved {
+		d, _ := e.Data.(events.AlarmData)
+		slog.WarnContext(ctx, "alarm notification (no database)", "event", e.Type, "organization_id", e.OrgID,
+			"alarm_id", d.ID, "severity", d.Severity, "summary", d.Summary)
+	}
+	return nil
+}
+
 // Service runs the lifecycle on a store. With a pool every operation runs
 // in one transaction of the context's tenant scope and joins the caller's
 // transaction (database.WithRequestTenantTx): the evaluator and the check
@@ -230,12 +252,14 @@ func (s *Service) Raise(ctx context.Context, orgID string, in *RaiseInput) (*Ala
 				sev = in.Severity
 			}
 			u := stateOf(a)
-			u.State, u.Severity, u.OpenedAt = StateOpen, sev, &at
+			// The observation that opens the alarm, not the first one of
+			// the pending phase, is its value (WP-987, AK4).
+			u.State, u.Severity, u.OpenedAt, u.Details = StateOpen, sev, &at, in.Details
 			out, err = s.move(ctx, a, u, &Transition{At: at, Reason: ReasonRaised}, events.AlarmOpened)
 			return err
 		case (a.State == StateOpen || a.State == StateAcknowledged) && severityRank(in.Severity) > severityRank(a.Severity):
 			u := stateOf(a)
-			u.State, u.Severity, u.AcknowledgedAt, u.AcknowledgedBy = StateOpen, in.Severity, nil, nil
+			u.State, u.Severity, u.AcknowledgedAt, u.AcknowledgedBy, u.Details = StateOpen, in.Severity, nil, nil, in.Details
 			out, err = s.move(ctx, a, u, &Transition{At: at, Reason: ReasonSeverityChanged}, events.AlarmSeverityChanged)
 			return err
 		}
@@ -355,10 +379,17 @@ func (s *Service) record(ctx context.Context, a *Alarm, tr *Transition, eventTyp
 
 // eventData is the data of an alarm.* event of a. ci_id, client_id and
 // site_id are absent when the alarm has none (the null convention of the
-// payload frames).
+// payload frames). Source, summary, value (details.value of a rule alarm),
+// suppression and the times serve the notifications (WP-987).
 func eventData(a *Alarm) events.AlarmData {
-	return events.AlarmData{ID: a.ID, AlarmID: a.ID, DedupKey: a.DedupKey, CIID: deref(a.CIID),
-		ClientID: deref(a.ClientID), SiteID: deref(a.SiteID), Severity: a.Severity, IncidentID: deref(a.IncidentID)}
+	d := events.AlarmData{ID: a.ID, AlarmID: a.ID, DedupKey: a.DedupKey, CIID: deref(a.CIID),
+		ClientID: deref(a.ClientID), SiteID: deref(a.SiteID), Severity: a.Severity, IncidentID: deref(a.IncidentID),
+		SourceKind: a.SourceKind, Summary: a.Summary, SuppressedReason: deref(a.SuppressedReason),
+		OpenedAt: a.OpenedAt, ResolvedAt: a.ResolvedAt}
+	if v, ok := a.Details["value"].(float64); ok {
+		d.Value = &v
+	}
+	return d
 }
 
 // observed is the time of a raise: ObservedAt, or now on the service's

@@ -313,3 +313,21 @@ func revealContacts(ctx context.Context, tx pgx.Tx, orgID string, rows pgx.Rows)
 	}
 	return out, nil
 }
+
+// CIName implements CINamer: the name of a CI of the organization (empty
+// for an unknown one), for the alarm texts (WP-987).
+func (r *PGResolver) CIName(ctx context.Context, orgID, ciID string) (string, error) {
+	var name string
+	scope := database.OrgWideScope(orgID, "")
+	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `SELECT name FROM ci WHERE organization_id = $1 AND id::text = $2`, orgID, ciID).Scan(&name)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("ci name: %w", err)
+		}
+		return nil
+	})
+	return name, err
+}

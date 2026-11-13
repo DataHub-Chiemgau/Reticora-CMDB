@@ -1846,3 +1846,6 @@ MON-03;[P3];E;backend/internal/probe/metrics_bridge_integration_test.go;WP-976
 ALR-05;[P3];E;backend/internal/monitoring/threshold_test.go;WP-985
 MET-45;Phase 1 im Fokus, voller Tag fehlt;E;backend/internal/rules/rules_test.go;WP-985
 MON-04;[P3];E;backend/internal/monitoring/threshold_test.go;WP-985
+NTF-05;[B], Zusätze [P2], [P3];E;backend/internal/notify/alarm_notify_integration_test.go;WP-987
+MON-04;[P3];E;backend/internal/notify/alarm_notify_integration_test.go;WP-987
+ALR-02;[P3];E;backend/internal/notify/alarm_notify_integration_test.go;WP-987

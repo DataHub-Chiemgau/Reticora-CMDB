@@ -168,7 +168,7 @@ func MemoryRepositories() Repositories {
 		IPAM:              ipam.NewMemoryRepository(),
 		Metrics:           monitoring.NewMemoryMetricStore(),
 		Probes:            probes,
-		Alarms:            alarm.NewService(alarm.NewMemoryStore(), nil, &alarm.MemorySink{}),
+		Alarms:            alarm.NewService(alarm.NewMemoryStore(), nil, &alarm.LogSink{}),
 		Permission:        permission.NewMemoryRepository(),
 		FieldGrants:       permission.NewMemoryFieldGrants(),
 		APIKeys:           identity.NewMemoryAPIKeyStore(),

@@ -158,6 +158,9 @@ type StateUpdate struct {
 	AcknowledgedAt   *time.Time
 	AcknowledgedBy   *string
 	ResolvedAt       *time.Time
+	// Details replaces the details of the alarm when not nil (the
+	// observation that opens or escalates it, WP-987); nil keeps them.
+	Details map[string]any
 }
 
 // ListFilter selects alarms (List). Empty fields do not filter.

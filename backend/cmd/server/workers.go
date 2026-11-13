@@ -187,8 +187,12 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 	// webhook subscriptions (EVT-01, WP-136).
 	if d.repos.EventOutbox && d.pool != nil {
 		// Subscribed events become notifications (NTF-05).
+		// The alarm texts link to the frontend of the invitation page
+		// (WP-987); alarms reach notify only through the outbox, the
+		// evaluator has no log notifier with a database.
 		publisher := events.NewPublisher(d.pool, d.eventStream, d.dispatcher,
-			notify.NewEventConsumer(notify.NewPGResolver(d.pool, permission.NewPGRepository(d.pool)), d.notifier))
+			notify.NewEventConsumer(notify.NewPGResolver(d.pool, permission.NewPGRepository(d.pool)), d.notifier).
+				WithLinkBase(d.cfg.InvitationAcceptURL))
 		// The stream retention of the installation (EVT-01, NFR-06); the
 		// outbox keeps published event data as long.
 		publisher.MaxAge, publisher.MaxBytes = d.cfg.EventsMaxAge, d.cfg.EventsMaxBytes

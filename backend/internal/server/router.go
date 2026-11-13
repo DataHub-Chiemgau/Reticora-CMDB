@@ -1729,7 +1729,7 @@ func alarmService(repos *Repositories) *alarm.Service {
 	if repos.Alarms != nil {
 		return repos.Alarms
 	}
-	return alarm.NewService(alarm.NewMemoryStore(), nil, &alarm.MemorySink{})
+	return alarm.NewService(alarm.NewMemoryStore(), nil, &alarm.LogSink{})
 }
 
 // probeAutocreator returns the job probe.autocreate on the PostgreSQL probe

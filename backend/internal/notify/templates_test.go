@@ -47,6 +47,102 @@ var templateData = map[string]map[string]any{
 		"services": float64(2), "contact_roles": []any{"technical"}},
 	events.StockBelowMinimum: {"id": "k-1", "client_id": "c-1", "sku": "TON-415", "name": "Toner HP 415A", "unit": "Stk",
 		"on_hand_total": float64(2.5), "min_level": float64(4)},
+	events.AlarmOpened: {"id": "a-1", "ci_id": "ci-1", "ci_name": "core-sw-1", "severity": "critical",
+		"summary": "cpu: cpu critical (value 97)", "value": float64(97), "source_kind": "rule",
+		"opened_at": "2026-11-09T10:00:00Z", "link": "https://cmdb.example/alarms?id=a-1"},
+	events.AlarmSeverityChanged: {"id": "a-1", "ci_id": "ci-1", "ci_name": "core-sw-1", "severity": "critical",
+		"summary": "cpu: cpu critical (value 97)", "value": float64(97), "source_kind": "rule",
+		"opened_at": "2026-11-09T10:00:00Z", "link": "https://cmdb.example/alarms?id=a-1"},
+	events.AlarmResolved: {"id": "a-1", "ci_id": "ci-1", "ci_name": "core-sw-1", "severity": "warning",
+		"summary": "cpu: cpu warning (value 80)", "value": float64(80), "source_kind": "rule",
+		"opened_at": "2026-11-09T10:00:00Z", "resolved_at": "2026-11-09T10:25:30Z"},
+	events.IncidentOpened: {"id": "i-1", "root_ci_id": "ci-1", "ci_name": "core-sw-1", "severity": "critical",
+		"cause_class": "network"},
+	events.IncidentResolved: {"id": "i-1", "root_ci_id": "ci-1", "ci_name": "core-sw-1", "severity": "critical"},
+}
+
+// TestAlarmTemplates covers the subscriptions and texts of the alarms and
+// incidents (NTF-05 [P3], MON-04, ALR-02, WP-987): category alarm, critical
+// by severity, no audience for a suppressed alarm; the texts name CI,
+// severity, summary, value and the link (only when the consumer has a
+// configured frontend); the resolution names the duration.
+func TestAlarmTemplates(t *testing.T) {
+	for _, typ := range []string{events.AlarmOpened, events.AlarmSeverityChanged, events.AlarmResolved, events.IncidentOpened, events.IncidentResolved} {
+		sub, ok := Subscriptions[typ]
+		if !ok || sub.Category != CategoryAlarm || sub.Critical || sub.CriticalIf == nil {
+			t.Fatalf("%s: subscription %+v, want category alarm, critical by severity", typ, sub)
+		}
+		if !sub.CriticalIf(map[string]any{"severity": "critical"}) || sub.CriticalIf(map[string]any{"severity": "warning"}) {
+			t.Errorf("%s: CriticalIf is not severity = critical", typ)
+		}
+		for _, locale := range []string{LocaleDE, LocaleEN} {
+			if _, ok := Templates[typ][locale]; !ok {
+				t.Errorf("%s: no %s template", typ, locale)
+			}
+		}
+	}
+	a := Subscriptions[events.AlarmOpened].Audience(map[string]any{"ci_id": "ci-1", "client_id": "c-1", "site_id": "s-1"})
+	if a == nil || a.Permission != identity.PermMonitoringRead || !a.AllWithPermission || a.ClientID != "c-1" || a.SiteID != "s-1" ||
+		a.CIID != "ci-1" || !slices.Equal(a.ContactRoles, []string{"operations", "escalation"}) {
+		t.Errorf("alarm audience %+v", a)
+	}
+	for _, reason := range []string{"symptom", "maintenance", "flapping"} {
+		if a := Subscriptions[events.AlarmOpened].Audience(map[string]any{"ci_id": "ci-1", "suppressed_reason": reason}); a != nil {
+			t.Errorf("suppressed %s: audience %+v, want none", reason, a)
+		}
+	}
+	// Only an escalation to critical is delivered (past quiet hours).
+	if a := Subscriptions[events.AlarmSeverityChanged].Audience(map[string]any{"ci_id": "ci-1", "severity": "warning"}); a != nil {
+		t.Errorf("escalation to warning: audience %+v, want none", a)
+	}
+	if a := Subscriptions[events.AlarmSeverityChanged].Audience(map[string]any{"ci_id": "ci-1", "severity": "critical"}); a == nil || a.CIID != "ci-1" {
+		t.Errorf("escalation to critical: audience %+v, want the alarm audience", a)
+	}
+	if a := Subscriptions[events.AlarmSeverityChanged].Audience(map[string]any{"ci_id": "ci-1", "severity": "critical", "suppressed_reason": "symptom"}); a != nil {
+		t.Errorf("suppressed escalation: audience %+v, want none", a)
+	}
+	if de := Render(events.AlarmSeverityChanged, LocaleDE, templateData[events.AlarmSeverityChanged]); de.Subject != "Alarm eskaliert auf kritisch: core-sw-1" ||
+		!strings.Contains(de.Body, "Wert: 97") {
+		t.Errorf("German alarm.severity_changed: %+v", de)
+	}
+	if a := Subscriptions[events.IncidentOpened].Audience(map[string]any{"root_ci_id": "ci-9"}); a == nil || a.CIID != "ci-9" {
+		t.Errorf("incident audience %+v, want the contacts of the root CI", a)
+	}
+
+	de := Render(events.AlarmOpened, LocaleDE, templateData[events.AlarmOpened])
+	if de.Subject != "Alarm kritisch: core-sw-1" || !strings.Contains(de.Body, "auf core-sw-1") ||
+		!strings.Contains(de.Body, "Zusammenfassung: cpu: cpu critical (value 97)") || !strings.Contains(de.Body, "Wert: 97") ||
+		!strings.Contains(de.Body, "Details: https://cmdb.example/alarms?id=a-1") {
+		t.Errorf("German alarm.opened: %+v", de)
+	}
+	en := Render(events.AlarmResolved, LocaleEN, templateData[events.AlarmResolved])
+	if en.Subject != "Alarm resolved: core-sw-1" || !strings.Contains(en.Body, "Duration: 25m30s") ||
+		!strings.Contains(en.Body, "Severity: warning") || strings.Contains(en.Body, "Details:") {
+		t.Errorf("English alarm.resolved without link: %+v", en)
+	}
+
+	// The link exists only with a configured frontend, on its origin.
+	if got := LinkOrigin("https://cmdb.example:8443/invitations/accept?x=1"); got != "https://cmdb.example:8443" {
+		t.Errorf("origin %q", got)
+	}
+	if got := LinkOrigin(""); got != "" {
+		t.Errorf("origin of no URL %q", got)
+	}
+	c := NewEventConsumer(nil, nil)
+	data := map[string]any{"id": "a-1"}
+	if err := c.enrich(context.Background(), &events.Envelope{Type: events.AlarmOpened}, data); err != nil || data["link"] != nil {
+		t.Errorf("without frontend: link %v (%v), want none", data["link"], err)
+	}
+	c.WithLinkBase("https://cmdb.example/invitations/accept")
+	if err := c.enrich(context.Background(), &events.Envelope{Type: events.AlarmOpened}, data); err != nil ||
+		data["link"] != "https://cmdb.example/alarms?id=a-1" {
+		t.Errorf("with frontend: link %v (%v)", data["link"], err)
+	}
+	data = map[string]any{"id": "i-1"}
+	if err := c.enrich(context.Background(), &events.Envelope{Type: events.IncidentOpened}, data); err != nil ||
+		data["link"] != "https://cmdb.example/alarms?incident_id=i-1" {
+		t.Errorf("incident link %v (%v)", data["link"], err)
+	}
 }
 
 // TestStockBelowMinimumAudience covers the recipients and texts of

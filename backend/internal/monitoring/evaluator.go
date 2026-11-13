@@ -28,7 +28,10 @@ import (
 // while the condition has not held for the rule's duration, open once it
 // has, resolved when it no longer holds. The evaluator reads that state
 // through AlarmSink, so a restart neither loses a pending start nor reports
-// a series twice; package monitoring does not import package alarm.
+// a series twice; package monitoring does not import package alarm. The
+// evaluator notifies nobody itself (WP-987): the alarm lifecycle writes
+// alarm.opened and alarm.resolved to the outbox, which notify consumes;
+// only without a database the lifecycle logs them (alarm.LogSink).
 
 // EvaluationInterval is the cycle of the evaluator (worker monitoring).
 const EvaluationInterval = 15 * time.Second

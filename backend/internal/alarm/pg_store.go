@@ -285,16 +285,24 @@ func (s *PGStore) UpdateState(ctx context.Context, orgID, id string, u *StateUpd
 	if err := validateState(u); err != nil {
 		return nil, err
 	}
+	var details []byte
+	if u.Details != nil {
+		var err error
+		if details, err = jsonObject(u.Details); err != nil {
+			return nil, err
+		}
+	}
 	var out *Alarm
 	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
 		out, err = scanAlarm(tx.QueryRow(ctx, `
 			UPDATE alarm SET state = $3, severity = $4, suppressed_reason = $5, incident_id = $6,
-			       opened_at = $7, acknowledged_at = $8, acknowledged_by = $9, resolved_at = $10
+			       opened_at = $7, acknowledged_at = $8, acknowledged_by = $9, resolved_at = $10,
+			       details = COALESCE($11::jsonb, details)
 			 WHERE organization_id = $1 AND id = $2
 			RETURNING `+alarmColumns,
 			orgID, id, u.State, u.Severity, u.SuppressedReason, u.IncidentID,
-			u.OpenedAt, u.AcknowledgedAt, u.AcknowledgedBy, u.ResolvedAt))
+			u.OpenedAt, u.AcknowledgedAt, u.AcknowledgedBy, u.ResolvedAt, details))
 		return err
 	})
 	return out, err

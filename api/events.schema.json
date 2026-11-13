@@ -2696,6 +2696,34 @@
           "type": "string",
           "format": "uuid",
           "description": "The incident the alarm belongs to; absent before the correlation."
+        },
+        "source_kind": {
+          "type": "string",
+          "enum": ["rule", "check", "collector", "config", "capacity", "sla"],
+          "description": "Source of the alarm (WP-987)."
+        },
+        "summary": {
+          "type": "string",
+          "description": "Summary of the alarm for the notification texts, at most 500 characters (WP-987)."
+        },
+        "value": {
+          "type": "number",
+          "description": "Measured value of a rule alarm; absent for the other sources (WP-987)."
+        },
+        "suppressed_reason": {
+          "type": "string",
+          "enum": ["maintenance", "symptom", "flapping"],
+          "description": "Why the alarm is suppressed; a suppressed alarm notifies nobody (WP-987). Absent when it is not suppressed."
+        },
+        "opened_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the alarm opened; absent for an alarm that never opened (WP-987)."
+        },
+        "resolved_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the alarm was resolved; only on alarm.resolved (WP-987)."
         }
       },
       "examples": [
@@ -2707,7 +2735,11 @@
           "client_id": "33333333-3333-4333-8333-333333333333",
           "site_id": "44444444-4444-4444-8444-444444444444",
           "severity": "critical",
-          "incident_id": "99999999-9999-4999-8999-999999999999"
+          "incident_id": "99999999-9999-4999-8999-999999999999",
+          "source_kind": "rule",
+          "summary": "if errors: ifInErrors critical (value 42)",
+          "value": 42,
+          "opened_at": "2026-11-09T10:00:00Z"
         }
       ]
     },
@@ -2755,6 +2787,34 @@
           "type": "string",
           "format": "uuid",
           "description": "The incident the alarm belongs to; absent before the correlation."
+        },
+        "source_kind": {
+          "type": "string",
+          "enum": ["rule", "check", "collector", "config", "capacity", "sla"],
+          "description": "Source of the alarm (WP-987)."
+        },
+        "summary": {
+          "type": "string",
+          "description": "Summary of the alarm for the notification texts, at most 500 characters (WP-987)."
+        },
+        "value": {
+          "type": "number",
+          "description": "Measured value of a rule alarm; absent for the other sources (WP-987)."
+        },
+        "suppressed_reason": {
+          "type": "string",
+          "enum": ["maintenance", "symptom", "flapping"],
+          "description": "Why the alarm is suppressed; a suppressed alarm notifies nobody (WP-987). Absent when it is not suppressed."
+        },
+        "opened_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the alarm opened; absent for an alarm that never opened (WP-987)."
+        },
+        "resolved_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the alarm was resolved; only on alarm.resolved (WP-987)."
         }
       },
       "examples": [
@@ -2814,6 +2874,34 @@
           "type": "string",
           "format": "uuid",
           "description": "The incident the alarm belongs to; absent before the correlation."
+        },
+        "source_kind": {
+          "type": "string",
+          "enum": ["rule", "check", "collector", "config", "capacity", "sla"],
+          "description": "Source of the alarm (WP-987)."
+        },
+        "summary": {
+          "type": "string",
+          "description": "Summary of the alarm for the notification texts, at most 500 characters (WP-987)."
+        },
+        "value": {
+          "type": "number",
+          "description": "Measured value of a rule alarm; absent for the other sources (WP-987)."
+        },
+        "suppressed_reason": {
+          "type": "string",
+          "enum": ["maintenance", "symptom", "flapping"],
+          "description": "Why the alarm is suppressed; a suppressed alarm notifies nobody (WP-987). Absent when it is not suppressed."
+        },
+        "opened_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the alarm opened; absent for an alarm that never opened (WP-987)."
+        },
+        "resolved_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the alarm was resolved; only on alarm.resolved (WP-987)."
         }
       },
       "examples": [
@@ -2873,6 +2961,34 @@
           "type": "string",
           "format": "uuid",
           "description": "The incident the alarm belongs to; absent before the correlation."
+        },
+        "source_kind": {
+          "type": "string",
+          "enum": ["rule", "check", "collector", "config", "capacity", "sla"],
+          "description": "Source of the alarm (WP-987)."
+        },
+        "summary": {
+          "type": "string",
+          "description": "Summary of the alarm for the notification texts, at most 500 characters (WP-987)."
+        },
+        "value": {
+          "type": "number",
+          "description": "Measured value of a rule alarm; absent for the other sources (WP-987)."
+        },
+        "suppressed_reason": {
+          "type": "string",
+          "enum": ["maintenance", "symptom", "flapping"],
+          "description": "Why the alarm is suppressed; a suppressed alarm notifies nobody (WP-987). Absent when it is not suppressed."
+        },
+        "opened_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the alarm opened; absent for an alarm that never opened (WP-987)."
+        },
+        "resolved_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the alarm was resolved; only on alarm.resolved (WP-987)."
         }
       },
       "examples": [
@@ -2932,6 +3048,34 @@
           "type": "string",
           "format": "uuid",
           "description": "The incident the alarm belongs to; absent before the correlation."
+        },
+        "source_kind": {
+          "type": "string",
+          "enum": ["rule", "check", "collector", "config", "capacity", "sla"],
+          "description": "Source of the alarm (WP-987)."
+        },
+        "summary": {
+          "type": "string",
+          "description": "Summary of the alarm for the notification texts, at most 500 characters (WP-987)."
+        },
+        "value": {
+          "type": "number",
+          "description": "Measured value of a rule alarm; absent for the other sources (WP-987)."
+        },
+        "suppressed_reason": {
+          "type": "string",
+          "enum": ["maintenance", "symptom", "flapping"],
+          "description": "Why the alarm is suppressed; a suppressed alarm notifies nobody (WP-987). Absent when it is not suppressed."
+        },
+        "opened_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the alarm opened; absent for an alarm that never opened (WP-987)."
+        },
+        "resolved_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the alarm was resolved; only on alarm.resolved (WP-987)."
         }
       },
       "examples": [
@@ -2943,7 +3087,12 @@
           "client_id": "33333333-3333-4333-8333-333333333333",
           "site_id": "44444444-4444-4444-8444-444444444444",
           "severity": "critical",
-          "incident_id": "99999999-9999-4999-8999-999999999999"
+          "incident_id": "99999999-9999-4999-8999-999999999999",
+          "source_kind": "rule",
+          "summary": "if errors: ifInErrors critical (value 42)",
+          "value": 42,
+          "opened_at": "2026-11-09T10:00:00Z",
+          "resolved_at": "2026-11-09T10:25:00Z"
         }
       ]
     },

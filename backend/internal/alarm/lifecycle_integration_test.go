@@ -309,3 +309,30 @@ func TestAlarmBurstPublishedAtLeast200PerSecond(t *testing.T) {
 		t.Error("events not delivered in sequence order")
 	}
 }
+
+// TestPendingOpensWithCurrentValueOnPostgres: on PostgreSQL too an alarm
+// that was pending opens with the value of the opening observation (the
+// upsert keeps the details of the first one, WP-987 AK4).
+func TestPendingOpensWithCurrentValueOnPostgres(t *testing.T) {
+	f := scopetest.Seed(t, alarmTag)
+	s := alarm.NewPGService(f.App)
+	ctx := f.OrgCtx(f.OrgA)
+	before := lastSequence(t, f, f.OrgA)
+	in := raiseIn("value-of-open", alarm.SeverityWarning)
+	in.Details = map[string]any{"value": 82.0}
+	if _, err := s.Pend(ctx, f.OrgA, in); err != nil {
+		t.Fatal(err)
+	}
+	in.Severity, in.Details = alarm.SeverityCritical, map[string]any{"value": 97.5}
+	a, err := s.Raise(ctx, f.OrgA, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := a.Details["value"].(float64); v != 97.5 || a.Severity != alarm.SeverityCritical {
+		t.Errorf("opened alarm %s with details %v, want critical with value 97.5", a.Severity, a.Details)
+	}
+	evs := outboxOf(t, f, f.OrgA, before)
+	if len(evs) != 1 || evs[0].Type != events.AlarmOpened || evs[0].Data["value"] != 97.5 {
+		t.Errorf("events %+v, want one alarm.opened with value 97.5", evs)
+	}
+}

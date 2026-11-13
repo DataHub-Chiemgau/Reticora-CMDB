@@ -12911,7 +12911,7 @@ export interface components {
       /** @description Categories the user unsubscribed; critical notifications reach the user anyway. */
       muted_categories: string[];
       /**
-       * @description Category subscriptions (NTF-03, E-91 option 2): every notification category → subscribed or muted, the view of `muted_categories`. Every category is subscribed by default; a muted one reaches the user only with a critical notification (collector, invitation, certificate, apikey, security and expired licences are critical). In a PUT the named categories win over `muted_categories`; the response lists every category.
+       * @description Category subscriptions (NTF-03, E-91 option 2): every notification category → subscribed or muted, the view of `muted_categories`. Every category is subscribed by default; a muted one reaches the user only with a critical notification (collector, invitation, certificate, apikey, security and expired licences are critical; alarm notifications of severity critical are). In a PUT the named categories win over `muted_categories`; the response lists every category.
        * @example {
        *       "review": "muted",
        *       "export": "subscribed"
@@ -12921,7 +12921,7 @@ export interface components {
         [key: string]: 'subscribed' | 'muted';
       };
       /**
-       * @description Categories whose e-mails are bundled into one digest per window (NTF-04): category → hourly (ends at the full hour) or daily (ends at midnight in time_zone). Allowed are the categories with a non-critical event (contract, entitlement, export, job, maintenance, review, stock, ticket, warranty, webhook) and workflow (send_notification, NTF-05 [P3]); critical notifications, the in-app center and webhooks are never bundled. Omitted: the default `{"review":"hourly"}`; `{}`: every e-mail on its own.
+       * @description Categories whose e-mails are bundled into one digest per window (NTF-04): category → hourly (ends at the full hour) or daily (ends at midnight in time_zone). Allowed are the categories with a non-critical event (alarm, contract, entitlement, export, job, maintenance, review, stock, ticket, warranty, webhook) and workflow (send_notification, NTF-05 [P3]); critical notifications, the in-app center and webhooks are never bundled. Omitted: the default `{"review":"hourly"}`; `{}`: every e-mail on its own.
        * @example {
        *       "review": "hourly"
        *     }
