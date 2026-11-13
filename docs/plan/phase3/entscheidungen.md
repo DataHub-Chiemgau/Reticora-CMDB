@@ -4,7 +4,7 @@ Stand: 2026-11-12 (Grundlage main `6d019370`; Anforderungen des Auftraggebers vo
 
 **Geltung der früheren Entscheidungen:** Alle Entscheidungen der Phase 1, des Korrekturplans und der Phase 2 sind entschieden (Beschluss des Auftraggebers vom 2026-10-28) und gelten in Phase 3 unverändert weiter. Diese Datei ändert keine von ihnen. Wo eine Phase-3-Entscheidung eine frühere ergänzt oder einschränkt (zum Beispiel [E-34](../entscheidungen.md#e-34) durch [E-151](#e-151) und [E-153](#e-153), [E-44](../phase2/entscheidungen.md#e-44) durch [E-153](#e-153) und [E-157](#e-157)), nennt sie die frühere ausdrücklich; ohne diese Nennung gilt die frühere Festlegung. Zitiert wird mit relativem Link, der Korrekturplan mit dem Zusatz „(Korrekturplan)“, zum Beispiel [E-59](../g1-korrektur/entscheidungen.md#e-59) (Korrekturplan). Alle Aufgaben A-01 bis A-53 sind erledigt (A-28 am 2026-11-09 mit WP-832).
 
-**Nummern:** E-Nummern sind über alle vier Entscheidungsdateien eindeutig. Phase 1 belegt E-01 bis E-36 und E-56 bis E-58, der Korrekturplan E-59 bis E-102 und E-144, Phase 2 E-37 bis E-55, E-103 bis E-143 und E-145 bis E-147. Diese Datei führt E-148 bis E-255. A-Nummern sind über die Dateien der Phasen 1 bis 3 eindeutig: Phase 1 belegt A-01 bis A-14, Phase 2 A-15 bis A-54, diese Datei A-55 bis A-86. Neue Entscheidungen erhalten die nächste freie Nummer über alle vier Dateien, neue Aufgaben die nächste freie Nummer über die Dateien der Phasen 1 bis 3 (Stand dieser Fassung: **E-257** und **A-87**; E-245 und E-246 vom 2026-11-10 nach Empfehlung, E-247 vom 2026-11-12 durch den Auftraggeber, E-248 bis E-255 vom 2026-11-12 nach Empfehlung (ADMP-API-Doku), E-256 vom 2026-11-12 nach Empfehlung, A-85 und A-86 offen). **Nachtrag vom 2026-11-10:** Phase 2 hat am 2026-11-09 E-146, E-147 und A-54 selbst vergeben. Die Nummern dieser Datei sind deshalb um zwei (E) bzw. eins (A) verschoben; Inhalt und Status bleiben gleich.
+**Nummern:** E-Nummern sind über alle vier Entscheidungsdateien eindeutig. Phase 1 belegt E-01 bis E-36 und E-56 bis E-58, der Korrekturplan E-59 bis E-102 und E-144, Phase 2 E-37 bis E-55, E-103 bis E-143 und E-145 bis E-147. Diese Datei führt E-148 bis E-255. A-Nummern sind über die Dateien der Phasen 1 bis 3 eindeutig: Phase 1 belegt A-01 bis A-14, Phase 2 A-15 bis A-54, diese Datei A-55 bis A-86. Neue Entscheidungen erhalten die nächste freie Nummer über alle vier Dateien, neue Aufgaben die nächste freie Nummer über die Dateien der Phasen 1 bis 3 (Stand dieser Fassung: **E-258** und **A-87**; E-245 und E-246 vom 2026-11-10 nach Empfehlung, E-247 vom 2026-11-12 durch den Auftraggeber, E-248 bis E-255 vom 2026-11-12 nach Empfehlung (ADMP-API-Doku), E-256 vom 2026-11-12 nach Empfehlung, E-257 vom 2026-11-13 nach Empfehlung, A-85 und A-86 offen). **Nachtrag vom 2026-11-10:** Phase 2 hat am 2026-11-09 E-146, E-147 und A-54 selbst vergeben. Die Nummern dieser Datei sind deshalb um zwei (E) bzw. eins (A) verschoben; Inhalt und Status bleiben gleich.
 
 **Status:** Alle Entscheidungen dieser Datei sind entschieden, E-148 bis E-244 am 2026-11-09, die späteren an dem Datum in ihrem Statusfeld. Jede nennt Schlüssel, Status, Kontext, Optionen, Empfehlung, Auswirkung, Quelle sowie betroffene IDs und WPs. Die WP-Blöcke des Plans nennen den Status im Feld „Entscheidungsbedarf“.
 
@@ -2780,4 +2780,25 @@ Mengengerüst (aus [E-222](#e-222)/[E-225](#e-225)): Mit gezielter Auffrischung 
 **Betroffene IDs:** IPM-10, TEN-05
 
 **Betroffene WPs:** WP-910 (`p3-ipam-section-acl`)
+
+<a id="e-257"></a>
+## E-257 – PostgreSQL 16.15 im eigenen Image reticora-postgres nach dem Release 16.16
+
+**Status:** entschieden (2026-11-13, nach Empfehlung: Option 1)
+**Kontext:** Seit 2026-11-13 meldet `image-scan (postgres)` 38 High-CVEs in PostgreSQL 16.15, behoben in 16.16 (Release 2026-11-12). Trivy sieht sie an den apk-Paketen `postgresql16`, `postgresql16-client`, `postgresql16-plpython3` und `libpq`. Der laufende Server ist aber ein Quell-Build 16.15 der Basis `timescale/timescaledb:2.31.0-pg16` unter `/usr/local`; ihn und die von pgBackRest, `psql` und `pg_dump` geladene `libpq` 16.15 (`/usr/local/lib`) sieht Trivy nicht. Ein `apk upgrade` der Pakete machte den Scan grün, ohne den Server zu ändern. Ein TimescaleDB-Image mit 16.16 gibt es am 2026-11-13 nicht (2.31.0-pg16 und 2.32.0-pg16 tragen PG_VERSION=16.15).
+**Optionen:**
+
+1. Befristete Ausnahmen in `security/scan-exceptions.txt` (since 2026-11-13, exp 2026-12-13 = SEC-11 für High) und Wechsel auf das erste TimescaleDB-pg16-Image mit PostgreSQL ≥ 16.16 (Version und Digest an allen Stellen nach E-96). Gibt es bis 2026-12-06 keines, baut ein Folge-WP PostgreSQL 16.16 aus dem Quelltext (sha256-geprüfter Tarball, Konfiguration wie `pg_config --configure`) über die Dateien in `/usr/local` und prüft im Build `postgres --version`.
+2. Sofort PostgreSQL 16.16 aus dem Quelltext bauen. Folge: längerer Image-Build, eigener Pflegeaufwand für jede Minor-Version.
+3. `apk upgrade` der Pakete. Folge: Scan grün, Server und Client-Bibliothek bleiben verwundbar (verdeckter Befund).
+
+**Empfehlung:** Option 1. Der Scan zeigt das Risiko weiter an und schlägt mit Ablauf der Frist wieder fehl; der Hersteller-Fix kommt erfahrungsgemäß binnen Tagen. Option 3 ist ausgeschlossen, weil sie den Befund verdeckt.
+
+**Auswirkung:** 38 Einträge in `security/scan-exceptions.txt` mit Verweis auf E-257; Nachtrag in `docs/security/abhaengigkeitsscans.md`. Prüfpunkt 2026-12-06: TimescaleDB-Image mit 16.16 pinnen oder Folge-WP nach Option 2 starten.
+
+**Quelle:** CI-Lauf 43403501444 (Job 131811976341); Docker Hub timescale/timescaledb (2.31.0-pg16 sha256:322ae364…, 2.32.0-pg16 sha256:2f87efea…); Prüfbericht vom 2026-11-13 (ldd: pgBackRest lädt `/usr/local/lib/libpq.so.5` 16.15)
+
+**Betroffene IDs:** SEC-11 [Q]
+
+**Betroffene WPs:** WP-873 (Scan), Folge-WP nach Option 2 falls nötig
 

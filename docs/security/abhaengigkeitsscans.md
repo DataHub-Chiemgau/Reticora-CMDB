@@ -274,3 +274,8 @@ auf, die CI auf 2.17.2. Geprüft am 2026-10-21 mit einer Datenbank, die mit
   (nachgestellt mit einem Katalogeintrag 2.99.0). Am 2026-10-21 gibt es auf
   Docker Hub keine 2.x-pg16-Version über 2.31.0; `latest-pg16` zeigt auf
   denselben Digest.
+
+### Nachtrag 2026-11-13: PostgreSQL 16.15 in reticora-postgres (E-257)
+
+`image-scan (postgres)` meldet 38 High-CVEs in PostgreSQL 16.15 (behoben in 16.16). Der Server der TimescaleDB-Basis ist ein Quell-Build in `/usr/local`, den Trivy nicht sieht; die gemeldeten apk-Pakete tragen dieselbe Version und stehen deshalb für das Risiko des Servers und der von pgBackRest, `psql` und `pg_dump` geladenen `libpq`. Ein `apk upgrade` würde den Befund verdecken und wird nicht verwendet. Die CVEs stehen befristet bis 2026-12-13 in `security/scan-exceptions.txt`; bis dahin wird auf ein TimescaleDB-Image mit 16.16 gewechselt oder PostgreSQL 16.16 aus dem Quelltext gebaut (Prüfpunkt 2026-12-06).
+
