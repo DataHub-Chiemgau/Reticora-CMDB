@@ -27466,19 +27466,24 @@ paths:
   /api/v1/subnets/{id}/scan:
     x-phase: P3
     x-feature: ipam
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: getSubnetScan
       tags: [IPAM]
-      summary: Get the scan settings and last result of a subnet
+      summary: Get the scan settings of a subnet
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        IPM-11 (WP-1062): the scan configuration of the subnet, the members
+        of its collector group (read only) and the target numbers (targets,
+        owned: managed probes of the scan, reused: probes of the
+        organization the scan uses). Requires ipam:read; the features ipam
+        and monitoring gate the path. Without PostgreSQL 501.
       responses:
         '200':
-          description: Get the scan settings and last result of a subnet. The schema comes with the implementing work package.
+          description: Scan settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubnetScan' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -27487,6 +27492,52 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
+    patch:
+      operationId: updateSubnetScan
+      tags: [IPAM]
+      summary: Change the scan settings of a subnet
+      description: >-
+        IPM-11 (WP-1062): sets the scan fields. Switching the scan on or
+        changing it synchronizes the targets in the same transaction: one
+        managed icmp probe (managed_by ipam_scan) per known address of the
+        subnet and, with discover_new_hosts, per further host address of an
+        IPv4 subnet up to /22, in the collector group of the subnet with the
+        client of the subnet (else of the group); an unmanaged icmp probe on
+        the same target and group is reused. The probes count against the
+        probe budget (403 entitlement-limit). Switching off deletes every
+        target and the managed probes. 422 with field for an invisible
+        collector group or one of another client (collector_group_id), an
+        interval outside the limits of icmp (scan_interval_s),
+        offline_after_s below the effective interval, discover_new_hosts on
+        IPv6 or wider than /22. Requires ipam:write; the features ipam and
+        monitoring gate the path. Without PostgreSQL 501.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SubnetScanUpdate' }
+      responses:
+        '200':
+          description: Scan settings changed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SubnetScan' }
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
 
   /api/v1/subnets/{id}/rpki:
     x-phase: P3
@@ -32601,6 +32652,14 @@ components:
           format: date-time
           readOnly: true
           description: When the probe was suspended (with suspended_reason).
+        managed_by:
+          type: string
+          enum: [ipam_scan, ipam_ptr]
+          readOnly: true
+          description: >-
+            The IPAM function that manages the probe (the subnet scan,
+            WP-1062): it changes only through that function; PATCH and
+            DELETE answer 409 with field managed_by. Absent for other probes.
         origin:
           type: string
           enum: [manual, auto]
@@ -32705,6 +32764,40 @@ components:
           type: object
           description: Every parameter of the type's schema, by name.
           additionalProperties: { $ref: '#/components/schemas/EffectiveProbeField' }
+    SubnetScanMember:
+      type: object
+      required: [collector_id, priority, member_status]
+      properties:
+        collector_id: { type: string, format: uuid }
+        priority: { type: integer }
+        member_status: { type: string, enum: [healthy, degraded, down] }
+    SubnetScan:
+      type: object
+      required: [subnet_id, scan_enabled, scan_interval_s, discover_new_hosts, offline_after_s, scan_synced_at, members, targets, owned, reused]
+      properties:
+        subnet_id: { type: string, format: uuid }
+        scan_enabled: { type: boolean }
+        collector_group_id: { type: string, format: uuid, description: The collector group that runs the probes of the scan (redundancy after PRB-03). }
+        scan_interval_s: { type: [integer, 'null'], description: 'Interval in seconds; null: the effective value of the type icmp (30 s).' }
+        discover_new_hosts: { type: boolean, description: Scan every host address of an IPv4 subnet up to /22, not only the known ones. }
+        offline_after_s: { type: integer, minimum: 60, maximum: 2592000 }
+        scan_synced_at: { type: [string, 'null'], format: date-time }
+        members:
+          type: array
+          items: { $ref: '#/components/schemas/SubnetScanMember' }
+        targets: { type: integer }
+        owned: { type: integer }
+        reused: { type: integer }
+    SubnetScanUpdate:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        scan_enabled: { type: boolean }
+        collector_group_id: { type: [string, 'null'], format: uuid }
+        scan_interval_s: { type: [integer, 'null'], minimum: 10, maximum: 3600 }
+        discover_new_hosts: { type: boolean }
+        offline_after_s: { type: integer, minimum: 60, maximum: 2592000 }
     ProbeStateValue:
       type: string
       description: State of a probe (PRB-05).

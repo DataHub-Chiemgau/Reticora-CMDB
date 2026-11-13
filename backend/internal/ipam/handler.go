@@ -21,6 +21,9 @@ type Handler struct {
 	// WP-300); without it, or with a repository that cannot find
 	// duplicates, nothing is checked.
 	reviews *reviews.Service
+	// scanProbes writes the managed probes of the subnet scan (IPM-11,
+	// WP-1062); without it the scan routes answer 501.
+	scanProbes ScanProbes
 }
 
 // NewHandler creates a new ipam handler.
@@ -137,6 +140,10 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	// NAT translations (IPM-15, nat_handler.go): only with PostgreSQL,
 	// else 501.
 	h.registerNATRoutes(r)
+
+	// The subnet scan (IPM-11, scan_handler.go): only with PostgreSQL and
+	// the probe engine, else 501.
+	h.registerScanRoutes(r)
 
 	// BGP peerings (IPM-17, bgp_handler.go): only with PostgreSQL, else
 	// 501.

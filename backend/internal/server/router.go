@@ -1063,7 +1063,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		contract.NewContractHandler(repos.Contract),
 		// Duplicate addresses open duplicate_ip items in the review queue of
 		// discovery (NET-06, WP-300).
-		ipam.NewHandler(repos.IPAM).WithReviews(discoveryHandler.ReviewService()),
+		// The subnet scan writes managed probes of the probe engine
+		// (IPM-11, WP-1062).
+		ipam.NewHandler(repos.IPAM).WithReviews(discoveryHandler.ReviewService()).WithScanProbes(scanProbesOf(&repos)),
 		monitoringHandler,
 		// The probe definitions and the probe type register (PRB-01,
 		// PRT-01, WP-939).
@@ -1790,6 +1792,16 @@ func alarmService(repos *Repositories) *alarm.Service {
 func probeAutocreator(repos *Repositories) *probe.Autocreator {
 	pg, _ := repos.Probes.(*probe.PGRepository)
 	return probe.NewAutocreator(pg)
+}
+
+// scanProbesOf returns the managed probes of the subnet scan on the
+// PostgreSQL probe store (nil without one: the scan routes answer 501).
+func scanProbesOf(repos *Repositories) ipam.ScanProbes {
+	pg, ok := repos.Probes.(*probe.PGRepository)
+	if !ok || pg == nil {
+		return nil
+	}
+	return probe.ScanProbes{Repo: pg}
 }
 
 // probeStore returns the probe store of repos, an empty memory store when

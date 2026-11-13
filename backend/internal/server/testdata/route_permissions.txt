@@ -400,6 +400,7 @@ GET /api/v1/subnets/{id}/free-addresses ipam:read
 GET /api/v1/subnets/{id}/free-subnets ipam:read
 GET /api/v1/subnets/{id}/history ipam:read
 GET /api/v1/subnets/{id}/reservations ipam:read
+GET /api/v1/subnets/{id}/scan ipam:read
 GET /api/v1/subnets/{id}/usage ipam:read
 GET /api/v1/suppliers contract:read
 GET /api/v1/suppliers/{id} contract:read
@@ -518,6 +519,7 @@ PATCH /api/v1/sites/{id} location:write
 PATCH /api/v1/slas/{id} sla:write
 PATCH /api/v1/stocktakes/{id} stocktake:write
 PATCH /api/v1/subnets/{id} ipam:write
+PATCH /api/v1/subnets/{id}/scan ipam:write
 PATCH /api/v1/suppliers/{id} contract:write
 PATCH /api/v1/tags/{id} tag:manage
 PATCH /api/v1/teams/{id} team:manage

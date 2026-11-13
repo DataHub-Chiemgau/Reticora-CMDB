@@ -357,7 +357,7 @@ func (a *Autocreator) Run(ctx context.Context, orgID string) (*AutocreateReport,
 				}
 				p, ierr := scanProbe(tx.QueryRow(ctx, `INSERT INTO probe AS p (organization_id, ci_id, collector_group_id, type, target, params, origin)
 					VALUES ($1, $2, $3, 'icmp', $4, '{}', 'auto')
-					ON CONFLICT ON CONSTRAINT probe_target_key DO NOTHING RETURNING `+probeColumns,
+					ON CONFLICT (organization_id, client_id, ci_id, type, target) WHERE managed_by IS NULL DO NOTHING RETURNING `+probeColumns,
 					orgID, c.CIID, c.Group, c.ManagementIP))
 				if errors.Is(ierr, pgx.ErrNoRows) {
 					continue

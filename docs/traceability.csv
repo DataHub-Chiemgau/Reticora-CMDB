@@ -1881,3 +1881,4 @@ IPM-13;[P3];G3;frontend/src/components/ipam/AddressDialog.test.tsx;WP-917
 IPM-09;[P3];G3;backend/internal/export/ipam_integration_test.go;WP-921
 TLC-05;[P3];F;backend/internal/export/orgexport_handler_test.go;WP-1151
 TLC-06;[P3];F;backend/internal/tenantapi/purge_integration_test.go;WP-1154
+IPM-11;[P3];G3;backend/internal/ipam/scan_integration_test.go;WP-1062

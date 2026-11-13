@@ -67,6 +67,11 @@ type Probe struct {
 	// Origin is manual (the API) or auto (the job probe.autocreate,
 	// WP-949); read only for the API.
 	Origin string `json:"origin"`
+	// ManagedBy names the IPAM function that manages the probe (ipam_scan,
+	// ipam_ptr; WP-1062): such a probe changes only through it, PATCH and
+	// DELETE are 409. ManagedKey is its key there (scan:<subnet>:<address>).
+	ManagedBy  string `json:"managed_by,omitempty"`
+	ManagedKey string `json:"-"`
 }
 
 // Origins of a probe (probe.origin, WP-949).

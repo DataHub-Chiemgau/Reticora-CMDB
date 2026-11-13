@@ -11681,8 +11681,8 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Get the scan settings and last result of a subnet
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * Get the scan settings of a subnet
+     * @description IPM-11 (WP-1062): the scan configuration of the subnet, the members of its collector group (read only) and the target numbers (targets, owned: managed probes of the scan, reused: probes of the organization the scan uses). Requires ipam:read; the features ipam and monitoring gate the path. Without PostgreSQL 501.
      */
     get: operations['getSubnetScan'];
     put?: never;
@@ -11690,7 +11690,11 @@ export interface paths {
     delete?: never;
     options?: never;
     head?: never;
-    patch?: never;
+    /**
+     * Change the scan settings of a subnet
+     * @description IPM-11 (WP-1062): sets the scan fields. Switching the scan on or changing it synchronizes the targets in the same transaction: one managed icmp probe (managed_by ipam_scan) per known address of the subnet and, with discover_new_hosts, per further host address of an IPv4 subnet up to /22, in the collector group of the subnet with the client of the subnet (else of the group); an unmanaged icmp probe on the same target and group is reused. The probes count against the probe budget (403 entitlement-limit). Switching off deletes every target and the managed probes. 422 with field for an invisible collector group or one of another client (collector_group_id), an interval outside the limits of icmp (scan_interval_s), offline_after_s below the effective interval, discover_new_hosts on IPv6 or wider than /22. Requires ipam:write; the features ipam and monitoring gate the path. Without PostgreSQL 501.
+     */
+    patch: operations['updateSubnetScan'];
     trace?: never;
   };
   '/api/v1/subnets/{id}/rpki': {
@@ -14652,6 +14656,11 @@ export interface components {
        */
       readonly suspended_at?: string;
       /**
+       * @description The IPAM function that manages the probe (the subnet scan, WP-1062): it changes only through that function; PATCH and DELETE answer 409 with field managed_by. Absent for other probes.
+       * @enum {string}
+       */
+      readonly managed_by?: 'ipam_scan' | 'ipam_ptr';
+      /**
        * @description manual: created through the API; auto: created by the automatic ping probes (monitoring.auto_ping, WP-949), its target follows the management IP of the CI. Deleting an auto probe keeps the job from creating it again for the CI.
        * @enum {string}
        */
@@ -14740,6 +14749,42 @@ export interface components {
       params: {
         [key: string]: components['schemas']['EffectiveProbeField'];
       };
+    };
+    SubnetScanMember: {
+      /** Format: uuid */
+      collector_id: string;
+      priority: number;
+      /** @enum {string} */
+      member_status: 'healthy' | 'degraded' | 'down';
+    };
+    SubnetScan: {
+      /** Format: uuid */
+      subnet_id: string;
+      scan_enabled: boolean;
+      /**
+       * Format: uuid
+       * @description The collector group that runs the probes of the scan (redundancy after PRB-03).
+       */
+      collector_group_id?: string;
+      /** @description Interval in seconds; null: the effective value of the type icmp (30 s). */
+      scan_interval_s: number | null;
+      /** @description Scan every host address of an IPv4 subnet up to /22 */
+      discover_new_hosts: boolean;
+      offline_after_s: number;
+      /** Format: date-time */
+      scan_synced_at: string | null;
+      members: components['schemas']['SubnetScanMember'][];
+      targets: number;
+      owned: number;
+      reused: number;
+    };
+    SubnetScanUpdate: {
+      scan_enabled?: boolean;
+      /** Format: uuid */
+      collector_group_id?: string | null;
+      scan_interval_s?: number | null;
+      discover_new_hosts?: boolean;
+      offline_after_s?: number;
     };
     /**
      * @description State of a probe (PRB-05).
@@ -52722,17 +52767,54 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get the scan settings and last result of a subnet. The schema comes with the implementing work package. */
+      /** @description Scan settings */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['SubnetScan'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
+    };
+  };
+  updateSubnetScan: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SubnetScanUpdate'];
+      };
+    };
+    responses: {
+      /** @description Scan settings changed */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SubnetScan'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+      500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   getSubnetRPKIState: {

@@ -27,6 +27,9 @@ type PGRepository struct {
 	// outbox writes ipam.address.state_changed in the writing transaction
 	// (IPM-04, Konvention 13); nil writes no events.
 	outbox *events.Outbox
+	// scanProbes writes the managed probes of the subnet scan (IPM-11,
+	// WP-1062); nil leaves the scan to the triggers of subnet_scan_target.
+	scanProbes ScanProbes
 }
 
 // NewPGRepository creates a new PostgreSQL-backed IPAM repository.
@@ -409,8 +412,17 @@ func overlapWarnings(ctx context.Context, tx pgx.Tx, id string) ([]SubnetWarning
 
 func (r *PGRepository) UpdateSubnet(ctx context.Context, orgID, id string, req *UpdateSubnetRequest) (*Subnet, error) {
 	var sn *Subnet
+	// A new client or CIDR of a scanned subnet changes the client of its
+	// probes and its host addresses (IPM-11, WP-1062).
+	rescan := r.scanProbes != nil && (req.ClientID != nil || req.CIDR != nil)
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		// The tree locks before any row lock (checks and update below).
+		// The probe budget lock first (WP-940 AK3), then the tree locks
+		// before any row lock (checks and update below).
+		if rescan {
+			if err := r.scanProbes.LockProbeBudget(ctx, tx, orgID); err != nil {
+				return err
+			}
+		}
 		if err := lockTreesOfSubnet(ctx, tx, orgID, id, req.VRFID); err != nil {
 			return err
 		}
@@ -522,6 +534,11 @@ func (r *PGRepository) UpdateSubnet(ctx context.Context, orgID, id string, req *
 					return err
 				}
 			}
+			if rescan {
+				if err := r.rescanSubnet(ctx, tx, orgID, id, req); err != nil {
+					return err
+				}
+			}
 		}
 		// The row as the triggers left it (parent, children).
 		var err error
@@ -576,7 +593,18 @@ func syncGateway(ctx context.Context, tx pgx.Tx, orgID, subnetID, gateway string
 // (subnet_unplace) under the tree lock, taken before the row lock.
 func (r *PGRepository) DeleteSubnet(ctx context.Context, orgID, id string) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		// The probe budget lock before the tree and row locks (WP-940 AK3).
+		if r.scanProbes != nil {
+			if err := r.scanProbes.LockProbeBudget(ctx, tx, orgID); err != nil {
+				return err
+			}
+		}
 		if err := lockTreesOfSubnet(ctx, tx, orgID, id, nil); err != nil {
+			return err
+		}
+		// The scan goes through the probe engine (IPM-11, WP-1062): the
+		// collectors of its probes learn it with a new version.
+		if err := r.releaseScanOf(ctx, tx, orgID, id); err != nil {
 			return err
 		}
 		tag, err := tx.Exec(ctx, "DELETE FROM subnet WHERE organization_id = $1 AND id = $2", orgID, id)

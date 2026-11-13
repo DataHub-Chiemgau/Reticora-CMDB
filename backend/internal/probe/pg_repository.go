@@ -147,12 +147,19 @@ var _ Repository = (*PGRepository)(nil)
 const probeColumns = `p.id::text, p.organization_id::text, COALESCE(p.client_id::text, ''), COALESCE(p.site_id::text, ''),
 	COALESCE(p.ci_id::text, ''), p.collector_group_id::text, p.type, p.target, p.params, p.enabled,
 	COALESCE(p.parent_probe_id::text, ''), COALESCE(p.created_by_surrogate::text, ''), p.created_at, p.updated_at,
-	COALESCE(p.suspended_reason, ''), p.suspended_at, p.origin`
+	COALESCE(p.suspended_reason, ''), p.suspended_at, p.origin, COALESCE(p.managed_by, ''), COALESCE(p.managed_key, '')`
+
+// probeDest returns the scan destinations of probeColumns, followed by
+// extra.
+func probeDest(p *Probe, extra ...any) []any {
+	return append([]any{&p.ID, &p.OrganizationID, &p.ClientID, &p.SiteID, &p.CIID, &p.CollectorGroupID, &p.Type, &p.Target,
+		&p.Params, &p.Enabled, &p.ParentProbeID, &p.CreatedBySurrogate, &p.CreatedAt, &p.UpdatedAt, &p.SuspendedReason, &p.SuspendedAt,
+		&p.Origin, &p.ManagedBy, &p.ManagedKey}, extra...)
+}
 
 func scanProbe(row pgx.Row) (Probe, error) {
 	var p Probe
-	err := row.Scan(&p.ID, &p.OrganizationID, &p.ClientID, &p.SiteID, &p.CIID, &p.CollectorGroupID, &p.Type, &p.Target,
-		&p.Params, &p.Enabled, &p.ParentProbeID, &p.CreatedBySurrogate, &p.CreatedAt, &p.UpdatedAt, &p.SuspendedReason, &p.SuspendedAt, &p.Origin)
+	err := row.Scan(probeDest(&p)...)
 	return p, err
 }
 
@@ -319,9 +326,7 @@ func (r *PGRepository) ResolveForCollector(ctx context.Context, collectorID stri
 		for rows.Next() {
 			var p Probe
 			var epoch int64
-			if scanErr := rows.Scan(&p.ID, &p.OrganizationID, &p.ClientID, &p.SiteID, &p.CIID, &p.CollectorGroupID, &p.Type, &p.Target,
-				&p.Params, &p.Enabled, &p.ParentProbeID, &p.CreatedBySurrogate, &p.CreatedAt, &p.UpdatedAt, &p.SuspendedReason,
-				&p.SuspendedAt, &p.Origin, &epoch); scanErr != nil {
+			if scanErr := rows.Scan(probeDest(&p, &epoch)...); scanErr != nil {
 				rows.Close()
 				return fmt.Errorf("scan assigned probe: %w", scanErr)
 			}

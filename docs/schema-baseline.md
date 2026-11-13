@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000356_org_purge_fn
+Stand: Migration 000357_subnet_scan
 
 ## Prüfung
 
@@ -822,6 +822,26 @@ neu ab. ENABLE und FORCE RLS mit den Policies nach Konvention 5, `updated_at`
 und `reticora_truncate_guard`. Die Tabelle oben und die Zeile „Stand:“
 erzeugt `RETICORA_UPDATE_SCHEMA_BASELINE=1` beim Zusammenführen mit den
 endgültigen Migrationsnummern neu.
+
+Migration `subnet_scan` (WP-1062, IPM-11, vorläufige Nummer 000357) gibt
+`subnet` die Scan-Spalten `scan_enabled`, `collector_group_id` (zusammengesetzter
+Fremdschlüssel `subnet_collector_group_fkey` auf `collector_group`, ON DELETE
+RESTRICT, Teilindex `idx_subnet_collector_group`), `scan_interval_s`,
+`discover_new_hosts`, `offline_after_s` (60 s bis 30 Tage, Standard 3600) und
+`scan_synced_at` mit `subnet_scan_collector_group_required`. `probe` erhält
+`managed_by` (`ipam_scan`, `ipam_ptr`) und `managed_key` (beide oder keiner,
+`probe_managed_pair`); der Schlüssel `probe_target_key` aus WP-935 wird ein
+partieller eindeutiger Index gleichen Namens (NULLS NOT DISTINCT, nur ohne
+`managed_by`), verwaltete Probes sind über `probe_managed_key`
+(organization_id, managed_by, managed_key) eindeutig. Neue Mandantentabelle
+`subnet_scan_target` (PK subnet_id, address) mit zusammengesetzten
+Fremdschlüsseln auf `subnet` und `probe` (ON DELETE CASCADE), Index
+`(organization_id, probe_id)`; `client_id` und `site_id` leitet ein
+BEFORE-Trigger aus dem Subnetz ab (ohne Fremdschlüssel), ein AFTER-UPDATE-
+Trigger auf `subnet` zieht sie nach, ein AFTER-DELETE-Trigger löscht die Probe
+einer Zeile mit `owned`. ENABLE und FORCE RLS mit den Policies nach Konvention 5
+und `reticora_truncate_guard`. `subnet_id_organization_key` besteht seit 000287
+und wird nur angelegt, wenn er fehlt.
 
 Migration `bgp_peering` (WP-1068, IPM-17, vorläufige Nummer 000337) legt
 `bgp_peering` als Soll-Inventar an: Gerät, VRF, lokale ASN, entfernte
@@ -2174,6 +2194,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `stocktake` | ja | ja | stocktake_isolation (ALL), stocktake_scoped_delete (DELETE), stocktake_scoped_update (UPDATE) |
 | `stocktake_item` | ja | ja | stocktake_item_isolation (ALL) |
 | `subnet` | ja | ja | org_isolation (ALL), subnet_scoped_delete (DELETE), subnet_scoped_update (UPDATE), subnet_section_acl_delete (DELETE), subnet_section_acl_insert (INSERT), subnet_section_acl_read (SELECT), subnet_section_acl_update (UPDATE) |
+| `subnet_scan_target` | ja | ja | subnet_scan_target_isolation (ALL), subnet_scan_target_scoped_delete (DELETE), subnet_scan_target_scoped_update (UPDATE) |
 | `supplier` | ja | ja | supplier_isolation (ALL), supplier_scoped_delete (DELETE), supplier_scoped_update (UPDATE) |
 | `tag` | ja | ja | tag_isolation (ALL) |
 | `team` | ja | ja | team_tenant_isolation (ALL) |

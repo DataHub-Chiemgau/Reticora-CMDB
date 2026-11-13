@@ -312,9 +312,7 @@ func (d *Distributor) build(ctx context.Context, tx pgx.Tx, orgID, collectorID s
 		var p Probe
 		var epoch int64
 		var ids, notInBundle []string
-		if scanErr := rows.Scan(&p.ID, &p.OrganizationID, &p.ClientID, &p.SiteID, &p.CIID, &p.CollectorGroupID, &p.Type, &p.Target,
-			&p.Params, &p.Enabled, &p.ParentProbeID, &p.CreatedBySurrogate, &p.CreatedAt, &p.UpdatedAt, &p.SuspendedReason,
-			&p.SuspendedAt, &p.Origin, &epoch, &ids, &notInBundle); scanErr != nil {
+		if scanErr := rows.Scan(probeDest(&p, &epoch, &ids, &notInBundle)...); scanErr != nil {
 			rows.Close()
 			return nil, fmt.Errorf("scan assigned probe: %w", scanErr)
 		}

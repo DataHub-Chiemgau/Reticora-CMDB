@@ -68,6 +68,9 @@ var (
 	// ErrTargetTaken: the client, CI, type and target are taken by another
 	// probe (probe_target_key), 409.
 	ErrTargetTaken = &api.ConflictError{Field: "target", Message: "a probe of this type for this target already exists"}
+	// ErrManagedProbe: the probe is managed by an IPAM function (subnet
+	// scan, PTR check; WP-1062) and changes only through it, 409.
+	ErrManagedProbe = &api.ConflictError{Field: "managed_by", Message: "the probe is managed by IPAM and cannot be changed here"}
 )
 
 // unprocessable returns the 422 of a field.
@@ -334,10 +337,18 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", "name at least one field to change")
 		return
 	}
-	change, err := parseUpdate(body)
+	parsed, err := parseUpdate(body)
 	if err != nil {
 		writeError(w, err)
 		return
+	}
+	// A managed probe changes only through its IPAM function (WP-1062 AK3);
+	// managed_by is set at creation and never changes.
+	change := func(current *Probe) (*Probe, []string, error) {
+		if current.ManagedBy != "" {
+			return nil, nil, ErrManagedProbe
+		}
+		return parsed(current)
 	}
 	updated, err := h.store.Update(r.Context(), chi.URLParam(r, "id"), change, checkWrite)
 	if err != nil {
@@ -428,7 +439,16 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	if !requireOrg(w, r) {
 		return
 	}
-	if err := h.store.Delete(r.Context(), chi.URLParam(r, "id")); err != nil {
+	p, err := h.store.Get(r.Context(), chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if p.ManagedBy != "" {
+		writeError(w, ErrManagedProbe)
+		return
+	}
+	if err := h.store.Delete(r.Context(), p.ID); err != nil {
 		writeError(w, err)
 		return
 	}

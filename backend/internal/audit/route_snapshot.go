@@ -384,6 +384,8 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	crud(m, v1+"credentials", "credential", "DELETE", "PATCH")
 	m["POST "+v1+"credentials/"] = created("credential")
 	m["PUT "+v1+"credentials/{id}/secret"] = row("credential")
+	// The scan configuration of a subnet (IPM-11, WP-1062).
+	m["PATCH "+v1+"subnets/{id}/scan"] = row("subnet")
 	// Credential bindings (WP-890). PUT /cis/{id}/credentials replaces the
 	// whole set of the CI (possibly with none); the entry names the CI, the
 	// bindings are read through GET /cis/{id}/credentials.
