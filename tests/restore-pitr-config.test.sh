@@ -484,7 +484,7 @@ else
     cat > "$o/fixture.yml" <<'YML'
 services:
   postgres:
-    image: postgres:16.15-alpine@sha256:aa6cb33cf4c19c765cefcf48d96176258800870a9a1e930ad126200f9d825139
+    image: postgres:16.16-alpine@sha256:0adbf25a9e96d38823bb813f3ac0ed41fadb665c88f1df7fe6dbfb060cbdc106
     command:
       - postgres
       - -c

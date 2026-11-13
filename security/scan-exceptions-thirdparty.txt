@@ -8,7 +8,9 @@
 # The findings lie in the vendor images (Go and Java dependencies and OS
 # packages of minio, opensearch, keycloak, certbot and the postgres image of
 # keycloak-db; the logical backup runs on the own image since WP-1178);
-# none of these images has a newer release (2026-11-10). since: is the first scan of the
+# none of these images has a newer release (2026-11-10). keycloak-db moved to
+# postgres:16.16-alpine on 2026-11-13 (vendor fix of krb5-libs and libxslt);
+# its gosu still carries Go 1.24.6, the same IDs as before. since: is the first scan of the
 # image (WP-873), exp: the SLA limit of SEC-11 (critical 7, high 30 days).
 # The resolution per image is E-246 (docs/plan/phase3/entscheidungen.md).
 

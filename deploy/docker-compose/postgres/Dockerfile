@@ -49,10 +49,13 @@ RUN curl -fsSL -o /tmp/pgbackrest.tar.gz \
 FROM ${TIMESCALE_IMAGE}
 # libexpat, Python 3 and musl of the base image have fixable findings (E-96;
 # python3 CVE-2026-115557, fixed in 3.12.16-r0; musl CVE-2026-107891, fixed
-# in 1.2.5-r24). curl: the signed GET
-# ?versioning of `reticora-backup.sh verify-repo` (NFR-05).
+# in 1.2.5-r24; krb5-libs CVE-2026-40355 and 16 more, fixed in 1.22.3-r0;
+# libxslt CVE-2026-9947, CVE-2026-87636, CVE-2026-125350, fixed in
+# 1.1.43-r4). curl: the signed GET ?versioning of
+# `reticora-backup.sh verify-repo` (NFR-05).
 RUN apk add --no-cache libpq openssl libxml2 lz4-libs zstd-libs libbz2 zlib libssh2 curl \
     && apk upgrade --no-cache libexpat python3 python3-pyc python3-pycache-pyc0 pyc musl musl-utils \
+        krb5-libs libxslt \
     && curl --version \
     && python3 --version
 # Rebuilt Go helpers (stage go-tools). timescaledb-parallel-copy is used by

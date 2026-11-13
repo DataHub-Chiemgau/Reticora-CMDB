@@ -2566,7 +2566,7 @@ db_image() {
     local service="${1:-postgres}" fallback img
     case "$service" in
         postgres) fallback="reticora-postgres:latest" ;;
-        *) fallback="postgres:16.15-alpine@sha256:aa6cb33cf4c19c765cefcf48d96176258800870a9a1e930ad126200f9d825139" ;;
+        *) fallback="postgres:16.16-alpine@sha256:0adbf25a9e96d38823bb813f3ac0ed41fadb665c88f1df7fe6dbfb060cbdc106" ;;
     esac
     img="$("${COMPOSE[@]}" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config 2>/dev/null \
         | awk -v svc="$service" '$0 == "  " svc ":" {f=1; next} f && /^  [^ ]/ {exit} f && /^    image:/ {print $2; exit}')"
