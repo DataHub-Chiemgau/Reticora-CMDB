@@ -159,6 +159,8 @@ export const navFeatureFor: Record<string, string | undefined> = {
   dashboard: undefined,
   cmdb: undefined,
   topology: 'topology',
+  // IPAM (IPM-19, WP-915): the feature ipam of WP-862 (E-151 option 2).
+  ipam: 'ipam',
   map: undefined,
   roomplan: 'rack_view',
   racks: 'rack_view',

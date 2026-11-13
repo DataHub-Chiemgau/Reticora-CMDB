@@ -1,4 +1,5 @@
 import {
+  Binary,
   Activity,
   Archive,
   Armchair,
@@ -93,6 +94,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
     items: [
       { page: 'cmdb', icon: Server },
       { page: 'topology', icon: Network },
+      { page: 'ipam', icon: Binary },
       { page: 'racks', icon: Rows3 },
       { page: 'roomplan', icon: Boxes },
       { page: 'map', icon: Map },

@@ -968,6 +968,8 @@ const ROUTES: A11yRoute[] = [
       await selects.nth(1).selectOption({ label: M.room });
     },
   },
+  // IPAM (WP-915): the section, its subnet tree and the usage bar.
+  { path: '/ipam', url: '/ipam', ready: text(M.ipamSubnet) },
   { path: '/racks', url: '/racks', ready: text(M.ci) },
   { path: '/discovery', url: '/discovery', ready: text(M.collector) },
   { path: '/assets', url: '/assets', ready: text(M.asset) },

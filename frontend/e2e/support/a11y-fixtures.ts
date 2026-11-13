@@ -18,6 +18,9 @@ const COLLECTOR = 'c1000000-0000-4000-8000-000000000001';
 const ASSET = 'a5000000-0000-4000-8000-000000000001';
 const ROLE = 'e0000000-0000-4000-8000-000000000001';
 const SERVER_TYPE = CI_TYPES[0]!.id;
+const IPAM_SECTION = 'a5000000-0000-4000-8000-000000000001';
+const IPAM_SUBNET = 'a5000000-0000-4000-8000-000000000002';
+const IPAM_VRF = 'a5000000-0000-4000-8000-000000000003';
 const AT = '2026-10-14T08:00:00Z';
 const LATER = '2026-12-31T08:00:00Z';
 
@@ -72,6 +75,8 @@ export const A11Y_MARKERS = {
   audit: 'ci.update',
   quantityItem: 'a11y-cable',
   notification: 'a11y-notification',
+  ipamSection: 'a11y-section-core',
+  ipamSubnet: '10.20.0.0/16',
 } as const;
 
 const M = A11Y_MARKERS;
@@ -1126,6 +1131,61 @@ export const A11Y_HANDLERS: Handler[] = [
   { path: '/jobs', reply: fixed(list([job])) },
   { path: '/credentials', reply: fixed(list([])) },
   { path: '/vrfs', reply: fixed(list([])) },
+  // IPAM (/ipam, WP-915): one section with a pool subnet and its usage.
+  {
+    path: '/ipam-sections',
+    reply: fixed(
+      list([
+        {
+          id: IPAM_SECTION,
+          organization_id: ORG,
+          name: M.ipamSection,
+          strict_mode: true,
+          show_vlan: true,
+          show_vrf: true,
+          is_default: true,
+          acl_enabled: false,
+          vrf_ids: [],
+          created_at: AT,
+          updated_at: AT,
+        },
+      ]),
+    ),
+  },
+  {
+    path: /^\/subnets\/[^/]+\/usage$/,
+    reply: fixed({
+      subnet_id: IPAM_SUBNET,
+      cidr: M.ipamSubnet,
+      is_pool: true,
+      total: 65536,
+      used: 0,
+      covered: 512,
+      percent: 0.8,
+    }),
+  },
+  {
+    path: '/subnets',
+    reply: (_request, url) =>
+      url.searchParams.get('parent_id') === 'root'
+        ? {
+            body: list([
+              {
+                id: IPAM_SUBNET,
+                organization_id: ORG,
+                cidr: M.ipamSubnet,
+                vrf_id: IPAM_VRF,
+                section_id: IPAM_SECTION,
+                name: 'a11y-core',
+                is_pool: true,
+                child_count: 2,
+                created_at: AT,
+                updated_at: AT,
+              },
+            ]),
+          }
+        : { body: list([]) },
+  },
   // Assets and the modules around them.
   { path: '/assets', reply: fixed(list([asset])) },
   {

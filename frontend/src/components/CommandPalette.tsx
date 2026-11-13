@@ -16,6 +16,8 @@ export type AppPage =
   | 'dashboard'
   | 'cmdb'
   | 'topology'
+  // IPAM with sections and the subnet tree (IPM-19, WP-915).
+  | 'ipam'
   | 'racks'
   | 'discovery'
   | 'assets'
@@ -73,6 +75,7 @@ export const pageToPath: Record<AppPage, string> = {
   dashboard: '/dashboard',
   cmdb: '/cmdb',
   topology: '/topology',
+  ipam: '/ipam',
   racks: '/racks',
   discovery: '/discovery',
   assets: '/assets',
@@ -312,6 +315,12 @@ export function CommandPalette({
         label: t('commandPalette.commands.topology'),
         keywords: ['topology topologie graph netzwerk'],
         action: () => onNavigate('topology'),
+      },
+      {
+        id: 'nav-ipam',
+        label: t('commandPalette.commands.ipam'),
+        keywords: ['ipam subnetz subnet ip adressen addresses section'],
+        action: () => onNavigate('ipam'),
       },
       {
         id: 'nav-racks',

@@ -5,6 +5,7 @@
  * 7807 errors, idempotency).
  */
 import {
+  API_MAX_LIMIT,
   ApiError,
   assetApi,
   buildQuery as qs,
@@ -1742,3 +1743,81 @@ export async function collectCIs(
   }
   return { cis, total };
 }
+
+// ─── IPAM sections and subnet tree (IPM-01, IPM-03, IPM-10, IPM-20, WP-915) ─
+
+export type IPAMSection = components['schemas']['IPAMSection'];
+export type IPAMSectionCreate = components['schemas']['CreateIPAMSectionRequest'];
+export type IPAMSectionUpdate = components['schemas']['UpdateIPAMSectionRequest'];
+export type IPAMSectionPermission = components['schemas']['IPAMSectionPermission'];
+export type IPAMSectionLevel = IPAMSectionPermission['level'];
+export type Subnet = components['schemas']['Subnet'];
+export type SubnetUsage = components['schemas']['SubnetUsage'];
+
+/**
+ * SubnetQuery are the filters of GET /subnets the IPAM page sets (WP-909):
+ * the section, one level of the tree (parent_id root or the id of the
+ * parent), VRF, client, site, the text q and contains (the chain of subnets
+ * that contain an address, narrowest first).
+ */
+export interface SubnetQuery {
+  section_id?: string;
+  parent_id?: string;
+  vrf_id?: string;
+  client_id?: string;
+  site_id?: string;
+  q?: string;
+  contains?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export const ipamApi = {
+  listSections(
+    params: { limit?: number; offset?: number } = {},
+  ): Promise<PaginatedResponse<IPAMSection>> {
+    return fetchAPI(`/ipam-sections${qs(params)}`);
+  },
+  createSection(data: IPAMSectionCreate): Promise<IPAMSection> {
+    return fetchAPI('/ipam-sections', { method: 'POST', body: JSON.stringify(data) });
+  },
+  updateSection(id: string, data: IPAMSectionUpdate): Promise<IPAMSection> {
+    return fetchAPI(`/ipam-sections/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  /** deleteSection: the default section and a section with subnets are 409. */
+  deleteSection(id: string): Promise<void> {
+    return fetchAPI(`/ipam-sections/${id}`, { method: 'DELETE' });
+  },
+  listPermissions(sectionId: string): Promise<PaginatedResponse<IPAMSectionPermission>> {
+    return fetchAPI(`/ipam-sections/${sectionId}/permissions${qs({ limit: API_MAX_LIMIT })}`);
+  },
+  createPermission(
+    sectionId: string,
+    data: { team_id: string; level: IPAMSectionLevel },
+  ): Promise<IPAMSectionPermission> {
+    return fetchAPI(`/ipam-sections/${sectionId}/permissions`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+  updatePermission(
+    sectionId: string,
+    id: string,
+    level: IPAMSectionLevel,
+  ): Promise<IPAMSectionPermission> {
+    return fetchAPI(`/ipam-sections/${sectionId}/permissions/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ level }),
+    });
+  },
+  deletePermission(sectionId: string, id: string): Promise<void> {
+    return fetchAPI(`/ipam-sections/${sectionId}/permissions/${id}`, { method: 'DELETE' });
+  },
+  /** listSubnets reads one page (at most API_MAX_LIMIT) of GET /subnets. */
+  listSubnets(params: SubnetQuery): Promise<PaginatedResponse<Subnet>> {
+    return fetchAPI(`/subnets${qs({ limit: API_MAX_LIMIT, ...params })}`);
+  },
+  subnetUsage(id: string): Promise<SubnetUsage> {
+    return fetchAPI(`/subnets/${id}/usage`);
+  },
+};

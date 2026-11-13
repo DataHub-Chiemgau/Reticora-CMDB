@@ -9,6 +9,7 @@
     "cmdb": "CMDB",
     "discovery": "Discovery",
     "topology": "Topology",
+    "ipam": "IPAM",
     "settings": "Settings",
     "assets": "Assets",
     "assignments": "Assignments",
@@ -100,6 +101,7 @@
       "tickets": "Open Tickets",
       "users": "Open Users & Teams",
       "topology": "Open topology",
+      "ipam": "Open IPAM",
       "racks": "Open racks",
       "permissions": "Open permissions",
       "slas": "Open SLAs",
@@ -5021,6 +5023,103 @@
       "ssh": "SSH",
       "nas": "NAS",
       "sweep": "Network sweep"
+    }
+  },
+  "ipam": {
+    "title": "IP address management",
+    "description": "Sections, the subnet tree with usage and rights per section.",
+    "loadFailed": "The IPAM sections could not be loaded.",
+    "filters": {
+      "label": "Filters of the subnet tree",
+      "vrf": "VRF",
+      "client": "Client",
+      "site": "Site",
+      "all": "All",
+      "q": "Search",
+      "qPlaceholder": "Name, description or CIDR",
+      "contains": "Contains address",
+      "find": "Find",
+      "containsInvalid": "The address is no valid IP address.",
+      "containsNone": "No visible subnet contains {{address}}."
+    },
+    "tree": {
+      "label": "Subnet tree",
+      "title": "Subnets of section {{section}}",
+      "loading": "Loading subnets …",
+      "loadFailed": "The subnets could not be loaded.",
+      "empty": "This section holds no subnets.",
+      "loadMore": "Load more",
+      "expand": "Expand {{subnet}}",
+      "collapse": "Collapse {{subnet}}",
+      "vrf": "VRF {{vrf}}",
+      "narrowest": "Narrowest subnet",
+      "results": "Filter results as a list: with text, client or site the page shows the matching subnets without the tree, also when their parent does not match.",
+      "noResults": "No subnet of the section matches the filters."
+    },
+    "usage": {
+      "label": "Usage of {{subnet}}",
+      "text": "{{used}} of {{total}} used ({{percent}} %)"
+    },
+    "pool": {
+      "true": "Pool",
+      "false": "No pool"
+    },
+    "levels": {
+      "read": "Read",
+      "write": "Write"
+    },
+    "section": {
+      "label": "Section",
+      "new": "New section",
+      "edit": "Edit section",
+      "show": "Show section",
+      "defaultName": "{{name}} (default)",
+      "createTitle": "New section",
+      "editTitle": "Section {{name}}",
+      "tabs": "Parts of the section",
+      "tab": {
+        "general": "General",
+        "permissions": "Permissions"
+      },
+      "name": "Name",
+      "description": "Description",
+      "client": "Client",
+      "orgWide": "Organization-wide",
+      "clientFixed": "The section belongs to a client; the client does not change.",
+      "settings": "Settings",
+      "strictMode": "Strict mode",
+      "showVlan": "Show VLANs",
+      "showVrf": "Show VRFs",
+      "restricted": "Restricted",
+      "save": "Save",
+      "create": "Create",
+      "delete": "Delete",
+      "nameRequired": "Please enter a name.",
+      "nameTaken": "A section with this name exists already.",
+      "saveFailed": "The section could not be saved.",
+      "forbidden": "You lack the permission for this.",
+      "deleteDefault": "The default section cannot be deleted.",
+      "deleteInUse": "The section still holds subnets. Move or delete them first.",
+      "deleteFailed": "The section could not be deleted."
+    },
+    "permissions": {
+      "restricted": "The section is restricted: only teams with an entry read or write its subnets and addresses.",
+      "open": "The section has no rights: everybody with IPAM permission reads and writes it.",
+      "none": "No teams entered.",
+      "team": "Team",
+      "level": "Level",
+      "levelOf": "Level of {{team}}",
+      "add": "Add",
+      "remove": "Remove {{team}}",
+      "loadFailed": "The rights could not be loaded.",
+      "forbidden": "Rights are changed only by users without client and site restriction who may write the section.",
+      "duplicate": "The team already has an entry.",
+      "teamNotFound": "The team was not found.",
+      "saveFailed": "The rights could not be saved.",
+      "lockedEmpty": "The section stays locked until a team is entered or it is opened explicitly.",
+      "release": "Open section",
+      "hidden": "The section has {{count}} entries of teams you do not see.",
+      "releaseHasEntries": "The section still has entries, also of teams you do not see; it opens only without entries."
     }
   }
 }

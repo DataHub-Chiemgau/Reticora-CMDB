@@ -9,6 +9,7 @@
     "cmdb": "CMDB",
     "discovery": "Discovery",
     "topology": "Topologie",
+    "ipam": "IPAM",
     "settings": "Einstellungen",
     "assets": "Inventar",
     "assignments": "Zuweisungen",
@@ -100,6 +101,7 @@
       "tickets": "Tickets öffnen",
       "users": "Benutzer & Teams öffnen",
       "topology": "Topologie öffnen",
+      "ipam": "IPAM öffnen",
       "racks": "Racks öffnen",
       "permissions": "Berechtigungen öffnen",
       "slas": "SLAs öffnen",
@@ -5021,6 +5023,103 @@
       "ssh": "SSH",
       "nas": "NAS",
       "sweep": "Netzscan"
+    }
+  },
+  "ipam": {
+    "title": "IP-Adressverwaltung",
+    "description": "Sections, Subnetzbaum mit Belegung und Rechte je Section.",
+    "loadFailed": "Die IPAM-Sections konnten nicht geladen werden.",
+    "filters": {
+      "label": "Filter des Subnetzbaums",
+      "vrf": "VRF",
+      "client": "Kunde",
+      "site": "Standort",
+      "all": "Alle",
+      "q": "Suche",
+      "qPlaceholder": "Name, Beschreibung oder CIDR",
+      "contains": "Enthält Adresse",
+      "find": "Finden",
+      "containsInvalid": "Die Adresse ist keine gültige IP-Adresse.",
+      "containsNone": "Kein sichtbares Subnetz enthält {{address}}."
+    },
+    "tree": {
+      "label": "Subnetzbaum",
+      "title": "Subnetze der Section {{section}}",
+      "loading": "Subnetze werden geladen …",
+      "loadFailed": "Die Subnetze konnten nicht geladen werden.",
+      "empty": "Diese Section enthält keine Subnetze.",
+      "loadMore": "Weitere laden",
+      "expand": "{{subnet}} aufklappen",
+      "collapse": "{{subnet}} zuklappen",
+      "vrf": "VRF {{vrf}}",
+      "narrowest": "Engstes Subnetz",
+      "results": "Treffer der Filter als Liste: Mit Text, Kunde oder Standort zeigt die Seite die passenden Subnetze ohne Baum, auch wenn ihr Elternnetz nicht passt.",
+      "noResults": "Kein Subnetz der Section passt zu den Filtern."
+    },
+    "usage": {
+      "label": "Belegung von {{subnet}}",
+      "text": "{{used}} von {{total}} belegt ({{percent}} %)"
+    },
+    "pool": {
+      "true": "Pool",
+      "false": "Kein Pool"
+    },
+    "levels": {
+      "read": "Lesen",
+      "write": "Schreiben"
+    },
+    "section": {
+      "label": "Section",
+      "new": "Neue Section",
+      "edit": "Section bearbeiten",
+      "show": "Section anzeigen",
+      "defaultName": "{{name}} (Standard)",
+      "createTitle": "Neue Section",
+      "editTitle": "Section {{name}}",
+      "tabs": "Bereiche der Section",
+      "tab": {
+        "general": "Allgemein",
+        "permissions": "Rechte"
+      },
+      "name": "Name",
+      "description": "Beschreibung",
+      "client": "Kunde",
+      "orgWide": "Organisationsweit",
+      "clientFixed": "Die Section gehört einem Kunden; der Kunde ändert sich nicht.",
+      "settings": "Einstellungen",
+      "strictMode": "Strikter Modus",
+      "showVlan": "VLANs anzeigen",
+      "showVrf": "VRFs anzeigen",
+      "restricted": "Eingeschränkt",
+      "save": "Speichern",
+      "create": "Anlegen",
+      "delete": "Löschen",
+      "nameRequired": "Bitte einen Namen angeben.",
+      "nameTaken": "Eine Section mit diesem Namen gibt es bereits.",
+      "saveFailed": "Die Section konnte nicht gespeichert werden.",
+      "forbidden": "Dafür fehlt die Berechtigung.",
+      "deleteDefault": "Die Standard-Section kann nicht gelöscht werden.",
+      "deleteInUse": "Die Section enthält noch Subnetze. Verschieben oder löschen Sie diese zuerst.",
+      "deleteFailed": "Die Section konnte nicht gelöscht werden."
+    },
+    "permissions": {
+      "restricted": "Die Section ist eingeschränkt: Nur Teams mit einem Eintrag lesen bzw. schreiben ihre Subnetze und Adressen.",
+      "open": "Die Section hat keine Rechte: Alle mit IPAM-Berechtigung lesen und schreiben sie.",
+      "none": "Keine Teams eingetragen.",
+      "team": "Team",
+      "level": "Stufe",
+      "levelOf": "Stufe von {{team}}",
+      "add": "Hinzufügen",
+      "remove": "{{team}} entfernen",
+      "loadFailed": "Die Rechte konnten nicht geladen werden.",
+      "forbidden": "Rechte dürfen nur Benutzer ohne Kunden- und Standortbeschränkung mit Schreibrecht auf die Section ändern.",
+      "duplicate": "Das Team hat bereits einen Eintrag.",
+      "teamNotFound": "Das Team wurde nicht gefunden.",
+      "saveFailed": "Die Rechte konnten nicht gespeichert werden.",
+      "lockedEmpty": "Die Section bleibt gesperrt, bis ein Team eingetragen oder sie ausdrücklich freigegeben wird.",
+      "release": "Section freigeben",
+      "hidden": "Die Section hat {{count}} Einträge von Teams, die Sie nicht sehen.",
+      "releaseHasEntries": "Die Section hat noch Einträge, auch von Teams, die Sie nicht sehen; sie lässt sich erst ohne Einträge freigeben."
     }
   }
 }
