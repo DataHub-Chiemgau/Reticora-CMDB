@@ -162,6 +162,9 @@ spec:
             # system job it runs where the scheduler runs.
             - name: RETICORA_WORKER_PROBE_ASSIGN_ENABLED
               value: "true"
+            # Probe result ingest into probe_result (NFR-11, WP-960).
+            - name: RETICORA_WORKER_PROBE_INGEST_ENABLED
+              value: "true"
           volumeMounts:
             - name: session-key
               mountPath: /etc/reticora/session

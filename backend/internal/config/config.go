@@ -530,6 +530,10 @@ const (
 	// collector group every 10 s (PRB-03, PRB-11, WP-941; module
 	// monitoring).
 	WorkerProbeAssign = "probe_assign"
+	// WorkerProbeIngest consumes the probe result batches of the stream
+	// RETICORA_PROBE and writes them to probe_result (NFR-11, PRB-07,
+	// WP-960; module monitoring).
+	WorkerProbeIngest = "probe_ingest"
 )
 
 // WorkerNames lists every registered worker.
@@ -549,6 +553,7 @@ var WorkerNames = []string{
 	WorkerOfflineDetector,
 	WorkerComputedRefresh,
 	WorkerProbeAssign,
+	WorkerProbeIngest,
 }
 
 // OfflineDetectorAlias is the former switch of the offline detector (WP-157).

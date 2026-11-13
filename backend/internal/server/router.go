@@ -1322,6 +1322,8 @@ func metricsHandler(version string, includeTenantLabel bool) (handler http.Handl
 	operator.RegisterMetrics(registry)
 	entitlement.RegisterMetrics(registry)
 	discovery.RegisterMetrics(registry)
+	// The probe ingest (WP-960): rows, dropped results and dead letters.
+	probe.RegisterMetrics(registry)
 	rack.RegisterMetrics(registry)
 	iga.RegisterMetrics(registry)
 	ipam.RegisterMetrics(registry)

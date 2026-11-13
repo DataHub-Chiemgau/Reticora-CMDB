@@ -6690,13 +6690,14 @@ NFR-11;[P3];E;backend/internal/probe/edge_test.go;WP-959
 
 **Tests:**
 
-- `backend/internal/probe/ingest_integration_test.go` (PostgreSQL mit TimescaleDB, eingebetteter NATS-Server):
+- `backend/internal/probe/ingest_integration_test.go` (PostgreSQL mit TimescaleDB, NATS-Server mit JetStream aus `TEST_NATS_URL` wie bei den übrigen JetStream-Integrationstests des Backends; die CI setzt die Variable, ohne sie überspringen die Tests; das Backend hängt nicht von `nats-server` ab):
   - `TestProbeIngestIdempotentUnderRedelivery`: 1 Mio. Ergebnisse, jede 10. doppelt
   - `TestProbeIngestThroughput`: ≥ 5.000 Zeilen/s
   - `TestProbeIngestIsolatesOrganizations`
   - `TestProbeIngestStaleEpochStored`
   - `TestProbeIngestCursorAdvancesInSameTransaction`
   - `TestProbeIngestRecordsCredentialUsage`: Erfolg und `auth_failed` mit `credential_id` setzen `last_success_at` bzw. `last_failure_at` und `last_error_class`
+  - `TestProbeIngestRejectsForeignCollector`: ein an Client 2 gebundener Collector meldet für eine Probe von Client 1 mit aktueller Epoche → keine Zeile, kein `credential_usage` (`foreign_collector`); ein nicht zugewiesener Collector → `stale_epoch = true`, kein `credential_usage`
 - `backend/internal/probe/ingest_test.go`:
   - `TestBatchGroupingByOrganization`
   - `TestUnknownProbeDiscardedAndCounted`

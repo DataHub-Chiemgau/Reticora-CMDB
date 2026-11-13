@@ -72,6 +72,9 @@ type workerDeps struct {
 	credentials  *credential.Service
 	jobQueue     *jobs.Queue
 	ingestQueue  *discovery.NATSIngestQueue
+	// probeIngest is the worker probe_ingest main built for /readyz; nil
+	// builds one on ingestQueue (probeIngester).
+	probeIngest *probe.Ingester
 	// entitlements checks the discovery license on the collectors' scope
 	// channel (F-400); nil treats every organization as licensed.
 	entitlements *entitlement.Service
@@ -84,6 +87,26 @@ type workerDeps struct {
 	// cycle replaces the intervals of the polling workers and of the
 	// cycles of the workers that answer requests (tests); 0 keeps them.
 	cycle time.Duration
+}
+
+// probeIngester is the worker probe_ingest: the one main built for /readyz,
+// else one on the ingest queue's JetStream and the database; nil without
+// either.
+func (d *workerDeps) probeIngester() *probe.Ingester {
+	if d.probeIngest != nil {
+		return d.probeIngest
+	}
+	if d.ingestQueue == nil || d.pool == nil {
+		return nil
+	}
+	d.probeIngest = newProbeIngester(d.ingestQueue, d.pool, d.cfg)
+	return d.probeIngest
+}
+
+// newProbeIngester builds the worker probe_ingest on the stream
+// RETICORA_PROBE.
+func newProbeIngester(q *discovery.NATSIngestQueue, pool *pgxpool.Pool, cfg *config.Config) *probe.Ingester {
+	return probe.NewIngester(q.JetStream(), probe.DefaultStream(cfg.ProbeStreamMaxBytes), probe.NewPGIngestStore(pool))
 }
 
 // every is the interval of a worker: def, or the one of the tests.
@@ -260,6 +283,12 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 	// Consume ingest.> (REC-01).
 	if d.ingestQueue != nil {
 		workers = append(workers, server.Worker{Name: config.WorkerIngest, Run: d.ingestQueue.Run, Backlog: d.ingestQueue.Backlog})
+	}
+	// Write the probe result batches of the stream RETICORA_PROBE to
+	// probe_result (NFR-11, PRB-07, WP-960; module monitoring); the backlog
+	// is the consumer's unacknowledged messages, also in /readyz.
+	if ingester := d.probeIngester(); ingester != nil {
+		workers = append(workers, server.Worker{Name: config.WorkerProbeIngest, Run: ingester.Run, Backlog: ingester.Backlog})
 	}
 	// Evaluate monitoring alert rules against the metric store (module
 	// alerting, MON-04). Fired alerts are logged via the default notifier;

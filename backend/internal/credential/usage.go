@@ -82,7 +82,13 @@ type UsageInput struct {
 	ScopeID       string
 	ScopeClientID string
 	Bundle        UsageBundle
-	Entries       []UsageReport
+	// FromProbes marks the entries of the probe ingest (WP-960 AK7): the CI
+	// is the probe's (CIID, checked to exist in the organization) instead
+	// of a bundle target, and the credential need not be in a bundle of a
+	// scope; it must exist in the organization, and a client's credential
+	// still records nothing at a CI of another client.
+	FromProbes bool
+	Entries    []UsageReport
 	// At is the time of the use (the run, the collector's clock); zero is
 	// now. It sets last_success_at and last_failure_at.
 	At time.Time
@@ -192,7 +198,7 @@ func RecordUsage(ctx context.Context, tx pgx.Tx, in *UsageInput) (UsageOutcome, 
 	var lookupIPs, lookupCIs, credIDs []string
 	for _, e := range entries {
 		switch {
-		case !api.IsUUID(e.CredentialID) || !in.Bundle.CredentialIDs[e.CredentialID]:
+		case !api.IsUUID(e.CredentialID) || (!in.FromProbes && !in.Bundle.CredentialIDs[e.CredentialID]):
 			out.Rejected++
 			continue
 		case !usageNamespaces[e.Namespace]:

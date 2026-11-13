@@ -523,6 +523,12 @@ func main() {
 	if ingestQueue != nil && workerEnabled(config.WorkerIngest) {
 		readiness = append(readiness, server.ReadinessCheck{Name: "ingest", Detail: ingestQueue.ReadinessDetail})
 	}
+	// The backlog of the worker probe_ingest the same way (WP-960).
+	var probeIngest *probe.Ingester
+	if ingestQueue != nil && auditPool != nil && workerEnabled(config.WorkerProbeIngest) {
+		probeIngest = newProbeIngester(ingestQueue, auditPool, cfg)
+		readiness = append(readiness, server.ReadinessCheck{Name: "probe_ingest", Detail: probeIngest.ReadinessDetail})
+	}
 	// Every grant of org_admin binds the IdP account to MFA (WP-358).
 	mfa := mfaEnforcer(cfg)
 	// Session tokens are always verified cryptographically unless the operator
@@ -638,7 +644,7 @@ func main() {
 	workers, err := buildWorkers(&workerDeps{cfg: cfg, pool: auditPool, encryptor: encryptor, repos: &repos, mfa: mfa,
 		dispatcher: webhookDispatcher, scheduler: systemScheduler, blobs: blobStore, eventStream: eventStream,
 		notifier: notifier, collectorPKI: collectorPKI, coreNATS: coreNATS, credentials: credentialService,
-		jobQueue: jobQueue, ingestQueue: ingestQueue, entitlements: entitlementSvc, modules: modules, fieldPolicyCache: cacheStore})
+		jobQueue: jobQueue, ingestQueue: ingestQueue, probeIngest: probeIngest, entitlements: entitlementSvc, modules: modules, fieldPolicyCache: cacheStore})
 	if err != nil {
 		slog.Error("failed to set up the workers", "error", err)
 		os.Exit(1)

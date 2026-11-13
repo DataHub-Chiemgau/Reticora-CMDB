@@ -152,6 +152,10 @@ spec:
             # monitoring.
             - name: RETICORA_WORKER_PROBE_ASSIGN_ENABLED
               value: "true"
+            # Probe result ingest into probe_result (NFR-11, WP-960); module
+            # monitoring.
+            - name: RETICORA_WORKER_PROBE_INGEST_ENABLED
+              value: "true"
           volumeMounts:
             - name: session-key
               mountPath: /etc/reticora/session
