@@ -39,7 +39,9 @@ Migration mit `WITH NO DATA` anlegen?
 ### Umgebung und Aussagekraft
 
 Lokale Messung am 2026-11-12 auf einem Apple-Silicon-Rechner mit Docker
-Desktop, Image `timescale/timescaledb:2.31.0-pg16` (PostgreSQL 16.15,
+Desktop, Image
+`timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731`
+(der gepinnte `TIMESCALE_IMAGE` nach E-96; PostgreSQL 16.15,
 TimescaleDB 2.31.0), Standardkonfiguration des Testcontainers. Auf derselben
 Datenbankinstanz liefen gleichzeitig Testläufe anderer Arbeitsstränge. Die
 Werte sind deshalb **Richtwerte** einer Entwicklerumgebung, keine Messung
