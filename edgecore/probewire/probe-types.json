@@ -715,13 +715,13 @@
       }
     },
     "bfd": {
-      "status": "planned",
-      "min_interval_s": 10,
-      "default_interval_s": 30,
+      "status": "available",
+      "min_interval_s": 30,
+      "default_interval_s": 60,
       "max_interval_s": 86400,
       "min_timeout_s": 1,
       "default_timeout_s": 5,
-      "max_timeout_s": 15,
+      "max_timeout_s": 30,
       "default_down_count": 3,
       "default_up_count": 1,
       "max_parallel_per_target": 1,
@@ -729,7 +729,7 @@
       "max_rate_per_collector": 50,
       "max_probes_per_target": 2,
       "max_payload_bytes": 1048576,
-      "max_rows": 1024,
+      "max_rows": 1000,
       "credential_namespaces": [
         "snmp"
       ],
@@ -738,13 +738,18 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "expected_sessions": {
+          "sessions": {
             "type": "array",
             "items": {
               "type": "string",
               "maxLength": 64
             },
-            "maxItems": 256
+            "maxItems": 1000,
+            "description": "Neighbor addresses (IPv4 or IPv6) of the expected sessions, 1 to 1000; exactly one of sessions and all."
+          },
+          "all": {
+            "type": "boolean",
+            "description": "Every session of the table is expected up (adminDown excepted); exactly one of sessions and all."
           }
         }
       }

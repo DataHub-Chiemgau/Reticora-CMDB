@@ -1,0 +1,13 @@
+# CISCO-IETF-BFD-MIB (1.3.6.1.4.1.9.10.137) ciscoBfdSessTable of an IOS-XE
+# router (WP-1003): one session up, one down after the detection time
+# expired. ciscoBfdSessState .6, ciscoBfdSessDiag .8 (noDiagnostic(1)),
+# ciscoBfdSessAddrType .13, ciscoBfdSessAddr .14 below
+# ciscoBfdSessEntry 1.3.6.1.4.1.9.10.137.1.2.1.
+.1.3.6.1.4.1.9.10.137.1.2.1.6.10 = INTEGER: up(4)
+.1.3.6.1.4.1.9.10.137.1.2.1.6.11 = INTEGER: down(2)
+.1.3.6.1.4.1.9.10.137.1.2.1.8.10 = INTEGER: noDiagnostic(1)
+.1.3.6.1.4.1.9.10.137.1.2.1.8.11 = INTEGER: controlDetectionTimeExpired(2)
+.1.3.6.1.4.1.9.10.137.1.2.1.13.10 = INTEGER: ipv4(1)
+.1.3.6.1.4.1.9.10.137.1.2.1.13.11 = INTEGER: ipv4(1)
+.1.3.6.1.4.1.9.10.137.1.2.1.14.10 = Hex-STRING: C6 33 64 0A
+.1.3.6.1.4.1.9.10.137.1.2.1.14.11 = Hex-STRING: C6 33 64 0B

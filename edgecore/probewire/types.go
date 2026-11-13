@@ -334,9 +334,36 @@ func Validate(spec *ProbeSpec) []FieldError {
 // field errors.
 var paramChecks = map[string]func(spec *ProbeSpec, params map[string]any) []FieldError{
 	"icmp": checkICMPParams,
+	"bfd":  checkBFDParams,
 	"tcp":  func(_ *ProbeSpec, params map[string]any) []FieldError { return checkTCPParams(params) },
 	"dns":  func(_ *ProbeSpec, params map[string]any) []FieldError { return checkDNSParams(params) },
 	"http": func(_ *ProbeSpec, params map[string]any) []FieldError { return checkHTTPParams(params) },
+}
+
+// checkBFDParams checks the selection of the bfd type (PRT-08, WP-1003
+// AK3): exactly one of sessions (1 to 1000 neighbor addresses, IPv4 or
+// IPv6) and all: true; both or neither is a field error on
+// params.sessions.
+func checkBFDParams(_ *ProbeSpec, params map[string]any) []FieldError {
+	sessions, hasSessions := params["sessions"].([]any)
+	all, _ := params["all"].(bool)
+	switch {
+	case hasSessions && all:
+		return []FieldError{{Field: "params.sessions", Message: "set either sessions or all, not both"}}
+	case !hasSessions && !all:
+		return []FieldError{{Field: "params.sessions", Message: "set sessions (1 to 1000 neighbor addresses) or all: true"}}
+	case hasSessions && len(sessions) == 0:
+		return []FieldError{{Field: "params.sessions", Message: "must list 1 to 1000 neighbor addresses"}}
+	}
+	var errs []FieldError
+	for i, item := range sessions {
+		if str, ok := item.(string); ok {
+			if _, err := netip.ParseAddr(strings.TrimSpace(str)); err != nil {
+				errs = append(errs, FieldError{Field: fmt.Sprintf("params.sessions[%d]", i), Message: "must be an IPv4 or IPv6 address"})
+			}
+		}
+	}
+	return errs
 }
 
 // Defaults of the icmp parameters count and spacing_ms (api/probe-types.json).

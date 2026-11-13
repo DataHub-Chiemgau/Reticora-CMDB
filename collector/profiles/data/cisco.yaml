@@ -33,6 +33,38 @@
   attributes:
     category: network_device
     device_type: switch
+  # Monitoring (PRT-20, WP-1000): Cisco IOS/IOS-XE lead BFD in
+  # CISCO-IETF-BFD-MIB (1.3.6.1.4.1.9.10.137, draft of RFC 7331), not in
+  # BFD-STD-MIB (bfd, WP-1003).
+  monitor:
+    bfd:
+      tables:
+        sessions:
+          index: int
+          columns:
+            # ciscoBfdSessEntry 1.3.6.1.4.1.9.10.137.1.2.1: ciscoBfdSessState
+            # (6), ciscoBfdSessDiag (8), ciscoBfdSessAddrType (13),
+            # ciscoBfdSessAddr (14).
+            state: 1.3.6.1.4.1.9.10.137.1.2.1.6
+            diag: 1.3.6.1.4.1.9.10.137.1.2.1.8
+            addr_type: 1.3.6.1.4.1.9.10.137.1.2.1.13
+            addr: 1.3.6.1.4.1.9.10.137.1.2.1.14
+          enums:
+            state:
+              '1': adminDown
+              '2': down
+              '3': init
+              '4': up
+            diag:
+              '1': noDiagnostic
+              '2': controlDetectionTimeExpired
+              '3': echoFunctionFailed
+              '4': neighborSignaledSessionDown
+              '5': forwardingPlaneReset
+              '6': pathDown
+              '7': concatenatedPathDown
+              '8': administrativelyDown
+              '9': reverseConcatenatedPathDown
 - name: cisco-ios-ssh
   vendor: Cisco
   model: IOS

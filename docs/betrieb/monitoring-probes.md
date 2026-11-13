@@ -186,6 +186,45 @@ Messwerte: `rtt_ms` ist die Gesamtzeit; `values` enthält `dns_ms`,
 `probe_http_phase_seconds{phase=dns|connect|tls|ttfb|total}`,
 `probe_http_status_code` und `probe_http_cert_expiry_seconds`.
 
+## BFD-Sessions (`bfd`)
+
+Standard nach PRT-08: Intervall 60 s (30 s–24 h), Timeout 5 s (1–30 s),
+Down-Count 3, Up-Count 1, höchstens 1000 Sessions je Prüfung, Zugangsdaten
+aus dem Namespace `snmp`. Parameter: genau eines von `sessions` (1–1000
+Nachbaradressen, IPv4 oder IPv6) und `all: true`; beide zugleich oder
+keines ist ein Feldfehler auf `params.sessions`.
+
+Quelle ist `bfdSessTable` der BFD-STD-MIB (RFC 7331, `mib-2 222`:
+`bfdSessState`, `bfdSessDiag`, `bfdSessDstAddrType`/`bfdSessDstAddr`).
+Weicht ein Hersteller ab, liefert der Profilabschnitt `monitor.bfd` die
+Tabelle (logische Spalten `state`, `diag`, `addr_type`, `addr` mit
+Enum-Abbildung); `cisco.yaml` bildet CISCO-IETF-BFD-MIB ab. Ist die
+Profiltabelle leer, gilt der Kern; antwortet das Gerät auf keine der
+beiden Tabellen, ist das Ergebnis `error`/`unsupported` (`unknown`).
+
+Ergebnis: Eine erwartete Session, die fehlt oder nicht `up` ist, ergibt
+`fail` mit `session_down`; mit `all: true` gilt `adminDown` nicht als
+Fehler. SNMP-Timeout ergibt `fail`/`timeout`, ein abgewiesener
+SNMPv3-Zugang `error`/`auth_failed`. Mehr als 1000 Zeilen brechen den Walk
+ab (`probe_bfd_truncated` = 1); fehlende Zeilen dahinter erzeugen keinen
+Zustand (`probe_bfd_sessions_unseen` zählt die erwarteten Sessions hinter
+dem Abbruch). Liegt keine erwartete Session in den gelesenen Zeilen, ist
+das Ergebnis `error`/`response_too_large` (`unknown`), nie `ok`. Mehrere
+Sessions zu einem Nachbarn (Micro-BFD auf LAG-Mitgliedern, eine Session je
+VRF) zählen mit der schlechtesten: Ist eine davon nicht `up`, gilt der
+Nachbar als nicht `up`. Link-Local-Nachbarn (`ipv6z`) werden ohne Zone
+verglichen, `fe80::1%eth0` in `sessions` trifft also `fe80::1`. Werte je
+Nachbar mit Label `peer` (Nachbaradresse, bei mehreren Sessions die
+schlechteste):
+`probe_bfd_session_state{peer}` (Enum-Wert, `up` = 4) und
+`probe_bfd_diag{peer,diag}` (Diagnose-Code, Label `diag` mit dem Namen,
+z. B. `controlDetectionTimeExpired`), dazu `probe_bfd_sessions` und
+`probe_bfd_sessions_down`.
+
+Werte mit Labels tragen die Labels im Schlüssel von `Result.values` in der
+Form des Prometheus-Formats (`name{label="wert",…}`, Labels sortiert;
+`probewire.ValueKey`/`ParseValueKey`).
+
 ## Typtabelle
 
 Zeiten in Sekunden, Rate in Prüfungen je Sekunde. Die Werte sind Startwerte
@@ -204,7 +243,7 @@ nach E-154; WP-1023 misst die Raten nach.
 | `bgp` | planned | 60 / 30 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 4096 | snmp, gnmi | – |
 | `ospf` | planned | 60 / 30 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 1024 | snmp, gnmi | – |
 | `isis` | planned | 60 / 30 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 1024 | snmp, gnmi | – |
-| `bfd` | planned | 30 / 10 / 86400 | 5 / 1 / 15 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 1024 | snmp | – |
+| `bfd` | available | 60 / 30 / 86400 | 5 / 1 / 30 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 1000 | snmp | – |
 | `optical` | planned | 300 / 60 / 86400 | 15 / 1 / 60 | 3 / 1 | 1 | 8 | 20 | 2 | 1048576 | 1024 | snmp, gnmi | – |
 | `bng` | planned | 60 / 30 / 86400 | 10 / 1 / 30 | 3 / 1 | 1 | 8 | 20 | 2 | 1048576 | 1024 | snmp | – |
 | `pon` | planned | 300 / 120 / 86400 | 60 / 1 / 120 | 3 / 1 | 1 | 4 | 5 | 2 | 4194304 | 8192 | snmp | – |

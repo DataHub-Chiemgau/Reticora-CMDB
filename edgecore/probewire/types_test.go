@@ -61,7 +61,7 @@ func TestRegistryComplete(t *testing.T) {
 			t.Errorf("%s params schema: %v", key, err)
 		}
 		wantStatus := TypePlanned
-		if key == "icmp" || key == "tcp" || key == "dns" || key == "http" {
+		if key == "icmp" || key == "tcp" || key == "dns" || key == "http" || key == "bfd" {
 			wantStatus = TypeAvailable
 		}
 		if typ.Status != wantStatus {
@@ -116,9 +116,17 @@ func validSpec(typ Type) ProbeSpec {
 	}
 }
 
+// selectionParams are valid params of the types with a selection rule.
+var selectionParams = map[string]string{"bfd": `{"all":true}`}
+
 // requiredParams returns params with a valid value for every required
 // parameter of the type (nil without required parameters).
 func requiredParams(typ Type) json.RawMessage {
+	// Types whose selection the schema cannot require (exactly one of two
+	// parameters, checked by paramChecks).
+	if p, ok := selectionParams[typ.Key]; ok {
+		return json.RawMessage(p)
+	}
 	var s schema
 	if err := json.Unmarshal(typ.Params, &s); err != nil || len(s.Required) == 0 {
 		return nil

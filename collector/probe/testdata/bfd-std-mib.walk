@@ -1,0 +1,16 @@
+# BFD-STD-MIB (RFC 7331) bfdSessTable of a router with three sessions
+# (WP-1003): two IPv4 neighbors and one IPv6 neighbor, all up.
+# bfdSessState .11, bfdSessDiag .13, bfdSessDstAddrType .21,
+# bfdSessDstAddr .22 below bfdSessEntry 1.3.6.1.2.1.222.1.2.1.
+.1.3.6.1.2.1.222.1.2.1.11.1 = INTEGER: up(4)
+.1.3.6.1.2.1.222.1.2.1.11.2 = INTEGER: up(4)
+.1.3.6.1.2.1.222.1.2.1.11.3 = INTEGER: up(4)
+.1.3.6.1.2.1.222.1.2.1.13.1 = INTEGER: noDiagnostic(0)
+.1.3.6.1.2.1.222.1.2.1.13.2 = INTEGER: noDiagnostic(0)
+.1.3.6.1.2.1.222.1.2.1.13.3 = INTEGER: noDiagnostic(0)
+.1.3.6.1.2.1.222.1.2.1.21.1 = INTEGER: ipv4(1)
+.1.3.6.1.2.1.222.1.2.1.21.2 = INTEGER: ipv4(1)
+.1.3.6.1.2.1.222.1.2.1.21.3 = INTEGER: ipv6(2)
+.1.3.6.1.2.1.222.1.2.1.22.1 = Hex-STRING: C0 00 02 01
+.1.3.6.1.2.1.222.1.2.1.22.2 = Hex-STRING: C0 00 02 02
+.1.3.6.1.2.1.222.1.2.1.22.3 = Hex-STRING: 20 01 0D B8 00 00 00 00 00 00 00 00 00 00 00 03

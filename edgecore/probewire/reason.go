@@ -55,6 +55,9 @@ const (
 	// ReasonRedirectLimit: more redirects than follow_redirects, or a
 	// redirect from https to http with a credential (http, WP-971).
 	ReasonRedirectLimit = "redirect_limit"
+	// ReasonSessionDown: an expected BFD session is missing or not up
+	// (bfd, WP-1003, PRT-08).
+	ReasonSessionDown = "session_down"
 
 	// WarnThresholdExceeded: the check succeeded but a threshold (RTT,
 	// loss, value) was violated.
@@ -97,6 +100,7 @@ var reasons = map[string]bool{
 	ReasonStatusMismatch:       true,
 	ReasonBodyMismatch:         true,
 	ReasonRedirectLimit:        true,
+	ReasonSessionDown:          true,
 }
 
 // ValidReason reports whether code is a known reason or warn code.

@@ -402,7 +402,7 @@ func TestReasonCodes(t *testing.T) {
 	for _, code := range []string{
 		ReasonCollectorUnreachable, ReasonParentDown, ReasonLimitExceeded, ReasonUnsupported,
 		ReasonConfig, ReasonAuthFailed, ReasonTimeout, ReasonRefused, ReasonICMPUnavailable,
-		"unsupported", "unreachable", "tls", "expect_mismatch", "response_too_large",
+		"unsupported", "unreachable", "tls", "expect_mismatch", "response_too_large", "session_down",
 	} {
 		if !ValidReason(code) {
 			t.Fatalf("%q rejected", code)
