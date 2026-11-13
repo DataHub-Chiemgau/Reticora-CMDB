@@ -834,3 +834,39 @@ func TestVulnfeedCSAFProvidersMustBeHTTPS(t *testing.T) {
 		t.Fatalf("1 min interval: %v", err)
 	}
 }
+
+// TestVulnfeedNVDDisabledWhenAirGapped covers WP-1119 AK2 and AK6: the
+// NVD and KEV import runs only outside the air-gapped profile; the API key
+// is read from RETICORA_VULNFEED_NVD_API_KEY, the interval defaults to
+// 2 h, a non-https KEV URL refuses the start and the key appears in no
+// start error.
+func TestVulnfeedNVDDisabledWhenAirGapped(t *testing.T) {
+	clearEnv(t)
+	for _, k := range []string{"RETICORA_AIR_GAPPED", "RETICORA_VULNFEED_NVD_API_KEY", "RETICORA_VULNFEED_NVD_INTERVAL", "RETICORA_VULNFEED_KEV_URL"} {
+		t.Setenv(k, "")
+	}
+	cfg := Load()
+	if !cfg.VulnfeedNVDEnabled() || cfg.VulnfeedNVDInterval != DefaultVulnfeedNVDInterval || cfg.VulnfeedNVDAPIKey != "" || cfg.VulnfeedKEVURL != "" {
+		t.Fatalf("defaults: enabled %v interval %s key %q kev %q", cfg.VulnfeedNVDEnabled(), cfg.VulnfeedNVDInterval,
+			cfg.VulnfeedNVDAPIKey, cfg.VulnfeedKEVURL)
+	}
+	t.Setenv("RETICORA_AIR_GAPPED", "true")
+	if Load().VulnfeedNVDEnabled() {
+		t.Fatal("NVD import enabled in the air-gapped profile")
+	}
+	t.Setenv("RETICORA_AIR_GAPPED", "")
+	t.Setenv("RETICORA_VULNFEED_NVD_API_KEY", " nvd-key-in-env ")
+	t.Setenv("RETICORA_VULNFEED_KEV_URL", "http://kev.example/kev.json")
+	t.Setenv("RETICORA_VULNFEED_NVD_INTERVAL", "1m")
+	cfg = Load()
+	if cfg.VulnfeedNVDAPIKey != "nvd-key-in-env" {
+		t.Fatalf("key %q", cfg.VulnfeedNVDAPIKey)
+	}
+	err := cfg.Validate(true)
+	if err == nil || !strings.Contains(err.Error(), "RETICORA_VULNFEED_KEV_URL") || !strings.Contains(err.Error(), "RETICORA_VULNFEED_NVD_INTERVAL") {
+		t.Fatalf("validate: %v", err)
+	}
+	if strings.Contains(err.Error(), "nvd-key-in-env") {
+		t.Fatalf("the API key is in the start error: %v", err)
+	}
+}

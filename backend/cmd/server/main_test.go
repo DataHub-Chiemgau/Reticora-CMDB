@@ -1059,7 +1059,16 @@ func TestVulnfeedCSAFJobRegistration(t *testing.T) {
 	if _, ok := kinds(false, findings)[vulnfeed.CSAFKind]; ok {
 		t.Errorf("without a database %s is registered", vulnfeed.CSAFKind)
 	}
+	if spec := kinds(true, findings)[vulnfeed.NVDKind]; spec != "@every 2h0m0s" {
+		t.Errorf("with the module findings: %s spec %q, want @every 2h0m0s", vulnfeed.NVDKind, spec)
+	}
+	if _, ok := kinds(true, nil)[vulnfeed.NVDKind]; ok {
+		t.Errorf("without the module findings %s is registered", vulnfeed.NVDKind)
+	}
 	t.Setenv("RETICORA_AIR_GAPPED", "true")
+	if _, ok := kinds(true, findings)[vulnfeed.NVDKind]; ok {
+		t.Errorf("air-gapped %s is registered", vulnfeed.NVDKind)
+	}
 	if _, ok := kinds(true, findings)[vulnfeed.CSAFKind]; ok {
 		t.Errorf("air-gapped without RETICORA_VULNFEED_CSAF_PROVIDERS %s is registered", vulnfeed.CSAFKind)
 	}

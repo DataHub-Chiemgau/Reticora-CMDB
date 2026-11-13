@@ -1,0 +1,91 @@
+{
+  "resultsPerPage": 2,
+  "startIndex": 0,
+  "totalResults": 3,
+  "format": "NVD_CVE",
+  "version": "2.0",
+  "timestamp": "2026-11-13T08:00:00.000",
+  "vulnerabilities": [
+    {
+      "cve": {
+        "id": "CVE-2026-1001",
+        "sourceIdentifier": "cve@mitre.org",
+        "published": "2026-10-01T12:00:00.000",
+        "lastModified": "2026-10-03T08:15:00.000",
+        "vulnStatus": "Analyzed",
+        "descriptions": [
+          {"lang": "es", "value": "Desbordamiento en SwitchOS."},
+          {"lang": "en", "value": "A buffer overflow in the web service of MikroTik SwitchOS allows remote code execution."}
+        ],
+        "metrics": {
+          "cvssMetricV31": [
+            {
+              "source": "cve@mitre.org",
+              "type": "Secondary",
+              "cvssData": {"version": "3.1", "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L", "baseScore": 5.6, "baseSeverity": "MEDIUM"}
+            },
+            {
+              "source": "nvd@nist.gov",
+              "type": "Primary",
+              "cvssData": {"version": "3.1", "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H", "baseScore": 9.8, "baseSeverity": "CRITICAL"}
+            }
+          ]
+        },
+        "configurations": [
+          {
+            "nodes": [
+              {
+                "operator": "OR",
+                "negate": false,
+                "cpeMatch": [
+                  {"vulnerable": true, "criteria": "cpe:2.3:o:mikrotik:switchos:*:*:*:*:*:*:*:*", "versionStartIncluding": "6.0", "versionEndExcluding": "6.49.7", "matchCriteriaId": "A1"},
+                  {"vulnerable": true, "criteria": "cpe:2.3:o:mikrotik:switchos:*:*:*:*:*:*:*:*", "versionStartExcluding": "7.0", "versionEndIncluding": "7.10.1", "matchCriteriaId": "A2"}
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "cve": {
+        "id": "CVE-2026-1002",
+        "sourceIdentifier": "security@zyxel.com.tw",
+        "published": "2026-10-02T09:00:00.000",
+        "lastModified": "2026-10-04T10:00:00.000",
+        "vulnStatus": "Analyzed",
+        "descriptions": [{"lang": "en", "value": "A command injection in the Zyxel USG FLEX firmware."}],
+        "metrics": {
+          "cvssMetricV30": [
+            {
+              "source": "nvd@nist.gov",
+              "type": "Primary",
+              "cvssData": {"version": "3.0", "vectorString": "CVSS:3.0/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N", "baseScore": 7.5, "baseSeverity": "HIGH"}
+            }
+          ]
+        },
+        "configurations": [
+          {
+            "operator": "AND",
+            "nodes": [
+              {
+                "operator": "OR",
+                "negate": false,
+                "cpeMatch": [
+                  {"vulnerable": true, "criteria": "cpe:2.3:o:zyxel:usg_flex_100_firmware:5.36:*:*:*:*:*:*:*", "matchCriteriaId": "B1"}
+                ]
+              },
+              {
+                "operator": "OR",
+                "negate": false,
+                "cpeMatch": [
+                  {"vulnerable": false, "criteria": "cpe:2.3:h:zyxel:usg_flex_100:-:*:*:*:*:*:*:*", "matchCriteriaId": "B2"}
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -229,6 +229,14 @@ type Config struct {
 	// profile the import runs only with an explicitly set list (E-235).
 	VulnfeedCSAFProviders []string
 	VulnfeedCSAFInterval  time.Duration
+	// NVD 2.0 and CISA KEV (WP-1119): the API key of the installation
+	// (RETICORA_VULNFEED_NVD_API_KEY, deployment secret, only the header
+	// apiKey), the interval of vulnfeed.nvd (RETICORA_VULNFEED_NVD_INTERVAL,
+	// default 2 h) and the KEV catalog (RETICORA_VULNFEED_KEV_URL, default
+	// the CISA feed). Not in the air-gapped profile (VulnfeedNVDEnabled).
+	VulnfeedNVDAPIKey   string
+	VulnfeedNVDInterval time.Duration
+	VulnfeedKEVURL      string
 
 	// Search
 	SearchBackend      string
@@ -355,6 +363,9 @@ func Load() *Config {
 		ADMPCacheTTLDays:        l.integer("RETICORA_ADMP_CACHE_TTL_DAYS", DefaultADMPCacheTTLDays),
 		VulnfeedCSAFProviders:   splitList(l.str("RETICORA_VULNFEED_CSAF_PROVIDERS", "")),
 		VulnfeedCSAFInterval:    l.duration("RETICORA_VULNFEED_CSAF_INTERVAL", DefaultVulnfeedCSAFInterval),
+		VulnfeedNVDAPIKey:       strings.TrimSpace(l.str("RETICORA_VULNFEED_NVD_API_KEY", "")),
+		VulnfeedNVDInterval:     l.duration("RETICORA_VULNFEED_NVD_INTERVAL", DefaultVulnfeedNVDInterval),
+		VulnfeedKEVURL:          strings.TrimSpace(l.str("RETICORA_VULNFEED_KEV_URL", "")),
 		EgressAllowPrivate:      l.boolean("RETICORA_EGRESS_ALLOW_PRIVATE", false),
 		PreAuthRateLimitRPM:     l.integer("RETICORA_PREAUTH_RATE_LIMIT_RPM", 20),
 		TrustedProxies:          l.str("RETICORA_TRUSTED_PROXIES", "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"),
@@ -619,6 +630,14 @@ const natsIngestWarning = "RETICORA_NATS_URL is not set: the discovery ingest ru
 // RETICORA_VULNFEED_CSAF_INTERVAL (WP-1118).
 const DefaultVulnfeedCSAFInterval = 6 * time.Hour
 
+// DefaultVulnfeedNVDInterval is the default of
+// RETICORA_VULNFEED_NVD_INTERVAL (WP-1119).
+const DefaultVulnfeedNVDInterval = 2 * time.Hour
+
+// VulnfeedNVDEnabled reports whether the NVD and KEV import may run: never
+// in the air-gapped profile (only the offline bundle, WP-1120).
+func (c *Config) VulnfeedNVDEnabled() bool { return !c.AirGapped }
+
 // MinVulnfeedInterval is the shortest interval of a vulnerability feed.
 const MinVulnfeedInterval = 5 * time.Minute
 
@@ -636,6 +655,15 @@ func (c *Config) vulnfeedErrors() []error {
 		if err != nil || !strings.EqualFold(u.Scheme, "https") || u.Hostname() == "" || u.User != nil {
 			errs = append(errs, fmt.Errorf("RETICORA_VULNFEED_CSAF_PROVIDERS: %q is no absolute https URL with a host", p))
 		}
+	}
+	if c.VulnfeedKEVURL != "" {
+		u, err := url.Parse(c.VulnfeedKEVURL)
+		if err != nil || !strings.EqualFold(u.Scheme, "https") || u.Hostname() == "" || u.User != nil {
+			errs = append(errs, fmt.Errorf("RETICORA_VULNFEED_KEV_URL is no absolute https URL with a host"))
+		}
+	}
+	if c.VulnfeedNVDInterval < MinVulnfeedInterval {
+		errs = append(errs, fmt.Errorf("RETICORA_VULNFEED_NVD_INTERVAL must be at least %s, got %s", MinVulnfeedInterval, c.VulnfeedNVDInterval))
 	}
 	if c.VulnfeedCSAFInterval < MinVulnfeedInterval {
 		errs = append(errs, fmt.Errorf("RETICORA_VULNFEED_CSAF_INTERVAL must be at least %s, got %s", MinVulnfeedInterval, c.VulnfeedCSAFInterval))

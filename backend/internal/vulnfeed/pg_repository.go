@@ -42,7 +42,9 @@ func (r *PGRepository) read(ctx context.Context, fn func(ctx context.Context, tx
 
 // ReplaceAdvisory stores adv and replaces its affected ranges in one
 // system transaction: a failing range leaves the advisory and its former
-// ranges as they were. Vendor and product are normalized. An advisory of
+// ranges as they were. The KEV flag only rises here (adv.KEV, a stored
+// flag, or another flagged advisory of one of its CVEs); SetKEV alone
+// clears it (WP-1119), so a re-import between two KEV syncs keeps it. Vendor and product are normalized. An advisory of
 // another source under the same id is left alone
 // (ErrAdvisoryOwnedByOtherSource).
 func (r *PGRepository) ReplaceAdvisory(ctx context.Context, adv *Advisory, affected []Affected) error {
@@ -57,9 +59,12 @@ func (r *PGRepository) ReplaceAdvisory(ctx context.Context, adv *Advisory, affec
 		var stored string
 		err := tx.QueryRow(ctx, `INSERT INTO vuln_advisory (id, source_id, cve_ids, title, severity, cvss_score, cvss_vector, kev,
 				published_at, modified_at, url, withdrawn)
-			VALUES ($1, $2, $3, $4, NULLIF($5, ''), $6, $7, $8, $9, $10, $11, $12)
+			VALUES ($1, $2, $3, $4, NULLIF($5, ''), $6, $7,
+				$8 OR EXISTS (SELECT 1 FROM vuln_advisory o WHERE o.kev AND o.cve_ids && $3::text[]),
+				$9, $10, $11, $12)
 			ON CONFLICT (id) DO UPDATE SET cve_ids = EXCLUDED.cve_ids, title = EXCLUDED.title,
-				severity = EXCLUDED.severity, cvss_score = EXCLUDED.cvss_score, cvss_vector = EXCLUDED.cvss_vector, kev = EXCLUDED.kev,
+				severity = EXCLUDED.severity, cvss_score = EXCLUDED.cvss_score, cvss_vector = EXCLUDED.cvss_vector,
+				kev = vuln_advisory.kev OR EXCLUDED.kev,
 				published_at = EXCLUDED.published_at, modified_at = EXCLUDED.modified_at, url = EXCLUDED.url, withdrawn = EXCLUDED.withdrawn
 				WHERE vuln_advisory.source_id = EXCLUDED.source_id
 			RETURNING id`,
@@ -210,4 +215,79 @@ func (r *PGRepository) SearchProducts(ctx context.Context, q string, limit int) 
 		return nil, fmt.Errorf("search products: %w", err)
 	}
 	return out, nil
+}
+
+// CSAFCovered returns per CVE of cves the (vendor, product) pairs that a
+// CSAF advisory of that CVE has ranges for (WP-1119 AK4, CSAF first).
+func (r *PGRepository) CSAFCovered(ctx context.Context, cves []string) (map[string]map[[2]string]bool, error) {
+	out := map[string]map[[2]string]bool{}
+	if len(cves) == 0 {
+		return out, nil
+	}
+	err := r.read(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT DISTINCT c.cve, f.vendor, f.product
+			  FROM vuln_advisory a
+			  JOIN vuln_affected f ON f.advisory_id = a.id
+			  CROSS JOIN LATERAL unnest(a.cve_ids) AS c(cve)
+			 WHERE a.source_id LIKE 'csaf:%' AND a.cve_ids && $1::text[] AND c.cve = ANY ($1::text[])`, cves)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var cve, vendor, product string
+			if err := rows.Scan(&cve, &vendor, &product); err != nil {
+				return err
+			}
+			if out[cve] == nil {
+				out[cve] = map[[2]string]bool{}
+			}
+			out[cve][[2]string{vendor, product}] = true
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, fmt.Errorf("csaf coverage: %w", err)
+	}
+	return out, nil
+}
+
+// RemoveCoveredNVDRanges deletes the ranges of NVD advisories whose vendor
+// and product a CSAF advisory of one of the same CVEs covers (WP-1119
+// AK4: a CSAF advisory that arrives later wins).
+func (r *PGRepository) RemoveCoveredNVDRanges(ctx context.Context) (int64, error) {
+	var n int64
+	err := database.WithSystemWrite(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `DELETE FROM vuln_affected f
+			 USING vuln_advisory a
+			 WHERE f.advisory_id = a.id AND a.source_id = 'nvd'
+			   AND EXISTS (SELECT 1 FROM vuln_advisory c JOIN vuln_affected cf ON cf.advisory_id = c.id
+			                WHERE c.source_id LIKE 'csaf:%' AND c.cve_ids && a.cve_ids
+			                  AND cf.vendor = f.vendor AND cf.product = f.product)`)
+		n = tag.RowsAffected()
+		return err
+	})
+	if err != nil {
+		return 0, fmt.Errorf("remove nvd ranges covered by csaf: %w", err)
+	}
+	return n, nil
+}
+
+// SetKEV sets kev for every advisory with a CVE of cves and clears it for
+// the others (WP-1119 AK5); it returns the number of changed advisories.
+func (r *PGRepository) SetKEV(ctx context.Context, cves []string) (int64, error) {
+	if cves == nil {
+		cves = []string{}
+	}
+	var n int64
+	err := database.WithSystemWrite(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE vuln_advisory SET kev = (cve_ids && $1::text[])
+			 WHERE kev IS DISTINCT FROM (cve_ids && $1::text[])`, cves)
+		n = tag.RowsAffected()
+		return err
+	})
+	if err != nil {
+		return 0, fmt.Errorf("set kev: %w", err)
+	}
+	return n, nil
 }

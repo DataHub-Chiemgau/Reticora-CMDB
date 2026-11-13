@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -56,7 +57,20 @@ func (m *memStore) ReplaceAdvisory(_ context.Context, adv *Advisory, affected []
 	if cur, ok := m.advisory[adv.ID]; ok && cur.SourceID != adv.SourceID {
 		return ErrAdvisoryOwnedByOtherSource
 	}
-	m.advisory[adv.ID] = *adv
+	// The KEV flag only rises on a write, like PGRepository: a stored
+	// flag or another flagged advisory of one of its CVEs.
+	stored := *adv
+	if cur, ok := m.advisory[adv.ID]; ok && cur.KEV {
+		stored.KEV = true
+	}
+	for _, o := range m.advisory {
+		for _, c := range o.CVEIDs {
+			if o.KEV && slices.Contains(adv.CVEIDs, c) {
+				stored.KEV = true
+			}
+		}
+	}
+	m.advisory[adv.ID] = stored
 	out := make([]Affected, len(affected))
 	for i, a := range affected {
 		a.AdvisoryID, a.Vendor, a.Product = adv.ID, Normalize(a.Vendor), Normalize(a.Product)
@@ -70,7 +84,10 @@ func (m *memStore) ReplaceAdvisory(_ context.Context, adv *Advisory, affected []
 	return nil
 }
 
-func (m *memStore) UpdateSource(_ context.Context, src *Source) error {
+func (m *memStore) UpdateSource(ctx context.Context, src *Source) error {
+	if err := ctx.Err(); err != nil {
+		return err // like PGRepository with a cancelled context
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	src.UpdatedAt = time.Now()

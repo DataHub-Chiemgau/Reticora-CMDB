@@ -433,10 +433,11 @@ type systemJobDeps struct {
 	blobs blob.Store
 }
 
-// vulnfeedJobs are the system jobs of the vulnerability feeds on store
-// (WP-1118): vulnfeed.csaf, unless the air-gapped profile has no explicit
-// provider list.
-func vulnfeedJobs(cfg *config.Config, store vulnfeed.Store) []jobs.Schedule {
+// vulnfeedJobs are the system jobs of the vulnerability feeds on store:
+// vulnfeed.csaf (WP-1118), unless the air-gapped profile has no explicit
+// provider list, and vulnfeed.nvd with the KEV sync (WP-1119), not in the
+// air-gapped profile.
+func vulnfeedJobs(cfg *config.Config, store vulnfeed.NVDStore) []jobs.Schedule {
 	var out []jobs.Schedule
 	csaf, err := vulnfeed.NewCSAF(store, &vulnfeed.CSAFConfig{Providers: cfg.VulnfeedCSAFProviders,
 		Explicit: cfg.VulnfeedCSAFExplicit(), AirGapped: cfg.AirGapped, Interval: cfg.VulnfeedCSAFInterval,
@@ -450,7 +451,17 @@ func vulnfeedJobs(cfg *config.Config, store vulnfeed.Store) []jobs.Schedule {
 		// Validate refuses the start for an invalid provider list.
 		slog.Error("CSAF import not registered", "event", "vulnfeed.csaf.disabled", "error", err)
 	}
-	return out
+	if !cfg.VulnfeedNVDEnabled() {
+		slog.Info("NVD and KEV import off in the air-gapped profile", "event", "vulnfeed.nvd.disabled")
+		return out
+	}
+	nvd, err := vulnfeed.NewNVD(store, &vulnfeed.NVDConfig{APIKey: cfg.VulnfeedNVDAPIKey, Interval: cfg.VulnfeedNVDInterval,
+		KEVURL: cfg.VulnfeedKEVURL, Egress: egress.Options{AllowPrivate: cfg.EgressAllowPrivate}})
+	if err != nil {
+		slog.Error("NVD import not registered", "event", "vulnfeed.nvd.disabled", "error", err)
+		return out
+	}
+	return append(out, nvd.Schedule())
 }
 
 // registerSystemJobs registers the system jobs (systemJobs) with the
@@ -593,10 +604,11 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 		// once per secret_version as credential.rotation_due (CRD-05,
 		// WP-897).
 		systemJobs = append(systemJobs, credential.NewAgeCheck(pool).Schedule())
-		// Vulnerability feeds (SEC-02, E-234, WP-1118): vulnfeed.csaf every
-		// RETICORA_VULNFEED_CSAF_INTERVAL with the module findings, over
-		// the egress client; air-gapped only with an explicit provider
-		// list (E-235).
+		// Vulnerability feeds (SEC-02, E-234, WP-1118, WP-1119): vulnfeed.csaf
+		// every RETICORA_VULNFEED_CSAF_INTERVAL and vulnfeed.nvd with the
+		// KEV sync every RETICORA_VULNFEED_NVD_INTERVAL, with the module
+		// findings, over the egress client; air-gapped only the CSAF import
+		// with an explicit provider list (E-235).
 		if d.modules.Enabled("findings") {
 			systemJobs = append(systemJobs, vulnfeedJobs(d.cfg, vulnfeed.NewPGRepository(pool))...)
 		}
