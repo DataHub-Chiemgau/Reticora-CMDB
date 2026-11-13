@@ -6,9 +6,13 @@
 # ID in the scans of the own release images, govulncheck or npm audit.
 #
 # The findings lie in the vendor images (Go and Java dependencies and OS
-# packages of minio, opensearch, keycloak, certbot and the postgres image of
+# packages of opensearch, keycloak, certbot and the postgres image of
 # keycloak-db; the logical backup runs on the own image since WP-1178);
-# none of these images has a newer release (2026-11-10). keycloak-db moved to
+# none of these images has a newer release (2026-11-10). On 2026-11-13 the
+# object storage moved from the frozen pgsty/minio (release 2026-08-04) to
+# pgsty/silo (release 2026-11-12, Trivy: no critical or high finding with a
+# fix), so its 31 IDs left this file (20 entries removed, 11 stay for
+# keycloak-db). keycloak-db moved to
 # postgres:16.16-alpine on 2026-11-13 (vendor fix of krb5-libs and libxslt);
 # its gosu still carries Go 1.24.6, the same IDs as before. On 2026-11-13
 # Amazon Linux 2023 published fixes for sqlite-libs and rpm that the pinned
@@ -19,9 +23,6 @@
 
 # critical
 CVE-2025-68121 exp:2026-11-17 since:2026-11-10 sev:critical # keycloak-db: stdlib
-CVE-2026-77405 exp:2026-11-17 since:2026-11-10 sev:critical # minio: github.com/rabbitmq/amqp091-go
-CVE-2026-77408 exp:2026-11-17 since:2026-11-10 sev:critical # minio: github.com/rabbitmq/amqp091-go
-CVE-2026-77411 exp:2026-11-17 since:2026-11-10 sev:critical # minio: github.com/rabbitmq/amqp091-go
 CVE-2025-14813 exp:2026-11-17 since:2026-11-10 sev:critical # opensearch: org.bouncycastle:bcprov-jdk15to18
 CVE-2026-8763 exp:2026-11-17 since:2026-11-10 sev:critical # opensearch: org.bouncycastle:bcprov-jdk15to18
 # high
@@ -33,7 +34,7 @@ GHSA-6v7p-g79w-8964 exp:2026-12-10 since:2026-11-10 sev:high # certbot: msgpack
 CVE-2026-102554 exp:2026-12-10 since:2026-11-10 sev:high # keycloak: com.google.guava:guava; opensearch: com.google.guava:guava
 CVE-2025-61726 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
 CVE-2025-61729 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-111943 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib
+CVE-2026-111943 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
 CVE-2026-25679 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
 CVE-2026-27145 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
 CVE-2026-32280 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
@@ -41,38 +42,21 @@ CVE-2026-32281 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
 CVE-2026-32283 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
 CVE-2026-33811 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
 CVE-2026-33814 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-33818 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib
+CVE-2026-33818 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
 CVE-2026-39820 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-39821 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib
+CVE-2026-39821 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
 CVE-2026-39822 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
 CVE-2026-39836 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
 CVE-2026-42499 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
 CVE-2026-42504 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-56853 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib
-CVE-2026-56858 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib
-CVE-2026-56859 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib
-CVE-2026-56860 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib
-CVE-2026-56862 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib
-CVE-2026-78667 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib
-CVE-2026-78669 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: golang.org/x/net, stdlib
-CVE-2026-97031 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib; minio: stdlib
-CVE-2026-103111 exp:2026-12-10 since:2026-11-10 sev:high # minio: pcre2, pcre2-syntax
-CVE-2026-116587 exp:2026-12-10 since:2026-11-10 sev:high # minio: github.com/go-jose/go-jose/v4
-CVE-2026-46600 exp:2026-12-10 since:2026-11-10 sev:high # minio: stdlib
-CVE-2026-56851 exp:2026-12-10 since:2026-11-10 sev:high # minio: golang.org/x/text
-CVE-2026-56854 exp:2026-12-10 since:2026-11-10 sev:high # minio: golang.org/x/crypto
-CVE-2026-77403 exp:2026-12-10 since:2026-11-10 sev:high # minio: github.com/rabbitmq/amqp091-go
-CVE-2026-77404 exp:2026-12-10 since:2026-11-10 sev:high # minio: github.com/rabbitmq/amqp091-go
-CVE-2026-77406 exp:2026-12-10 since:2026-11-10 sev:high # minio: github.com/rabbitmq/amqp091-go
-CVE-2026-77407 exp:2026-12-10 since:2026-11-10 sev:high # minio: github.com/rabbitmq/amqp091-go
-CVE-2026-77410 exp:2026-12-10 since:2026-11-10 sev:high # minio: github.com/rabbitmq/amqp091-go
-CVE-2026-77412 exp:2026-12-10 since:2026-11-10 sev:high # minio: github.com/rabbitmq/amqp091-go
-CVE-2026-78661 exp:2026-12-10 since:2026-11-10 sev:high # minio: golang.org/x/net
-CVE-2026-79921 exp:2026-12-10 since:2026-11-10 sev:high # minio: github.com/rabbitmq/amqp091-go
-CVE-2026-84304 exp:2026-12-10 since:2026-11-10 sev:high # minio: google.golang.org/grpc
-CVE-2026-84445 exp:2026-12-10 since:2026-11-10 sev:high # minio: google.golang.org/grpc
-CVE-2026-86145 exp:2026-12-10 since:2026-11-10 sev:high # minio: pcre2, pcre2-syntax
-CVE-2026-89161 exp:2026-12-10 since:2026-11-10 sev:high # minio: pcre2, pcre2-syntax
+CVE-2026-56853 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
+CVE-2026-56858 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
+CVE-2026-56859 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
+CVE-2026-56860 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
+CVE-2026-56862 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
+CVE-2026-78667 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
+CVE-2026-78669 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
+CVE-2026-97031 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
 CVE-2026-10050 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: org.eclipse.jetty:jetty-security
 CVE-2026-103242 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: python3-rpm, rpm, rpm-build-libs, rpm-libs, rpm-sign-libs
 CVE-2026-106451 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: at.yawk.lz4:lz4-java

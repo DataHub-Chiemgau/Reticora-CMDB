@@ -1,10 +1,11 @@
-# MinIO of the kind smoke, the image of the compose stack (pinned by release
-# tag and digest). The staging overlay sets no RETICORA_S3_*, so the server
-# runs without object storage. The case wal_archive (WP-444) uses it as the
-# pgBackRest repository, which speaks S3 over TLS only: kind-smoke.sh setup
-# creates the secret kind-smoke-minio-tls (certificate for minio and
-# localhost of the test CA, generated per run) and the bucket
-# reticora-backup with versioning.
+# MinIO of the kind smoke: Silo, the MinIO fork and image of the compose stack
+# (pinned by release tag and digest; the standard image, because kind-smoke.sh
+# setup runs sh and mc in it). The staging overlay sets no RETICORA_S3_*, so
+# the server runs without object storage. The case wal_archive (WP-444) uses
+# it as the pgBackRest repository, which speaks S3 over TLS only: kind-smoke.sh
+# setup creates the secret kind-smoke-minio-tls (certificate for minio and
+# localhost of the test CA, generated per run) and the bucket reticora-backup
+# with versioning.
 apiVersion: v1
 kind: Secret
 metadata:
@@ -32,7 +33,7 @@ spec:
     spec:
       containers:
         - name: minio
-          image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
+          image: pgsty/silo:RELEASE.2026-11-12T00-00-00Z@sha256:c20d112390b9a9ce8c11b8af95ad35bcaa62f4759663c09c936cd8d2b511f329
           args: ["server", "/data", "--certs-dir", "/certs"]
           env:
             - name: MINIO_ROOT_USER

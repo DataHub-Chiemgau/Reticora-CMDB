@@ -126,6 +126,18 @@ Nachtrag 2026-11-13: Amazon Linux 2023 hat Fixes für `sqlite-libs`
 veröffentlicht; `opensearchproject/opensearch:2.19.7` ist weiter das neueste
 2.x-Release (Digest unverändert) und enthält sie nicht. Fünf neue High-Ausnahmen
 bis 2026-12-13 (75 IDs); OpenSearch ist optional und nur intern erreichbar (A-85).
+Nachtrag 2026-11-13 (Update-Plan Upd-01): Der Objektspeicher läuft auf
+`pgsty/silo` (Release 2026-11-12, Pin in der Tabelle) statt auf dem
+eingefrorenen `pgsty/minio` (Release 2026-08-04; Upstream `minio/minio` ist
+archiviert; Silo ist derselbe Fork unter neuem Namen). Trivy findet im neuen
+Image keinen Critical- oder High-Befund mit Fix (amd64 und arm64; das alte
+Image: 31 IDs, 3 Critical und 28 High). Die 31 MinIO-IDs sind aus der
+Ausnahmedatei entfernt (20 Einträge gestrichen, 11 bleiben für keycloak-db):
+55 IDs. Das Standard-Image, nicht `-distroless`: Healthcheck
+(`mc ready local`), `tests/backup-config.test.sh` und `tests/k8s/kind-smoke.sh`
+brauchen `mc` und `sh` im Container. Alle Referenzen auf das Image sind
+gleich, `tests/ci-config.test.sh` (`objectstorage_image_refs`) prüft das.
+Restrisiko Bus-Faktor des Forks: E-246.
 
 | Image | Ort | Scan |
 |---|---|---|
@@ -133,12 +145,12 @@ bis 2026-12-13 (75 IDs); OpenSearch ist optional und nur intern erreichbar (A-85
 | `timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731` | Basis von `reticora-postgres` (der logische Backup-CronJob nutzt seit WP-1178 das eigene Image `reticora-cmdb/postgres`) | über `image-scan` (`postgres`), dieselbe Referenz (E-96, `timescale_image_refs`) |
 | `nats:2.14.10-alpine@sha256:311da47e2f31c26e99c623cd78d486a1e8ab039c49b32652770bb91a4f70512e` | Compose (`nats`, `nats-edge`), `deploy/k8s/base/components/nats-edge/nats-edge.yaml` | `image-scan-thirdparty` (`nats`) |
 | `redis:7.4.12-alpine@sha256:7b1753b4c5ad8458906c272a8132b8c15f5557b000379eb115fb239706a384b7` | Compose (`redis`) | `image-scan-thirdparty` (`redis`) |
-| `pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372` | Compose (`minio`) | `image-scan-thirdparty` (`minio`) |
+| `pgsty/silo:RELEASE.2026-11-12T00-00-00Z@sha256:c20d112390b9a9ce8c11b8af95ad35bcaa62f4759663c09c936cd8d2b511f329` | Compose (`minio`) | `image-scan-thirdparty` (`minio`) |
 | `postgres:16.16-alpine@sha256:0adbf25a9e96d38823bb813f3ac0ed41fadb665c88f1df7fe6dbfb060cbdc106` | Compose (`keycloak-db`) | `image-scan-thirdparty` (`keycloak-db`) |
 | `quay.io/keycloak/keycloak:26.8.2@sha256:723b1d6e254c0fc96d5cffec860c7e0744d6a3277822b865bb538cf891575e41` | Compose (`keycloak`); vom Hersteller gepflegte Major-Version 26 | `image-scan-thirdparty` (`keycloak`) |
 | `opensearchproject/opensearch:2.19.7@sha256:3bfa1ec74d56928c2e018033d45c460ce2c0ea65a5cedd577de3102326c31b89` | Compose (`opensearch`), `deploy/k8s/base/components/opensearch/statefulset.yaml` | `image-scan-thirdparty` (`opensearch`) |
 | `certbot/certbot:v5.9.0@sha256:bc93cb710b413e6b456d622f9b0133b3e109c0a78c2ed9976af43d209b0a1805` | Compose (`certbot`, TLS-Zertifikate) | `image-scan-thirdparty` (`certbot`) |
-| Images von `docker-compose.yml` (Entwicklung) | Dev-Stack | Ausnahme: nur Entwicklung, nicht ausgeliefert; TimescaleDB, MinIO und clamd tragen dieselben Pins wie der Betrieb |
+| Images von `docker-compose.yml` (Entwicklung) | Dev-Stack | Ausnahme: nur Entwicklung, nicht ausgeliefert; TimescaleDB, MinIO (Silo) und clamd tragen dieselben Pins wie der Betrieb (`timescale_image_refs`, `objectstorage_image_refs`) |
 
 Die Matrix von `image-scan` deckt jedes Image ab, das `release.yml` baut,
 signiert und veröffentlicht:

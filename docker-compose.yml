@@ -35,10 +35,14 @@ services:
       retries: 5
 
   minio:
-    # minio/minio is no longer published on Docker Hub. Silo (pgsty/minio) is a
-    # community-maintained, drop-in build of the MinIO server (same CLI, `mc`
-    # included, AGPLv3), pinned by release tag and digest.
-    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
+    # minio/minio is archived and no longer published on Docker Hub. Silo
+    # (pgsty/silo, the former pgsty/minio, whose image name is frozen since
+    # RELEASE.2026-08-04) is a community-maintained, drop-in fork of the MinIO
+    # server (same S3 API, MINIO_* variables and data format, `mc` included,
+    # AGPLv3), pinned by release tag and digest (E-246). The standard image,
+    # not -distroless: the healthcheck and the test setups run `mc` and `sh`
+    # inside the container.
+    image: pgsty/silo:RELEASE.2026-11-12T00-00-00Z@sha256:c20d112390b9a9ce8c11b8af95ad35bcaa62f4759663c09c936cd8d2b511f329
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: reticora

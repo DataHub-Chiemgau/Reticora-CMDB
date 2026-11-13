@@ -145,6 +145,17 @@ existing `.env` values, generated defaults and never prompts. CI installs the
 checked-out, unpublished state with `--build-from-source`; the default path
 runs on release tags (job `release-mode` of `install-smoke.yml`).
 
+### Object storage (MinIO → Silo)
+
+The service `minio` runs Silo (`pgsty/silo`), the maintained fork of the
+MinIO server. `minio/minio` is archived, and the image name `pgsty/minio` has
+been frozen since its release of 2026-08-04. Service name, volume
+`miniodata`, `MINIO_*` variables and the S3 endpoint `minio:9000` stay the
+same. A re-run of `install-cloud.sh` (or `docker compose up -d`) starts Silo
+on the existing data, and buckets, versioning and object versions carry over
+(E-246). This is a single-node setup, so the multi-node upgrade checklist in
+the Silo release notes (quorum, batch jobs) does not apply.
+
 ### Container logs: 30 days (NFR-06)
 
 Container logs can hold personal data and are kept 30 days (decision E-77,

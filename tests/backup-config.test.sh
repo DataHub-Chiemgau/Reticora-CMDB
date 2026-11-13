@@ -11,8 +11,9 @@
 # Docker is used for busybox sh when no busybox binary is on PATH (the
 # TimescaleDB base of deploy/docker-compose/postgres/Dockerfile, the shell
 # the script runs with; BACKUP_TEST_SH_IMAGE overrides it) and for the
-# verify-repo case against MinIO (the pinned image of docker-compose.yml,
-# TLS on a random local port); without Docker that case is skipped.
+# verify-repo case against MinIO (the pinned Silo image of the minio service
+# of docker-compose.yml, TLS on a random local port); without Docker that
+# case is skipped.
 #
 # Usage: ./tests/backup-config.test.sh
 set -uo pipefail
@@ -371,7 +372,7 @@ fi
 # ─── verify-repo against MinIO (Docker) ──────────────────────────────────────
 # Buckets with versioning enabled, never enabled and suspended on the pinned
 # MinIO of the stack, TLS with a throwaway certificate on a random port.
-MINIO_IMAGE="${BACKUP_TEST_MINIO_IMAGE:-$(sed -n 's/^ *image: \(pgsty\/minio:[^ ]*\)$/\1/p' "$COMPOSE" | head -n 1)}"
+MINIO_IMAGE="${BACKUP_TEST_MINIO_IMAGE:-$(sed -n 's/^ *image: \(pgsty\/silo:[^ ]*\)$/\1/p' "$COMPOSE" | head -n 1)}"
 minio_up() {
     local i
     mkdir -p "$TMP_ROOT/minio/CAs" && chmod 0755 "$TMP_ROOT/minio" "$TMP_ROOT/minio/CAs" || return 1

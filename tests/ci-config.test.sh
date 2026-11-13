@@ -19,6 +19,10 @@
 #     repository (CI, deploy, compose, docs; not the historical records) is
 #     the TIMESCALE_IMAGE of that Dockerfile, version and digest (E-96), with
 #     a negative fixture;
+#   - objectstorage_image_refs: every MinIO/Silo image reference (dev and
+#     deploy compose, CI and load jobs, kind fixture, docs) is the pinned
+#     pgsty/silo image of the minio service, version and digest (E-246), with
+#     a negative fixture;
 #   - thirdparty_image_pins: every third-party image of the operation
 #     (deploy compose stack, Kubernetes components) is pinned by version and
 #     digest, in the image-scan-thirdparty matrix and documented (SR-60,
@@ -390,6 +394,81 @@ if [ "$(grep -c . <<<"$problems")" -eq 3 ] \
     ok "timescale_image_refs_negative: a floating tag, another digest and a missing reference are reported"
 else
     fail "timescale_image_refs_negative: a floating tag, another digest and a missing reference are reported" "$problems"
+fi
+
+# ─── E-246 (Update-Plan Upd-01): one object storage image everywhere ───────
+# objectstorage_refs <root>: every MinIO/Silo image reference in the tracked
+# files of <root> (pgsty/silo, the frozen pgsty/minio, the archived
+# minio/minio) must be the image of the minio service of
+# deploy/docker-compose/docker-compose.yml, version and digest: the dev
+# stack, the CI and load jobs, the kind fixture and the docs start the
+# image that the operation runs and image-scan-thirdparty scans.
+# Historical records keep the version they were made with. First output
+# line: "<refs> <files>", then one line per problem.
+objectstorage_refs() {
+    python3 - "$1" <<'PY'
+import os, re, subprocess, sys, yaml
+root = sys.argv[1]
+HISTORY = ("audit/", "docs/audit/", "docs/plan/", "docs/acceptance/")
+SELF = "tests/ci-config.test.sh"
+REQUIRED = {".github/workflows/ci.yml", ".github/workflows/load.yml", "docker-compose.yml",
+            "deploy/docker-compose/docker-compose.yml", "tests/k8s/fixtures/minio.yaml",
+            "docs/README.md", "docs/security/abhaengigkeitsscans.md"}
+image = yaml.safe_load(open(os.path.join(root, "deploy/docker-compose/docker-compose.yml")))["services"]["minio"]["image"]
+problems = []
+if not re.fullmatch(r"pgsty/silo:RELEASE\.[0-9TZ-]+@sha256:[0-9a-f]{64}", image):
+    problems.append(f"deploy/docker-compose/docker-compose.yml minio: {image} is not pgsty/silo pinned by release and digest")
+ref = re.compile(r"(?:pgsty/(?:silo|minio)|minio/minio):[\w.-]+(?:@sha256:[0-9a-f]*)?")
+files = subprocess.run(["git", "-C", root, "ls-files", "-z"], capture_output=True, check=True).stdout.decode().split("\0")
+refs, where = 0, set()
+for f in files:
+    if not f or f == SELF or f.startswith(HISTORY):
+        continue
+    try:
+        text = open(os.path.join(root, f), encoding="utf-8").read()
+    except (OSError, UnicodeDecodeError):
+        continue
+    for i, line in enumerate(text.splitlines(), 1):
+        for r in ref.findall(line):
+            refs += 1
+            where.add(f)
+            if r != image:
+                problems.append(f"{f}:{i}: {r} is not {image}")
+for f in sorted(REQUIRED - where):
+    problems.append(f"{f}: names no object storage image")
+print(refs, len(where))
+print("\n".join(problems))
+PY
+}
+
+out="$(objectstorage_refs . 2>&1)"
+problems="$(sed 1d <<<"$out")"
+if [ -z "$problems" ]; then
+    ok "objectstorage_image_refs: every MinIO/Silo image reference is the pinned image of the minio service ($(head -n1 <<<"$out" | awk '{print $1" references in "$2" files"}'))"
+else
+    fail "objectstorage_image_refs: every MinIO/Silo image reference is the pinned image of the minio service" "$problems"
+fi
+
+# Negative fixture (copies of the files that name the image): the dev stack
+# back on the frozen pgsty/minio, the load job with another digest and the
+# kind fixture without the image are reported, nothing else.
+fx="$TMP_ROOT/objectstorage-fixture"
+mkdir -p "$fx"
+while IFS= read -r -d '' f; do
+    mkdir -p "$fx/$(dirname "$f")" && cp "$f" "$fx/$f"
+done < <(git ls-files -z | xargs -0 grep -lZ -E 'pgsty/(silo|minio):' --)
+sed -i -E 's#pgsty/silo:[^ ]+#pgsty/minio:RELEASE.2026-08-04T00-00-00Z#' "$fx/docker-compose.yml"
+sed -i -E 's#(pgsty/silo:[^@ ]+)@sha256:[0-9a-f]{64}#\1@sha256:0000000000000000000000000000000000000000000000000000000000000000#' "$fx/.github/workflows/load.yml"
+sed -i '/pgsty\/silo:/d' "$fx/tests/k8s/fixtures/minio.yaml"
+git -C "$fx" init -q && git -C "$fx" add -A
+problems="$(objectstorage_refs "$fx" 2>&1 | sed 1d)"
+if [ "$(grep -c . <<<"$problems")" -eq 3 ] \
+    && grep -q '^docker-compose\.yml:[0-9]*: pgsty/minio:RELEASE\.2026-08-04T00-00-00Z is not pgsty/silo:' <<<"$problems" \
+    && grep -q '^\.github/workflows/load\.yml:[0-9]*: pgsty/silo:[^ ]*@sha256:0\{64\} is not ' <<<"$problems" \
+    && grep -qx 'tests/k8s/fixtures/minio\.yaml: names no object storage image' <<<"$problems"; then
+    ok "objectstorage_image_refs_negative: the frozen image name, another digest and a missing reference are reported"
+else
+    fail "objectstorage_image_refs_negative: the frozen image name, another digest and a missing reference are reported" "$problems"
 fi
 
 # ─── SR-60 (WP-873): third-party images of the operation ───────────────────
