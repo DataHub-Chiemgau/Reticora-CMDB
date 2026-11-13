@@ -7448,6 +7448,7 @@ PRT-04;[P3];E;collector/probe/http_test.go;WP-971
    - 1h: `start_offset` 3 Tage, `end_offset` 1 h, stündlich,
    - 1d: `start_offset` 4 Tage, `end_offset` 1 Tag, täglich.
    Nachgereichte Ergebnisse bis 48 h nach Messzeit erscheinen damit in allen Stufen. Die Werte stehen mit Begründung in ADR 0002.
+   - *Umsetzungsvermerk (Prüfung 2026-11-13):* Mit 2/3/4 Tagen gilt die 48-h-Zusage im ungünstigsten Fall nicht: Ein Refresh erfasst nur ganz abgedeckte Buckets, die 1d-Stufe läuft täglich in beliebiger Phase und liest die 1h-Stufe erst nach deren Lauf; die 1d-Stufe nähme so nur etwa 46 h 55 min auf, die 5m-Stufe 47 h 50 min. Umgesetzt sind deshalb 5m `start_offset` 2 Tage 1 h und 1d `start_offset` 5 Tage (1h unverändert 3 Tage); die Kompression (3/7/30 Tage) liegt weiter jenseits der Fenster. Die Rechnung steht in ADR 0002, `TestProbeRollupsLateResultWithinWindow` prüft den ungünstigsten Fall mit 48 h.
 4. Kompression der Materialisierungen (`timescaledb.compress`, segmentby `organization_id, probe_id`): 5m nach 3 Tagen, 1h nach 7 Tagen, 1d nach 30 Tagen, jeweils jenseits des Refresh-Fensters. Retention-Policies: 5m 90 Tage, 1h 400 Tage, 1d 400 Tage ([E-172](entscheidungen.md#e-172)).
 5. Views `probe_result_5m_v`, `probe_result_1h_v` und `probe_result_1d_v` `WITH (security_barrier)`. Spalten wie AK2 plus `rtt_avg`, `loss_avg`, `value_avg` (Summe/Zähler, NULL bei Zähler 0). Prädikate:
    - Organisation als Subselect auf `app.org_id` (Muster `000071_metric_sample_rls.up.sql:27–30`),

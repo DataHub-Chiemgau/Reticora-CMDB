@@ -297,6 +297,50 @@ ohne sie wächst allein die 5-min-Stufe auf ≈ 33 GB (bei Faktor 3 ≈ 100 GB).
    `has_table_privilege('reticora_app', …) = false` (nicht eine leere ACL),
    so wie `TestProbeStorageSpikeAppRoleHasNoDirectAccess`.
 
+## Aggregationsstufen
+
+Umgesetzt mit WP-972 (Migration `000340_probe_result_rollups`, Nummer
+vorläufig): drei hierarchische Continuous Aggregates `probe_result_5m`
+(auf `probe_result`, ohne Ergebnisse mit `stale_epoch`), `probe_result_1h`
+(auf 5m) und `probe_result_1d` (auf 1h, Tagesgrenzen UTC), angelegt
+`WITH NO DATA` in der Transaktion der Migration. Jede Stufe hält `total`,
+`ok`, `fail`, `error` (Status 0, 1, 2), `rtt_sum`/`rtt_count`/`rtt_min`/
+`rtt_max`, `loss_sum`/`loss_count` und `value_sum`/`value_count`/
+`value_min`/`value_max`; die oberen Stufen summieren Summen und Zähler.
+Mittelwerte (`rtt_avg`, `loss_avg`, `value_avg`, NULL bei Zähler 0) bilden
+erst die Security-Barrier-Views `probe_result_5m_v`, `_1h_v` und `_1d_v`
+mit Organisation als Subselect und Client-/Site-Scope über die Probe.
+
+| Stufe | Refresh `start_offset` / `end_offset` / Takt | Kompression nach | Retention |
+|---|---|---|---|
+| 5 min | 2 Tage 1 h / 5 min / 5 min | 3 Tage | 90 Tage |
+| 1 h | 3 Tage / 1 h / 1 h | 7 Tage | 400 Tage |
+| 1 d | 5 Tage / 1 Tag / 1 Tag | 30 Tage | 400 Tage |
+
+Begründung der Fenster: Ein Collector puffert Ergebnisse mindestens 24 h
+(PRB-07) und liefert sie nach; ein Refresh-Fenster von 2 h (Entwurf) ließe
+nachgereichte Ergebnisse dauerhaft aus allen Stufen fallen. Ein Refresh
+erfasst einen Bucket nur, wenn das Fenster ihn ganz abdeckt; der Bucket
+beginnt bis zu seiner Breite vor der Messzeit, eine Stufe liest die
+darunterliegende erst nach deren Lauf, und der Job läuft einmal je Takt in
+beliebiger Phase. Eine Stufe mit Breite w, Takt i und `start_offset` s
+nimmt deshalb eine Verspätung L nur sicher auf, wenn s ≥ L + w + i + Latenz
+der unteren Stufen gilt. Für L = 48 h ergibt das 5 min: 48 h 10 min
+(gesetzt 2 Tage 1 h), 1 h: 50 h 5 min (3 Tage), 1 d: 97 h 5 min (5 Tage).
+Mit diesen Fenstern erscheinen Ergebnisse bis 48 h nach Messzeit in allen
+Stufen, auch im ungünstigsten Fall (Messzeit kurz vor Mitternacht UTC,
+Tageslauf kurz vor dem Ende der Lieferung). Fenster von 2/3/4 Tagen
+reichten für die 1d-Stufe nur bis etwa 46 h 55 min. Die Kompression beginnt jeweils jenseits des Refresh-Fensters
+(segmentby `organization_id, probe_id`), damit ein Refresh keine
+komprimierten Chunks umschreiben muss. Die App-Rolle hat nur `SELECT` auf
+die drei Views; Aggregate, Materialisierungen, deren Chunks und
+`<chunk>_compressed`-Relationen sowie Partial- und Direct-Views sind
+entzogen (Entscheidung 7, `REVOKE` vor jeder Kompression). Jede
+Materialisierung trägt den Truncate-Guard.
+Nachweis: `backend/internal/probe/cagg_integration_test.go`
+(`TestProbeRollupsLateResultWithinWindow` prüft ein 30 h nach Messzeit
+geliefertes Ergebnis mit den Fenstern aus `timescaledb_information.jobs`).
+
 ## Folgen
 
 - WP-945 legt `probe_result` mit 3-h-Chunks, Kompression ab 1 Tag,
