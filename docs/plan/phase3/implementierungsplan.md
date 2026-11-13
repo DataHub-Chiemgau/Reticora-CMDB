@@ -5302,8 +5302,8 @@ PRT-01;[P3];E;backend/internal/entitlement/probe_budget_test.go;WP-940
 - backend/internal/probe/assign_test.go (neu)
 - backend/internal/probe/assign_integration_test.go (neu)
 - backend/internal/probe/pg_repository.go (aus WP-937)
-- backend/migrations/000820_probe_epoch.up.sql (neu, vorläufige Nummer; Hochwassermarke der Epoche je Probe)
-- backend/migrations/000820_probe_epoch.down.sql (neu)
+- backend/migrations/000338_probe_epoch.up.sql (neu; Hochwassermarke der Epoche je Probe)
+- backend/migrations/000338_probe_epoch.down.sql (neu)
 - backend/internal/config/config.go
 - backend/internal/server/modules.go
 - backend/internal/server/modules_test.go (`p3Workers` und G2-Prüfung für den Monitoring-Worker `probe_assign`)
