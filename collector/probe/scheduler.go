@@ -335,7 +335,8 @@ func (s *Scheduler) Advance(now time.Time) {
 	var start []dueCheck
 	var releases []func()
 	var skipped []probewire.Result
-	for _, d := range due {
+	for i := range due {
+		d := &due[i]
 		if s.running[d.spec.ID] {
 			s.nOverrun.Add(1)
 			continue
@@ -352,15 +353,15 @@ func (s *Scheduler) Advance(now time.Time) {
 			continue
 		}
 		s.running[d.spec.ID] = true
-		start = append(start, d)
+		start = append(start, *d)
 		releases = append(releases, release)
 	}
 	ctx := s.ctx
 	s.mu.Unlock()
 
 	if s.Sink != nil {
-		for _, r := range skipped {
-			s.Sink(r)
+		for i := range skipped {
+			s.Sink(skipped[i])
 		}
 	}
 	for i := range start {

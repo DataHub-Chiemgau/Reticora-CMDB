@@ -115,7 +115,8 @@ func (l *Limits) Acquire(typ, target string, now time.Time) (release func(), ok 
 			l.mu.Lock()
 			defer l.mu.Unlock()
 			b.running--
-			if b.perTarget[target]--; b.perTarget[target] <= 0 {
+			b.perTarget[target]--
+			if b.perTarget[target] <= 0 {
 				delete(b.perTarget, target)
 			}
 		})
