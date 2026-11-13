@@ -10413,11 +10413,11 @@ paths:
       summary: Get an IP address
       responses:
         '200':
-          description: IP address details
+          description: IP address details with the NAT translations it takes part in (IPM-15)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/IPAddress'
+                $ref: '#/components/schemas/IPAddressDetail'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -10474,11 +10474,11 @@ paths:
       summary: Get an IP address
       responses:
         '200':
-          description: IP address details
+          description: IP address details with the NAT translations it takes part in (IPM-15)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/IPAddress'
+                $ref: '#/components/schemas/IPAddressDetail'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -26497,38 +26497,79 @@ paths:
   /api/v1/nat-translations:
     x-phase: P3
     x-feature: ipam
-    x-status: planned
     get:
       operationId: listNATTranslations
       tags: [IPAM]
       summary: List NAT translations
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        NAT translations of the devices the caller sees (IPM-15, WP-1071),
+        newest first; client and site follow the device. Requires
+        ipam:read; without PostgreSQL 501.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
+        - name: ci_id
+          in: query
+          description: Only translations of this device.
+          schema: { type: string, format: uuid }
+        - name: kind
+          in: query
+          description: Only translations of this kind; another value is 422 with field kind.
+          schema:
+            $ref: '#/components/schemas/NATKind'
+        - name: address_id
+          in: query
+          description: Only translations with this address inside or outside.
+          schema: { type: string, format: uuid }
+        - name: subnet_id
+          in: query
+          description: Only translations with this subnet inside or outside.
+          schema: { type: string, format: uuid }
       responses:
         '200':
-          description: List NAT translations. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+          description: Paginated list of NAT translations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NATTranslationListResponse'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
     post:
       operationId: createNatTranslation
       tags: [IPAM]
       summary: Create a NAT translation
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Exactly one of inside_address_id and inside_subnet_id (422 inside)
+        and of outside_address_id and outside_subnet_id (422 outside); ports
+        only with protocol tcp or udp (422 protocol), kind pat needs
+        outside_port (422). The device, the addresses and the subnets must
+        be visible to the caller (422 per field); the inside side belongs
+        to the client of the device or is org-wide. Requires ipam:write;
+        without PostgreSQL 501.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateNATTranslationRequest'
       responses:
         '201':
-          description: Created. The schema comes with the implementing work package.
+          description: NAT translation created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NATTranslation'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -26541,23 +26582,25 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
 
   /api/v1/nat-translations/{id}:
     x-phase: P3
     x-feature: ipam
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: getNatTranslation
       tags: [IPAM]
       summary: Get a NAT translation
-      description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
       responses:
         '200':
-          description: Get a NAT translation. The schema comes with the implementing work package.
+          description: NAT translation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NATTranslation'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -26566,16 +26609,29 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
     patch:
       operationId: updateNatTranslation
       tags: [IPAM]
       summary: Update a NAT translation
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Changes the given fields; the result is checked as POST checks it.
+        A reference given with an id replaces the other reference of its
+        side unless that one is given too; "" clears a reference, 0 a port.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateNATTranslationRequest'
       responses:
         '200':
-          description: Update a NAT translation. The schema comes with the implementing work package.
+          description: NAT translation updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NATTranslation'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -26590,13 +26646,12 @@ paths:
           $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
     delete:
       operationId: deleteNatTranslation
       tags: [IPAM]
       summary: Delete a NAT translation
-      description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
       responses:
         '204':
           description: Done.
@@ -26610,6 +26665,8 @@ paths:
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
 
   /api/v1/nameserver-sets:
     x-phase: P3
@@ -42749,6 +42806,128 @@ components:
         updated_at:
           type: string
           format: date-time
+
+    IPAddressDetail:
+      description: >-
+        IP address with the NAT translations it takes part in (IPM-15):
+        directly as inside or outside address, or through a subnet of its
+        VRF that contains it; empty without PostgreSQL.
+      allOf:
+        - $ref: '#/components/schemas/IPAddress'
+        - type: object
+          required: [nat_translations]
+          properties:
+            nat_translations:
+              type: array
+              items:
+                $ref: '#/components/schemas/AddressNAT'
+
+    AddressNAT:
+      type: object
+      required: [id, kind, role, protocol, device_ci_id]
+      properties:
+        id: { type: string }
+        kind:
+          $ref: '#/components/schemas/NATKind'
+        role:
+          type: string
+          enum: [inside, outside, inside_subnet, outside_subnet]
+          description: How the address takes part; *_subnet through a subnet that contains it.
+        counterpart:
+          type: string
+          description: The other side, an address or a CIDR; absent when the caller does not see it.
+        protocol:
+          $ref: '#/components/schemas/NATProtocol'
+        inside_port: { type: integer }
+        outside_port: { type: integer }
+        device_ci_id: { type: string }
+
+    NATKind:
+      type: string
+      enum: [static, source, destination, pat]
+
+    NATProtocol:
+      type: string
+      enum: [any, tcp, udp, icmp]
+
+    NATTranslation:
+      type: object
+      description: >-
+        NAT translation of a device (IPM-15, E-218) between an inside and an
+        outside side, each an address or a subnet. client_id and site_id
+        follow the device.
+      required: [id, organization_id, kind, device_ci_id, protocol, created_at, updated_at]
+      properties:
+        id: { type: string }
+        organization_id: { type: string }
+        client_id: { type: string, readOnly: true }
+        site_id: { type: string, readOnly: true }
+        kind:
+          $ref: '#/components/schemas/NATKind'
+        device_ci_id: { type: string }
+        inside_address_id: { type: string }
+        inside_subnet_id: { type: string }
+        outside_address_id: { type: string }
+        outside_subnet_id: { type: string }
+        inside:
+          type: string
+          readOnly: true
+          description: Address or CIDR of the inside side; absent when the caller does not see it.
+        outside:
+          type: string
+          readOnly: true
+          description: Address or CIDR of the outside side; absent when the caller does not see it.
+        protocol:
+          $ref: '#/components/schemas/NATProtocol'
+        inside_port: { type: integer, minimum: 1, maximum: 65535 }
+        outside_port: { type: integer, minimum: 1, maximum: 65535 }
+        description: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    NATTranslationListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/NATTranslation'
+
+    CreateNATTranslationRequest:
+      type: object
+      required: [kind, device_ci_id]
+      properties:
+        kind:
+          $ref: '#/components/schemas/NATKind'
+        device_ci_id: { type: string }
+        inside_address_id: { type: string }
+        inside_subnet_id: { type: string }
+        outside_address_id: { type: string }
+        outside_subnet_id: { type: string }
+        protocol:
+          $ref: '#/components/schemas/NATProtocol'
+        inside_port: { type: integer, minimum: 1, maximum: 65535 }
+        outside_port: { type: integer, minimum: 1, maximum: 65535 }
+        description: { type: string }
+
+    UpdateNATTranslationRequest:
+      type: object
+      properties:
+        kind:
+          $ref: '#/components/schemas/NATKind'
+        device_ci_id: { type: string }
+        inside_address_id: { type: string, description: '"" clears it.' }
+        inside_subnet_id: { type: string, description: '"" clears it.' }
+        outside_address_id: { type: string, description: '"" clears it.' }
+        outside_subnet_id: { type: string, description: '"" clears it.' }
+        protocol:
+          $ref: '#/components/schemas/NATProtocol'
+        inside_port: { type: integer, minimum: 0, maximum: 65535, description: 0 removes the port. }
+        outside_port: { type: integer, minimum: 0, maximum: 65535, description: 0 removes the port. }
+        description: { type: string }
 
     IPAddressOrigin:
       type: string

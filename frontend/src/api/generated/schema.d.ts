@@ -11375,13 +11375,13 @@ export interface paths {
     };
     /**
      * List NAT translations
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description NAT translations of the devices the caller sees (IPM-15, WP-1071), newest first; client and site follow the device. Requires ipam:read; without PostgreSQL 501.
      */
     get: operations['listNATTranslations'];
     put?: never;
     /**
      * Create a NAT translation
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Exactly one of inside_address_id and inside_subnet_id (422 inside) and of outside_address_id and outside_subnet_id (422 outside); ports only with protocol tcp or udp (422 protocol), kind pat needs outside_port (422). The device, the addresses and the subnets must be visible to the caller (422 per field); the inside side belongs to the client of the device or is org-wide. Requires ipam:write; without PostgreSQL 501.
      */
     post: operations['createNatTranslation'];
     delete?: never;
@@ -11400,23 +11400,17 @@ export interface paths {
       };
       cookie?: never;
     };
-    /**
-     * Get a NAT translation
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
-     */
+    /** Get a NAT translation */
     get: operations['getNatTranslation'];
     put?: never;
     post?: never;
-    /**
-     * Delete a NAT translation
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
-     */
+    /** Delete a NAT translation */
     delete: operations['deleteNatTranslation'];
     options?: never;
     head?: never;
     /**
      * Update a NAT translation
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Changes the given fields; the result is checked as POST checks it. A reference given with an id replaces the other reference of its side unless that one is given too; "" clears a reference, 0 a port.
      */
     patch: operations['updateNatTranslation'];
     trace?: never;
@@ -21157,6 +21151,87 @@ export interface components {
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    /** @description IP address with the NAT translations it takes part in (IPM-15): directly as inside or outside address, or through a subnet of its VRF that contains it; empty without PostgreSQL. */
+    IPAddressDetail: components['schemas']['IPAddress'] & {
+      nat_translations: components['schemas']['AddressNAT'][];
+    };
+    AddressNAT: {
+      id: string;
+      kind: components['schemas']['NATKind'];
+      /**
+       * @description How the address takes part; *_subnet through a subnet that contains it.
+       * @enum {string}
+       */
+      role: 'inside' | 'outside' | 'inside_subnet' | 'outside_subnet';
+      /** @description The other side, an address or a CIDR; absent when the caller does not see it. */
+      counterpart?: string;
+      protocol: components['schemas']['NATProtocol'];
+      inside_port?: number;
+      outside_port?: number;
+      device_ci_id: string;
+    };
+    /** @enum {string} */
+    NATKind: 'static' | 'source' | 'destination' | 'pat';
+    /** @enum {string} */
+    NATProtocol: 'any' | 'tcp' | 'udp' | 'icmp';
+    /** @description NAT translation of a device (IPM-15, E-218) between an inside and an outside side, each an address or a subnet. client_id and site_id follow the device. */
+    NATTranslation: {
+      id: string;
+      organization_id: string;
+      readonly client_id?: string;
+      readonly site_id?: string;
+      kind: components['schemas']['NATKind'];
+      device_ci_id: string;
+      inside_address_id?: string;
+      inside_subnet_id?: string;
+      outside_address_id?: string;
+      outside_subnet_id?: string;
+      /** @description Address or CIDR of the inside side; absent when the caller does not see it. */
+      readonly inside?: string;
+      /** @description Address or CIDR of the outside side; absent when the caller does not see it. */
+      readonly outside?: string;
+      protocol: components['schemas']['NATProtocol'];
+      inside_port?: number;
+      outside_port?: number;
+      description?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    NATTranslationListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['NATTranslation'][];
+    };
+    CreateNATTranslationRequest: {
+      kind: components['schemas']['NATKind'];
+      device_ci_id: string;
+      inside_address_id?: string;
+      inside_subnet_id?: string;
+      outside_address_id?: string;
+      outside_subnet_id?: string;
+      protocol?: components['schemas']['NATProtocol'];
+      inside_port?: number;
+      outside_port?: number;
+      description?: string;
+    };
+    UpdateNATTranslationRequest: {
+      kind?: components['schemas']['NATKind'];
+      device_ci_id?: string;
+      /** @description "" clears it. */
+      inside_address_id?: string;
+      /** @description "" clears it. */
+      inside_subnet_id?: string;
+      /** @description "" clears it. */
+      outside_address_id?: string;
+      /** @description "" clears it. */
+      outside_subnet_id?: string;
+      protocol?: components['schemas']['NATProtocol'];
+      /** @description 0 removes the port. */
+      inside_port?: number;
+      /** @description 0 removes the port. */
+      outside_port?: number;
+      description?: string;
     };
     /**
      * @description Where the address row came from (IPM-14): manual (POST, never set by the client), discovery (discovery sync), scan or import. Discovery overwrites no binding of origin manual and removes only rows of origin discovery that are not pinned.
@@ -33242,13 +33317,13 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description IP address details */
+      /** @description IP address details with the NAT translations it takes part in (IPM-15) */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['IPAddress'];
+          'application/json': components['schemas']['IPAddressDetail'];
         };
       };
       401: components['responses']['Unauthorized'];
@@ -33320,13 +33395,13 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description IP address details */
+      /** @description IP address details with the NAT translations it takes part in (IPM-15) */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['IPAddress'];
+          'application/json': components['schemas']['IPAddressDetail'];
         };
       };
       401: components['responses']['Unauthorized'];
@@ -51029,6 +51104,19 @@ export interface operations {
          *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /** @description Only translations of this device. */
+        ci_id?: string;
+        /** @description Only translations of this kind; another value is 422 with field kind. */
+        kind?: components['schemas']['NATKind'];
+        /** @description Only translations with this address inside or outside. */
+        address_id?: string;
+        /** @description Only translations with this subnet inside or outside. */
+        subnet_id?: string;
       };
       header?: never;
       path?: never;
@@ -51036,17 +51124,21 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List NAT translations. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description Paginated list of NAT translations */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['NATTranslationListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   createNatTranslation: {
@@ -51056,14 +51148,20 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateNATTranslationRequest'];
+      };
+    };
     responses: {
-      /** @description Created. The schema comes with the implementing work package. */
+      /** @description NAT translation created */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['NATTranslation'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -51071,6 +51169,7 @@ export interface operations {
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   getNatTranslation: {
@@ -51085,17 +51184,20 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get a NAT translation. The schema comes with the implementing work package. */
+      /** @description NAT translation */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['NATTranslation'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   deleteNatTranslation: {
@@ -51122,6 +51224,7 @@ export interface operations {
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   updateNatTranslation: {
@@ -51134,14 +51237,20 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateNATTranslationRequest'];
+      };
+    };
     responses: {
-      /** @description Update a NAT translation. The schema comes with the implementing work package. */
+      /** @description NAT translation updated */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['NATTranslation'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -51150,6 +51259,7 @@ export interface operations {
       409: components['responses']['Conflict'];
       422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   listNameserverSets: {

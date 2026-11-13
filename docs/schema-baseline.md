@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000335_ipam_section_acl_enabled
+Stand: Migration 000336_nat_translation
 
 ## Prüfung
 
@@ -756,6 +756,28 @@ Vergabe je Range mit einem Transaktions-Advisory-Lock
 organisationsweiter Ranges nicht hat. Die Tabelle oben und die Zeile
 „Stand:“ erzeugt `RETICORA_UPDATE_SCHEMA_BASELINE=1` beim Zusammenführen mit
 den endgültigen Migrationsnummern neu.
+
+Migration `nat_translation` (WP-1071, IPM-15, vorläufige Nummer 000336)
+legt `nat_translation` an: Art (`kind` static, source, destination, pat),
+Gerät, je genau eine Innen- und Außenseite als Adresse oder Subnetz
+(`nat_translation_inside_check`, `nat_translation_outside_check`), Protokoll,
+Ports nur bei tcp/udp (`nat_translation_ports_check`), pat verlangt den
+Außenport (`nat_translation_pat_port_check`). Die Fremdschlüssel sind
+zusammengesetzt mit Organisation (Konvention 19) und alle ON DELETE CASCADE:
+`nat_translation_device_fkey` auf `ci`, `nat_translation_inside_address_fkey`
+und `nat_translation_outside_address_fkey` auf `ip_address`,
+`nat_translation_inside_subnet_fkey` und `nat_translation_outside_subnet_fkey`
+auf `subnet`, dazu Teilindizes je Seite und `idx_nat_translation_device`.
+`ip_address` und `subnet` erhalten `ip_address_id_organization_key` bzw.
+`subnet_id_organization_key` (UNIQUE (id, organization_id)) nur, wenn noch
+kein eindeutiger Schlüssel über genau diese Spalten besteht; Down entfernt sie
+nur, solange kein Fremdschlüssel mehr auf sie verweist. `client_id` und
+`site_id` folgen dem Gerät (Scope-Trigger mit erweitertem Scope);
+`propagate_ci_scope` leitet sie bei einer Kunden- oder Standortänderung des CI
+neu ab. ENABLE und FORCE RLS mit den Policies nach Konvention 5, `updated_at`
+und `reticora_truncate_guard`. Die Tabelle oben und die Zeile „Stand:“
+erzeugt `RETICORA_UPDATE_SCHEMA_BASELINE=1` beim Zusammenführen mit den
+endgültigen Migrationsnummern neu.
 
 `TestTenantReferencesCarryOrganization`
 (`backend/internal/tenant/rls/object_reference_integration_test.go`) prüft
@@ -2025,6 +2047,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `monitoring_group_member` | ja | ja | monitoring_group_member_isolation (ALL), monitoring_group_member_scoped_delete (DELETE), monitoring_group_member_scoped_update (UPDATE) |
 | `monitoring_profile` | ja | ja | monitoring_profile_isolation (ALL), monitoring_profile_scoped_delete (DELETE), monitoring_profile_scoped_update (UPDATE) |
 | `nameserver_set` | ja | ja | nameserver_set_isolation (ALL), nameserver_set_scoped_delete (DELETE), nameserver_set_scoped_insert (INSERT), nameserver_set_scoped_update (UPDATE) |
+| `nat_translation` | ja | ja | nat_translation_isolation (ALL), nat_translation_scoped_delete (DELETE), nat_translation_scoped_update (UPDATE) |
 | `network_interface` | ja | ja | network_interface_scoped_delete (DELETE), network_interface_scoped_update (UPDATE), org_isolation (ALL) |
 | `notice_sent` | ja | ja | notice_sent_isolation (ALL) |
 | `notification_channel` | ja | ja | notification_channel_isolation (ALL) |

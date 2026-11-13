@@ -146,6 +146,9 @@ var matrixOverrides = map[string]map[string]string{
 	// overlap (asn_number_key, asn_range_no_overlap, WP-1066).
 	"asn":       {"number": "@seq"},
 	"asn_range": {"range_start": "@seq", "range_end": "@seq"},
+	// A NAT translation names exactly one inside and one outside side
+	// (nat_translation_inside_check, nat_translation_outside_check, WP-1071).
+	"nat_translation": {"inside_address_id": "@uuid", "outside_address_id": "@uuid"},
 }
 
 var anyArrayCheck = regexp.MustCompile(`^CHECK \(\((\w+) = ANY \(\(?ARRAY\['([^']*)'`)

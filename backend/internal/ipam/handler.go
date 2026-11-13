@@ -133,6 +133,10 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	// AS numbers and ranges (IPM-16, asn_handler.go): only with
 	// PostgreSQL, else 501.
 	h.registerASNRoutes(r)
+
+	// NAT translations (IPM-15, nat_handler.go): only with PostgreSQL,
+	// else 501.
+	h.registerNATRoutes(r)
 }
 
 func org(w http.ResponseWriter, r *http.Request) (string, bool) {
@@ -557,7 +561,20 @@ func (h *Handler) GetIPAddress(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "ip address not found")
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, a)
+	// The NAT translations the address takes part in (IPM-15); none
+	// without a repository that keeps them.
+	detail := IPAddressDetail{IPAddress: *a, NATTranslations: []AddressNAT{}}
+	if nat, ok := h.repo.(NATRepository); ok {
+		if detail.NATTranslations, err = nat.ListAddressNAT(r.Context(), orgID, a.ID); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				api.WriteError(w, http.StatusNotFound, "Not Found", "ip address not found")
+				return
+			}
+			api.WriteRepoError(w, err)
+			return
+		}
+	}
+	api.WriteJSON(w, http.StatusOK, detail)
 }
 
 // UpdateIPAddress handles PATCH /api/v1/ip-addresses/{id}

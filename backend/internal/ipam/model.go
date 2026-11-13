@@ -166,6 +166,28 @@ const (
 // ValidIPOrigins lists the origins of an address.
 var ValidIPOrigins = map[string]bool{IPOriginManual: true, IPOriginDiscovery: true, IPOriginScan: true, IPOriginImport: true}
 
+// AddressNAT is a translation in which an address takes part (GET
+// /api/v1/ips/{id}): Role is inside or outside for a direct reference and
+// inside_subnet or outside_subnet for a translation of a subnet that
+// contains the address; Counterpart is the other side (address or CIDR).
+type AddressNAT struct {
+	ID          string `json:"id"`
+	Kind        string `json:"kind"`
+	Role        string `json:"role"`
+	Counterpart string `json:"counterpart,omitempty"`
+	Protocol    string `json:"protocol"`
+	InsidePort  *int   `json:"inside_port,omitempty"`
+	OutsidePort *int   `json:"outside_port,omitempty"`
+	DeviceCIID  string `json:"device_ci_id"`
+}
+
+// IPAddressDetail is the answer of GET /api/v1/ips/{id}: the address with
+// the NAT translations it takes part in (IPM-15).
+type IPAddressDetail struct {
+	IPAddress
+	NATTranslations []AddressNAT `json:"nat_translations"`
+}
+
 // CIAddress is an address of a CI in GET /api/v1/cis/{id}/addresses
 // (IPM-13): the address with the name of its interface and the CIDR of
 // its subnet.
