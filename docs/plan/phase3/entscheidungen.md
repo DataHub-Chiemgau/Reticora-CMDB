@@ -2823,6 +2823,7 @@ Mengengerüst (aus [E-222](#e-222)/[E-225](#e-225)): Mit gezielter Auffrischung 
 
 **Betroffene WPs:** WP-873 (Scan), Folge-WP nach Option 2 falls nötig
 
+**Nachtrag 2026-11-13 (Update-Plan Upd-08, nach Empfehlung):** `reticora-postgres` und alle TimescaleDB-Referenzen nutzen jetzt `timescale/timescaledb:2.32.0-pg16@sha256:2f87efeaec6fbdd3ba4a6993b921c05d069cd8e980792cb23c7c5f32a6fe68a7`. Das Release vom 2026-11-12 enthält Sicherheitsfixes mit der Empfehlung „upgrade as soon as possible“ und trägt weiterhin PostgreSQL 16.15 (Image-Config `PG_VERSION=16.15`). Laut Release-Notes ist TimescaleDB 2.32.0 nur bis PostgreSQL 16.15 kompatibel; vor PostgreSQL 16.16 ist zuerst 2.32.1 nötig. Die Reihenfolge ist damit fest: **TimescaleDB 2.32.0 (jetzt, Upd-08) → TimescaleDB 2.32.1 → PostgreSQL 16.16.** Das gilt für Option 1 (Image des Herstellers mit 16.16) ebenso wie für einen Quellbuild 16.16 nach Option 2. Ein solcher Quellbuild setzt also ein 2.32.1-Image als Basis voraus. Am 2026-11-13 gibt es auf Docker Hub weder 2.32.1-pg16 noch ein GitHub-Release 2.32.1. Der Prüfpunkt 2026-12-06 und der Ablauf der 38 Ausnahmen am 2026-12-13 bleiben unverändert. Die Ausnahmen gelten unverändert weiter, neue kommen nicht hinzu. PostgreSQL 18 (`2.32.0-pg18`) ist ein Major-Upgrade (pg_upgrade oder Dump/Restore) und gehört als eigenes WP in die Roadmap, nicht in diese Entscheidung.
 
 <a id="e-258"></a>
 ## E-258 – cosign v3: Bundle-Format, Mindestversion und Übergang der Collector-Hosts

@@ -39,10 +39,15 @@ Migration mit `WITH NO DATA` anlegen?
 ### Umgebung und Aussagekraft
 
 Lokale Messung am 2026-11-12 auf einem Apple-Silicon-Rechner mit Docker
-Desktop, Image
-`timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731`
-(der gepinnte `TIMESCALE_IMAGE` nach E-96; PostgreSQL 16.15,
-TimescaleDB 2.31.0), Standardkonfiguration des Testcontainers. Auf derselben
+Desktop, Image TimescaleDB `2.31.0-pg16` (Digest
+`sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731`,
+damals der gepinnte `TIMESCALE_IMAGE` nach E-96; PostgreSQL 16.15,
+TimescaleDB 2.31.0), Standardkonfiguration des Testcontainers. Nachtrag
+2026-11-13 (Update-Plan Upd-08): `TIMESCALE_IMAGE` ist jetzt
+`timescale/timescaledb:2.32.0-pg16@sha256:2f87efeaec6fbdd3ba4a6993b921c05d069cd8e980792cb23c7c5f32a6fe68a7`
+(TimescaleDB 2.32.0, PostgreSQL 16.15). Die Spike-Tests laufen in der CI auf
+diesem Image; die Messwerte unten stammen weiter aus 2.31.0 und wurden nicht
+neu erhoben. Auf derselben
 Datenbankinstanz liefen gleichzeitig Testläufe anderer Arbeitsstränge. Die
 Werte sind deshalb **Richtwerte** einer Entwicklerumgebung, keine Messung
 auf der Referenzhardware. Der Nachweis unter der Last aus NFR-11 folgt im

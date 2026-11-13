@@ -1444,7 +1444,7 @@ counts and verifies the audit hash chain with the `audit-verify` binary.
 
 | Service | Image | Purpose |
 |---------|-------|---------|
-| PostgreSQL + TimescaleDB | timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731 | Primary database with time-series |
+| PostgreSQL + TimescaleDB | timescale/timescaledb:2.32.0-pg16@sha256:2f87efeaec6fbdd3ba4a6993b921c05d069cd8e980792cb23c7c5f32a6fe68a7 | Primary database with time-series |
 | NATS | nats:2.14.10-alpine | Event bus (JetStream) |
 | Redis | redis:7.4.12-alpine | Cache, sessions, rate-limiting |
 | MinIO (Silo fork) | pgsty/silo:RELEASE.2026-11-12T00-00-00Z@sha256:c20d112390b9a9ce8c11b8af95ad35bcaa62f4759663c09c936cd8d2b511f329 | S3-compatible object storage; `minio/minio` is archived, the image name `pgsty/minio` is frozen since 2026-08-04 |
@@ -1569,7 +1569,7 @@ A version tag `v*` starts the release workflow. Tools follow E-31.
 
 1. It builds the edge binaries `reticora-collector` and `reticora-agent` for linux/amd64 and linux/arm64.
 2. It builds the images `reticora-server`, `reticora-collector`, `reticora-frontend`, `reticora-postgres` and `reticora-keycloak-db` and pushes them to `ghcr.io/datahub-chiemgau`.
-   - `reticora-postgres` is TimescaleDB with pgBackRest (`deploy/docker-compose/postgres/Dockerfile`). Its base is pinned by version and digest (the same TimescaleDB reference as CI and the dev stack, E-96), its Go helpers `gosu` and `timescaledb-tune` are rebuilt with the repository's Go toolchain, and the pgBackRest tarball is checked by sha256.
+   - `reticora-postgres` is TimescaleDB with pgBackRest (`deploy/docker-compose/postgres/Dockerfile`). Its base is pinned by version and digest (the same TimescaleDB reference as CI and the dev stack, E-96), its Go helpers `gosu` and `timescaledb-tune` are rebuilt with the repository's Go toolchain, and pgBackRest is built from its distribution tarball (release asset), checked by sha256.
    - `reticora-keycloak-db` is the PostgreSQL of Keycloak (`deploy/docker-compose/keycloak-db/Dockerfile`): the official `postgres:16.16-alpine`, pinned by version and digest, with its `gosu` rebuilt by the repository's Go toolchain (the vendor's is built with an outdated Go, E-96, A-85). Major version, data directory and UID 70 are the vendor's, so the `keycloakdb` volume of an earlier installation (`postgres:16.x-alpine`) keeps running.
    - Before the push, Trivy scans each image with the threshold of the CI job `image-scan`: Critical/High findings with an available fix block. Exceptions follow `security/scan-exceptions.txt`, see [security/abhaengigkeitsscans.md](security/abhaengigkeitsscans.md).
 3. Syft generates an SPDX SBOM for every binary and every image, plus one for the source tree.

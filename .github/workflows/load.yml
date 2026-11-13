@@ -272,7 +272,7 @@ jobs:
         run: |
           docker run -d --name postgres -p 5432:5432 \
             -e POSTGRES_USER=reticora -e POSTGRES_PASSWORD=reticora -e POSTGRES_DB=reticora \
-            timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731 \
+            timescale/timescaledb:2.32.0-pg16@sha256:2f87efeaec6fbdd3ba4a6993b921c05d069cd8e980792cb23c7c5f32a6fe68a7 \
             postgres -c shared_preload_libraries=timescaledb,pg_stat_statements,auto_explain
           for _ in $(seq 1 90); do
             psql "$DATABASE_URL" -Atc 'SELECT 1' >/dev/null 2>&1 && exit 0

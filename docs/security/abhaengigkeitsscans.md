@@ -160,7 +160,7 @@ einem Hersteller-Image; sie behalten ihr `since:` (Ablauf 2026-12-10 bzw.
 | Image | Ort | Scan |
 |---|---|---|
 | `clamav/clamav:1.5.4@sha256:6d87c712e3391e13c1ba6e05dfb074d4b1ddb5a6834b23bb9da990d2a4ef042a` | `deploy/docker-compose/docker-compose.yml` (`clamd`), `deploy/k8s/base/components/clamav/clamd.yaml`, Dev-Stack `docker-compose.yml` | `image-scan-thirdparty` (`clamd`) |
-| `timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731` | Basis von `reticora-postgres` (der logische Backup-CronJob nutzt seit WP-1178 das eigene Image `reticora-cmdb/postgres`) | über `image-scan` (`postgres`), dieselbe Referenz (E-96, `timescale_image_refs`) |
+| `timescale/timescaledb:2.32.0-pg16@sha256:2f87efeaec6fbdd3ba4a6993b921c05d069cd8e980792cb23c7c5f32a6fe68a7` | Basis von `reticora-postgres` (der logische Backup-CronJob nutzt seit WP-1178 das eigene Image `reticora-cmdb/postgres`) | über `image-scan` (`postgres`), dieselbe Referenz (E-96, `timescale_image_refs`) |
 | `nats:2.14.10-alpine@sha256:311da47e2f31c26e99c623cd78d486a1e8ab039c49b32652770bb91a4f70512e` | Compose (`nats`, `nats-edge`), `deploy/k8s/base/components/nats-edge/nats-edge.yaml` | `image-scan-thirdparty` (`nats`) |
 | `redis:7.4.12-alpine@sha256:7b1753b4c5ad8458906c272a8132b8c15f5557b000379eb115fb239706a384b7` | Compose (`redis`) | `image-scan-thirdparty` (`redis`) |
 | `pgsty/silo:RELEASE.2026-11-12T00-00-00Z@sha256:c20d112390b9a9ce8c11b8af95ad35bcaa62f4759663c09c936cd8d2b511f329` | Compose (`minio`) | `image-scan-thirdparty` (`minio`) |
@@ -348,27 +348,31 @@ reproduzierbar und integritätsgeprüft:
 
 - `TIMESCALE_IMAGE` pinnt die Basis per Version und Digest des
   Multi-Arch-Index:
-  `timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731`.
+  `timescale/timescaledb:2.32.0-pg16@sha256:2f87efeaec6fbdd3ba4a6993b921c05d069cd8e980792cb23c7c5f32a6fe68a7`.
   Dieselbe Referenz nutzen die Datenbanken in `ci.yml`, `load.yml` und
   `restore-test.yml`, der Dev-Stack `docker-compose.yml` und der logische
   Backup-CronJob in `deploy/k8s` (E-96).
 - Die Go-Hilfsprogramme des Basisimages tragen Funde ihrer Go-Toolchain. Die
   Stufe `go-tools` baut sie mit der Go-Toolchain des Repositorys neu
-  (`GO_IMAGE`, `golang:1.26.11-alpine` per Digest), in der Modulversion, die
-  das Basisimage ausliefert; `go install` prüft jedes Modul gegen
-  sum.golang.org.
+  (`GO_IMAGE`, `golang:1.26.11-alpine` per Digest), mindestens in der
+  Modulversion, die das Basisimage ausliefert; `go install` prüft jedes
+  Modul gegen sum.golang.org.
   - `timescaledb-tune` (`TIMESCALEDB_TUNE_VERSION`) stimmt beim ersten Init
     `postgresql.conf` ab (`/docker-entrypoint-initdb.d/001_timescaledb_tune.sh`).
-  - `gosu` (`GOSU_VERSION`, Commit des Tags 1.19; gosu hat keine
-    Semver-Tags): Der Entrypoint wechselt damit von root zu postgres. Der
-    Build prüft, dass `gosu postgres` als postgres läuft.
+  - `gosu` (`GOSU_VERSION`, Commit des Tags 1.20, das Basisimage liefert
+    1.19; gosu hat keine Semver-Tags): Der Entrypoint wechselt damit von
+    root zu postgres. Der Build prüft, dass `gosu postgres` als postgres
+    läuft.
   - `timescaledb-parallel-copy` nutzen weder der Entrypoint noch die
     Init-Skripte noch Reticora; es wird entfernt.
 - `libexpat`, Python 3 und `musl` (CVE-2026-107891, behoben in 1.2.5-r24)
   des Basisimages werden per `apk upgrade` auf den Stand mit Fix gehoben.
-- Der pgBackRest-Quell-Tarball wird gegen `PGBACKREST_SHA256` geprüft, bevor
-  er entpackt wird; eine andere `PGBACKREST_VERSION` ohne neue Prüfsumme
-  bricht den Build ab.
+- pgBackRest wird aus dem Distributions-Tarball gebaut, dem Release-Asset
+  `pgbackrest-<Version>.tar.gz` (seit 2.59.0 vom Hersteller für Paketierer
+  empfohlen): Er enthält die erzeugten Quellen, sodass der Build ohne die
+  Code-Erzeugung des Repositorys auskommt. Der Tarball wird gegen
+  `PGBACKREST_SHA256` geprüft, bevor er entpackt wird; eine andere
+  `PGBACKREST_VERSION` ohne neue Prüfsumme bricht den Build ab.
 
 `tests/ci-config.test.sh` prüft das statisch: `db_image_pin` (Dockerfile) und
 `timescale_image_refs` (jede TimescaleDB-Referenz des Repositorys außer
@@ -439,6 +443,19 @@ auf, die CI auf 2.17.2. Geprüft am 2026-10-21 mit einer Datenbank, die mit
 ### Nachtrag 2026-11-13: PostgreSQL 16.15 in reticora-postgres (E-257)
 
 `image-scan (postgres)` meldet 38 High-CVEs in PostgreSQL 16.15 (behoben in 16.16). Der Server der TimescaleDB-Basis ist ein Quell-Build in `/usr/local`, den Trivy nicht sieht; die gemeldeten apk-Pakete tragen dieselbe Version und stehen deshalb für das Risiko des Servers und der von pgBackRest, `psql` und `pg_dump` geladenen `libpq`. Ein `apk upgrade` würde den Befund verdecken und wird nicht verwendet. Die CVEs stehen befristet bis 2026-12-13 in `security/scan-exceptions.txt`; bis dahin wird auf ein TimescaleDB-Image mit 16.16 gewechselt oder PostgreSQL 16.16 aus dem Quelltext gebaut (Prüfpunkt 2026-12-06).
+
+Nachtrag 2026-11-13 (Update-Plan Upd-08): Auch `2.32.0-pg16` trägt PostgreSQL 16.15. TimescaleDB 2.32.0 ist laut Hersteller nur bis PostgreSQL 16.15 kompatibel; vor PostgreSQL 16.16 ist zuerst TimescaleDB 2.32.1 nötig. Die Reihenfolge ist deshalb fest: TimescaleDB 2.32.0 (jetzt) → 2.32.1 → PostgreSQL 16.16, das gilt auch für einen Quellbuild 16.16 nach Option 2 von E-257. Die 38 Ausnahmen bleiben unverändert.
+
+### Nachtrag 2026-11-13: TimescaleDB 2.32.0, pgBackRest 2.60.0 und gosu 1.20 (Update-Plan Upd-08)
+
+- **TimescaleDB 2.32.0** (Release 2026-11-12, Image `timescale/timescaledb:2.32.0-pg16@sha256:2f87efeaec6fbdd3ba4a6993b921c05d069cd8e980792cb23c7c5f32a6fe68a7`, PostgreSQL 16.15). Der Hersteller nennt „a larger set of security fixes than usual“ und empfiehlt das Update so bald wie möglich. Die Fixes haben keine GHSA-Kennung; es geht um Rechteprüfungen und den Superuser-Kontext, zum Beispiel Hintergrund-Worker als Datenbankeigentümer statt als Superuser (#10966, #10983), das `CREATE`-Recht auf das Schema bei Continuous Aggregates (#10919), Chunk-Constraints ohne Rollenwechsel (#10925), Chunk-Operationen nur für den Eigentümer des Chunks (#10993) und die Zertifikatsprüfung der Telemetrie (#10965). Dazu kommt der Fix für übersprungene Zeilen bei gleichzeitigem `UPDATE`/`DELETE` unter `READ COMMITTED` (#10902, Regression seit 2.28.1). Neu ist Adaptive Integer Compression als Standard (#10878); die Laufzeit beobachtet `load.yml`.
+- **Bestehende Datenbanken:** Das Image liefert die Bibliotheken 2.13.0 bis 2.32.0. `scripts/ops/timescaledb-update.sh` hebt die Erweiterung wie oben beschrieben auf 2.32.0. `install-cloud.sh` ruft das Skript bei jedem Lauf auf; bei Kubernetes mit externer Datenbank führt es der Betreiber vor dem Rollout aus. Nach dem Update ist kein Rückweg auf das 2.31.0-Image möglich, weil diesem die Bibliothek 2.32.0 fehlt. Die Loader-Änderungen wirken erst nach einem Neustart von PostgreSQL; der Wechsel des Images startet den Container ohnehin neu.
+- **pgBackRest 2.56.0 → 2.60.0** (Distributions-Tarball, SHA256 `6d3ee1b5defdadc85228969b4be804096f5e65e54707bb95c7c4c4ce41f5d007`, gleich der `.sha256sum` des Releases). Ab 2.59.3 erzeugt pgBackRest keine schwachen Subkeys und Salts mehr. Früher konnte das passieren, wenn der Zugriff auf den Systemzufall fehlschlug. Das Repository ist mit `aes-256-cbc` verschlüsselt. Deshalb **nach dem Rollout sofort eine neue Vollsicherung erzeugen** (`docs/backup-dr.md`). Die alten Sicherungen laufen mit der Retention aus.
+- Verhaltensänderungen von pgBackRest:
+  - 2.58.0 verlangt TLS ≥ 1.2 zum S3-Repository.
+  - Ab 2.59.0 läuft außer `restore` kein Befehl mehr als root. Reticora ruft pgBackRest nur als `postgres` auf: Compose mit `user: postgres` bzw. dem Server-Prozess, Kubernetes mit `runAsUser: 70`, der Restore mit `--user postgres`.
+  - Ab 2.60.0 brechen `restore` und `expire` bei ungültigen Seitenprüfsummen ab (`checksum-page-error`). Reticora behält diesen strengen Standard.
+- **gosu 1.20** (Pseudo-Version `v0.0.0-20261025094355-29b939aa5bd4`, Commit des Tags 1.20, proxy.golang.org). Das Basisimage liefert 1.19. `timescaledb-tune` bleibt bei v0.19.0, weil v0.19.1 `go 1.27.3` voraussetzt und erst mit dem Wechsel auf Go 1.27 kommt.
 
 ## Datenbank-Image `reticora-keycloak-db`
 

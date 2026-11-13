@@ -170,6 +170,27 @@ assertion `Assert WAL archiving` and the kind case `wal_archive`:
   neither the component `postgres` nor the pgBackRest CronJob. The
   provider's PITR takes their place, with the same RPO, RTO and retention.
 
+### After the update to pgBackRest 2.60.0: a new full backup
+
+Images up to pgBackRest 2.56.0 could generate weak encryption subkeys and
+salts when access to the system's random data failed (fixed in 2.59.3; the
+repositories are encrypted with `aes-256-cbc`). Once the image with
+pgBackRest 2.60.0 (TimescaleDB 2.32.0, Update-Plan Upd-08) runs, take a new
+full backup at once instead of waiting for the daily one; the older backups
+expire with the retention (`repo1-retention-full=35`). The backup service
+only takes a full backup at start when none exists, so start it by hand:
+
+```bash
+# Docker Compose
+docker compose --env-file .env exec backup reticora-pgbackrest-env.sh pgbackrest --stanza=reticora --type=full backup
+# Kubernetes
+kubectl -n reticora create job --from=cronjob/reticora-pgbackrest-full reticora-pgbackrest-full-upd08
+```
+
+Check with `pgbackrest --stanza=reticora info` that the newest full backup
+is from after the rollout. Since 2.60.0, `restore` and `expire` stop on an
+invalid page checksum (`checksum-page-error`); Reticora keeps that default.
+
 ### Object storage: versioning and replication (NFR-05)
 
 - The server enables versioning on every bucket it uses at start

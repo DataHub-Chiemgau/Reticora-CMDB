@@ -20,7 +20,8 @@
 # pg_dump, libpq of pgBackRest). Trivy reports the same CVEs on the apk
 # packages postgresql16, postgresql16-client, postgresql16-plpython3 and libpq
 # of the image; fixed in PostgreSQL 16.16 (2026-11-12), for which no
-# timescale/timescaledb pg16 image exists yet. The entries expire with the
+# timescale/timescaledb pg16 image exists yet (2.32.0-pg16 also ships 16.15;
+# PostgreSQL 16.16 needs TimescaleDB 2.32.1 first). The entries expire with the
 # SEC-11 limit for High; until then E-257 replaces the base image (or builds
 # PostgreSQL 16.16 from source) – an apk upgrade alone would hide the
 # findings without fixing the server.

@@ -24,11 +24,14 @@ Hypertable als bekannte Lücke für WP-040.
 Umgebung: PostgreSQL 16 mit TimescaleDB 2.17.2, beim Spike die Version des
 CI-Images (der Compose-Stack nutzte den gleitenden Tag `latest-pg16`).
 Nachtrag 2026-10-21 (E-96, WP-389): CI, Compose-Stack und `reticora-postgres`
-nutzen jetzt
-`timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731`
-(PostgreSQL 16.15). Die Nachweistests im Kopf sind darauf grün; die Zeilen 1
+nutzten ab da TimescaleDB 2.31.0 (`2.31.0-pg16`, Digest `sha256:322ae364…`,
+PostgreSQL 16.15). Die Nachweistests im Kopf waren darauf grün; die Zeilen 1
 bis 3 von Ergebnis 1 prüft `TestTimescaleRefusesRLSWithCompression` mit
 denselben Fehlertexten, die Zeilen 4 und 5 wurden nicht erneut geprüft.
+Nachtrag 2026-11-13 (Update-Plan Upd-08): Alle Stellen nutzen jetzt
+`timescale/timescaledb:2.32.0-pg16@sha256:2f87efeaec6fbdd3ba4a6993b921c05d069cd8e980792cb23c7c5f32a6fe68a7`
+(TimescaleDB 2.32.0, weiterhin PostgreSQL 16.15); die Nachweistests laufen in
+der CI auf diesem Image.
 
 Geprüft wurde mit der App-Rolle `reticora_app` (ohne Superuser, ohne
 BYPASSRLS) über `database.WithTenant`. Ein Superuser umgeht RLS auch mit FORCE

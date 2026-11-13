@@ -312,9 +312,12 @@ if not re.search(r'\[ "\$\(gosu postgres id -un\)" = postgres \]', df):
 if not re.search(r"^ARG PGBACKREST_SHA256=[0-9a-f]{64}$", df, re.M):
     problems.append("ARG PGBACKREST_SHA256=<sha256> missing")
 run = re.sub(r"\\\n\s*", " ", df)
-dl = re.search(r"curl [^\n]*?-o (\S+)[^\n]*?pgbackrest/archive[^\n]*", run)
+# pgBackRest 2.59.0 recommends the distribution tarball (release asset with
+# the generated sources) over the archive GitHub generates from the tag.
+dl = re.search(r"curl [^\n]*?-o (\S+)[^\n]*?/pgbackrest/pgbackrest/releases/download/release/"
+               r"\$\{PGBACKREST_VERSION\}/pgbackrest-\$\{PGBACKREST_VERSION\}\.tar\.gz\b[^\n]*", run)
 if not dl:
-    problems.append("the pgBackRest tarball is not downloaded to a file (curl -o)")
+    problems.append("the pgBackRest distribution tarball (release asset) is not downloaded to a file (curl -o)")
 else:
     tarball, rest = dl.group(1), dl.group(0)
     check = rest.find(f'echo "${{PGBACKREST_SHA256}}  {tarball}" | sha256sum -c -')
