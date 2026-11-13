@@ -548,14 +548,25 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 	for _, withDB := range []bool{true, false} {
 		deps := systemJobTestDeps(t, cfg, withDB)
 		deps.modules = workflowModules
-		if kinds := registeredSystemJobs(t, deps); kinds[workflow.SerialSweepKind] != withDB {
-			t.Errorf("JOB-02 workflow serial sweep (database %v): registered %v", withDB, kinds[workflow.SerialSweepKind])
-		}
-		for _, job := range systemJobs(deps) {
-			if job.Kind == workflow.SerialSweepKind && (job.Spec != "* * * * *" || job.MaxCatchUp != 1) {
-				t.Errorf("%s: spec %q, max catch-up %d; want every minute and 1", job.Kind, job.Spec, job.MaxCatchUp)
+		kinds := registeredSystemJobs(t, deps)
+		for _, kind := range []string{workflow.SerialSweepKind, workflow.ScheduleKind} {
+			if kinds[kind] != withDB {
+				t.Errorf("JOB-02 %s (database %v): registered %v", kind, withDB, kinds[kind])
 			}
 		}
+		for _, job := range systemJobs(deps) {
+			if (job.Kind == workflow.SerialSweepKind || job.Kind == workflow.ScheduleKind) && (job.Spec != "* * * * *" || job.MaxCatchUp != 1) {
+				t.Errorf("%s: spec %q, max catch-up %d; want every minute and 1", job.Kind, job.Spec, job.MaxCatchUp)
+			}
+			if job.Kind == workflow.ScheduleKind && job.Timeout != time.Minute {
+				t.Errorf("%s: timeout %v, want 1 min", job.Kind, job.Timeout)
+			}
+		}
+	}
+	// Workflow schedules (JOB-02 [P3], WP-1091): workflow.schedule runs
+	// with the module workflows only (checked above).
+	if registered[workflow.ScheduleKind] {
+		t.Errorf("without the module workflows %s is registered", workflow.ScheduleKind)
 	}
 
 	// The ADMP cache (ADM-03, WP-929): admp.refresh_linked every 15

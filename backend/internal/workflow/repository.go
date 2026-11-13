@@ -139,6 +139,9 @@ func (r *MemoryRepository) GetDefinition(_ context.Context, orgID, id string) (*
 	return &cp, nil
 }
 func (r *MemoryRepository) CreateDefinition(ctx context.Context, def *Definition) error {
+	if err := requireScheduleScope(ctx, def.Trigger); err != nil {
+		return err
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	def.ID = r.nextID("workflow")
@@ -152,7 +155,7 @@ func (r *MemoryRepository) CreateDefinition(ctx context.Context, def *Definition
 	r.definitions[def.ID] = &cp
 	return nil
 }
-func (r *MemoryRepository) UpdateDefinition(_ context.Context, orgID, id string, req *UpdateDefinitionRequest) (*Definition, error) {
+func (r *MemoryRepository) UpdateDefinition(ctx context.Context, orgID, id string, req *UpdateDefinitionRequest) (*Definition, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	d := r.definitions[id]
@@ -164,6 +167,9 @@ func (r *MemoryRepository) UpdateDefinition(_ context.Context, orgID, id string,
 	}
 	next := *d
 	applyUpdate(&next, req)
+	if err := requireScheduleScope(ctx, d.Trigger, next.Trigger); err != nil {
+		return nil, err
+	}
 	if err := validateEffective(d, &next); err != nil {
 		return nil, err
 	}

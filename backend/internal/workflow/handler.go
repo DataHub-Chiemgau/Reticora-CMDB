@@ -69,6 +69,16 @@ func writeWorkflowError(w http.ResponseWriter, r *http.Request, err error) {
 	}
 }
 
+// validateWrite checks the trigger and the conditions a create or a PATCH
+// sends: filter and conditions after MET-45 (WP-1087), cron and time zone
+// of a schedule (WP-1091); each refusal is a 422 on its field.
+func validateWrite(trigger JSONMap, conditions []JSONMap) error {
+	if err := ValidateSchedule(trigger); err != nil {
+		return err
+	}
+	return ValidateDefinition(trigger, conditions)
+}
+
 func (h *Handler) ListDefinitions(w http.ResponseWriter, r *http.Request) {
 	t, ok := org(w, r)
 	if !ok {
@@ -113,7 +123,7 @@ func (h *Handler) CreateDefinition(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, 400, "Bad Request", "name, trigger and actions are required")
 		return
 	}
-	if err := ValidateDefinition(req.Trigger, req.Conditions); err != nil {
+	if err := validateWrite(req.Trigger, req.Conditions); err != nil {
 		api.WriteFieldError(w, err)
 		return
 	}
@@ -149,7 +159,7 @@ func (h *Handler) UpdateDefinition(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, 400, "Bad Request", err.Error())
 		return
 	}
-	if err := ValidateDefinition(req.Trigger, req.Conditions); err != nil {
+	if err := validateWrite(req.Trigger, req.Conditions); err != nil {
 		api.WriteFieldError(w, err)
 		return
 	}

@@ -16261,6 +16261,8 @@ WFL-03;[P3];F;backend/internal/workflow/trigger_integration_test.go;WP-1090
 - docs/schema-baseline.md
 - docs/traceability.csv
 
+Nachtrag aus der Prüfung (zusätzlich geändert): `backend/internal/workflow/worker.go` (`RegisterMetrics` registriert `reticora_workflow_schedule_skipped_total` mit den übrigen Workflow-Metriken), `backend/internal/workflow/pg_repository.go` und `backend/internal/workflow/repository.go` (ein Zeitplan-Trigger wird nur mit organisationsweitem Scope geschrieben oder geändert, sonst 422 auf `trigger.type`: der Scheduler führt die Runs ohne Initiator organisationsweit aus, TEN-04).
+
 **Migration/RLS:** Migration `<nächste Nr.>_workflow_schedule_slot`: `workflow_run.schedule_slot` (timestamptz NULL), Unique-Index `uq_workflow_run_schedule_slot (organization_id, workflow_id, schedule_slot) WHERE schedule_slot IS NOT NULL`. Der Index hängt an `workflow_id` statt an der Version, damit eine neue Version im selben Slot keinen zweiten Run erzeugt. Policies unverändert. Down entfernt Index und Spalte. `docs/schema-baseline.md`: Zeile „Stand“.
 
 **Tests:**

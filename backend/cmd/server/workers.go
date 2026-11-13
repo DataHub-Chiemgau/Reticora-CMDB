@@ -33,6 +33,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/operator"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
@@ -459,17 +460,31 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 		}
 		systemJobs = append(systemJobs, collectorStatus.Schedule())
 		// Workflow runs of a CI whose wake-up was lost (WP-1089, EVT-01):
+		// one executor queues the runs of both workflow system jobs on the
+		// job queue (without it a scheduled run executes in the job).
 		// every minute the next pending run of each free CI that waited
 		// longer than five minutes is queued again, with the module
 		// workflows; without the job queue the runs execute in the request
 		// and the sweep queues nothing.
 		if d.modules.Enabled("workflows") {
-			sweepRuns := workflow.NewExecutor(d.repos.Workflow, nil, nil, nil, nil)
+			sweepRuns := workflow.NewExecutor(d.repos.Workflow, d.repos.Ticket, d.repos.CI, d.repos.Form, d.dispatcher).
+				WithFieldGuard(override.NewGuard(d.repos.Override))
 			if d.jobQueue != nil {
 				sweepRuns.WithQueue(d.jobQueue)
 			}
-			systemJobs = append(systemJobs, workflow.NewSerialSweep(sweepRuns,
-				func(ctx context.Context) ([]string, error) { return database.OrganizationIDs(ctx, pool) }).Schedule())
+			orgs := func(ctx context.Context) ([]string, error) { return database.OrganizationIDs(ctx, pool) }
+			systemJobs = append(systemJobs, workflow.NewSerialSweep(sweepRuns, orgs).Schedule())
+			// Schedule triggers of workflows (JOB-02 [P3], WP-1091): every
+			// minute on one instance the due slot of each active schedule
+			// definition of the organizations with the feature workflows,
+			// at most the newest missed slot.
+			if store, ok := d.repos.Workflow.(workflow.ScheduleStore); ok {
+				ents := d.entitlements
+				systemJobs = append(systemJobs, workflow.NewScheduler(sweepRuns, store, orgs,
+					func(ctx context.Context, orgID string) bool {
+						return ents != nil && ents.IsEnabled(ctx, orgID, entitlement.FeatureWorkflows)
+					}).Schedule())
+			}
 		}
 		// Alarm retention (ALR-01, WP-981): daily the resolved alarms
 		// older than 400 days with their transitions, with the module

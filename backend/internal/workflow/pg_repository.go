@@ -87,6 +87,9 @@ func (r *PGRepository) GetDefinition(ctx context.Context, orgID, id string) (*De
 // (DEFERRABLE), so the definition can name the version before it exists.
 func (r *PGRepository) CreateDefinition(ctx context.Context, d *Definition) error {
 	normalizeDefinition(d)
+	if err := requireScheduleScope(ctx, d.Trigger); err != nil {
+		return err
+	}
 	return database.WithRequestTenant(ctx, r.pool, d.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `INSERT INTO workflow_def (organization_id,name,description,trigger,conditions,actions,active,version,current_version_id)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,1,gen_random_uuid())
@@ -132,6 +135,9 @@ func (r *PGRepository) UpdateDefinition(ctx context.Context, orgID, id string, r
 		}
 		next := *current
 		applyUpdate(&next, req)
+		if verr := requireScheduleScope(ctx, current.Trigger, next.Trigger); verr != nil {
+			return verr
+		}
 		if verr := validateEffective(current, &next); verr != nil {
 			return verr
 		}

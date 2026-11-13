@@ -1810,3 +1810,5 @@ PRB-06;[P3];E;backend/internal/probe/cagg_integration_test.go;WP-972
 NFR-06;[B];E;backend/internal/probe/cagg_integration_test.go;WP-972
 PRT-20;[P3];E;collector/profiles/monitor_test.go;WP-1000
 WFL-02;[P3];F;backend/internal/workflow/serial_integration_test.go;WP-1089
+JOB-02;[B], Zusätze [P2], [P3];F;backend/internal/workflow/schedule_integration_test.go;WP-1091
+WFL-02;[P3];F;backend/internal/workflow/schedule_integration_test.go;WP-1091

@@ -67,7 +67,7 @@ var serialWait = prometheus.NewHistogram(prometheus.HistogramOpts{
 })
 
 // RegisterMetrics registers the workflow metrics on reg.
-func RegisterMetrics(reg prometheus.Registerer) { reg.MustRegister(serialWait) }
+func RegisterMetrics(reg prometheus.Registerer) { reg.MustRegister(serialWait, scheduleSkipped) }
 
 // idempotentActions may be executed again when an attempt ended while
 // their step was running: a second execution has the effect of the first
