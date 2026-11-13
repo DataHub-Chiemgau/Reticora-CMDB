@@ -458,7 +458,7 @@ func TestHTTPLimits(t *testing.T) {
 		s := base
 		s.Params = json.RawMessage(c.params)
 		var fields []string
-		for _, e := range Validate(s) {
+		for _, e := range Validate(&s) {
 			fields = append(fields, e.Field)
 		}
 		if !slices.Equal(fields, c.fields) {
@@ -473,7 +473,7 @@ func TestHTTPLimits(t *testing.T) {
 	} {
 		s := base
 		s.IntervalMS, s.TimeoutMS, s.Params = spec.IntervalMS, spec.TimeoutMS, params
-		if errs := Validate(s); len(errs) != 1 {
+		if errs := Validate(&s); len(errs) != 1 {
 			t.Errorf("%s: errs = %v, want one", name, errs)
 		}
 	}

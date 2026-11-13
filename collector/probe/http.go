@@ -239,12 +239,12 @@ func (e *HTTPExecutor) Execute(ctx context.Context, spec probewire.ProbeSpec, cr
 			next, err := target.Parse(location)
 			switch {
 			case err != nil || (next.Scheme != "http" && next.Scheme != "https"):
-				return withRTT(failResult(probewire.StatusFail, probewire.ReasonRedirectLimit), start)
+				return redirectLimit(start)
 			case hop >= c.follow:
-				return withRTT(failResult(probewire.StatusFail, probewire.ReasonRedirectLimit), start)
+				return redirectLimit(start)
 			case c.auth != "" && target.Scheme == "https" && next.Scheme == "http":
 				// A credential never leaves https (COL-02).
-				return withRTT(failResult(probewire.StatusFail, probewire.ReasonRedirectLimit), start)
+				return redirectLimit(start)
 			}
 			target = next
 			continue
@@ -253,7 +253,10 @@ func (e *HTTPExecutor) Execute(ctx context.Context, spec probewire.ProbeSpec, cr
 	}
 }
 
-func withRTT(r probewire.Result, start time.Time) probewire.Result {
+// redirectLimit is the result of a check that followed too many redirects,
+// with the time spent until then.
+func redirectLimit(start time.Time) probewire.Result {
+	r := failResult(probewire.StatusFail, probewire.ReasonRedirectLimit)
 	r.RTTMS = msSince(start)
 	return r
 }
@@ -315,7 +318,9 @@ func (e *HTTPExecutor) request(ctx context.Context, c *httpCheck, target *url.UR
 	}
 	var dialer net.Dialer
 	transport := &http.Transport{
-		DialContext:       func(ctx context.Context, network, _ string) (net.Conn, error) { return dialer.DialContext(ctx, network, addr) },
+		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return dialer.DialContext(ctx, network, addr)
+		},
 		TLSClientConfig:   tlsCfg,
 		DisableKeepAlives: true,
 		Proxy:             nil,

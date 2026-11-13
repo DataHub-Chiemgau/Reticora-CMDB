@@ -5,8 +5,8 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/tls"
 	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
@@ -324,7 +324,7 @@ func TestHTTPOnlyGetHead(t *testing.T) {
 	defer srv.Close()
 	for _, m := range []string{"POST", "PUT", "DELETE", "PATCH", "OPTIONS"} {
 		spec := httpSpec(srv.URL+"/", `"method":"`+m+`"`)
-		if errs := probewire.Validate(spec); len(errs) == 0 || errs[0].Field != "params.method" {
+		if errs := probewire.Validate(&spec); len(errs) == 0 || errs[0].Field != "params.method" {
 			t.Errorf("Validate accepted method %s: %v", m, errs)
 		}
 		expectResult(t, "Execute "+m, runHTTP(t, &HTTPExecutor{}, spec, nil), probewire.StatusError, probewire.ReasonConfig)
