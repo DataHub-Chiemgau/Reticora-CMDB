@@ -64,6 +64,7 @@ const PermissionsPage = lazyPage(() => import('./pages/PermissionsPage'), 'Permi
 const RackPage = lazyPage(() => import('./pages/RackPage'), 'RackPage');
 const TopologyPage = lazyPage(() => import('./pages/TopologyPage'), 'TopologyPage');
 const IpamPage = lazyPage(() => import('./pages/IpamPage'), 'IpamPage');
+const SubnetDetailPage = lazyPage(() => import('./pages/SubnetDetailPage'), 'SubnetDetailPage');
 const SLAPage = lazyPage(() => import('./pages/SLAPage'), 'SLAPage');
 const FormsPage = lazyPage(() => import('./pages/FormsPage'), 'FormsPage');
 const WorkflowPage = lazyPage(() => import('./pages/WorkflowPage'), 'WorkflowPage');
@@ -256,6 +257,7 @@ function App() {
           <Route path="/cmdb/:id" element={<CIDetailPage />} />
           <Route path="/topology" element={<TopologyPage />} />
           <Route path="/ipam" element={<IpamPage />} />
+          <Route path="/ipam/subnets/:id" element={<SubnetDetailPage />} />
           <Route path="/map" element={<MapPage />} />
           <Route path="/roomplan" element={<RoomPlanPage />} />
           <Route path="/racks" element={<RackPage />} />

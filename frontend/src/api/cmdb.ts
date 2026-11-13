@@ -1820,4 +1820,112 @@ export const ipamApi = {
   subnetUsage(id: string): Promise<SubnetUsage> {
     return fetchAPI(`/subnets/${id}/usage`);
   },
+  // ─── Subnet detail (IPM-03, IPM-05, IPM-07, IPM-19, WP-916) ───────────────
+  getSubnet(id: string): Promise<Subnet> {
+    return fetchAPI(`/subnets/${id}`);
+  },
+  createSubnet(data: SubnetCreate): Promise<Subnet> {
+    return fetchAPI('/subnets', { method: 'POST', body: JSON.stringify(data) });
+  },
+  updateSubnet(id: string, data: SubnetUpdate): Promise<Subnet> {
+    return fetchAPI(`/subnets/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  deleteSubnet(id: string): Promise<void> {
+    return fetchAPI(`/subnets/${id}`, { method: 'DELETE' });
+  },
+  /** subnetAddresses reads one page (at most API_MAX_LIMIT) of the addresses of a subnet. */
+  subnetAddresses(
+    id: string,
+    params: { limit?: number; offset?: number } = {},
+  ): Promise<PaginatedResponse<IPAddress>> {
+    return fetchAPI(`/subnets/${id}/addresses${qs({ limit: API_MAX_LIMIT, ...params })}`);
+  },
+  /** allSubnetAddresses reads every address of a subnet page by page (the address map). */
+  allSubnetAddresses(id: string): Promise<IPAddress[]> {
+    return fetchAllPages(`/subnets/${id}/addresses`);
+  },
+  /** allocateAddress stores the next free host address (409 subnet-exhausted when full). */
+  allocateAddress(id: string, data: IPAllocate): Promise<IPAddress> {
+    return fetchAPI(`/subnets/${id}/allocate`, { method: 'POST', body: JSON.stringify(data) });
+  },
+  /** allocateSubnet stores the next free child of the prefix length. */
+  allocateSubnet(id: string, data: SubnetAllocate): Promise<Subnet> {
+    return fetchAPI(`/subnets/${id}/allocate-subnet`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+  /** createReservation stores an address of type reserved (NET-09). */
+  createReservation(id: string, data: IPReservationCreate): Promise<IPAddress> {
+    return fetchAPI(`/subnets/${id}/reservations`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+  /** deleteReservation releases a reservation of the subnet. */
+  deleteReservation(id: string, ipId: string): Promise<void> {
+    return fetchAPI(`/subnets/${id}/reservations/${ipId}`, { method: 'DELETE' });
+  },
+  /** getIPAddress reads one address (a search hit ?address=<id> of the subnet detail). */
+  getIPAddress(id: string): Promise<IPAddress> {
+    return fetchAPI(`/ips/${id}`);
+  },
+  getVRF(id: string): Promise<IPAMVRF> {
+    return fetchAPI(`/vrfs/${id}`);
+  },
+  getVLAN(id: string): Promise<VLAN> {
+    return fetchAPI(`/vlans/${id}`);
+  },
+  /** listVLANs reads one page (at most API_MAX_LIMIT) of the VLAN catalog. */
+  listVLANs(
+    params: { site_id?: string; limit?: number; offset?: number } = {},
+  ): Promise<PaginatedResponse<VLAN>> {
+    return fetchAPI(`/vlans${qs({ limit: API_MAX_LIMIT, ...params })}`);
+  },
+  /** listNameserverSets reads one page (at most API_MAX_LIMIT) of the nameserver sets. */
+  listNameserverSets(
+    params: { limit?: number; offset?: number } = {},
+  ): Promise<PaginatedResponse<NameserverSet>> {
+    return fetchAPI(`/nameserver-sets${qs({ limit: API_MAX_LIMIT, ...params })}`);
+  },
 };
+
+export type IPAddress = components['schemas']['IPAddress'];
+export type IPAddressState = components['schemas']['IPAddressState'];
+export type IPAddressType = components['schemas']['IPAddressType'];
+export type IPAddressRole = components['schemas']['IPAddressRole'];
+export type IPAllocate = components['schemas']['IPAllocateRequest'];
+export type SubnetAllocate = components['schemas']['SubnetAllocateRequest'];
+export type IPReservationCreate = components['schemas']['IPReservationCreateRequest'];
+export type SubnetCreate = components['schemas']['CreateSubnetRequest'];
+export type SubnetUpdate = components['schemas']['UpdateSubnetRequest'];
+export type VLAN = components['schemas']['VLAN'];
+/** IPAMVRF is a VRF with route distinguisher, route targets and sections (IPM-07). */
+export type IPAMVRF = components['schemas']['VRF'];
+export type NameserverSet = components['schemas']['NameserverSet'];
+
+/** IP_ADDRESS_STATES are the states of an address (IPM-04), labels ipam.states.*. */
+export const IP_ADDRESS_STATES = [
+  'active',
+  'offline',
+  'unknown',
+] as const satisfies readonly IPAddressState[];
+/** IP_ADDRESS_TYPES are the types of an address (NET-03), labels ipam.types.*. */
+export const IP_ADDRESS_TYPES = [
+  'discovered',
+  'reserved',
+  'static',
+  'dhcp',
+] as const satisfies readonly IPAddressType[];
+/** IP_ADDRESS_ROLES are the roles at a device (IPM-13), labels ipam.roles.*. */
+export const IP_ADDRESS_ROLES = [
+  'primary',
+  'secondary',
+  'vip',
+  'anycast',
+  'loopback',
+  'management',
+] as const satisfies readonly IPAddressRole[];
+
+/** PROBLEM_SUBNET_EXHAUSTED is the problem type of a full subnet (IPM-03). */
+export const PROBLEM_SUBNET_EXHAUSTED = 'urn:reticora:problem:subnet-exhausted';

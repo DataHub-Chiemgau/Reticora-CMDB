@@ -11,6 +11,7 @@ import {
   DRAFT_ID,
   FORM_BUILDER_HANDLERS,
   FORM_TYPE_ID,
+  IPAM_DETAIL,
   RULE_HANDLERS,
   TEMPLATE_ID,
   TEMPLATE_PERMISSIONS,
@@ -971,6 +972,12 @@ const ROUTES: A11yRoute[] = [
   },
   // IPAM (WP-915): the section, its subnet tree and the usage bar.
   { path: '/ipam', url: '/ipam', ready: text(M.ipamSubnet) },
+  // WP-916: head with usage, actions, address map and address list.
+  {
+    path: '/ipam/subnets/:id',
+    url: `/ipam/subnets/${IPAM_DETAIL}`,
+    ready: (page) => page.getByRole('group', { name: new RegExp(M.ipamDetail) }),
+  },
   { path: '/racks', url: '/racks', ready: text(M.ci) },
   { path: '/discovery', url: '/discovery', ready: text(M.collector) },
   { path: '/assets', url: '/assets', ready: text(M.asset) },

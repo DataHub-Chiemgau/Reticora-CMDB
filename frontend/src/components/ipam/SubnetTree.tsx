@@ -11,11 +11,12 @@
  * the pool mark and a usage bar from GET /subnets/{id}/usage with the
  * share in percent and occupied/total as text for screen readers.
  * contains opens the chain of subnets that hold the address and marks the
- * narrowest one.
+ * narrowest one. The CIDR of a node links to the subnet detail (WP-916).
  */
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 import type { Subnet, SubnetQuery } from '../../api/cmdb';
 import { useSubnetLevel, useSubnetUsage } from '../../api/ipamHooks';
 import { useScopeStore } from '../../stores/scope';
@@ -159,7 +160,12 @@ function SubnetNode({ subnet, query, vrfNames, expanded, marked, depth, flat }: 
         ) : (
           <span className="inline-block w-5" aria-hidden />
         )}
-        <span className="font-mono text-sm font-medium text-fg">{subnet.cidr}</span>
+        <Link
+          to={`/ipam/subnets/${subnet.id}`}
+          className="rounded font-mono text-sm font-medium text-fg underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
+        >
+          {subnet.cidr}
+        </Link>
         {subnet.name && <span className="text-sm text-fg">{subnet.name}</span>}
         <span className="text-xs text-fg-muted">
           {t('ipam.tree.vrf', { vrf: (subnet.vrf_id && vrfNames[subnet.vrf_id]) || subnet.vrf_id })}

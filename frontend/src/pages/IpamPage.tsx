@@ -5,16 +5,19 @@
  * (VRF, client, site, text and contains). contains opens the chain of the
  * subnets that hold the address and marks the narrowest one. The section
  * dialog creates, edits and deletes sections and keeps their rights per
- * team; without ipam:write every write action is hidden.
+ * team; without ipam:write every write action is hidden. A new subnet is
+ * created in the SubnetFormModal and opens its detail page (WP-916).
  */
 import { Network, Plus, Settings2 } from 'lucide-react';
 import { useMemo, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import type { IPAMSection } from '../api/cmdb';
 import { useClients } from '../api/cmdbHooks';
 import { useHasPermission, useSites, useVrfs } from '../api/hooks';
 import { useIPAMSections, useSubnetChain } from '../api/ipamHooks';
 import { SectionDialog } from '../components/ipam/SectionDialog';
+import { SubnetFormModal } from '../components/ipam/SubnetFormModal';
 import { SubnetTree } from '../components/ipam/SubnetTree';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
@@ -36,7 +39,8 @@ export function IpamPage() {
   const [q, setQ] = useState('');
   const [containsInput, setContainsInput] = useState('');
   const [contains, setContains] = useState('');
-  const [dialog, setDialog] = useState<'create' | 'edit' | undefined>();
+  const [dialog, setDialog] = useState<'create' | 'edit' | 'subnet' | undefined>();
+  const navigate = useNavigate();
   const clients = useClients();
   const sites = useSites(clientId || undefined);
 
@@ -77,9 +81,14 @@ export function IpamPage() {
         description={t('ipam.description')}
         actions={
           canWrite && (
-            <Button icon={<Plus />} onClick={() => setDialog('create')}>
-              {t('ipam.section.new')}
-            </Button>
+            <>
+              <Button variant="secondary" icon={<Plus />} onClick={() => setDialog('subnet')}>
+                {t('ipam.subnetForm.new')}
+              </Button>
+              <Button icon={<Plus />} onClick={() => setDialog('create')}>
+                {t('ipam.section.new')}
+              </Button>
+            </>
           )
         }
       />
@@ -197,6 +206,14 @@ export function IpamPage() {
           onOpenChange={(open) => !open && setDialog(undefined)}
           canWrite={canWrite}
           onCreated={(created) => setChosen(created.id)}
+        />
+      )}
+      {dialog === 'subnet' && (
+        <SubnetFormModal
+          open
+          onOpenChange={(open) => !open && setDialog(undefined)}
+          sectionId={section?.id}
+          onSaved={(created) => navigate(`/ipam/subnets/${created.id}`)}
         />
       )}
       {dialog === 'edit' && section && (

@@ -21,6 +21,8 @@ const SERVER_TYPE = CI_TYPES[0]!.id;
 const IPAM_SECTION = 'a5000000-0000-4000-8000-000000000001';
 const IPAM_SUBNET = 'a5000000-0000-4000-8000-000000000002';
 const IPAM_VRF = 'a5000000-0000-4000-8000-000000000003';
+/** The subnet of the subnet detail route (WP-916). */
+export const IPAM_DETAIL = 'a5000000-0000-4000-8000-000000000004';
 const AT = '2026-10-14T08:00:00Z';
 const LATER = '2026-12-31T08:00:00Z';
 
@@ -77,6 +79,7 @@ export const A11Y_MARKERS = {
   notification: 'a11y-notification',
   ipamSection: 'a11y-section-core',
   ipamSubnet: '10.20.0.0/16',
+  ipamDetail: '10.20.1.0/24',
 } as const;
 
 const M = A11Y_MARKERS;
@@ -824,6 +827,10 @@ export const A11Y_HANDLERS: Handler[] = [
         'user:read',
         'webhook:manage',
         'webhook:read',
+        // WP-916: the allocation, reservation and edit actions of the
+        // subnet detail.
+        'ipam:read',
+        'ipam:write',
       ],
     }),
   },
@@ -1162,6 +1169,77 @@ export const A11Y_HANDLERS: Handler[] = [
       used: 0,
       covered: 512,
       percent: 0.8,
+    }),
+  },
+  // The subnet detail (/ipam/subnets/:id, WP-916): the /24 below the pool
+  // with its address map, two addresses and the VRF with its RD.
+  {
+    path: /^\/subnets\/[^/]+$/,
+    reply: fixed({
+      id: IPAM_DETAIL,
+      organization_id: ORG,
+      cidr: M.ipamDetail,
+      vrf_id: IPAM_VRF,
+      section_id: IPAM_SECTION,
+      name: 'a11y-office',
+      gateway: '10.20.1.1',
+      effective_dns_servers: ['10.20.0.53'],
+      is_management: false,
+      is_pool: false,
+      child_count: 0,
+      created_at: AT,
+      updated_at: AT,
+    }),
+  },
+  {
+    path: /^\/subnets\/[^/]+\/addresses$/,
+    reply: fixed(
+      list([
+        {
+          id: 'a5000000-0000-4000-8000-000000000011',
+          organization_id: ORG,
+          subnet_id: IPAM_DETAIL,
+          address: '10.20.1.1',
+          vrf_id: IPAM_VRF,
+          type: 'static',
+          role: 'primary',
+          origin: 'manual',
+          pinned: false,
+          state: 'active',
+          is_gateway: true,
+          created_at: AT,
+          updated_at: AT,
+        },
+        {
+          id: 'a5000000-0000-4000-8000-000000000012',
+          organization_id: ORG,
+          subnet_id: IPAM_DETAIL,
+          address: '10.20.1.20',
+          vrf_id: IPAM_VRF,
+          type: 'reserved',
+          role: 'primary',
+          origin: 'manual',
+          pinned: false,
+          state: 'unknown',
+          created_at: AT,
+          updated_at: AT,
+        },
+      ]),
+    ),
+  },
+  {
+    path: /^\/vrfs\/[^/]+$/,
+    reply: fixed({
+      id: IPAM_VRF,
+      organization_id: ORG,
+      name: 'a11y-vrf',
+      is_default: false,
+      route_distinguisher: '65000:20',
+      import_targets: [],
+      export_targets: [],
+      section_ids: [],
+      created_at: AT,
+      updated_at: AT,
     }),
   },
   {
