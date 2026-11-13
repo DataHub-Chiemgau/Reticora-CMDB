@@ -47,6 +47,8 @@ var (
 		"Error":         reflect.TypeFor[Error](),
 		"SecretSource":  reflect.TypeFor[SecretSource](),
 		"Authenticator": reflect.TypeFor[Authenticator](),
+		// The lifetime of the cached token (TokenLifetimeOf, WP-1077).
+		"TokenLifetime": reflect.TypeFor[TokenLifetime](),
 		// The decoded answers of the endpoints (WP-1073 ff.).
 		"Session":    reflect.TypeFor[Session](),
 		"AccessPort": reflect.TypeFor[AccessPort](),
@@ -63,6 +65,7 @@ var (
 		"ClassOf":         ClassOf,
 		"IsCircuitOpen":   IsCircuitOpen,
 		"RegisterMetrics": RegisterMetrics,
+		"TokenLifetimeOf": TokenLifetimeOf,
 	}
 	exportedVars = map[string]reflect.Type{
 		"Classes":                  reflect.TypeOf(&Classes).Elem(),

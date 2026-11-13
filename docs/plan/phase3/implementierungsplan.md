@@ -15061,6 +15061,12 @@ Die Doku enthält keine Beispiele (einziges `example` ist `""` am Parameter `fil
 - backend/internal/admp/smoke_config_test.go (neu; Konfiguration des Smoke-Tests ohne Build-Tag)
 - docs/traceability.csv
 
+Nachtrag aus der Prüfung (zusätzlich geändert):
+
+- `backend/internal/admp/readonly/client.go` und `readonly/client_test.go`: Ein Pfad außerhalb der Allowlist endet schon vor der Anmeldung (`TestSpecGetOutsideAllowlistIsRejected` verlangt null Treffer am Mock, die Anmeldung eingeschlossen); `TestClientTokenCacheAndRenewOn401` gibt dem Client die Testrouten. Dazu `TokenLifetimeOf` (Anmeldezeit, Ablauf und Quelle des zwischengespeicherten Tokens, ohne Anfrage), mit der der Smoke-Test den Ablauf des Cookies für A-86 misst.
+- `backend/internal/admp/readonly/auth.go`, `readonly/auth_test.go` und `readonly/readonly_test.go`: `sessionCookie` meldet die Quelle des Ablaufs (`max-age`, `expires`, `exp`, `default`); die Liste der exportierten Typen und Funktionen nennt `TokenLifetime` und `TokenLifetimeOf`.
+- Den Status ohne Cookie (AK7) misst der Smoke-Test mit genau einem GET auf `/V1/user/authentication` ohne Cookie über einen eigenen Egress-Client, da `readonly.Client` immer sein Cookie sendet; den Status mit ungültigem Cookie berichtet er getrennt.
+
 **Migration/RLS:** keine.
 
 **Tests:**

@@ -22,7 +22,8 @@
     }
   },
   "getV1InfrastructureAccessnodepicker": {
-    "assumed": "A-86: the documentation answers 200 without schema; assumed AccessNode[] with modules[].ports[] after components.schemas",
+    "_comment": "The documentation answers 200 without schema; assumed AccessNode[] with modules[].ports[] after components.schemas (A-86).",
+    "assumed": "A-86",
     "status": 200,
     "headers": {"Content-Type": "application/json"},
     "body": [
@@ -36,7 +37,7 @@
         "password": "node-password-canary",
         "iv": "node-iv-canary",
         "snmpVersion": null,
-        "organization": {"id": 7, "name": "organization-canary", "netzbetreiberNummer": "N-1", "shortName": "ORG", "groupName": null},
+        "organization": {"id": 7, "name": "organization-canary", "netzbetreiberNummer": 1, "shortName": "ORG", "groupName": "group-canary-node"},
         "type": {"id": 1, "name": "Keymile MileGate", "protocol": "KEYMILE_SSH", "vendorId": 1},
         "modules": [
           {
@@ -82,7 +83,8 @@
     ]
   },
   "getV1InfrastructurePort:portIdDienstIds": {
-    "assumed": "A-86: the documentation has responses {} (\"Returns all dienstIds\"); assumed a JSON array of whole numbers",
+    "_comment": "The documentation has responses {} (\"Returns all dienstIds\"); assumed a JSON array of whole numbers (A-86).",
+    "assumed": "A-86",
     "status": 200,
     "headers": {"Content-Type": "application/json"},
     "body": [815, 816]
@@ -91,7 +93,7 @@
     "status": 200,
     "headers": {"Content-Type": "application/json"},
     "body": [
-      {"id": 11, "dienstId": 815, "timestamp": 1700000000, "isPublic": true, "key": "bandwidth_down", "orderIndex": 2, "title": "Downstream", "description": "description-canary", "value": 1000, "input": {"dataType": "number", "type": "input-canary", "options": []}, "label": "Bandbreite down"},
+      {"id": 11, "dienstId": 815, "timestamp": 1700000000, "isPublic": true, "key": "bandwidth_down", "orderIndex": 2, "title": "Downstream", "description": "description-canary", "value": 1000, "input": {"dataType": "DOUBLE", "type": "freeform", "origin": "input-canary"}, "label": "Bandbreite down"},
       {"id": 12, "dienstId": 815, "timestamp": 1700000001, "isPublic": true, "key": "technology", "orderIndex": 1, "title": "Technologie", "description": null, "value": "FTTH", "input": null, "label": ""},
       {"id": 13, "dienstId": 815, "timestamp": 1700000002, "isPublic": true, "key": "static_ip", "orderIndex": null, "title": null, "description": null, "value": true, "input": null, "label": "Feste IP"},
       {"id": 14, "dienstId": 815, "timestamp": 1700000003, "isPublic": true, "key": "note", "orderIndex": 4, "title": "Notiz", "description": null, "value": null, "input": null, "label": "Notiz"},
@@ -132,6 +134,22 @@
       "actions": []
     }
   },
+  "getV1Dienst:id#816": {
+    "_comment": "Second service of port 301 (WP-1077): connection 4713, template only by id, no embedded relations.",
+    "status": 200,
+    "headers": {"Content-Type": "application/json"},
+    "body": {
+      "id": 816,
+      "anschlussId": 4713,
+      "templateId": 5,
+      "gebucht": 1700000000,
+      "bereitstellung": null,
+      "bereitgestellt": null,
+      "gekuendigt": null,
+      "abschaltung": null,
+      "abgeschaltet": null
+    }
+  },
   "getV1Anschluss:id#4711": {
     "_comment": "Business connection (WP-1075): holder Gewerblich, netzbetreiber embedded with relations that are dropped while decoding.",
     "status": 200,
@@ -167,10 +185,10 @@
          "anschluss": {"id": 4711, "netzbetreiberId": 9, "vertragId": "holder-anschluss-canary", "created": 1, "removed": null, "strasse": null, "hausnummer": null, "hausnummerzusatz": null, "plz": null, "ort": null}}
       ],
       "dienste": [
-        {"id": 815, "anschlussId": 4711, "templateId": 3, "gebucht": null, "bereitstellung": null, "bereitgestellt": null, "gekuendigt": null, "abschaltung": null, "abgeschaltet": null, "properties": [{"key": "dienst-canary"}]}
+        {"id": 815, "anschlussId": 4711, "templateId": 3, "gebucht": null, "bereitstellung": null, "bereitgestellt": null, "gekuendigt": null, "abschaltung": null, "abgeschaltet": null, "properties": [{"id": 2, "dienstId": 815, "timestamp": 1700000000, "isPublic": true, "key": "dienst-canary", "orderIndex": null, "title": null, "description": null, "value": null, "input": null}]}
       ],
       "actions": [
-        {"anschlussId": 4711, "actionId": 1, "action": {"id": 1, "name": "action-canary"}}
+        {"anschlussId": 4711, "actionId": 1, "action": {"id": 1, "name": "action-canary", "listable": false, "label": "action-label-canary", "description": "action-description-canary", "expectsImmidiateResult": false, "messageTargetModule": "module-canary", "messageProcedure": "procedure-canary", "requiredAuthorizationId": 1}}
       ]
     }
   },

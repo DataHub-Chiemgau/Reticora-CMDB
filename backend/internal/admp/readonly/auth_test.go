@@ -264,19 +264,20 @@ func TestAuthenticatorReadsAuthTokenCookie(t *testing.T) {
 	for _, tc := range []struct {
 		name, line string
 		want       time.Time
+		source     string
 		ok         bool
 	}{
-		{"max-age", "AuthToken=" + fixtureJWT + "; Max-Age=3600; Path=/", now.Add(time.Hour), true},
-		{"expires", "AuthToken=abc; Expires=" + now.Add(2*time.Hour).Format(http.TimeFormat), now.Add(2 * time.Hour), true},
-		{"jwt exp", "AuthToken=" + fixtureJWT + "; Path=/; HttpOnly", time.Unix(1924992000, 0), true},
-		{"default", "AuthToken=opaque-token; Path=/", now.Add(10 * time.Minute), true},
-		{"deleted", "AuthToken=x; Max-Age=0", time.Time{}, false},
-		{"expired", "AuthToken=x; Expires=" + now.Add(-time.Hour).Format(http.TimeFormat), time.Time{}, false},
-		{"empty", "AuthToken=; Path=/", time.Time{}, false},
+		{"max-age", "AuthToken=" + fixtureJWT + "; Max-Age=3600; Path=/", now.Add(time.Hour), ExpiryMaxAge, true},
+		{"expires", "AuthToken=abc; Expires=" + now.Add(2*time.Hour).Format(http.TimeFormat), now.Add(2 * time.Hour), ExpiryExpires, true},
+		{"jwt exp", "AuthToken=" + fixtureJWT + "; Path=/; HttpOnly", time.Unix(1924992000, 0), ExpiryJWT, true},
+		{"default", "AuthToken=opaque-token; Path=/", now.Add(10 * time.Minute), ExpiryDefault, true},
+		{"deleted", "AuthToken=x; Max-Age=0", time.Time{}, "", false},
+		{"expired", "AuthToken=x; Expires=" + now.Add(-time.Hour).Format(http.TimeFormat), time.Time{}, "", false},
+		{"empty", "AuthToken=; Path=/", time.Time{}, "", false},
 	} {
-		token, exp, ok := sessionCookie(header(tc.line), now)
-		if ok != tc.ok || !exp.Equal(tc.want) || (ok && token == "") {
-			t.Errorf("%s: %q %v %v, want %v %v", tc.name, token, exp, ok, tc.want, tc.ok)
+		token, exp, source, ok := sessionCookie(header(tc.line), now)
+		if ok != tc.ok || !exp.Equal(tc.want) || source != tc.source || (ok && token == "") {
+			t.Errorf("%s: %q %v %q %v, want %v %q %v", tc.name, token, exp, source, ok, tc.want, tc.source, tc.ok)
 		}
 	}
 	// Through the client: the fixture's JWT expires in 2031, a cookie with
@@ -295,6 +296,11 @@ func TestAuthenticatorReadsAuthTokenCookie(t *testing.T) {
 	}
 	if n := len(m.logins); n != 1 {
 		t.Fatalf("logins %d, want 1", n)
+	}
+	// TokenLifetimeOf reports the lifetime of the cached token without a
+	// request (the smoke test, A-86).
+	if lt, ok := TokenLifetimeOf(c); !ok || lt.Source != ExpiryMaxAge || lt.Expires.Sub(lt.IssuedAt) != 120*time.Second {
+		t.Errorf("token lifetime %+v %v, want 120 s from Max-Age", lt, ok)
 	}
 	fc.advance(61 * time.Second)
 	if _, err := c.GetSession(ctx); err != nil {

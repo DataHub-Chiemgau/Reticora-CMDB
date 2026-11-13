@@ -1815,3 +1815,5 @@ WFL-02;[P3];F;backend/internal/workflow/schedule_integration_test.go;WP-1091
 WFL-02;[P3];F;backend/internal/workflow/notify_action_integration_test.go;WP-1095
 NTF-05;[B], Zusätze [P2], [P3];F;backend/internal/workflow/notify_action_integration_test.go;WP-1095
 WFL-02;[P3];F;backend/internal/workflow/webhook_action_integration_test.go;WP-1096
+ADM-02;[P3];E;backend/internal/admp/contract_integration_test.go;WP-1077
+ADM-02;[P3];E;backend/internal/admp/readonly/readonly_spec_test.go;WP-1077

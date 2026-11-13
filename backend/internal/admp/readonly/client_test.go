@@ -565,6 +565,7 @@ func TestClientTokenCacheAndRenewOn401(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	allowTestRoutes(failing)
 	if err = failing.getJSON(ctx, "x", nil, nil); ClassOf(err) != ClassCredential {
 		t.Fatalf("failing secret: %v", err)
 	}

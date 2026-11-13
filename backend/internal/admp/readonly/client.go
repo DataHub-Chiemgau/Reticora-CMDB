@@ -210,6 +210,23 @@ func (c *Client) secret(ctx context.Context, secrets SecretSource) (map[string]a
 	return s, nil
 }
 
+// TokenLifetime is the lifetime of the session token of a client's last
+// login, without the token: when it was obtained, when it expires and
+// where the expiry came from (ExpiryMaxAge, ExpiryExpires, ExpiryJWT,
+// ExpiryDefault; empty for an authenticator that does not tell).
+type TokenLifetime struct {
+	IssuedAt time.Time
+	Expires  time.Time
+	Source   string
+}
+
+// TokenLifetimeOf reports the lifetime of the token c holds (the smoke
+// test answers A-86 with it); ok is false before the first login and
+// after a 401 dropped the token. It sends no request.
+func TokenLifetimeOf(c *Client) (TokenLifetime, bool) {
+	return c.tokens.lifetime()
+}
+
 // IsCircuitOpen reports whether the circuit breaker of the client's
 // account refuses reads now (WP-929 skips the account).
 func IsCircuitOpen(c *Client) bool {
@@ -274,6 +291,12 @@ func (c *Client) read(ctx context.Context, path string, query url.Values, out an
 	u, err := c.resolve(path, query)
 	if err != nil {
 		return err
+	}
+	// A path outside the allowlist ends here, before the login: ADMP sees
+	// no request for it, not even the login (WP-1077). The transport
+	// refuses it again.
+	if rt, ok := c.http.Transport.(*readOnlyTransport); ok && !rt.allowed(u) {
+		return classErr(ClassPathNotAllowed, 0, ErrPathNotAllowed)
 	}
 	if !c.breaker.allow(c.clock.now()) {
 		return classErr(ClassCircuitOpen, 0, ErrCircuitOpen)

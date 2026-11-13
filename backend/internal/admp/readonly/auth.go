@@ -152,7 +152,12 @@ func (l *login) do(ctx context.Context, header http.Header, body []byte) (status
 // sessionAuth is the login of the documentation (E-250): POST {username,
 // password}, success is 200 with the cookie AuthToken. The body {message}
 // is not read.
-type sessionAuth struct{ l *login }
+type sessionAuth struct {
+	l *login
+	// source is where the expiry of the last token came from
+	// (sessionCookie); tokenCache calls Token one at a time.
+	source string
+}
 
 func (a *sessionAuth) bindLogin(l *login) { a.l = l }
 
@@ -195,18 +200,37 @@ func (a *sessionAuth) Token(ctx context.Context) (string, time.Time, error) {
 	if a.l.now != nil {
 		now = a.l.now()
 	}
-	token, expires, ok := sessionCookie(header, now)
+	token, expires, source, ok := sessionCookie(header, now)
 	if !ok {
 		return "", time.Time{}, classErr(ClassAuth, status, nil)
 	}
+	a.source = source
 	return token, expires, nil
 }
 
+// expirySource implements expirySourcer.
+func (a *sessionAuth) expirySource() string { return a.source }
+
+// expirySourcer is implemented by the authenticators that tell where the
+// expiry of their last token came from (TokenLifetimeOf).
+type expirySourcer interface {
+	expirySource() string
+}
+
+// Sources of the expiry of a token (TokenLifetime.Source).
+const (
+	ExpiryMaxAge  = "max-age"
+	ExpiryExpires = "expires"
+	ExpiryJWT     = "exp"
+	ExpiryDefault = "default"
+)
+
 // sessionCookie returns the AuthToken of a login answer and its expiry:
 // Max-Age, else Expires, else the exp claim of the JWT (read, not
-// verified), else now + defaultTokenTTL. A cookie that deletes itself
-// (Max-Age 0 or less, an Expires in the past) is no token.
-func sessionCookie(header http.Header, now time.Time) (token string, expires time.Time, ok bool) {
+// verified), else now + defaultTokenTTL; source names which one. A cookie
+// that deletes itself (Max-Age 0 or less, an Expires in the past) is no
+// token.
+func sessionCookie(header http.Header, now time.Time) (token string, expires time.Time, source string, ok bool) {
 	for _, line := range header.Values("Set-Cookie") {
 		c, err := http.ParseSetCookie(line)
 		if err != nil || c.Name != authCookie || c.Value == "" {
@@ -214,21 +238,21 @@ func sessionCookie(header http.Header, now time.Time) (token string, expires tim
 		}
 		switch {
 		case c.MaxAge < 0:
-			return "", time.Time{}, false
+			return "", time.Time{}, "", false
 		case c.MaxAge > 0:
-			return c.Value, now.Add(time.Duration(c.MaxAge) * time.Second), true
+			return c.Value, now.Add(time.Duration(c.MaxAge) * time.Second), ExpiryMaxAge, true
 		case !c.Expires.IsZero():
 			if !c.Expires.After(now) {
-				return "", time.Time{}, false
+				return "", time.Time{}, "", false
 			}
-			return c.Value, c.Expires, true
+			return c.Value, c.Expires, ExpiryExpires, true
 		}
 		if exp, found := jwtExpiry(c.Value); found {
-			return c.Value, exp, true
+			return c.Value, exp, ExpiryJWT, true
 		}
-		return c.Value, now.Add(defaultTokenTTL), true
+		return c.Value, now.Add(defaultTokenTTL), ExpiryDefault, true
 	}
-	return "", time.Time{}, false
+	return "", time.Time{}, "", false
 }
 
 // jwtExpiry reads the claim exp (seconds since the epoch) of a JWT without
@@ -285,6 +309,10 @@ type tokenCache struct {
 	mu      sync.Mutex
 	token   string
 	expires time.Time
+	// issued is when the cached token was obtained, source where its
+	// expiry came from ("" for an authenticator that does not tell).
+	issued time.Time
+	source string
 }
 
 // get returns the cached token or logs in. A failure of the login is the
@@ -309,8 +337,21 @@ func (c *tokenCache) get(ctx context.Context) (string, error) {
 	if token == "" {
 		return "", classErr(ClassAuth, 0, nil)
 	}
-	c.token, c.expires = token, expires
+	c.token, c.expires, c.issued, c.source = token, expires, c.now(), ""
+	if s, ok := c.auth.(expirySourcer); ok {
+		c.source = s.expirySource()
+	}
 	return token, nil
+}
+
+// lifetime returns the cached token's times; ok is false without one.
+func (c *tokenCache) lifetime() (TokenLifetime, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.token == "" {
+		return TokenLifetime{}, false
+	}
+	return TokenLifetime{IssuedAt: c.issued, Expires: c.expires, Source: c.source}, true
 }
 
 // invalidate drops the cached token.
