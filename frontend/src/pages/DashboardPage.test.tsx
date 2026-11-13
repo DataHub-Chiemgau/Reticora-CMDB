@@ -370,6 +370,31 @@ describe('DashboardPage', () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/entitlements'))).toBe(true);
   });
 
+  it('shows the compliance widget with compliance_findings, not with the former key compliance (WP-862)', async () => {
+    useAuthStore.setState({
+      token: 'header.payload.signature',
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      user: { sub: 'user-1' },
+    });
+    const routes = (featureKey: string) => ({
+      '/modules': { data: [{ key: 'compliance', phase: 'P3', nav: ['compliance'], enabled: true }] },
+      '/entitlements': paginated([{ organization_id: 'org-1', feature_key: featureKey, enabled: true }]),
+      '/compliance/score': { overall: { score: 80, passed: 4, failed: 1, total: 5 }, rules: [] },
+      '/cis': paginated([]),
+      '/collectors': paginated([]),
+    });
+
+    stubFetchRoutes(routes('compliance_findings'));
+    const { unmount } = renderWithProviders(<DashboardPage />, { route: '/dashboard' });
+    expect(await screen.findByText('80 %')).toBeInTheDocument();
+    unmount();
+
+    stubFetchRoutes(routes('compliance'));
+    renderWithProviders(<DashboardPage />, { route: '/dashboard' });
+    await waitFor(() => expect(screen.queryByText('Compliance-Score')).not.toBeInTheDocument());
+    expect(screen.queryByText('80 %')).not.toBeInTheDocument();
+  });
+
   describe('quick access and setup checklist (WP-857)', () => {
     const SETUP_READER = {
       user_id: 'user-1',

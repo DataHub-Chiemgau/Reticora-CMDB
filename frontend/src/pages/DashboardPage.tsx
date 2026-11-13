@@ -55,7 +55,7 @@ const widgetFeature: Partial<Record<DashboardWidget, string>> = {
   stocktake: 'stocktake_standard',
   tickets: 'ticketing_essential',
   slaBreaches: 'ticketing_standard',
-  compliance: 'compliance',
+  compliance: 'compliance_findings',
 };
 
 function CISummaryWidget() {
