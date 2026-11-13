@@ -182,7 +182,8 @@ func Paginate(collectorID string, version int64, probes []ProbeSpec) ([]Assignme
 		current = []ProbeSpec{}
 		size = overhead
 	}
-	for _, p := range probes {
+	for i := range probes {
+		p := &probes[i]
 		b, err := json.Marshal(p)
 		if err != nil {
 			return nil, err
@@ -194,7 +195,7 @@ func Paginate(collectorID string, version int64, probes []ProbeSpec) ([]Assignme
 		if len(current) == MaxPageProbes || size+n > MaxPageBytes {
 			flush()
 		}
-		current = append(current, p)
+		current = append(current, *p)
 		size += n
 	}
 	flush()
@@ -400,7 +401,7 @@ func Decode(data []byte, m Message) error {
 }
 
 func majorOf(v string) (int, bool) {
-	maj, min, found := strings.Cut(v, ".")
+	maj, minor, found := strings.Cut(v, ".")
 	if !found {
 		return 0, false
 	}
@@ -408,7 +409,7 @@ func majorOf(v string) (int, bool) {
 	if err != nil || n < 0 {
 		return 0, false
 	}
-	if _, err := strconv.Atoi(min); err != nil {
+	if _, err := strconv.Atoi(minor); err != nil {
 		return 0, false
 	}
 	return n, true

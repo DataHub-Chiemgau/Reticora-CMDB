@@ -135,8 +135,8 @@ func TestGoldenRoundtrip(t *testing.T) {
 			}
 			path := filepath.Join("testdata", name)
 			if os.Getenv("RETICORA_UPDATE_GOLDEN") == "1" {
-				if err := os.WriteFile(path, append(got, '\n'), 0o644); err != nil {
-					t.Fatal(err)
+				if werr := os.WriteFile(path, append(got, '\n'), 0o644); werr != nil {
+					t.Fatal(werr)
 				}
 			}
 			want, err := os.ReadFile(path)
@@ -250,9 +250,9 @@ func TestAssignmentSetPageLimits(t *testing.T) {
 		if len(p.Probes) > MaxPageProbes {
 			t.Fatalf("page %d holds %d probes", p.Page, len(p.Probes))
 		}
-		b, err := Encode(&p)
-		if err != nil {
-			t.Fatal(err)
+		b, encErr := Encode(&p)
+		if encErr != nil {
+			t.Fatal(encErr)
 		}
 		if len(b) > MaxPageBytes {
 			t.Fatalf("page %d is %d bytes", p.Page, len(b))
