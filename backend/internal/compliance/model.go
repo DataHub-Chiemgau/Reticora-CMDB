@@ -42,8 +42,11 @@ type Result struct {
 	Status         string    `json:"status"`
 	Details        string    `json:"details,omitempty"`
 	EvaluatedAt    time.Time `json:"evaluated_at"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	// StatusChangedAt is when the status of the result last changed
+	// (WP-1126).
+	StatusChangedAt time.Time `json:"status_changed_at"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 type Score struct {
 	CITypeID      string  `json:"ci_type_id,omitempty"`

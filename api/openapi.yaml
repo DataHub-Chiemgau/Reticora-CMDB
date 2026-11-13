@@ -14023,12 +14023,32 @@ paths:
       operationId: evaluateCompliance
       tags: [Compliance]
       summary: Evaluate active compliance rules against tenant CIs
-      description: The evaluation replaces the results of the whole organization; a principal restricted to some clients, sites or teams gets 403 (TEN-06, E-09).
+      description: >-
+        Queues the job compliance.evaluate (SEC-03, WP-1126, E-237): it
+        evaluates all CIs of the organization against all active rules in
+        pages of 500 CIs, writes one result per rule and CI
+        (status_changed_at changes with the status only), reports its
+        progress and removes the results of rules no longer active at the
+        end; a running evaluation can be cancelled between two pages with
+        compliance:write. While a job of the organization is queued or
+        running, that job is answered again. The answer carries no results;
+        GET /api/v1/compliance/results reads them. A principal restricted
+        to some clients, sites or teams gets 403 before a job exists
+        (TEN-06, E-09). Every night (02:30 UTC) and after a change of a CI,
+        its lifecycle state or its findings the results are evaluated as
+        well.
       responses:
-        '200': { description: Evaluation results and score, content: { application/json: { schema: { $ref: '#/components/schemas/ComplianceEvaluationResponse' } } } }
+        '202':
+          description: The evaluation job (new or the one already queued or running)
+          headers:
+            Location:
+              description: The job, /api/v1/jobs/{id}.
+              schema: { type: string }
+          content: { application/json: { schema: { $ref: '#/components/schemas/Job' } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '500': { $ref: '#/components/responses/InternalServerError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/v1/compliance/results:
     x-phase: P3
     x-feature: compliance_findings
@@ -40964,6 +40984,7 @@ components:
         status: { type: string, enum: [pass, fail, not_applicable] }
         details: { type: string }
         evaluated_at: { type: string, format: date-time }
+        status_changed_at: { type: string, format: date-time, description: When the status of the result last changed (WP-1126). }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     ComplianceScore:

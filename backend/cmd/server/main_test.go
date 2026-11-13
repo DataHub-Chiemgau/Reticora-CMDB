@@ -30,6 +30,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/compliance"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
@@ -556,6 +557,28 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 	}
 	if registered[probe.AssignKind] {
 		t.Errorf("without the module monitoring %s is registered", probe.AssignKind)
+	}
+	// The nightly compliance evaluation (SEC-03, WP-1126): with the module
+	// compliance and the database, daily 02:30.
+	if registered[compliance.NightlyKind] {
+		t.Errorf("without the module compliance %s is registered", compliance.NightlyKind)
+	}
+	complianceModules, err := server.ParseModules("compliance")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, withDB := range []bool{true, false} {
+		deps := systemJobTestDeps(t, cfg, withDB)
+		deps.modules = complianceModules
+		if kinds := registeredSystemJobs(t, deps); kinds[compliance.NightlyKind] != withDB {
+			t.Errorf("JOB-02 nightly compliance evaluation with the module compliance (database %v): registered %v",
+				withDB, kinds[compliance.NightlyKind])
+		}
+		for _, job := range systemJobs(deps) {
+			if job.Kind == compliance.NightlyKind && (job.Spec != "30 2 * * *" || job.MaxCatchUp != 1) {
+				t.Errorf("%s: spec %q, max catch-up %d; want 30 2 * * * and 1", job.Kind, job.Spec, job.MaxCatchUp)
+			}
+		}
 	}
 	// Its worker switch off: not registered.
 	t.Setenv(config.WorkerEnvKey(config.WorkerProbeAssign), "false")

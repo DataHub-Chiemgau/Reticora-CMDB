@@ -18532,6 +18532,13 @@ CMP-02;[P3];F;backend/internal/compliance/evaluator_test.go;WP-1125
 - frontend/src/api/generated/schema.d.ts (generiert)
 - docs/traceability.csv
 
+**Nachtrag 2026-11-13 (Prüfung):**
+- AK2: Der Lauf blättert per Keyset (`created_at`, `id` aufsteigend; `ci.NextCursor`) statt per Offset, damit ein während des Laufs gelöschtes CI kein anderes CI überspringen lässt (Fall in `TestEvaluationJobCoversAllCIs`). `processed`/`total` stehen nach jeder Seite als Zwischenergebnis am Job (`jobs.Service.ProgressResult`, neu in `backend/internal/jobs/service.go`), neben dem Prozentwert.
+- AK1: Gleichzeitige Anforderungen legen einen Job an: Der Idempotenzschlüssel des Jobs nennt den jüngsten beendeten Bewertungsjob der Organisation (`after:<id>`), der eindeutige Index der Jobtabelle lässt je Schlüssel einen Job zu (`TestEvaluationSubmitsOneJobAtOnce`).
+- AK3: `evaluated_at` und der Laufbeginn kommen aus der Datenbankuhr (`Repository.Now`, `now()` im Upsert), damit das Löschen veralteter Ergebnisse kein frisches Ergebnis einer Instanz mit nachgehender Uhr trifft.
+- AK5: Ohne Job-Queue läuft der Systemjob über `compliance.NewJobService` mit registrierter Jobart (`TestNightlyEvaluationWithoutQueue`).
+- AK7: `BenchmarkEvaluatePage` misst die ganze Seite auf PostgreSQL (CI-Lesen, Befundfakten, Bewertung, Upsert von 25.000 Ergebnissen; `scopetest.Seed` nimmt dafür `testing.TB`, `backend/internal/database/scopetest/scopetest.go`), `BenchmarkEvaluatePageInMemory` die Bewertung allein.
+
 **Migration/RLS:** Migration `<nächste Nr.>_compliance_result_upsert`: entfernt doppelte Zeilen je (`organization_id`, `rule_id`, `ci_id`) und behält die jüngste nach `evaluated_at`; `UNIQUE (organization_id, rule_id, ci_id)`; Spalte `status_changed_at TIMESTAMPTZ NOT NULL DEFAULT now()`; Index `(organization_id, evaluated_at)` für das Löschen veralteter Ergebnisse. Keine neue Tabelle; Policies, Scope-Trigger `compliance_result_scope` (000061) und Truncate-Guard bleiben. Down entfernt Index, Spalte und Constraint.
 
 **Tests:**

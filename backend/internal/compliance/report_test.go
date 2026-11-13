@@ -42,7 +42,7 @@ func TestReportAggregatesFindingsByRule(t *testing.T) {
 		{OrganizationID: "org-1", RuleID: rule.ID, CIID: "ci-2", CITypeID: "type-server", Status: "fail"},
 		{OrganizationID: "org-1", RuleID: rule.ID, CIID: "ci-3", CITypeID: "type-server", Status: "pass"},
 	}
-	if err := repo.ReplaceResults(ctx, "org-1", results); err != nil {
+	if err := repo.UpsertResults(ctx, "org-1", results); err != nil {
 		t.Fatal(err)
 	}
 

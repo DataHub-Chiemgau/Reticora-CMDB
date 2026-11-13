@@ -18,6 +18,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/compliance"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -216,9 +217,20 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 		// The alarm texts link to the frontend of the invitation page
 		// (WP-987); alarms reach notify only through the outbox, the
 		// evaluator has no log notifier with a database.
-		publisher := events.NewPublisher(d.pool, d.eventStream, d.dispatcher,
+		consumers := []events.Consumer{d.dispatcher,
 			notify.NewEventConsumer(notify.NewPGResolver(d.pool, permission.NewPGRepository(d.pool)), d.notifier).
-				WithLinkBase(d.cfg.InvitationAcceptURL))
+				WithLinkBase(d.cfg.InvitationAcceptURL)}
+		// A changed CI, lifecycle state or finding evaluates its CI against
+		// the active compliance rules (SEC-03, WP-1126), with the module
+		// compliance and the feature compliance_findings.
+		if d.modules != nil && d.modules.Enabled("compliance") {
+			ents := d.entitlements
+			consumers = append(consumers, compliance.NewIncrementalConsumer(compliance.NewEvaluator(d.repos.Compliance, d.repos.CI),
+				func(ctx context.Context, orgID string) bool {
+					return ents != nil && ents.IsEnabled(ctx, orgID, entitlement.FeatureComplianceFindings)
+				}))
+		}
+		publisher := events.NewPublisher(d.pool, d.eventStream, consumers...)
 		// The stream retention of the installation (EVT-01, NFR-06); the
 		// outbox keeps published event data as long.
 		publisher.MaxAge, publisher.MaxBytes = d.cfg.EventsMaxAge, d.cfg.EventsMaxBytes
@@ -616,6 +628,23 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 						return ents != nil && ents.IsEnabled(ctx, orgID, entitlement.FeatureWorkflows)
 					}).Schedule())
 			}
+		}
+		// The nightly compliance evaluation (SEC-03, WP-1126, E-237): daily
+		// 02:30 UTC one job compliance.evaluate per organization with the
+		// feature compliance_findings and an active rule, with the module
+		// compliance.
+		if d.modules.Enabled("compliance") && d.repos.Jobs != nil {
+			// Without the job queue the job runs in this process: the service
+			// knows its kind (NewJobService).
+			evalJobs := compliance.NewJobs(compliance.NewEvaluator(d.repos.Compliance, d.repos.CI)).WithJobs(compliance.NewJobService(d.repos.Jobs))
+			if d.jobQueue != nil {
+				evalJobs.WithQueue(d.jobQueue)
+			}
+			ents := d.entitlements
+			orgs := func(ctx context.Context) ([]string, error) { return database.OrganizationIDs(ctx, pool) }
+			systemJobs = append(systemJobs, compliance.NewNightly(evalJobs, d.repos.Compliance, orgs, func(ctx context.Context, orgID string) bool {
+				return ents != nil && ents.IsEnabled(ctx, orgID, entitlement.FeatureComplianceFindings)
+			}).Schedule())
 		}
 		// Alarm retention (ALR-01, WP-981): daily the resolved alarms
 		// older than 400 days with their transitions, with the module

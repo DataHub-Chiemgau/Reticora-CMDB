@@ -6032,7 +6032,7 @@ export interface paths {
     put?: never;
     /**
      * Evaluate active compliance rules against tenant CIs
-     * @description The evaluation replaces the results of the whole organization; a principal restricted to some clients, sites or teams gets 403 (TEN-06, E-09).
+     * @description Queues the job compliance.evaluate (SEC-03, WP-1126, E-237): it evaluates all CIs of the organization against all active rules in pages of 500 CIs, writes one result per rule and CI (status_changed_at changes with the status only), reports its progress and removes the results of rules no longer active at the end; a running evaluation can be cancelled between two pages with compliance:write. While a job of the organization is queued or running, that job is answered again. The answer carries no results; GET /api/v1/compliance/results reads them. A principal restricted to some clients, sites or teams gets 403 before a job exists (TEN-06, E-09). Every night (02:30 UTC) and after a change of a CI, its lifecycle state or its findings the results are evaluated as well.
      */
     post: operations['evaluateCompliance'];
     delete?: never;
@@ -19975,6 +19975,11 @@ export interface components {
       details?: string;
       /** Format: date-time */
       evaluated_at: string;
+      /**
+       * Format: date-time
+       * @description When the status of the result last changed (WP-1126).
+       */
+      status_changed_at?: string;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -38055,18 +38060,21 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Evaluation results and score */
-      200: {
+      /** @description The evaluation job (new or the one already queued or running) */
+      202: {
         headers: {
+          /** @description The job, /api/v1/jobs/{id}. */
+          Location?: string;
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['ComplianceEvaluationResponse'];
+          'application/json': components['schemas']['Job'];
         };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   listComplianceResults: {

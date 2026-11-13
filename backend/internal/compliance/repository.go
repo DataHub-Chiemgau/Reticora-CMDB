@@ -24,7 +24,17 @@ type Repository interface {
 	CreateRule(ctx context.Context, rule *Rule) error
 	UpdateRule(ctx context.Context, orgID, id string, req *UpdateRuleRequest) (*Rule, error)
 	DeleteRule(ctx context.Context, orgID, id string) error
-	ReplaceResults(ctx context.Context, orgID string, results []Result) error
+	// UpsertResults writes the results in one statement per call, keyed by
+	// (organization, rule, CI); status_changed_at changes only with the
+	// status (WP-1126 AK3).
+	UpsertResults(ctx context.Context, orgID string, results []Result) error
+	// DeleteStaleResults removes the results evaluated before before (the
+	// end of a complete run).
+	DeleteStaleResults(ctx context.Context, orgID string, before time.Time) error
+	// Now is the clock evaluated_at is written with (the database clock):
+	// a run reads its start from it, so a result an instance with another
+	// clock writes during the run is never older than the start.
+	Now(ctx context.Context, orgID string) (time.Time, error)
 	ListResults(ctx context.Context, orgID, ciTypeID, status string, page api.PaginationParams) ([]Result, int, error)
 	// FindingFacts returns the facts of the open findings of the CIs in one
 	// read (per page of CIs, not per CI; CMP-02): open is open or
@@ -172,29 +182,52 @@ func (r *MemoryRepository) DeleteRule(_ context.Context, orgID, id string) error
 	delete(r.rules, id)
 	return nil
 }
-func (r *MemoryRepository) ReplaceResults(_ context.Context, orgID string, results []Result) error {
+func (r *MemoryRepository) UpsertResults(_ context.Context, orgID string, results []Result) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	for id, res := range r.results {
+	byKey := map[string]*Result{}
+	for _, res := range r.results {
 		if res.OrganizationID == orgID {
-			delete(r.results, id)
+			byKey[res.RuleID+"/"+res.CIID] = res
 		}
 	}
+	now := time.Now().UTC()
 	for i := range results {
 		res := results[i]
-		res.ID = r.nextID("result")
-		now := time.Now().UTC()
-		res.CreatedAt = now
-		res.UpdatedAt = now
 		if res.EvaluatedAt.IsZero() {
 			res.EvaluatedAt = now
 		}
+		if old := byKey[res.RuleID+"/"+res.CIID]; old != nil {
+			if old.Status != res.Status {
+				old.StatusChangedAt = res.EvaluatedAt
+			}
+			old.CITypeID, old.Status, old.Details, old.EvaluatedAt, old.UpdatedAt = res.CITypeID, res.Status, res.Details, res.EvaluatedAt, now
+			results[i] = *old
+			continue
+		}
+		res.ID = r.nextID("result")
+		res.CreatedAt, res.UpdatedAt, res.StatusChangedAt = now, now, res.EvaluatedAt
 		cp := res
 		r.results[res.ID] = &cp
+		byKey[res.RuleID+"/"+res.CIID] = &cp
 		results[i] = res
 	}
 	return nil
 }
+
+func (r *MemoryRepository) DeleteStaleResults(_ context.Context, orgID string, before time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for id, res := range r.results {
+		if res.OrganizationID == orgID && res.EvaluatedAt.Before(before) {
+			delete(r.results, id)
+		}
+	}
+	return nil
+}
+// Now implements Repository: the process clock.
+func (r *MemoryRepository) Now(context.Context, string) (time.Time, error) { return time.Now().UTC(), nil }
+
 func (r *MemoryRepository) ListResults(_ context.Context, orgID, ciTypeID, status string, page api.PaginationParams) ([]Result, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

@@ -259,7 +259,7 @@ func (c *queryCounter) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pg
 func (c *queryCounter) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
 
 // TestFindingFactsSingleQuery: the finding inputs of 500 CIs are one query;
-// the evaluation reads them once per page of 100 CIs.
+// the evaluation reads them once per page of 500 CIs (WP-1126).
 func TestFindingFactsSingleQuery(t *testing.T) {
 	e := newASTEnv(t)
 	bg := context.Background()
@@ -323,8 +323,9 @@ func TestFindingFactsSingleQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := counter.n.Load(); n != 5 {
-		t.Errorf("queries on security_finding while evaluating 500 CIs: %d, want 5 (one per page of 100)", n)
+	// One page of 500 CIs since WP-1126.
+	if n := counter.n.Load(); n != 1 {
+		t.Errorf("queries on security_finding while evaluating 500 CIs: %d, want 1 (one per page of 500)", n)
 	}
 	if resp.Overall.Failed != 1 || resp.Overall.Passed != 499 {
 		t.Errorf("score: %+v, want 1 failed (CI 0) and 499 passed", resp.Overall)

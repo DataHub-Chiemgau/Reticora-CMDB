@@ -14,6 +14,14 @@ type Handler struct {
 	repo      Repository
 	evaluator *Evaluator
 	reports   *ReportService
+	jobs      *Jobs
+}
+
+// WithJobs makes POST /api/v1/compliance/evaluations queue the job
+// compliance.evaluate (WP-1126).
+func (h *Handler) WithJobs(j *Jobs) *Handler {
+	h.jobs = j
+	return h
 }
 
 func NewHandler(repo Repository, evaluator *Evaluator) *Handler {
@@ -196,7 +204,9 @@ func (h *Handler) Evaluate(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	resp, err := h.evaluator.Evaluate(r.Context(), t.OrganizationID)
+	// The evaluation covers the whole organization: a restricted principal
+	// is refused before a job exists (E-09).
+	err := requireOrgWide(r.Context(), t.OrganizationID)
 	if errors.Is(err, ErrOrgWideScopeRequired) {
 		api.WriteError(w, http.StatusForbidden, "Forbidden", "the compliance evaluation covers the whole organization and requires an org-wide principal")
 		return
@@ -205,7 +215,18 @@ func (h *Handler) Evaluate(w http.ResponseWriter, r *http.Request) {
 		api.WriteRepoError(w, err)
 		return
 	}
-	api.WriteJSON(w, 200, resp)
+	job, err := h.jobs.Submit(r.Context(), t.OrganizationID, t.UserID)
+	if errors.Is(err, ErrJobsUnavailable) {
+		api.WriteUnavailable(w, ErrJobsUnavailable.Error())
+		return
+	}
+	if err != nil {
+		slog.ErrorContext(r.Context(), "compliance evaluation: submit the job", "error", err)
+		api.WriteRepoError(w, err)
+		return
+	}
+	w.Header().Set("Location", "/api/v1/jobs/"+job.ID)
+	api.WriteJSON(w, http.StatusAccepted, job)
 }
 func (h *Handler) ListResults(w http.ResponseWriter, r *http.Request) {
 	t, ok := org(w, r)

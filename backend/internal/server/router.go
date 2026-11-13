@@ -502,6 +502,11 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// unlicensed_ci and adopted once the limit is raised (ENT-03, CH21).
 	// Export and discovery jobs register in the generic job model (JOB-01).
 	var jobTracker jobs.Tracker
+	// The compliance evaluation runs as the job compliance.evaluate
+	// (WP-1126); without the job service POST /compliance/evaluations
+	// answers 503.
+	complianceEvaluator := compliance.NewEvaluator(repos.Compliance, repos.CI)
+	complianceJobs := compliance.NewJobs(complianceEvaluator)
 	var bffJobs graphqlbff.JobSource
 	// The CI history projects the field values with the policy of the
 	// caller, a queued snapshot with that of its creator (WP-727).
@@ -690,6 +695,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			WithBulkKind(asset.BulkJobKind).
 			WithKind(jobs.RevertKind, identity.PermCIWrite, nil).
 			WithKind("export", identity.PermExportRun, nil).
+			// A running compliance evaluation is cancelled with
+			// compliance:write like its start (WP-1126).
+			WithKind(compliance.EvaluateJobKind, identity.PermComplianceWrite, nil).
 			// A running template migration is cancelled with citype:manage
 			// like its start; it has no revert (E-25).
 			WithKind(ci.TemplateMigrateJobKind, identity.PermCITypeManage, nil).
@@ -768,7 +776,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			export.NewOrgExporter(opts.AuditPool, opts.Blobs, jobService), subjectService, workflowRuns,
 			// The automatic ping probes (WP-949) on the probe store of
 			// PostgreSQL.
-			probeAutocreator(&repos))
+			probeAutocreator(&repos), complianceJobs)
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -1024,7 +1032,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		sla.NewAvailabilityHandler(repos.AvailabilityTargets),
 		form.NewHandler(repos.Form).WithQuota(workflowQuotas),
 		workflow.NewHandler(repos.Workflow, workflowRuns).WithQuota(workflowQuotas),
-		compliance.NewHandler(repos.Compliance, compliance.NewEvaluator(repos.Compliance, repos.CI)).
+		compliance.NewHandler(repos.Compliance, complianceEvaluator).WithJobs(complianceJobs).
 			WithReports(compliance.NewReportService(repos.Compliance, reportAuditVerifier(&opts), entitlementLister{svc: opts.Entitlements})),
 		iga.NewHandler(repos.IGA, repos.User, opts.Credentials, repos.Discovery, repos.Workflow).
 			WithWorkflowRuns(accessRequestRuns(opts.Modules, workflowRuns)).WithEgress(opts.Egress),

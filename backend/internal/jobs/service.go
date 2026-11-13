@@ -246,6 +246,19 @@ func (s *Service) Progress(ctx context.Context, orgID, id string, percent int) e
 	return err
 }
 
+// ProgressResult records the progress (0–100) of a running job together
+// with an interim result (counters such as processed/total), which the
+// result of its end replaces.
+func (s *Service) ProgressResult(ctx context.Context, orgID, id string, percent int, interim any) error {
+	percent = max(0, min(100, percent))
+	raw, err := json.Marshal(interim)
+	if err != nil {
+		return fmt.Errorf("encode the interim result: %w", err)
+	}
+	_, err = s.repo.Transition(ctx, orgID, id, []Status{StatusRunning}, &Update{Status: StatusRunning, Progress: &percent, Result: raw})
+	return err
+}
+
 // Succeed ends a running job with its result.
 func (s *Service) Succeed(ctx context.Context, orgID, id string, result any) (*Job, error) {
 	raw, err := json.Marshal(result)

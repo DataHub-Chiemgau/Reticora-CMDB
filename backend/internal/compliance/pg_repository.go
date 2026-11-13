@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -14,7 +15,7 @@ import (
 )
 
 const ruleCols = `id::text, organization_id::text, COALESCE(ci_type_id::text,''), name, description, severity, category, expression, applies_when, remediation_hint, active, created_at, updated_at`
-const resultCols = `id::text, organization_id::text, rule_id::text, ci_id::text, COALESCE(ci_type_id::text,''), status, details, evaluated_at, created_at, updated_at`
+const resultCols = `id::text, organization_id::text, rule_id::text, ci_id::text, COALESCE(ci_type_id::text,''), status, details, evaluated_at, status_changed_at, created_at, updated_at`
 
 type PGRepository struct{ pool *pgxpool.Pool }
 
@@ -195,20 +196,51 @@ func (r *PGRepository) DeleteRule(ctx context.Context, orgID, id string) error {
 		return nil
 	})
 }
-func (r *PGRepository) ReplaceResults(ctx context.Context, orgID string, results []Result) error {
-	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, "DELETE FROM compliance_result WHERE organization_id=$1", orgID); err != nil {
-			return err
-		}
-		for i := range results {
-			res := &results[i]
-			if err := tx.QueryRow(ctx, `INSERT INTO compliance_result (organization_id,rule_id,ci_id,ci_type_id,status,details,evaluated_at) VALUES ($1,$2,$3,NULLIF($4,'')::uuid,$5,$6,$7) RETURNING id::text, created_at, updated_at`, res.OrganizationID, res.RuleID, res.CIID, res.CITypeID, res.Status, res.Details, res.EvaluatedAt).Scan(&res.ID, &res.CreatedAt, &res.UpdatedAt); err != nil {
-				return err
-			}
-		}
+
+// UpsertResults implements Repository: one INSERT … ON CONFLICT (organization_id,
+// rule_id, ci_id) DO UPDATE for all results (WP-1126 AK3).
+func (r *PGRepository) UpsertResults(ctx context.Context, orgID string, results []Result) error {
+	if len(results) == 0 {
 		return nil
+	}
+	rules, cis, types, statuses, details := make([]string, len(results)), make([]string, len(results)), make([]string, len(results)),
+		make([]string, len(results)), make([]string, len(results))
+	for i := range results {
+		rules[i], cis[i], types[i], statuses[i], details[i] = results[i].RuleID, results[i].CIID, results[i].CITypeID, results[i].Status, results[i].Details
+	}
+	// evaluated_at is the database clock (Now), whatever instance writes:
+	// the removal after a run (DeleteStaleResults) compares with it.
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO compliance_result (organization_id, rule_id, ci_id, ci_type_id, status, details, evaluated_at, status_changed_at)
+			SELECT $1, u.rule_id, u.ci_id, NULLIF(u.ci_type_id, '')::uuid, u.status, u.details, now(), now()
+			FROM unnest($2::uuid[], $3::uuid[], $4::text[], $5::text[], $6::text[]) AS u(rule_id, ci_id, ci_type_id, status, details)
+			ON CONFLICT (organization_id, rule_id, ci_id) DO UPDATE SET ci_type_id = EXCLUDED.ci_type_id, status = EXCLUDED.status,
+				details = EXCLUDED.details, evaluated_at = EXCLUDED.evaluated_at,
+				status_changed_at = CASE WHEN compliance_result.status IS DISTINCT FROM EXCLUDED.status THEN EXCLUDED.evaluated_at
+					ELSE compliance_result.status_changed_at END`,
+			orgID, rules, cis, types, statuses, details)
+		return err
 	})
 }
+
+// Now implements Repository: the clock of the database.
+func (r *PGRepository) Now(ctx context.Context, orgID string) (time.Time, error) {
+	var now time.Time
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, "SELECT now()").Scan(&now)
+	})
+	return now.UTC(), err
+}
+
+// DeleteStaleResults implements Repository over
+// idx_compliance_result_evaluated.
+func (r *PGRepository) DeleteStaleResults(ctx context.Context, orgID string, before time.Time) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "DELETE FROM compliance_result WHERE organization_id=$1 AND evaluated_at < $2", orgID, before)
+		return err
+	})
+}
+
 func (r *PGRepository) ListResults(ctx context.Context, orgID, ciTypeID, status string, page api.PaginationParams) ([]Result, int, error) {
 	var out []Result
 	var total int
@@ -315,7 +347,7 @@ func (r *PGRepository) FindingFacts(ctx context.Context, orgID string, ciIDs []s
 }
 func scanResult(s scanner) (*Result, error) {
 	r := &Result{}
-	if err := s.Scan(&r.ID, &r.OrganizationID, &r.RuleID, &r.CIID, &r.CITypeID, &r.Status, &r.Details, &r.EvaluatedAt, &r.CreatedAt, &r.UpdatedAt); err != nil {
+	if err := s.Scan(&r.ID, &r.OrganizationID, &r.RuleID, &r.CIID, &r.CITypeID, &r.Status, &r.Details, &r.EvaluatedAt, &r.StatusChangedAt, &r.CreatedAt, &r.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return r, nil
