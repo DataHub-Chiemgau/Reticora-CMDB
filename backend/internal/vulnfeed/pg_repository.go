@@ -291,3 +291,28 @@ func (r *PGRepository) SetKEV(ctx context.Context, cves []string) (int64, error)
 	}
 	return n, nil
 }
+
+// finishBundleSource implements bundleSourceFinisher: the state of the
+// source bundle is written only when the stored one is not newer.
+func (r *PGRepository) finishBundleSource(ctx context.Context, src *Source) (bool, error) {
+	done := false
+	err := database.WithSystemWrite(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `INSERT INTO vuln_source (id, kind, url, etag, last_modified, cursor, synced_at, documents_total,
+				errors_total, last_error, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
+			ON CONFLICT (id) DO UPDATE SET kind = EXCLUDED.kind, url = EXCLUDED.url, etag = EXCLUDED.etag,
+				last_modified = EXCLUDED.last_modified, cursor = EXCLUDED.cursor, synced_at = EXCLUDED.synced_at,
+				documents_total = EXCLUDED.documents_total, errors_total = EXCLUDED.errors_total,
+				last_error = EXCLUDED.last_error, updated_at = now()
+				WHERE vuln_source.synced_at IS NULL OR vuln_source.synced_at <= EXCLUDED.synced_at
+			RETURNING updated_at`,
+			src.ID, src.Kind, src.URL, src.ETag, src.LastModified, src.Cursor, src.SyncedAt, src.DocumentsTotal,
+			src.ErrorsTotal, src.LastError).Scan(&src.UpdatedAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		done = err == nil
+		return err
+	})
+	return done, err
+}

@@ -227,6 +227,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/admin/vulnfeed/bundle': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Import an offline bundle of the vulnerability catalog
+     * @description Imports a signed bundle reticora-vulnfeed/1 (tar.gz with manifest.json, manifest.sig and NDJSON files of advisories; SEC-02, TEC-16, WP-1120, E-235) for the air-gapped profile. The archive is unpacked to a temporary directory, the Ed25519 signature of manifest.json is checked against the public key (embedded in the binary, replaceable with RETICORA_VULNFEED_BUNDLE_PUBLIC_KEY), every file against its SHA-256; only then the advisories are written in the system context and vuln_source('bundle') gets synced_at = created_at of the bundle. A wrong signature or hash, a missing file or an unknown format is 422, a bundle older than the imported one 409, a body above 512 MiB 413; nothing is imported then. Every attempt writes an entry to operator_audit with the hash of the manifest, the number of advisories and the result. Every data file is parsed before the first write (a malformed line is 422 with nothing written); an advisory the catalog refuses as data (unknown severity, a range without vendor or product, a CHECK of the database) is skipped and counted in skipped. One import runs per instance at a time with its own deadline of an hour instead of the server's timeouts; a second one is 503 with Retry-After.
+     */
+    post: operations['importVulnfeedBundleAsOperator'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/admin/vulnfeed/status': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * State of the vulnerability feeds
+     * @description Per source of the catalog synced_at, its age, the counters and the last error, and whether the online sync runs (off with RETICORA_AIR_GAPPED=true without RETICORA_VULNFEED_CSAF_PROVIDERS); while it is off, bundle names the state and age of the imported bundle (WP-1120).
+     */
+    get: operations['getVulnfeedStatusAsOperator'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/admin/orgs/{id}/usage': {
     parameters: {
       query?: never;
@@ -19740,6 +19780,32 @@ export interface components {
     TicketSLAListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['TicketSLA'][];
     };
+    VulnfeedBundleImport: {
+      /** Format: date-time */
+      created_at: string;
+      manifest_sha256: string;
+      advisories: number;
+      /** @description Advisories another source of the catalog owns. */
+      skipped: number;
+    };
+    VulnfeedSourceStatus: {
+      id: string;
+      kind: string;
+      /** Format: date-time */
+      synced_at?: string;
+      /** Format: int64 */
+      age_seconds?: number;
+      /** Format: int64 */
+      documents_total: number;
+      /** Format: int64 */
+      errors_total: number;
+      last_error?: string;
+    };
+    VulnfeedStatus: {
+      online_sync: boolean;
+      sources: components['schemas']['VulnfeedSourceStatus'][];
+      bundle?: components['schemas']['VulnfeedSourceStatus'];
+    };
     /** @description Arbitrary JSON value. */
     JSONValue: unknown;
     FormDefinition: {
@@ -24366,6 +24432,101 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
+    };
+  };
+  importVulnfeedBundleAsOperator: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/octet-stream': string;
+      };
+    };
+    responses: {
+      /** @description The bundle was imported */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VulnfeedBundleImport'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      /** @description The bundle is older than the imported one */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description The bundle exceeds 512 MiB */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      /** @description Invalid signature or hash, missing file or unknown format */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+      500: components['responses']['InternalServerError'];
+      /** @description The vulnerability catalog is not configured, or another bundle import is in progress (Retry-After) */
+      503: {
+        headers: {
+          /** @description Seconds until a retry, set while another import runs */
+          'Retry-After'?: number;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
+    };
+  };
+  getVulnfeedStatusAsOperator: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description State of the feeds */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['VulnfeedStatus'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+      /** @description The vulnerability catalog is not configured */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
     };
   };
   getOrganizationUsage: {

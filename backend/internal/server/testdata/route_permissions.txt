@@ -107,6 +107,7 @@ GET /api/v1/admin/orgs operator
 GET /api/v1/admin/orgs/{id}/entitlements operator
 GET /api/v1/admin/orgs/{id}/usage operator
 GET /api/v1/admin/plans operator
+GET /api/v1/admin/vulnfeed/status operator
 GET /api/v1/admp/accounts/ admp:manage
 GET /api/v1/admp/accounts/{id} admp:manage
 GET /api/v1/admp/connections/{id} admp:read
@@ -543,6 +544,7 @@ POST /api/v1/admin/auth/callback operator
 POST /api/v1/admin/orgs operator
 POST /api/v1/admin/orgs/{id}/addons/{key} operator
 POST /api/v1/admin/orgs/{id}/entitlements operator
+POST /api/v1/admin/vulnfeed/bundle operator
 POST /api/v1/admp/accounts/ admp:manage
 POST /api/v1/agents/enroll agent:manage
 POST /api/v1/agents/enrollment-tokens agent:manage

@@ -1896,3 +1896,4 @@ WFL-01;[P3];F;backend/internal/form/conditions_test.go;WP-1101
 LCY-04;[P3];F;backend/internal/ci/lifecycle_lock_integration_test.go;WP-1103
 OPS-02;[B], [P3], [A];F;backend/cmd/server/main_test.go;WP-1114
 OPS-02;[B], [P3], [A];F;backend/internal/jobs/queue_test.go;WP-1114
+SEC-02;[P3];F;backend/internal/vulnfeed/bundle_test.go;WP-1120

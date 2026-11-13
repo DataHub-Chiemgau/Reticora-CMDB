@@ -93,6 +93,24 @@ jobs:
           done
           syft scan dir:. -o spdx-json=dist/reticora-source.spdx.json
 
+      # The offline bundle of the vulnerability catalog for the air-gapped
+      # profile (SEC-02, TEC-16, WP-1120, E-235): CSAF, NVD and KEV at the
+      # time of the release, manifest signed with the Ed25519 key of the
+      # secret VULNBUNDLE_SIGNING_KEY (its public half is embedded in the
+      # server). The cosign signature of every artifact covers it as well.
+      # Without the secret no bundle is built.
+      - name: Vulnerability catalog bundle
+        env:
+          VULNBUNDLE_SIGNING_KEY: ${{ secrets.VULNBUNDLE_SIGNING_KEY }}
+          RETICORA_VULNFEED_NVD_API_KEY: ${{ secrets.RETICORA_VULNFEED_NVD_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${VULNBUNDLE_SIGNING_KEY}" ]; then
+            echo "::warning::VULNBUNDLE_SIGNING_KEY is not set: no vulnerability catalog bundle in this release"
+            exit 0
+          fi
+          (cd backend && go run ./cmd/vulnbundle -out "../dist/reticora-vulnfeed-$GITHUB_REF_NAME.tar.gz")
+
       # The source of the tag for the installers (WP-387, TEC-15): the commit
       # a checkout of the tag must be, and the tarball installed without git.
       - name: Source tarball and commit

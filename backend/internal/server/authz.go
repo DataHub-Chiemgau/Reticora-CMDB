@@ -707,6 +707,7 @@ var auditExemptions = map[string]string{
 	"PUT /api/v1/admin/orgs/{id}/plan":            "operator path, operator_audit",
 	"POST /api/v1/admin/orgs/{id}/addons/{key}":   "operator path, operator_audit",
 	"DELETE /api/v1/admin/orgs/{id}/addons/{key}": "operator path, operator_audit",
+	"POST /api/v1/admin/vulnfeed/bundle":          "operator path, operator_audit",
 	// The Alertmanager bridge (OPS-05, E-75) records a queued alert itself,
 	// in the tenant transaction of the operator organization; refusals go to
 	// operator_audit.

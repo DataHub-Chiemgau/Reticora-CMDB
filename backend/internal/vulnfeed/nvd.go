@@ -355,7 +355,10 @@ func (n *NVD) window(ctx context.Context, start, end time.Time) (imported, faile
 				}
 			}
 			if werr := n.store.ReplaceAdvisory(ctx, adv, kept); werr != nil {
-				if errors.Is(werr, ErrAdvisoryOwnedByOtherSource) {
+				// Like CSAF: a record the catalog refuses as data (the
+				// memory store of the bundle export checks the same) is
+				// skipped, not the end of the sync (WP-1120).
+				if errors.Is(werr, ErrAdvisoryOwnedByOtherSource) || errors.Is(werr, ErrInvalidAdvisory) || isDataError(werr) {
 					countDocument(KindNVD, ResultParseError)
 					failed++
 					continue

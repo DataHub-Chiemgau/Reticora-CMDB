@@ -1,7 +1,10 @@
 package vulnfeed_test
 
 import (
+	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"strings"
@@ -291,5 +294,63 @@ func TestVulnSearchProducts(t *testing.T) {
 	}
 	if vulnfeed.Normalize("  Cisco   Systems\tInc ") != "cisco_systems_inc" {
 		t.Errorf("Normalize: %q", vulnfeed.Normalize("  Cisco   Systems\tInc "))
+	}
+}
+
+// staleCheckPassed is the catalog of a concurrent import: its stale check
+// read no bundle source yet, while another import of a newer bundle
+// committed meanwhile.
+type staleCheckPassed struct{ *vulnfeed.PGRepository }
+
+func (s staleCheckPassed) GetSource(ctx context.Context, id string) (*vulnfeed.Source, error) {
+	if id == vulnfeed.BundleSourceID {
+		return nil, fmt.Errorf("source %s: %w", id, pgx.ErrNoRows)
+	}
+	return s.PGRepository.GetSource(ctx, id)
+}
+
+// TestVulnBundleFinishKeepsNewerImport (WP-1120 AK3): an older bundle whose
+// stale check passed before a newer import committed ends with
+// ErrBundleStale and leaves synced_at of the newer bundle.
+func TestVulnBundleFinishKeepsNewerImport(t *testing.T) {
+	e := newCatalogEnv(t)
+	ctx := context.Background()
+	restore := func() {
+		_, _ = e.f.Admin.Exec(ctx, `DELETE FROM vuln_advisory WHERE id LIKE 'wp1120-%'`)
+		_, _ = e.f.Admin.Exec(ctx, `DELETE FROM vuln_source WHERE id = $1`, vulnfeed.BundleSourceID)
+	}
+	restore()
+	t.Cleanup(restore)
+	newer := time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)
+	if err := e.repo.UpdateSource(ctx, &vulnfeed.Source{ID: vulnfeed.BundleSourceID, Kind: vulnfeed.KindBundle, SyncedAt: &newer}); err != nil {
+		t.Fatal(err)
+	}
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	export := vulnfeed.NewMemoryStore()
+	if err = export.UpdateSource(ctx, &vulnfeed.Source{ID: e.source, Kind: vulnfeed.KindCSAF}); err != nil {
+		t.Fatal(err)
+	}
+	if err = export.ReplaceAdvisory(ctx, &vulnfeed.Advisory{ID: "wp1120-ok", SourceID: e.source, Severity: "high"},
+		[]vulnfeed.Affected{{Vendor: "zyxel", Product: "usg", VersionScheme: "generic"}}); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if _, err = vulnfeed.WriteBundle(&buf, export, priv, newer.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	b, err := vulnfeed.OpenBundle(&buf, pub, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
+	if _, err = vulnfeed.ImportBundle(ctx, staleCheckPassed{e.repo}, b); !errors.Is(err, vulnfeed.ErrBundleStale) {
+		t.Fatalf("older import finishing last: %v, want ErrBundleStale", err)
+	}
+	src, err := e.repo.GetSource(ctx, vulnfeed.BundleSourceID)
+	if err != nil || src.SyncedAt == nil || !src.SyncedAt.Equal(newer) {
+		t.Fatalf("bundle source %+v %v, want synced_at of the newer bundle %v", src, err, newer)
 	}
 }

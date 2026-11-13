@@ -240,6 +240,10 @@ type Config struct {
 	VulnfeedNVDAPIKey   string
 	VulnfeedNVDInterval time.Duration
 	VulnfeedKEVURL      string
+	// VulnfeedBundlePublicKey replaces the embedded public key of the
+	// offline bundles (RETICORA_VULNFEED_BUNDLE_PUBLIC_KEY, base64 Ed25519,
+	// WP-1120); empty keeps vulnfeed.DefaultBundlePublicKey.
+	VulnfeedBundlePublicKey string
 
 	// Search
 	SearchBackend      string
@@ -370,6 +374,7 @@ func Load() *Config {
 		VulnfeedNVDAPIKey:        strings.TrimSpace(l.str("RETICORA_VULNFEED_NVD_API_KEY", "")),
 		VulnfeedNVDInterval:      l.duration("RETICORA_VULNFEED_NVD_INTERVAL", DefaultVulnfeedNVDInterval),
 		VulnfeedKEVURL:           strings.TrimSpace(l.str("RETICORA_VULNFEED_KEV_URL", "")),
+		VulnfeedBundlePublicKey:  strings.TrimSpace(l.str("RETICORA_VULNFEED_BUNDLE_PUBLIC_KEY", "")),
 		EgressAllowPrivate:       l.boolean("RETICORA_EGRESS_ALLOW_PRIVATE", false),
 		PreAuthRateLimitRPM:      l.integer("RETICORA_PREAUTH_RATE_LIMIT_RPM", 20),
 		TrustedProxies:           l.str("RETICORA_TRUSTED_PROXIES", "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"),

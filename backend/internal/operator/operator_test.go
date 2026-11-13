@@ -1,8 +1,10 @@
 package operator
 
 import (
+	"bytes"
 	"context"
 	"crypto"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -12,6 +14,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"math/big"
 	"net/http"
@@ -28,6 +31,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/vulnfeed"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -654,5 +658,232 @@ func TestRealmOperatorLoginConfiguration(t *testing.T) {
 				t.Errorf("%s: authenticators %v, want only allow access after the OTP", level2, got)
 			}
 		})
+	}
+}
+
+// vulnfeedRouter serves the operator routes with a catalog in memory and a
+// test key for the bundles.
+func vulnfeedRouter(t *testing.T, audit *memoryAudit, online bool) (*chi.Mux, *vulnfeed.MemoryStore, ed25519.PrivateKey) {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := vulnfeed.NewMemoryStore()
+	h := withAudit(NewHandler(Config{BreakGlassToken: testBreakGlass}, nil, testIssuer(t), nil, nil), audit).
+		WithVulnfeed(&VulnfeedConfig{Catalog: catalog, PublicKey: pub, OnlineSync: online, TempDir: t.TempDir()})
+	return testRouter(h), catalog, priv
+}
+
+// vulnBundle is a signed bundle of one advisory created at.
+func vulnBundle(t *testing.T, priv ed25519.PrivateKey, at time.Time) []byte {
+	t.Helper()
+	src := vulnfeed.NewMemoryStore()
+	ctx := context.Background()
+	if err := src.UpdateSource(ctx, &vulnfeed.Source{ID: "nvd", Kind: vulnfeed.KindNVD, SyncedAt: &at}); err != nil {
+		t.Fatal(err)
+	}
+	if err := src.ReplaceAdvisory(ctx, &vulnfeed.Advisory{ID: "nvd:CVE-2026-1120", SourceID: "nvd", CVEIDs: []string{"CVE-2026-1120"}, Severity: "high"},
+		[]vulnfeed.Affected{{Vendor: "zyxel", Product: "usg", VersionScheme: "generic", VersionEnd: "5.30"}}); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if _, err := vulnfeed.WriteBundle(&buf, src, priv, at); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
+func postBundle(mux http.Handler, body []byte, header map[string]string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/vulnfeed/bundle", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/octet-stream")
+	for k, v := range header {
+		req.Header.Set(k, v)
+	}
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	return w
+}
+
+// TestVulnfeedBundleImportNeedsOperator covers WP-1120 AK3: the import is
+// an operator route; without credentials it is 401, a tenant session is
+// refused as well, and nothing is imported.
+func TestVulnfeedBundleImportNeedsOperator(t *testing.T) {
+	audit := &memoryAudit{}
+	issuer := testIssuer(t)
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := vulnfeed.NewMemoryStore()
+	mux := testRouter(withAudit(NewHandler(Config{BreakGlassToken: testBreakGlass}, nil, issuer, nil, nil), audit).
+		WithVulnfeed(&VulnfeedConfig{Catalog: catalog, PublicKey: pub, TempDir: t.TempDir()}))
+	body := vulnBundle(t, priv, time.Now().UTC())
+	if w := postBundle(mux, body, nil); w.Code != http.StatusUnauthorized {
+		t.Errorf("without credentials: %d, want 401", w.Code)
+	}
+	now := time.Now().UTC()
+	tenant, err := issuer.Issue(&identity.SessionClaims{Subject: "user-1", OrganizationID: "11111111-1111-4111-8111-111111111111",
+		Permissions: identity.AllPermissions(), IssuedAt: now, ExpiresAt: now.Add(time.Minute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := postBundle(mux, body, map[string]string{"Authorization": "Bearer " + tenant}); w.Code != http.StatusUnauthorized && w.Code != http.StatusForbidden {
+		t.Errorf("tenant session: %d, want 401/403", w.Code)
+	}
+	if catalog.Len() != 0 {
+		t.Errorf("%d advisories imported without an operator", catalog.Len())
+	}
+}
+
+// TestVulnfeedBundleImportIsAudited covers WP-1120 AK3/AK4: an operator
+// imports a valid bundle (200, the advisories in the catalog, an
+// operator_audit entry with the manifest hash, the count and the result); a
+// manipulated bundle is 422 and an older one 409, both audited, nothing
+// imported.
+func TestVulnfeedBundleImportIsAudited(t *testing.T) {
+	audit := &memoryAudit{}
+	mux, catalog, priv := vulnfeedRouter(t, audit, false)
+	operatorHeader := map[string]string{BreakGlassHeader: testBreakGlass}
+	at := time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC)
+	w := postBundle(mux, vulnBundle(t, priv, at), operatorHeader)
+	if w.Code != http.StatusOK {
+		t.Fatalf("import: %d %s", w.Code, w.Body.String())
+	}
+	var res vulnfeed.BundleImport
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil || res.Advisories != 1 || res.ManifestSHA256 == "" {
+		t.Fatalf("result %s: %v", w.Body.String(), err)
+	}
+	if catalog.Len() != 1 {
+		t.Errorf("catalog has %d advisories, want 1", catalog.Len())
+	}
+	audit.mu.Lock()
+	entries := slices.Clone(audit.entries)
+	audit.mu.Unlock()
+	var imported *AuditEntry
+	for i := range entries {
+		if entries[i].Action == "vulnfeed.bundle.import" {
+			imported = &entries[i]
+		}
+	}
+	if len(entries) != 1 || imported == nil || imported.Status != http.StatusOK || imported.Details["manifest_sha256"] != res.ManifestSHA256 ||
+		imported.Details["advisories"] != 1 || imported.Details["result"] != "imported" {
+		t.Fatalf("audit entries %+v, want one import entry with hash, count and result", entries)
+	}
+	bad := vulnBundle(t, priv, at.Add(time.Hour))
+	bad[len(bad)/2] ^= 0xff
+	if w = postBundle(mux, bad, operatorHeader); w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("manipulated bundle: %d %s, want 422", w.Code, w.Body.String())
+	}
+	if w = postBundle(mux, vulnBundle(t, priv, at.Add(-time.Hour)), operatorHeader); w.Code != http.StatusConflict {
+		t.Errorf("older bundle: %d %s, want 409", w.Code, w.Body.String())
+	}
+	results := []any{}
+	audit.mu.Lock()
+	for _, e := range audit.entries {
+		if e.Action == "vulnfeed.bundle.import" {
+			results = append(results, e.Details["result"])
+		}
+	}
+	audit.mu.Unlock()
+	if !slices.Equal(results, []any{"imported", "invalid", "stale"}) {
+		t.Errorf("audited results %v, want imported, invalid, stale", results)
+	}
+	if catalog.Len() != 1 {
+		t.Errorf("catalog has %d advisories after the refused bundles, want 1", catalog.Len())
+	}
+}
+
+// TestVulnfeedStatusShowsBundleAgeWhenOffline covers WP-1120 AK5: with the
+// online sync off the status names the age and state of the bundle.
+func TestVulnfeedStatusShowsBundleAgeWhenOffline(t *testing.T) {
+	audit := &memoryAudit{}
+	mux, _, priv := vulnfeedRouter(t, audit, false)
+	operatorHeader := map[string]string{BreakGlassHeader: testBreakGlass}
+	at := time.Now().UTC().Add(-48 * time.Hour).Truncate(time.Second)
+	if w := postBundle(mux, vulnBundle(t, priv, at), operatorHeader); w.Code != http.StatusOK {
+		t.Fatalf("import: %d %s", w.Code, w.Body.String())
+	}
+	w := get(mux, "/api/v1/admin/vulnfeed/status", operatorHeader)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status: %d %s", w.Code, w.Body.String())
+	}
+	var st struct {
+		OnlineSync bool `json:"online_sync"`
+		Sources    []struct {
+			ID string `json:"id"`
+		} `json:"sources"`
+		Bundle *struct {
+			SyncedAt   *time.Time `json:"synced_at"`
+			AgeSeconds *int64     `json:"age_seconds"`
+		} `json:"bundle"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &st); err != nil {
+		t.Fatal(err)
+	}
+	if st.OnlineSync || st.Bundle == nil || st.Bundle.SyncedAt == nil || !st.Bundle.SyncedAt.Equal(at) ||
+		st.Bundle.AgeSeconds == nil || *st.Bundle.AgeSeconds < 47*3600 {
+		t.Errorf("status %s, want the bundle of %v about 48 h old and the online sync off", w.Body.String(), at)
+	}
+	online, _, _ := vulnfeedRouter(t, &memoryAudit{}, true)
+	if w = get(online, "/api/v1/admin/vulnfeed/status", operatorHeader); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"online_sync":true`) ||
+		strings.Contains(w.Body.String(), `"bundle"`) {
+		t.Errorf("online status: %d %s, want online_sync true without bundle", w.Code, w.Body.String())
+	}
+}
+
+// TestVulnfeedBundleImportOutlastsServerTimeouts covers WP-1120 AK1/AK3:
+// the import sets its own deadlines, so a bundle uploaded more slowly than
+// the server's ReadTimeout is still imported (200); a second import while
+// one runs is 503 with Retry-After.
+func TestVulnfeedBundleImportOutlastsServerTimeouts(t *testing.T) {
+	audit := &memoryAudit{}
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog := vulnfeed.NewMemoryStore()
+	cfg := &VulnfeedConfig{Catalog: catalog, PublicKey: pub, TempDir: t.TempDir(), ImportTimeout: time.Minute}
+	mux := testRouter(withAudit(NewHandler(Config{BreakGlassToken: testBreakGlass}, nil, testIssuer(t), nil, nil), audit).WithVulnfeed(cfg))
+	srv := httptest.NewUnstartedServer(mux)
+	srv.Config.ReadTimeout, srv.Config.WriteTimeout = time.Second, time.Second
+	srv.Start()
+	defer srv.Close()
+
+	body := vulnBundle(t, priv, time.Now().UTC())
+	pr, pw := io.Pipe()
+	go func() {
+		// The body arrives over about two and a half seconds, longer
+		// than the server's ReadTimeout.
+		step := len(body)/5 + 1
+		for i := 0; i < len(body); i += step {
+			time.Sleep(500 * time.Millisecond)
+			if _, werr := pw.Write(body[i:min(i+step, len(body))]); werr != nil {
+				return
+			}
+		}
+		_ = pw.Close()
+	}()
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/api/v1/admin/vulnfeed/bundle", pr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set(BreakGlassHeader, testBreakGlass)
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("slow upload: %v, want the import to outlast the server's timeouts", err)
+	}
+	reply, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || catalog.Len() != 1 {
+		t.Fatalf("slow upload: %d %s, catalog %d, want 200 with the advisory", resp.StatusCode, reply, catalog.Len())
+	}
+
+	cfg.slot <- struct{}{}
+	defer func() { <-cfg.slot }()
+	w := postBundle(mux, vulnBundle(t, priv, time.Now().UTC()), map[string]string{BreakGlassHeader: testBreakGlass})
+	if w.Code != http.StatusServiceUnavailable || w.Header().Get("Retry-After") == "" {
+		t.Errorf("concurrent import: %d %v, want 503 with Retry-After", w.Code, w.Header())
 	}
 }

@@ -113,13 +113,20 @@ func (h *Handler) authenticate(r *http.Request) (Identity, bool) {
 }
 
 // heldResponse holds a response back until its audit entry is written.
+// under is the writer of the connection: http.ResponseController reaches
+// it through Unwrap for the deadlines of a long request (the bundle
+// import, WP-1120); the body stays held.
 type heldResponse struct {
 	header http.Header
 	status int
 	body   bytes.Buffer
+	under  http.ResponseWriter
 }
 
 func (h *heldResponse) Header() http.Header { return h.header }
+
+// Unwrap returns the writer of the connection (http.ResponseController).
+func (h *heldResponse) Unwrap() http.ResponseWriter { return h.under }
 
 func (h *heldResponse) WriteHeader(code int) {
 	if h.status == 0 {
@@ -175,7 +182,7 @@ func (h *Handler) Middleware(next http.Handler) http.Handler {
 			}
 			return
 		}
-		held := &heldResponse{header: w.Header().Clone()}
+		held := &heldResponse{header: w.Header().Clone(), under: w}
 		audited := false
 		ctx := context.WithValue(context.WithValue(r.Context(), identityKey{}, op), auditedKey{}, &audited)
 		next.ServeHTTP(held, r.WithContext(ctx))

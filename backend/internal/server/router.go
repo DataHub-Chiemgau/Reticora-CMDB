@@ -226,6 +226,12 @@ type Options struct {
 	// audit fails and is logged, tests and --no-db).
 	Operator     operator.Config
 	OperatorPool *pgxpool.Pool
+	// VulnfeedBundlePublicKey checks the offline bundles of the
+	// vulnerability catalog (RETICORA_VULNFEED_BUNDLE_PUBLIC_KEY; empty:
+	// the embedded key, WP-1120); VulnfeedOnlineSync reports whether the
+	// online feeds run (shown by GET /api/v1/admin/vulnfeed/status).
+	VulnfeedBundlePublicKey string
+	VulnfeedOnlineSync      bool
 	// OpsAlerts configures the Alertmanager bridge of the operator path
 	// (OPS-05, E-75): without an operator organization it answers 404.
 	// Notifier queues its notifications on the channels of that
@@ -396,6 +402,17 @@ func operatorHandler(opts *Options) *operator.Handler {
 		WithEntitlements(opts.Entitlements)
 	if opts.Signup != nil {
 		h.WithOrgCreator(opts.Signup)
+	}
+	// The vulnerability catalog: import of the offline bundle and state of
+	// the feeds (WP-1120), written in the system context.
+	if opts.AuditPool != nil {
+		key := opts.VulnfeedBundlePublicKey
+		if key == "" {
+			key = vulnfeed.DefaultBundlePublicKey
+		}
+		pub, keyErr := vulnfeed.ParsePublicKey(key)
+		h.WithVulnfeed(&operator.VulnfeedConfig{Catalog: vulnfeed.NewPGRepository(opts.AuditPool), PublicKey: pub, KeyError: keyErr,
+			OnlineSync: opts.VulnfeedOnlineSync})
 	}
 	return h
 }

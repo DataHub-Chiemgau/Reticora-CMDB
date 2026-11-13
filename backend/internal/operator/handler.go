@@ -29,6 +29,9 @@ type Handler struct {
 	entitlements *entitlement.Service
 	// orgs creates organizations (TLC-02).
 	orgs OrgCreator
+	// vulnfeed serves the vulnerability catalog routes (WithVulnfeed,
+	// WP-1120).
+	vulnfeed *VulnfeedConfig
 }
 
 // NewHandler creates the operator handler. pool serves the organization
@@ -54,6 +57,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.With(h.Middleware).Get("/api/v1/admin/orgs/{id}/usage", h.OrganizationUsage)
 	r.With(h.Middleware).Post("/api/v1/admin/orgs/{id}/addons/{key}", h.BookAddon)
 	r.With(h.Middleware).Delete("/api/v1/admin/orgs/{id}/addons/{key}", h.CancelAddon)
+	r.With(h.Middleware).Post("/api/v1/admin/vulnfeed/bundle", h.ImportVulnfeedBundle)
+	r.With(h.Middleware).Get("/api/v1/admin/vulnfeed/status", h.VulnfeedStatus)
 }
 
 var errNotOperator = errors.New("operator: login is not an operator with MFA")
