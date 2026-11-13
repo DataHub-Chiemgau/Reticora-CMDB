@@ -93,7 +93,7 @@ func parse(t *testing.T, msg []byte) (dnsmessage.Header, []dnsmessage.Resource) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := p.SkipAllQuestions(); err != nil {
+	if err = p.SkipAllQuestions(); err != nil {
 		t.Fatal(err)
 	}
 	rrs, err := p.AllAnswers()
@@ -243,7 +243,7 @@ func tcpRaw(t *testing.T, s *Server, msg []byte) []byte {
 	}
 	defer func() { _ = c.Close() }()
 	_ = c.SetDeadline(time.Now().Add(2 * time.Second))
-	if _, err := c.Write(append(binary.BigEndian.AppendUint16(nil, uint16(len(msg))), msg...)); err != nil { //nolint:gosec // test query
+	if _, err = c.Write(append(binary.BigEndian.AppendUint16(nil, uint16(len(msg))), msg...)); err != nil { //nolint:gosec // test query
 		t.Fatal(err)
 	}
 	out, err := io.ReadAll(c)

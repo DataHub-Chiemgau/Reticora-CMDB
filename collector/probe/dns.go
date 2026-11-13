@@ -123,7 +123,7 @@ func (e *DNSExecutor) Execute(ctx context.Context, spec probewire.ProbeSpec, _ m
 	}
 	rd := p.RD == nil || *p.RD
 	q := dnsmessage.Question{Name: qname, Type: qtype, Class: dnsmessage.ClassINET}
-	if _, _, err := dnsQuery(q, rd, p.RequireAD); err != nil {
+	if _, _, qerr := dnsQuery(&q, rd, p.RequireAD); qerr != nil {
 		return configResult("params.qname", "invalid name")
 	}
 	maxTCP := e.MaxTCPResponse
@@ -134,12 +134,12 @@ func (e *DNSExecutor) Execute(ctx context.Context, spec probewire.ProbeSpec, _ m
 	start := time.Now()
 	var answer []byte
 	if p.Transport == "tcp" {
-		answer, err = dnsExchangeTCP(ctx, server, q, rd, p.RequireAD, maxTCP)
+		answer, err = dnsExchangeTCP(ctx, server, &q, rd, p.RequireAD, maxTCP)
 	} else {
 		var truncated bool
-		answer, truncated, err = dnsExchangeUDP(ctx, server, q, rd, p.RequireAD)
+		answer, truncated, err = dnsExchangeUDP(ctx, server, &q, rd, p.RequireAD)
 		if err == nil && truncated {
-			answer, err = dnsExchangeTCP(ctx, server, q, rd, p.RequireAD, maxTCP)
+			answer, err = dnsExchangeTCP(ctx, server, &q, rd, p.RequireAD, maxTCP)
 		}
 	}
 	elapsed := time.Since(start)
@@ -171,7 +171,7 @@ func evaluateDNS(answer []byte, p *dnsParams, wantRcode dnsmessage.RCode, elapse
 			return failResult(probewire.StatusFail, probewire.WarnAnswerMismatch)
 		}
 		count++
-		text, soa, err := dnsRecordText(&parser, rh)
+		text, soa, err := dnsRecordText(&parser, &rh)
 		if err != nil {
 			return failResult(probewire.StatusFail, probewire.WarnAnswerMismatch)
 		}
@@ -225,7 +225,7 @@ func evaluateDNS(answer []byte, p *dnsParams, wantRcode dnsmessage.RCode, elapse
 
 // dnsRecordText renders an answer record for the expect_contains match;
 // for SOA it also returns the serial.
-func dnsRecordText(p *dnsmessage.Parser, rh dnsmessage.ResourceHeader) (string, *uint32, error) {
+func dnsRecordText(p *dnsmessage.Parser, rh *dnsmessage.ResourceHeader) (string, *uint32, error) {
 	switch rh.Type {
 	case dnsmessage.TypeA:
 		r, err := p.AResource()
@@ -269,7 +269,7 @@ func dnsRecordText(p *dnsmessage.Parser, rh dnsmessage.ResourceHeader) (string, 
 
 // dnsQuery builds a query with a random ID: EDNS0 with a 4096-byte buffer,
 // RD as configured and the AD bit when require_ad asks for it (RFC 6840).
-func dnsQuery(q dnsmessage.Question, rd, ad bool) (uint16, []byte, error) {
+func dnsQuery(q *dnsmessage.Question, rd, ad bool) (uint16, []byte, error) {
 	var idb [2]byte
 	if _, err := rand.Read(idb[:]); err != nil {
 		return 0, nil, err
@@ -279,7 +279,7 @@ func dnsQuery(q dnsmessage.Question, rd, ad bool) (uint16, []byte, error) {
 	if err := b.StartQuestions(); err != nil {
 		return 0, nil, err
 	}
-	if err := b.Question(q); err != nil {
+	if err := b.Question(*q); err != nil {
 		return 0, nil, err
 	}
 	if err := b.StartAdditionals(); err != nil {
@@ -297,7 +297,7 @@ func dnsQuery(q dnsmessage.Question, rd, ad bool) (uint16, []byte, error) {
 }
 
 // dnsMatches reports whether msg is the answer to the query id/q.
-func dnsMatches(msg []byte, id uint16, q dnsmessage.Question) bool {
+func dnsMatches(msg []byte, id uint16, q *dnsmessage.Question) bool {
 	var p dnsmessage.Parser
 	h, err := p.Start(msg)
 	if err != nil || h.ID != id || !h.Response {
@@ -316,7 +316,7 @@ func dnsHeaderMatches(msg []byte, id uint16) bool {
 	return len(msg) >= 12 && binary.BigEndian.Uint16(msg[:2]) == id && msg[2]&0x80 != 0
 }
 
-func dnsExchangeUDP(ctx context.Context, server string, q dnsmessage.Question, rd, ad bool) ([]byte, bool, error) {
+func dnsExchangeUDP(ctx context.Context, server string, q *dnsmessage.Question, rd, ad bool) ([]byte, bool, error) {
 	id, query, err := dnsQuery(q, rd, ad)
 	if err != nil {
 		return nil, false, err
@@ -356,7 +356,7 @@ func dnsExchangeUDP(ctx context.Context, server string, q dnsmessage.Question, r
 	}
 }
 
-func dnsExchangeTCP(ctx context.Context, server string, q dnsmessage.Question, rd, ad bool, maxResponse int) ([]byte, error) {
+func dnsExchangeTCP(ctx context.Context, server string, q *dnsmessage.Question, rd, ad bool, maxResponse int) ([]byte, error) {
 	id, query, err := dnsQuery(q, rd, ad)
 	if err != nil {
 		return nil, err

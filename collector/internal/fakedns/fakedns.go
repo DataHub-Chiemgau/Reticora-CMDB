@@ -151,7 +151,7 @@ func (s *Server) SetOversize(n int) { s.mu.Lock(); s.oversize = n; s.mu.Unlock()
 func (s *Server) SetCloseTCP(mode int) { s.mu.Lock(); s.closeTCP = mode; s.mu.Unlock() }
 
 // Add adds a record; the name of its header is the owner name.
-func (s *Server) Add(rr dnsmessage.Resource) {
+func (s *Server) Add(rr *dnsmessage.Resource) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	name := canonical(rr.Header.Name.String())
@@ -162,7 +162,7 @@ func (s *Server) Add(rr dnsmessage.Resource) {
 		rr.Header.TTL = 300
 	}
 	k := key{name, rr.Header.Type}
-	s.zone[k] = append(s.zone[k], rr)
+	s.zone[k] = append(s.zone[k], *rr)
 	s.names[name] = true
 }
 
@@ -173,33 +173,33 @@ func hdr(name string, typ dnsmessage.Type) dnsmessage.ResourceHeader {
 // AddA adds an A record.
 func (s *Server) AddA(name, ip string) {
 	a := netip.MustParseAddr(ip).As4()
-	s.Add(dnsmessage.Resource{Header: hdr(name, dnsmessage.TypeA), Body: &dnsmessage.AResource{A: a}})
+	s.Add(&dnsmessage.Resource{Header: hdr(name, dnsmessage.TypeA), Body: &dnsmessage.AResource{A: a}})
 }
 
 // AddAAAA adds an AAAA record.
 func (s *Server) AddAAAA(name, ip string) {
 	a := netip.MustParseAddr(ip).As16()
-	s.Add(dnsmessage.Resource{Header: hdr(name, dnsmessage.TypeAAAA), Body: &dnsmessage.AAAAResource{AAAA: a}})
+	s.Add(&dnsmessage.Resource{Header: hdr(name, dnsmessage.TypeAAAA), Body: &dnsmessage.AAAAResource{AAAA: a}})
 }
 
 // AddCNAME adds a CNAME record.
 func (s *Server) AddCNAME(name, target string) {
-	s.Add(dnsmessage.Resource{Header: hdr(name, dnsmessage.TypeCNAME), Body: &dnsmessage.CNAMEResource{CNAME: dnsmessage.MustNewName(canonical(target))}})
+	s.Add(&dnsmessage.Resource{Header: hdr(name, dnsmessage.TypeCNAME), Body: &dnsmessage.CNAMEResource{CNAME: dnsmessage.MustNewName(canonical(target))}})
 }
 
 // AddMX adds an MX record.
 func (s *Server) AddMX(name string, pref uint16, host string) {
-	s.Add(dnsmessage.Resource{Header: hdr(name, dnsmessage.TypeMX), Body: &dnsmessage.MXResource{Pref: pref, MX: dnsmessage.MustNewName(canonical(host))}})
+	s.Add(&dnsmessage.Resource{Header: hdr(name, dnsmessage.TypeMX), Body: &dnsmessage.MXResource{Pref: pref, MX: dnsmessage.MustNewName(canonical(host))}})
 }
 
 // AddNS adds an NS record.
 func (s *Server) AddNS(name, ns string) {
-	s.Add(dnsmessage.Resource{Header: hdr(name, dnsmessage.TypeNS), Body: &dnsmessage.NSResource{NS: dnsmessage.MustNewName(canonical(ns))}})
+	s.Add(&dnsmessage.Resource{Header: hdr(name, dnsmessage.TypeNS), Body: &dnsmessage.NSResource{NS: dnsmessage.MustNewName(canonical(ns))}})
 }
 
 // AddSOA adds an SOA record.
 func (s *Server) AddSOA(name, ns, mbox string, serial uint32) {
-	s.Add(dnsmessage.Resource{Header: hdr(name, dnsmessage.TypeSOA), Body: &dnsmessage.SOAResource{
+	s.Add(&dnsmessage.Resource{Header: hdr(name, dnsmessage.TypeSOA), Body: &dnsmessage.SOAResource{
 		NS: dnsmessage.MustNewName(canonical(ns)), MBox: dnsmessage.MustNewName(canonical(mbox)),
 		Serial: serial, Refresh: 3600, Retry: 600, Expire: 86400, MinTTL: 300,
 	}})
@@ -207,17 +207,17 @@ func (s *Server) AddSOA(name, ns, mbox string, serial uint32) {
 
 // AddTXT adds a TXT record.
 func (s *Server) AddTXT(name string, txt ...string) {
-	s.Add(dnsmessage.Resource{Header: hdr(name, dnsmessage.TypeTXT), Body: &dnsmessage.TXTResource{TXT: txt}})
+	s.Add(&dnsmessage.Resource{Header: hdr(name, dnsmessage.TypeTXT), Body: &dnsmessage.TXTResource{TXT: txt}})
 }
 
 // AddPTR adds a PTR record.
 func (s *Server) AddPTR(name, ptr string) {
-	s.Add(dnsmessage.Resource{Header: hdr(name, dnsmessage.TypePTR), Body: &dnsmessage.PTRResource{PTR: dnsmessage.MustNewName(canonical(ptr))}})
+	s.Add(&dnsmessage.Resource{Header: hdr(name, dnsmessage.TypePTR), Body: &dnsmessage.PTRResource{PTR: dnsmessage.MustNewName(canonical(ptr))}})
 }
 
 // AddSRV adds an SRV record.
 func (s *Server) AddSRV(name string, prio, weight, port uint16, target string) {
-	s.Add(dnsmessage.Resource{Header: hdr(name, dnsmessage.TypeSRV), Body: &dnsmessage.SRVResource{
+	s.Add(&dnsmessage.Resource{Header: hdr(name, dnsmessage.TypeSRV), Body: &dnsmessage.SRVResource{
 		Priority: prio, Weight: weight, Port: port, Target: dnsmessage.MustNewName(canonical(target)),
 	}})
 }
@@ -226,7 +226,7 @@ func (s *Server) AddSRV(name string, prio, weight, port uint16, target string) {
 func (s *Server) AddCAA(name string, flags uint8, tag, value string) {
 	data := append([]byte{flags, byte(len(tag))}, tag...)
 	data = append(data, value...)
-	s.Add(dnsmessage.Resource{Header: hdr(name, TypeCAA), Body: &dnsmessage.UnknownResource{Type: TypeCAA, Data: data}})
+	s.Add(&dnsmessage.Resource{Header: hdr(name, TypeCAA), Body: &dnsmessage.UnknownResource{Type: TypeCAA, Data: data}})
 }
 
 func canonical(name string) string {
@@ -339,7 +339,7 @@ func (s *Server) answers(query []byte, transport string) [][]byte {
 		records = nil
 	}
 	build := func(id uint16) []byte {
-		msg, err := buildMessage(id, &h, q, rc, ad, tc, records, oversize)
+		msg, err := buildMessage(id, &h, &q, rc, ad, tc, records, oversize)
 		if err != nil {
 			return nil
 		}
@@ -354,7 +354,7 @@ func (s *Server) answers(query []byte, transport string) [][]byte {
 	return [][]byte{build(h.ID)}
 }
 
-func buildMessage(id uint16, qh *dnsmessage.Header, q dnsmessage.Question, rc dnsmessage.RCode, ad, tc bool, records []dnsmessage.Resource, oversize int) ([]byte, error) {
+func buildMessage(id uint16, qh *dnsmessage.Header, q *dnsmessage.Question, rc dnsmessage.RCode, ad, tc bool, records []dnsmessage.Resource, oversize int) ([]byte, error) {
 	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{
 		ID: id, Response: true, Authoritative: true, RecursionDesired: qh.RecursionDesired,
 		RecursionAvailable: true, AuthenticData: ad, Truncated: tc, RCode: rc,
@@ -363,13 +363,16 @@ func buildMessage(id uint16, qh *dnsmessage.Header, q dnsmessage.Question, rc dn
 	if err := b.StartQuestions(); err != nil {
 		return nil, err
 	}
-	if err := b.Question(q); err != nil {
+	if err := b.Question(*q); err != nil {
 		return nil, err
 	}
 	if err := b.StartAnswers(); err != nil {
 		return nil, err
 	}
-	for _, rr := range records {
+	// records is the per-query copy made in answers, so the owner name
+	// may be rewritten in place.
+	for i := range records {
+		rr := &records[i]
 		rr.Header.Name = q.Name // keep the spelling of the question
 		if err := addResource(&b, rr); err != nil {
 			return nil, err
@@ -386,7 +389,7 @@ func buildMessage(id uint16, qh *dnsmessage.Header, q dnsmessage.Question, rc dn
 	return b.Finish()
 }
 
-func addResource(b *dnsmessage.Builder, rr dnsmessage.Resource) error {
+func addResource(b *dnsmessage.Builder, rr *dnsmessage.Resource) error {
 	switch body := rr.Body.(type) {
 	case *dnsmessage.AResource:
 		return b.AResource(rr.Header, *body)
