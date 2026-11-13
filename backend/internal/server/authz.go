@@ -401,6 +401,12 @@ var routeRules = []routeRule{
 	// (WP-272); the handler also requires asset:write.
 	{http.MethodPost, "assets/*/cis", identity.PermCIWrite},
 	{http.MethodDelete, "assets/*/cis/*", identity.PermCIWrite},
+	// Deciding on a workflow approval and the approval inbox need the
+	// approval right (RBA-05, E-230, WP-1098); the handler also checks the
+	// approver circle of the step, and the inbox without mine=true
+	// workflow:write.
+	{http.MethodPost, "workflow-runs/*/approval", identity.PermWorkflowApprove},
+	{http.MethodGet, "workflow-approvals", identity.PermWorkflowApprove},
 	// Approving or rejecting an order is not editing it.
 	{http.MethodPost, "orders/*/approve", identity.PermOrderApprove},
 	{http.MethodPost, "orders/*/reject", identity.PermOrderApprove},

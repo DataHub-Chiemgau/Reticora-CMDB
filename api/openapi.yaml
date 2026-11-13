@@ -13909,12 +13909,56 @@ paths:
       operationId: approveWorkflowRun
       tags: [Workflows]
       summary: Approve or reject a waiting workflow run
+      description: >-
+        The decision of the calling user on the waiting approval step
+        (WFL-02, WP-1098, E-230). Requires workflow:approve; the caller must
+        also be in the approver circle of the step (the users with
+        workflow:approve in client and site of the run among the users,
+        teams and roles of the action, without the initiator unless
+        exclude_initiator is false), otherwise 403. A second decision of the
+        same user on the same step is 409, a run without a waiting approval
+        400. A rejection cancels step and run; once the approvals reach the
+        quorum the run continues (queued as workflow.run), otherwise it keeps
+        waiting. The answer names approvals and quorum of the step. Writes
+        workflow.approval_decided in the transaction of the decision.
       requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowApprovalRequest' } } } }
       responses:
-        '200': { description: Updated workflow run, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowRun' } } } }
+        '200': { description: The run with the state of its approval step, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowApprovalResult' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/workflow-approvals:
+    x-phase: P3
+    x-feature: workflows
+    get:
+      operationId: listWorkflowApprovals
+      tags: [Workflows]
+      summary: List waiting workflow approvals
+      description: >-
+        The approval inbox (WFL-02, WP-1098): with mine=true the waiting
+        approval steps whose approver circle holds the caller and on which
+        the caller has not decided yet; with mine=false every waiting
+        approval step in the caller's scope, which needs workflow:write as
+        well (403 otherwise). Without mine a caller with workflow:write gets
+        every step, any other caller its own inbox. Requires
+        workflow:approve. Newest request first, paged by offset cursor.
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
+        - name: mine
+          in: query
+          description: Only the steps the caller may still decide on.
+          schema: { type: boolean }
+      responses:
+        '200': { description: Paginated waiting approval steps, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowApprovalListResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/workflow-runs/{id}/cancel:
     x-phase: P3
     x-feature: workflows
@@ -41051,7 +41095,20 @@ components:
             of payload that is exactly ${<path>} becomes the value of the run
             context under that path, null for an unknown one. The action
             names no target of its own: url, headers, secret and event are
-            refused with 422 on actions[i].<field>. set_ci_field (WP-1097):
+            refused with 422 on actions[i].<field>. require_approval
+            (WP-1098, E-230): {"type": "require_approval", "message": <text>,
+            "approvers": {"users": [<user id>], "teams": [<team id>],
+            "roles": [<role name>]}, "quorum": <1 to 10, default 1>,
+            "exclude_initiator": <boolean, default true>, "deadline":
+            <duration such as "72h" or "3d", at most 30 days>, "on_timeout":
+            reject (default) | escalate, "escalate_to": {"users", "teams",
+            "roles"}, "remind_before": <duration shorter than the deadline>}
+            waits for quorum approvals of the approver circle: the users with
+            workflow:approve in client and site of the run among those named
+            (none named: every holder), without the initiator unless
+            exclude_initiator is false; one rejection cancels the run.
+            Several stages are several require_approval steps. An invalid
+            value is 422 on actions[i].<field>. set_ci_field (WP-1097):
             {"type": "set_ci_field", "ci_id": <CI, default the run's CI>,
             "fields": {<field>: <value>, ...} (at most 50) or "field" and
             "value"} writes as source workflow (rank 92) through the CI
@@ -41113,7 +41170,20 @@ components:
             of payload that is exactly ${<path>} becomes the value of the run
             context under that path, null for an unknown one. The action
             names no target of its own: url, headers, secret and event are
-            refused with 422 on actions[i].<field>. set_ci_field (WP-1097):
+            refused with 422 on actions[i].<field>. require_approval
+            (WP-1098, E-230): {"type": "require_approval", "message": <text>,
+            "approvers": {"users": [<user id>], "teams": [<team id>],
+            "roles": [<role name>]}, "quorum": <1 to 10, default 1>,
+            "exclude_initiator": <boolean, default true>, "deadline":
+            <duration such as "72h" or "3d", at most 30 days>, "on_timeout":
+            reject (default) | escalate, "escalate_to": {"users", "teams",
+            "roles"}, "remind_before": <duration shorter than the deadline>}
+            waits for quorum approvals of the approver circle: the users with
+            workflow:approve in client and site of the run among those named
+            (none named: every holder), without the initiator unless
+            exclude_initiator is false; one rejection cancels the run.
+            Several stages are several require_approval steps. An invalid
+            value is 422 on actions[i].<field>. set_ci_field (WP-1097):
             {"type": "set_ci_field", "ci_id": <CI, default the run's CI>,
             "fields": {<field>: <value>, ...} (at most 50) or "field" and
             "value"} writes as source workflow (rank 92) through the CI
@@ -41188,7 +41258,20 @@ components:
             of payload that is exactly ${<path>} becomes the value of the run
             context under that path, null for an unknown one. The action
             names no target of its own: url, headers, secret and event are
-            refused with 422 on actions[i].<field>. set_ci_field (WP-1097):
+            refused with 422 on actions[i].<field>. require_approval
+            (WP-1098, E-230): {"type": "require_approval", "message": <text>,
+            "approvers": {"users": [<user id>], "teams": [<team id>],
+            "roles": [<role name>]}, "quorum": <1 to 10, default 1>,
+            "exclude_initiator": <boolean, default true>, "deadline":
+            <duration such as "72h" or "3d", at most 30 days>, "on_timeout":
+            reject (default) | escalate, "escalate_to": {"users", "teams",
+            "roles"}, "remind_before": <duration shorter than the deadline>}
+            waits for quorum approvals of the approver circle: the users with
+            workflow:approve in client and site of the run among those named
+            (none named: every holder), without the initiator unless
+            exclude_initiator is false; one rejection cancels the run.
+            Several stages are several require_approval steps. An invalid
+            value is 422 on actions[i].<field>. set_ci_field (WP-1097):
             {"type": "set_ci_field", "ci_id": <CI, default the run's CI>,
             "fields": {<field>: <value>, ...} (at most 50) or "field" and
             "value"} writes as source workflow (rank 92) through the CI
@@ -41261,7 +41344,20 @@ components:
             of payload that is exactly ${<path>} becomes the value of the run
             context under that path, null for an unknown one. The action
             names no target of its own: url, headers, secret and event are
-            refused with 422 on actions[i].<field>. set_ci_field (WP-1097):
+            refused with 422 on actions[i].<field>. require_approval
+            (WP-1098, E-230): {"type": "require_approval", "message": <text>,
+            "approvers": {"users": [<user id>], "teams": [<team id>],
+            "roles": [<role name>]}, "quorum": <1 to 10, default 1>,
+            "exclude_initiator": <boolean, default true>, "deadline":
+            <duration such as "72h" or "3d", at most 30 days>, "on_timeout":
+            reject (default) | escalate, "escalate_to": {"users", "teams",
+            "roles"}, "remind_before": <duration shorter than the deadline>}
+            waits for quorum approvals of the approver circle: the users with
+            workflow:approve in client and site of the run among those named
+            (none named: every holder), without the initiator unless
+            exclude_initiator is false; one rejection cancels the run.
+            Several stages are several require_approval steps. An invalid
+            value is 422 on actions[i].<field>. set_ci_field (WP-1097):
             {"type": "set_ci_field", "ci_id": <CI, default the run's CI>,
             "fields": {<field>: <value>, ...} (at most 50) or "field" and
             "value"} writes as source workflow (rank 92) through the CI
@@ -41341,6 +41437,35 @@ components:
       properties:
         decision: { type: string, enum: [approved, rejected] }
         comment: { type: string }
+    WorkflowApprovalResult:
+      allOf:
+        - $ref: '#/components/schemas/WorkflowRun'
+        - type: object
+          required: [approvals, quorum]
+          properties:
+            approvals: { type: integer, minimum: 0, description: Approvals of the approval step so far. }
+            quorum: { type: integer, minimum: 1, maximum: 10, description: Approvals the step needs. }
+    WorkflowPendingApproval:
+      type: object
+      required: [run_id, workflow_id, workflow_name, step_id, step_index, message, quorum, approvals, requested_at]
+      properties:
+        run_id: { type: string }
+        workflow_id: { type: string }
+        workflow_name: { type: string }
+        step_id: { type: string }
+        step_index: { type: integer }
+        message: { type: string }
+        due_at: { type: string, format: date-time, description: Deadline of the approval; absent without one. }
+        quorum: { type: integer, minimum: 1, maximum: 10 }
+        approvals: { type: integer, minimum: 0 }
+        ci_id: { type: string }
+        requested_at: { type: string, format: date-time }
+    WorkflowApprovalListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties: { data: { type: array, items: { $ref: '#/components/schemas/WorkflowPendingApproval' } } }
     WorkflowDefinitionListResponse:
       allOf:
         - $ref: '#/components/schemas/PaginationEnvelope'

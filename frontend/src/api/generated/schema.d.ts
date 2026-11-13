@@ -5931,8 +5931,31 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Approve or reject a waiting workflow run */
+    /**
+     * Approve or reject a waiting workflow run
+     * @description The decision of the calling user on the waiting approval step (WFL-02, WP-1098, E-230). Requires workflow:approve; the caller must also be in the approver circle of the step (the users with workflow:approve in client and site of the run among the users, teams and roles of the action, without the initiator unless exclude_initiator is false), otherwise 403. A second decision of the same user on the same step is 409, a run without a waiting approval 400. A rejection cancels step and run; once the approvals reach the quorum the run continues (queued as workflow.run), otherwise it keeps waiting. The answer names approvals and quorum of the step. Writes workflow.approval_decided in the transaction of the decision.
+     */
     post: operations['approveWorkflowRun'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/workflow-approvals': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List waiting workflow approvals
+     * @description The approval inbox (WFL-02, WP-1098): with mine=true the waiting approval steps whose approver circle holds the caller and on which the caller has not decided yet; with mine=false every waiting approval step in the caller's scope, which needs workflow:write as well (403 otherwise). Without mine a caller with workflow:write gets every step, any other caller its own inbox. Requires workflow:approve. Newest request first, paged by offset cursor.
+     */
+    get: operations['listWorkflowApprovals'];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -20050,7 +20073,7 @@ export interface components {
       trigger: components['schemas']['JSONValue'];
       /** @description MET-45 condition nodes of api/rules.schema.json (eq, ne, in, not_in, gt, gte, lt, lte, contains, empty, not_empty, all, any, not; CH18, E-229) combined with all; an empty list always holds. They are evaluated over the run context flattened to dot paths (event.type, data.<field>, ci.status, ci.attributes.<name>). A refused node is 422 on conditions[i] with the path of the error. */
       conditions: components['schemas']['JSONValue'][];
-      /** @description Actions executed in order, each {"type": "<action>", ...}: noop, create_ticket, set_ci_field, transition_lifecycle, require_approval, submit_form, send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification", "recipients": {"users": [<user id>], "teams": [<team id>], "roles": [<role name>], "contact_roles": [owner | escalation | operator | responsible | vendor of the run's CI], "client_contacts": {"roles": [<contact role>], "organization": <boolean>}}, "subject": <text or {"de": ..., "en": ...}>, "body": <text or {"de": ..., "en": ...}>, "critical": <boolean, default false>, "channel_ids": [<channel id>]}. Texts may name values of the run context as {{path}}. The notification has the category workflow; users receive it only with ci:read in client and site of the run's CI (workflow:read without a CI). An unknown user, team or role or no recipient fails the step with "notification has no recipient". send_webhook (WP-1096, E-231): {"type": "send_webhook", "topic": <^[a-z0-9_.-]{1,64}$>, "payload": <object>} hands the event workflow.webhook (run_id, workflow_id, definition_version_id, step_index, topic, ci_id, payload) to the active webhook subscriptions of the organization; a string value of payload that is exactly ${<path>} becomes the value of the run context under that path, null for an unknown one. The action names no target of its own: url, headers, secret and event are refused with 422 on actions[i].<field>. set_ci_field (WP-1097): {"type": "set_ci_field", "ci_id": <CI, default the run's CI>, "fields": {<field>: <value>, ...} (at most 50) or "field" and "value"} writes as source workflow (rank 92) through the CI service in one update (one version step, one audit entry ci.updated with the initiator as actor, source system and the run id as correlation id); a manual override stays and opens the review override_conflict, the action and field rights the initiator holds (an inactive initiator writes nothing) and the attribute and catalog rules apply (refusal fails the step, violations in its output); the output names written and reason per field. transition_lifecycle (LCY-04, WP-1097): {"type": "transition_lifecycle", "to_state": <state>, "reason": <text>, "context": <object>, "from_state": <state>, "entity": ci | asset, "ci_id" | "asset_id"} moves the CI (default the run's CI) or the asset with the guards of its lifecycle model after the check of lifecycle:transition for the initiator; a guard violation fails the step with violations, guard and missing in its output. Neither action is repeated when an attempt was interrupted while its step ran. */
+      /** @description Actions executed in order, each {"type": "<action>", ...}: noop, create_ticket, set_ci_field, transition_lifecycle, require_approval, submit_form, send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification", "recipients": {"users": [<user id>], "teams": [<team id>], "roles": [<role name>], "contact_roles": [owner | escalation | operator | responsible | vendor of the run's CI], "client_contacts": {"roles": [<contact role>], "organization": <boolean>}}, "subject": <text or {"de": ..., "en": ...}>, "body": <text or {"de": ..., "en": ...}>, "critical": <boolean, default false>, "channel_ids": [<channel id>]}. Texts may name values of the run context as {{path}}. The notification has the category workflow; users receive it only with ci:read in client and site of the run's CI (workflow:read without a CI). An unknown user, team or role or no recipient fails the step with "notification has no recipient". send_webhook (WP-1096, E-231): {"type": "send_webhook", "topic": <^[a-z0-9_.-]{1,64}$>, "payload": <object>} hands the event workflow.webhook (run_id, workflow_id, definition_version_id, step_index, topic, ci_id, payload) to the active webhook subscriptions of the organization; a string value of payload that is exactly ${<path>} becomes the value of the run context under that path, null for an unknown one. The action names no target of its own: url, headers, secret and event are refused with 422 on actions[i].<field>. require_approval (WP-1098, E-230): {"type": "require_approval", "message": <text>, "approvers": {"users": [<user id>], "teams": [<team id>], "roles": [<role name>]}, "quorum": <1 to 10, default 1>, "exclude_initiator": <boolean, default true>, "deadline": <duration such as "72h" or "3d", at most 30 days>, "on_timeout": reject (default) | escalate, "escalate_to": {"users", "teams", "roles"}, "remind_before": <duration shorter than the deadline>} waits for quorum approvals of the approver circle: the users with workflow:approve in client and site of the run among those named (none named: every holder), without the initiator unless exclude_initiator is false; one rejection cancels the run. Several stages are several require_approval steps. An invalid value is 422 on actions[i].<field>. set_ci_field (WP-1097): {"type": "set_ci_field", "ci_id": <CI, default the run's CI>, "fields": {<field>: <value>, ...} (at most 50) or "field" and "value"} writes as source workflow (rank 92) through the CI service in one update (one version step, one audit entry ci.updated with the initiator as actor, source system and the run id as correlation id); a manual override stays and opens the review override_conflict, the action and field rights the initiator holds (an inactive initiator writes nothing) and the attribute and catalog rules apply (refusal fails the step, violations in its output); the output names written and reason per field. transition_lifecycle (LCY-04, WP-1097): {"type": "transition_lifecycle", "to_state": <state>, "reason": <text>, "context": <object>, "from_state": <state>, "entity": ci | asset, "ci_id" | "asset_id"} moves the CI (default the run's CI) or the asset with the guards of its lifecycle model after the check of lifecycle:transition for the initiator; a guard violation fails the step with violations, guard and missing in its output. Neither action is repeated when an attempt was interrupted while its step ran. */
       actions: components['schemas']['JSONValue'][];
       active: boolean;
       /** @description Number of the current definition version (WFL-02); the ETag. */
@@ -20070,7 +20093,7 @@ export interface components {
       version: number;
       trigger: components['schemas']['JSONValue'];
       conditions: components['schemas']['JSONValue'][];
-      /** @description Actions executed in order, each {"type": "<action>", ...}: noop, create_ticket, set_ci_field, transition_lifecycle, require_approval, submit_form, send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification", "recipients": {"users": [<user id>], "teams": [<team id>], "roles": [<role name>], "contact_roles": [owner | escalation | operator | responsible | vendor of the run's CI], "client_contacts": {"roles": [<contact role>], "organization": <boolean>}}, "subject": <text or {"de": ..., "en": ...}>, "body": <text or {"de": ..., "en": ...}>, "critical": <boolean, default false>, "channel_ids": [<channel id>]}. Texts may name values of the run context as {{path}}. The notification has the category workflow; users receive it only with ci:read in client and site of the run's CI (workflow:read without a CI). An unknown user, team or role or no recipient fails the step with "notification has no recipient". send_webhook (WP-1096, E-231): {"type": "send_webhook", "topic": <^[a-z0-9_.-]{1,64}$>, "payload": <object>} hands the event workflow.webhook (run_id, workflow_id, definition_version_id, step_index, topic, ci_id, payload) to the active webhook subscriptions of the organization; a string value of payload that is exactly ${<path>} becomes the value of the run context under that path, null for an unknown one. The action names no target of its own: url, headers, secret and event are refused with 422 on actions[i].<field>. set_ci_field (WP-1097): {"type": "set_ci_field", "ci_id": <CI, default the run's CI>, "fields": {<field>: <value>, ...} (at most 50) or "field" and "value"} writes as source workflow (rank 92) through the CI service in one update (one version step, one audit entry ci.updated with the initiator as actor, source system and the run id as correlation id); a manual override stays and opens the review override_conflict, the action and field rights the initiator holds (an inactive initiator writes nothing) and the attribute and catalog rules apply (refusal fails the step, violations in its output); the output names written and reason per field. transition_lifecycle (LCY-04, WP-1097): {"type": "transition_lifecycle", "to_state": <state>, "reason": <text>, "context": <object>, "from_state": <state>, "entity": ci | asset, "ci_id" | "asset_id"} moves the CI (default the run's CI) or the asset with the guards of its lifecycle model after the check of lifecycle:transition for the initiator; a guard violation fails the step with violations, guard and missing in its output. Neither action is repeated when an attempt was interrupted while its step ran. */
+      /** @description Actions executed in order, each {"type": "<action>", ...}: noop, create_ticket, set_ci_field, transition_lifecycle, require_approval, submit_form, send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification", "recipients": {"users": [<user id>], "teams": [<team id>], "roles": [<role name>], "contact_roles": [owner | escalation | operator | responsible | vendor of the run's CI], "client_contacts": {"roles": [<contact role>], "organization": <boolean>}}, "subject": <text or {"de": ..., "en": ...}>, "body": <text or {"de": ..., "en": ...}>, "critical": <boolean, default false>, "channel_ids": [<channel id>]}. Texts may name values of the run context as {{path}}. The notification has the category workflow; users receive it only with ci:read in client and site of the run's CI (workflow:read without a CI). An unknown user, team or role or no recipient fails the step with "notification has no recipient". send_webhook (WP-1096, E-231): {"type": "send_webhook", "topic": <^[a-z0-9_.-]{1,64}$>, "payload": <object>} hands the event workflow.webhook (run_id, workflow_id, definition_version_id, step_index, topic, ci_id, payload) to the active webhook subscriptions of the organization; a string value of payload that is exactly ${<path>} becomes the value of the run context under that path, null for an unknown one. The action names no target of its own: url, headers, secret and event are refused with 422 on actions[i].<field>. require_approval (WP-1098, E-230): {"type": "require_approval", "message": <text>, "approvers": {"users": [<user id>], "teams": [<team id>], "roles": [<role name>]}, "quorum": <1 to 10, default 1>, "exclude_initiator": <boolean, default true>, "deadline": <duration such as "72h" or "3d", at most 30 days>, "on_timeout": reject (default) | escalate, "escalate_to": {"users", "teams", "roles"}, "remind_before": <duration shorter than the deadline>} waits for quorum approvals of the approver circle: the users with workflow:approve in client and site of the run among those named (none named: every holder), without the initiator unless exclude_initiator is false; one rejection cancels the run. Several stages are several require_approval steps. An invalid value is 422 on actions[i].<field>. set_ci_field (WP-1097): {"type": "set_ci_field", "ci_id": <CI, default the run's CI>, "fields": {<field>: <value>, ...} (at most 50) or "field" and "value"} writes as source workflow (rank 92) through the CI service in one update (one version step, one audit entry ci.updated with the initiator as actor, source system and the run id as correlation id); a manual override stays and opens the review override_conflict, the action and field rights the initiator holds (an inactive initiator writes nothing) and the attribute and catalog rules apply (refusal fails the step, violations in its output); the output names written and reason per field. transition_lifecycle (LCY-04, WP-1097): {"type": "transition_lifecycle", "to_state": <state>, "reason": <text>, "context": <object>, "from_state": <state>, "entity": ci | asset, "ci_id" | "asset_id"} moves the CI (default the run's CI) or the asset with the guards of its lifecycle model after the check of lifecycle:transition for the initiator; a guard violation fails the step with violations, guard and missing in its output. Neither action is repeated when an attempt was interrupted while its step ran. */
       actions: components['schemas']['JSONValue'][];
       /** @description User who stored the version; absent for migrated versions and callers without a user. */
       created_by?: string;
@@ -20084,7 +20107,7 @@ export interface components {
       trigger: components['schemas']['JSONValue'];
       /** @description MET-45 condition nodes of api/rules.schema.json (eq, ne, in, not_in, gt, gte, lt, lte, contains, empty, not_empty, all, any, not; CH18, E-229) combined with all; an empty list always holds. They are evaluated over the run context flattened to dot paths (event.type, data.<field>, ci.status, ci.attributes.<name>). A refused node is 422 on conditions[i] with the path of the error. */
       conditions?: components['schemas']['JSONValue'][];
-      /** @description Actions executed in order, each {"type": "<action>", ...}: noop, create_ticket, set_ci_field, transition_lifecycle, require_approval, submit_form, send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification", "recipients": {"users": [<user id>], "teams": [<team id>], "roles": [<role name>], "contact_roles": [owner | escalation | operator | responsible | vendor of the run's CI], "client_contacts": {"roles": [<contact role>], "organization": <boolean>}}, "subject": <text or {"de": ..., "en": ...}>, "body": <text or {"de": ..., "en": ...}>, "critical": <boolean, default false>, "channel_ids": [<channel id>]}. Texts may name values of the run context as {{path}}. The notification has the category workflow; users receive it only with ci:read in client and site of the run's CI (workflow:read without a CI). An unknown user, team or role or no recipient fails the step with "notification has no recipient". send_webhook (WP-1096, E-231): {"type": "send_webhook", "topic": <^[a-z0-9_.-]{1,64}$>, "payload": <object>} hands the event workflow.webhook (run_id, workflow_id, definition_version_id, step_index, topic, ci_id, payload) to the active webhook subscriptions of the organization; a string value of payload that is exactly ${<path>} becomes the value of the run context under that path, null for an unknown one. The action names no target of its own: url, headers, secret and event are refused with 422 on actions[i].<field>. set_ci_field (WP-1097): {"type": "set_ci_field", "ci_id": <CI, default the run's CI>, "fields": {<field>: <value>, ...} (at most 50) or "field" and "value"} writes as source workflow (rank 92) through the CI service in one update (one version step, one audit entry ci.updated with the initiator as actor, source system and the run id as correlation id); a manual override stays and opens the review override_conflict, the action and field rights the initiator holds (an inactive initiator writes nothing) and the attribute and catalog rules apply (refusal fails the step, violations in its output); the output names written and reason per field. transition_lifecycle (LCY-04, WP-1097): {"type": "transition_lifecycle", "to_state": <state>, "reason": <text>, "context": <object>, "from_state": <state>, "entity": ci | asset, "ci_id" | "asset_id"} moves the CI (default the run's CI) or the asset with the guards of its lifecycle model after the check of lifecycle:transition for the initiator; a guard violation fails the step with violations, guard and missing in its output. Neither action is repeated when an attempt was interrupted while its step ran. */
+      /** @description Actions executed in order, each {"type": "<action>", ...}: noop, create_ticket, set_ci_field, transition_lifecycle, require_approval, submit_form, send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification", "recipients": {"users": [<user id>], "teams": [<team id>], "roles": [<role name>], "contact_roles": [owner | escalation | operator | responsible | vendor of the run's CI], "client_contacts": {"roles": [<contact role>], "organization": <boolean>}}, "subject": <text or {"de": ..., "en": ...}>, "body": <text or {"de": ..., "en": ...}>, "critical": <boolean, default false>, "channel_ids": [<channel id>]}. Texts may name values of the run context as {{path}}. The notification has the category workflow; users receive it only with ci:read in client and site of the run's CI (workflow:read without a CI). An unknown user, team or role or no recipient fails the step with "notification has no recipient". send_webhook (WP-1096, E-231): {"type": "send_webhook", "topic": <^[a-z0-9_.-]{1,64}$>, "payload": <object>} hands the event workflow.webhook (run_id, workflow_id, definition_version_id, step_index, topic, ci_id, payload) to the active webhook subscriptions of the organization; a string value of payload that is exactly ${<path>} becomes the value of the run context under that path, null for an unknown one. The action names no target of its own: url, headers, secret and event are refused with 422 on actions[i].<field>. require_approval (WP-1098, E-230): {"type": "require_approval", "message": <text>, "approvers": {"users": [<user id>], "teams": [<team id>], "roles": [<role name>]}, "quorum": <1 to 10, default 1>, "exclude_initiator": <boolean, default true>, "deadline": <duration such as "72h" or "3d", at most 30 days>, "on_timeout": reject (default) | escalate, "escalate_to": {"users", "teams", "roles"}, "remind_before": <duration shorter than the deadline>} waits for quorum approvals of the approver circle: the users with workflow:approve in client and site of the run among those named (none named: every holder), without the initiator unless exclude_initiator is false; one rejection cancels the run. Several stages are several require_approval steps. An invalid value is 422 on actions[i].<field>. set_ci_field (WP-1097): {"type": "set_ci_field", "ci_id": <CI, default the run's CI>, "fields": {<field>: <value>, ...} (at most 50) or "field" and "value"} writes as source workflow (rank 92) through the CI service in one update (one version step, one audit entry ci.updated with the initiator as actor, source system and the run id as correlation id); a manual override stays and opens the review override_conflict, the action and field rights the initiator holds (an inactive initiator writes nothing) and the attribute and catalog rules apply (refusal fails the step, violations in its output); the output names written and reason per field. transition_lifecycle (LCY-04, WP-1097): {"type": "transition_lifecycle", "to_state": <state>, "reason": <text>, "context": <object>, "from_state": <state>, "entity": ci | asset, "ci_id" | "asset_id"} moves the CI (default the run's CI) or the asset with the guards of its lifecycle model after the check of lifecycle:transition for the initiator; a guard violation fails the step with violations, guard and missing in its output. Neither action is repeated when an attempt was interrupted while its step ran. */
       actions: components['schemas']['JSONValue'][];
       active?: boolean;
     };
@@ -20095,7 +20118,7 @@ export interface components {
       trigger?: components['schemas']['JSONValue'];
       /** @description MET-45 condition nodes of api/rules.schema.json (eq, ne, in, not_in, gt, gte, lt, lte, contains, empty, not_empty, all, any, not; CH18, E-229) combined with all; an empty list always holds. They are evaluated over the run context flattened to dot paths (event.type, data.<field>, ci.status, ci.attributes.<name>). A refused node is 422 on conditions[i] with the path of the error. */
       conditions?: components['schemas']['JSONValue'][];
-      /** @description Actions executed in order, each {"type": "<action>", ...}: noop, create_ticket, set_ci_field, transition_lifecycle, require_approval, submit_form, send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification", "recipients": {"users": [<user id>], "teams": [<team id>], "roles": [<role name>], "contact_roles": [owner | escalation | operator | responsible | vendor of the run's CI], "client_contacts": {"roles": [<contact role>], "organization": <boolean>}}, "subject": <text or {"de": ..., "en": ...}>, "body": <text or {"de": ..., "en": ...}>, "critical": <boolean, default false>, "channel_ids": [<channel id>]}. Texts may name values of the run context as {{path}}. The notification has the category workflow; users receive it only with ci:read in client and site of the run's CI (workflow:read without a CI). An unknown user, team or role or no recipient fails the step with "notification has no recipient". send_webhook (WP-1096, E-231): {"type": "send_webhook", "topic": <^[a-z0-9_.-]{1,64}$>, "payload": <object>} hands the event workflow.webhook (run_id, workflow_id, definition_version_id, step_index, topic, ci_id, payload) to the active webhook subscriptions of the organization; a string value of payload that is exactly ${<path>} becomes the value of the run context under that path, null for an unknown one. The action names no target of its own: url, headers, secret and event are refused with 422 on actions[i].<field>. set_ci_field (WP-1097): {"type": "set_ci_field", "ci_id": <CI, default the run's CI>, "fields": {<field>: <value>, ...} (at most 50) or "field" and "value"} writes as source workflow (rank 92) through the CI service in one update (one version step, one audit entry ci.updated with the initiator as actor, source system and the run id as correlation id); a manual override stays and opens the review override_conflict, the action and field rights the initiator holds (an inactive initiator writes nothing) and the attribute and catalog rules apply (refusal fails the step, violations in its output); the output names written and reason per field. transition_lifecycle (LCY-04, WP-1097): {"type": "transition_lifecycle", "to_state": <state>, "reason": <text>, "context": <object>, "from_state": <state>, "entity": ci | asset, "ci_id" | "asset_id"} moves the CI (default the run's CI) or the asset with the guards of its lifecycle model after the check of lifecycle:transition for the initiator; a guard violation fails the step with violations, guard and missing in its output. Neither action is repeated when an attempt was interrupted while its step ran. */
+      /** @description Actions executed in order, each {"type": "<action>", ...}: noop, create_ticket, set_ci_field, transition_lifecycle, require_approval, submit_form, send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification", "recipients": {"users": [<user id>], "teams": [<team id>], "roles": [<role name>], "contact_roles": [owner | escalation | operator | responsible | vendor of the run's CI], "client_contacts": {"roles": [<contact role>], "organization": <boolean>}}, "subject": <text or {"de": ..., "en": ...}>, "body": <text or {"de": ..., "en": ...}>, "critical": <boolean, default false>, "channel_ids": [<channel id>]}. Texts may name values of the run context as {{path}}. The notification has the category workflow; users receive it only with ci:read in client and site of the run's CI (workflow:read without a CI). An unknown user, team or role or no recipient fails the step with "notification has no recipient". send_webhook (WP-1096, E-231): {"type": "send_webhook", "topic": <^[a-z0-9_.-]{1,64}$>, "payload": <object>} hands the event workflow.webhook (run_id, workflow_id, definition_version_id, step_index, topic, ci_id, payload) to the active webhook subscriptions of the organization; a string value of payload that is exactly ${<path>} becomes the value of the run context under that path, null for an unknown one. The action names no target of its own: url, headers, secret and event are refused with 422 on actions[i].<field>. require_approval (WP-1098, E-230): {"type": "require_approval", "message": <text>, "approvers": {"users": [<user id>], "teams": [<team id>], "roles": [<role name>]}, "quorum": <1 to 10, default 1>, "exclude_initiator": <boolean, default true>, "deadline": <duration such as "72h" or "3d", at most 30 days>, "on_timeout": reject (default) | escalate, "escalate_to": {"users", "teams", "roles"}, "remind_before": <duration shorter than the deadline>} waits for quorum approvals of the approver circle: the users with workflow:approve in client and site of the run among those named (none named: every holder), without the initiator unless exclude_initiator is false; one rejection cancels the run. Several stages are several require_approval steps. An invalid value is 422 on actions[i].<field>. set_ci_field (WP-1097): {"type": "set_ci_field", "ci_id": <CI, default the run's CI>, "fields": {<field>: <value>, ...} (at most 50) or "field" and "value"} writes as source workflow (rank 92) through the CI service in one update (one version step, one audit entry ci.updated with the initiator as actor, source system and the run id as correlation id); a manual override stays and opens the review override_conflict, the action and field rights the initiator holds (an inactive initiator writes nothing) and the attribute and catalog rules apply (refusal fails the step, violations in its output); the output names written and reason per field. transition_lifecycle (LCY-04, WP-1097): {"type": "transition_lifecycle", "to_state": <state>, "reason": <text>, "context": <object>, "from_state": <state>, "entity": ci | asset, "ci_id" | "asset_id"} moves the CI (default the run's CI) or the asset with the guards of its lifecycle model after the check of lifecycle:transition for the initiator; a guard violation fails the step with violations, guard and missing in its output. Neither action is repeated when an attempt was interrupted while its step ran. */
       actions?: components['schemas']['JSONValue'][];
       active?: boolean;
     };
@@ -20165,6 +20188,33 @@ export interface components {
       /** @enum {string} */
       decision: 'approved' | 'rejected';
       comment?: string;
+    };
+    WorkflowApprovalResult: components['schemas']['WorkflowRun'] & {
+      /** @description Approvals of the approval step so far. */
+      approvals: number;
+      /** @description Approvals the step needs. */
+      quorum: number;
+    };
+    WorkflowPendingApproval: {
+      run_id: string;
+      workflow_id: string;
+      workflow_name: string;
+      step_id: string;
+      step_index: number;
+      message: string;
+      /**
+       * Format: date-time
+       * @description Deadline of the approval; absent without one.
+       */
+      due_at?: string;
+      quorum: number;
+      approvals: number;
+      ci_id?: string;
+      /** Format: date-time */
+      requested_at: string;
+    };
+    WorkflowApprovalListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['WorkflowPendingApproval'][];
     };
     WorkflowDefinitionListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['WorkflowDefinition'][];
@@ -38282,18 +38332,63 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Updated workflow run */
+      /** @description The run with the state of its approval step */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['WorkflowRun'];
+          'application/json': components['schemas']['WorkflowApprovalResult'];
         };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+    };
+  };
+  listWorkflowApprovals: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        /** @description Only the steps the caller may still decide on. */
+        mine?: boolean;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Paginated waiting approval steps */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WorkflowApprovalListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
+      500: components['responses']['InternalServerError'];
     };
   };
   cancelWorkflowRun: {

@@ -264,6 +264,7 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 		webhookWorkflow                    string
 		runWorkflow, failingWorkflow       string
 		approvalWorkflow                   string
+		quorumWorkflow, decidedRun         string
 		rotatedCredential, agedCredential  string
 		usageCredential, usageCollector    string
 		usageScope, usageCI                string
@@ -1492,6 +1493,58 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 				return run
 			},
 			data: evt02RunData(&approvalWorkflow, "cancelled")},
+		// The approval model (WP-1098): the request of an approval and each
+		// decision write their event in their transaction. The admin holds
+		// workflow:approve through a role of the database (the approver
+		// circle) and may approve its own run (exclude_initiator false).
+		{typ: events.WorkflowApprovalRequested,
+			setup: func(t *testing.T) {
+				role := scalar(t, `INSERT INTO role (organization_id, name, scope, permissions) VALUES ($1, 'evt02-approvers', 'org', '["workflow:approve"]'::jsonb)
+					RETURNING id::text`, f.OrgA)
+				exec(t, `INSERT INTO role_assignment (organization_id, user_id, role_id) VALUES ($1, $2, $3)`, f.OrgA, admin.User, role)
+				quorumWorkflow = evt02Workflow(t, call, admin, "evt02-approval",
+					`[{"type": "require_approval", "exclude_initiator": false, "quorum": 1, "message": "evt02"}, {"type": "noop"}]`)
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/workflows/"+quorumWorkflow+"/runs", `{"context": {}}`)
+				answered(t, "run workflow", r, false, http.StatusCreated)
+				if refused {
+					// The request was rolled back: the step failed, the run
+					// with it, nothing waits.
+					run := evt02RunID(t, r, "failed")
+					unchanged(t, "approval step", scalar(t, `SELECT status FROM workflow_step WHERE run_id = $1 AND step_index = 0`, run), "failed")
+					return ""
+				}
+				decidedRun = evt02RunID(t, r, "waiting_approval")
+				return scalar(t, `SELECT id::text FROM workflow_step WHERE run_id = $1 AND step_index = 0`, decidedRun)
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["step_id"] != entity || data["run_id"] != decidedRun || data["step_key"] != "0" ||
+					data["quorum"] != 1.0 || data["workflow_id"] != quorumWorkflow {
+					t.Errorf("workflow.approval_requested data %v", data)
+				}
+			}},
+		{typ: events.WorkflowApprovalDecided,
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/workflows/"+quorumWorkflow+"/runs", `{"context": {}}`)
+				answered(t, "run workflow", r, false, http.StatusCreated)
+				run := evt02RunID(t, r, "waiting_approval")
+				r = call(t, admin, http.MethodPost, "/api/v1/workflow-runs/"+run+"/approval", `{"decision": "approved"}`)
+				answered(t, "approve run", r, refused, http.StatusOK)
+				if refused {
+					unchanged(t, "run whose approval was refused", scalar(t, `SELECT status || '/' || (SELECT count(*) FROM workflow_approval a WHERE a.run_id = r.id)
+						FROM workflow_run r WHERE id = $1`, run), "waiting_approval/0")
+					return ""
+				}
+				decidedRun = evt02RunID(t, r, "succeeded")
+				return scalar(t, `SELECT id::text FROM workflow_step WHERE run_id = $1 AND step_index = 0`, decidedRun)
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["run_id"] != decidedRun || data["decision"] != "approved" || data["approver_id"] != admin.User ||
+					data["approvals"] != 1.0 || data["quorum"] != 1.0 {
+					t.Errorf("workflow.approval_decided data %v", data)
+				}
+			}},
 	}
 
 	// The table covers every type of events.Types without a frame in
@@ -1938,8 +1991,6 @@ var plannedProducers = map[string]string{
 	"sla.violated":                "WP-1049",
 	"maintenance.started":         "WP-1033",
 	"maintenance.ended":           "WP-1033",
-	"workflow.approval_requested": "WP-1098",
-	"workflow.approval_decided":   "WP-1098",
 	"notification.escalated":      "WP-1146",
 	"notification.acknowledged":   "WP-1146",
 }

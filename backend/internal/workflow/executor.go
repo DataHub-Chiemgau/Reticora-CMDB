@@ -49,6 +49,9 @@ type Executor struct {
 	// send_notification (WithNotifier, WP-1095).
 	notifier   *notify.Notifier
 	recipients notify.Resolver
+	// approvers resolves the approver circles of require_approval
+	// (WithApprovers, WP-1098); nil: everyone the route admits.
+	approvers notify.Resolver
 	// eventOutbox makes send_webhook write workflow.webhook to the event
 	// outbox of the step's transaction (WithEventOutbox, WP-1096);
 	// without it the event goes to the dispatcher after the step.
@@ -197,33 +200,17 @@ func TriggerMatches(def *Definition, event string) bool {
 	return def != nil && triggerMatches(def.Trigger, event)
 }
 
-// Approve records decision on the approval step of a waiting run. The
-// decision and the change of the run happen in one transaction under the
-// run's row lock (Repository.DecideApproval): a run cancelled meanwhile
-// stays cancelled and the decision is ErrNotWaiting (WP-1092 AK1).
+// Approve records decision of the calling user on the approval step of a
+// waiting run and returns the run (Decide, WP-1098): the decision and the
+// change of the run happen in one transaction under the row locks of run and
+// step, so a run cancelled meanwhile stays cancelled and the decision is
+// ErrNotWaiting (WP-1092 AK1).
 func (e *Executor) Approve(ctx context.Context, orgID, runID, decision, comment string) (*Run, error) {
-	run, err := e.repo.GetRun(ctx, orgID, runID)
+	res, err := e.Decide(ctx, orgID, runID, decision, comment)
 	if err != nil {
 		return nil, err
 	}
-	if run.Status != StatusWaitingApproval {
-		return nil, ErrNotWaiting
-	}
-	if decision != "approved" && decision != "rejected" {
-		return nil, ErrInvalidDecision
-	}
-	out := JSONMap{"decision": decision, "comment": comment}
-	run, err = e.repo.DecideApproval(ctx, orgID, runID, decision == "approved", out)
-	if err != nil {
-		return nil, err
-	}
-	if decision == "rejected" {
-		return run, nil
-	}
-	if e.queue == nil {
-		return e.resume(ctx, orgID, run, attempt{})
-	}
-	return e.continueApproved(ctx, orgID, run)
+	return res.Run, nil
 }
 
 // Cancel ends a pending or waiting run as cancelled (WP-1092 AK1): its open
@@ -367,6 +354,17 @@ func (e *Executor) resume(ctx context.Context, orgID string, run *Run, at attemp
 			completed = err == nil
 		} else {
 			output, wait, err = e.executeAction(ctx, orgID, run, i, action)
+		}
+		if wait && err == nil && typ == approvalActionType {
+			// The approval is requested with its circle, quorum and
+			// deadline (WP-1098); a request that cannot be stored fails
+			// the step like a failed action.
+			waiting, rerr := e.requestApproval(ctx, orgID, run, step, action)
+			if rerr == nil {
+				return waiting, nil
+			}
+			output, err = nil, rerr
+			wait = false
 		}
 		if wait {
 			if _, markErr := e.repo.UpdateStep(ctx, orgID, step.ID, StatusWaitingApproval, output, ""); markErr != nil {
@@ -623,7 +621,7 @@ func (e *Executor) executeAction(ctx context.Context, orgID string, run *Run, in
 		return e.setCIFields(ctx, orgID, run, action)
 	case "transition_lifecycle":
 		return e.transitionLifecycle(ctx, orgID, run, action)
-	case "require_approval":
+	case approvalActionType:
 		return JSONMap{"message": str(action, "message", "Approval required")}, true, nil
 	case "send_notification":
 		out, err := e.sendNotification(ctx, orgID, run, index, action)

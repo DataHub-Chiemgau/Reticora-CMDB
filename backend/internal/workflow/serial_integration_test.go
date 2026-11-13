@@ -271,7 +271,7 @@ func TestRunsOfDifferentCIsRunInParallel(t *testing.T) {
 func TestWaitingApprovalDoesNotBlockCI(t *testing.T) {
 	e := newWorkerEnv(t, 5, true)
 	ciID := e.f.CI(t, e.f.OrgA, "", "wf-serial-approval")
-	waiting := e.startOn(t, ciID, nil, JSONMap{"type": "require_approval"}, JSONMap{"type": "noop"})
+	waiting := e.startOn(t, ciID, nil, JSONMap{"type": "require_approval", "exclude_initiator": false}, JSONMap{"type": "noop"})
 	if _, err := e.exec.Execute(e.ctx, e.f.OrgA, nil, waiting); err != nil {
 		t.Fatal(err)
 	}

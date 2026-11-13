@@ -61,11 +61,11 @@ type failingWorkflowRepository struct {
 	failOnRunCalls map[string]bool
 }
 
-func (f *failingWorkflowRepository) DecideApproval(ctx context.Context, orgID, id string, approved bool, output JSONMap) (*Run, error) {
+func (f *failingWorkflowRepository) decideVote(ctx context.Context, orgID, id string, v *approvalVote) (*ApprovalResult, error) {
 	if f.decideErr != nil {
 		return nil, f.decideErr
 	}
-	return f.MemoryRepository.DecideApproval(ctx, orgID, id, approved, output)
+	return f.MemoryRepository.decideVote(ctx, orgID, id, v)
 }
 
 func (f *failingWorkflowRepository) ListSteps(_ context.Context, orgID, runID string) ([]Step, error) {
@@ -141,7 +141,7 @@ func TestExecutorApproveListStepsFailure(t *testing.T) {
 		t.Fatalf("want waiting, got %s", run.Status)
 	}
 	// The decision and the change of the run are one write
-	// (DecideApproval, WP-1092): when it fails, the run still waits.
+	// (decideVote, WP-1092, WP-1098): when it fails, the run still waits.
 	repo.decideErr = errors.New("write denied")
 	if _, approveErr := exec.Approve(context.Background(), "org-1", run.ID, "approved", ""); approveErr == nil {
 		t.Fatal("expected error when the decision cannot be stored")

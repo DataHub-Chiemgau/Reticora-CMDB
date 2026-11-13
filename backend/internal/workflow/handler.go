@@ -59,6 +59,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/v1/workflow-runs/{id}/approval", h.ApproveRun)
 	r.Post("/api/v1/workflow-runs/{id}/cancel", h.CancelRun)
 	r.Post("/api/v1/workflow-runs/{id}/retry", h.RetryRun)
+	r.Get("/api/v1/workflow-approvals", h.ListApprovals)
 }
 func org(w http.ResponseWriter, r *http.Request) (tenant.TenantInfo, bool) {
 	t := tenant.FromContext(r.Context())
@@ -75,7 +76,7 @@ func org(w http.ResponseWriter, r *http.Request) (tenant.TenantInfo, bool) {
 // api.WriteRepoError; no table, constraint, policy or SQLSTATE text reaches
 // the client (API-03, F-047), the log keeps it.
 func writeWorkflowError(w http.ResponseWriter, r *http.Request, err error) {
-	for _, rule := range []error{ErrTriggerMismatch, ErrNotWaiting, ErrInvalidDecision, ErrInvalidAction} {
+	for _, rule := range []error{ErrTriggerMismatch, ErrNotWaiting, ErrInvalidDecision, ErrInvalidAction, ErrInvalidApproval} {
 		if errors.Is(err, rule) {
 			api.WriteError(w, 400, "Bad Request", rule.Error())
 			return
@@ -94,6 +95,10 @@ func writeWorkflowError(w http.ResponseWriter, r *http.Request, err error) {
 		api.WriteError(w, http.StatusConflict, "Conflict", ErrRunNotCancellable.Error())
 	case errors.Is(err, ErrRunNotRetryable):
 		api.WriteError(w, http.StatusConflict, "Conflict", ErrRunNotRetryable.Error())
+	case errors.Is(err, ErrNotApprover):
+		api.WriteError(w, http.StatusForbidden, "Forbidden", ErrNotApprover.Error())
+	case errors.Is(err, ErrAlreadyDecided):
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrAlreadyDecided.Error())
 	case errors.Is(err, ErrPreconditionFailed):
 		api.WritePreconditionFailed(w, ErrPreconditionFailed.Error())
 	case api.WriteFieldError(w, err):
@@ -105,8 +110,8 @@ func writeWorkflowError(w http.ResponseWriter, r *http.Request, err error) {
 
 // validateWrite checks trigger, conditions and actions a create or a PATCH
 // sends: filter and conditions after MET-45 (WP-1087), cron and time zone
-// of a schedule (WP-1091), the send_webhook actions (WP-1096); each
-// refusal is a 422 on its field.
+// of a schedule (WP-1091), the send_webhook actions (WP-1096) and the
+// require_approval actions (WP-1098); each refusal is a 422 on its field.
 func validateWrite(trigger JSONMap, conditions, actions []JSONMap) error {
 	if err := ValidateSchedule(trigger); err != nil {
 		return err
@@ -116,7 +121,10 @@ func validateWrite(trigger JSONMap, conditions, actions []JSONMap) error {
 	}
 	// send_webhook names a topic and no target of its own (E-231,
 	// WP-1096).
-	return validateActions(actions)
+	if err := validateActions(actions); err != nil {
+		return err
+	}
+	return validateApprovalActions(actions)
 }
 
 func (h *Handler) ListDefinitions(w http.ResponseWriter, r *http.Request) {
@@ -446,6 +454,11 @@ func (h *Handler) RetryRun(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, 200, run)
 }
 
+// ApproveRun handles POST /api/v1/workflow-runs/{id}/approval (WP-1098
+// AK4): the decision of the calling user, who must be in the approver
+// circle of the waiting step (403 otherwise, also for the excluded
+// initiator); a second decision is 409. The answer is the run with
+// approvals and quorum of the step.
 func (h *Handler) ApproveRun(w http.ResponseWriter, r *http.Request) {
 	t, ok := org(w, r)
 	if !ok {
@@ -460,10 +473,10 @@ func (h *Handler) ApproveRun(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, 400, "Bad Request", err.Error())
 		return
 	}
-	run, err := h.exec.Approve(r.Context(), t.OrganizationID, id, req.Decision, req.Comment)
+	res, err := h.exec.Decide(r.Context(), t.OrganizationID, id, req.Decision, req.Comment)
 	if err != nil {
 		writeWorkflowError(w, r, err)
 		return
 	}
-	api.WriteJSON(w, 200, run)
+	api.WriteJSON(w, 200, res)
 }

@@ -187,6 +187,7 @@ var featureRules = []featureRule{
 	gate("/api/v1/form-submissions", FeatureWorkflows),
 	gate("/api/v1/workflows", FeatureWorkflows),
 	gate("/api/v1/workflow-runs", FeatureWorkflows),
+	gate("/api/v1/workflow-approvals", FeatureWorkflows),
 	gate("/api/v1/compliance", FeatureComplianceFindings),
 	gate("/api/v1/iga", FeatureIGA),
 	gate("/scim/v2", FeatureIGA),

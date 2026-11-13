@@ -159,7 +159,7 @@ func TestPatchActionsCreatesVersion2(t *testing.T) {
 func TestWaitingRunKeepsVersion1(t *testing.T) {
 	e := newVersionEnv(t)
 	ctx := e.ctx(e.f.OrgA, e.user)
-	d := e.create(t, ctx, "wf-waiting", []workflow.JSONMap{{"type": "require_approval"}, {"type": "noop"}})
+	d := e.create(t, ctx, "wf-waiting", []workflow.JSONMap{{"type": "require_approval", "exclude_initiator": false}, {"type": "noop"}})
 	rec := e.do(t, ctx, http.MethodPost, "/api/v1/workflows/"+d.ID+"/runs", map[string]any{"trigger": "manual", "context": map[string]any{}}, nil)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("trigger: %d %s", rec.Code, rec.Body.String())

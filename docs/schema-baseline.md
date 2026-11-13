@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000360_compliance_score_snapshot
+Stand: Migration 000361_workflow_approval
 
 ## Prüfung
 
@@ -873,6 +873,32 @@ organization_id) besteht; Down entfernt ihn nur ohne verbleibende Verweise.
 `propagate_ci_scope` leitet auch die Peerings eines CI neu ab. ENABLE und
 FORCE RLS mit den Policies nach Konvention 5, `updated_at` und
 `reticora_truncate_guard`. Die Tabelle oben und die Zeile „Stand:“ erzeugt
+`RETICORA_UPDATE_SCHEMA_BASELINE=1` beim Zusammenführen neu.
+
+Migration `workflow_approval` (WP-1098, WFL-02, E-230, vorläufige Nummer
+000361) legt `workflow_approval` an: eine Zeile je Entscheidung eines
+Genehmigers zu einem Genehmigungsschritt (`decision` approved oder rejected,
+`comment`, `decided_at`), eindeutig über `workflow_approval_step_approver_key`
+(organization_id, step_id, approver_id). Die Fremdschlüssel sind
+zusammengesetzt mit Organisation (Konvention 19):
+`workflow_approval_run_fkey` auf `workflow_run` und
+`workflow_approval_step_fkey` auf `workflow_step` (ON DELETE CASCADE),
+`workflow_approval_approver_fkey` auf `app_user` (ON DELETE SET NULL
+(approver_id)). `workflow_step_id_organization_key` (und
+`workflow_run_id_organization_key`, falls er fehlt) entsteht nur, wenn noch
+kein eindeutiger Schlüssel über (id, organization_id) besteht; Down entfernt
+ihn nur ohne verbleibende Verweise. `client_id` und `site_id` übernimmt der
+BEFORE-Trigger `workflow_approval_scope` aus dem Run, ein Run mit neuem
+Scope nimmt seine Entscheidungen mit (`workflow_approval_scope_propagation`);
+die Tabelle steht damit nicht in `rls.DerivedScopeTables`. ENABLE und FORCE
+RLS mit der Policy `workflow_approval_isolation` (USING und WITH CHECK über
+`app.org_id`, `app.client_scope`, `app.site_scope`, ohne EXISTS) und den
+restriktiven `workflow_approval_scoped_update`/`_scoped_delete` (E-09, Muster
+000351); wie bei den Runs sind Entscheidungen ohne Client nur org-weit sichtbar
+(`matrixClientOnlyReads`). Dazu `reticora_truncate_guard`. `workflow_step`
+erhält `due_at` und `reminded_at` (Frist und Erinnerung, WP-1099) und den
+Teilindex `idx_workflow_step_due` (organization_id, due_at) WHERE status =
+'waiting_approval'. Die Tabelle oben und die Zeile „Stand:“ erzeugt
 `RETICORA_UPDATE_SCHEMA_BASELINE=1` beim Zusammenführen neu.
 
 `TestTenantReferencesCarryOrganization`
@@ -2253,6 +2279,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `webhook_dead_letter` | ja | ja | webhook_dead_letter_isolation (ALL), webhook_dead_letter_system_select (SELECT) |
 | `webhook_delivery` | ja | ja | webhook_delivery_isolation (ALL), webhook_delivery_system_select (SELECT) |
 | `webhook_subscription` | ja | ja | webhook_sub_isolation (ALL), webhook_sub_scope_select (SELECT) |
+| `workflow_approval` | ja | ja | workflow_approval_isolation (ALL), workflow_approval_scoped_delete (DELETE), workflow_approval_scoped_update (UPDATE) |
 | `workflow_def` | ja | ja | workflow_def_tenant_isolation (ALL) |
 | `workflow_def_version` | ja | ja | workflow_def_version_tenant_isolation (ALL) |
 | `workflow_run` | ja | ja | workflow_run_scoped_delete (DELETE), workflow_run_scoped_update (UPDATE), workflow_run_tenant_isolation (ALL) |

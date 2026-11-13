@@ -445,6 +445,7 @@ GET /api/v1/webhooks webhook:read
 GET /api/v1/webhooks/dead-letters webhook:read
 GET /api/v1/webhooks/{id} webhook:read
 GET /api/v1/webhooks/{id}/deliveries webhook:read
+GET /api/v1/workflow-approvals workflow:approve
 GET /api/v1/workflow-runs workflow:read
 GET /api/v1/workflow-runs/{id} workflow:read
 GET /api/v1/workflows workflow:read
@@ -762,7 +763,7 @@ POST /api/v1/webhooks webhook:manage
 POST /api/v1/webhooks/{id}/deliveries/{delivery_id}/retry webhook:manage
 POST /api/v1/webhooks/{id}/rotate-secret webhook:manage
 POST /api/v1/webhooks/{id}/test webhook:manage
-POST /api/v1/workflow-runs/{id}/approval workflow:write
+POST /api/v1/workflow-runs/{id}/approval workflow:approve
 POST /api/v1/workflow-runs/{id}/cancel workflow:write
 POST /api/v1/workflow-runs/{id}/retry workflow:write
 POST /api/v1/workflows workflow:write

@@ -253,6 +253,9 @@ func TestSpecialActionsRequireTheirOwnPermission(t *testing.T) {
 		{http.MethodPost, "/api/v1/lifecycle-definitions", identity.PermLifecycleManage},
 		{http.MethodDelete, "/api/v1/lifecycle-definitions/{id}", identity.PermLifecycleManage},
 		{http.MethodPost, "/api/v1/stocktakes/{id}/complete", identity.PermStocktakeComplete},
+		// The decision on a workflow approval (WP-1098): workflow:approve,
+		// not workflow:write.
+		{http.MethodPost, "/api/v1/workflow-runs/{id}/approval", identity.PermWorkflowApprove},
 	} {
 		got, access := PermissionForRoute(c.method, c.path)
 		if access != routeProtected || got != c.want {

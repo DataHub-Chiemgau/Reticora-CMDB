@@ -295,7 +295,7 @@ func TestCancelRacesApproval(t *testing.T) {
 	e := newWorkerEnv(t, 5, false)
 	sync := e.syncExec(e.forms)
 	waiting := func() *Run {
-		run := e.start(t, e.ctx, JSONMap{"type": "require_approval"}, JSONMap{"type": "noop"})
+		run := e.start(t, e.ctx, JSONMap{"type": "require_approval", "exclude_initiator": false}, JSONMap{"type": "noop"})
 		if out, err := sync.Execute(e.ctx, e.f.OrgA, nil, run); err != nil || out.Status != StatusWaitingApproval {
 			t.Fatalf("waiting run: %+v %v", out, err)
 		}

@@ -666,6 +666,12 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	if opts.Notifier != nil && opts.AuditPool != nil && repos.Permission != nil {
 		workflowRuns.WithNotifier(opts.Notifier, notify.NewPGResolver(opts.AuditPool, repos.Permission))
 	}
+	// The approver circles of require_approval: holders of
+	// workflow:approve in client and site of the run (WP-1098); without
+	// the database (--no-db) everyone the route admits.
+	if opts.AuditPool != nil && repos.Permission != nil {
+		workflowRuns.WithApprovers(notify.NewPGResolver(opts.AuditPool, repos.Permission))
+	}
 	if repos.Jobs != nil {
 		jobService := jobs.NewService(repos.Jobs)
 		jobTracker = jobService

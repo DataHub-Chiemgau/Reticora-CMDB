@@ -59,6 +59,8 @@ var matrixClientOnlyReads = map[string]string{
 	// E-09).
 	"workflow_run":  "workflow runs without CI, migration 000351 (WP-1093): workflow.TestRunWithoutCIOnlyForOrgWidePrincipal",
 	"workflow_step": "steps of workflow runs without CI, migration 000351 (WP-1093): workflow.TestWorkflowStepFollowsRunScope",
+	// Approval decisions follow their run (WP-1098, migration 000361).
+	"workflow_approval": "decisions on workflow runs without CI, migration 000361 (WP-1098): workflow.TestApprovalClientScope",
 }
 
 // matrixSiteWrites lists the tables with a client but without a site column
