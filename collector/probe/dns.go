@@ -225,36 +225,36 @@ func evaluateDNS(answer []byte, p *dnsParams, wantRcode dnsmessage.RCode, elapse
 
 // dnsRecordText renders an answer record for the expect_contains match;
 // for SOA it also returns the serial.
-func dnsRecordText(p *dnsmessage.Parser, rh *dnsmessage.ResourceHeader) (string, *uint32, error) {
+func dnsRecordText(p *dnsmessage.Parser, rh *dnsmessage.ResourceHeader) (text string, ttl *uint32, err error) {
 	switch rh.Type {
 	case dnsmessage.TypeA:
-		r, err := p.AResource()
-		return netip.AddrFrom4(r.A).String(), nil, err
+		r, rerr := p.AResource()
+		return netip.AddrFrom4(r.A).String(), nil, rerr
 	case dnsmessage.TypeAAAA:
-		r, err := p.AAAAResource()
-		return netip.AddrFrom16(r.AAAA).String(), nil, err
+		r, rerr := p.AAAAResource()
+		return netip.AddrFrom16(r.AAAA).String(), nil, rerr
 	case dnsmessage.TypeCNAME:
-		r, err := p.CNAMEResource()
-		return r.CNAME.String(), nil, err
+		r, rerr := p.CNAMEResource()
+		return r.CNAME.String(), nil, rerr
 	case dnsmessage.TypeMX:
-		r, err := p.MXResource()
-		return fmt.Sprintf("%d %s", r.Pref, r.MX.String()), nil, err
+		r, rerr := p.MXResource()
+		return fmt.Sprintf("%d %s", r.Pref, r.MX.String()), nil, rerr
 	case dnsmessage.TypeNS:
-		r, err := p.NSResource()
-		return r.NS.String(), nil, err
+		r, rerr := p.NSResource()
+		return r.NS.String(), nil, rerr
 	case dnsmessage.TypeSOA:
-		r, err := p.SOAResource()
+		r, rerr := p.SOAResource()
 		serial := r.Serial
-		return fmt.Sprintf("%s %s %d %d %d %d %d", r.NS.String(), r.MBox.String(), r.Serial, r.Refresh, r.Retry, r.Expire, r.MinTTL), &serial, err
+		return fmt.Sprintf("%s %s %d %d %d %d %d", r.NS.String(), r.MBox.String(), r.Serial, r.Refresh, r.Retry, r.Expire, r.MinTTL), &serial, rerr
 	case dnsmessage.TypeTXT:
-		r, err := p.TXTResource()
-		return strings.Join(r.TXT, ""), nil, err
+		r, rerr := p.TXTResource()
+		return strings.Join(r.TXT, ""), nil, rerr
 	case dnsmessage.TypePTR:
-		r, err := p.PTRResource()
-		return r.PTR.String(), nil, err
+		r, rerr := p.PTRResource()
+		return r.PTR.String(), nil, rerr
 	case dnsmessage.TypeSRV:
-		r, err := p.SRVResource()
-		return fmt.Sprintf("%d %d %d %s", r.Priority, r.Weight, r.Port, r.Target.String()), nil, err
+		r, rerr := p.SRVResource()
+		return fmt.Sprintf("%d %d %d %s", r.Priority, r.Weight, r.Port, r.Target.String()), nil, rerr
 	}
 	r, err := p.UnknownResource()
 	if err != nil {
@@ -269,30 +269,36 @@ func dnsRecordText(p *dnsmessage.Parser, rh *dnsmessage.ResourceHeader) (string,
 
 // dnsQuery builds a query with a random ID: EDNS0 with a 4096-byte buffer,
 // RD as configured and the AD bit when require_ad asks for it (RFC 6840).
-func dnsQuery(q *dnsmessage.Question, rd, ad bool) (uint16, []byte, error) {
+func dnsQuery(q *dnsmessage.Question, rd, ad bool) (id uint16, msg []byte, err error) {
 	var idb [2]byte
-	if _, err := rand.Read(idb[:]); err != nil {
+	_, err = rand.Read(idb[:])
+	if err != nil {
 		return 0, nil, err
 	}
-	id := binary.BigEndian.Uint16(idb[:])
+	id = binary.BigEndian.Uint16(idb[:])
 	b := dnsmessage.NewBuilder(nil, dnsmessage.Header{ID: id, RecursionDesired: rd, AuthenticData: ad})
-	if err := b.StartQuestions(); err != nil {
+	err = b.StartQuestions()
+	if err != nil {
 		return 0, nil, err
 	}
-	if err := b.Question(*q); err != nil {
+	err = b.Question(*q)
+	if err != nil {
 		return 0, nil, err
 	}
-	if err := b.StartAdditionals(); err != nil {
+	err = b.StartAdditionals()
+	if err != nil {
 		return 0, nil, err
 	}
 	var opt dnsmessage.ResourceHeader
-	if err := opt.SetEDNS0(DNSMaxUDPResponse, dnsmessage.RCodeSuccess, false); err != nil {
+	err = opt.SetEDNS0(DNSMaxUDPResponse, dnsmessage.RCodeSuccess, false)
+	if err != nil {
 		return 0, nil, err
 	}
-	if err := b.OPTResource(opt, dnsmessage.OPTResource{}); err != nil {
+	err = b.OPTResource(opt, dnsmessage.OPTResource{})
+	if err != nil {
 		return 0, nil, err
 	}
-	msg, err := b.Finish()
+	msg, err = b.Finish()
 	return id, msg, err
 }
 
@@ -316,7 +322,7 @@ func dnsHeaderMatches(msg []byte, id uint16) bool {
 	return len(msg) >= 12 && binary.BigEndian.Uint16(msg[:2]) == id && msg[2]&0x80 != 0
 }
 
-func dnsExchangeUDP(ctx context.Context, server string, q *dnsmessage.Question, rd, ad bool) ([]byte, bool, error) {
+func dnsExchangeUDP(ctx context.Context, server string, q *dnsmessage.Question, rd, ad bool) (resp []byte, truncated bool, err error) {
 	id, query, err := dnsQuery(q, rd, ad)
 	if err != nil {
 		return nil, false, err
@@ -332,7 +338,8 @@ func dnsExchangeUDP(ctx context.Context, server string, q *dnsmessage.Question, 
 	}
 	stop := context.AfterFunc(ctx, func() { _ = conn.SetDeadline(time.Now()) })
 	defer stop()
-	if _, err := conn.Write(query); err != nil {
+	_, err = conn.Write(query)
+	if err != nil {
 		return nil, false, err
 	}
 	buf := make([]byte, 65536)
