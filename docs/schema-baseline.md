@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000359_ticket_link_incident
+Stand: Migration 000360_compliance_score_snapshot
 
 ## Prüfung
 
@@ -2098,6 +2098,8 @@ SECURITY`), Policies mit ihrem Kommando.
 | `compliance_result` | ja | ja | compliance_result_scoped_delete (DELETE), compliance_result_scoped_update (UPDATE), compliance_result_tenant_isolation (ALL) |
 | `compliance_rule` | ja | ja | compliance_rule_tenant_isolation (ALL) |
 | `compliance_rule_control` | ja | ja | compliance_rule_control_isolation (ALL) |
+| `compliance_score_snapshot` | ja | ja | compliance_score_snapshot_isolation (ALL), compliance_score_snapshot_scoped_delete (DELETE), compliance_score_snapshot_scoped_update (UPDATE) |
+| `compliance_settings` | ja | ja | compliance_settings_isolation (ALL) |
 | `config_snapshot` | ja | ja | config_snapshot_isolation (ALL), config_snapshot_scoped_delete (DELETE), config_snapshot_scoped_update (UPDATE) |
 | `consumable` | ja | ja | consumable_isolation (ALL), consumable_scoped_delete (DELETE), consumable_scoped_update (UPDATE) |
 | `contact` | ja | ja | contact_scoped_delete (DELETE), contact_scoped_update (UPDATE), org_isolation (ALL) |

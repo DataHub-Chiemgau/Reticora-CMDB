@@ -1886,3 +1886,5 @@ MON-04;[P3];E;backend/internal/alarm/actions_test.go;WP-988
 ALR-09;[P3];E;backend/internal/alarm/tickets_integration_test.go;WP-1039
 TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];E;backend/internal/alarm/tickets_integration_test.go;WP-1039
 ALR-10;[P3];E;frontend/src/pages/IncidentsPage.test.tsx;WP-1045
+SEC-03;[P3];F;backend/internal/compliance/score_integration_test.go;WP-1127
+CMP-02;[P3];F;backend/internal/compliance/score_integration_test.go;WP-1127

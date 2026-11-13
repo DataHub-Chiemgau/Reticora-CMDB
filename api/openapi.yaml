@@ -14154,14 +14154,108 @@ paths:
       operationId: getComplianceScore
       tags: [Compliance]
       summary: Get compliance score from stored results
+      description: >-
+        The score aggregated in SQL over all stored results under the
+        caller's row level security (SEC-03, CMP-02, WP-1127), weighted by the
+        severity of the rule: score = Σ weight(pass) / Σ weight(pass + fail) ×
+        100, not_applicable does not count (weights: GET
+        /api/v1/compliance/settings). Without group_by the answer keeps its
+        form (overall, by_ci_type, results empty); with group_by it adds
+        groups. group_by=ci is paged by cursor and sorted by score ascending;
+        another value of group_by is 400.
       parameters:
         - name: ci_type_id
           in: query
           schema: { type: string }
+        - name: group_by
+          in: query
+          schema: { type: string, enum: [ci, ci_type, client, site, category, severity] }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
       responses:
-        '200': { description: Compliance score, content: { application/json: { schema: { $ref: '#/components/schemas/ComplianceEvaluationResponse' } } } }
+        '200': { description: Compliance score, content: { application/json: { schema: { $ref: '#/components/schemas/ComplianceScoreResponse' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+  /api/v1/compliance/score/history:
+    x-phase: P3
+    x-feature: compliance_findings
+    get:
+      operationId: getComplianceScoreHistory
+      tags: [Compliance]
+      summary: Get the daily compliance score history
+      description: >-
+        The daily snapshots of the system job compliance.score.snapshot
+        (CMP-02, WP-1127, 04:30 UTC, kept 400 days) summed per day and group
+        under the caller's row level security: a principal restricted to
+        clients sees the trend of its clients. The score follows from the
+        weight sums. from and to are days (default the last 30 days up to
+        today); a period longer than 400 days is 400. The memory profile
+        keeps no snapshots (503).
+      parameters:
+        - name: group_by
+          in: query
+          schema: { type: string, enum: [overall, ci_type, category, severity, client, site], default: overall }
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: The score per day and group
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ComplianceScoreHistory' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/v1/compliance/settings:
+    x-phase: P3
+    x-feature: compliance_findings
+    get:
+      operationId: getComplianceSettings
+      tags: [Compliance]
+      summary: Get the compliance settings (severity weights)
+      description: >-
+        The weights of the severities in the score (WP-1127); without stored
+        settings the defaults critical 10, high 5, medium 2, low 1 and
+        updated_at null.
+      responses:
+        '200':
+          description: The compliance settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ComplianceSettings' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '500': { $ref: '#/components/responses/InternalServerError' }
+    put:
+      operationId: putComplianceSettings
+      tags: [Compliance]
+      summary: Replace the compliance settings (severity weights)
+      description: >-
+        Whole numbers 0–100 per severity; a missing severity takes its
+        default, another key or value is 422 with the field (weights.high).
+        The weights apply to the whole organization: a principal restricted
+        to clients, sites or teams is 403. Audited with the row before and
+        after.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ComplianceSettingsRequest' }
+      responses:
+        '200':
+          description: The stored settings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ComplianceSettings' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/compliance/report:
     x-phase: P3
@@ -41360,6 +41454,67 @@ components:
         failed: { type: integer }
         not_applicable: { type: integer }
         score: { type: number }
+    ComplianceScoreGroup:
+      type: object
+      required: [key, label, passed, failed, not_applicable, score]
+      description: One group of the compliance score; key is empty for results without client, site or CI type.
+      properties:
+        key: { type: string }
+        label: { type: string }
+        passed: { type: integer }
+        failed: { type: integer }
+        not_applicable: { type: integer }
+        score: { type: number }
+    ComplianceScoreResponse:
+      allOf:
+        - $ref: '#/components/schemas/ComplianceEvaluationResponse'
+        - type: object
+          properties:
+            group_by: { type: string, enum: [ci, ci_type, client, site, category, severity] }
+            groups: { type: array, items: { $ref: '#/components/schemas/ComplianceScoreGroup' } }
+            next_cursor: { type: string, description: The cursor of the next page of group_by=ci. }
+            has_more: { type: boolean }
+    ComplianceScoreHistory:
+      type: object
+      required: [group_by, from, to, data]
+      properties:
+        group_by: { type: string, enum: [overall, ci_type, category, severity, client, site] }
+        from: { type: string, format: date }
+        to: { type: string, format: date }
+        data:
+          type: array
+          items:
+            type: object
+            required: [day, key, label, passed, failed, passed_weight, failed_weight, score]
+            properties:
+              day: { type: string, format: date }
+              key: { type: string }
+              label: { type: string }
+              passed: { type: integer }
+              failed: { type: integer }
+              passed_weight: { type: integer }
+              failed_weight: { type: integer }
+              score: { type: number }
+    ComplianceWeights:
+      type: object
+      additionalProperties: false
+      properties:
+        critical: { type: integer, minimum: 0, maximum: 100, default: 10 }
+        high: { type: integer, minimum: 0, maximum: 100, default: 5 }
+        medium: { type: integer, minimum: 0, maximum: 100, default: 2 }
+        low: { type: integer, minimum: 0, maximum: 100, default: 1 }
+    ComplianceSettings:
+      type: object
+      required: [weights, updated_at]
+      properties:
+        weights: { $ref: '#/components/schemas/ComplianceWeights' }
+        updated_at: { type: [string, 'null'], format: date-time }
+    ComplianceSettingsRequest:
+      type: object
+      required: [weights]
+      additionalProperties: false
+      properties:
+        weights: { $ref: '#/components/schemas/ComplianceWeights' }
     ComplianceEvaluationResponse:
       type: object
       required: [overall, by_ci_type, results]

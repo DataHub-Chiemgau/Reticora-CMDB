@@ -45,6 +45,10 @@ type Repository interface {
 	// (WP-1128); the memory profile has no catalog
 	// (ErrControlsUnavailable).
 	ControlStore
+	// ScoreStore: the aggregated score, the weights and the daily
+	// snapshots (WP-1127); the memory profile keeps no snapshots
+	// (ErrScoreHistoryUnavailable).
+	ScoreStore
 }
 
 // FindingSource lists the findings of an organization (security.Repository
@@ -59,6 +63,7 @@ type MemoryRepository struct {
 	results  map[string]*Result
 	findings FindingSource
 	next     int
+	settings map[string]*Settings
 }
 
 // WithFindings makes FindingFacts read the findings of src (--no-db, the
@@ -273,4 +278,103 @@ func (r *MemoryRepository) RuleControlIDs(context.Context, string, string) ([]st
 // ReplaceRuleControls implements ControlStore.
 func (r *MemoryRepository) ReplaceRuleControls(context.Context, string, string, []string) error {
 	return ErrControlsUnavailable
+}
+
+// Score implements ScoreStore in Go over the stored results (the memory
+// profile has no client, site or CI names: their keys are empty or the
+// CI id).
+func (r *MemoryRepository) Score(_ context.Context, orgID string, q *ScoreQuery) (*ScorePage, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	weights := r.weightsOf(orgID)
+	rules := map[string]*Rule{}
+	for id, rule := range r.rules {
+		if rule.OrganizationID == orgID {
+			rules[id] = rule
+		}
+	}
+	var results []Result
+	for _, res := range r.results {
+		if res.OrganizationID == orgID && (q.CITypeID == "" || res.CITypeID == q.CITypeID) {
+			results = append(results, *res)
+		}
+	}
+	key := func(res *Result, rule *Rule) (string, string) {
+		switch q.GroupBy {
+		case GroupCI:
+			return res.CIID, res.CIID
+		case GroupCIType:
+			return res.CITypeID, res.CITypeID
+		case GroupCategory:
+			return rule.Category, rule.Category
+		case GroupSeverity:
+			return rule.Severity, rule.Severity
+		}
+		return "", ""
+	}
+	groups := tallyGroups(results, rules, weights, key)
+	if q.GroupBy == "" && len(groups) == 0 {
+		groups = []ScoreGroup{{}}
+	}
+	page := &ScorePage{Groups: groups}
+	if q.GroupBy == GroupCI {
+		if q.After != nil {
+			start := len(groups)
+			for i := range groups {
+				if groups[i].Score > q.After.Score || (groups[i].Score == q.After.Score && groups[i].Key > q.After.Key) {
+					start = i
+					break
+				}
+			}
+			groups = groups[start:]
+		}
+		if q.Limit > 0 && len(groups) > q.Limit {
+			last := groups[q.Limit-1]
+			groups, page.Next = groups[:q.Limit], &ScoreCursor{Score: last.Score, Key: last.Key}
+		}
+		page.Groups = groups
+	}
+	return page, nil
+}
+
+// weightsOf are the weights of the organization (the caller holds the lock).
+func (r *MemoryRepository) weightsOf(orgID string) Weights {
+	if s := r.settings[orgID]; s != nil {
+		return s.Weights
+	}
+	return DefaultWeights()
+}
+
+// GetSettings implements ScoreStore.
+func (r *MemoryRepository) GetSettings(_ context.Context, orgID string) (*Settings, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if s := r.settings[orgID]; s != nil {
+		out := *s
+		return &out, nil
+	}
+	return &Settings{Weights: DefaultWeights()}, nil
+}
+
+// PutSettings implements ScoreStore.
+func (r *MemoryRepository) PutSettings(_ context.Context, orgID string, weights Weights) (*Settings, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.settings == nil {
+		r.settings = map[string]*Settings{}
+	}
+	now := time.Now().UTC()
+	r.settings[orgID] = &Settings{Weights: weights, UpdatedAt: &now}
+	out := *r.settings[orgID]
+	return &out, nil
+}
+
+// SnapshotScores implements ScoreStore: the memory profile keeps none.
+func (r *MemoryRepository) SnapshotScores(context.Context, string, time.Time) (int, error) {
+	return 0, ErrScoreHistoryUnavailable
+}
+
+// ScoreHistory implements ScoreStore: the memory profile keeps none.
+func (r *MemoryRepository) ScoreHistory(context.Context, string, *HistoryQuery) ([]HistoryPoint, error) {
+	return nil, ErrScoreHistoryUnavailable
 }

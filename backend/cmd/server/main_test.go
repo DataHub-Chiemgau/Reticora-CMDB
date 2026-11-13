@@ -600,8 +600,8 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 	}
 	// The nightly compliance evaluation (SEC-03, WP-1126): with the module
 	// compliance and the database, daily 02:30.
-	if registered[compliance.NightlyKind] {
-		t.Errorf("without the module compliance %s is registered", compliance.NightlyKind)
+	if registered[compliance.NightlyKind] || registered[compliance.SnapshotKind] {
+		t.Errorf("without the module compliance %s or %s is registered", compliance.NightlyKind, compliance.SnapshotKind)
 	}
 	complianceModules, err := server.ParseModules("compliance")
 	if err != nil {
@@ -610,13 +610,23 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 	for _, withDB := range []bool{true, false} {
 		deps := systemJobTestDeps(t, cfg, withDB)
 		deps.modules = complianceModules
-		if kinds := registeredSystemJobs(t, deps); kinds[compliance.NightlyKind] != withDB {
+		kinds := registeredSystemJobs(t, deps)
+		if kinds[compliance.NightlyKind] != withDB {
 			t.Errorf("JOB-02 nightly compliance evaluation with the module compliance (database %v): registered %v",
 				withDB, kinds[compliance.NightlyKind])
+		}
+		// The daily score snapshot (WP-1127): with the module and the
+		// database, 04:30 after the nightly run.
+		if kinds[compliance.SnapshotKind] != withDB {
+			t.Errorf("JOB-02 compliance score snapshot with the module compliance (database %v): registered %v",
+				withDB, kinds[compliance.SnapshotKind])
 		}
 		for _, job := range systemJobs(deps) {
 			if job.Kind == compliance.NightlyKind && (job.Spec != "30 2 * * *" || job.MaxCatchUp != 1) {
 				t.Errorf("%s: spec %q, max catch-up %d; want 30 2 * * * and 1", job.Kind, job.Spec, job.MaxCatchUp)
+			}
+			if job.Kind == compliance.SnapshotKind && (job.Spec != "30 4 * * *" || job.MaxCatchUp != 1) {
+				t.Errorf("%s: spec %q, max catch-up %d; want 30 4 * * * and 1", job.Kind, job.Spec, job.MaxCatchUp)
 			}
 		}
 	}

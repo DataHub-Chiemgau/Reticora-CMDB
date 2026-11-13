@@ -43,6 +43,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/api/v1/compliance/evaluations", h.Evaluate)
 	r.Get("/api/v1/compliance/results", h.ListResults)
 	r.Get("/api/v1/compliance/score", h.Score)
+	r.Get("/api/v1/compliance/score/history", h.ScoreHistory)
+	r.Get("/api/v1/compliance/settings", h.GetSettings)
+	r.Put("/api/v1/compliance/settings", h.PutSettings)
 	r.Get("/api/v1/compliance/report", h.Report)
 	r.Get("/api/v1/compliance/controls", h.ListControls)
 	r.Get("/api/v1/compliance/controls/coverage", h.ControlCoverage)
@@ -255,22 +258,6 @@ func (h *Handler) ListResults(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	api.WriteJSON(w, 200, api.ListResponse[Result]{Data: items, Total: total, Limit: page.Limit, Offset: page.Offset, HasMore: page.Offset+page.Limit < total})
-}
-func (h *Handler) Score(w http.ResponseWriter, r *http.Request) {
-	t, ok := org(w, r)
-	if !ok {
-		return
-	}
-	ciTypeID, ok := ciTypeFilter(w, r)
-	if !ok {
-		return
-	}
-	items, _, err := h.repo.ListResults(r.Context(), t.OrganizationID, ciTypeID, "", api.PaginationParams{Limit: 100})
-	if err != nil {
-		writeComplianceError(w, r, err)
-		return
-	}
-	api.WriteJSON(w, 200, summarize(items))
 }
 
 // Report handles GET /api/v1/compliance/report and produces the

@@ -421,6 +421,10 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	crud(m, v1+"monitoring/sla/targets", "availability_target", all...)
 	// The alarm settings of the organization (WP-1030): the row of the
 	// organization, absent while the defaults apply.
+	// The severity weights of the compliance score (WP-1127): the row of
+	// the organization, absent while the defaults apply.
+	m["PUT "+v1+"compliance/settings"] = RouteSnapshot{Table: "compliance_settings",
+		Keys: []SnapshotKey{{"organization_id", "$org"}}}
 	m["PUT "+v1+"monitoring/alarm-settings"] = RouteSnapshot{Table: "alarm_settings",
 		Keys: []SnapshotKey{{"organization_id", "$org"}}}
 	// Acknowledging an incident and setting its root by hand (WP-1036):

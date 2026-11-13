@@ -6129,9 +6129,56 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Get compliance score from stored results */
+    /**
+     * Get compliance score from stored results
+     * @description The score aggregated in SQL over all stored results under the caller's row level security (SEC-03, CMP-02, WP-1127), weighted by the severity of the rule: score = Σ weight(pass) / Σ weight(pass + fail) × 100, not_applicable does not count (weights: GET /api/v1/compliance/settings). Without group_by the answer keeps its form (overall, by_ci_type, results empty); with group_by it adds groups. group_by=ci is paged by cursor and sorted by score ascending; another value of group_by is 400.
+     */
     get: operations['getComplianceScore'];
     put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/compliance/score/history': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get the daily compliance score history
+     * @description The daily snapshots of the system job compliance.score.snapshot (CMP-02, WP-1127, 04:30 UTC, kept 400 days) summed per day and group under the caller's row level security: a principal restricted to clients sees the trend of its clients. The score follows from the weight sums. from and to are days (default the last 30 days up to today); a period longer than 400 days is 400. The memory profile keeps no snapshots (503).
+     */
+    get: operations['getComplianceScoreHistory'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/compliance/settings': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get the compliance settings (severity weights)
+     * @description The weights of the severities in the score (WP-1127); without stored settings the defaults critical 10, high 5, medium 2, low 1 and updated_at null.
+     */
+    get: operations['getComplianceSettings'];
+    /**
+     * Replace the compliance settings (severity weights)
+     * @description Whole numbers 0–100 per severity; a missing severity takes its default, another key or value is 422 with the field (weights.high). The weights apply to the whole organization: a principal restricted to clients, sites or teams is 403. Audited with the row before and after.
+     */
+    put: operations['putComplianceSettings'];
     post?: never;
     delete?: never;
     options?: never;
@@ -20189,6 +20236,60 @@ export interface components {
       failed: number;
       not_applicable: number;
       score: number;
+    };
+    /** @description One group of the compliance score; key is empty for results without client, site or CI type. */
+    ComplianceScoreGroup: {
+      key: string;
+      label: string;
+      passed: number;
+      failed: number;
+      not_applicable: number;
+      score: number;
+    };
+    ComplianceScoreResponse: components['schemas']['ComplianceEvaluationResponse'] & {
+      /** @enum {string} */
+      group_by?: 'ci' | 'ci_type' | 'client' | 'site' | 'category' | 'severity';
+      groups?: components['schemas']['ComplianceScoreGroup'][];
+      /** @description The cursor of the next page of group_by=ci. */
+      next_cursor?: string;
+      has_more?: boolean;
+    };
+    ComplianceScoreHistory: {
+      /** @enum {string} */
+      group_by: 'overall' | 'ci_type' | 'category' | 'severity' | 'client' | 'site';
+      /** Format: date */
+      from: string;
+      /** Format: date */
+      to: string;
+      data: {
+        /** Format: date */
+        day: string;
+        key: string;
+        label: string;
+        passed: number;
+        failed: number;
+        passed_weight: number;
+        failed_weight: number;
+        score: number;
+      }[];
+    };
+    ComplianceWeights: {
+      /** @default 10 */
+      critical: number;
+      /** @default 5 */
+      high: number;
+      /** @default 2 */
+      medium: number;
+      /** @default 1 */
+      low: number;
+    };
+    ComplianceSettings: {
+      weights: components['schemas']['ComplianceWeights'];
+      /** Format: date-time */
+      updated_at: string | null;
+    };
+    ComplianceSettingsRequest: {
+      weights: components['schemas']['ComplianceWeights'];
     };
     ComplianceEvaluationResponse: {
       overall: components['schemas']['ComplianceScore'];
@@ -38500,6 +38601,17 @@ export interface operations {
     parameters: {
       query?: {
         ci_type_id?: string;
+        group_by?: 'ci' | 'ci_type' | 'client' | 'site' | 'category' | 'severity';
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
       };
       header?: never;
       path?: never;
@@ -38513,11 +38625,90 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['ComplianceEvaluationResponse'];
+          'application/json': components['schemas']['ComplianceScoreResponse'];
         };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  getComplianceScoreHistory: {
+    parameters: {
+      query?: {
+        group_by?: 'overall' | 'ci_type' | 'category' | 'severity' | 'client' | 'site';
+        from?: string;
+        to?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The score per day and group */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ComplianceScoreHistory'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  getComplianceSettings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The compliance settings */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ComplianceSettings'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      500: components['responses']['InternalServerError'];
+    };
+  };
+  putComplianceSettings: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ComplianceSettingsRequest'];
+      };
+    };
+    responses: {
+      /** @description The stored settings */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ComplianceSettings'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };

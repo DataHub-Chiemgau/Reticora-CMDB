@@ -648,6 +648,11 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 			systemJobs = append(systemJobs, compliance.NewNightly(evalJobs, d.repos.Compliance, orgs, func(ctx context.Context, orgID string) bool {
 				return ents != nil && ents.IsEnabled(ctx, orgID, entitlement.FeatureComplianceFindings)
 			}).Schedule())
+			// The daily score snapshot (CMP-02, WP-1127): 04:30 UTC, after
+			// the nightly evaluation, for trends over 400 days.
+			systemJobs = append(systemJobs, compliance.NewSnapshot(d.repos.Compliance, orgs, func(ctx context.Context, orgID string) bool {
+				return ents != nil && ents.IsEnabled(ctx, orgID, entitlement.FeatureComplianceFindings)
+			}).Schedule())
 		}
 		// Alarm retention (ALR-01, WP-981): daily the resolved alarms
 		// older than 400 days with their transitions, with the module

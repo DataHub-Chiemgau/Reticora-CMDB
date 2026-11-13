@@ -33,6 +33,7 @@ const paginationSpecPath = "../../../api/openapi.yaml"
 // list resources: a file export streams every row in one document.
 var notALists = map[string]string{
 	"/api/v1/export/cis":                             "export download (JSON file of the whole selection)",
+	"/api/v1/compliance/score/history":               "one point per day and group of a period of at most 400 days (WP-1127)",
 	"/api/v1/maintenance-windows/{id}/notifications": "at most one notification per affected client and channel of one window (WP-1034)",
 	"/api/v1/modules":                                "the fixed module catalog of the release (WP-214), no tenant data",
 	"/api/v1/admin/addons":                           "the fixed add-on catalog (WP-883), no tenant data",
