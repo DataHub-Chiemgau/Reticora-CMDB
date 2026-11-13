@@ -77,8 +77,23 @@ type Store interface {
 	// TransitionIncident moves an incident to state to (acknowledge with
 	// actor, un-acknowledge, resolve).
 	TransitionIncident(ctx context.Context, orgID, id, to string, actorID *string) (*Incident, error)
+	// AcknowledgeIncident acknowledges an incident for actor
+	// (TransitionIncident to acknowledged); a comment is kept in the
+	// details of the transition (timeline, WP-1036).
+	AcknowledgeIncident(ctx context.Context, orgID, id string, actorID *string, comment string) (*Incident, error)
 	// IncidentTransitions returns the log of an incident, oldest first.
 	IncidentTransitions(ctx context.Context, orgID, incidentID string) ([]IncidentTransition, error)
+
+	// SetRootManual makes alarmID, a member of the incident, its root by
+	// hand (manual_root): the transition root_changed names actor and
+	// reason. An alarm of no or another incident is ErrAlarmNotMember.
+	SetRootManual(ctx context.Context, orgID, incidentID, alarmID string, actor *string, reason string) (*Incident, error)
+	// CountIncidents counts the incidents of the filter (without its
+	// cursor), at most limit when limit > 0.
+	CountIncidents(ctx context.Context, orgID string, f *IncidentFilter, limit int) (int, error)
+	// CINames returns the names of the CIs visible in the caller's scope
+	// by id (the root of an incident).
+	CINames(ctx context.Context, orgID string, ids []string) (map[string]string, error)
 
 	// Settings returns the alarm settings of the organization; without a
 	// row the Defaults (WP-1030).

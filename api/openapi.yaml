@@ -24417,33 +24417,64 @@ paths:
   /api/v1/monitoring/incidents:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     get:
       operationId: listIncidents
       tags: [Monitoring]
       summary: List incidents
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        The incidents in the caller's scope (ALR-03, ALR-10, WP-1036), newest
+        first on opened_at, paged with limit and the signed cursor (API-02).
+        Each with its root (alarm, CI and CI name), cause class, confidence,
+        affected counts, the number of symptoms, state and times. from and to
+        apply to opened_at: the incidents opened in [from, to).
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
+        - name: state
+          in: query
+          description: Repeatable or comma-separated.
+          style: form
+          explode: true
+          schema:
+            type: array
+            items: { type: string, enum: [open, acknowledged, resolved] }
+        - name: client_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: cause_class
+          in: query
+          description: Repeatable or comma-separated.
+          style: form
+          explode: true
+          schema:
+            type: array
+            items: { type: string, enum: [topology, collector_unreachable, unknown] }
+        - name: from
+          in: query
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          schema: { type: string, format: date-time }
       responses:
         '200':
-          description: List incidents. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+          description: Incidents
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IncidentListResponse' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
   /api/v1/monitoring/incidents/{id}:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -24451,11 +24482,16 @@ paths:
       tags: [Monitoring]
       summary: Get an incident
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        The incident with its members (alarms with role root or symptom,
+        details filtered like the alarm list), reasons and the timeline: the
+        transitions of the incident and of its alarms by time, at most 500
+        (timeline_truncated). A foreign or invisible incident is 404.
       responses:
         '200':
-          description: Get an incident. The schema comes with the implementing work package.
+          description: The incident
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IncidentDetail' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -24493,7 +24529,6 @@ paths:
   /api/v1/monitoring/incidents/{id}/ack:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -24501,11 +24536,22 @@ paths:
       tags: [Monitoring]
       summary: Acknowledge an incident
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Acknowledges the incident and its open root alarm (alert:acknowledge,
+        E-159); writes incident.updated (change acknowledged). The comment is
+        kept in the timeline entry of the incident's transition (and passed
+        to the root alarm's ack). An incident acknowledged or resolved
+        already is 409.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AlarmActionRequest' }
       responses:
         '200':
-          description: Acknowledge an incident. The schema comes with the implementing work package.
+          description: The acknowledged incident
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IncidentDetail' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -24516,13 +24562,14 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
   /api/v1/monitoring/incidents/{id}/root:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -24530,11 +24577,22 @@ paths:
       tags: [Monitoring]
       summary: Set the root alarm of an incident
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Sets the root by hand (manual_root): the alarm must be a member of
+        the incident (422 alarm_id), the previous root becomes a symptom, the
+        transition root_changed names actor and reason. The automatic
+        correlation keeps a root set by hand. Writes incident.updated
+        (change root_changed); a resolved incident is 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IncidentRootRequest' }
       responses:
         '200':
-          description: Set the root alarm of an incident. The schema comes with the implementing work package.
+          description: The incident with its new root
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IncidentDetail' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -24545,6 +24603,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -32851,6 +32911,127 @@ components:
       properties:
         comment:
           type: string
+          maxLength: 1000
+    Incident:
+      type: object
+      description: An incident (ALR-03, WP-1027, WP-1036) with its root and the number of symptoms.
+      required: [id, organization_id, client_id, site_id, root_alarm_id, root_ci_id, cause_class, confidence, reasons,
+        state, opened_at, acknowledged_at, acknowledged_by, resolved_at, manual_root, affected_counts, updated_at, root,
+        symptom_count]
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        client_id: { type: [string, 'null'], format: uuid }
+        site_id: { type: [string, 'null'], format: uuid }
+        root_alarm_id: { type: [string, 'null'], format: uuid }
+        root_ci_id: { type: [string, 'null'], format: uuid }
+        cause_class:
+          type: string
+          enum: [topology, collector_unreachable, unknown]
+        confidence: { type: integer, minimum: 0, maximum: 100 }
+        reasons:
+          type: array
+          items: { type: string }
+        state:
+          type: string
+          enum: [open, acknowledged, resolved]
+        opened_at: { type: string, format: date-time }
+        acknowledged_at: { type: [string, 'null'], format: date-time }
+        acknowledged_by: { type: [string, 'null'] }
+        resolved_at: { type: [string, 'null'], format: date-time }
+        manual_root:
+          type: boolean
+          description: The root was set by hand; the correlation does not change it.
+        affected_counts:
+          type: object
+          additionalProperties: { type: integer }
+        updated_at: { type: string, format: date-time }
+        root:
+          type: object
+          required: [alarm_id, ci_id, ci_name]
+          properties:
+            alarm_id: { type: [string, 'null'], format: uuid }
+            ci_id: { type: [string, 'null'], format: uuid }
+            ci_name:
+              type: [string, 'null']
+              description: Null when the caller does not see the CI.
+        symptom_count:
+          type: integer
+          description: The visible member alarms besides the root.
+    IncidentMember:
+      allOf:
+        - $ref: '#/components/schemas/Alarm'
+        - type: object
+          required: [role]
+          properties:
+            role:
+              type: string
+              enum: [root, symptom]
+    IncidentTimelineEntry:
+      type: object
+      required: [kind, alarm_id, from_state, to_state, at, actor_id, reason, comment, details]
+      properties:
+        kind:
+          type: string
+          enum: [incident, alarm]
+        alarm_id:
+          type: [string, 'null']
+          format: uuid
+          description: The alarm of an entry of kind alarm.
+        from_state: { type: [string, 'null'] }
+        to_state: { type: string }
+        at: { type: string, format: date-time }
+        actor_id:
+          type: [string, 'null']
+          description: The acting user; null is the system.
+        reason: { type: string }
+        comment: { type: [string, 'null'] }
+        details:
+          type: object
+          additionalProperties: true
+    IncidentDetail:
+      allOf:
+        - $ref: '#/components/schemas/Incident'
+        - type: object
+          required: [members, members_truncated, timeline, timeline_truncated]
+          properties:
+            members:
+              type: array
+              maxItems: 1000
+              items: { $ref: '#/components/schemas/IncidentMember' }
+            members_truncated:
+              type: boolean
+              description: >-
+                True when the incident has more than 1000 members visible to
+                the caller; symptom_count counts them all.
+            timeline:
+              type: array
+              maxItems: 500
+              items: { $ref: '#/components/schemas/IncidentTimelineEntry' }
+            timeline_truncated:
+              type: boolean
+              description: True when the timeline has more than 500 entries.
+    IncidentListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Incident' }
+    IncidentRootRequest:
+      type: object
+      required: [alarm_id, reason]
+      additionalProperties: false
+      properties:
+        alarm_id:
+          type: string
+          format: uuid
+          description: An alarm of the incident.
+        reason:
+          type: string
+          minLength: 1
           maxLength: 1000
     AlarmSettingsRequest:
       type: object

@@ -1855,3 +1855,5 @@ ALR-02;[P3];E;backend/internal/alarm/settings_test.go;WP-1030
 ALR-04;[P3];E;backend/internal/alarm/settings_test.go;WP-1030
 ALR-06;[P3];E;backend/internal/alarm/settings_test.go;WP-1030
 ALR-12;[P3];E;backend/internal/alarm/settings_integration_test.go;WP-1030
+ALR-03;[P3];E;backend/internal/alarm/incident_handler_integration_test.go;WP-1036
+ALR-10;[P3];E;backend/internal/alarm/incident_handler_test.go;WP-1036

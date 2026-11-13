@@ -304,6 +304,8 @@ GET /api/v1/monitoring/alerts monitoring:read
 GET /api/v1/monitoring/groups monitoring:read
 GET /api/v1/monitoring/groups/{id} monitoring:read
 GET /api/v1/monitoring/groups/{id}/members monitoring:read
+GET /api/v1/monitoring/incidents monitoring:read
+GET /api/v1/monitoring/incidents/{id} monitoring:read
 GET /api/v1/monitoring/metrics monitoring:read
 GET /api/v1/monitoring/probe-types monitoring:read
 GET /api/v1/monitoring/probe-types/{key} monitoring:read
@@ -654,6 +656,8 @@ POST /api/v1/monitoring/alarms/{id}/unack alert:acknowledge
 POST /api/v1/monitoring/alerts monitoring:write
 POST /api/v1/monitoring/groups monitoring:write
 POST /api/v1/monitoring/groups/{id}/members monitoring:write
+POST /api/v1/monitoring/incidents/{id}/ack alert:acknowledge
+POST /api/v1/monitoring/incidents/{id}/root monitoring:write
 POST /api/v1/monitoring/metrics monitoring:write
 POST /api/v1/monitoring/probes monitoring:write
 POST /api/v1/monitoring/profiles monitoring:write

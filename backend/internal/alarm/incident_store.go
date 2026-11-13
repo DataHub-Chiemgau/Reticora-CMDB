@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -158,14 +157,11 @@ func (s *PGStore) GetIncident(ctx context.Context, orgID, id string) (*Incident,
 	return out, err
 }
 
-// ListIncidents implements Store.
-func (s *PGStore) ListIncidents(ctx context.Context, orgID string, f *IncidentFilter) (IncidentPage, error) {
-	args := []any{orgID}
-	where := []string{"organization_id = $1"}
-	arg := func(v any) string {
-		args = append(args, v)
-		return "$" + strconv.Itoa(len(args))
-	}
+// incidentWhere is the condition of the incident list without the cursor.
+func incidentWhere(orgID string, f *IncidentFilter) (where []string, args *sqlArgs) {
+	args = &sqlArgs{values: []any{orgID}}
+	where = []string{"organization_id = $1"}
+	arg := args.add
 	if len(f.States) > 0 {
 		where = append(where, "state = ANY("+arg(f.States)+"::text[])")
 	}
@@ -181,6 +177,36 @@ func (s *PGStore) ListIncidents(ctx context.Context, orgID string, f *IncidentFi
 	if f.From != nil {
 		where = append(where, "(resolved_at IS NULL OR resolved_at >= "+arg(*f.From)+")")
 	}
+	if f.OpenedFrom != nil {
+		where = append(where, "opened_at >= "+arg(*f.OpenedFrom))
+	}
+	if f.OpenedTo != nil {
+		where = append(where, "opened_at < "+arg(*f.OpenedTo))
+	}
+	return where, args
+}
+
+// CountIncidents implements Store.
+func (s *PGStore) CountIncidents(ctx context.Context, orgID string, f *IncidentFilter, limit int) (int, error) {
+	where, args := incidentWhere(orgID, f)
+	query := `SELECT 1 FROM incident WHERE ` + strings.Join(where, " AND ")
+	if limit > 0 {
+		query += ` LIMIT ` + args.add(limit)
+	}
+	var n int
+	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM (`+query+`) AS matching`, args.values...).Scan(&n)
+	})
+	if err != nil {
+		return 0, fmt.Errorf("alarm: count incidents: %w", err)
+	}
+	return n, nil
+}
+
+// ListIncidents implements Store.
+func (s *PGStore) ListIncidents(ctx context.Context, orgID string, f *IncidentFilter) (IncidentPage, error) {
+	where, args := incidentWhere(orgID, f)
+	arg := args.add
 	if f.After != nil {
 		at := arg(f.After.OpenedAt)
 		where = append(where, "(opened_at, id) < ("+at+"::timestamptz, "+arg(f.After.ID)+"::uuid)")
@@ -190,7 +216,7 @@ func (s *PGStore) ListIncidents(ctx context.Context, orgID string, f *IncidentFi
 		` ORDER BY opened_at DESC, id DESC LIMIT ` + arg(limit+1)
 	var items []Incident
 	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, query, args...)
+		rows, err := tx.Query(ctx, query, args.values...)
 		if err != nil {
 			return err
 		}
@@ -243,7 +269,8 @@ func lockAttachable(ctx context.Context, tx pgx.Tx, orgID, incidentID string, id
 }
 
 // setRootTx makes alarmID (already attached) the root of inc.
-func setRootTx(ctx context.Context, tx pgx.Tx, inc *Incident, alarmID string, ciID *string, manual bool, at time.Time) (*Incident, error) {
+func setRootTx(ctx context.Context, tx pgx.Tx, inc *Incident, alarmID string, ciID *string, manual bool, at time.Time,
+	actor *string, reason string) (*Incident, error) {
 	if inc.RootAlarmID != nil && *inc.RootAlarmID != alarmID {
 		if _, err := tx.Exec(ctx, `UPDATE alarm SET suppressed_reason = COALESCE(suppressed_reason, 'symptom')
 			WHERE organization_id = $1 AND id = $2 AND incident_id = $3`, inc.OrganizationID, *inc.RootAlarmID, inc.ID); err != nil {
@@ -255,8 +282,12 @@ func setRootTx(ctx context.Context, tx pgx.Tx, inc *Incident, alarmID string, ci
 	if err != nil {
 		return nil, err
 	}
-	return out, appendIncidentTransition(ctx, tx, inc.OrganizationID, inc.ID, &inc.State, out.State, at, nil,
-		IncidentReasonRootChanged, map[string]any{"from_alarm_id": deref(inc.RootAlarmID), "to_alarm_id": alarmID, "manual": manual})
+	details := map[string]any{"from_alarm_id": deref(inc.RootAlarmID), "to_alarm_id": alarmID, "manual": manual}
+	if reason != "" {
+		details["reason"] = reason
+	}
+	return out, appendIncidentTransition(ctx, tx, inc.OrganizationID, inc.ID, &inc.State, out.State, at, actor,
+		IncidentReasonRootChanged, details)
 }
 
 // AttachAlarms implements Store.
@@ -297,7 +328,7 @@ func (s *PGStore) AttachAlarms(ctx context.Context, orgID, incidentID string, al
 			return fmt.Errorf("alarm: attach: %w", ErrNotFound)
 		}
 		if role == RoleRoot {
-			out, err = setRootTx(ctx, tx, inc, got[0].id, got[0].ci, false, at)
+			out, err = setRootTx(ctx, tx, inc, got[0].id, got[0].ci, false, at, nil, "")
 			return err
 		}
 		out = inc
@@ -329,8 +360,63 @@ func (s *PGStore) SetRoot(ctx context.Context, orgID, incidentID, alarmID string
 			}
 			return err
 		}
-		out, err = setRootTx(ctx, tx, inc, alarmID, ciID, manual, at)
+		out, err = setRootTx(ctx, tx, inc, alarmID, ciID, manual, at, nil, "")
 		return err
+	})
+	return out, err
+}
+
+// SetRootManual implements Store.
+func (s *PGStore) SetRootManual(ctx context.Context, orgID, incidentID, alarmID string, actor *string, reason string) (*Incident, error) {
+	at := now()
+	var out *Incident
+	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		inc, err := lockIncident(ctx, tx, orgID, incidentID)
+		if err != nil {
+			return err
+		}
+		if cerr := checkRoot(inc, true); cerr != nil {
+			return cerr
+		}
+		var owner, ciID *string
+		err = tx.QueryRow(ctx, `SELECT incident_id::text, ci_id::text FROM alarm WHERE organization_id = $1 AND id = $2
+			FOR UPDATE`, orgID, alarmID).Scan(&owner, &ciID)
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && (owner == nil || *owner != incidentID)) {
+			return ErrAlarmNotMember
+		}
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `UPDATE alarm SET suppressed_reason = NULLIF(suppressed_reason, 'symptom')
+			WHERE organization_id = $1 AND id = $2`, orgID, alarmID); err != nil {
+			return err
+		}
+		out, err = setRootTx(ctx, tx, inc, alarmID, ciID, true, at, actor, reason)
+		return err
+	})
+	return out, err
+}
+
+// CINames implements Store.
+func (s *PGStore) CINames(ctx context.Context, orgID string, ids []string) (map[string]string, error) {
+	out := map[string]string{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id::text, name FROM ci WHERE organization_id = $1 AND id = ANY($2::uuid[])`, orgID, ids)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id, name string
+			if err := rows.Scan(&id, &name); err != nil {
+				return err
+			}
+			out[id] = name
+		}
+		return rows.Err()
 	})
 	return out, err
 }
@@ -414,7 +500,7 @@ func (s *PGStore) MergeIncidents(ctx context.Context, orgID, keepID, absorbID, r
 			}
 			return err
 		}
-		out, err = setRootTx(ctx, tx, keep, rootAlarmID, ciID, false, at)
+		out, err = setRootTx(ctx, tx, keep, rootAlarmID, ciID, false, at, nil, "")
 		return err
 	})
 	return out, err
@@ -422,6 +508,15 @@ func (s *PGStore) MergeIncidents(ctx context.Context, orgID, keepID, absorbID, r
 
 // TransitionIncident implements Store.
 func (s *PGStore) TransitionIncident(ctx context.Context, orgID, id, to string, actorID *string) (*Incident, error) {
+	return s.transitionIncident(ctx, orgID, id, to, actorID, nil)
+}
+
+// AcknowledgeIncident implements Store.
+func (s *PGStore) AcknowledgeIncident(ctx context.Context, orgID, id string, actorID *string, comment string) (*Incident, error) {
+	return s.transitionIncident(ctx, orgID, id, IncidentAcknowledged, actorID, commentDetails(comment))
+}
+
+func (s *PGStore) transitionIncident(ctx context.Context, orgID, id, to string, actorID *string, details map[string]any) (*Incident, error) {
 	at := now()
 	var out *Incident
 	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
@@ -447,9 +542,18 @@ func (s *PGStore) TransitionIncident(ctx context.Context, orgID, id, to string, 
 		if err != nil {
 			return err
 		}
-		return appendIncidentTransition(ctx, tx, orgID, id, &inc.State, to, at, actorID, incidentReason(inc.State, to), nil)
+		return appendIncidentTransition(ctx, tx, orgID, id, &inc.State, to, at, actorID, incidentReason(inc.State, to), details)
 	})
 	return out, err
+}
+
+// commentDetails are the details of a transition with a comment; nil
+// without one.
+func commentDetails(comment string) map[string]any {
+	if comment == "" {
+		return nil
+	}
+	return map[string]any{"comment": comment}
 }
 
 // IncidentTransitions implements Store.

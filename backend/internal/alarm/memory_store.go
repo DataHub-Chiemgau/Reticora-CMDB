@@ -86,6 +86,7 @@ func matches(a *Alarm, f *ListFilter) bool {
 		len(f.SourceKinds) > 0 && !slices.Contains(f.SourceKinds, a.SourceKind),
 		f.SourceID != "" && !strings.EqualFold(a.SourceID, f.SourceID),
 		!eq(a.CIID, f.CIID), !eq(a.ClientID, f.ClientID), !eq(a.SiteID, f.SiteID), !eq(a.IncidentID, f.IncidentID),
+		f.ExcludeID != "" && a.ID == f.ExcludeID,
 		f.Suppressed != nil && *f.Suppressed != (a.SuppressedReason != nil),
 		f.To != nil && !a.FirstSeenAt.Before(*f.To),
 		f.From != nil && a.ResolvedAt != nil && a.ResolvedAt.Before(*f.From),
@@ -388,21 +389,47 @@ func (m *MemoryStore) GetIncident(_ context.Context, orgID, id string) (*Inciden
 	return cloneIncident(inc), nil
 }
 
+// CountIncidents implements Store.
+func (m *MemoryStore) CountIncidents(_ context.Context, orgID string, f *IncidentFilter, limit int) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, inc := range m.incidents {
+		if incidentMatches(inc, orgID, f) {
+			n++
+		}
+	}
+	if limit > 0 && n > limit {
+		n = limit
+	}
+	return n, nil
+}
+
+// incidentMatches reports whether inc passes the filter (without cursor
+// and limit); the caller holds m.mu.
+func incidentMatches(inc *Incident, orgID string, f *IncidentFilter) bool {
+	switch {
+	case inc.OrganizationID != orgID,
+		len(f.States) > 0 && !slices.Contains(f.States, inc.State),
+		len(f.CauseClasses) > 0 && !slices.Contains(f.CauseClasses, inc.CauseClass),
+		f.ClientID != "" && (inc.ClientID == nil || *inc.ClientID != f.ClientID),
+		f.To != nil && !inc.OpenedAt.Before(*f.To),
+		f.From != nil && inc.ResolvedAt != nil && inc.ResolvedAt.Before(*f.From),
+		f.OpenedFrom != nil && inc.OpenedAt.Before(*f.OpenedFrom),
+		f.OpenedTo != nil && !inc.OpenedAt.Before(*f.OpenedTo):
+		return false
+	}
+	return true
+}
+
 // ListIncidents implements Store.
 func (m *MemoryStore) ListIncidents(_ context.Context, orgID string, f *IncidentFilter) (IncidentPage, error) {
 	m.mu.Lock()
 	var items []Incident
 	for _, inc := range m.incidents {
-		switch {
-		case inc.OrganizationID != orgID,
-			len(f.States) > 0 && !slices.Contains(f.States, inc.State),
-			len(f.CauseClasses) > 0 && !slices.Contains(f.CauseClasses, inc.CauseClass),
-			f.ClientID != "" && (inc.ClientID == nil || *inc.ClientID != f.ClientID),
-			f.To != nil && !inc.OpenedAt.Before(*f.To),
-			f.From != nil && inc.ResolvedAt != nil && inc.ResolvedAt.Before(*f.From):
-			continue
+		if incidentMatches(inc, orgID, f) {
+			items = append(items, *cloneIncident(inc))
 		}
-		items = append(items, *cloneIncident(inc))
 	}
 	m.mu.Unlock()
 	slices.SortFunc(items, func(a, b Incident) int {
@@ -445,11 +472,11 @@ func attach(a *Alarm, incidentID string, root bool) {
 }
 
 // setRoot makes a (attached already) the root of inc (lock held).
-func (m *MemoryStore) setRoot(inc *Incident, a *Alarm, manual bool, at time.Time) {
+func (m *MemoryStore) setRoot(inc *Incident, a *Alarm, manual bool, at time.Time, actor *string, reason string) {
 	if inc.RootAlarmID != nil && *inc.RootAlarmID != a.ID {
 		if prev, ok := m.alarms[*inc.RootAlarmID]; ok && prev.IncidentID != nil && *prev.IncidentID == inc.ID && prev.SuppressedReason == nil {
-			reason := SuppressedSymptom
-			prev.SuppressedReason = &reason
+			symptom := SuppressedSymptom
+			prev.SuppressedReason = &symptom
 		}
 	}
 	from := deref(inc.RootAlarmID)
@@ -457,8 +484,11 @@ func (m *MemoryStore) setRoot(inc *Incident, a *Alarm, manual bool, at time.Time
 	inc.RootAlarmID, inc.RootCIID, inc.ManualRoot = &id, a.CIID, inc.ManualRoot || manual
 	inc.UpdatedAt = m.clock()
 	state := inc.State
-	m.appendIncidentTransition(inc, &state, inc.State, at, nil, IncidentReasonRootChanged,
-		map[string]any{"from_alarm_id": from, "to_alarm_id": a.ID, "manual": manual})
+	details := map[string]any{"from_alarm_id": from, "to_alarm_id": a.ID, "manual": manual}
+	if reason != "" {
+		details["reason"] = reason
+	}
+	m.appendIncidentTransition(inc, &state, inc.State, at, actor, IncidentReasonRootChanged, details)
 }
 
 // AttachAlarms implements Store.
@@ -492,7 +522,7 @@ func (m *MemoryStore) AttachAlarms(_ context.Context, orgID, incidentID string, 
 		attach(a, incidentID, role == RoleRoot)
 	}
 	if role == RoleRoot {
-		m.setRoot(inc, targets[0], false, at)
+		m.setRoot(inc, targets[0], false, at, nil, "")
 	} else {
 		state := inc.State
 		m.appendIncidentTransition(inc, &state, inc.State, at, nil, IncidentReasonAlarmsAttached,
@@ -520,8 +550,33 @@ func (m *MemoryStore) SetRoot(_ context.Context, orgID, incidentID, alarmID stri
 		return nil, fmt.Errorf("alarm: attach: %w", ErrAlarmInOtherIncident)
 	}
 	attach(a, incidentID, true)
-	m.setRoot(inc, a, manual, m.clock())
+	m.setRoot(inc, a, manual, m.clock(), nil, "")
 	return cloneIncident(inc), nil
+}
+
+// SetRootManual implements Store.
+func (m *MemoryStore) SetRootManual(_ context.Context, orgID, incidentID, alarmID string, actor *string, reason string) (*Incident, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	inc, err := m.incidentOf(orgID, incidentID)
+	if err != nil {
+		return nil, err
+	}
+	if cerr := checkRoot(inc, true); cerr != nil {
+		return nil, cerr
+	}
+	a, ok := m.alarms[alarmID]
+	if !ok || a.OrganizationID != orgID || a.IncidentID == nil || *a.IncidentID != incidentID {
+		return nil, ErrAlarmNotMember
+	}
+	attach(a, incidentID, true)
+	m.setRoot(inc, a, true, m.clock(), actor, reason)
+	return cloneIncident(inc), nil
+}
+
+// CINames implements Store: the memory store knows no CIs.
+func (m *MemoryStore) CINames(_ context.Context, _ string, _ []string) (map[string]string, error) {
+	return map[string]string{}, nil
 }
 
 // MergeIncidents implements Store.
@@ -574,13 +629,22 @@ func (m *MemoryStore) MergeIncidents(_ context.Context, orgID, keepID, absorbID,
 		map[string]any{"absorbed": absorbID, "alarms": moved})
 	if root != nil {
 		attach(root, keepID, true)
-		m.setRoot(keep, root, false, at)
+		m.setRoot(keep, root, false, at, nil, "")
 	}
 	return cloneIncident(keep), nil
 }
 
 // TransitionIncident implements Store.
 func (m *MemoryStore) TransitionIncident(_ context.Context, orgID, id, to string, actorID *string) (*Incident, error) {
+	return m.transitionIncident(orgID, id, to, actorID, nil)
+}
+
+// AcknowledgeIncident implements Store.
+func (m *MemoryStore) AcknowledgeIncident(_ context.Context, orgID, id string, actorID *string, comment string) (*Incident, error) {
+	return m.transitionIncident(orgID, id, IncidentAcknowledged, actorID, commentDetails(comment))
+}
+
+func (m *MemoryStore) transitionIncident(orgID, id, to string, actorID *string, details map[string]any) (*Incident, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	inc, err := m.incidentOf(orgID, id)
@@ -601,7 +665,7 @@ func (m *MemoryStore) TransitionIncident(_ context.Context, orgID, id, to string
 		inc.AcknowledgedAt, inc.AcknowledgedBy = nil, nil
 	}
 	inc.State, inc.UpdatedAt = to, m.clock()
-	m.appendIncidentTransition(inc, &from, to, at, actorID, incidentReason(from, to), nil)
+	m.appendIncidentTransition(inc, &from, to, at, actorID, incidentReason(from, to), details)
 	return cloneIncident(inc), nil
 }
 

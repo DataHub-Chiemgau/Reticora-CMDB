@@ -10322,7 +10322,7 @@ export interface paths {
     };
     /**
      * List incidents
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description The incidents in the caller's scope (ALR-03, ALR-10, WP-1036), newest first on opened_at, paged with limit and the signed cursor (API-02). Each with its root (alarm, CI and CI name), cause class, confidence, affected counts, the number of symptoms, state and times. from and to apply to opened_at: the incidents opened in [from, to).
      */
     get: operations['listIncidents'];
     put?: never;
@@ -10345,7 +10345,7 @@ export interface paths {
     };
     /**
      * Get an incident
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description The incident with its members (alarms with role root or symptom, details filtered like the alarm list), reasons and the timeline: the transitions of the incident and of its alarms by time, at most 500 (timeline_truncated). A foreign or invisible incident is 404.
      */
     get: operations['getIncident'];
     put?: never;
@@ -10393,7 +10393,7 @@ export interface paths {
     put?: never;
     /**
      * Acknowledge an incident
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Acknowledges the incident and its open root alarm (alert:acknowledge, E-159); writes incident.updated (change acknowledged). The comment is kept in the timeline entry of the incident's transition (and passed to the root alarm's ack). An incident acknowledged or resolved already is 409.
      */
     post: operations['acknowledgeIncident'];
     delete?: never;
@@ -10416,7 +10416,7 @@ export interface paths {
     put?: never;
     /**
      * Set the root alarm of an incident
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Sets the root by hand (manual_root): the alarm must be a member of the incident (422 alarm_id), the previous root becomes a symptom, the transition root_changed names actor and reason. The automatic correlation keeps a root set by hand. Writes incident.updated (change root_changed); a resolved incident is 409.
      */
     post: operations['setIncidentRoot'];
     delete?: never;
@@ -15046,6 +15046,94 @@ export interface components {
     };
     AlarmActionRequest: {
       comment?: string;
+    };
+    /** @description An incident (ALR-03, WP-1027, WP-1036) with its root and the number of symptoms. */
+    Incident: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      /** Format: uuid */
+      client_id: string | null;
+      /** Format: uuid */
+      site_id: string | null;
+      /** Format: uuid */
+      root_alarm_id: string | null;
+      /** Format: uuid */
+      root_ci_id: string | null;
+      /** @enum {string} */
+      cause_class: 'topology' | 'collector_unreachable' | 'unknown';
+      confidence: number;
+      reasons: string[];
+      /** @enum {string} */
+      state: 'open' | 'acknowledged' | 'resolved';
+      /** Format: date-time */
+      opened_at: string;
+      /** Format: date-time */
+      acknowledged_at: string | null;
+      acknowledged_by: string | null;
+      /** Format: date-time */
+      resolved_at: string | null;
+      /** @description The root was set by hand; the correlation does not change it. */
+      manual_root: boolean;
+      affected_counts: {
+        [key: string]: number;
+      };
+      /** Format: date-time */
+      updated_at: string;
+      root: {
+        /** Format: uuid */
+        alarm_id: string | null;
+        /** Format: uuid */
+        ci_id: string | null;
+        /** @description Null when the caller does not see the CI. */
+        ci_name: string | null;
+      };
+      /** @description The visible member alarms besides the root. */
+      symptom_count: number;
+    };
+    IncidentMember: components['schemas']['Alarm'] & {
+      /** @enum {string} */
+      role: 'root' | 'symptom';
+    };
+    IncidentTimelineEntry: {
+      /** @enum {string} */
+      kind: 'incident' | 'alarm';
+      /**
+       * Format: uuid
+       * @description The alarm of an entry of kind alarm.
+       */
+      alarm_id: string | null;
+      from_state: string | null;
+      to_state: string;
+      /** Format: date-time */
+      at: string;
+      /** @description The acting user; null is the system. */
+      actor_id: string | null;
+      reason: string;
+      comment: string | null;
+      details: {
+        [key: string]: unknown;
+      };
+    };
+    IncidentDetail: components['schemas']['Incident'] & {
+      members: components['schemas']['IncidentMember'][];
+      /** @description True when the incident has more than 1000 members visible to the caller; symptom_count counts them all. */
+      members_truncated: boolean;
+      timeline: components['schemas']['IncidentTimelineEntry'][];
+      /** @description True when the timeline has more than 500 entries. */
+      timeline_truncated: boolean;
+    };
+    IncidentListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Incident'][];
+    };
+    IncidentRootRequest: {
+      /**
+       * Format: uuid
+       * @description An alarm of the incident.
+       */
+      alarm_id: string;
+      reason: string;
     };
     /** @description The alarm settings to store (WP-1030); an absent member takes its default. */
     AlarmSettingsRequest: {
@@ -49220,6 +49308,13 @@ export interface operations {
          *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
+        /** @description Repeatable or comma-separated. */
+        state?: ('open' | 'acknowledged' | 'resolved')[];
+        client_id?: string;
+        /** @description Repeatable or comma-separated. */
+        cause_class?: ('topology' | 'collector_unreachable' | 'unknown')[];
+        from?: string;
+        to?: string;
       };
       header?: never;
       path?: never;
@@ -49227,16 +49322,19 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List incidents. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description Incidents */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['IncidentListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -49252,12 +49350,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get an incident. The schema comes with the implementing work package. */
+      /** @description The incident */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['IncidentDetail'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -49300,20 +49400,27 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        'application/json': components['schemas']['AlarmActionRequest'];
+      };
+    };
     responses: {
-      /** @description Acknowledge an incident. The schema comes with the implementing work package. */
+      /** @description The acknowledged incident */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['IncidentDetail'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -49327,20 +49434,27 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['IncidentRootRequest'];
+      };
+    };
     responses: {
-      /** @description Set the root alarm of an incident. The schema comes with the implementing work package. */
+      /** @description The incident with its new root */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['IncidentDetail'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };

@@ -274,6 +274,7 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 		admpSync                           *admp.Sync
 		alarms                             = alarm.NewPGService(f.App)
 		ackAlarm, sevAlarm, resAlarm       *alarm.Alarm
+		updIncident                        *alarm.Incident
 		maintWindow, maintCI               string
 		allocParent                        string
 		hookServer                         *httptest.Server
@@ -1316,6 +1317,38 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 					t.Errorf("alarm.resolved data %v", data)
 				}
 			}},
+		// Acknowledging an incident over the REST route (WP-1036): the
+		// incident and its root alarm in one transaction with
+		// incident.updated.
+		{typ: events.IncidentUpdated,
+			setup: func(t *testing.T) {
+				root, err := alarms.Raise(f.OrgCtx(f.OrgA), f.OrgA, evt02AlarmInput("evt02-incident", alarm.SeverityCritical))
+				if err != nil {
+					t.Fatal(err)
+				}
+				store := alarms.Store()
+				if updIncident, _, err = store.UpsertIncident(f.OrgCtx(f.OrgA), f.OrgA, &alarm.IncidentInput{
+					CauseClass: alarm.CauseTopology}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err = store.AttachAlarms(f.OrgCtx(f.OrgA), f.OrgA, updIncident.ID, []string{root.ID}, alarm.RoleRoot); err != nil {
+					t.Fatal(err)
+				}
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/monitoring/incidents/"+updIncident.ID+"/ack", `{}`)
+				answered(t, "acknowledge incident", r, refused, http.StatusOK)
+				if refused {
+					unchanged(t, "incident state", scalar(t, `SELECT state FROM incident WHERE id = $1`, updIncident.ID), "open")
+				}
+				return updIncident.ID
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["incident_id"] != entity || data["change"] != "acknowledged" ||
+					data["severity"] != "critical" || data["actor_id"] != admin.User {
+					t.Errorf("incident.updated data %v", data)
+				}
+			}},
 		// The workflow action send_webhook (WP-1096): the event is written
 		// with the succeeded step; while the outbox refuses it the run
 		// reports the failed step, which stays without its event.
@@ -1756,7 +1789,6 @@ func evt02ValidateValue(root map[string]any, path string, schema map[string]any,
 var plannedProducers = map[string]string{
 	"alarm.escalated":             "WP-1146",
 	"incident.opened":             "WP-1028",
-	"incident.updated":            "WP-1036",
 	"incident.resolved":           "WP-1028",
 	"collector_group.unreachable": "WP-964",
 	"collector_group.reachable":   "WP-964",

@@ -119,6 +119,13 @@ func (m *MemorySink) Append(_ context.Context, e *events.Event) error {
 	return nil
 }
 
+// Reset forgets the recorded events (tests).
+func (m *MemorySink) Reset() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.events = nil
+}
+
 // Events returns the recorded events, oldest first.
 func (m *MemorySink) Events() []events.Event {
 	m.mu.Lock()

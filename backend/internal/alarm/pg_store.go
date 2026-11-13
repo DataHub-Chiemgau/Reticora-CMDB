@@ -154,6 +154,9 @@ func listWhere(orgID string, f *ListFilter) (where []string, args *sqlArgs) {
 	if f.IncidentID != "" {
 		where = append(where, "incident_id = "+arg(f.IncidentID)+"::uuid")
 	}
+	if f.ExcludeID != "" {
+		where = append(where, "id <> "+arg(f.ExcludeID)+"::uuid")
+	}
 	if f.Suppressed != nil {
 		if *f.Suppressed {
 			where = append(where, "suppressed_reason IS NOT NULL")

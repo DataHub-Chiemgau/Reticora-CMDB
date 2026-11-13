@@ -174,6 +174,9 @@ type ListFilter struct {
 	// SourceID selects the alarms of one source (a rule, WP-984).
 	SourceID   string
 	IncidentID string
+	// ExcludeID leaves out one alarm (the root of an incident when its
+	// symptoms are counted, WP-1036).
+	ExcludeID string
 	// Suppressed selects suppressed (true) or unsuppressed (false) alarms.
 	Suppressed *bool
 	// From and To select the alarms active in the period: first seen

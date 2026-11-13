@@ -419,6 +419,11 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	// organization, absent while the defaults apply.
 	m["PUT "+v1+"monitoring/alarm-settings"] = RouteSnapshot{Table: "alarm_settings",
 		Keys: []SnapshotKey{{"organization_id", "$org"}}}
+	// Acknowledging an incident and setting its root by hand (WP-1036):
+	// the incident row (state, root, manual_root); the root alarm keeps its
+	// own transition.
+	m["POST "+v1+"monitoring/incidents/{id}/ack"] = row("incident")
+	m["POST "+v1+"monitoring/incidents/{id}/root"] = row("incident")
 	// Collector groups (PRB-03, WP-947): the group row; adding or moving a
 	// member shows the members of the group, removing one the member row.
 	crud(m, v1+"collector-groups", "collector_group", all...)

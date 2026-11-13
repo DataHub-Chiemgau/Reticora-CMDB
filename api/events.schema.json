@@ -3130,6 +3130,26 @@
         "cause_class": {
           "type": "string",
           "description": "Cause class (topology, collector_unreachable, config_change, unknown)."
+        },
+        "incident_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident (same as id); set on incident.updated of a user action (WP-1036)."
+        },
+        "change": {
+          "type": "string",
+          "enum": ["acknowledged", "root_changed"],
+          "description": "The kind of the change of incident.updated of a user action (WP-1036)."
+        },
+        "root_alarm_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The root alarm after the change; absent without root."
+        },
+        "actor_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The acting user of incident.updated (WP-1036); absent for the system."
         }
       },
       "examples": [
@@ -3177,6 +3197,26 @@
         "cause_class": {
           "type": "string",
           "description": "Cause class (topology, collector_unreachable, config_change, unknown)."
+        },
+        "incident_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident (same as id); set on incident.updated of a user action (WP-1036)."
+        },
+        "change": {
+          "type": "string",
+          "enum": ["acknowledged", "root_changed"],
+          "description": "The kind of the change of incident.updated of a user action (WP-1036)."
+        },
+        "root_alarm_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The root alarm after the change; absent without root."
+        },
+        "actor_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The acting user of incident.updated (WP-1036); absent for the system."
         }
       },
       "examples": [
@@ -3186,7 +3226,11 @@
           "client_id": "33333333-3333-4333-8333-333333333333",
           "site_id": "44444444-4444-4444-8444-444444444444",
           "severity": "critical",
-          "cause_class": "topology"
+          "cause_class": "topology",
+          "incident_id": "11111111-1111-4111-8111-111111111111",
+          "change": "root_changed",
+          "root_alarm_id": "55555555-5555-4555-8555-555555555555",
+          "actor_id": "66666666-6666-4666-8666-666666666666"
         }
       ]
     },
@@ -3224,6 +3268,26 @@
         "cause_class": {
           "type": "string",
           "description": "Cause class (topology, collector_unreachable, config_change, unknown)."
+        },
+        "incident_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident (same as id); set on incident.updated of a user action (WP-1036)."
+        },
+        "change": {
+          "type": "string",
+          "enum": ["acknowledged", "root_changed"],
+          "description": "The kind of the change of incident.updated of a user action (WP-1036)."
+        },
+        "root_alarm_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The root alarm after the change; absent without root."
+        },
+        "actor_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The acting user of incident.updated (WP-1036); absent for the system."
         }
       },
       "examples": [

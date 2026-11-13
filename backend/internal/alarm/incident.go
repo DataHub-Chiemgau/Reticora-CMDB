@@ -73,6 +73,9 @@ var (
 	// be moved, so the merge needs the organization-wide scope. Nothing is
 	// written.
 	ErrMergeScopeRestricted = errors.New("merging incidents needs the organization-wide scope")
+	// ErrAlarmNotMember is returned when SetRootManual names an alarm that
+	// is no member of the incident; nothing is written.
+	ErrAlarmNotMember = errors.New("alarm is no member of the incident")
 )
 
 // Incident is one incident.
@@ -142,7 +145,11 @@ type IncidentFilter struct {
 	// From and To select the incidents active in the period: opened before
 	// To and not resolved before From.
 	From, To *time.Time
-	After    *IncidentCursor
+	// OpenedFrom and OpenedTo select the incidents opened in the period
+	// (opened_at at or after OpenedFrom, before OpenedTo; REST from/to,
+	// WP-1036 AK1, like the alarm list of WP-983).
+	OpenedFrom, OpenedTo *time.Time
+	After                *IncidentCursor
 	// Limit is the page size; 0 or less is DefaultLimit.
 	Limit int
 }

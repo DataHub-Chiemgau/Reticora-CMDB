@@ -461,13 +461,21 @@ type AlarmData struct {
 
 // IncidentData is the data of the incident.* types (ALR-03): the incident
 // with its root CI and cause class.
+//
+// incident.updated of a user action (WP-1036) adds incident_id (the
+// incident, as id), the kind of the change (acknowledged, root_changed),
+// the root alarm and the acting user.
 type IncidentData struct {
-	ID         string `json:"id"`
-	RootCIID   string `json:"root_ci_id,omitempty"`
-	ClientID   string `json:"client_id,omitempty"`
-	SiteID     string `json:"site_id,omitempty"`
-	Severity   string `json:"severity"`
-	CauseClass string `json:"cause_class,omitempty"`
+	ID          string `json:"id"`
+	IncidentID  string `json:"incident_id,omitempty"`
+	RootCIID    string `json:"root_ci_id,omitempty"`
+	ClientID    string `json:"client_id,omitempty"`
+	SiteID      string `json:"site_id,omitempty"`
+	Severity    string `json:"severity"`
+	CauseClass  string `json:"cause_class,omitempty"`
+	Change      string `json:"change,omitempty"`
+	RootAlarmID string `json:"root_alarm_id,omitempty"`
+	ActorID     string `json:"actor_id,omitempty"`
 }
 
 // CollectorGroupData is the data of the collector_group.* types (PRB-03,

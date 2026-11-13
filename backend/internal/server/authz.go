@@ -332,6 +332,11 @@ var routeRules = []routeRule{
 	{http.MethodPost, "monitoring/alarms/*/ack", identity.PermAlertAcknowledge},
 	{http.MethodPost, "monitoring/alarms/*/unack", identity.PermAlertAcknowledge},
 	{http.MethodPost, "monitoring/incidents/*/ack", identity.PermAlertAcknowledge},
+	// The other incident routes (WP-1036) need no rule of their own: GET
+	// monitoring/incidents and monitoring/incidents/{id} read with the
+	// monitoring:read of the prefix, POST monitoring/incidents/{id}/root
+	// writes with monitoring:write by the suffix rule
+	// (testdata/route_permissions.txt).
 	{http.MethodPost, "notification-escalations/*/acknowledge", identity.PermAlertAcknowledge},
 	// Deleting a CI is its own right; ci:write does not delete. Restoring
 	// undoes a deletion and needs the same right (CI-05).
