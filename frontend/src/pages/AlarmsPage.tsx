@@ -1,7 +1,7 @@
 import { BellRing, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { alarmApi } from '../api/client';
 import type { Alarm, AlarmListParams } from '../api/client';

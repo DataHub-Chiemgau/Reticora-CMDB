@@ -165,6 +165,9 @@ var referenceKinds = map[string]string{
 	// site itself.
 	"monitoring_group_member": DependencyCI,
 	"monitoring_profile":      DependencyCI,
+	// A suppressed auto probe carries the site of its CI (000345, WP-949);
+	// the CI at the site is the dependency.
+	"probe_autocreate_suppression": DependencyCI,
 	// A probe assignment carries the site of its probe (000308, WP-936);
 	// the probe is the dependency.
 	"probe_assignment": DependencyProbe,

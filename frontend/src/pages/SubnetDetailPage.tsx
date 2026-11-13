@@ -17,7 +17,7 @@
 import { Pencil, Plus, Sparkles } from 'lucide-react';
 import { useMemo, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { API_MAX_LIMIT, ApiError } from '../api/client';
 import {
   IP_ADDRESS_STATES,

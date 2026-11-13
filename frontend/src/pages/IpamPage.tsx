@@ -13,7 +13,7 @@
 import { Network, Plus, Settings2 } from 'lucide-react';
 import { useMemo, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router';
 import type { IPAMSection } from '../api/cmdb';
 import { useClients } from '../api/cmdbHooks';
 import { useHasPermission, useSites } from '../api/hooks';

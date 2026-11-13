@@ -655,6 +655,10 @@ export const SCOPED_LISTS: Record<string, readonly ('client_id' | 'site_id')[]> 
   '/collector-groups': ['client_id', 'site_id'],
   // The alarms filter by client and site (ALR-01, WP-983).
   '/monitoring/alarms': ['client_id', 'site_id'],
+  // The incidents (WP-1036) and the availability targets (WP-1048) filter
+  // by client.
+  '/monitoring/incidents': ['client_id'],
+  '/monitoring/sla/targets': ['client_id'],
 };
 
 /** withScope adds the selected scope to a GET of a scoped list. */
