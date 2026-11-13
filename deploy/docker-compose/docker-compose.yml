@@ -125,7 +125,7 @@ services:
   # Internal NATS (jobs, ingest, events), reachable only on this host; its
   # leaf node port 7422 serves nats-edge on the internal network (nats.conf).
   nats:
-    image: nats:2.14.9-alpine@sha256:c9706755679d8bcf05b4ce275fdd2ac8890058b1535881208a65b3cd613f00bd
+    image: nats:2.14.10-alpine@sha256:311da47e2f31c26e99c623cd78d486a1e8ab039c49b32652770bb91a4f70512e
     restart: unless-stopped
     logging: *logging
     command: ["-c", "/etc/nats/nats.conf"]
@@ -147,7 +147,7 @@ services:
   # writes the collector CA, the server certificate and the generated
   # pki/edge.conf into the collector-pki volume; the endpoint waits for them.
   nats-edge:
-    image: nats:2.14.9-alpine@sha256:c9706755679d8bcf05b4ce275fdd2ac8890058b1535881208a65b3cd613f00bd
+    image: nats:2.14.10-alpine@sha256:311da47e2f31c26e99c623cd78d486a1e8ab039c49b32652770bb91a4f70512e
     restart: unless-stopped
     logging: *logging
     working_dir: /etc/nats

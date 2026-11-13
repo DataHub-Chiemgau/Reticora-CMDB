@@ -1436,7 +1436,7 @@ counts and verifies the audit hash chain with the `audit-verify` binary.
 | Service | Image | Purpose |
 |---------|-------|---------|
 | PostgreSQL + TimescaleDB | timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731 | Primary database with time-series |
-| NATS | nats:2.14.9-alpine | Event bus (JetStream) |
+| NATS | nats:2.14.10-alpine | Event bus (JetStream) |
 | Redis | redis:7.4.12-alpine | Cache, sessions, rate-limiting |
 | MinIO (Silo build) | pgsty/minio:RELEASE.2026-08-04T00-00-00Z | S3-compatible object storage; `minio/minio` is no longer published |
 | Keycloak | keycloak:26.8.2 | OIDC identity provider |

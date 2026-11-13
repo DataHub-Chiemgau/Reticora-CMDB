@@ -15,8 +15,8 @@ permissions:
 # "Install nats-server" is the same in the jobs go-modules (collector),
 # migrations and auditdefect (WP-337, WP-374).
 env:
-  NATS_SERVER_VERSION: "2.14.9"
-  NATS_SERVER_SHA256: 74f20433c5b39d7cc6db54155ec1e669671c728f625e54cf307298924b2b4259
+  NATS_SERVER_VERSION: "2.14.10"
+  NATS_SERVER_SHA256: 464f118a8aecf293e405514c1ab2c197a5d9209e58e36a5d05ad9577e5ee9b99
 
 jobs:
   backend:
@@ -236,7 +236,7 @@ jobs:
       # containers cannot pass arguments, so NATS is started here.
       - name: Start NATS with JetStream
         run: |
-          docker run -d --name nats -p 4222:4222 nats:2.14.9-alpine@sha256:c9706755679d8bcf05b4ce275fdd2ac8890058b1535881208a65b3cd613f00bd -js
+          docker run -d --name nats -p 4222:4222 nats:2.14.10-alpine@sha256:311da47e2f31c26e99c623cd78d486a1e8ab039c49b32652770bb91a4f70512e -js
           for i in $(seq 1 30); do nc -z localhost 4222 && exit 0; sleep 1; done
           docker logs nats; exit 1
 
@@ -468,7 +468,7 @@ jobs:
 
       - name: Start NATS with JetStream
         run: |
-          docker run -d --name nats -p 4222:4222 nats:2.14.9-alpine@sha256:c9706755679d8bcf05b4ce275fdd2ac8890058b1535881208a65b3cd613f00bd -js
+          docker run -d --name nats -p 4222:4222 nats:2.14.10-alpine@sha256:311da47e2f31c26e99c623cd78d486a1e8ab039c49b32652770bb91a4f70512e -js
           for i in $(seq 1 30); do nc -z localhost 4222 && exit 0; sleep 1; done
           docker logs nats; exit 1
 

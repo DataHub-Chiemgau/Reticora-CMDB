@@ -2566,6 +2566,8 @@ Mengengerüst (aus [E-222](#e-222)/[E-225](#e-225)): Mit gezielter Auffrischung 
 
 **Betroffene WPs:** WP-873 (`p3-sr60-thirdparty-pins`), Folge-WP nach E-246
 
+**Nachtrag 2026-11-13 (Update-Plan Upd-01, Teil NATS):** NATS läuft auf `nats:2.14.10-alpine@sha256:311da47e2f31c26e99c623cd78d486a1e8ab039c49b32652770bb91a4f70512e` (Compose `nats` und `nats-edge`, `nats-edge.yaml`, CI-Services, `load.yml`, `tests/k8s/fixtures/nats.yaml`, Fallback in `tests/nats-mtls.test.sh`). Die CI lädt nats-server v2.14.10 (linux-amd64, SHA256 `464f118a8aecf293e405514c1ab2c197a5d9209e58e36a5d05ad9577e5ee9b99` laut `SHA256SUMS` des Releases). Damit sind die sieben Repository-Advisories des Herstellers für ≤ 2.14.9 behoben: GHSA-p849-62j6-rhc5, GHSA-r9gv-x84w-62mr und GHSA-fwrx-9r9q-h7p4 (Leafnode), GHSA-7mrx-vpq7-fhmp und GHSA-p29q-ccgc-hcg7 (Auth-Callout), GHSA-4fpp-8grw-j976 (Route-Pool) mit High sowie GHSA-rr37-7hx9-8xw5 mit Medium. NATS braucht weiterhin keine Ausnahme: Trivy 0.75.0 meldet für 2.14.10-alpine 0 Critical und 0 High. Für 2.14.9-alpine meldete Trivy ebenfalls 0, obwohl die sieben Advisories bestanden. Diese Advisories stehen nur im Hersteller-Repository und nicht in der globalen Advisory-Datenbank, deshalb erkennt `image-scan-thirdparty` sie nicht. Diese Lücke schließt Upd-04 mit einer eigenen Abfrage der Repository-Advisories. Der Minor-Sprung auf 2.15.3 folgt mit Upd-20.
+
 <a id="e-247"></a>
 ## E-247 – Bedeutung von „Überlappung“ und strict_mode in der Subnetzhierarchie (IPM-02)
 
