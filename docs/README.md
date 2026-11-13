@@ -961,6 +961,26 @@ data first is the safe degradation. Spool occupancy (message count, bytes,
 oldest age) is emitted as structured `spool stats` log records on every
 spool/flush so operators can alert on a growing backlog.
 
+**Probe spool (PRB-07, NFR-04, COL-05, WP-954):** next to the discovery
+spool the monitoring keeps two queues of its own below `RETICORA_SPOOL_DIR`:
+`probe-state` (every state change as an entry of its own, written before
+the engine goes on; kept at least 24 h and never displaced within them)
+and `probe-results` (the results, bundled every second or at 1,000 results
+into one gzip-compressed entry with `seq_from`/`seq_to`, delivered in
+sequence order). `RETICORA_PROBE_SPOOL_MAX_BYTES` (default 2 GiB) is the
+budget of both together, a tenth of it for the state changes; 24 h at 170
+results/s fit into it. At 80 % of the result share the oldest bundles are
+compacted (per probe one result per 5 minutes plus every failure and every
+result of a state change): a window of up to 900 bundles behind a cursor,
+the last compacted part included so it thins out again with the bundles
+behind it; a full window with nothing to leave out (an outage with only
+failures) is passed over, so the compaction never stalls on it and reads
+only the bundles behind its cursor (`DiskBuffer.PeekAfter`). Only at the
+limit a new bundle is dropped. Losses are
+counted per reason (`max_bytes`, `compacted`, `quarantined`; compacted
+results are no loss), persisted and reported in the monitoring alive
+message (`collector/probe/outbox.go`).
+
 **Identity resolution (spec §5.3):** `discovery.Reconcile` matches incoming
 items against existing CIs in the spec's priority order — serial number,
 hardware UUID, MAC address(es), management IP + CI type, hostname/FQDN. Each

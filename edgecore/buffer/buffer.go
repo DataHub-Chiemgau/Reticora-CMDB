@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -509,6 +510,15 @@ func (b *DiskBuffer) Saturated(ctx context.Context) (bool, error) {
 // it), is quarantined, counted as a LossCorrupt and skipped; the batch is
 // filled from the following entries in source-time order.
 func (b *DiskBuffer) PeekBatch(ctx context.Context, limit int) ([]Message, error) {
+	return b.PeekAfter(ctx, "", limit)
+}
+
+// PeekAfter is PeekBatch from the first message that sorts after the
+// message id after (in delivery order, the order of the file names; also
+// after the parts a Replace of after wrote); "" starts at the oldest. Only
+// the messages it returns are read, so a reader can walk the spool with a
+// cursor instead of reading its head again and again.
+func (b *DiskBuffer) PeekAfter(ctx context.Context, after string, limit int) ([]Message, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -522,6 +532,12 @@ func (b *DiskBuffer) PeekBatch(ctx context.Context, limit int) ([]Message, error
 	entries, err := b.expireLocked()
 	if err != nil {
 		return nil, err
+	}
+	if after != "" {
+		// The parts of after ("<after>.<n>.json") sort before
+		// "<after>.json" and are skipped with it.
+		bound := after + ".json"
+		entries = entries[sort.Search(len(entries), func(i int) bool { return entries[i].name > bound }):]
 	}
 
 	out := make([]Message, 0, min(len(entries), limit))

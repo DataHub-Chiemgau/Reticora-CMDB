@@ -6309,12 +6309,14 @@ PRT-19;[P3];E;collector/probe/icmp_mux_test.go;WP-953
 - [ ] **AK5:** Verluste werden je Grund (`max_bytes`, `compacted`, `quarantined`) gezählt, persistent geführt und über `Stats` für das Lebenszeichen (WP-957) bereitgestellt. Verdichtete Ergebnisse zählen als `compacted`, nicht als verloren.
 - [ ] **AK6:** `docs/README.md` nennt `RETICORA_PROBE_SPOOL_MAX_BYTES` und die beiden Verzeichnisse neben dem Discovery-Spool.
 
-**Dateien (7 Einträge):**
+**Dateien (9 Einträge):**
 
 - collector/probe/outbox.go (neu): zwei Warteschlangen, Bündelung, Budget
 - collector/probe/outbox_test.go (neu)
 - collector/probe/compact.go (neu)
 - collector/probe/compact_test.go (neu)
+- edgecore/buffer/buffer.go: `PeekAfter(ctx, after, limit)`, Lesen hinter einem Cursor für die Verdichtung (sonst liest jeder Lauf den verdichteten Kopf der Warteschlange erneut und bleibt hinter einem festen Fenster stehen)
+- edgecore/buffer/buffer_test.go: `TestPeekAfterContinuesBehindCursor`
 - collector/collectorcmd/collectorcmd.go: `RETICORA_PROBE_SPOOL_MAX_BYTES` in `loadCollectorConfig`
 - docs/README.md
 - docs/traceability.csv
@@ -6330,10 +6332,12 @@ PRT-19;[P3];E;collector/probe/icmp_mux_test.go;WP-953
   - `TestOutboxBudgetFor24Hours`: Rechnung 14,7 Mio. Ergebnisse
   - `TestOutboxCrashDuringWrite`
   - `TestOutboxCountsLossByReason`
+  - `TestOutboxCompactionPassesOverIncompressibleBundles`: ältestes Fenster nur mit Fehlschlägen, danach verdichtbare Bündel → `compacted` > 0, `max_bytes` = 0
+  - `TestOutboxCompactionReadsBehindItsCursor`: verdichteter Kopf länger als vier Fenster hält die Verdichtung nicht auf
 - `collector/probe/compact_test.go`:
   - `TestCompactionKeepsFailuresAndStateResults`
   - `TestCompactionOneResultPerFiveMinutes`
-- `edgecore/buffer/buffer_test.go` bleibt unverändert grün.
+- `edgecore/buffer/buffer_test.go`: die bestehenden Tests bleiben grün; neu `TestPeekAfterContinuesBehindCursor`.
 
 **Traceability (`docs/traceability.csv`):**
 

@@ -96,6 +96,10 @@ type collectorConfig struct {
 	// SpoolMaxAge drops buffered messages older than this on enqueue, but
 	// never before 24 h; 0 = keep forever.
 	SpoolMaxAge time.Duration
+	// ProbeSpoolMaxBytes is the budget of the probe spool below SpoolDir
+	// (probe-state and probe-results together, state changes 10 %;
+	// RETICORA_PROBE_SPOOL_MAX_BYTES, default 2 GiB; PRB-07, WP-954).
+	ProbeSpoolMaxBytes int64
 	// TrapListenAddr enables the SNMP trap receiver when set (e.g. ":162").
 	// Traps are normalized into metric events and sent to the monitoring
 	// ingest so existing alert rules can fire on them (spec §9).
@@ -1945,6 +1949,7 @@ func loadCollectorConfig() collectorConfig {
 		SpoolDir:           envOrDefault("RETICORA_SPOOL_DIR", "/var/lib/reticora-collector/spool"),
 		SpoolMaxBytes:      int64EnvOrDefault("RETICORA_SPOOL_MAX_BYTES", 1<<30), // 1 GiB default cap
 		SpoolMaxAge:        durationEnvOrDefault("RETICORA_SPOOL_MAX_AGE", 72*time.Hour),
+		ProbeSpoolMaxBytes: int64EnvOrDefault("RETICORA_PROBE_SPOOL_MAX_BYTES", probe.DefaultOutboxMaxBytes),
 		TrapListenAddr:     os.Getenv("RETICORA_SNMP_TRAP_LISTEN"),
 		MetricsInterval:    durationEnvOrDefault("RETICORA_METRICS_INTERVAL", defaultMetricsInterval),
 		PollMetrics:        pollMetricsFromEnv(os.Getenv("RETICORA_SNMP_POLL_METRICS")),

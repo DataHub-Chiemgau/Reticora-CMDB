@@ -1794,3 +1794,6 @@ NFR-11;[P3];E;collector/probe/icmp_mux_test.go;WP-953
 PRT-01;[P3];E;collector/probe/icmp_test.go;WP-953
 PRT-02;[P3];E;collector/probe/icmp_test.go;WP-953
 PRT-19;[P3];E;collector/probe/icmp_mux_test.go;WP-953
+PRB-07;[P3];E;collector/probe/outbox_test.go;WP-954
+NFR-04;[B], Teilumfang [P5];E;collector/probe/outbox_test.go;WP-954
+COL-05;[B];E;collector/probe/outbox_test.go;WP-954

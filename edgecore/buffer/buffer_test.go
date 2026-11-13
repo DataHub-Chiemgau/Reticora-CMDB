@@ -1068,3 +1068,55 @@ func TestReplaceRollsBackAndRefuses(t *testing.T) {
 		t.Fatalf("Replace with a cancelled context: %v", err)
 	}
 }
+
+// TestPeekAfterContinuesBehindCursor: PeekAfter returns the messages that
+// sort after a message id in delivery order, also after the parts a
+// Replace of it wrote, and from the oldest without a cursor.
+func TestPeekAfterContinuesBehindCursor(t *testing.T) {
+	b := &DiskBuffer{Dir: t.TempDir()}
+	ctx := testCtx(t)
+	ids := make([]string, 0, 5)
+	for i := range 5 {
+		id, err := b.Enqueue(ctx, &Message{
+			ID:      time.Date(2024, 1, 1, 0, 0, i, 0, time.UTC).Format("20060102T150405.000000000Z"),
+			Topic:   "t",
+			Payload: []byte{byte('a' + i)},
+		})
+		if err != nil {
+			t.Fatalf("Enqueue %d: %v", i, err)
+		}
+		ids = append(ids, id)
+	}
+	parts, err := b.Replace(ctx, ids[1], []Message{{Topic: "t", Payload: []byte("x")}, {Topic: "t", Payload: []byte("y")}})
+	if err != nil {
+		t.Fatalf("Replace: %v", err)
+	}
+	got := func(after string, limit int) []string {
+		t.Helper()
+		msgs, err := b.PeekAfter(ctx, after, limit)
+		if err != nil {
+			t.Fatalf("PeekAfter(%q): %v", after, err)
+		}
+		out := make([]string, 0, len(msgs))
+		for _, m := range msgs {
+			out = append(out, m.ID)
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		after string
+		limit int
+		want  []string
+	}{
+		{"", 10, []string{ids[0], parts[0], parts[1], ids[2], ids[3], ids[4]}},
+		{ids[0], 2, []string{parts[0], parts[1]}},
+		{parts[0], 10, []string{parts[1], ids[2], ids[3], ids[4]}},
+		{ids[1], 10, []string{ids[2], ids[3], ids[4]}},
+		{parts[1], 1, []string{ids[2]}},
+		{ids[4], 10, []string{}},
+	} {
+		if g := got(tc.after, tc.limit); fmt.Sprint(g) != fmt.Sprint(tc.want) {
+			t.Errorf("PeekAfter(%q, %d) = %v, want %v", tc.after, tc.limit, g, tc.want)
+		}
+	}
+}
