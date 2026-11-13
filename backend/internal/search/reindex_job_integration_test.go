@@ -100,6 +100,18 @@ func TestSearchReindexJob(t *testing.T) {
 	ended := func(job *jobs.Job) bool {
 		return job.Status == jobs.StatusSucceeded || job.Status == jobs.StatusFailed
 	}
+	// dbNow is the clock of the database. The documents get updated_at =
+	// now() of the database, the job its started_at from the clock of the
+	// process (jobs.Service); the clock of the database VM is off by up to
+	// about 100 ms, so the documents written by the run are counted from a
+	// database instant taken before the job is started, not from StartedAt.
+	dbNow := func() (now time.Time) {
+		t.Helper()
+		if qerr := f.Admin.QueryRow(bg, `SELECT clock_timestamp()`).Scan(&now); qerr != nil {
+			t.Fatal(qerr)
+		}
+		return now
+	}
 	// rebuilt counts the documents of the type the run since the time wrote.
 	rebuilt := func(entityType string, since time.Time) (n int) {
 		t.Helper()
@@ -139,9 +151,10 @@ func TestSearchReindexJob(t *testing.T) {
 	if _, err = lock.Exec(bg, `SELECT 1 FROM search_document WHERE entity_type = 'asset' AND entity_id = $1 FOR UPDATE`, w.asset); err != nil {
 		t.Fatal(err)
 	}
+	since := dbNow()
 	id := start()
 	job := wait(id, func(job *jobs.Job) bool {
-		return ended(job) || (job.Status == jobs.StatusRunning && job.StartedAt != nil && rebuilt("ci", *job.StartedAt) == liveCIs)
+		return ended(job) || (job.Status == jobs.StatusRunning && rebuilt("ci", since) == liveCIs)
 	})
 	if job.Status != jobs.StatusRunning {
 		t.Fatalf("job ended while the asset batch waits: %+v", job)
@@ -177,13 +190,9 @@ func TestSearchReindexJob(t *testing.T) {
 	}
 	// Organization-wide (E-08): the CI and the location of client 2 are
 	// rebuilt although client 1 started the job.
-	var startedAt time.Time
-	if job.StartedAt != nil {
-		startedAt = *job.StartedAt
-	}
 	for _, entityID := range []string{w.delta, site.ID} {
 		var updated time.Time
-		if err = f.Admin.QueryRow(bg, `SELECT updated_at FROM search_document WHERE entity_id = $1`, entityID).Scan(&updated); err != nil || updated.Before(startedAt) {
+		if err = f.Admin.QueryRow(bg, `SELECT updated_at FROM search_document WHERE entity_id = $1`, entityID).Scan(&updated); err != nil || updated.Before(since) {
 			t.Errorf("document of client 2 (%s) not rebuilt by the client-1 job: %v %v", entityID, updated, err)
 		}
 	}
@@ -205,12 +214,13 @@ func TestSearchReindexJob(t *testing.T) {
 	})
 	w.exec(t, `CREATE TRIGGER wp786_fail BEFORE INSERT OR UPDATE ON search_document
 		FOR EACH ROW WHEN (NEW.title = 'wp786 fail') EXECUTE FUNCTION wp786_fail()`)
+	since = dbNow()
 	id = start()
 	job = wait(id, ended)
 	if job.Status != jobs.StatusFailed || job.Error == "" || job.Error == "wp786 forced failure" {
 		t.Fatalf("job with a failing batch: %s %q", job.Status, job.Error)
 	}
-	if got := rebuilt("ci", *job.StartedAt); got != search.ReindexBatchSize {
+	if got := rebuilt("ci", since); got != search.ReindexBatchSize {
 		t.Errorf("documents of the first CI batch after the failure: %d, want %d", got, search.ReindexBatchSize)
 	}
 	if indexed(gone2) != 1 {
