@@ -25,7 +25,9 @@ import (
 // that leaves moves only its own probes and a member that joins takes only
 // probes to itself. In the mode failover every probe runs on the healthy
 // member with the highest priority (on a tie the smaller collector id).
-// Without a healthy member the assignments stay as they are (network down,
+// A suspended probe (suspended_reason, WP-942) is treated like a disabled
+// one: it loses its assignment. Without a healthy member the assignments
+// stay as they are (network down,
 // WP-964). Until the monitoring liveness of WP-963 a member is healthy when
 // its collector has the status active (COL-05).
 //
@@ -378,7 +380,8 @@ func assignGroup(ctx context.Context, tx pgx.Tx, orgID, groupID string) ([]Colle
 	if err != nil {
 		return nil, fmt.Errorf("read collector group members: %w", err)
 	}
-	rows, err = tx.Query(ctx, `SELECT p.id::text, p.enabled FROM probe p
+	// A suspended probe (WP-942) runs nowhere: it counts as disabled.
+	rows, err = tx.Query(ctx, `SELECT p.id::text, p.enabled AND p.suspended_reason IS NULL FROM probe p
 		WHERE p.organization_id = $1 AND p.collector_group_id = $2 ORDER BY p.id`, orgID, groupID)
 	if err != nil {
 		return nil, fmt.Errorf("read probes: %w", err)
@@ -429,7 +432,8 @@ func lockPlanProbes(ctx context.Context, tx pgx.Tx, orgID, groupID string, plan 
 		return nil
 	}
 	rows, err := tx.Query(ctx, `SELECT p.id::text FROM probe p
-		WHERE p.organization_id = $1 AND p.id = ANY ($2::uuid[]) AND p.enabled AND p.collector_group_id = $3
+		WHERE p.organization_id = $1 AND p.id = ANY ($2::uuid[]) AND p.enabled AND p.suspended_reason IS NULL
+		  AND p.collector_group_id = $3
 		ORDER BY p.id FOR SHARE`, orgID, ids, groupID)
 	if err != nil {
 		return fmt.Errorf("lock probes: %w", err)

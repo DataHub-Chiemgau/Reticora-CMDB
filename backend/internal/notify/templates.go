@@ -146,6 +146,18 @@ var Templates = map[string]map[string]render{
 				"The licence of " + str(d, "feature") + " expired on " + str(d, "expired_at") + "."}
 		},
 	},
+	events.MonitoringSuspensionChanged: {
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Monitoring-Prüfungen pausiert oder fortgesetzt",
+				"Wegen einer Änderung des Lizenzumfangs (" + strList(d["features"]) + ") wurden " + fmt.Sprint(d["paused"]) +
+					" Prüfungen pausiert und " + fmt.Sprint(d["resumed"]) + " fortgesetzt. Die Einstellungen bleiben erhalten."}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Monitoring checks paused or resumed",
+				"Because the licensed scope changed (" + strList(d["features"]) + "), " + fmt.Sprint(d["paused"]) +
+					" checks were paused and " + fmt.Sprint(d["resumed"]) + " resumed. Their configuration is kept."}
+		},
+	},
 	events.EntitlementChanged: {
 		LocaleDE: func(d map[string]any) Text {
 			if before := str(d, "plan_before"); before != "" {

@@ -530,7 +530,7 @@ func budgetTarget(p *Probe) string {
 
 // budgetSpec is the part of the effective values the budget counts.
 func budgetSpec(p *Probe, e *EffectiveSpec) entitlement.EffectiveSpec {
-	return entitlement.EffectiveSpec{Type: p.Type, Target: budgetTarget(p), IntervalS: e.IntervalS.Int(), Active: p.Enabled}
+	return entitlement.EffectiveSpec{Type: p.Type, Target: budgetTarget(p), IntervalS: e.IntervalS.Int(), Active: p.Active()}
 }
 
 // admitBudget admits a write against the budget (WP-940 AK2, AK3): active
@@ -551,8 +551,8 @@ func admitBudget(ctx context.Context, gate BudgetGate, orgID string, active []Pr
 	raw := nextLayers
 	raw.PlanMinIntervalS = 0
 	e := Resolve(next, raw)
-	asked := current == nil || !current.Enabled || Resolve(current, raw).IntervalS.Int() != e.IntervalS.Int()
-	if !next.Enabled {
+	asked := current == nil || !current.Active() || Resolve(current, raw).IntervalS.Int() != e.IntervalS.Int()
+	if !next.Active() {
 		if !asked || nextLayers.PlanMinIntervalS <= 0 || e.IntervalS.Int() >= nextLayers.PlanMinIntervalS {
 			return nil
 		}

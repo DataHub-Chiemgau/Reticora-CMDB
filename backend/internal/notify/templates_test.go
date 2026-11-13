@@ -23,6 +23,8 @@ var templateData = map[string]map[string]any{
 	events.EntitlementWarning: {"feature": "discovery", "valid_until": "2026-11-08T04:13:00Z", "days_left": float64(7)},
 	events.EntitlementExpired: {"feature": "discovery", "expired_at": "2026-11-08T04:13:00Z"},
 	events.EntitlementChanged: {"id": "11111111-1111-4111-8111-111111111111", "plan": "standard", "plan_before": "pro", "changed": []any{"monitoring_network", "max_cis"}},
+	events.MonitoringSuspensionChanged: {"feature_key": "monitoring_network", "suspended": true, "paused": 3.0, "resumed": 0.0,
+		"features": []any{"monitoring_network"}, "probe_types": []any{"snmp_status"}},
 	events.InvitationCreated: {"organization_name": "ACME", "expires_at": "2026-10-20T12:00:00Z",
 		"link": "https://cmdb.example/invitations/accept?token=t"},
 	events.ExportCompleted: {"format": "csv", "row_count": float64(3)},

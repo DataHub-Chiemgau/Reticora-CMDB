@@ -65,12 +65,12 @@ func (m *MemoryRepository) admit(ctx context.Context, orgID string, current, nex
 	if err != nil {
 		return err
 	}
-	if !next.Enabled {
+	if !next.Active() {
 		return admitBudget(ctx, m.budget, orgID, nil, nil, current, next, Layers{PlanMinIntervalS: planMin})
 	}
 	active := make([]Probe, 0)
 	for _, p := range m.probes {
-		if p.OrganizationID == orgID && p.Enabled {
+		if p.OrganizationID == orgID && p.Active() {
 			active = append(active, *p)
 		}
 	}
@@ -537,7 +537,7 @@ func (m *MemoryRepository) memBudget(ctx context.Context, orgID string) (entitle
 	x.planMin = planMin
 	var specs []entitlement.EffectiveSpec
 	for _, p := range m.probes {
-		if p.OrganizationID == orgID && p.Enabled {
+		if p.OrganizationID == orgID && p.Active() {
 			e := Resolve(p, x.layers(p))
 			specs = append(specs, budgetSpec(p, &e))
 		}

@@ -74,6 +74,14 @@ var Subscriptions = map[string]Subscription{
 			return &Audience{Permission: identity.PermUserManage, AllWithPermission: true}
 		},
 	},
+	events.MonitoringSuspensionChanged: {
+		// Probes of a lost monitoring feature paused or resumed (PKG-09,
+		// WP-942) go to the org_admins like entitlement.warning.
+		Category: "entitlement", Critical: true,
+		Audience: func(map[string]any) *Audience {
+			return &Audience{Permission: identity.PermUserManage, AllWithPermission: true}
+		},
+	},
 	events.EntitlementChanged: {
 		// A change of plan, add-on or quota (PKG-02, WP-882) goes to the
 		// org_admins who may read the entitlements.

@@ -5387,6 +5387,8 @@ PRB-11;[P3];E;backend/internal/probe/assign_integration_test.go;WP-941
 - frontend/src/api/generated/schema.d.ts (generiert)
 - docs/traceability.csv
 
+**Nachtrag 2026-11-13 (Umsetzung):** Die Dateiliste umfasst 21 Einträge (Migration = 2). Hinzu kommen `backend/internal/probe/pg_repository.go` und `backend/internal/probe/memory_repo.go` (Spalten in `probeColumns`/`scanProbe` lesen; das Budget aus WP-940 zählt gesperrte Probes über `Probe.Active` nicht), `backend/internal/probe/handler.go` (`Probe.Active` und die nur lesbaren Felder im DTO), `backend/internal/notify/templates_test.go` (Testpayload von `monitoring.suspension_changed`), `backend/internal/entitlement/entitlement.go` und `backend/internal/entitlement/entitlement_test.go` (`Service.ActiveUntilExpiry`: Ablauf von `valid_until` auf der Uhr des Dienstes für jede Funktion; ohne Durchsetzung, `RETICORA_ENTITLEMENT_ENFORCEMENT=false`, ist jede Funktion aktiv und der Job pausiert nichts). Präzisierung von AK4: Der Rahmen aus WP-867 nennt als `feature_key` die erste sortierte Funktion der pausierten Typen, wenn der Lauf pausiert hat (`suspended = true`), sonst die der fortgesetzten; `features` nennt beide Richtungen.
+
 **Migration/RLS:** Migration `<nächste Nr.>_probe_suspend` (frühestens 000284):
 - `ALTER TABLE probe ADD COLUMN suspended_reason text NULL CHECK (suspended_reason IN ('entitlement')), ADD COLUMN suspended_at timestamptz NULL`.
 - Partieller Index `(organization_id) WHERE suspended_reason IS NOT NULL`.

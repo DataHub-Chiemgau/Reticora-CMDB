@@ -59,7 +59,19 @@ type Probe struct {
 	CreatedBySurrogate string    `json:"-"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
+	// SuspendedReason is set (entitlement) while the feature of the probe
+	// type is not active (PKG-09, WP-942); independent of Enabled, read
+	// only for the API.
+	SuspendedReason string     `json:"suspended_reason,omitempty"`
+	SuspendedAt     *time.Time `json:"suspended_at,omitempty"`
 }
+
+// SuspendedEntitlement is the suspended_reason of a probe whose feature
+// was lost (PKG-09, WP-942).
+const SuspendedEntitlement = "entitlement"
+
+// Active reports whether the probe runs: enabled and not suspended.
+func (p *Probe) Active() bool { return p.Enabled && p.SuspendedReason == "" }
 
 // MonitoringGroup groups CIs for the monitoring overrides and the
 // credential bindings (device group). ClientID empty is org-wide (E-09).

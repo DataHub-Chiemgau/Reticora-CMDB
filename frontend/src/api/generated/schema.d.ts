@@ -14506,9 +14506,20 @@ export interface components {
       /** @description IP address or host name, for tcp host and port, for http the URL. */
       target: string;
       params: components['schemas']['ProbeOverrides'];
+      /** @description The user's switch. A suspended probe stays suspended when it is set to true (PATCH enabled true lifts no suspension). */
       enabled: boolean;
       /** Format: uuid */
       parent_probe_id?: string;
+      /**
+       * @description Set while the monitoring feature of the probe type (monitoring, monitoring_network, monitoring_access) has no active entitlement after a plan change, a cancellation or an expiry (PKG-09, ENT-08, WP-942): the probe is paused, neither assigned nor distributed, and resumed with its configuration unchanged once the feature is active again (system job probe.entitlement_reconcile, every minute); enabled stays as it was. A quota exceeded after a downgrade pauses nothing: only new load is refused with 403 entitlement-limit. Absent when the probe is not suspended.
+       * @enum {string}
+       */
+      readonly suspended_reason?: 'entitlement';
+      /**
+       * Format: date-time
+       * @description When the probe was suspended (with suspended_reason).
+       */
+      readonly suspended_at?: string;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */

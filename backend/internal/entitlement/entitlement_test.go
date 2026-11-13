@@ -1262,3 +1262,39 @@ func TestChangePlanWritesTheTransition(t *testing.T) {
 		t.Errorf("same plan: %+v, %v", same, err)
 	}
 }
+
+// TestActiveUntilExpiry covers the expiry check of the monitoring
+// suspension (WP-942): an expired monitoring row is not active on the clock
+// of the service, unlike Status; without enforcement every feature is.
+func TestActiveUntilExpiry(t *testing.T) {
+	ctx := context.Background()
+	until := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	repo := NewMemoryRepository()
+	if _, err := repo.Upsert(ctx, &Entitlement{OrganizationID: "o", FeatureKey: FeatureMonitoringAccess,
+		Plan: PlanStandard, Enabled: true, ValidUntil: &until}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name    string
+		enforce bool
+		now     time.Time
+		want    bool
+	}{
+		{"before valid_until", true, until.Add(-time.Hour), true},
+		{"after valid_until", true, until.Add(time.Hour), false},
+		{"after valid_until without enforcement", false, until.Add(time.Hour), true},
+	} {
+		svc := NewService(repo, Options{Enforce: c.enforce})
+		svc.now = func() time.Time { return c.now }
+		if got, err := svc.ActiveUntilExpiry(ctx, "o", FeatureMonitoringAccess); err != nil || got != c.want {
+			t.Errorf("%s: %v %v, want %v", c.name, got, err, c.want)
+		}
+		if _, status, _ := svc.Status(ctx, "o", FeatureMonitoringAccess); status != StatusActive {
+			t.Errorf("%s: Status %s, want active (only discovery stops at expiry)", c.name, status)
+		}
+	}
+	missing := NewService(repo, Options{Enforce: true})
+	if got, _ := missing.ActiveUntilExpiry(ctx, "o", FeatureMonitoringNetwork); got {
+		t.Error("a missing row is active")
+	}
+}

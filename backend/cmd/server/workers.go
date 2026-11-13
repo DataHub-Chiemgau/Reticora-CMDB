@@ -521,6 +521,10 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 			if d.cfg.WorkerEnabled(config.WorkerProbeAssign) {
 				systemJobs = append(systemJobs, workerJob(config.WorkerProbeAssign, assigner.Schedule()))
 			}
+			// Suspension of the probes of a lost monitoring feature
+			// (PKG-09, ENT-08, WP-942): every minute per organization;
+			// resumed when the feature is active again.
+			systemJobs = append(systemJobs, probe.NewSuspender(pool, probe.LicensedBy(d.entitlements)).Schedule())
 		}
 		// Credential age: daily each stored secret beyond its max_age_days
 		// once per secret_version as credential.rotation_due (CRD-05,

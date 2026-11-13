@@ -702,6 +702,22 @@ func (s *Service) Status(ctx context.Context, orgID, featureKey string) (Entitle
 	return ent, status, nil
 }
 
+// ActiveUntilExpiry reports whether a feature is active and, unlike Status,
+// not past its valid_until for any feature, on the clock of the service:
+// the expiry of a monitoring feature ends it (PKG-09, ENT-08, WP-942),
+// while Status keeps an expired row active for every feature but discovery
+// (expiryStops). Without enforcement every feature is active.
+func (s *Service) ActiveUntilExpiry(ctx context.Context, orgID, featureKey string) (bool, error) {
+	ent, status, err := s.Status(ctx, orgID, featureKey)
+	if err != nil {
+		return false, err
+	}
+	if !s.opts.Enforce {
+		return true, nil
+	}
+	return status == StatusActive && (ent.ValidUntil == nil || s.now().Before(*ent.ValidUntil)), nil
+}
+
 // Check returns the effective entitlement for a feature and whether it grants
 // access.
 func (s *Service) Check(ctx context.Context, orgID, featureKey string) (Entitlement, bool, error) {

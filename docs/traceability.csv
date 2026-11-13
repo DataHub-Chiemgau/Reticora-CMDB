@@ -1824,3 +1824,5 @@ IPM-09;[P3];G3;backend/internal/importer/ipam_integration_test.go;WP-920
 TLC-05;[P3];F;backend/internal/export/orgexport_documents_test.go;WP-1150
 TLC-06;[P3];F;backend/internal/server/orgstate_integration_test.go;WP-1153
 PRB-01;[P3];E;backend/internal/probe/profile_scope_integration_test.go;WP-946
+PKG-09;[P3];E;backend/internal/probe/suspend_integration_test.go;WP-942
+ENT-08;[B];E;backend/internal/probe/suspend_integration_test.go;WP-942

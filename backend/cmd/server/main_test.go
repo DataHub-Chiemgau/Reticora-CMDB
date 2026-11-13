@@ -523,6 +523,17 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 			t.Errorf("JOB-02 probe assignment (PRB-03) with the module monitoring (database %v): registered %v",
 				withDB, kinds[probe.AssignKind])
 		}
+		// The probe suspension (PKG-09, WP-942): every minute with the
+		// module monitoring and the database.
+		if kinds[probe.SuspendKind] != withDB {
+			t.Errorf("JOB-02 probe suspension (PKG-09) with the module monitoring (database %v): registered %v",
+				withDB, kinds[probe.SuspendKind])
+		}
+		for _, job := range systemJobs(deps) {
+			if job.Kind == probe.SuspendKind && (job.Spec != "@every 1m" || job.MaxCatchUp != 1) {
+				t.Errorf("%s: spec %q, max catch-up %d; want @every 1m and 1", job.Kind, job.Spec, job.MaxCatchUp)
+			}
+		}
 	}
 	if registered[probe.AssignKind] {
 		t.Errorf("without the module monitoring %s is registered", probe.AssignKind)

@@ -119,7 +119,7 @@ func (r *PGRepository) admit(ctx context.Context, tx pgx.Tx, orgID string, curre
 	if err != nil {
 		return err
 	}
-	if !next.Enabled {
+	if !next.Active() {
 		return admitBudget(txCtx, r.budget, orgID, nil, nil, current, next, Layers{PlanMinIntervalS: planMin})
 	}
 	var (
@@ -128,7 +128,7 @@ func (r *PGRepository) admit(ctx context.Context, tx pgx.Tx, orgID string, curre
 	)
 	err = (&pgWriteTx{tx: tx, orgID: orgID}).widened(ctx, func() error {
 		var rerr error
-		active, rerr = collectProbes(ctx, tx, `SELECT `+probeColumns+` FROM probe p WHERE p.organization_id = $1 AND p.enabled`, orgID)
+		active, rerr = collectProbes(ctx, tx, `SELECT `+probeColumns+` FROM probe p WHERE p.organization_id = $1 AND p.enabled AND p.suspended_reason IS NULL`, orgID)
 		if rerr != nil {
 			return rerr
 		}
@@ -146,12 +146,13 @@ var _ Repository = (*PGRepository)(nil)
 
 const probeColumns = `p.id::text, p.organization_id::text, COALESCE(p.client_id::text, ''), COALESCE(p.site_id::text, ''),
 	COALESCE(p.ci_id::text, ''), p.collector_group_id::text, p.type, p.target, p.params, p.enabled,
-	COALESCE(p.parent_probe_id::text, ''), COALESCE(p.created_by_surrogate::text, ''), p.created_at, p.updated_at`
+	COALESCE(p.parent_probe_id::text, ''), COALESCE(p.created_by_surrogate::text, ''), p.created_at, p.updated_at,
+	COALESCE(p.suspended_reason, ''), p.suspended_at`
 
 func scanProbe(row pgx.Row) (Probe, error) {
 	var p Probe
 	err := row.Scan(&p.ID, &p.OrganizationID, &p.ClientID, &p.SiteID, &p.CIID, &p.CollectorGroupID, &p.Type, &p.Target,
-		&p.Params, &p.Enabled, &p.ParentProbeID, &p.CreatedBySurrogate, &p.CreatedAt, &p.UpdatedAt)
+		&p.Params, &p.Enabled, &p.ParentProbeID, &p.CreatedBySurrogate, &p.CreatedAt, &p.UpdatedAt, &p.SuspendedReason, &p.SuspendedAt)
 	return p, err
 }
 
@@ -319,7 +320,8 @@ func (r *PGRepository) ResolveForCollector(ctx context.Context, collectorID stri
 			var p Probe
 			var epoch int64
 			if scanErr := rows.Scan(&p.ID, &p.OrganizationID, &p.ClientID, &p.SiteID, &p.CIID, &p.CollectorGroupID, &p.Type, &p.Target,
-				&p.Params, &p.Enabled, &p.ParentProbeID, &p.CreatedBySurrogate, &p.CreatedAt, &p.UpdatedAt, &epoch); scanErr != nil {
+				&p.Params, &p.Enabled, &p.ParentProbeID, &p.CreatedBySurrogate, &p.CreatedAt, &p.UpdatedAt, &p.SuspendedReason,
+				&p.SuspendedAt, &epoch); scanErr != nil {
 				rows.Close()
 				return fmt.Errorf("scan assigned probe: %w", scanErr)
 			}
@@ -895,7 +897,7 @@ func (r *PGRepository) orgBudget(ctx context.Context, tx pgx.Tx, orgID string) (
 	}
 	var specs []entitlement.EffectiveSpec
 	err = (&pgWriteTx{tx: tx, orgID: orgID}).widened(ctx, func() error {
-		active, rerr := collectProbes(ctx, tx, `SELECT `+probeColumns+` FROM probe p WHERE p.organization_id = $1 AND p.enabled`, orgID)
+		active, rerr := collectProbes(ctx, tx, `SELECT `+probeColumns+` FROM probe p WHERE p.organization_id = $1 AND p.enabled AND p.suspended_reason IS NULL`, orgID)
 		if rerr != nil {
 			return rerr
 		}

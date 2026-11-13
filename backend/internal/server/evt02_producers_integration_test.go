@@ -71,6 +71,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/probe"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
@@ -766,6 +767,34 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 				fields, _ := data["changed_fields"].([]any)
 				if data["id"] != entity || data["client_id"] != f.Client1 || len(fields) == 0 {
 					t.Errorf("config.changed data %v", data)
+				}
+			}},
+		{typ: events.MonitoringSuspensionChanged,
+			// The reconciliation probe.entitlement_reconcile (WP-942): a
+			// snmp_status probe without monitoring_network is paused.
+			setup: func(t *testing.T) {
+				group := scalar(t, `INSERT INTO collector_group (organization_id, client_id, name)
+					VALUES ($1, $2, 'evt02-suspend') RETURNING id::text`, f.OrgA, f.Client1)
+				exec(t, `INSERT INTO probe (organization_id, client_id, collector_group_id, type, target)
+					VALUES ($1, $2, $3, 'snmp_status', '10.250.1.1')`, f.OrgA, f.Client1, group)
+			},
+			act: func(t *testing.T, refused bool) string {
+				s := probe.NewSuspender(f.App, func(_ context.Context, _, feature string) (bool, error) {
+					return feature == entitlement.FeatureMonitoring, nil
+				})
+				_, err := s.RunOrg(context.Background(), f.OrgA)
+				failed(t, "probe suspension", err, refused)
+				if refused {
+					unchanged(t, "suspended probes", count(t, `probe WHERE organization_id = $1 AND suspended_reason IS NOT NULL`, f.OrgA), "0")
+					return ""
+				}
+				return f.OrgA
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				types, _ := data["probe_types"].([]any)
+				if entity != f.OrgA || data["paused"] != float64(1) || data["resumed"] != float64(0) || data["suspended"] != true ||
+					data["feature_key"] != entitlement.FeatureMonitoringNetwork || len(types) != 1 || types[0] != "snmp_status" {
+					t.Errorf("monitoring.suspension_changed data %v", data)
 				}
 			}},
 		{typ: events.ADMPConnectionRefreshed,
@@ -1693,30 +1722,29 @@ func evt02ValidateValue(root map[string]any, path string, schema map[string]any,
 // package adds the producer case and removes its entry; before WP-1177
 // (p3-gate) the list is empty.
 var plannedProducers = map[string]string{
-	"probe.state_changed":           "WP-961",
-	"alarm.escalated":               "WP-1146",
-	"incident.opened":               "WP-1028",
-	"incident.updated":              "WP-1036",
-	"incident.resolved":             "WP-1028",
-	"collector_group.unreachable":   "WP-964",
-	"collector_group.reachable":     "WP-964",
-	"collector_group.failover":      "WP-963",
-	"collector.clock_skew":          "WP-962",
-	"ci.config_changed":             "WP-1054",
-	"monitoring.suspension_changed": "WP-942",
-	"capacity.forecast_exceeded":    "WP-1060",
-	"sla.violated":                  "WP-1049",
-	"maintenance.started":           "WP-1033",
-	"maintenance.ended":             "WP-1033",
-	"workflow.run_started":          "WP-1092",
-	"workflow.run_succeeded":        "WP-1092",
-	"workflow.run_failed":           "WP-1092",
-	"workflow.run_cancelled":        "WP-1092",
-	"workflow.approval_requested":   "WP-1098",
-	"workflow.approval_decided":     "WP-1098",
-	"notification.escalated":        "WP-1146",
-	"notification.acknowledged":     "WP-1146",
-	"org.export_completed":          "WP-1151",
+	"probe.state_changed":         "WP-961",
+	"alarm.escalated":             "WP-1146",
+	"incident.opened":             "WP-1028",
+	"incident.updated":            "WP-1036",
+	"incident.resolved":           "WP-1028",
+	"collector_group.unreachable": "WP-964",
+	"collector_group.reachable":   "WP-964",
+	"collector_group.failover":    "WP-963",
+	"collector.clock_skew":        "WP-962",
+	"ci.config_changed":           "WP-1054",
+	"capacity.forecast_exceeded":  "WP-1060",
+	"sla.violated":                "WP-1049",
+	"maintenance.started":         "WP-1033",
+	"maintenance.ended":           "WP-1033",
+	"workflow.run_started":        "WP-1092",
+	"workflow.run_succeeded":      "WP-1092",
+	"workflow.run_failed":         "WP-1092",
+	"workflow.run_cancelled":      "WP-1092",
+	"workflow.approval_requested": "WP-1098",
+	"workflow.approval_decided":   "WP-1098",
+	"notification.escalated":      "WP-1146",
+	"notification.acknowledged":   "WP-1146",
+	"org.export_completed":        "WP-1151",
 }
 
 // evt02AlarmSource is the rule of the alarm cases.
