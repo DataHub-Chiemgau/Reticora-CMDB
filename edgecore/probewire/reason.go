@@ -58,6 +58,9 @@ const (
 	// ReasonSessionDown: an expected BFD session is missing or not up
 	// (bfd, WP-1003, PRT-08).
 	ReasonSessionDown = "session_down"
+	// ReasonLOS: loss of signal, the Rx level of a transceiver below
+	// -40 dBm (optical, WP-1004, PRT-09).
+	ReasonLOS = "los"
 
 	// WarnThresholdExceeded: the check succeeded but a threshold (RTT,
 	// loss, value) was violated.
@@ -101,6 +104,7 @@ var reasons = map[string]bool{
 	ReasonBodyMismatch:         true,
 	ReasonRedirectLimit:        true,
 	ReasonSessionDown:          true,
+	ReasonLOS:                  true,
 }
 
 // ValidReason reports whether code is a known reason or warn code.

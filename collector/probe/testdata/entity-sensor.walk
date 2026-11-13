@@ -1,0 +1,105 @@
+# ENTITY-MIB, ENTITY-SENSOR-MIB (RFC 3433) and IF-MIB of a switch with two
+# SFP ports (WP-1004). Containment: chassis 1 > port 100 "Te1/0/1"
+# (alias ifIndex 12) > transceiver 101 > sensors 102-106; chassis 1 >
+# port 200 "Te1/0/2" (alias ifIndex 13) > transceiver 201 > sensors 202,
+# 203. Sensor 10 is a chassis temperature (no interface), sensor 300 an
+# Rx power sensor without container (unmapped), sensor 203 unavailable.
+#
+# entPhysicalDescr .2, entPhysicalContainedIn .4, entPhysicalName .7
+.1.3.6.1.2.1.47.1.1.1.1.2.1 = STRING: "Switch chassis"
+.1.3.6.1.2.1.47.1.1.1.1.2.10 = STRING: "Chassis temperature"
+.1.3.6.1.2.1.47.1.1.1.1.2.100 = STRING: "TenGigabitEthernet1/0/1"
+.1.3.6.1.2.1.47.1.1.1.1.2.101 = STRING: "SFP+ 10GBASE-LR"
+.1.3.6.1.2.1.47.1.1.1.1.2.102 = STRING: "Te1/0/1 Receive Power Sensor"
+.1.3.6.1.2.1.47.1.1.1.1.2.103 = STRING: "Te1/0/1 Transmit Power Sensor"
+.1.3.6.1.2.1.47.1.1.1.1.2.104 = STRING: "Te1/0/1 Module Temperature Sensor"
+.1.3.6.1.2.1.47.1.1.1.1.2.105 = STRING: "Te1/0/1 Bias Current Sensor"
+.1.3.6.1.2.1.47.1.1.1.1.2.106 = STRING: "Te1/0/1 Supply Voltage Sensor"
+.1.3.6.1.2.1.47.1.1.1.1.2.200 = STRING: "TenGigabitEthernet1/0/2"
+.1.3.6.1.2.1.47.1.1.1.1.2.201 = STRING: "SFP+ 10GBASE-LR"
+.1.3.6.1.2.1.47.1.1.1.1.2.202 = STRING: "Te1/0/2 Receive Power Sensor"
+.1.3.6.1.2.1.47.1.1.1.1.2.203 = STRING: "Te1/0/2 Transmit Power Sensor"
+.1.3.6.1.2.1.47.1.1.1.1.2.300 = STRING: "Rx Power orphan"
+.1.3.6.1.2.1.47.1.1.1.1.4.1 = INTEGER: 0
+.1.3.6.1.2.1.47.1.1.1.1.4.10 = INTEGER: 1
+.1.3.6.1.2.1.47.1.1.1.1.4.100 = INTEGER: 1
+.1.3.6.1.2.1.47.1.1.1.1.4.101 = INTEGER: 100
+.1.3.6.1.2.1.47.1.1.1.1.4.102 = INTEGER: 101
+.1.3.6.1.2.1.47.1.1.1.1.4.103 = INTEGER: 101
+.1.3.6.1.2.1.47.1.1.1.1.4.104 = INTEGER: 101
+.1.3.6.1.2.1.47.1.1.1.1.4.105 = INTEGER: 101
+.1.3.6.1.2.1.47.1.1.1.1.4.106 = INTEGER: 101
+.1.3.6.1.2.1.47.1.1.1.1.4.200 = INTEGER: 1
+.1.3.6.1.2.1.47.1.1.1.1.4.201 = INTEGER: 200
+.1.3.6.1.2.1.47.1.1.1.1.4.202 = INTEGER: 201
+.1.3.6.1.2.1.47.1.1.1.1.4.203 = INTEGER: 201
+.1.3.6.1.2.1.47.1.1.1.1.4.300 = INTEGER: 0
+.1.3.6.1.2.1.47.1.1.1.1.7.1 = STRING: "Chassis"
+.1.3.6.1.2.1.47.1.1.1.1.7.10 = STRING: "Chassis Temp"
+.1.3.6.1.2.1.47.1.1.1.1.7.100 = STRING: "Te1/0/1"
+.1.3.6.1.2.1.47.1.1.1.1.7.101 = STRING: "Te1/0/1 Transceiver"
+.1.3.6.1.2.1.47.1.1.1.1.7.102 = STRING: "Te1/0/1 Rx Power"
+.1.3.6.1.2.1.47.1.1.1.1.7.103 = STRING: "Te1/0/1 Tx Power"
+.1.3.6.1.2.1.47.1.1.1.1.7.104 = STRING: "Te1/0/1 Temperature"
+.1.3.6.1.2.1.47.1.1.1.1.7.105 = STRING: "Te1/0/1 Bias"
+.1.3.6.1.2.1.47.1.1.1.1.7.106 = STRING: "Te1/0/1 Voltage"
+.1.3.6.1.2.1.47.1.1.1.1.7.200 = STRING: "Te1/0/2"
+.1.3.6.1.2.1.47.1.1.1.1.7.201 = STRING: "Te1/0/2 Transceiver"
+.1.3.6.1.2.1.47.1.1.1.1.7.202 = STRING: "Te1/0/2 Rx Power"
+.1.3.6.1.2.1.47.1.1.1.1.7.203 = STRING: "Te1/0/2 Tx Power"
+.1.3.6.1.2.1.47.1.1.1.1.7.300 = STRING: "Orphan Rx Power"
+# entAliasMappingIdentifier (index entPhysicalIndex.0) → ifIndex
+.1.3.6.1.2.1.47.1.3.2.1.2.100.0 = OID: .1.3.6.1.2.1.2.2.1.1.12
+.1.3.6.1.2.1.47.1.3.2.1.2.200.0 = OID: .1.3.6.1.2.1.2.2.1.1.13
+# entPhySensorTable: type .1, scale .2, precision .3, value .4, status .5
+# Rx 102: 501.2 uW = -3.00 dBm; Tx 103: 631.0 uW = -2.00 dBm;
+# temperature 104: 35.5 C; bias 105: 6.5 mA; voltage 106: 3.30 V;
+# Rx 202: 7.94 uW = -21.00 dBm; Tx 203 unavailable; Rx 300 orphan.
+.1.3.6.1.2.1.99.1.1.1.1.10 = INTEGER: celsius(8)
+.1.3.6.1.2.1.99.1.1.1.1.102 = INTEGER: watts(6)
+.1.3.6.1.2.1.99.1.1.1.1.103 = INTEGER: watts(6)
+.1.3.6.1.2.1.99.1.1.1.1.104 = INTEGER: celsius(8)
+.1.3.6.1.2.1.99.1.1.1.1.105 = INTEGER: amperes(5)
+.1.3.6.1.2.1.99.1.1.1.1.106 = INTEGER: voltsDC(4)
+.1.3.6.1.2.1.99.1.1.1.1.202 = INTEGER: watts(6)
+.1.3.6.1.2.1.99.1.1.1.1.203 = INTEGER: watts(6)
+.1.3.6.1.2.1.99.1.1.1.1.300 = INTEGER: watts(6)
+.1.3.6.1.2.1.99.1.1.1.2.10 = INTEGER: units(9)
+.1.3.6.1.2.1.99.1.1.1.2.102 = INTEGER: micro(7)
+.1.3.6.1.2.1.99.1.1.1.2.103 = INTEGER: micro(7)
+.1.3.6.1.2.1.99.1.1.1.2.104 = INTEGER: units(9)
+.1.3.6.1.2.1.99.1.1.1.2.105 = INTEGER: milli(8)
+.1.3.6.1.2.1.99.1.1.1.2.106 = INTEGER: units(9)
+.1.3.6.1.2.1.99.1.1.1.2.202 = INTEGER: micro(7)
+.1.3.6.1.2.1.99.1.1.1.2.203 = INTEGER: micro(7)
+.1.3.6.1.2.1.99.1.1.1.2.300 = INTEGER: micro(7)
+.1.3.6.1.2.1.99.1.1.1.3.10 = INTEGER: 0
+.1.3.6.1.2.1.99.1.1.1.3.102 = INTEGER: 1
+.1.3.6.1.2.1.99.1.1.1.3.103 = INTEGER: 1
+.1.3.6.1.2.1.99.1.1.1.3.104 = INTEGER: 1
+.1.3.6.1.2.1.99.1.1.1.3.105 = INTEGER: 1
+.1.3.6.1.2.1.99.1.1.1.3.106 = INTEGER: 2
+.1.3.6.1.2.1.99.1.1.1.3.202 = INTEGER: 2
+.1.3.6.1.2.1.99.1.1.1.3.203 = INTEGER: 1
+.1.3.6.1.2.1.99.1.1.1.3.300 = INTEGER: 1
+.1.3.6.1.2.1.99.1.1.1.4.10 = INTEGER: 41
+.1.3.6.1.2.1.99.1.1.1.4.102 = INTEGER: 5012
+.1.3.6.1.2.1.99.1.1.1.4.103 = INTEGER: 6310
+.1.3.6.1.2.1.99.1.1.1.4.104 = INTEGER: 355
+.1.3.6.1.2.1.99.1.1.1.4.105 = INTEGER: 65
+.1.3.6.1.2.1.99.1.1.1.4.106 = INTEGER: 330
+.1.3.6.1.2.1.99.1.1.1.4.202 = INTEGER: 794
+.1.3.6.1.2.1.99.1.1.1.4.203 = INTEGER: 0
+.1.3.6.1.2.1.99.1.1.1.4.300 = INTEGER: 1000
+.1.3.6.1.2.1.99.1.1.1.5.10 = INTEGER: ok(1)
+.1.3.6.1.2.1.99.1.1.1.5.102 = INTEGER: ok(1)
+.1.3.6.1.2.1.99.1.1.1.5.103 = INTEGER: ok(1)
+.1.3.6.1.2.1.99.1.1.1.5.104 = INTEGER: ok(1)
+.1.3.6.1.2.1.99.1.1.1.5.105 = INTEGER: ok(1)
+.1.3.6.1.2.1.99.1.1.1.5.106 = INTEGER: ok(1)
+.1.3.6.1.2.1.99.1.1.1.5.202 = INTEGER: ok(1)
+.1.3.6.1.2.1.99.1.1.1.5.203 = INTEGER: unavailable(2)
+.1.3.6.1.2.1.99.1.1.1.5.300 = INTEGER: ok(1)
+# ifName
+.1.3.6.1.2.1.31.1.1.1.1.12 = STRING: Te1/0/1
+.1.3.6.1.2.1.31.1.1.1.1.13 = STRING: Te1/0/2

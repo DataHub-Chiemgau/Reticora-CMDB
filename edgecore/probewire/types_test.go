@@ -61,7 +61,7 @@ func TestRegistryComplete(t *testing.T) {
 			t.Errorf("%s params schema: %v", key, err)
 		}
 		wantStatus := TypePlanned
-		if key == "icmp" || key == "tcp" || key == "dns" || key == "http" || key == "bfd" {
+		if key == "icmp" || key == "tcp" || key == "dns" || key == "http" || key == "bfd" || key == "optical" {
 			wantStatus = TypeAvailable
 		}
 		if typ.Status != wantStatus {
@@ -117,7 +117,7 @@ func validSpec(typ Type) ProbeSpec {
 }
 
 // selectionParams are valid params of the types with a selection rule.
-var selectionParams = map[string]string{"bfd": `{"all":true}`}
+var selectionParams = map[string]string{"bfd": `{"all":true}`, "optical": `{"all":true}`}
 
 // requiredParams returns params with a valid value for every required
 // parameter of the type (nil without required parameters).

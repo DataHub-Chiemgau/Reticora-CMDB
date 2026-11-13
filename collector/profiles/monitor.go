@@ -44,6 +44,10 @@ type MonitorTable struct {
 	// ThresholdColumns maps a logical threshold (e.g. rx_power_low_alarm)
 	// to the logical column that holds it.
 	ThresholdColumns map[string]string `json:"threshold_columns,omitempty" yaml:"threshold_columns,omitempty"`
+	// Patterns maps a logical quantity (e.g. rx, tx of the optical type)
+	// to an RE2 expression matched against the entity name or description
+	// of a row (WP-1004).
+	Patterns map[string]string `json:"patterns,omitempty" yaml:"patterns,omitempty"`
 }
 
 // Index kinds of a monitor table.
@@ -155,6 +159,14 @@ func (t MonitorTable) validate(path string) error { //nolint:gocritic // value o
 	}
 	if t.Scale != nil && (!(*t.Scale > 0) || math.IsInf(*t.Scale, 0)) {
 		return fmt.Errorf("%s.scale: must be a finite number above 0", path)
+	}
+	for _, name := range sortedKeys(t.Patterns) {
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("%s.patterns: empty quantity name", path)
+		}
+		if _, err := regexp.Compile(t.Patterns[name]); err != nil {
+			return fmt.Errorf("%s.patterns.%s: invalid RE2 expression", path, name)
+		}
 	}
 	for _, threshold := range sortedKeys(t.ThresholdColumns) {
 		if _, ok := t.Columns[t.ThresholdColumns[threshold]]; !ok {

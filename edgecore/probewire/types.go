@@ -333,11 +333,12 @@ func Validate(spec *ProbeSpec) []FieldError {
 // family against the target). They run on decodable params and report
 // field errors.
 var paramChecks = map[string]func(spec *ProbeSpec, params map[string]any) []FieldError{
-	"icmp": checkICMPParams,
-	"bfd":  checkBFDParams,
-	"tcp":  func(_ *ProbeSpec, params map[string]any) []FieldError { return checkTCPParams(params) },
-	"dns":  func(_ *ProbeSpec, params map[string]any) []FieldError { return checkDNSParams(params) },
-	"http": func(_ *ProbeSpec, params map[string]any) []FieldError { return checkHTTPParams(params) },
+	"icmp":    checkICMPParams,
+	"bfd":     checkBFDParams,
+	"optical": checkOpticalParams,
+	"tcp":     func(_ *ProbeSpec, params map[string]any) []FieldError { return checkTCPParams(params) },
+	"dns":     func(_ *ProbeSpec, params map[string]any) []FieldError { return checkDNSParams(params) },
+	"http":    func(_ *ProbeSpec, params map[string]any) []FieldError { return checkHTTPParams(params) },
 }
 
 // checkBFDParams checks the selection of the bfd type (PRT-08, WP-1003
@@ -361,6 +362,64 @@ func checkBFDParams(_ *ProbeSpec, params map[string]any) []FieldError {
 			if _, err := netip.ParseAddr(strings.TrimSpace(str)); err != nil {
 				errs = append(errs, FieldError{Field: fmt.Sprintf("params.sessions[%d]", i), Message: "must be an IPv4 or IPv6 address"})
 			}
+		}
+	}
+	return errs
+}
+
+// Defaults of the optical Rx thresholds (E-186, api/probe-types.json).
+const (
+	opticalDefaultRxWarnDBm = -20
+	opticalDefaultRxCritDBm = -25
+)
+
+// checkOpticalParams checks the selection and thresholds of the optical
+// type (PRT-09, WP-1004 AK5, AK6): exactly one of interfaces (1 to 512
+// ifName or ifIndex) and all: true, else a field error on
+// params.interfaces; a critical level must lie below its warning level.
+// The levels are merged like the executor reads them (thresholds before
+// params before the defaults), and the error names the field the
+// critical level comes from (thresholds.rx_crit_dbm or params.rx_crit_dbm).
+func checkOpticalParams(spec *ProbeSpec, params map[string]any) []FieldError {
+	var errs []FieldError
+	interfaces, hasInterfaces := params["interfaces"].([]any)
+	all, _ := params["all"].(bool)
+	switch {
+	case hasInterfaces && all:
+		errs = append(errs, FieldError{Field: "params.interfaces", Message: "set either interfaces or all, not both"})
+	case !hasInterfaces && !all:
+		errs = append(errs, FieldError{Field: "params.interfaces", Message: "set interfaces (1 to 512 ifName or ifIndex) or all: true"})
+	case hasInterfaces && len(interfaces) == 0:
+		errs = append(errs, FieldError{Field: "params.interfaces", Message: "must list 1 to 512 interfaces"})
+	}
+	var thresholds map[string]any
+	if spec != nil {
+		thresholds, _ = decodeObject(spec.Thresholds)
+	}
+	// level returns the effective value of name and the field it comes
+	// from ("" for a default).
+	level := func(name string, def float64, hasDef bool) (float64, string, bool) {
+		if v, ok := numberOf(thresholds[name]); ok {
+			return v, "thresholds." + name, true
+		}
+		if v, ok := numberOf(params[name]); ok {
+			return v, "params." + name, true
+		}
+		return def, "", hasDef
+	}
+	for _, dir := range []string{"rx", "tx"} {
+		warn, warnField, hasWarn := level(dir+"_warn_dbm", opticalDefaultRxWarnDBm, dir == "rx")
+		crit, critField, hasCrit := level(dir+"_crit_dbm", opticalDefaultRxCritDBm, dir == "rx")
+		if hasWarn && hasCrit && crit >= warn {
+			field := critField
+			switch {
+			case field != "":
+			case strings.HasPrefix(warnField, "thresholds."):
+				field = warnField // the default critical level against a warning level of thresholds
+			default:
+				field = "params." + dir + "_crit_dbm"
+			}
+			errs = append(errs, FieldError{Field: field, Message: dir + "_crit_dbm must be below " + dir + "_warn_dbm"})
 		}
 	}
 	return errs

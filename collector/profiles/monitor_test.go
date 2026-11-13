@@ -145,6 +145,15 @@ func TestMonitorRejectsBadOID(t *testing.T) {
 	}
 }
 
+// TestMonitorRejectsBadPattern covers the patterns of a monitor table
+// (WP-1004): every pattern must be an RE2 expression.
+func TestMonitorRejectsBadPattern(t *testing.T) {
+	expectRejected(t, monitorDoc("optical", `          index: int
+          columns: {value: 1.3.6.1.2.1.99.1.1.1.4}
+          patterns: {rx: "(?<=a)b"}
+`), "monitor.optical.tables.peers.patterns.rx", "invalid RE2")
+}
+
 func TestMonitorRejectsBadIndex(t *testing.T) {
 	for _, index := range []string{"string", "", "composite:[int]", "composite:[int,mac]", "composite:int,int"} {
 		expectRejected(t, monitorDoc("bgp", `          index: "`+index+`"

@@ -755,7 +755,7 @@
       }
     },
     "optical": {
-      "status": "planned",
+      "status": "available",
       "min_interval_s": 60,
       "default_interval_s": 300,
       "max_interval_s": 86400,
@@ -769,10 +769,9 @@
       "max_rate_per_collector": 20,
       "max_probes_per_target": 2,
       "max_payload_bytes": 1048576,
-      "max_rows": 1024,
+      "max_rows": 512,
       "credential_namespaces": [
-        "snmp",
-        "gnmi"
+        "snmp"
       ],
       "capabilities": [],
       "params": {
@@ -785,22 +784,30 @@
               "type": "string",
               "maxLength": 128
             },
-            "maxItems": 1024
+            "maxItems": 512,
+            "description": "Interfaces by ifName or ifIndex, 1 to 512; exactly one of interfaces and all."
+          },
+          "all": {
+            "type": "boolean",
+            "description": "Every transceiver of the device (at most 512); exactly one of interfaces and all."
           },
           "rx_warn_dbm": {
-            "type": "number"
+            "type": "number",
+            "default": -20,
+            "description": "Rx level below which the check warns (degraded), unless the device reports thresholds."
           },
-          "rx_alarm_dbm": {
-            "type": "number"
+          "rx_crit_dbm": {
+            "type": "number",
+            "default": -25,
+            "description": "Rx level below which the check fails, unless the device reports thresholds; below -40 dBm is LOS."
           },
-          "source": {
-            "type": "string",
-            "enum": [
-              "snmp",
-              "gnmi"
-            ],
-            "default": "snmp",
-            "description": "Data source (SNMP MIB or gNMI/OpenConfig)."
+          "tx_warn_dbm": {
+            "type": "number",
+            "description": "Tx level below which the check warns; no default."
+          },
+          "tx_crit_dbm": {
+            "type": "number",
+            "description": "Tx level below which the check fails; no default."
           }
         }
       }

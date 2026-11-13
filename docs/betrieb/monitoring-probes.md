@@ -221,6 +221,55 @@ schlechteste):
 z. B. `controlDetectionTimeExpired`), dazu `probe_bfd_sessions` und
 `probe_bfd_sessions_down`.
 
+## Optische Pegel (`optical`)
+
+Standard nach PRT-09: Intervall 300 s (60 s–24 h), Timeout 15 s (1–60 s),
+Down-Count 3, Up-Count 1, höchstens 512 Transceiver je Prüfung,
+Zugangsdaten aus dem Namespace `snmp`. Parameter: genau eines von
+`interfaces` (1–512 Einträge, ifName oder ifIndex) und `all: true`
+(Feldfehler `params.interfaces`); Schwellen `rx_warn_dbm` (−20),
+`rx_crit_dbm` (−25), optional `tx_warn_dbm`/`tx_crit_dbm`; eine
+kritische Schwelle muss unter ihrer Warnschwelle liegen. Geprüft werden die
+wirksamen Werte wie im Collector (`thresholds` vor `params` vor dem
+Standard); der Feldfehler nennt das Feld der kritischen Schwelle
+(`thresholds.rx_crit_dbm` bzw. `params.rx_crit_dbm`).
+
+Kern ist `entPhySensorTable` der ENTITY-SENSOR-MIB (RFC 3433, `mib-2 99`):
+Wert = `entPhySensorValue` × 10^(3 × (`entPhySensorScale` − 9)) ×
+10^(−`entPhySensorPrecision`); Sensoren mit `entPhySensorOperStatus` ≠
+`ok` liefern keinen Wert und zählen als `probe_optical_sensors_unavailable`.
+Leistung in Watt rechnet der Collector in dBm um (`10 · log10(mW)`). Die
+Zuordnung zum Interface geht vom Sensor über `entPhysicalContainedIn`
+höchstens 4 Ebenen aufwärts bis zum Eintrag, dessen
+`entAliasMappingIdentifier` auf ein `ifIndex` zeigt; Rx/Tx unterscheidet
+das Muster `patterns` (Standard `rx|receive`, `tx|transmit` auf
+`entPhysicalName`/`entPhysicalDescr`), Temperatur, Bias und Spannung der
+Sensortyp. Ein Leistungssensor ohne Interface zählt als
+`probe_optical_sensors_unmapped` und geht in keinen Zustand ein. Das Profil
+`cisco` (`monitor.optical`) liest CISCO-ENTITY-SENSOR-MIB mit Typ dBm und
+den Geräteschwellen aus `entSensorThresholdTable` (minor → Warnung,
+major/critical → Alarm). Geräteschwellen rechnet der Collector wie den
+Sensorwert um (Watt in dBm, Ampere in mA).
+
+Schwellen (E-186): Geräteschwellen, sofern das Profil sie für den Sensor
+liefert, sonst die Parameter. Warnschwelle → `ok` mit `threshold_exceeded`
+(`degraded` über die Zustandsmaschine), Alarmschwelle → `fail` mit
+`threshold_exceeded`, Rx unter −40 dBm oder ohne Licht → `fail` mit `los`
+und `probe_optical_los{ifIndex,ifName}` = 1. Antwortet keine Sensortabelle,
+ist das Ergebnis `error`/`unsupported`.
+
+Werte je Interface (Labels `ifIndex`, `ifName`): `probe_optical_rx_dbm`,
+`probe_optical_tx_dbm`, `probe_optical_temperature_celsius`,
+`probe_optical_bias_ma`, `probe_optical_voltage_volts`; dazu
+`probe_optical_interfaces`, `probe_optical_interfaces_not_found` (gelistete
+Interfaces ohne Transceiver) und bei mehr als 512 Transceivern
+`probe_optical_truncated` = 1 (die übrigen erzeugen keinen Zustand).
+`probe_optical_truncated` = 1 steht auch, wenn ein Walk der Entity-Tabellen
+(`entPhysicalTable`, `entAliasMappingTable`, `ifName`) oder der
+Schwellentabelle an seiner Grenze (16384 Zeilen) abbricht; die Schwellen
+des zuletzt gelesenen Sensors bleiben dann unberücksichtigt, er wird nach
+den Parametern bewertet.
+
 Werte mit Labels tragen die Labels im Schlüssel von `Result.values` in der
 Form des Prometheus-Formats (`name{label="wert",…}`, Labels sortiert;
 `probewire.ValueKey`/`ParseValueKey`).
@@ -244,7 +293,7 @@ nach E-154; WP-1023 misst die Raten nach.
 | `ospf` | planned | 60 / 30 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 1024 | snmp, gnmi | – |
 | `isis` | planned | 60 / 30 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 1024 | snmp, gnmi | – |
 | `bfd` | available | 60 / 30 / 86400 | 5 / 1 / 30 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 1000 | snmp | – |
-| `optical` | planned | 300 / 60 / 86400 | 15 / 1 / 60 | 3 / 1 | 1 | 8 | 20 | 2 | 1048576 | 1024 | snmp, gnmi | – |
+| `optical` | available | 300 / 60 / 86400 | 15 / 1 / 60 | 3 / 1 | 1 | 8 | 20 | 2 | 1048576 | 512 | snmp | – |
 | `bng` | planned | 60 / 30 / 86400 | 10 / 1 / 30 | 3 / 1 | 1 | 8 | 20 | 2 | 1048576 | 1024 | snmp | – |
 | `pon` | planned | 300 / 120 / 86400 | 60 / 1 / 120 | 3 / 1 | 1 | 4 | 5 | 2 | 4194304 | 8192 | snmp | – |
 | `dns` | available | 60 / 10 / 86400 | 5 / 1 / 10 | 3 / 1 | 4 | 64 | 200 | 16 | 65535 | 1 | – | – |

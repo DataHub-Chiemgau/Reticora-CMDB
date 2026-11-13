@@ -84,7 +84,16 @@ tables by logical name:
 - `enums`: logical column → raw value (an integer in decimal form, without
   leading zeros or sign `+`) → `up`, `degraded`, `down` or a raw value name,
 - `scale` (finite factor above 0; default 1) and `unit`,
-- `threshold_columns`: logical threshold → logical column holding it.
+- `threshold_columns`: logical threshold → logical column holding it,
+- `patterns`: logical quantity → RE2 expression on the entity name and
+  description of a row (optical: `rx`, `tx`; an invalid expression refuses
+  the profile).
+
+The shipped `cisco.yaml` maps `bfd` onto CISCO-IETF-BFD-MIB (table
+`sessions` with `state`, `diag`, `addr_type`, `addr`) and `optical` onto
+CISCO-ENTITY-SENSOR-MIB (table `sensors` with `type`, `scale`,
+`precision`, `value`, `status`; table `thresholds` with `severity`
+mapped to `degraded`/`down`, `relation`, `value`).
 
 Example: the peers of a BGP4-V2 table with an `inet` index and the state
 `established` (6) as `up`:

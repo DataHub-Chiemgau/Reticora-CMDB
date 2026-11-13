@@ -1802,6 +1802,7 @@ PRB-07;[P3];E;collector/probe/uplink_test.go;WP-955
 PRT-02;[P3];E;collector/probe/icmp_test.go;WP-969
 MON-04;[P3];E;collector/probe/icmp_test.go;WP-969
 PRT-08;[P3];E;collector/probe/bfd_test.go;WP-1003
+PRT-09;[P3];E;collector/probe/optical_test.go;WP-1004
 NFR-11;[P3];E;backend/internal/probe/ingest_integration_test.go;WP-960
 PRB-07;[P3];E;backend/internal/probe/ingest_integration_test.go;WP-960
 OPS-02;[B], [P3], [A];E;backend/internal/probe/ingest_test.go;WP-960
