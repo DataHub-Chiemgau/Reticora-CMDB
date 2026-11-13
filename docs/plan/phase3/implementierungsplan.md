@@ -16707,6 +16707,8 @@ WFL-02;[P3];F;backend/internal/workflow/webhook_action_integration_test.go;WP-10
 - frontend/src/api/generated/schema.d.ts (generiert)
 - docs/traceability.csv
 
+**Nachtrag 2026-11-13 (Prüfung zu AK2/AK6):** Die Policy des Initiators kommt nicht über `PolicyResolver.Resolve` mit allen Rechten als Obergrenze, sondern wie beim Ersteller eines Queue-Jobs über `permission.FieldResolver.PolicyForCreator` (aktuelle Rollenzuweisungen, eingeengt auf den Scope des Run-Kontexts; ein inaktiver Initiator schreibt nichts). So gilt auch in einer Organisation ohne Feldrechte das Aktionsrecht `ci:write`. `transition_lifecycle` prüft vor dem Übergang `lifecycle:transition` des Initiators auf Typ und Scope des CI (wie die Route, WP-728), für ein Asset ohne Typ. Ein Fehler beim Festhalten der Herkunft nach dem bereits geschriebenen Update lässt den Schritt nicht mehr fehlschlagen (sonst schriebe der Retry das CI ein zweites Mal, AK4); die Ausgabe nennt die Felder in `provenance_unrecorded`. Zusätzliche Tests: `TestSetCIFieldNeedsInitiatorActionRight` (nur `ci:read`, dazu ein deaktivierter Initiator) und `TestTransitionLifecycleNeedsInitiatorRight`; `TestSetCIFieldAuditCarriesRun` prüft auch `actor_id` der `ci_change`-Zeilen.
+
 **Migration/RLS:** keine (`workflow_run.initiated_by` mit zusammengesetztem Fremdschlüssel aus WP-1088).
 
 **Tests:**

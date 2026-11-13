@@ -40496,8 +40496,8 @@ components:
           items: { $ref: '#/components/schemas/JSONValue' }
           description: >-
             Actions executed in order, each {"type": "<action>", ...}: noop,
-            create_ticket, set_ci_field, require_approval, submit_form,
-            send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
+            create_ticket, set_ci_field, transition_lifecycle, require_approval,
+            submit_form, send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
             "recipients": {"users": [<user id>], "teams": [<team id>],
             "roles": [<role name>], "contact_roles": [owner | escalation |
             operator | responsible | vendor of the run's CI],
@@ -40517,7 +40517,26 @@ components:
             of payload that is exactly ${<path>} becomes the value of the run
             context under that path, null for an unknown one. The action
             names no target of its own: url, headers, secret and event are
-            refused with 422 on actions[i].<field>.
+            refused with 422 on actions[i].<field>. set_ci_field (WP-1097):
+            {"type": "set_ci_field", "ci_id": <CI, default the run's CI>,
+            "fields": {<field>: <value>, ...} (at most 50) or "field" and
+            "value"} writes as source workflow (rank 92) through the CI
+            service in one update (one version step, one audit entry ci.updated
+            with the initiator as actor, source system and the run id as
+            correlation id); a manual override stays and opens the review
+            override_conflict, the action and field rights the initiator
+            holds (an inactive initiator writes nothing) and the attribute
+            and catalog rules apply (refusal fails the step,
+            violations in its output); the output names written and reason
+            per field. transition_lifecycle (LCY-04, WP-1097): {"type":
+            "transition_lifecycle", "to_state": <state>, "reason": <text>,
+            "context": <object>, "from_state": <state>, "entity": ci | asset,
+            "ci_id" | "asset_id"} moves the CI (default the run's CI) or the
+            asset with the guards of its lifecycle model after the check of
+            lifecycle:transition for the initiator; a guard violation
+            fails the step with violations, guard and missing in its output.
+            Neither action is repeated when an attempt was interrupted while
+            its step ran.
         active: { type: boolean }
         version: { type: integer, minimum: 1, description: Number of the current definition version (WFL-02); the ETag. }
         current_version_id: { type: string, description: The stored version that trigger, conditions and actions copy. }
@@ -40539,8 +40558,8 @@ components:
           items: { $ref: '#/components/schemas/JSONValue' }
           description: >-
             Actions executed in order, each {"type": "<action>", ...}: noop,
-            create_ticket, set_ci_field, require_approval, submit_form,
-            send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
+            create_ticket, set_ci_field, transition_lifecycle, require_approval,
+            submit_form, send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
             "recipients": {"users": [<user id>], "teams": [<team id>],
             "roles": [<role name>], "contact_roles": [owner | escalation |
             operator | responsible | vendor of the run's CI],
@@ -40560,7 +40579,26 @@ components:
             of payload that is exactly ${<path>} becomes the value of the run
             context under that path, null for an unknown one. The action
             names no target of its own: url, headers, secret and event are
-            refused with 422 on actions[i].<field>.
+            refused with 422 on actions[i].<field>. set_ci_field (WP-1097):
+            {"type": "set_ci_field", "ci_id": <CI, default the run's CI>,
+            "fields": {<field>: <value>, ...} (at most 50) or "field" and
+            "value"} writes as source workflow (rank 92) through the CI
+            service in one update (one version step, one audit entry ci.updated
+            with the initiator as actor, source system and the run id as
+            correlation id); a manual override stays and opens the review
+            override_conflict, the action and field rights the initiator
+            holds (an inactive initiator writes nothing) and the attribute
+            and catalog rules apply (refusal fails the step,
+            violations in its output); the output names written and reason
+            per field. transition_lifecycle (LCY-04, WP-1097): {"type":
+            "transition_lifecycle", "to_state": <state>, "reason": <text>,
+            "context": <object>, "from_state": <state>, "entity": ci | asset,
+            "ci_id" | "asset_id"} moves the CI (default the run's CI) or the
+            asset with the guards of its lifecycle model after the check of
+            lifecycle:transition for the initiator; a guard violation
+            fails the step with violations, guard and missing in its output.
+            Neither action is repeated when an attempt was interrupted while
+            its step ran.
         created_by: { type: string, description: User who stored the version; absent for migrated versions and callers without a user. }
         created_at: { type: string, format: date-time }
     CreateWorkflowDefinitionRequest:
@@ -40595,8 +40633,8 @@ components:
           items: { $ref: '#/components/schemas/JSONValue' }
           description: >-
             Actions executed in order, each {"type": "<action>", ...}: noop,
-            create_ticket, set_ci_field, require_approval, submit_form,
-            send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
+            create_ticket, set_ci_field, transition_lifecycle, require_approval,
+            submit_form, send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
             "recipients": {"users": [<user id>], "teams": [<team id>],
             "roles": [<role name>], "contact_roles": [owner | escalation |
             operator | responsible | vendor of the run's CI],
@@ -40616,7 +40654,26 @@ components:
             of payload that is exactly ${<path>} becomes the value of the run
             context under that path, null for an unknown one. The action
             names no target of its own: url, headers, secret and event are
-            refused with 422 on actions[i].<field>.
+            refused with 422 on actions[i].<field>. set_ci_field (WP-1097):
+            {"type": "set_ci_field", "ci_id": <CI, default the run's CI>,
+            "fields": {<field>: <value>, ...} (at most 50) or "field" and
+            "value"} writes as source workflow (rank 92) through the CI
+            service in one update (one version step, one audit entry ci.updated
+            with the initiator as actor, source system and the run id as
+            correlation id); a manual override stays and opens the review
+            override_conflict, the action and field rights the initiator
+            holds (an inactive initiator writes nothing) and the attribute
+            and catalog rules apply (refusal fails the step,
+            violations in its output); the output names written and reason
+            per field. transition_lifecycle (LCY-04, WP-1097): {"type":
+            "transition_lifecycle", "to_state": <state>, "reason": <text>,
+            "context": <object>, "from_state": <state>, "entity": ci | asset,
+            "ci_id" | "asset_id"} moves the CI (default the run's CI) or the
+            asset with the guards of its lifecycle model after the check of
+            lifecycle:transition for the initiator; a guard violation
+            fails the step with violations, guard and missing in its output.
+            Neither action is repeated when an attempt was interrupted while
+            its step ran.
         active: { type: boolean }
     UpdateWorkflowDefinitionRequest:
       type: object
@@ -40649,8 +40706,8 @@ components:
           items: { $ref: '#/components/schemas/JSONValue' }
           description: >-
             Actions executed in order, each {"type": "<action>", ...}: noop,
-            create_ticket, set_ci_field, require_approval, submit_form,
-            send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
+            create_ticket, set_ci_field, transition_lifecycle, require_approval,
+            submit_form, send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
             "recipients": {"users": [<user id>], "teams": [<team id>],
             "roles": [<role name>], "contact_roles": [owner | escalation |
             operator | responsible | vendor of the run's CI],
@@ -40670,7 +40727,26 @@ components:
             of payload that is exactly ${<path>} becomes the value of the run
             context under that path, null for an unknown one. The action
             names no target of its own: url, headers, secret and event are
-            refused with 422 on actions[i].<field>.
+            refused with 422 on actions[i].<field>. set_ci_field (WP-1097):
+            {"type": "set_ci_field", "ci_id": <CI, default the run's CI>,
+            "fields": {<field>: <value>, ...} (at most 50) or "field" and
+            "value"} writes as source workflow (rank 92) through the CI
+            service in one update (one version step, one audit entry ci.updated
+            with the initiator as actor, source system and the run id as
+            correlation id); a manual override stays and opens the review
+            override_conflict, the action and field rights the initiator
+            holds (an inactive initiator writes nothing) and the attribute
+            and catalog rules apply (refusal fails the step,
+            violations in its output); the output names written and reason
+            per field. transition_lifecycle (LCY-04, WP-1097): {"type":
+            "transition_lifecycle", "to_state": <state>, "reason": <text>,
+            "context": <object>, "from_state": <state>, "entity": ci | asset,
+            "ci_id" | "asset_id"} moves the CI (default the run's CI) or the
+            asset with the guards of its lifecycle model after the check of
+            lifecycle:transition for the initiator; a guard violation
+            fails the step with violations, guard and missing in its output.
+            Neither action is repeated when an attempt was interrupted while
+            its step ran.
         active: { type: boolean }
     WorkflowStep:
       type: object

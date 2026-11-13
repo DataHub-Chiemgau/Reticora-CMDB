@@ -1109,6 +1109,19 @@ func WithCorrelationID(ctx context.Context, correlationID string) context.Contex
 	return context.WithValue(ctx, requestInfoKey{}, info)
 }
 
+// WithSource returns ctx whose audit entries carry source (a workflow run
+// writes as source system, WP-1097). Like WithCorrelationID it keeps the
+// request context of ctx and its recorded flag; without one it starts one
+// with only the source.
+func WithSource(ctx context.Context, source string) context.Context {
+	info, ok := requestInfoFrom(ctx)
+	if !ok {
+		info = RequestInfo{recorded: &atomic.Bool{}}
+	}
+	info.Source = source
+	return context.WithValue(ctx, requestInfoKey{}, info)
+}
+
 func requestInfoFrom(ctx context.Context) (RequestInfo, bool) {
 	info, ok := ctx.Value(requestInfoKey{}).(RequestInfo)
 	return info, ok && info.recorded != nil

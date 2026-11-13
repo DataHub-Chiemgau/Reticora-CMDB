@@ -628,8 +628,19 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	if repos.EventOutbox {
 		workflowDispatcher = nil
 	}
+	// set_ci_field writes through the CI service with the field rights of
+	// the initiator and the attribute and catalog rules (WP-1097); a
+	// profile without the service writes to the repository.
 	workflowRuns := workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, workflowDispatcher).
 		WithFieldGuard(override.NewGuard(repos.Override))
+	// The CI actions write with the rights the initiator holds now (role
+	// assignments, active user; WP-1097), as a queue job of its creator.
+	if users, ok := repos.User.(permission.CreatorStatus); ok {
+		workflowRuns.WithPolicies(fieldResolver, users)
+	}
+	if opts.CIService != nil {
+		workflowRuns.WithCIService(opts.CIService)
+	}
 	if repos.EventOutbox {
 		workflowRuns.WithEventOutbox()
 	}
@@ -925,6 +936,11 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// (WP-278), with the system guards of LCY-03 (WP-279).
 	lifecycleService := lifecycle.NewService(repos.Lifecycle, repos.LifecycleStates, lifecycle.NewHistoryRecorder(repos.History)).
 		WithGuards(repos.LifecycleGuards)
+	// transition_lifecycle of the workflows moves CIs and assets with the
+	// guards of their model (LCY-04, WP-1097).
+	if repos.LifecycleResolver != nil {
+		workflowRuns.WithLifecycle(workflow.NewLifecycleTransitioner(lifecycleService, repos.LifecycleResolver))
+	}
 	relationshipHandler := relationship.NewHandler(repos.Relationship, repos.RelationshipType)
 	exportJobHandler := export.NewJobHandler(repos.ExportJobs, exportWorker, opts.Blobs).WithDATEVGate(datevGate)
 	// The delegating actions of POST /cis/bulk reach the edges, the

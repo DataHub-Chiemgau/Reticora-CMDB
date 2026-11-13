@@ -13,6 +13,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
@@ -51,6 +52,16 @@ type Executor struct {
 	// outbox of the step's transaction (WithEventOutbox, WP-1096);
 	// without it the event goes to the dispatcher after the step.
 	eventOutbox bool
+	// policies resolves the action and field rights of the initiator of
+	// set_ci_field and transition_lifecycle from the initiator's current
+	// role assignments, users whether the initiator is active
+	// (WithPolicies, WP-1097); lifecycle moves the entity of
+	// transition_lifecycle (WithLifecycle).
+	policies  InitiatorPolicies
+	users     permission.CreatorStatus
+	lifecycle LifecycleTransitioner
+	// ciWriter writes the CIs of set_ci_field (WithCIService).
+	ciWriter CIWriter
 	// afterStep is a test hook called after each succeeded step; an error
 	// ends the attempt there like a worker that dies.
 	afterStep func(index int) error
@@ -598,10 +609,9 @@ func (e *Executor) executeAction(ctx context.Context, orgID string, run *Run, in
 		}
 		return JSONMap{"ticket_id": t.ID}, false, nil
 	case "set_ci_field":
-		if e.cis == nil {
-			return nil, false, fmt.Errorf("ci repository unavailable")
-		}
-		return e.setCIField(ctx, orgID, action)
+		return e.setCIFields(ctx, orgID, run, action)
+	case "transition_lifecycle":
+		return e.transitionLifecycle(ctx, orgID, run, action)
 	case "require_approval":
 		return JSONMap{"message": str(action, "message", "Approval required")}, true, nil
 	case "send_notification":
@@ -678,67 +688,6 @@ func str(m map[string]any, key, fallback string) string {
 		return v
 	}
 	return fallback
-}
-
-// setCIField writes one CI field as source workflow (rank 92) through the
-// central decision (OVR-02, WFL-02): a manual override is never replaced,
-// a refused write is reported in the action output, and an unreadable
-// override state fails the action.
-func (e *Executor) setCIField(ctx context.Context, orgID string, action JSONMap) (JSONMap, bool, error) {
-	ciID := str(action, "ci_id", "")
-	field := str(action, "field", "")
-	value := action["value"]
-	if field == "" {
-		return nil, false, fmt.Errorf("set_ci_field needs a field")
-	}
-	item, err := e.cis.GetByID(ctx, orgID, ciID)
-	if err != nil {
-		return nil, false, err
-	}
-	// Workflow writes rank 92 and raise the CI version (API-07).
-	req := ci.UpdateRequest{Authoritative: true}
-	var current any
-	switch field {
-	case "status":
-		v := fmt.Sprint(value)
-		value, current, req.Status = v, item.Status, &v
-	case "name":
-		v := fmt.Sprint(value)
-		value, current, req.Name = v, item.Name, &v
-	default:
-		current = item.Attributes[field]
-		req.Attributes = map[string]any{field: value}
-	}
-	w := &override.Write{
-		OrganizationID: orgID, CIID: item.ID, Field: field, Value: value, Source: sourceWorkflow,
-		ObservedAt: time.Now().UTC(), Current: current, FallbackSource: item.DiscoverySource,
-	}
-	d := e.guard.Decide(ctx, w)
-	if d.Reason == override.ReasonError {
-		return nil, false, fmt.Errorf("set_ci_field %s: override state unreadable, nothing written", field)
-	}
-	if d.Write {
-		if _, err = e.cis.Update(ctx, orgID, item.ID, req); err != nil {
-			return nil, false, err
-		}
-	}
-	if d.Write || d.Conflict || d.Reason == override.ReasonOverride {
-		if err = e.guard.Record(ctx, w); err != nil {
-			return nil, false, fmt.Errorf("record provenance: %w", err)
-		}
-	}
-	if d.Conflict && e.conflicts != nil {
-		// The override stays; the value goes to the review queue like a
-		// discovered one (REC-12). A failed review does not fail the step.
-		previous, hasPrevious := item.ObservedUnderOverride(field)
-		if _, err = e.conflicts.OpenOverrideConflict(ctx, &reviews.OverrideConflict{
-			OrganizationID: orgID, CIID: item.ID, Field: field, Value: value, Source: sourceWorkflow,
-			Rank: override.SourceRank(sourceWorkflow), Previous: previous, HasPrevious: hasPrevious,
-		}); err != nil {
-			slog.WarnContext(ctx, "override conflict review not created", "ci_id", item.ID, "field", field, "error", err)
-		}
-	}
-	return JSONMap{"ci_id": item.ID, "field": field, "written": d.Write, "reason": d.Reason}, false, nil
 }
 
 // sourceWorkflow is the automation source of workflow writes (REC-03 rank 92).
