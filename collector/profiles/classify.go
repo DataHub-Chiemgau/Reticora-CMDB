@@ -69,10 +69,14 @@ type compiledProfile struct {
 }
 
 // Validate checks a profile: a classifying profile needs a system CI type
-// and compilable patterns.
+// and compilable patterns; the monitor section (WP-1000) is checked for
+// every profile, with or without ciType.
 func (p *Profile) Validate() error {
 	if p.Name == "" {
 		return fmt.Errorf("profiles: name is required")
+	}
+	if err := p.validateMonitor(); err != nil {
+		return err
 	}
 	if p.CIType == "" {
 		if p.SysDescrPattern != "" || p.RedfishPattern != "" || p.BannerPattern != "" {
@@ -165,23 +169,7 @@ func classifySNMP(cs []*compiledProfile, o *Observation) *Profile {
 	var best *Profile
 	bestScore := -1
 	for _, c := range cs {
-		prefix := 0
-		for _, candidate := range c.profile.SysObjectIDs {
-			candidate = strings.TrimSpace(candidate)
-			if candidate != "" && oid != "" && oidMatches(candidate, oid) && len(candidate) > prefix {
-				prefix = len(candidate)
-			}
-		}
-		score := prefix
-		switch {
-		case c.sysDescr != nil && descr != "" && c.sysDescr.MatchString(descr):
-			score += 1000
-		case c.sysDescr != nil:
-			continue
-		case prefix == 0:
-			continue
-		}
-		if score > bestScore {
+		if score, ok := snmpScore(c, oid, descr); ok && score > bestScore {
 			best, bestScore = &c.profile, score
 		}
 	}

@@ -67,3 +67,65 @@ here and fails for a value without a catalog template.
 `catalog` names the entry of the confirmed CH30 profile list (E-21) a
 profile covers; `TestProfileListCoversCH30` checks the list,
 `TestEmbeddedProfileData` validates every shipped file.
+
+## Monitoring section `monitor` (PRT-20)
+
+Vendor-dependent probe types (routing v2 tables, BFD, optics, BNG, PON) read
+their SNMP tables from the profile of the device instead of a release
+(E-187 option 1: SNMP with standard MIBs as the core, vendor MIBs through
+this section, gNMI as an alternative source). The key below `monitor` is a
+probe type of the register (`api/probe-types.json`); each type lists its
+tables by logical name:
+
+- `columns`: logical column name → column OID (numeric, a leading dot is
+  allowed),
+- `index`: `int`, `ipv4`, `ipv6`, `inet` (InetAddressType + InetAddress) or
+  `composite:[kind,kind,…]`,
+- `enums`: logical column → raw value (an integer in decimal form, without
+  leading zeros or sign `+`) → `up`, `degraded`, `down` or a raw value name,
+- `scale` (finite factor above 0; default 1) and `unit`,
+- `threshold_columns`: logical threshold → logical column holding it.
+
+Example: the peers of a BGP4-V2 table with an `inet` index and the state
+`established` (6) as `up`:
+
+```yaml
+- name: example-bgp4v2
+  vendor: Example
+  ciType: router
+  sysObjectIds:
+  - 1.3.6.1.4.1.99999
+  monitor:
+    bgp:
+      tables:
+        peers:
+          index: inet
+          columns:
+            state: 1.3.6.1.4.1.99999.5.1.2.1.13
+            remote_as: 1.3.6.1.4.1.99999.5.1.2.1.10
+            established_time: 1.3.6.1.4.1.99999.5.1.2.1.16
+          enums:
+            state:
+              "1": idle
+              "2": connect
+              "3": active
+              "6": up
+        prefixes:
+          index: composite:[inet, int, int]
+          columns:
+            accepted: 1.3.6.1.4.1.99999.5.1.6.1.3
+```
+
+Every profile is validated when it is loaded, also without `ciType`: an
+unknown probe type, an invalid OID, an unknown index kind, an enum or a
+threshold on an unknown column, a raw enum value that is no integer, or a
+scale of 0 or below, NaN or infinite refuse the profile with
+its name and the path of the failing value
+(`monitor.bgp.tables.peers.index`); `LoadDir` names the file.
+`Registry.MonitorFor(probeType, sysObjectID, sysDescr)` picks the profile
+like the classification (longest sysObjectID prefix; a matching
+`sysDescrPattern` beats a longer prefix) among the profiles with a section
+for the type and returns its name; without a match the type uses its
+standard-MIB core. A profile in `RETICORA_PROFILES_DIR` with the name of a
+shipped profile replaces it, its `monitor` section included, without a
+collector release.

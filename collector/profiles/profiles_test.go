@@ -212,6 +212,11 @@ func TestEmbeddedProfileData(t *testing.T) {
 				t.Errorf("%s registered zero profiles", path)
 			}
 			for _, p := range r.List() {
+				// Every monitor section of the shipped profiles is
+				// valid on its own (WP-1000).
+				if err := p.validateMonitor(); err != nil {
+					t.Errorf("monitor section: %v", err)
+				}
 				if other, dup := names[p.Name]; dup {
 					t.Errorf("profile %s defined in %s and %s", p.Name, other, path)
 				}

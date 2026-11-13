@@ -52,6 +52,10 @@ type Profile struct {
 	SSHCommands map[string]string `json:"sshCommands,omitempty" yaml:"sshCommands,omitempty"`
 	Endpoints   map[string]string `json:"endpoints,omitempty" yaml:"endpoints,omitempty"`
 	Attributes  map[string]any    `json:"attributes,omitempty" yaml:"attributes,omitempty"`
+	// Monitor holds the monitoring data per probe type (PRT-20, WP-1000):
+	// tables, index kinds, enum mappings, scaling and threshold columns of
+	// the vendor-dependent probe types (monitor.go).
+	Monitor map[string]MonitorSpec `json:"monitor,omitempty" yaml:"monitor,omitempty"`
 
 	// SysObjectIDs lists SNMP sysObjectID values (1.3.6.1.2.1.1.2.0) that
 	// identify this device family. Matching uses longest-prefix, so a profile
