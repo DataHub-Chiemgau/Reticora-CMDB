@@ -129,6 +129,17 @@
     "data": {
       "type": "object",
       "description": "The event data; for ci.* the CI, for ci.changed with changed_fields; for a phase 2 type the frame of its $defs entry."
+    },
+    "origin": {
+      "type": "object",
+      "description": "The workflow run whose execution wrote the event (WP-1090); absent for every other writer. Such an event starts workflow runs only of definitions with trigger.allow_workflow_origin, up to trigger depth 3.",
+      "required": ["kind", "depth"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string", "enum": ["workflow_run"] },
+        "run_id": { "type": "string", "format": "uuid", "description": "The workflow run." },
+        "depth": { "type": "integer", "minimum": 0, "description": "Trigger depth of the run: 0 for a run not started by an event of a run." }
+      }
     }
   },
   "dependentRequired": {

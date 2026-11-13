@@ -21,7 +21,7 @@ import (
 
 const defCols = `id::text, organization_id::text, name, description, trigger, conditions, actions, active, version, current_version_id::text, created_at, updated_at`
 const versionCols = `id::text, organization_id::text, workflow_id::text, version, trigger, conditions, actions, COALESCE(created_by::text, ''), created_at`
-const runCols = `id::text, organization_id::text, workflow_id::text, definition_version_id::text, status, trigger, context, started_at, finished_at, attempts, next_attempt_at, COALESCE(last_error, ''), COALESCE(initiated_by::text, ''), COALESCE(ci_id::text, ''), COALESCE(serial_key, ''), entity_seq, enqueues, created_at, updated_at`
+const runCols = `id::text, organization_id::text, workflow_id::text, definition_version_id::text, status, trigger, context, started_at, finished_at, attempts, next_attempt_at, COALESCE(last_error, ''), COALESCE(initiated_by::text, ''), COALESCE(ci_id::text, ''), COALESCE(serial_key, ''), entity_seq, enqueues, COALESCE(trigger_event_id::text, ''), trigger_depth, created_at, updated_at`
 
 // serialLock takes the transaction advisory lock of a serial key of the
 // organization (WP-1089 AK2); claims and the pick of the next run of a key
@@ -551,6 +551,13 @@ func recordRunTransition(ctx context.Context, tx pgx.Tx, prev string, run *Run) 
 	if site != "" {
 		data["site_id"] = site
 	}
+	// The status events of a run name the run as their origin wherever the
+	// change happens (the claim in the worker, JobFailed, a failed queueing):
+	// a definition on workflow.run_* never starts itself without
+	// allow_workflow_origin and its depth limit (WP-1090 AK5).
+	if events.OriginFrom(ctx) == nil {
+		ctx = events.WithOrigin(ctx, events.Origin{Kind: events.OriginWorkflowRun, RunID: run.ID, Depth: run.TriggerDepth})
+	}
 	return database.BeforeCommit(ctx, func() error {
 		if _, err := events.NewOutbox().Append(ctx, tx, &events.Event{OrgID: run.OrganizationID, Type: typ, EntityID: run.ID, Data: data}); err != nil {
 			return fmt.Errorf("event of the workflow run: %w", err)
@@ -917,7 +924,8 @@ func scanRun(s scanner) (*Run, error) {
 	var fin, next sql.NullTime
 	var seq sql.NullInt64
 	if err := s.Scan(&r.ID, &r.OrganizationID, &r.WorkflowID, &r.DefinitionVersionID, &r.Status, &r.Trigger, &ctxb, &r.StartedAt, &fin,
-		&r.Attempts, &next, &r.LastError, &r.InitiatedBy, &r.CIID, &r.SerialKey, &seq, &r.Enqueues, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		&r.Attempts, &next, &r.LastError, &r.InitiatedBy, &r.CIID, &r.SerialKey, &seq, &r.Enqueues, &r.TriggerEventID, &r.TriggerDepth,
+		&r.CreatedAt, &r.UpdatedAt); err != nil {
 		return nil, err
 	}
 	if seq.Valid {

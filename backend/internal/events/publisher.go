@@ -197,15 +197,23 @@ func (p *Publisher) publishBatch(ctx context.Context, orgID string, limit int) (
 			return err // another replica publishes this organization
 		}
 		rows, err := tx.Query(ctx, `SELECT id::text, type, organization_id::text, occurred_at, sequence,
-			COALESCE(entity_id, ''), COALESCE(entity_seq, 0), data
+			COALESCE(entity_id, ''), COALESCE(entity_seq, 0), data, origin
 			FROM event_outbox WHERE organization_id = $1 AND published_at IS NULL ORDER BY sequence LIMIT $2`, orgID, limit)
 		if err != nil {
 			return err
 		}
 		pending, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Envelope, error) {
 			var e Envelope
-			scanErr := row.Scan(&e.ID, &e.Type, &e.OrgID, &e.OccurredAt, &e.Sequence, &e.EntityID, &e.EntitySeq, &e.Data)
+			var origin []byte
+			scanErr := row.Scan(&e.ID, &e.Type, &e.OrgID, &e.OccurredAt, &e.Sequence, &e.EntityID, &e.EntitySeq, &e.Data, &origin)
 			e.OccurredAt = e.OccurredAt.UTC()
+			// The workflow run that wrote the event (WP-1090).
+			if scanErr == nil && len(origin) > 0 {
+				var o Origin
+				if json.Unmarshal(origin, &o) == nil {
+					e.Origin = &o
+				}
+			}
 			return e, scanErr
 		})
 		if err != nil {

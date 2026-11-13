@@ -9,6 +9,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
@@ -309,6 +310,9 @@ func (e *Executor) runCI(ctx context.Context, orgID string, payload JSONMap) (st
 // back to running and executed again. at is the job attempt that executes
 // the run; its zero value is the run in the request, which is not retried.
 func (e *Executor) resume(ctx context.Context, orgID string, run *Run, at attempt) (*Run, error) {
+	// The events the run writes name it as their origin (WP-1090): they
+	// start runs only of definitions that allow it, up to a depth.
+	ctx = events.WithOrigin(ctx, events.Origin{Kind: events.OriginWorkflowRun, RunID: run.ID, Depth: run.TriggerDepth})
 	def, err := e.repo.GetVersionByID(ctx, orgID, run.DefinitionVersionID)
 	if err != nil {
 		return e.abort(ctx, orgID, run, at, fmt.Errorf("load workflow definition version: %w", err))
@@ -680,7 +684,29 @@ func triggerMatches(trigger JSONMap, event string) bool {
 	if typ == "manual" || typ == "schedule" {
 		return event == typ || event == "manual"
 	}
-	return str(trigger, "event", "") == event
+	return eventMatches(trigger, event)
+}
+
+// eventMatches reports whether the trigger names event in trigger.event: a
+// type name or a list of type names (WP-1090).
+func eventMatches(trigger JSONMap, event string) bool {
+	switch v := trigger["event"].(type) {
+	case string:
+		return v != "" && v == event
+	case []any:
+		for _, item := range v {
+			if s, ok := item.(string); ok && s == event {
+				return true
+			}
+		}
+	case []string:
+		for _, s := range v {
+			if s == event {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func str(m map[string]any, key, fallback string) string {

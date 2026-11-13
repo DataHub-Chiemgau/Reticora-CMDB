@@ -73,10 +73,16 @@ type Run struct {
 	EntitySeq *int64 `json:"-"`
 	// Enqueues counts how often the run was queued as the job
 	// workflow.run; only the job of the last enqueue executes it.
-	Enqueues  int       `json:"-"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Steps     []Step    `json:"steps,omitempty"`
+	Enqueues int `json:"-"`
+	// TriggerEventID is the event that started the run (WP-1090): one run
+	// per definition version and event. Empty for other triggers.
+	TriggerEventID string `json:"-"`
+	// TriggerDepth counts the runs started by events of runs before this
+	// one (loop protection, at most triggerMaxDepth).
+	TriggerDepth int       `json:"-"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	Steps        []Step    `json:"steps,omitempty"`
 }
 
 // RunClaim is the decision of Repository.ClaimRun about a job of a run

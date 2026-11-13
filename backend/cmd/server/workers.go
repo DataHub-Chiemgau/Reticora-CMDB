@@ -95,6 +95,32 @@ type workerDeps struct {
 	cycle time.Duration
 }
 
+// workflowTriggers is the consumer of the workflow event triggers
+// (WP-1090): with the module workflows, the database, the job queue and the
+// event stream; nil otherwise.
+func (d *workerDeps) workflowTriggers() *workflow.TriggerConsumer {
+	if d.modules == nil || !d.modules.Enabled("workflows") || d.pool == nil || d.eventStream == nil || d.jobQueue == nil {
+		return nil
+	}
+	store, ok := d.repos.Workflow.(workflow.EventStore)
+	if !ok {
+		return nil
+	}
+	dispatcher := d.dispatcher
+	if d.repos.EventOutbox {
+		dispatcher = nil
+	}
+	exec := workflow.NewExecutor(d.repos.Workflow, d.repos.Ticket, d.repos.CI, d.repos.Form, dispatcher).
+		WithFieldGuard(override.NewGuard(d.repos.Override)).WithQueue(d.jobQueue)
+	if d.repos.EventOutbox {
+		exec.WithEventOutbox()
+	}
+	ents := d.entitlements
+	return workflow.NewTriggerConsumer(exec, store, d.eventStream, func(ctx context.Context, orgID string) bool {
+		return ents != nil && ents.IsEnabled(ctx, orgID, entitlement.FeatureWorkflows)
+	})
+}
+
 // probeIngester is the worker probe_ingest: the one main built for /readyz,
 // else one on the ingest queue's JetStream and the database; nil without
 // either.
@@ -291,7 +317,18 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 	// Run the jobs announced on the JOBS work queue (TEC-14); a cycle is a
 	// sweep, the backlog the due queued jobs of the kinds it runs.
 	if d.jobQueue != nil {
-		workers = append(workers, server.Worker{Name: config.WorkerJobs, Run: d.jobQueue.Run, Backlog: d.jobBacklog})
+		run := d.jobQueue.Run
+		// Event triggers of workflows (WFL-02, WP-1090, E-226): the durable
+		// consumer workflow-triggers on RETICORA_EVENTS starts the runs of
+		// the event definitions and queues them as workflow.run, with the
+		// module workflows; until WP-1114 in the worker jobs.
+		if triggers := d.workflowTriggers(); triggers != nil {
+			run = func(ctx context.Context) {
+				go triggers.Run(ctx)
+				d.jobQueue.Run(ctx)
+			}
+		}
+		workers = append(workers, server.Worker{Name: config.WorkerJobs, Run: run, Backlog: d.jobBacklog})
 	}
 	// Consume ingest.> (REC-01).
 	if d.ingestQueue != nil {
