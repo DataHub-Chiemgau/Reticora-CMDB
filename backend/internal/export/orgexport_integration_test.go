@@ -10,6 +10,7 @@ package export_test
 // Retest: cd backend && TEST_DATABASE_URL=… go test -count=1 -run 'TestOrgExport' ./internal/export/
 
 import (
+	"archive/zip"
 	"bufio"
 	"bytes"
 	"context"
@@ -20,6 +21,7 @@ import (
 	"io"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -28,6 +30,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
@@ -41,6 +44,9 @@ type recordingStore struct {
 	mu      sync.Mutex
 	put     []string
 	deleted []string
+	// aborted are the keys whose unfinished uploads were aborted
+	// (blob.AbortUploads, WP-1150).
+	aborted []string
 	// failPut, when set, refuses a Put of key (the process ends there);
 	// last is the key of the previous Put.
 	failPut func(key, last string) bool
@@ -66,6 +72,15 @@ func (s *recordingStore) Delete(ctx context.Context, bucket, key string) error {
 	s.deleted = append(s.deleted, key)
 	s.mu.Unlock()
 	return s.Store.Delete(ctx, bucket, key)
+}
+
+// AbortUploads implements blob.UploadAborter: it records the key (the
+// FileStore keeps no unfinished uploads).
+func (s *recordingStore) AbortUploads(_ context.Context, _, key string) error {
+	s.mu.Lock()
+	s.aborted = append(s.aborted, key)
+	s.mu.Unlock()
+	return nil
 }
 
 // recordingProgress records the reported progress of the export.
@@ -722,6 +737,11 @@ func (env *orgExportEnv) leftObjects(t *testing.T, job *jobs.Job, m *export.OrgE
 				listed[p.Key] = true
 			}
 		}
+		if m.Documents != nil {
+			for _, p := range m.Documents.Parts {
+				listed[p.Key] = true
+			}
+		}
 	}
 	var left []string
 	seen := map[string]bool{}
@@ -848,5 +868,167 @@ func TestOrgExportWithoutVaultFails(t *testing.T) {
 	}
 	if tb := tableOf(&partial, "ci_change"); tb != nil {
 		t.Errorf("ci_change recorded complete without vault: %+v", tb)
+	}
+}
+
+// document stores a document of organization A with one version of
+// scan_status status and its content in the document bucket; it returns
+// the document id.
+func (env *orgExportEnv) document(t *testing.T, title, status string, content []byte) string {
+	t.Helper()
+	bg := context.Background()
+	uploader := env.f.AppUser(t, env.f.OrgA, "wp1150-"+title)
+	var doc string
+	if err := env.f.Admin.QueryRow(bg, `INSERT INTO document (organization_id, title, file_name, storage_key, uploaded_by)
+		VALUES ($1, $2, 'f.bin', '', $3) RETURNING id::text`, env.f.OrgA, title, uploader).Scan(&doc); err != nil {
+		t.Fatalf("seed document: %v", err)
+	}
+	key := "org/" + env.f.OrgA + "/documents/" + doc + "/v1"
+	h := sha256.Sum256(content)
+	if _, err := env.f.Admin.Exec(bg, `INSERT INTO document_version (organization_id, document_id, version, storage_key, size, mime, checksum_sha256, scan_status)
+		VALUES ($1, $2, 1, $3, $4, 'application/octet-stream', $5, $6)`, env.f.OrgA, doc, key, len(content), hex.EncodeToString(h[:]), status); err != nil {
+		t.Fatalf("seed document version: %v", err)
+	}
+	if err := env.store.Store.Put(bg, document.Bucket, key, bytes.NewReader(content), int64(len(content)), "application/octet-stream"); err != nil {
+		t.Fatal(err)
+	}
+	return doc
+}
+
+// documentsKey is the key of ZIP part n of the job.
+func documentsKey(env *orgExportEnv, job *jobs.Job, n int) string {
+	return export.OrgExportPrefix(env.f.OrgA, job.ID) + "/documents-" + strconv.Itoa(n) + ".zip"
+}
+
+// TestOrgExportDocumentsAfterTables (WP-1150 AK1): the job org.export
+// writes documents-<n>.zip after the tables and pii_subject; the manifest
+// lists the part with its hash, the clean version with its entry and the
+// infected one without content.
+func TestOrgExportDocumentsAfterTables(t *testing.T) {
+	env := newOrgExportEnv(t)
+	content := []byte("wp1150 clean document content")
+	clean := env.document(t, "clean", "clean", content)
+	infected := env.document(t, "infected", "infected", []byte("EICAR"))
+	job := env.job(t)
+	var steps []string
+	e := export.NewOrgExporter(env.f.App, env.store, nil).WithStepHook(func(_ context.Context, step string) error {
+		steps = append(steps, step)
+		return nil
+	})
+	m := env.run(t, e, job)
+	if len(steps) == 0 || steps[len(steps)-1] != "documents" || !slices.Contains(steps, "pii_subject") ||
+		slices.Index(steps, "pii_subject") > slices.Index(steps, "documents") {
+		t.Fatalf("steps %v: the documents do not follow the tables", steps)
+	}
+	var stored export.OrgExportManifest
+	if err := json.Unmarshal(env.read(t, export.OrgExportManifestKey(env.f.OrgA, job.ID)), &stored); err != nil {
+		t.Fatal(err)
+	}
+	docs := stored.Documents
+	if docs == nil || len(stored.PendingDocuments) != 0 || len(docs.Parts) != 1 {
+		t.Fatalf("stored documents %+v, pending %v", docs, stored.PendingDocuments)
+	}
+	part := docs.Parts[0]
+	if part.Key != documentsKey(env, job, 1) || part.Entries != 1 {
+		t.Fatalf("part %+v", part)
+	}
+	raw := env.read(t, part.Key)
+	h := sha256.Sum256(raw)
+	if int64(len(raw)) != part.Bytes || hex.EncodeToString(h[:]) != part.SHA256 {
+		t.Fatalf("part %s: %d bytes %x, manifest %+v", part.Key, len(raw), h, part)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	if err != nil || len(zr.File) != 1 || zr.File[0].Name != "documents/"+clean+"/1" {
+		t.Fatalf("zip %v: %v", err, zr)
+	}
+	objects := map[string]export.OrgExportDocument{}
+	for _, o := range docs.Objects {
+		objects[o.DocumentID] = o
+	}
+	want := sha256.Sum256(content)
+	if o := objects[clean]; o.Entry == "" || o.Part != part.Key || o.SHA256 != hex.EncodeToString(want[:]) || o.ChecksumMismatch {
+		t.Errorf("clean version %+v", o)
+	}
+	if o, ok := objects[infected]; !ok || o.Entry != "" || o.Part != "" || o.ScanStatus != "infected" {
+		t.Errorf("infected version %+v (listed %v)", o, ok)
+	}
+	if docs.Count != 1 || docs.TotalBytes != int64(len(content)) || m.Documents == nil {
+		t.Errorf("documents count %d bytes %d, result %+v", docs.Count, docs.TotalBytes, m.Documents)
+	}
+	if left := env.leftObjects(t, job, m); len(left) > 0 {
+		t.Errorf("objects outside the manifest: %v", left)
+	}
+}
+
+// TestOrgExportDocumentsResumeRemovesPendingParts (WP-1150 AK5): the
+// documents step is one unit of the resumption. A process that ends inside
+// it leaves the part pending; the next attempt deletes it, aborts its
+// unfinished uploads and runs the step again in full. The failure of the
+// last attempt removes a pending part as well.
+func TestOrgExportDocumentsResumeRemovesPendingParts(t *testing.T) {
+	env := newOrgExportEnv(t)
+	bg := context.Background()
+	content := []byte("wp1150 resumed document")
+	env.document(t, "resume", "clean", content)
+	job := env.job(t)
+	crashAt := func(key string) func(string, string) bool {
+		done := false
+		return func(k, _ string) bool {
+			if !done && k == key {
+				done = true
+				return true
+			}
+			return false
+		}
+	}
+	env.store.failPut = crashAt(documentsKey(env, job, 1))
+	if _, err := export.NewOrgExporter(env.f.App, env.store, nil).RunJob(bg, job); err == nil {
+		t.Fatal("the first attempt did not fail")
+	}
+	env.store.failPut = nil
+	var partial export.OrgExportManifest
+	if err := json.Unmarshal(env.read(t, export.OrgExportManifestKey(env.f.OrgA, job.ID)), &partial); err != nil {
+		t.Fatal(err)
+	}
+	pendingKey := documentsKey(env, job, 1)
+	if partial.Documents != nil || !slices.Equal(partial.PendingDocuments, []string{pendingKey}) || tableOf(&partial, "pii_subject") == nil {
+		t.Fatalf("manifest after the crash: documents %+v, pending %v", partial.Documents, partial.PendingDocuments)
+	}
+	// What a crashed upload may have left at the key.
+	if err := env.store.Store.Put(bg, export.ExportBucket, pendingKey, strings.NewReader("truncated"), 9, "application/zip"); err != nil {
+		t.Fatal(err)
+	}
+	deletedBefore := len(env.store.deleted)
+	m := env.run(t, export.NewOrgExporter(env.f.App, env.store, nil), job)
+	if !slices.Contains(env.store.deleted[deletedBefore:], pendingKey) || !slices.Contains(env.store.aborted, pendingKey) {
+		t.Errorf("the pending part was not removed: deleted %v, aborted %v", env.store.deleted[deletedBefore:], env.store.aborted)
+	}
+	if m.Documents == nil || len(m.PendingDocuments) != 0 || len(m.Documents.Parts) != 1 || m.Documents.Count != 1 {
+		t.Fatalf("documents after the resume %+v, pending %v", m.Documents, m.PendingDocuments)
+	}
+	raw := env.read(t, pendingKey)
+	h := sha256.Sum256(raw)
+	if hex.EncodeToString(h[:]) != m.Documents.Parts[0].SHA256 {
+		t.Errorf("the part was not written again: %q", raw)
+	}
+	// The tables of the first attempt are kept.
+	if pii := tableOf(m, "pii_subject"); pii == nil || pii.Snapshot != tableOf(&partial, "pii_subject").Snapshot {
+		t.Errorf("pii_subject was exported again: %+v", pii)
+	}
+
+	// The last attempt fails inside the documents step: its pending part
+	// and every other object of the job go.
+	last := env.job(t)
+	last.Attempts, last.MaxAttempts = 3, 3
+	env.store.failPut = crashAt(documentsKey(env, last, 1))
+	if _, err := export.NewOrgExporter(env.f.App, env.store, nil).RunJob(bg, last); err == nil {
+		t.Fatal("the last attempt did not fail")
+	}
+	env.store.failPut = nil
+	if !slices.Contains(env.store.aborted, documentsKey(env, last, 1)) {
+		t.Errorf("the pending part of the last attempt was not aborted: %v", env.store.aborted)
+	}
+	if left := env.leftObjects(t, last, nil); len(left) > 0 {
+		t.Errorf("objects after the last attempt failed: %v", left)
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -572,4 +573,310 @@ func hmacSHA256(key []byte, data string) []byte {
 	mac := hmac.New(sha256.New, key)
 	_, _ = mac.Write([]byte(data))
 	return mac.Sum(nil)
+}
+
+// ─── Streaming upload (TLC-05, WP-1150) ─────────────────────────────────────
+
+// MultipartPartSize is the size of one part of a streamed upload to S3:
+// PutStream holds at most one part in memory.
+const MultipartPartSize = 16 << 20
+
+// StreamStore is a store that uploads a stream of unknown length without
+// holding it in memory (S3Store: multipart upload, FileStore: file).
+type StreamStore interface {
+	PutStream(ctx context.Context, bucket, key string, reader io.Reader, contentType string) error
+}
+
+// PutStream uploads reader as the object key: through StreamStore when the
+// store has it, else (test doubles) with one Put of the read content. A
+// failed upload leaves no object behind.
+func PutStream(ctx context.Context, s Store, bucket, key string, reader io.Reader, contentType string) error {
+	if ss, ok := s.(StreamStore); ok {
+		return ss.PutStream(ctx, bucket, key, reader, contentType)
+	}
+	payload, err := io.ReadAll(reader)
+	if err != nil {
+		return fmt.Errorf("blob: read upload stream: %w", err)
+	}
+	return s.Put(ctx, bucket, key, bytes.NewReader(payload), int64(len(payload)), contentType)
+}
+
+// PutStream implements StreamStore: the stream goes straight into a file
+// next to the object, renamed to it once complete; a failed stream removes
+// the file, so no partial object remains.
+func (s *FileStore) PutStream(_ context.Context, bucket, key string, reader io.Reader, _ string) error {
+	objectPath, err := s.objectPath(bucket, key)
+	if err != nil {
+		return err
+	}
+	if mkdirErr := os.MkdirAll(filepath.Dir(objectPath), 0o755); mkdirErr != nil {
+		return fmt.Errorf("blob: create directory for %q: %w", objectPath, mkdirErr)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(objectPath), "."+filepath.Base(objectPath)+".part-*")
+	if err != nil {
+		return fmt.Errorf("blob: create file for %q: %w", objectPath, err)
+	}
+	done := false
+	defer func() {
+		if !done {
+			_ = tmp.Close()
+			_ = os.Remove(tmp.Name())
+		}
+	}()
+	if _, err := io.Copy(tmp, reader); err != nil {
+		return fmt.Errorf("blob: write file %q: %w", objectPath, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("blob: close file %q: %w", objectPath, err)
+	}
+	if err := os.Rename(tmp.Name(), objectPath); err != nil {
+		return fmt.Errorf("blob: store file %q: %w", objectPath, err)
+	}
+	done = true
+	return nil
+}
+
+// PutStream implements StreamStore with a multipart upload in parts of
+// MultipartPartSize: one buffer of one part is reused, each part is sent
+// before the next is read. A stream that fits into the first part is one
+// PUT. Any failure aborts the upload (AbortMultipartUpload), so S3 keeps
+// neither an object nor its parts.
+func (s *S3Store) PutStream(ctx context.Context, bucket, key string, reader io.Reader, contentType string) error {
+	return s.putStream(ctx, bucket, key, reader, contentType, MultipartPartSize)
+}
+
+func (s *S3Store) putStream(ctx context.Context, bucket, key string, reader io.Reader, contentType string, partSize int) error {
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	buf := make([]byte, partSize)
+	n, err := io.ReadFull(reader, buf)
+	if streamFailed(err) {
+		return fmt.Errorf("blob: read upload stream: %w", err)
+	}
+	if n < partSize {
+		// The whole stream fits into one part: a plain PUT.
+		resp, perr := s.doRequest(ctx, http.MethodPut, bucket, key, bytes.NewReader(buf[:n]), contentType, payloadSHA256(buf[:n]), nil)
+		if perr != nil {
+			return perr
+		}
+		return resp.Body.Close()
+	}
+	uploadID, err := s.createMultipart(ctx, bucket, key, contentType)
+	if err != nil {
+		return err
+	}
+	var etags []string
+	fail := func(cause error) error {
+		if aerr := s.abortMultipart(context.WithoutCancel(ctx), bucket, key, uploadID); aerr != nil {
+			return errors.Join(cause, aerr)
+		}
+		return cause
+	}
+	for part := 1; n > 0; part++ {
+		etag, perr := s.uploadPart(ctx, bucket, key, uploadID, part, buf[:n])
+		if perr != nil {
+			return fail(perr)
+		}
+		etags = append(etags, etag)
+		n, err = io.ReadFull(reader, buf)
+		if streamFailed(err) {
+			return fail(fmt.Errorf("blob: read upload stream: %w", err))
+		}
+	}
+	if err := s.completeMultipart(ctx, bucket, key, uploadID, etags); err != nil {
+		return fail(err)
+	}
+	return nil
+}
+
+// streamFailed reports whether io.ReadFull ended with an error of the
+// source rather than at the end of the stream. ReadFull returns io.EOF and
+// io.ErrUnexpectedEOF itself unwrapped; the sentinels are compared by
+// identity, so a source error that wraps one of them (a document body cut
+// off mid-transfer, handed on through CloseWithError) aborts the upload
+// instead of storing a truncated object.
+func streamFailed(err error) bool {
+	//nolint:errorlint // identity on purpose, see above
+	return err != nil && err != io.EOF && err != io.ErrUnexpectedEOF
+}
+
+// UploadAborter is a store that can remove the unfinished multipart uploads
+// of a key, left behind when the process that started them ended (crash,
+// kill) before it could abort them.
+type UploadAborter interface {
+	AbortUploads(ctx context.Context, bucket, key string) error
+}
+
+// AbortUploads removes the unfinished uploads of key when the store keeps
+// any (S3Store); other stores have none and return nil.
+func AbortUploads(ctx context.Context, s Store, bucket, key string) error {
+	if a, ok := s.(UploadAborter); ok {
+		return a.AbortUploads(ctx, bucket, key)
+	}
+	return nil
+}
+
+// AbortUploads implements UploadAborter: ListMultipartUploads with the key
+// as prefix, then AbortMultipartUpload for every upload of exactly that key.
+func (s *S3Store) AbortUploads(ctx context.Context, bucket, key string) error {
+	if strings.TrimSpace(bucket) == "" || strings.TrimSpace(key) == "" {
+		return fmt.Errorf("blob: bucket and key are required")
+	}
+	scheme := "http"
+	if s.useSSL {
+		scheme = "https"
+	}
+	query := url.Values{"uploads": {""}, "prefix": {key}}
+	var errs []error
+	// A key has few unfinished uploads; the pages are followed regardless.
+	for range 100 {
+		listURL := &url.URL{Scheme: scheme, Host: s.endpoint, Path: "/" + bucket, RawQuery: canonicalQueryString(query)}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, listURL.String(), http.NoBody)
+		if err != nil {
+			return fmt.Errorf("blob: create list uploads request: %w", err)
+		}
+		if serr := s.signRequest(req, emptyPayloadSHA256); serr != nil {
+			return serr
+		}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			return fmt.Errorf("blob: list uploads of %s: %w", key, err)
+		}
+		var out struct {
+			Uploads []struct {
+				Key      string `xml:"Key"`
+				UploadID string `xml:"UploadId"`
+			} `xml:"Upload"`
+			IsTruncated        bool   `xml:"IsTruncated"`
+			NextKeyMarker      string `xml:"NextKeyMarker"`
+			NextUploadIDMarker string `xml:"NextUploadIdMarker"`
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+			_ = resp.Body.Close()
+			return statusError(http.MethodGet, listURL.Path, resp, strings.TrimSpace(string(body)))
+		}
+		derr := xml.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&out)
+		_ = resp.Body.Close()
+		if derr != nil {
+			return fmt.Errorf("blob: list uploads of %s: %w", key, derr)
+		}
+		for _, u := range out.Uploads {
+			if u.Key != key || u.UploadID == "" {
+				continue
+			}
+			if aerr := s.abortMultipart(ctx, bucket, key, u.UploadID); aerr != nil && !errors.Is(aerr, ErrNotFound) {
+				errs = append(errs, aerr)
+			}
+		}
+		if !out.IsTruncated || out.NextKeyMarker == "" {
+			return errors.Join(errs...)
+		}
+		query.Set("key-marker", out.NextKeyMarker)
+		query.Set("upload-id-marker", out.NextUploadIDMarker)
+	}
+	return errors.Join(errs...)
+}
+
+// queryRequest sends a signed request to the object with the query.
+func (s *S3Store) queryRequest(ctx context.Context, method, bucket, key string, query url.Values, body []byte, contentType string) (*http.Response, error) {
+	objectURL, err := s.objectURL(bucket, key)
+	if err != nil {
+		return nil, err
+	}
+	objectURL.RawQuery = canonicalQueryString(query)
+	if body == nil {
+		body = []byte{}
+	}
+	req, err := http.NewRequestWithContext(ctx, method, objectURL.String(), bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("blob: create %s request: %w", method, err)
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	if serr := s.signRequest(req, payloadSHA256(body)); serr != nil {
+		return nil, serr
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("blob: %s %s: %w", method, objectURL.Path, err)
+	}
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return resp, nil
+	}
+	defer resp.Body.Close()
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+	return nil, statusError(method, objectURL.Path, resp, strings.TrimSpace(string(bodyBytes)))
+}
+
+// createMultipart starts a multipart upload and returns its upload id.
+func (s *S3Store) createMultipart(ctx context.Context, bucket, key, contentType string) (string, error) {
+	resp, err := s.queryRequest(ctx, http.MethodPost, bucket, key, url.Values{"uploads": {""}}, nil, contentType)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	var out struct {
+		UploadID string `xml:"UploadId"`
+	}
+	if err := xml.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil || out.UploadID == "" {
+		return "", fmt.Errorf("blob: start multipart upload of %s: no upload id", key)
+	}
+	return out.UploadID, nil
+}
+
+// uploadPart sends one part and returns its ETag.
+func (s *S3Store) uploadPart(ctx context.Context, bucket, key, uploadID string, part int, data []byte) (string, error) {
+	resp, err := s.queryRequest(ctx, http.MethodPut, bucket, key,
+		url.Values{"partNumber": {strconv.Itoa(part)}, "uploadId": {uploadID}}, data, "")
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	etag := resp.Header.Get("ETag")
+	if etag == "" {
+		return "", fmt.Errorf("blob: part %d of %s has no ETag", part, key)
+	}
+	return etag, nil
+}
+
+// completeMultipart joins the parts into the object.
+func (s *S3Store) completeMultipart(ctx context.Context, bucket, key, uploadID string, etags []string) error {
+	type part struct {
+		PartNumber int    `xml:"PartNumber"`
+		ETag       string `xml:"ETag"`
+	}
+	body := struct {
+		XMLName xml.Name `xml:"CompleteMultipartUpload"`
+		Parts   []part   `xml:"Part"`
+	}{}
+	for i, etag := range etags {
+		body.Parts = append(body.Parts, part{PartNumber: i + 1, ETag: etag})
+	}
+	raw, err := xml.Marshal(body)
+	if err != nil {
+		return err
+	}
+	resp, err := s.queryRequest(ctx, http.MethodPost, bucket, key, url.Values{"uploadId": {uploadID}}, raw, "application/xml")
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	// S3 may answer 200 with an error document when the join fails late.
+	payload, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if bytes.Contains(payload, []byte("<Error>")) {
+		return fmt.Errorf("blob: complete multipart upload of %s failed", key)
+	}
+	return nil
+}
+
+// abortMultipart removes an unfinished upload with its parts.
+func (s *S3Store) abortMultipart(ctx context.Context, bucket, key, uploadID string) error {
+	resp, err := s.queryRequest(ctx, http.MethodDelete, bucket, key, url.Values{"uploadId": {uploadID}}, nil, "")
+	if err != nil {
+		return fmt.Errorf("blob: abort multipart upload of %s: %w", key, err)
+	}
+	return resp.Body.Close()
 }

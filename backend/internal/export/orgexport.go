@@ -69,6 +69,12 @@ type OrgExportManifest struct {
 	CompletedAt    *time.Time       `json:"completed_at,omitempty"`
 	Tables         []OrgExportTable `json:"tables"`
 	Pending        *OrgExportTable  `json:"pending,omitempty"`
+	// Documents are the ZIP parts with the document contents (WP-1150),
+	// set once the documents step is complete; PendingDocuments are the
+	// keys of the parts of a documents step in progress, removed by the
+	// next attempt (the step starts again, AK5).
+	Documents        *OrgExportDocuments `json:"documents,omitempty"`
+	PendingDocuments []string            `json:"pending_documents,omitempty"`
 }
 
 // OrgExportTable is one table of the manifest.
@@ -114,7 +120,12 @@ func (m *OrgExportManifest) keys() []string {
 			out = append(out, p.Key)
 		}
 	}
-	return out
+	if m.Documents != nil {
+		for _, p := range m.Documents.Parts {
+			out = append(out, p.Key)
+		}
+	}
+	return append(out, m.PendingDocuments...)
 }
 
 // OrgExportProgress records the progress of a job; jobs.Service
@@ -135,8 +146,10 @@ type OrgExporter struct {
 	progress  OrgExportProgress
 	batchSize int
 	partLimit int
-	now       func() time.Time
-	afterStep func(ctx context.Context, table string) error
+	// docPartLimit is the size of a ZIP part of the documents (WP-1150).
+	docPartLimit int64
+	now          func() time.Time
+	afterStep    func(ctx context.Context, table string) error
 }
 
 // NewOrgExporter builds the exporter on the application pool and the
@@ -144,7 +157,7 @@ type OrgExporter struct {
 // fail.
 func NewOrgExporter(pool *pgxpool.Pool, blobs blob.Store, progress OrgExportProgress) *OrgExporter {
 	return &OrgExporter{pool: pool, blobs: blobs, bucket: ExportBucket, progress: progress,
-		batchSize: OrgExportBatchSize, partLimit: OrgExportPartLimit, now: time.Now}
+		batchSize: OrgExportBatchSize, partLimit: OrgExportPartLimit, docPartLimit: OrgExportDocumentPartLimit, now: time.Now}
 }
 
 // WithLimits sets the rows per batch and the bytes per part (tests).
@@ -209,6 +222,16 @@ func (e *OrgExporter) RunJob(ctx context.Context, job *jobs.Job) (any, error) {
 			}
 		}
 		manifest.Pending = nil
+	}
+	// The same for the ZIP parts of an unfinished documents step (AK5 of
+	// WP-1150): the step starts again. A process that ended mid-upload
+	// (crash, kill) could not abort its multipart upload: the unfinished
+	// uploads of the key go as well.
+	if manifest.Documents == nil && len(manifest.PendingDocuments) > 0 {
+		for _, key := range manifest.PendingDocuments {
+			e.removeDocumentPart(ctx, job.ID, key)
+		}
+		manifest.PendingDocuments = nil
 	}
 	if cancelled(ctx) {
 		return nil, e.discard(ctx, manifest)
@@ -292,6 +315,24 @@ func (e *OrgExporter) run(ctx context.Context, tx pgx.Tx, m *OrgExportManifest) 
 		}
 		report()
 		if err := e.step(ctx, entry.Name); err != nil {
+			return err
+		}
+	}
+	// The documents after the tables (WP-1150): one unit of the resumption.
+	if m.Documents == nil {
+		if cancelled(ctx) {
+			return jobs.ErrCancelled
+		}
+		docs, err := e.exportDocuments(ctx, tx, m)
+		if err != nil {
+			return err
+		}
+		docs.SnapshotAt, docs.Snapshot = snapshotAt.UTC(), snapshot
+		m.Documents, m.PendingDocuments = docs, nil
+		if err := e.saveManifest(ctx, m); err != nil {
+			return err
+		}
+		if err := e.step(ctx, orgExportDocumentsStep); err != nil {
 			return err
 		}
 	}
@@ -698,11 +739,31 @@ func (e *OrgExporter) discard(ctx context.Context, m *OrgExportManifest) error {
 	return jobs.ErrCancelled
 }
 
+// removeDocumentPart deletes a pending ZIP part and aborts the unfinished
+// multipart uploads of its key (blob.AbortUploads).
+func (e *OrgExporter) removeDocumentPart(ctx context.Context, jobID, key string) {
+	if err := blob.AbortUploads(ctx, e.blobs, e.bucket, key); err != nil {
+		slog.WarnContext(ctx, "org export: abort unfinished upload of a documents part", "job", jobID, "error", err)
+	}
+	if err := e.blobs.Delete(ctx, e.bucket, key); err != nil && !errors.Is(err, blob.ErrNotFound) {
+		slog.WarnContext(ctx, "org export: remove part of an incomplete documents step", "job", jobID, "error", err)
+	}
+}
+
 // removeObjects deletes every part the manifest lists (complete and
-// pending) and the manifest, without the cancel of ctx.
+// pending) and the manifest, without the cancel of ctx; for pending ZIP
+// parts it also aborts their unfinished uploads.
 func (e *OrgExporter) removeObjects(ctx context.Context, m *OrgExportManifest) {
 	ctx = context.WithoutCancel(ctx)
+	pending := make(map[string]bool, len(m.PendingDocuments))
+	for _, key := range m.PendingDocuments {
+		pending[key] = true
+		e.removeDocumentPart(ctx, m.JobID, key)
+	}
 	for _, key := range append(m.keys(), OrgExportManifestKey(m.OrganizationID, m.JobID)) {
+		if pending[key] {
+			continue
+		}
 		if err := e.blobs.Delete(ctx, e.bucket, key); err != nil && !errors.Is(err, blob.ErrNotFound) {
 			slog.WarnContext(ctx, "org export: remove object of the job", "job", m.JobID, "error", err)
 		}
