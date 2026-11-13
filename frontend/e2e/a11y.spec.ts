@@ -1235,6 +1235,7 @@ const ROUTES: A11yRoute[] = [
   },
   { path: '/monitoring', url: '/monitoring', ready: text(M.alert) },
   { path: '/alarms', url: '/alarms', ready: text(M.alarm) },
+  { path: '/incidents', url: '/incidents', ready: text(M.incident) },
   { path: '/audit', url: '/audit', ready: text(M.audit) },
   { path: '/security', url: '/security', ready: text(M.compliance) },
   // Unknown paths fall back to the CI list.

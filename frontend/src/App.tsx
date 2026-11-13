@@ -61,6 +61,7 @@ const ExportPage = lazyPage(() => import('./pages/ExportPage'), 'ExportPage');
 const ImportPage = lazyPage(() => import('./pages/ImportPage'), 'ImportPage');
 const MonitoringPage = lazyPage(() => import('./pages/MonitoringPage'), 'MonitoringPage');
 const AlarmsPage = lazyPage(() => import('./pages/AlarmsPage'), 'AlarmsPage');
+const IncidentsPage = lazyPage(() => import('./pages/IncidentsPage'), 'IncidentsPage');
 const PermissionsPage = lazyPage(() => import('./pages/PermissionsPage'), 'PermissionsPage');
 const RackPage = lazyPage(() => import('./pages/RackPage'), 'RackPage');
 const TopologyPage = lazyPage(() => import('./pages/TopologyPage'), 'TopologyPage');
@@ -315,6 +316,7 @@ function App() {
           <Route path="/export" element={<ExportPage />} />
           <Route path="/monitoring" element={<MonitoringPage />} />
           <Route path="/alarms" element={<AlarmsPage />} />
+          <Route path="/incidents" element={<IncidentsPage />} />
           <Route path="/audit" element={<AuditPage />} />
           <Route path="/security" element={<SecurityPage />} />
           <Route path="*" element={<CIListPage onCreateCI={openCreateCI} />} />

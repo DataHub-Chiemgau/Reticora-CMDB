@@ -185,7 +185,19 @@ func TestIncidentListFilters(t *testing.T) {
 	if got := ids(base + "?to=" + earlier); len(got) != 0 {
 		t.Errorf("to before every opening: %v, want none", got)
 	}
-	for _, q := range []string{"?state=closed", "?cause_class=x", "?client_id=nope", "?from=yesterday",
+	// resolved_from applies to resolved_at: the resolved incident is listed
+	// with a time before its resolution, whenever it opened, and not with
+	// one after; the open incident is listed either way.
+	if got := ids(base + "?state=resolved&resolved_from=" + earlier); len(got) != 1 || got[0] != other.ID {
+		t.Errorf("resolved_from before the resolution: %v", got)
+	}
+	if got := ids(base + "?state=resolved&resolved_from=" + later); len(got) != 0 {
+		t.Errorf("resolved_from after the resolution: %v, want none", got)
+	}
+	if got := ids(base + "?state=open&resolved_from=" + later); len(got) != 1 || got[0] != m.inc.ID {
+		t.Errorf("resolved_from with an open incident: %v", got)
+	}
+	for _, q := range []string{"?state=closed", "?cause_class=x", "?client_id=nope", "?from=yesterday", "?resolved_from=yesterday",
 		"?from=2026-01-02T00:00:00Z&to=2026-01-01T00:00:00Z"} {
 		if rec := m.call(t, incidentOperator, http.MethodGet, base+q, ""); rec.Code != http.StatusUnprocessableEntity {
 			t.Errorf("%s: %d, want 422", q, rec.Code)

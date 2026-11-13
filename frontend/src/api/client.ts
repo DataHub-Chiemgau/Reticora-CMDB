@@ -3184,6 +3184,37 @@ export const alarmApi = {
   },
 };
 
+// --- Incidents (ALR-03, ALR-10, WP-1036, WP-1045) ---
+
+export type Incident = components['schemas']['Incident'];
+export type IncidentListPage = components['schemas']['IncidentListResponse'];
+
+/** The states and cause classes of an incident (enums of the API). */
+export const INCIDENT_STATES = ['open', 'acknowledged', 'resolved'] as const;
+export const INCIDENT_CAUSE_CLASSES = ['topology', 'collector_unreachable', 'unknown'] as const;
+
+/**
+ * IncidentListParams are the filters of GET /monitoring/incidents: state and
+ * cause_class comma-separated, from and to (RFC 3339) on opened_at,
+ * resolved_from (RFC 3339) on resolved_at.
+ */
+export interface IncidentListParams {
+  state?: string;
+  client_id?: string;
+  cause_class?: string;
+  from?: string;
+  to?: string;
+  resolved_from?: string;
+  limit?: number;
+  cursor?: string;
+}
+
+export const incidentApi = {
+  list(params: IncidentListParams = {}): Promise<IncidentListPage> {
+    return fetchAPI(`/monitoring/incidents${buildQuery(params)}`);
+  },
+};
+
 // --- Audit (hash chain verification) ---
 
 /**

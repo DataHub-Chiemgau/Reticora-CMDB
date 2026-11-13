@@ -37,6 +37,7 @@ export type AppPage =
   | 'export'
   | 'monitoring'
   | 'alarms'
+  | 'incidents'
   | 'audit'
   | 'security'
   | 'map'
@@ -96,6 +97,7 @@ export const pageToPath: Record<AppPage, string> = {
   export: '/export',
   monitoring: '/monitoring',
   alarms: '/alarms',
+  incidents: '/incidents',
   audit: '/audit',
   security: '/security',
   map: '/map',
@@ -483,6 +485,12 @@ export function CommandPalette({
         label: t('commandPalette.commands.alarms'),
         keywords: ['alarme alarms alerts ack bestätigen'],
         action: () => onNavigate('alarms'),
+      },
+      {
+        id: 'nav-incidents',
+        label: t('commandPalette.commands.incidents'),
+        keywords: ['störungen incidents ausfall outage root cause'],
+        action: () => onNavigate('incidents'),
       },
       {
         id: 'nav-audit',

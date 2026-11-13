@@ -49916,8 +49916,12 @@ export interface operations {
         client_id?: string;
         /** @description Repeatable or comma-separated. */
         cause_class?: ('topology' | 'collector_unreachable' | 'unknown')[];
+        /** @description Incidents opened at or after this time (opened_at). */
         from?: string;
+        /** @description Incidents opened before this time (opened_at). */
         to?: string;
+        /** @description Incidents not resolved before this time (resolved_at; an unresolved incident is included). With state=resolved the incidents resolved since then, whenever they opened (default view of the incident list, WP-1045). */
+        resolved_from?: string;
       };
       header?: never;
       path?: never;

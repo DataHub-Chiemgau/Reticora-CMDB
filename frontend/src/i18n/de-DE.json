@@ -56,7 +56,8 @@
     "suppliers": "Lieferanten",
     "clients": "Kunden",
     "plan": "Paket und Add-ons",
-    "alarms": "Alarme"
+    "alarms": "Alarme",
+    "incidents": "Störungen"
   },
   "common": {
     "save": "Speichern",
@@ -126,7 +127,8 @@
       "contracts": "Verträge öffnen",
       "suppliers": "Lieferanten öffnen",
       "plan": "Paket und Add-ons öffnen",
-      "alarms": "Alarme öffnen"
+      "alarms": "Alarme öffnen",
+      "incidents": "Störungen öffnen"
     },
     "contact": {
       "label": "Kontakt",
@@ -5510,6 +5512,54 @@
       "maintenance": "Wartung",
       "symptom": "Symptom",
       "flapping": "Flattern"
+    }
+  },
+  "incidents": {
+    "title": "Störungen",
+    "description": "Offene und in den letzten 7 Tagen gelöste Störungen mit Wurzel, Ursache und betroffenen Anschlüssen und Diensten.",
+    "empty": "Keine Störungen",
+    "emptyDescription": "Für die gewählten Filter gibt es keine Störungen.",
+    "loadMore": "Weitere laden",
+    "clientHint": "Der Kunde folgt dem Bereichsschalter oben.",
+    "noRoot": "ohne Wurzel",
+    "rowLabel": "Störung {{root}}, Ursache {{cause}}",
+    "confidenceValue": "{{value}} %",
+    "durationDays": "{{d}} T {{h}} Std.",
+    "durationHours": "{{h}} Std. {{m}} Min.",
+    "durationMinutes": "{{m}} Min.",
+    "columns": {
+      "state": "Zustand",
+      "root": "Wurzel",
+      "cause": "Ursache",
+      "confidence": "Konfidenz",
+      "connections": "Anschlüsse",
+      "services": "Dienste",
+      "opened": "Beginn",
+      "duration": "Dauer"
+    },
+    "filters": {
+      "state": "Zustand",
+      "causeClass": "Ursachenklasse",
+      "from": "Begonnen ab",
+      "to": "Begonnen bis",
+      "all": "Alle"
+    },
+    "stateFilter": {
+      "recent": "Offen und kürzlich gelöst",
+      "open": "Offen",
+      "acknowledged": "Bestätigt",
+      "resolved": "Gelöst",
+      "all": "Alle Zustände"
+    },
+    "states": {
+      "open": "Offen",
+      "acknowledged": "Bestätigt",
+      "resolved": "Gelöst"
+    },
+    "causeClasses": {
+      "topology": "Topologie",
+      "collector_unreachable": "Collector nicht erreichbar",
+      "unknown": "Unbekannt"
     }
   }
 }

@@ -17,7 +17,7 @@ import (
 
 // REST of the incidents (ALR-03, ALR-10, WP-1036, E-160):
 //
-//	GET  /api/v1/monitoring/incidents             list (filters state, client_id, cause_class, from/to; cursor)
+//	GET  /api/v1/monitoring/incidents             list (filters state, client_id, cause_class, from/to, resolved_from; cursor)
 //	GET  /api/v1/monitoring/incidents/{id}        the incident with its members, reasons and timeline
 //	POST /api/v1/monitoring/incidents/{id}/ack    acknowledge it and its root alarm (alert:acknowledge)
 //	POST /api/v1/monitoring/incidents/{id}/root   set the root by hand (monitoring:write)
@@ -147,6 +147,16 @@ func parseIncidentFilter(r *http.Request) (*IncidentFilter, error) {
 	}
 	if f.OpenedFrom != nil && f.OpenedTo != nil && !f.OpenedFrom.Before(*f.OpenedTo) {
 		return nil, unprocessable("to", "to must be after from")
+	}
+	// resolved_from applies to resolved_at (WP-1045): an incident resolved
+	// before it is not listed, one not resolved is. With state=resolved it
+	// is "resolved since", independent of when the incident opened.
+	if v := q.Get("resolved_from"); v != "" {
+		at, perr := time.Parse(time.RFC3339, v)
+		if perr != nil {
+			return nil, unprocessable("resolved_from", "resolved_from must be an RFC 3339 date-time")
+		}
+		f.From = &at
 	}
 	return f, nil
 }

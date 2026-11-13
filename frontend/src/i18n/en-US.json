@@ -56,7 +56,8 @@
     "suppliers": "Suppliers",
     "clients": "Customers",
     "plan": "Plan and add-ons",
-    "alarms": "Alarms"
+    "alarms": "Alarms",
+    "incidents": "Incidents"
   },
   "common": {
     "save": "Save",
@@ -126,7 +127,8 @@
       "contracts": "Open contracts",
       "suppliers": "Open suppliers",
       "plan": "Open plan and add-ons",
-      "alarms": "Open alarms"
+      "alarms": "Open alarms",
+      "incidents": "Open incidents"
     },
     "contact": {
       "label": "Contact",
@@ -5510,6 +5512,54 @@
       "maintenance": "Maintenance",
       "symptom": "Symptom",
       "flapping": "Flapping"
+    }
+  },
+  "incidents": {
+    "title": "Incidents",
+    "description": "Open incidents and those resolved in the last 7 days with root, cause and affected connections and services.",
+    "empty": "No incidents",
+    "emptyDescription": "There are no incidents for the chosen filters.",
+    "loadMore": "Load more",
+    "clientHint": "The client follows the scope switcher above.",
+    "noRoot": "no root",
+    "rowLabel": "Incident {{root}}, cause {{cause}}",
+    "confidenceValue": "{{value}} %",
+    "durationDays": "{{d}} d {{h}} h",
+    "durationHours": "{{h}} h {{m}} min",
+    "durationMinutes": "{{m}} min",
+    "columns": {
+      "state": "State",
+      "root": "Root",
+      "cause": "Cause",
+      "confidence": "Confidence",
+      "connections": "Connections",
+      "services": "Services",
+      "opened": "Started",
+      "duration": "Duration"
+    },
+    "filters": {
+      "state": "State",
+      "causeClass": "Cause class",
+      "from": "Started from",
+      "to": "Started until",
+      "all": "All"
+    },
+    "stateFilter": {
+      "recent": "Open and recently resolved",
+      "open": "Open",
+      "acknowledged": "Acknowledged",
+      "resolved": "Resolved",
+      "all": "All states"
+    },
+    "states": {
+      "open": "Open",
+      "acknowledged": "Acknowledged",
+      "resolved": "Resolved"
+    },
+    "causeClasses": {
+      "topology": "Topology",
+      "collector_unreachable": "Collector unreachable",
+      "unknown": "Unknown"
     }
   }
 }

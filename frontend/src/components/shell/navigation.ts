@@ -124,6 +124,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
       { page: 'maintenance', icon: Wrench },
       { page: 'monitoring', icon: Activity },
       { page: 'alarms', icon: BellRing },
+      { page: 'incidents', icon: Siren },
       { page: 'workflows', icon: Workflow },
       { page: 'forms', icon: FileSignature },
     ],

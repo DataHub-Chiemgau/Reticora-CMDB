@@ -199,6 +199,8 @@ export const navFeatureFor: Record<string, string | undefined> = {
   monitoring: 'monitoring',
   // The alarm list (ALR-01, WP-991) belongs to the module monitoring.
   alarms: 'monitoring',
+  // The incident list (ALR-10, WP-1045) belongs to the module monitoring.
+  incidents: 'monitoring',
   audit: undefined,
   security: undefined,
   // Enterprise CMDB + asset/inventory extension. ci-types, saved-views and

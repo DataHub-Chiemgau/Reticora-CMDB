@@ -73,7 +73,8 @@ import {
   type TemplatePatch,
   type TemplateVersionItemsUpdate,
 } from './cmdb';
-import { ApiError, ciApi } from './client';
+import { ApiError, ciApi, incidentApi } from './client';
+import type { IncidentListPage, IncidentListParams } from './client';
 import type { FieldDefinition } from '../lib/fieldmeta';
 import { useMetamodelDraftStore } from '../stores/metamodelDraft';
 
@@ -1422,5 +1423,31 @@ export function useSetCITags() {
       void qc.invalidateQueries({ queryKey: ['cis'] });
       void qc.invalidateQueries({ queryKey: ['ci', variables.id] });
     },
+  });
+}
+
+/** INCIDENT_POLL_MS is the refresh interval of the incident list (WP-1045). */
+export const INCIDENT_POLL_MS = 15_000;
+
+/**
+ * useIncidents loads the incidents of the filters page by page over
+ * next_cursor (ALR-10, WP-1045). While poll is true every loaded page is
+ * fetched again every 15 s; the caller passes false for a hidden tab.
+ */
+export function useIncidents(
+  params: Omit<IncidentListParams, 'cursor'>,
+  { enabled = true, poll = true }: { enabled?: boolean; poll?: boolean } = {},
+) {
+  return useInfiniteQuery({
+    queryKey: ['incidents', params],
+    queryFn: ({ pageParam }) => incidentApi.list({ ...params, cursor: pageParam }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last: IncidentListPage) =>
+      last.has_more ? last.next_cursor || undefined : undefined,
+    enabled,
+    refetchInterval: poll ? INCIDENT_POLL_MS : false,
+    refetchIntervalInBackground: false,
+    // The rows stay while a refresh runs: focus and scroll position keep.
+    placeholderData: (previous) => previous,
   });
 }
