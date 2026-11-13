@@ -47,6 +47,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/probe"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenantapi"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/vulnfeed"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
@@ -504,13 +505,22 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 	for _, withDB := range []bool{true, false} {
 		deps := systemJobTestDeps(t, cfg, withDB)
 		deps.modules = lifecycleModules
-		if kinds := registeredSystemJobs(t, deps); kinds[export.OrgExportCleanupKind] != withDB {
+		kinds := registeredSystemJobs(t, deps)
+		if kinds[export.OrgExportCleanupKind] != withDB {
 			t.Errorf("JOB-02 cleanup of the full exports (TLC-05) with the module org_lifecycle (database %v): registered %v",
 				withDB, kinds[export.OrgExportCleanupKind])
+		}
+		// The purge of deleted organizations (TLC-06, WP-1154): hourly.
+		if kinds[tenantapi.OrgPurgeKind] != withDB {
+			t.Errorf("JOB-02 purge of deleted organizations (TLC-06) with the module org_lifecycle (database %v): registered %v",
+				withDB, kinds[tenantapi.OrgPurgeKind])
 		}
 		for _, job := range systemJobs(deps) {
 			if job.Kind == export.OrgExportCleanupKind && job.Spec != "23 * * * *" {
 				t.Errorf("%s: spec %q, want hourly 23 * * * *", job.Kind, job.Spec)
+			}
+			if job.Kind == tenantapi.OrgPurgeKind && job.Spec != "41 * * * *" {
+				t.Errorf("%s: spec %q, want hourly 41 * * * *", job.Kind, job.Spec)
 			}
 		}
 	}
@@ -520,8 +530,8 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 	}
 	deps := systemJobTestDeps(t, cfg, true)
 	deps.modules = noLifecycle
-	if registeredSystemJobs(t, deps)[export.OrgExportCleanupKind] {
-		t.Errorf("without the module org_lifecycle %s is registered", export.OrgExportCleanupKind)
+	if kinds := registeredSystemJobs(t, deps); kinds[export.OrgExportCleanupKind] || kinds[tenantapi.OrgPurgeKind] {
+		t.Errorf("without the module org_lifecycle %s or %s is registered", export.OrgExportCleanupKind, tenantapi.OrgPurgeKind)
 	}
 
 	// The alarm retention (ALR-01, WP-981): alarm.retention daily with the

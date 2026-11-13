@@ -173,6 +173,7 @@ func TestRoleContractStartupCheck(t *testing.T) {
 		`CREATE ROLE reticora_wp064_su NOLOGIN SUPERUSER`,
 		`GRANT reticora_wp064_su TO reticora_owner WITH INHERIT FALSE`,
 		`GRANT ` + database.AuditSealerRole + ` TO reticora_owner WITH INHERIT FALSE`,
+		`GRANT ` + database.OrgPurgerRole + ` TO reticora_owner WITH INHERIT FALSE`,
 		`SET LOCAL ROLE reticora_app`,
 	} {
 		if _, err = tx.Exec(ctx, stmt); err != nil {
@@ -197,6 +198,8 @@ func TestRoleContractStartupCheck(t *testing.T) {
 		"tenant table ticket is owned by ", // the login role
 		// The owner of audit_seal_pii reached through reticora_owner (WP-680).
 		"role reticora_app reaches the audit sealer role " + database.AuditSealerRole + " via SET ROLE",
+		// The owner of org_purge_batch reached the same way (WP-1154).
+		"role reticora_app reaches the org purger role " + database.OrgPurgerRole + " via SET ROLE",
 	} {
 		if !slices.ContainsFunc(contractErr.Violations, func(v string) bool { return strings.HasPrefix(v, want) }) {
 			t.Errorf("violation %q not reported; got:\n%v", want, contractErr.Violations)

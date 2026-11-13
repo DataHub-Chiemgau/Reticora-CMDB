@@ -165,6 +165,20 @@ var Subscriptions = map[string]Subscription{
 			return &Audience{DirectUserIDs: []string{str(d, "initiated_by")}}
 		},
 	},
+	// The deletion request of the organization and its cancel (TLC-06,
+	// WP-1152, WP-1154) reach every org_admin, personally and critical.
+	events.OrgDeletionRequested: {
+		Category: "org_deletion", Critical: true, Personal: true,
+		Audience: func(map[string]any) *Audience {
+			return &Audience{Permission: identity.PermLocationRead, Roles: []string{"org_admin"}}
+		},
+	},
+	events.OrgDeletionCancelled: {
+		Category: "org_deletion", Critical: true, Personal: true,
+		Audience: func(map[string]any) *Audience {
+			return &Audience{Permission: identity.PermLocationRead, Roles: []string{"org_admin"}}
+		},
+	},
 	// The full export of the organization (TLC-05, WP-1151) reaches the
 	// user who started it, personally: no webhook channel learns of the
 	// unsealed export.

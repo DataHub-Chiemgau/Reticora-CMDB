@@ -79,6 +79,12 @@ var withSystemCallers = map[string]string{
 	// transaction.
 	"internal/discovery/natsedge.go": "organizations with superseded collector certificates",
 
+	// Purge of deleted organizations (TLC-06, WP-1154): finds the
+	// organizations whose grace period ended, whose purge runs or whose
+	// reminder is due (organization_system_select); each is purged and
+	// reminded in its tenant transaction.
+	"internal/tenantapi/purge.go": "organizations due for their purge or a deletion reminder",
+
 	// Collector enrollment: the code names its organization, so it is
 	// looked up before any tenant is known (system exception
 	// collector_enrollment_code); the enrollment runs in that tenant.

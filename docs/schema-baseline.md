@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000355_compliance_controls
+Stand: Migration 000356_org_purge_fn
 
 ## Prüfung
 
@@ -175,6 +175,7 @@ Start bei jeder Abweichung:
 | Laufzeit-Login (z. B. `reticora_runtime`) | LOGIN, NOSUPERUSER, NOBYPASSRLS | nur Mitglied von `reticora_app`; der Pool wechselt per `SET ROLE`; erreicht keine SUPERUSER-/BYPASSRLS-Rolle |
 | `reticora_app` | NOLOGIN, NOSUPERUSER, NOBYPASSRLS | DML/Sequenzen/EXECUTE; `SET ROLE reticora_owner` erlaubt, aber ohne Vererbung (`INHERIT FALSE`); kein eigenes `CREATE` auf `public` |
 | `reticora_owner` | NOLOGIN, NOSUPERUSER, NOBYPASSRLS | Eigentümer aller Tabellen in `public` außer `schema_migrations` und TimescaleDB-Hypertables; `USAGE, CREATE` auf `public` |
+| `reticora_org_purger` (Migration `org_purge_fn`, WP-1154) | NOLOGIN, NOSUPERUSER, NOBYPASSRLS, kein Mitglied (nur der migrierende Login mit `INHERIT FALSE, SET TRUE`) | Eigentümerin der SECURITY-DEFINER-Funktionen `org_purge_batch`, `org_purge_keys` und `org_purge_rows` (`EXECUTE` nur für `reticora_app`); Tabellen-, Sequenz- und Funktionsrechte wie `reticora_app` (ohne dessen Mitgliedschaft) plus `SELECT`/`DELETE` auf jeder Tabelle mit `organization_id` und auf den Materialisierungs-Hypertables der Continuous Aggregates (`_timescaledb_internal`), Default-Privilegien für künftige Tabellen; RLS bindet sie an `app.org_id`. Die Startprüfung meldet jeden Login, der sie erreicht (`database.OrgPurgerRole`) |
 
 - Jede Tabelle mit `organization_id` (plus `organization`), auf die
   `reticora_app` zugreifen darf, hat `ENABLE` und `FORCE ROW LEVEL SECURITY`
@@ -203,8 +204,24 @@ Start bei jeder Abweichung:
   `VerifyRoleContract` meldet jede Mandantentabelle ohne aktiven Guard und
   einen Login mit eigenem `TRUNCATE`-Recht; eine neue Mandantentabelle braucht
   den Trigger daher in ihrer Migration.
+- Purge-Ausnahme der Append-only-Wächter (TLC-06, WP-1154): Die
+  Wächter-Triggerfunktionen (`audit_log`, `stock_movement`, abgeschlossene
+  Inventuren, `disposal_record`, `assignment_signature_legacy`,
+  `alarm_transition`, `incident_transition`, `alarm`, `incident`, Form- und
+  Workflow-Definitionsversionen, Default-Section und Default-VRF) lassen ein
+  `DELETE` zusätzlich zu ihren bisherigen Ausnahmen nur durch, wenn
+  `org_purge_active(organization_id)` gilt: `current_user` ist
+  `reticora_org_purger` und die Organisation der Zeile steht in
+  `deletion_state = 'purging'`. Erreichbar ist das nur über
+  `org_purge_batch`/`org_purge_rows`, die mit 42501 abbrechen, wenn die
+  Organisation nicht in `purging` ist, `app.org_id` sie nicht nennt oder die
+  Relation keine Tabelle bzw. kein Continuous Aggregate mit
+  `organization_id` in `public` ist. Hypertables (auch komprimierte Chunks)
+  und die Materialisierungen der Continuous Aggregates (`org_purge_target`)
+  leeren die Funktionen mit einem `DELETE` je Organisation statt über `ctid`.
 
-Nachweis: `backend/internal/database/role_check_integration_test.go`.
+Nachweis: `backend/internal/database/role_check_integration_test.go`,
+`backend/internal/tenantapi/purge_integration_test.go`.
 
 ## RLS-Katalog und bekannte Lücken
 

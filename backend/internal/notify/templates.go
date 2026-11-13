@@ -262,6 +262,28 @@ var Templates = map[string]map[string]render{
 				"Your export (" + str(d, "format") + ", " + fmt.Sprint(d["row_count"]) + " rows) is ready for download."}
 		},
 	},
+	events.OrgDeletionRequested: {
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Löschung der Organisation beantragt",
+				"Die Löschung der Organisation wurde beantragt. Sie wird am " + str(d, "due_at") +
+					" endgültig ausgeführt; bis dahin ist die Organisation schreibgeschützt und der Antrag kann widerrufen werden."}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Deletion of the organization requested",
+				"The deletion of the organization was requested. It is carried out for good at " + str(d, "due_at") +
+					"; until then the organization is read-only and the request can be cancelled."}
+		},
+	},
+	events.OrgDeletionCancelled: {
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Löschung der Organisation widerrufen",
+				"Der Antrag auf Löschung der Organisation (fällig am " + str(d, "due_at") + ") wurde widerrufen; die Organisation ist wieder beschreibbar."}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Deletion of the organization cancelled",
+				"The request to delete the organization (due at " + str(d, "due_at") + ") was cancelled; the organization can be written again."}
+		},
+	},
 	events.OrgExportCompleted: {
 		LocaleDE: func(d map[string]any) Text {
 			return Text{"Vollexport der Organisation fertig",

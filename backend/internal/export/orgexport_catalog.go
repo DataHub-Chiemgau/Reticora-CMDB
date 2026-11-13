@@ -153,6 +153,30 @@ func OrgTables(ctx context.Context, tx pgx.Tx) ([]OrgTable, error) {
 	return out, nil
 }
 
+// orgPurgeKept are the tables of the catalog the database purge of an
+// organization leaves (TLC-06, WP-1154): the tombstone row of the
+// organization and the PII vault, whose key and subjects the next step
+// shreds (WP-1155).
+var orgPurgeKept = map[string]bool{"organization": true, "org_dek": true, "pii_subject": true}
+
+// OrgPurgeTables are the tables the database purge of an organization
+// empties: the catalog of OrgTables, the tables the export leaves out
+// because they are derived (the search index) included, without the
+// organization and the vault (orgPurgeKept), sorted by name.
+func OrgPurgeTables(ctx context.Context, tx pgx.Tx) ([]OrgTable, error) {
+	all, err := orgCatalog(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]OrgTable, 0, len(all))
+	for i := range all {
+		if !orgPurgeKept[all[i].Name] {
+			out = append(out, all[i])
+		}
+	}
+	return out, nil
+}
+
 // orgCatalog is OrgTables with the excluded tables.
 func orgCatalog(ctx context.Context, tx pgx.Tx) ([]OrgTable, error) {
 	rows, err := tx.Query(ctx, orgCatalogSQL)

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -700,6 +701,14 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 		// objects of the expired ones, with the module org_lifecycle.
 		if d.modules.Enabled("org_lifecycle") {
 			systemJobs = append(systemJobs, export.NewOrgExportCleanup(pool, d.blobs).Schedule())
+			// After the grace period of a deletion the rows of the
+			// organization go (TLC-06, WP-1154): hourly org.purge, with the
+			// reminders 7 and 1 day before to the org_admins.
+			purger := tenantapi.NewPurger(pool, purgeTables)
+			if d.notifier != nil {
+				purger.WithNotices(d.notifier, notify.NewPGResolver(pool, permission.NewPGRepository(pool)))
+			}
+			systemJobs = append(systemJobs, purger.Schedule())
 		}
 		// SLA breaches: every minute each missed due time once as
 		// ticket.sla_breached, the escalation to assignee and team lead
@@ -902,4 +911,17 @@ func (d dekRotator) RewrapOrgDEK(ctx context.Context, orgID string, enc *crypto.
 func readOrgDeletionState(ctx context.Context, pool *pgxpool.Pool, orgID string) (middleware.OrgDeletionState, error) {
 	state, due, err := tenantapi.ReadDeletionState(ctx, pool, orgID)
 	return middleware.OrgDeletionState{State: state, DueAt: due}, err
+}
+
+// purgeTables is the table catalog of the purge (export.OrgPurgeTables).
+func purgeTables(ctx context.Context, tx pgx.Tx) ([]string, error) {
+	tables, err := export.OrgPurgeTables(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(tables))
+	for i := range tables {
+		names = append(names, tables[i].Name)
+	}
+	return names, nil
 }
