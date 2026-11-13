@@ -1401,6 +1401,8 @@ Teilfrage Datenbasis (aus `d-alr-sla-source`): (a) Berechnung aus `metric_sample
 
 **Betroffene WPs:** WP-1010 (`p3-pt-dns`), WP-1011 (`p3-pt-dhcp-codec`), WP-1013 (`p3-pt-stamp`), WP-1015 (`p3-pt-gnmi-core`), WP-1020 (`p3-pt-rpki-rtr`)
 
+**Nachtrag 2026-11-13 (Update-Plan Upd-03, nach Empfehlung):** Die bestehenden Fremdabhängigkeiten des Collectors bleiben dieselben, ihre Versionen werden wegen Hersteller-Advisories angehoben, die `govulncheck` nicht kennt (nur Repository-Advisories, nicht in vuln.go.dev oder OSV): gosnmp v1.43.2 → v1.47.0 (GHSA-w96x-5v55-24xx, critical, SNMPv3-Auth-Bypass und Remote-Panic im Polling), `golang.org/x/crypto` v0.58.0 → v0.59.0 (GO-2026-5932) mit `x/sys` v0.50.0 und `x/text` v0.44.0, `klauspost/compress` v1.20.0 → v1.20.4 (GO-2026-6865). Neue Bibliotheken kommen nicht hinzu. Die Abhängigkeiten, die gRPC nur im Modulgraphen nennt (`go-jose/v4` v4.1.4, `go.opentelemetry.io/otel*` v1.44.0), werden über versionierte `replace`-Direktiven in `collector/go.mod` auf gefixte Versionen gehoben (v4.1.9 bzw. v1.47.0); sie werden nicht gebaut und vergrößern das Binary nicht. Diese Graph-Pins sind bei jedem gRPC-Update mit einer OSV-Abfrage über `go list -m all` zu prüfen. Die Übersicht steht in `docs/security/abhaengigkeitsscans.md` („Nachtrag 2026-11-13: Go-Module mit Repository-Advisories“). Die Lücke im Gate für Repository-Advisories schließt Upd-04 (SEC-11).
+
 <a id="e-196"></a>
 ## E-196 – Alarm- und Störungsmodell
 

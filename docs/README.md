@@ -1018,6 +1018,14 @@ delayed alert is usually worse than a lost one. Trap storms are bounded by a
 64-events-in-flight cap. The BER parser is deliberately tolerant: malformed
 varbinds are skipped, never fatal.
 
+**SNMPv3 polling:** the collector polls SNMPv3 only with authPriv
+(`collector/plugins/snmp/v3.go`) through gosnmp v1.47.0, which fixes
+GHSA-w96x-5v55-24xx (forged unauthenticated answers accepted before the
+engine ID is known, remote panic in USM parsing). Since v1.47.0 the engine
+discovery fails when the agent's REPORT carries an empty engine ID or one
+outside 5–32 bytes (RFC 3411 `SnmpEngineID`); such a non-conforming agent
+is reported as a failed target instead of being polled.
+
 **Identity values per record (SR-10, WP-878):** a DeviceRecord
 (`api/devicerecord.schema.json`) carries at most 256 identity values
 (`x-max-identity-keys`; counted as distinct values: serial number, hardware

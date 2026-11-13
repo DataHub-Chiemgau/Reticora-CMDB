@@ -44,9 +44,9 @@ der Job das Modul `collector` als Ganzes prüft, die SBOM des Releases
 |---|---|---|---|---|---|
 | `github.com/openconfig/gnmi` | v0.14.1 | Apache-2.0 | E-195, E-193, WP-1015 | ja (Collector, gNMI-Client `collector/probe/gnmi`) | `govulncheck` (`collector`) |
 | `google.golang.org/grpc` | v1.84.0 | Apache-2.0 | E-195, WP-1015 | ja (Collector) | `govulncheck` (`collector`) |
-| `google.golang.org/protobuf` (transitiv) | v1.36.11 | BSD-3-Clause | E-195, WP-1015 | ja (Collector) | `govulncheck` (`collector`) |
-| `google.golang.org/genproto/googleapis/rpc` (transitiv) | v0.0.0-20260706201446-f0a921348800 | Apache-2.0 | E-195, WP-1015 | ja (Collector) | `govulncheck` (`collector`) |
-| `golang.org/x/text` (transitiv) | v0.43.0 | BSD-3-Clause | E-195, WP-1015 | ja (Collector) | `govulncheck` (`collector`) |
+| `google.golang.org/protobuf` (transitiv) | v1.36.12 (Upd-03; WP-1015: v1.36.11) | BSD-3-Clause | E-195, WP-1015 | ja (Collector) | `govulncheck` (`collector`) |
+| `google.golang.org/genproto/googleapis/rpc` (transitiv) | v0.0.0-20260928230214-8a89bd6388cc (Upd-03; WP-1015: v0.0.0-20260706201446-f0a921348800) | Apache-2.0 | E-195, WP-1015 | ja (Collector) | `govulncheck` (`collector`) |
+| `golang.org/x/text` (transitiv) | v0.44.0 (Upd-03; WP-1015: v0.43.0) | BSD-3-Clause | E-195, WP-1015 | ja (Collector) | `govulncheck` (`collector`) |
 
 Der Client verwendet TLS immer (kein `insecure.NewCredentials`, kein
 `grpc.WithInsecure`) und hat weder `Set` noch Subscribe STREAM/POLL.
@@ -54,6 +54,51 @@ Binärgröße des Collectors (linux/amd64, Build wie `collector/Dockerfile`,
 `-ldflags="-s -w"`): vor und nach WP-1015 10.637.474 Byte, weil
 `cmd/collector` den Client erst mit dem Probetyp `gnmi` (WP-1016) einbindet;
 WP-1016 misst die Größe erneut.
+
+### Nachtrag 2026-11-13: Go-Module mit Repository-Advisories (Update-Plan Upd-03)
+
+`govulncheck` (v1.8.0 wie v1.9.0, Datenbank vom 2026-11-11) meldete auf dem
+Stand `167ec380` nur GO-2026-6865 (klauspost/compress) und GO-2026-5932
+(x/crypto/openpgp), beide nur importiert. Mehrere eingesetzte Module waren
+laut den Repository-Advisories ihrer Hersteller aber verwundbar; diese
+Advisories stehen weder in vuln.go.dev noch in der globalen GitHub Advisory
+Database bzw. OSV und sind deshalb für `govulncheck`, OSV-Scanner, Trivy und
+Dependabot unsichtbar (Abfrage `gh api repos/<owner>/<repo>/security-advisories`).
+Behoben durch Aktualisierung (Quelle der Versionen: proxy.golang.org `@latest`):
+
+| Modul | vorher → nachher | Advisories |
+|---|---|---|
+| `github.com/gosnmp/gosnmp` (Collector, SNMPv3-Polling) | v1.43.2 → v1.47.0 | GHSA-w96x-5v55-24xx (critical: SNMPv3-Auth-Bypass, Remote-Panic im USM-Parsing) |
+| `github.com/jackc/pgx/v5` (+ `jackc/puddle/v2` v2.2.2 → v2.2.3) | v5.10.0 → v5.13.0 | GHSA-j38q-h3ph-jjpq (high), GHSA-95fj-3fxw-g62g (high), GHSA-w9rp-vfrh-q8vv (low) |
+| `go.opentelemetry.io/otel*` (otel, sdk, sdk/metric, metric, trace, log, OTLP-HTTP-Exporter; `proto/otlp` v1.11.0 → v1.11.1, `metric/x` v0.69.0) | v1.45.0 → v1.47.0 | GHSA-rrfc-gjm9-cgrj (medium, Baggage-Propagator), GHSA-q7gw-24fr-5p69 (medium) |
+| `github.com/go-chi/chi/v5` | v5.3.1 → v5.5.0 | GHSA-j6qf-3m9c-vwj3 / CVE-2026-114437 (medium), GHSA-rqrp-8cg2-5958 (low) |
+| `github.com/klauspost/compress` (indirekt, explizit angehoben) | v1.20.0 → v1.20.4 | GO-2026-6865 / CVE-2026-116591 / GHSA-fpmh-frq8-7rj8 (high) |
+| `golang.org/x/crypto` (+ `x/sys` v0.50.0, `x/term` v0.48.0, `x/text` v0.44.0) | v0.58.0 → v0.59.0 | GO-2026-5932 |
+| `golang.org/x/image` (indirekt über excelize, Backend) | v0.44.0 → v0.48.0 | GO-2026-6222 / CVE-2026-46603 |
+
+Durch die Mindestversionen der neuen Module steigen außerdem `golang.org/x/tools`
+(v0.52.0), `x/mod`, `x/sync`, `grpc-gateway/v2`, `genproto` und `protobuf`.
+
+**Graph-Pins.** `github.com/go-jose/go-jose/v4` v4.1.4 (GHSA-mgcc-cww5-fp2q
+high u. a., Fix 4.1.7), `github.com/yuin/goldmark` v1.4.13 (GO-2026-5320, Fix
+1.7.17) und im Collector `go.opentelemetry.io/otel*` v1.44.0 stehen nur im
+Modulgraphen, weil die `go.mod` von `google.golang.org/grpc` (auch v1.85.0)
+bzw. `golang.org/x/tools` (auch v0.52.0) sie nennt; gebaut wird keines
+(`go mod why -m`: „main module does not need module“). `go mod tidy` entfernt
+eine bloße Anforderung darauf, deshalb heben versionierte `replace`-Direktiven
+in `backend/go.mod` und `collector/go.mod` genau diese Versionen an
+(go-jose v4.1.9, goldmark v1.8.7, otel v1.47.0). Sie greifen nur für die
+genannte Version und werden wirkungslos, sobald grpc oder x/tools höher
+ziehen; bei jedem Update dieser Module ist eine OSV-Abfrage über
+`go list -m all` der drei Module zu wiederholen. `go.work.sum` ist neu erzeugt
+und enthält keine verwundbare Version mehr.
+
+Nachweis (lokal, 2026-11-13): `govulncheck` v1.9.0 meldet für `backend`,
+`collector` und `edgecore` keinen Fund; die OSV-Abfrage (`api.osv.dev`
+querybatch) über `go list -m all` jedes Moduls und über `go.work.sum` ergibt
+keinen Eintrag. Die fehlende Erkennung der Repository-Advisories im Gate
+schließt das Paket Upd-04.
+
 
 ### Fremdimages des Betriebs
 

@@ -268,8 +268,9 @@ func TestAuditSNMPv3AuthFailureReported(t *testing.T) {
 
 			// Control: the agent answers the engine discovery and rejects the
 			// authenticated request; a plain gosnmp client gets an error
-			// (gosnmp v1.43 discards the unauthenticated report as "not
-			// authentic").
+			// (gosnmp discards the unauthenticated report as "not
+			// authentic"; since v1.47, GHSA-w96x-5v55-24xx, its engine
+			// discovery also requires an engine ID of 5-32 bytes).
 			raw := &gosnmp.GoSNMP{Target: target, Port: uint16(agent.port), Version: gosnmp.Version3, Timeout: time.Second, Retries: 0,
 				SecurityModel: gosnmp.UserSecurityModel, MsgFlags: gosnmp.AuthPriv, Logger: gosnmp.NewLogger(nil),
 				SecurityParameters: &gosnmp.UsmSecurityParameters{UserName: "reticora", AuthenticationProtocol: gosnmp.SHA256,
