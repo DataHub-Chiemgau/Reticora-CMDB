@@ -6384,7 +6384,7 @@ COL-05;[B];E;collector/probe/outbox_test.go;WP-954
 - [ ] **AK1:** Ein Zustandswechsel wird unmittelbar nach dem Persistieren (WP-954) auf `.probe.state` gesendet. Die Antwort des Servers enthält die höchste persistierte `seq`; danach folgt `DiskBuffer.Ack` für alle Einträge bis zu dieser `seq`. Ziel: p95 < 1 s Collector-intern vom Wechsel bis zum Versand (Test mit Fake-Edge).
 - [ ] **AK2:** Ergebnisse gehen alle 10 s oder ab 1.000 Stück (höchstens 256 KiB je Nachricht) auf `.probe.results`, in Sequenzreihenfolge. Je Warteschlange ist höchstens ein Batch unterwegs.
 - [ ] **AK3:** Nach einer Wiederverbindung sendet der Uplink zuerst die Zustandswarteschlange vollständig, dann die Ergebnisse mit höchstens `RETICORA_PROBE_SYNC_RATE` Batches/s (Standard 5).
-- [ ] **AK4:** Eine 4xx-Antwort außer 403 (nicht lizenziert) legt den Batch in Quarantäne (`DiskBuffer.Quarantine`) und zählt ihn als Verlust. Netzfehler und 5xx führen zu Wiederholung mit exponentiellem Backoff (1 s bis 60 s). 403 mit Problemtyp `feature-not-entitled` pausiert den Uplink wie `monitoringPaused` (`edge.go:226–258`); die Daten bleiben im Spool und zählen nicht als Verlust.
+- [ ] **AK4:** Eine 4xx-Antwort außer 403 (nicht lizenziert) legt den Batch in Quarantäne (`DiskBuffer.Quarantine`) und zählt ihn als Verlust. Ausgenommen sind 401 (Collector deaktiviert), 403 ohne Problemtyp `feature-not-entitled`, 408 und 429 (Server ausgelastet): Sie werden wie Netzfehler und 5xx wiederholt und zählen nicht als Verlust; 413 gilt als zu groß (Aufteilung bzw. Quarantäne). Netzfehler und 5xx führen zu Wiederholung mit exponentiellem Backoff (1 s bis 60 s). 403 mit Problemtyp `feature-not-entitled` pausiert den Uplink wie `monitoringPaused` (`edge.go:226–258`); die Daten bleiben im Spool und zählen nicht als Verlust.
 - [ ] **AK5:** `collector/probe/engine.go` verbindet Register, Scheduler, Zustandsmaschine, Spool und Uplink. `Main` startet die Engine; Probes nutzen den `metricBuffer` nicht. Die Suffixe `.probe.state`, `.probe.results` und `.probe.alive` stehen als Konstanten neben `edgeMetricsSuffix`.
 - [ ] **AK6:** Ohne Edge-Verbindung (`errNoEdge`) bleibt alles im Spool; es gibt keinen HTTP-Rückfall (F-046).
 
@@ -6408,6 +6408,7 @@ COL-05;[B];E;collector/probe/outbox_test.go;WP-954
   - `TestResyncStateBeforeResultsInSequenceOrder`
   - `TestResyncRateLimited`
   - `TestRefusedBatchIsQuarantinedAndCounted`
+  - `TestRetryableStatusesAreNotQuarantined`: 401, 403 ohne Problemtyp, 408, 429
   - `TestNotLicensedPausesWithoutLoss`
   - `TestAckRemovesUpToPersistedSeq`
 - `collector/probe/engine_test.go`: `TestEngineEndToEndWithFakeExecutor`

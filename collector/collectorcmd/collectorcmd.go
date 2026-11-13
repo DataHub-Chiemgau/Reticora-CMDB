@@ -100,6 +100,10 @@ type collectorConfig struct {
 	// (probe-state and probe-results together, state changes 10 %;
 	// RETICORA_PROBE_SPOOL_MAX_BYTES, default 2 GiB; PRB-07, WP-954).
 	ProbeSpoolMaxBytes int64
+	// ProbeSyncRate is the most probe result messages per second the
+	// uplink sends, also while it synchronizes a backlog
+	// (RETICORA_PROBE_SYNC_RATE, default 5; PRB-07, WP-955).
+	ProbeSyncRate int
 	// TrapListenAddr enables the SNMP trap receiver when set (e.g. ":162").
 	// Traps are normalized into metric events and sent to the monitoring
 	// ingest so existing alert rules can fire on them (spec §9).
@@ -263,6 +267,14 @@ func Main() {
 	if collectorCfg.MetricsInterval > 0 {
 		go runMetricsLoop(ctx, collectorCfg, uploader)
 	}
+	// The monitoring probes: scheduler, state machine, probe spool and
+	// uplink over the edge (WP-955).
+	engineDone := make(chan struct{})
+	if engine := startProbeEngine(&collectorCfg, uploader); engine != nil {
+		go func() { defer close(engineDone); engine.Run(ctx) }()
+	} else {
+		close(engineDone)
+	}
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -274,9 +286,41 @@ func Main() {
 		slog.Info("collector restarting into the update", "version", version)
 	}
 	cancel()
+	// The engine bundles its pending results and saves the counters of the
+	// state machine before the process ends (PRB-07); a check that does not
+	// return in time does not hold up the shutdown.
+	select {
+	case <-engineDone:
+	case <-time.After(engineStopTimeout):
+		slog.Warn("probe engine did not stop in time; pending results may be lost", "event", "collector.probe.stop_timeout")
+	}
 	// The values read from vaults are overwritten before the process ends
 	// (WP-895).
 	collectorVault.close()
+}
+
+// engineStopTimeout bounds the wait for the probe engine at shutdown.
+const engineStopTimeout = 5 * time.Second
+
+// startProbeEngine opens the probe engine below the spool directory: its
+// state changes and results go from the persistent probe spool over the
+// edge (sendProbeViaEdge), never through the metric buffer. A refusal as
+// not licensed pauses the metric samples as well and vice versa ends with
+// an accepted message. Without a spool directory there is no engine.
+func startProbeEngine(cfg *collectorConfig, up *uploader) *probe.Engine {
+	if cfg.SpoolDir == "" {
+		slog.Warn("probe engine not started: no spool directory", "event", "collector.probe.disabled")
+		return nil
+	}
+	engine, err := probe.NewEngine(&probe.EngineConfig{SpoolDir: cfg.SpoolDir, SpoolMaxBytes: cfg.ProbeSpoolMaxBytes,
+		Send: sendProbeViaEdge, SyncRate: cfg.ProbeSyncRate})
+	if err != nil {
+		slog.Error("probe engine not started", "event", "collector.probe.disabled", "error", err)
+		return nil
+	}
+	engine.Uplink.OnNotLicensed = func() { up.monitoringNotLicensed(time.Now()) }
+	engine.Uplink.OnLicensed = up.monitoringLicensed
+	return engine
 }
 
 // spoolTopic is the buffer topic under which discovery result batches are
@@ -1993,6 +2037,7 @@ func loadCollectorConfig() collectorConfig {
 		SpoolMaxBytes:      int64EnvOrDefault("RETICORA_SPOOL_MAX_BYTES", 1<<30), // 1 GiB default cap
 		SpoolMaxAge:        durationEnvOrDefault("RETICORA_SPOOL_MAX_AGE", 72*time.Hour),
 		ProbeSpoolMaxBytes: int64EnvOrDefault("RETICORA_PROBE_SPOOL_MAX_BYTES", probe.DefaultOutboxMaxBytes),
+		ProbeSyncRate:      int(int64EnvOrDefault("RETICORA_PROBE_SYNC_RATE", probe.DefaultSyncRate)),
 		TrapListenAddr:     os.Getenv("RETICORA_SNMP_TRAP_LISTEN"),
 		MetricsInterval:    durationEnvOrDefault("RETICORA_METRICS_INTERVAL", defaultMetricsInterval),
 		PollMetrics:        pollMetricsFromEnv(os.Getenv("RETICORA_SNMP_POLL_METRICS")),

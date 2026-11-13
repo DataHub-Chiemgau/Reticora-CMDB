@@ -120,6 +120,8 @@ type Scheduler struct {
 	gen      uint64
 
 	nStarted, nSkipped, nOverrun, nFinished atomic.Uint64
+
+	inflight sync.WaitGroup
 }
 
 type schedEntry struct {
@@ -265,6 +267,11 @@ func (s *Scheduler) RunLoop(ctx context.Context) {
 	}
 }
 
+// Wait blocks until every started check has returned and handed its
+// result to Sink. After RunLoop has returned no check is started any more,
+// so Wait then ends once the running checks end.
+func (s *Scheduler) Wait() { s.inflight.Wait() }
+
 // dueCheck is a check to start, collected under the lock and started
 // after it.
 type dueCheck struct {
@@ -379,7 +386,9 @@ func (s *Scheduler) start(ctx context.Context, spec probewire.ProbeSpec, release
 	if s.Creds != nil {
 		creds = s.Creds(&spec)
 	}
+	s.inflight.Add(1)
 	job := func() {
+		defer s.inflight.Done()
 		r := runFn(ctx, &spec, creds)
 		release()
 		s.mu.Lock()

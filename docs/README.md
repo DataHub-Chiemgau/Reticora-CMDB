@@ -1008,6 +1008,20 @@ counted per reason (`max_bytes`, `compacted`, `quarantined`; compacted
 results are no loss), persisted and reported in the monitoring alive
 message (`collector/probe/outbox.go`).
 
+**Probe uplink (PRB-05, PRB-07, WP-955):** the probe engine
+(`collector/probe/engine.go`) sends a state change on
+`collector.<org>.<id>.probe.state` as soon as it is spooled and the results
+on `….probe.results` every 10 s or at 1,000 results (at most 256 KiB per
+message), one message in flight per queue. An entry leaves the spool only
+after the server answered with the highest sequence number it persisted.
+After a reconnect the state changes go first, then the results at most
+`RETICORA_PROBE_SYNC_RATE` messages per second (default 5). A refusal for
+good (4xx) moves the entries into the quarantine of the queue and counts
+them as `quarantined`; network errors and 5xx are repeated with backoff
+(1 s to 60 s); 403 `feature-not-entitled` pauses the uplink (and the metric
+samples) for an hour without loss. Without the edge connection everything
+stays in the spool; there is no HTTP fallback.
+
 **Identity resolution (spec §5.3):** `discovery.Reconcile` matches incoming
 items against existing CIs in the spec's priority order — serial number,
 hardware UUID, MAC address(es), management IP + CI type, hostname/FQDN. Each

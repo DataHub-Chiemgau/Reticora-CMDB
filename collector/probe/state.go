@@ -16,7 +16,9 @@ import (
 )
 
 // StateFile is the file of the per-probe counters in the spool directory.
-const StateFile = "probe-state"
+// It must not be named like the state queue of the probe spool
+// (OutboxStateDir), which lies in the same directory.
+const StateFile = "probe-counters"
 
 // PersistInterval is how often the counters are saved (WP-952 AK6); they
 // are also saved when the state machine stops.
@@ -62,7 +64,7 @@ type ProbeCounters struct {
 // Every change yields a probewire.StateChange with seq from the stream
 // state, the epoch of the assignment, observed_at in UTC and the last
 // result; every result gets seq from the stream results. The counters are
-// kept in <dir>/probe-state and survive a restart (WP-952 AK6).
+// kept in <dir>/probe-counters and survive a restart (WP-952 AK6).
 //
 // Deriving "ok with a warn code → degraded" lives only here; probe type
 // work packages add their codes in edgecore/probewire/reason.go.
@@ -328,7 +330,7 @@ func (m *StateMachine) Remove(id string) {
 	}
 }
 
-// Save writes the counters atomically to <dir>/probe-state when they
+// Save writes the counters atomically to <dir>/probe-counters when they
 // changed since the last save.
 func (m *StateMachine) Save() error {
 	m.saveMu.Lock()
