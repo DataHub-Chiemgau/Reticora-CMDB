@@ -1009,7 +1009,7 @@ cloud_refused cl-refdigest "install-cloud.sh release mode: a signature whose ref
     "do not name reticora-server with one digest" FAKE_REGISTRY="$reg"
 reg="$TMP_ROOT/registry-legacy"; make_registry "$reg" "$TAG" "$TAG" legacy
 OUT="$(cloud cl-legacy "$P_ALL" FAKE_REGISTRY="$reg" -- provide_images)"; RC=$?
-[ "$(pinned cl-legacy)" -eq 3 ] || RC=91
+[ "$(pinned cl-legacy)" -eq 4 ] || RC=91
 expect "install-cloud.sh release mode: images signed with cosign v2 (legacy signature) are verified and pinned" 0 \
     "Signed image verified: reticora-server@sha256:$(printf '%064d' 1)" "$OUT"
 CLOUD_PATH="$P_NOCOSIGN" cloud_refused cl-nocosign "install-cloud.sh release mode: without cosign nothing is pulled or started" \
