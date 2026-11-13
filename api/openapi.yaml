@@ -7027,6 +7027,9 @@ paths:
       operationId: updateAlert
       tags: [Monitoring]
       summary: Partially update an alert rule (e.g. toggle enabled)
+      description: >-
+        A rule that is disabled (enabled false) resolves its alarms that are
+        not resolved (reason rule_disabled, WP-984).
       requestBody:
         required: true
         content:
@@ -7055,6 +7058,9 @@ paths:
       operationId: deleteAlert
       tags: [Monitoring]
       summary: Delete an alert rule
+      description: >-
+        Resolves the alarms of the rule that are not resolved (reason
+        rule_deleted, WP-984).
       responses:
         '204':
           description: Alert rule deleted
@@ -40968,10 +40974,17 @@ components:
           enum: [critical, warning, info]
         enabled:
           type: boolean
+        scope:
+          $ref: '#/components/schemas/AlertRuleScope'
+        group_by:
+          type: array
+          maxItems: 5
+          description: At most five distinct label keys (422 group_by).
+          items: { type: string }
 
     AlertRule:
       type: object
-      required: [id, org_id, name, metric_name, condition, threshold, duration, severity, enabled]
+      required: [id, org_id, name, metric_name, condition, threshold, duration, severity, enabled, scope, group_by]
       properties:
         id:
           type: string
@@ -40994,14 +41007,17 @@ components:
           enum: [critical, warning, info]
         enabled:
           type: boolean
-        pending_since:
-          type: string
-          format: date-time
-          description: Set while the condition holds but the duration has not elapsed yet.
-        last_fired_at:
-          type: string
-          format: date-time
-          description: Timestamp of the last notification for the current firing.
+        scope:
+          $ref: '#/components/schemas/AlertRuleScope'
+        group_by:
+          type: array
+          maxItems: 5
+          description: >-
+            Label keys that split the samples of a CI into series (WP-984). The
+            rule is evaluated per series (CI and the values of these labels); the
+            pending and firing state of a series is its alarm (GET
+            /api/v1/monitoring/alarms, source_kind rule).
+          items: { type: string }
 
     AlertRuleListResponse:
       allOf:
@@ -41038,6 +41054,39 @@ components:
         enabled:
           type: boolean
           default: true
+        scope:
+          $ref: '#/components/schemas/AlertRuleScope'
+        group_by:
+          type: array
+          maxItems: 5
+          description: At most five distinct label keys (422 group_by).
+          items: { type: string }
+
+    AlertRuleScope:
+      type: object
+      additionalProperties: false
+      description: >-
+        The CIs an alert rule applies to (ALR-05, WP-984); every key is
+        optional and {} is every CI of the organization. An unknown key, an id
+        that is no UUID or that the organization does not see is 422 with the
+        field (e.g. scope.ci_type_ids[1]).
+      properties:
+        ci_ids:
+          type: array
+          maxItems: 1000
+          items: { type: string, format: uuid }
+        ci_type_ids:
+          type: array
+          maxItems: 100
+          description: CI types including their subtypes.
+          items: { type: string, format: uuid }
+        client_id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid }
+        labels:
+          type: object
+          maxProperties: 16
+          description: Equality per label key of the samples.
+          additionalProperties: { type: string }
 
     DiscoveryJobCreateRequest:
       type: object

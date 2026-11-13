@@ -461,6 +461,16 @@ func (m evaluatingMetrics) AlertStore() monitoring.AlertStore { return m.alerts 
 
 func (m evaluatingMetrics) HealthRefresher() monitoring.HealthRefresher { return m.health }
 
+// LatestBySeries makes evaluatingMetrics a monitoring.SeriesStore (the
+// evaluator per series, WP-984) over the wrapped store; a store without
+// series yields none.
+func (m evaluatingMetrics) LatestBySeries(ctx context.Context, q *monitoring.SeriesQuery) ([]monitoring.SeriesPoint, error) {
+	if s, ok := m.MetricStore.(monitoring.SeriesStore); ok {
+		return s.LatestBySeries(ctx, q)
+	}
+	return nil, nil
+}
+
 func (h fakeHealth) RefreshHealth(context.Context) error { return h.err }
 
 // TestEveryWorkerSwitchIsDeployable covers WP-447 (OPS-02, F-289): the

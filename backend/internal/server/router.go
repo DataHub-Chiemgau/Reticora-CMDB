@@ -764,8 +764,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// The collectors' metric samples arrive on the edge (.metrics) and run
 	// through the ingest of POST /monitoring/metrics with the monitoring
 	// entitlement of that route (MON-02, F-046).
+	// Disabling or deleting a rule resolves its alarms (WP-984).
 	monitoringHandler := monitoring.NewHandler(repos.Metrics, alertStoreFor(repos.Metrics)).
-		WithCIResolver(monitoring.CIAddressResolver{CIs: repos.CI})
+		WithCIResolver(monitoring.CIAddressResolver{CIs: repos.CI}).
+		WithRuleAlarms(alarm.NewRuleSink(alarmService(&repos)))
 	var monitoringFeatures discovery.FeatureStatus
 	if opts.Entitlements != nil {
 		monitoringFeatures = opts.Entitlements

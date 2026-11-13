@@ -3102,11 +3102,17 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Delete an alert rule */
+    /**
+     * Delete an alert rule
+     * @description Resolves the alarms of the rule that are not resolved (reason rule_deleted, WP-984).
+     */
     delete: operations['deleteAlert'];
     options?: never;
     head?: never;
-    /** Partially update an alert rule (e.g. toggle enabled) */
+    /**
+     * Partially update an alert rule (e.g. toggle enabled)
+     * @description A rule that is disabled (enabled false) resolves its alarms that are not resolved (reason rule_disabled, WP-984).
+     */
     patch: operations['updateAlert'];
     trace?: never;
   };
@@ -20073,6 +20079,9 @@ export interface components {
       /** @enum {string} */
       severity?: 'critical' | 'warning' | 'info';
       enabled?: boolean;
+      scope?: components['schemas']['AlertRuleScope'];
+      /** @description At most five distinct label keys (422 group_by). */
+      group_by?: string[];
     };
     AlertRule: {
       id: string;
@@ -20087,16 +20096,9 @@ export interface components {
       /** @enum {string} */
       severity: 'critical' | 'warning' | 'info';
       enabled: boolean;
-      /**
-       * Format: date-time
-       * @description Set while the condition holds but the duration has not elapsed yet.
-       */
-      pending_since?: string;
-      /**
-       * Format: date-time
-       * @description Timestamp of the last notification for the current firing.
-       */
-      last_fired_at?: string;
+      scope: components['schemas']['AlertRuleScope'];
+      /** @description Label keys that split the samples of a CI into series (WP-984). The rule is evaluated per series (CI and the values of these labels); the pending and firing state of a series is its alarm (GET /api/v1/monitoring/alarms, source_kind rule). */
+      group_by: string[];
     };
     AlertRuleListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['AlertRule'][];
@@ -20114,6 +20116,23 @@ export interface components {
       severity?: 'critical' | 'warning' | 'info';
       /** @default true */
       enabled: boolean;
+      scope?: components['schemas']['AlertRuleScope'];
+      /** @description At most five distinct label keys (422 group_by). */
+      group_by?: string[];
+    };
+    /** @description The CIs an alert rule applies to (ALR-05, WP-984); every key is optional and {} is every CI of the organization. An unknown key, an id that is no UUID or that the organization does not see is 422 with the field (e.g. scope.ci_type_ids[1]). */
+    AlertRuleScope: {
+      ci_ids?: string[];
+      /** @description CI types including their subtypes. */
+      ci_type_ids?: string[];
+      /** Format: uuid */
+      client_id?: string;
+      /** Format: uuid */
+      site_id?: string;
+      /** @description Equality per label key of the samples. */
+      labels?: {
+        [key: string]: string;
+      };
     };
     DiscoveryJobCreateRequest: {
       collector_id: string;

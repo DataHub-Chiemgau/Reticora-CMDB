@@ -266,3 +266,67 @@ func (s *PGMetricStore) CIVisible(ctx context.Context, orgID, ciID string) (bool
 	})
 	return visible, err
 }
+
+// LatestBySeries implements SeriesStore (WP-984): in one statement the
+// latest sample of every series (CI and the values of the group_by labels)
+// of the metric in the window, in the tenant transaction of the
+// organization through metric_sample_v. Samples without CI form no series;
+// the scope narrows the CIs (ids, types with their subtypes, client, site)
+// and the labels (equality), and only CIs visible under the scope of the
+// transaction count.
+func (s *PGMetricStore) LatestBySeries(ctx context.Context, q *SeriesQuery) ([]SeriesPoint, error) {
+	args := []any{q.OrgID, q.Name, q.From.UTC(), q.To.UTC(), groupByOf(q.GroupBy)}
+	arg := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	where := []string{"s.organization_id = $1", "s.metric_name = $2", "s.time >= $3", "s.time <= $4", "s.ci_id IS NOT NULL"}
+	ciWhere := []string{"c.id = s.ci_id"}
+	if len(q.Scope.CIIDs) > 0 {
+		where = append(where, "s.ci_id = ANY("+arg(q.Scope.CIIDs)+"::uuid[])")
+	}
+	if len(q.Scope.CITypeIDs) > 0 {
+		ciWhere = append(ciWhere, "c.ci_type_id IN (SELECT st.id FROM unnest("+arg(q.Scope.CITypeIDs)+
+			"::uuid[]) AS t(id), LATERAL ci_type_subtree(t.id) st)")
+	}
+	if q.Scope.ClientID != "" {
+		ciWhere = append(ciWhere, "c.client_id = "+arg(q.Scope.ClientID)+"::uuid")
+	}
+	if q.Scope.SiteID != "" {
+		ciWhere = append(ciWhere, "c.site_id = "+arg(q.Scope.SiteID)+"::uuid")
+	}
+	if len(q.Scope.Labels) > 0 {
+		where = append(where, "s.labels @> "+arg(q.Scope.Labels)+"::jsonb")
+	}
+	// The ci policy filters the semi-join, so samples of CIs outside the
+	// transaction's scope drop out (as in metricWhere).
+	where = append(where, "EXISTS (SELECT 1 FROM ci c WHERE "+strings.Join(ciWhere, " AND ")+")")
+	query := `SELECT DISTINCT ON (x.ci_id, x.series) x.ci_id::text, x.series, x.time, x.value FROM (
+		SELECT s.ci_id, s.time, s.value,
+		       COALESCE((SELECT jsonb_object_agg(k, s.labels->>k) FROM unnest($5::text[]) AS k WHERE s.labels ? k),
+		                '{}'::jsonb) AS series
+		  FROM metric_sample_v s
+		 WHERE ` + strings.Join(where, " AND ") + `
+	) x ORDER BY x.ci_id, x.series, x.time DESC`
+	var out []SeriesPoint
+	err := database.WithRequestTenant(ctx, s.pool, q.OrgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("latest samples by series: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var p SeriesPoint
+			if err := rows.Scan(&p.CIID, &p.Labels, &p.Timestamp, &p.Value); err != nil {
+				return fmt.Errorf("scan series sample: %w", err)
+			}
+			if p.Labels == nil {
+				p.Labels = map[string]string{}
+			}
+			p.Timestamp = p.Timestamp.UTC()
+			out = append(out, p)
+		}
+		return rows.Err()
+	})
+	return out, err
+}

@@ -116,41 +116,50 @@ func TestEvaluatorFiresAfterDurationOnce(t *testing.T) {
 	}
 
 	alerts := NewAlertManager()
-	if _, err := alerts.CreateRule(t.Context(), &AlertRule{
+	rule, err := alerts.CreateRule(t.Context(), &AlertRule{
 		OrgID: "org-1", Name: "High CPU", MetricName: "cpu_usage",
 		Condition: "gt", Threshold: 90, Duration: 5 * time.Minute,
 		Severity: "critical", Enabled: true,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	var fired []AlertEvent
-	ev := NewEvaluator(store, alerts, NotifierFunc(func(_ context.Context, e *AlertEvent) {
-		fired = append(fired, *e)
-	}))
+	sink := newFakeSink()
+	ev := NewEvaluator(store, alerts, sink)
 	ev.Now = func() time.Time { return base.Add(2 * time.Minute) }
 
-	// Condition holds, but the duration has not elapsed yet.
+	// Condition holds, but the duration has not elapsed yet: pending.
 	ev.Evaluate(t.Context())
-	if len(fired) != 0 {
-		t.Fatalf("expected no alert before duration elapsed, got %d", len(fired))
+	key := RuleDedupKey(rule.ID, SeriesKey("ci-1", nil, nil))
+	if got := sink.calls(); len(got) != 1 || got[0] != "pend "+key {
+		t.Fatalf("calls before the duration %v, want one pend", got)
 	}
 
-	// After the duration the alert fires exactly once.
+	// The same sample after the duration does not open it: the condition
+	// was observed at one point in time only.
 	ev.Now = func() time.Time { return base.Add(6 * time.Minute) }
 	ev.Evaluate(t.Context())
-	if len(fired) != 1 {
-		t.Fatalf("expected exactly one alert after duration, got %d", len(fired))
+	if got := sink.calls(); len(got) != 1 {
+		t.Fatalf("calls with the first sample only %v, want the pend only", got)
 	}
-	if fired[0].Value != 95 || fired[0].Rule.Name != "High CPU" {
-		t.Fatalf("unexpected alert event: %+v", fired[0])
+	// A sample after the duration confirms the breach: it opens exactly once.
+	if err := store.Ingest(t.Context(), []Metric{
+		{OrgID: "org-1", CIID: "ci-1", Name: "cpu_usage", Value: 95, Timestamp: base.Add(5*time.Minute + 30*time.Second)},
+	}); err != nil {
+		t.Fatal(err)
 	}
 	ev.Evaluate(t.Context())
-	if len(fired) != 1 {
-		t.Fatalf("expected no duplicate notification, got %d", len(fired))
+	ev.Evaluate(t.Context())
+	if got := sink.calls(); len(got) != 2 || got[1] != "open "+key {
+		t.Fatalf("calls after the duration %v, want pend and one open", got)
+	}
+	a := sink.alarms[key]
+	if a.in.Severity != "critical" || a.in.Details["value"] != 95.0 || a.in.Details["rule_id"] != rule.ID {
+		t.Fatalf("unexpected alarm: %+v", a.in)
 	}
 
-	// Recovery clears the pending state; a later breach starts a new window.
+	// Recovery resolves the alarm; a later breach starts a new one.
 	if err := store.Ingest(t.Context(), []Metric{
 		{OrgID: "org-1", CIID: "ci-1", Name: "cpu_usage", Value: 40, Timestamp: base.Add(7 * time.Minute)},
 	}); err != nil {
@@ -158,19 +167,15 @@ func TestEvaluatorFiresAfterDurationOnce(t *testing.T) {
 	}
 	ev.Now = func() time.Time { return base.Add(8 * time.Minute) }
 	ev.Evaluate(t.Context())
-	updated, err := alerts.ListRules(t.Context(), "org-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(updated) != 1 || updated[0].PendingSince != nil {
-		t.Fatalf("expected pending state cleared, got %+v", updated)
+	if got := sink.calls(); len(got) != 3 || got[2] != "clear "+key || len(sink.alarms) != 0 {
+		t.Fatalf("calls after the recovery %v, want a clear", got)
 	}
 }
 
 func TestEvaluatorDisabledRulesAreSkipped(t *testing.T) {
 	store := NewMemoryMetricStore()
 	if err := store.Ingest(t.Context(), []Metric{
-		{OrgID: "org-1", Name: "cpu_usage", Value: 99, Timestamp: time.Now().UTC()},
+		{OrgID: "org-1", CIID: "ci-1", Name: "cpu_usage", Value: 99, Timestamp: time.Now().UTC()},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -181,11 +186,11 @@ func TestEvaluatorDisabledRulesAreSkipped(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	fired := 0
-	ev := NewEvaluator(store, alerts, NotifierFunc(func(context.Context, *AlertEvent) { fired++ }))
+	sink := newFakeSink()
+	ev := NewEvaluator(store, alerts, sink)
 	ev.Evaluate(t.Context())
-	if fired != 0 {
-		t.Fatalf("disabled rule must not fire, got %d alerts", fired)
+	if got := sink.calls(); len(got) != 0 {
+		t.Fatalf("disabled rule must not raise, got %v", got)
 	}
 }
 

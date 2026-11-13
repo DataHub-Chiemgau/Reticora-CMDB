@@ -1803,3 +1803,5 @@ OPS-02;[B], [P3], [A];E;backend/internal/probe/ingest_test.go;WP-960
 CRD-06;[P3];E;backend/internal/probe/ingest_integration_test.go;WP-960
 ALR-01;[P3];E;backend/internal/alarm/handler_integration_test.go;WP-983
 MON-04;[P3];E;backend/internal/alarm/handler_test.go;WP-983
+MON-04;[P3];E;backend/internal/monitoring/evaluator_series_test.go;WP-984
+ALR-05;[P3];E;backend/internal/monitoring/evaluator_series_integration_test.go;WP-984

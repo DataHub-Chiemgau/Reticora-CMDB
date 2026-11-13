@@ -82,6 +82,7 @@ func matches(a *Alarm, f *ListFilter) bool {
 	case len(f.States) > 0 && !slices.Contains(f.States, a.State),
 		len(f.Severities) > 0 && !slices.Contains(f.Severities, a.Severity),
 		len(f.SourceKinds) > 0 && !slices.Contains(f.SourceKinds, a.SourceKind),
+		f.SourceID != "" && !strings.EqualFold(a.SourceID, f.SourceID),
 		!eq(a.CIID, f.CIID), !eq(a.ClientID, f.ClientID), !eq(a.SiteID, f.SiteID), !eq(a.IncidentID, f.IncidentID),
 		f.Suppressed != nil && *f.Suppressed != (a.SuppressedReason != nil),
 		f.To != nil && !a.FirstSeenAt.Before(*f.To),

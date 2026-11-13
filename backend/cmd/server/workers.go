@@ -290,15 +290,17 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 	if ingester := d.probeIngester(); ingester != nil {
 		workers = append(workers, server.Worker{Name: config.WorkerProbeIngest, Run: ingester.Run, Backlog: ingester.Backlog})
 	}
-	// Evaluate monitoring alert rules against the metric store (module
-	// alerting, MON-04). Fired alerts are logged via the default notifier;
-	// evaluation state is persisted in the alert store so restarts neither
-	// re-notify nor lose pending durations.
-	if alertStore, ok := d.repos.Metrics.(monitoring.EvaluatingStore); ok {
-		evaluator := monitoring.NewEvaluator(d.repos.Metrics, alertStore.AlertStore(), nil)
+	// Evaluate the alert rules per series every 15 seconds (module
+	// monitoring, MON-04, ALR-05, WP-984): the state of a series is its
+	// alarm (WP-982), so a restart neither reports again nor loses a
+	// pending start.
+	alertStore, evaluating := d.repos.Metrics.(monitoring.EvaluatingStore)
+	series, bySeries := d.repos.Metrics.(monitoring.SeriesStore)
+	if evaluating && bySeries && d.repos.Alarms != nil {
+		evaluator := monitoring.NewEvaluator(series, alertStore.AlertStore(), alarm.NewRuleSink(d.repos.Alarms))
 		workers = append(workers, server.Worker{
 			Name: config.WorkerMonitoring,
-			Run:  func(ctx context.Context) { evaluator.Run(ctx, d.every(time.Minute)) },
+			Run:  func(ctx context.Context) { evaluator.Run(ctx, d.every(monitoring.EvaluationInterval)) },
 		})
 	}
 	// The health of the CIs follows the monitoring state every minute

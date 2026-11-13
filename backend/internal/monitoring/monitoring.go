@@ -63,11 +63,13 @@ type AlertRule struct {
 	Duration   time.Duration `json:"duration"`
 	Severity   string        `json:"severity"`
 	Enabled    bool          `json:"enabled"`
-	// PendingSince and LastFiredAt are evaluation bookkeeping: the rule
-	// fires only when the condition held continuously for Duration, and it
-	// notifies once per firing instead of on every evaluation tick.
-	PendingSince *time.Time `json:"pending_since,omitempty"`
-	LastFiredAt  *time.Time `json:"last_fired_at,omitempty"`
+	// Scope selects the CIs the rule applies to (ALR-05, WP-984); empty is
+	// every CI of the organization.
+	Scope RuleScope `json:"scope"`
+	// GroupBy are the label keys that split the samples of a CI into
+	// series (at most MaxGroupBy). The pending and firing state of a series
+	// lives in its alarm (WP-981), not on the rule.
+	GroupBy []string `json:"group_by"`
 }
 
 // MaxAlertDuration bounds the duration of an alert rule: the condition must
@@ -80,37 +82,15 @@ const MaxAlertDuration = 400 * 24 * time.Hour
 // ErrAlertRuleExists: a rule with the given id exists already (409).
 var ErrAlertRuleExists = errors.New("alert rule already exists")
 
-// AlertEvent describes a fired alert.
-type AlertEvent struct {
-	Rule    AlertRule `json:"rule"`
-	Value   float64   `json:"value"`
-	Sample  Metric    `json:"sample"`
-	FiredAt time.Time `json:"fired_at"`
-}
-
-// Notifier receives fired alerts (webhooks, tickets, log lines, ...).
-type Notifier interface {
-	NotifyAlert(ctx context.Context, event *AlertEvent)
-}
-
-// NotifierFunc adapts a plain function to the Notifier interface.
-type NotifierFunc func(ctx context.Context, event *AlertEvent)
-
-// NotifyAlert implements Notifier.
-func (f NotifierFunc) NotifyAlert(ctx context.Context, event *AlertEvent) { f(ctx, event) }
-
-// AlertStore is the persistence port for alert rules and their evaluation
-// state. AlertManager implements it in memory; PGAlertStore persists in
-// PostgreSQL.
+// AlertStore is the persistence port for alert rules. AlertManager
+// implements it in memory; PGAlertStore persists in PostgreSQL. The
+// evaluation state of a series is its alarm (AlarmSink, WP-984).
 type AlertStore interface {
 	ListRules(ctx context.Context, orgID string) ([]AlertRule, error)
 	CreateRule(ctx context.Context, rule *AlertRule) (AlertRule, error)
-	UpdateRule(ctx context.Context, orgID, id string, req UpdateAlertRuleRequest) (AlertRule, error)
+	UpdateRule(ctx context.Context, orgID, id string, req *UpdateAlertRuleRequest) (AlertRule, error)
 	DeleteRule(ctx context.Context, orgID, id string) (bool, error)
 	ListEnabled(ctx context.Context) ([]AlertRule, error)
-	MarkPending(ctx context.Context, rule *AlertRule, since time.Time) error
-	MarkFired(ctx context.Context, rule *AlertRule, at time.Time) error
-	ClearPending(ctx context.Context, rule *AlertRule) error
 }
 
 // UpdateAlertRuleRequest carries the mutable fields of an alert rule. Nil
@@ -123,11 +103,20 @@ type UpdateAlertRuleRequest struct {
 	Duration  *string  `json:"duration"`
 	Severity  *string  `json:"severity"`
 	Enabled   *bool    `json:"enabled"`
+	// Scope replaces the scope of the rule (ParseRuleScope); GroupBy the
+	// label keys of its series.
+	Scope   json.RawMessage `json:"scope"`
+	GroupBy *[]string       `json:"group_by"`
+	// ParsedScope is Scope after the handler checked it.
+	ParsedScope *RuleScope `json:"-"`
 }
 
 // MarshalJSON encodes duration values as Go duration strings.
 func (r AlertRule) MarshalJSON() ([]byte, error) { //nolint:gocritic // value receiver: json.Marshal of values and pointers
 	type alias AlertRule
+	if r.GroupBy == nil {
+		r.GroupBy = []string{}
+	}
 	return json.Marshal(struct {
 		alias
 		Duration string `json:"duration"`
@@ -140,17 +129,17 @@ func (r AlertRule) MarshalJSON() ([]byte, error) { //nolint:gocritic // value re
 // UnmarshalJSON accepts duration values as a string or nanoseconds.
 func (r *AlertRule) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		ID           string      `json:"id"`
-		OrgID        string      `json:"org_id"`
-		Name         string      `json:"name"`
-		MetricName   string      `json:"metric_name"`
-		Condition    string      `json:"condition"`
-		Threshold    float64     `json:"threshold"`
-		Duration     interface{} `json:"duration"`
-		Severity     string      `json:"severity"`
-		Enabled      bool        `json:"enabled"`
-		PendingSince *time.Time  `json:"pending_since"`
-		LastFiredAt  *time.Time  `json:"last_fired_at"`
+		ID         string          `json:"id"`
+		OrgID      string          `json:"org_id"`
+		Name       string          `json:"name"`
+		MetricName string          `json:"metric_name"`
+		Condition  string          `json:"condition"`
+		Threshold  float64         `json:"threshold"`
+		Duration   interface{}     `json:"duration"`
+		Severity   string          `json:"severity"`
+		Enabled    bool            `json:"enabled"`
+		Scope      json.RawMessage `json:"scope"`
+		GroupBy    []string        `json:"group_by"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -175,18 +164,22 @@ func (r *AlertRule) UnmarshalJSON(data []byte) error {
 		return errors.New("duration must be a string or number")
 	}
 
+	scope, err := ParseRuleScope(raw.Scope)
+	if err != nil {
+		return err
+	}
 	*r = AlertRule{
-		ID:           raw.ID,
-		OrgID:        raw.OrgID,
-		Name:         raw.Name,
-		MetricName:   raw.MetricName,
-		Condition:    raw.Condition,
-		Threshold:    raw.Threshold,
-		Duration:     duration,
-		Severity:     raw.Severity,
-		Enabled:      raw.Enabled,
-		PendingSince: raw.PendingSince,
-		LastFiredAt:  raw.LastFiredAt,
+		ID:         raw.ID,
+		OrgID:      raw.OrgID,
+		Name:       raw.Name,
+		MetricName: raw.MetricName,
+		Condition:  raw.Condition,
+		Threshold:  raw.Threshold,
+		Duration:   duration,
+		Severity:   raw.Severity,
+		Enabled:    raw.Enabled,
+		Scope:      scope,
+		GroupBy:    raw.GroupBy,
 	}
 	return nil
 }
@@ -246,7 +239,7 @@ func (m *AlertManager) CreateRule(_ context.Context, in *AlertRule) (AlertRule, 
 }
 
 // UpdateRule applies a partial update to an in-memory rule.
-func (m *AlertManager) UpdateRule(_ context.Context, orgID, id string, req UpdateAlertRuleRequest) (AlertRule, error) {
+func (m *AlertManager) UpdateRule(_ context.Context, orgID, id string, req *UpdateAlertRuleRequest) (AlertRule, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -276,6 +269,12 @@ func (m *AlertManager) UpdateRule(_ context.Context, orgID, id string, req Updat
 		}
 		if req.Enabled != nil {
 			rule.Enabled = *req.Enabled
+		}
+		if req.ParsedScope != nil {
+			rule.Scope = *req.ParsedScope
+		}
+		if req.GroupBy != nil {
+			rule.GroupBy = append([]string{}, *req.GroupBy...)
 		}
 		m.rules[i] = rule
 		return rule, nil
@@ -318,41 +317,27 @@ func (m *AlertManager) ListEnabled(_ context.Context) ([]AlertRule, error) {
 	return result, nil
 }
 
-// MarkPending records when the condition started being true.
-func (m *AlertManager) MarkPending(_ context.Context, rule *AlertRule, since time.Time) error {
-	return m.updateRuleState(rule, func(r *AlertRule) { r.PendingSince = &since })
-}
-
-// MarkFired records the firing and clears the pending marker.
-func (m *AlertManager) MarkFired(_ context.Context, rule *AlertRule, at time.Time) error {
-	return m.updateRuleState(rule, func(r *AlertRule) {
-		r.PendingSince = nil
-		r.LastFiredAt = &at
-	})
-}
-
-// ClearPending resets the duration tracking once the condition no longer
-// holds.
-func (m *AlertManager) ClearPending(_ context.Context, rule *AlertRule) error {
-	return m.updateRuleState(rule, func(r *AlertRule) { r.PendingSince = nil })
-}
-
-func (m *AlertManager) updateRuleState(rule *AlertRule, update func(*AlertRule)) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for i := range m.rules {
-		if m.rules[i].ID == rule.ID && m.rules[i].OrgID == rule.OrgID {
-			update(&m.rules[i])
-			return nil
-		}
-	}
-	return fmt.Errorf("alert rule %s not found", rule.ID)
-}
-
 // MemoryMetricStore stores metrics in memory for development and tests.
 type MemoryMetricStore struct {
 	mu      sync.RWMutex
 	metrics []Metric
+	// ciInfo answers the CI side of a rule scope (types, client, site) for
+	// LatestBySeries; nil matches no scope that needs it.
+	ciInfo func(orgID, ciID string) (CIScopeInfo, bool)
+}
+
+// CIScopeInfo is what a rule scope reads of a CI: its type with the
+// ancestors of the type, its client and its site.
+type CIScopeInfo struct {
+	TypeIDs  []string
+	ClientID string
+	SiteID   string
+}
+
+// WithCIInfo sets the CI lookup of LatestBySeries (tests, --no-db).
+func (s *MemoryMetricStore) WithCIInfo(info func(orgID, ciID string) (CIScopeInfo, bool)) *MemoryMetricStore {
+	s.ciInfo = info
+	return s
 }
 
 // NewMemoryMetricStore creates an empty in-memory metric store.
@@ -463,6 +448,17 @@ type Handler struct {
 	store  MetricStore
 	alerts AlertStore
 	cis    CIResolver
+	// alarms resolves the alarms of a rule that is disabled or deleted
+	// (WP-984); nil leaves them to nobody (handlers without alarms).
+	alarms AlarmSink
+}
+
+// WithRuleAlarms makes the rule routes resolve the alarms of a rule that is
+// disabled (PATCH enabled=false) or deleted: the evaluator only visits the
+// enabled rules, so their alarms would otherwise stay active for good.
+func (h *Handler) WithRuleAlarms(sink AlarmSink) *Handler {
+	h.alarms = sink
+	return h
 }
 
 // CIResolver assigns a collector sample to its CI by the address the
@@ -682,6 +678,9 @@ func (h *Handler) CreateAlert(w http.ResponseWriter, r *http.Request) {
 
 	created, err := h.alerts.CreateRule(r.Context(), &rule)
 	if err != nil {
+		if api.WriteFieldError(w, err) {
+			return
+		}
 		writeAlertError(w, r, err)
 		return
 	}
@@ -734,15 +733,39 @@ func (h *Handler) UpdateAlert(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if len(req.Scope) > 0 {
+		scope, err := ParseRuleScope(req.Scope)
+		if err != nil {
+			api.WriteFieldError(w, err)
+			return
+		}
+		req.ParsedScope = &scope
+	}
+	if req.GroupBy != nil {
+		if err := ValidateGroupBy(*req.GroupBy); err != nil {
+			api.WriteFieldError(w, err)
+			return
+		}
+	}
 
-	rule, err := h.alerts.UpdateRule(r.Context(), orgID, chi.URLParam(r, "id"), req)
+	rule, err := h.alerts.UpdateRule(r.Context(), orgID, chi.URLParam(r, "id"), &req)
 	if err != nil {
+		if api.WriteFieldError(w, err) {
+			return
+		}
 		if strings.Contains(err.Error(), "not found") {
 			api.WriteError(w, http.StatusNotFound, "Not Found", "alert rule not found")
 			return
 		}
 		writeAlertError(w, r, err)
 		return
+	}
+	if !rule.Enabled {
+		// Also on a repeated PATCH, so a failed resolve can be retried.
+		if err := ResolveRuleAlarms(r.Context(), h.alarms, orgID, rule.ID, ClearReasonRuleDisabled); err != nil {
+			writeAlertError(w, r, err)
+			return
+		}
 	}
 	api.WriteJSON(w, http.StatusOK, rule)
 }
@@ -753,6 +776,16 @@ func (h *Handler) DeleteAlert(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	id := strings.ToLower(chi.URLParam(r, "id"))
+	// The alarms are resolved before the rule goes, so a failure leaves the
+	// rule to delete again; once more afterwards for a run of the evaluator
+	// that raised in between.
+	if api.IsUUID(id) {
+		if err := ResolveRuleAlarms(r.Context(), h.alarms, orgID, id, ClearReasonRuleDeleted); err != nil {
+			writeAlertError(w, r, err)
+			return
+		}
+	}
 	deleted, err := h.alerts.DeleteRule(r.Context(), orgID, chi.URLParam(r, "id"))
 	if err != nil {
 		api.WriteRepoError(w, err)
@@ -761,6 +794,9 @@ func (h *Handler) DeleteAlert(w http.ResponseWriter, r *http.Request) {
 	if !deleted {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "alert rule not found")
 		return
+	}
+	if err := ResolveRuleAlarms(r.Context(), h.alarms, orgID, id, ClearReasonRuleDeleted); err != nil {
+		slog.ErrorContext(r.Context(), "alert rule deleted, resolving its alarms failed", "rule_id", id, "error", err)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -897,6 +933,9 @@ func validateAlertRule(rule *AlertRule) error {
 	case "critical", "warning", "info":
 	default:
 		return &api.FieldError{Field: "severity", Message: "must be one of critical, warning or info"}
+	}
+	if err := ValidateGroupBy(rule.GroupBy); err != nil {
+		return err
 	}
 	return checkAlertDuration(rule.Duration)
 }

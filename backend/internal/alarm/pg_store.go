@@ -139,6 +139,9 @@ func listWhere(orgID string, f *ListFilter) (where []string, args *sqlArgs) {
 	if len(f.SourceKinds) > 0 {
 		where = append(where, "source_kind = ANY("+arg(f.SourceKinds)+"::text[])")
 	}
+	if f.SourceID != "" {
+		where = append(where, "source_id = "+arg(f.SourceID)+"::uuid")
+	}
 	if f.CIID != "" {
 		where = append(where, "ci_id = "+arg(f.CIID)+"::uuid")
 	}
