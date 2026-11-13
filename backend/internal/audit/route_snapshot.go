@@ -621,6 +621,8 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	// deletion columns of the organization row (TLC-06, WP-1152).
 	m["POST /api/v1/org/deletion"] = RouteSnapshot{Table: "organization", Keys: []SnapshotKey{{"id", "$org"}}}
 	m["DELETE /api/v1/org/deletion"] = RouteSnapshot{Table: "organization", Keys: []SnapshotKey{{"id", "$org"}}}
+	// The start of a full export is its job (TLC-05, WP-1151).
+	m["POST /api/v1/org/exports"] = RouteSnapshot{Table: "job", Keys: []SnapshotKey{{"id", "@job_id"}}}
 	m["PUT /api/v1/privacy/retention"] = RouteSnapshot{Table: "privacy_retention_policy", Keys: []SnapshotKey{{"organization_id", "$org"}}}
 	m["PUT /api/v1/reconciliation/source-policy"] = RouteSnapshot{Table: "source_priority_policy",
 		Keys: []SnapshotKey{{"organization_id", "$org"}}, Where: "t.is_default"}

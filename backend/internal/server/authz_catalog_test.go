@@ -120,7 +120,6 @@ var unroutedKeys = map[string]string{
 var unroutedUntil = map[string]string{
 	"workflow:approve":  "WP-1098 (workflow approvals)",
 	"escalation:manage": "WP-1145 (escalation policies)",
-	"org:export":        "WP-1151 (organization export)",
 }
 
 // TestRBA01KeysGateTheirActions covers WP-068 and WP-363 (RBA-01): the

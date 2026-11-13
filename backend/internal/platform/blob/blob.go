@@ -27,9 +27,11 @@ const (
 	s3Algorithm        = "AWS4-HMAC-SHA256"
 	s3Region           = "us-east-1"
 	s3Service          = "s3"
-	s3PresignTTL       = 15 * time.Minute
 	emptyPayloadSHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 )
+
+// PresignTTL is the longest validity of a signed GET URL.
+const PresignTTL = 15 * time.Minute
 
 // ErrForeignKey reports an object key outside the organization's prefix.
 var ErrForeignKey = errors.New("blob: key outside the organization prefix")
@@ -385,7 +387,7 @@ func (s *S3Store) PresignedGetURL(_ context.Context, bucket, key string, dl Down
 	queryValues.Set("X-Amz-Algorithm", s3Algorithm)
 	queryValues.Set("X-Amz-Credential", s.accessKey+"/"+credentialScope)
 	queryValues.Set("X-Amz-Date", amzDate)
-	queryValues.Set("X-Amz-Expires", strconv.FormatInt(int64(s3PresignTTL/time.Second), 10))
+	queryValues.Set("X-Amz-Expires", strconv.FormatInt(dl.expires(), 10))
 	queryValues.Set("X-Amz-SignedHeaders", "host")
 	queryValues.Set("response-content-disposition", dl.disposition())
 	queryValues.Set("response-content-type", dl.contentType())

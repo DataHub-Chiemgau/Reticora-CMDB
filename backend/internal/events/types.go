@@ -624,10 +624,15 @@ type EntitlementChangedData struct {
 }
 
 // OrgExportData is the data of org.export_completed (TLC-05): the full
-// export of the organization is ready for download.
+// export of the organization is ready for download (WP-1151): the job, the
+// user who started it, the exported rows and bytes and the end of the
+// download period.
 type OrgExportData struct {
-	ID        string `json:"id"`
-	ExpiresAt string `json:"expires_at"`
+	ID          string `json:"id"`
+	InitiatedBy string `json:"initiated_by,omitempty"`
+	Rows        int64  `json:"rows"`
+	Bytes       int64  `json:"bytes"`
+	ExpiresAt   string `json:"expires_at"`
 }
 
 // OrgDeletionData is the data of the org.deletion_* types (TLC-06,

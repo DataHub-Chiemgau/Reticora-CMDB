@@ -4,6 +4,7 @@ import (
 	"mime"
 	"path"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -20,6 +21,20 @@ type Download struct {
 	// unparsable or a type a browser executes (HTML, XHTML, SVG, scripts):
 	// application/octet-stream.
 	ContentType string
+	// MaxAge shortens the validity of a signed URL below PresignTTL (the
+	// download period of a full export ends earlier, WP-1151); zero or more
+	// than PresignTTL: PresignTTL.
+	MaxAge time.Duration
+}
+
+// expires is the validity of a signed URL of dl in whole seconds, at least
+// one.
+func (dl Download) expires() int64 {
+	ttl := PresignTTL
+	if dl.MaxAge > 0 && dl.MaxAge < ttl {
+		ttl = dl.MaxAge
+	}
+	return max(int64(ttl/time.Second), 1)
 }
 
 // OctetStream is the type of a download without a verified type.

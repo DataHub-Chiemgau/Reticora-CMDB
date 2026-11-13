@@ -34,6 +34,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
@@ -492,6 +493,35 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 		if !registered[job.kind] {
 			t.Errorf("JOB-02 %s: kind %s is not registered (registered: %v)", job.requirement, job.kind, registered)
 		}
+	}
+
+	// The cleanup of the full exports (TLC-05, WP-1151): hourly with the
+	// module org_lifecycle and the database; without the module not.
+	lifecycleModules, err := server.ParseModules("org_lifecycle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, withDB := range []bool{true, false} {
+		deps := systemJobTestDeps(t, cfg, withDB)
+		deps.modules = lifecycleModules
+		if kinds := registeredSystemJobs(t, deps); kinds[export.OrgExportCleanupKind] != withDB {
+			t.Errorf("JOB-02 cleanup of the full exports (TLC-05) with the module org_lifecycle (database %v): registered %v",
+				withDB, kinds[export.OrgExportCleanupKind])
+		}
+		for _, job := range systemJobs(deps) {
+			if job.Kind == export.OrgExportCleanupKind && job.Spec != "23 * * * *" {
+				t.Errorf("%s: spec %q, want hourly 23 * * * *", job.Kind, job.Spec)
+			}
+		}
+	}
+	noLifecycle, err := server.ParseModules(server.ModuleMonitoring)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deps := systemJobTestDeps(t, cfg, true)
+	deps.modules = noLifecycle
+	if registeredSystemJobs(t, deps)[export.OrgExportCleanupKind] {
+		t.Errorf("without the module org_lifecycle %s is registered", export.OrgExportCleanupKind)
 	}
 
 	// The alarm retention (ALR-01, WP-981): alarm.retention daily with the

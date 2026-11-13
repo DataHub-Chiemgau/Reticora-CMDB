@@ -431,6 +431,13 @@ func (r *PGRepository) Transition(ctx context.Context, orgID, id string, from []
 				return fmt.Errorf("update job: %w", err)
 			}
 		}
+		if u.Events != nil && j.Status == StatusSucceeded {
+			if es := u.Events(j); len(es) > 0 {
+				if _, err := events.NewOutbox().AppendMany(ctx, tx, es); err != nil {
+					return fmt.Errorf("update job: %w", err)
+				}
+			}
+		}
 		out = j
 		return nil
 	})

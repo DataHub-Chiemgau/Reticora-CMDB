@@ -336,6 +336,9 @@ GET /api/v1/orders order:read
 GET /api/v1/orders/{id} order:read
 GET /api/v1/org location:read
 GET /api/v1/org/deletion location:read
+GET /api/v1/org/exports org:export
+GET /api/v1/org/exports/{id} org:export
+GET /api/v1/org/exports/{id}/download org:export
 GET /api/v1/permissions permission:read
 GET /api/v1/privacy/retention user:manage
 GET /api/v1/rack-mounts/{id} rack:read
@@ -684,6 +687,7 @@ POST /api/v1/orders/{id}/receive stock:write
 POST /api/v1/orders/{id}/reject order:approve
 POST /api/v1/orders/{id}/submit order:write
 POST /api/v1/org/deletion org:delete
+POST /api/v1/org/exports org:export
 POST /api/v1/privacy/erasure user:manage
 POST /api/v1/privacy/subjects/erase user:manage
 POST /api/v1/privacy/subjects/report user:manage

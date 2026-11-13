@@ -1873,3 +1873,4 @@ SEC-04;[P3], Rechte-Doku AD/Entra [A];F;backend/internal/compliance/controls_int
 IPM-19;[P3];G3;frontend/src/components/ipam/AddressDialog.test.tsx;WP-917
 IPM-13;[P3];G3;frontend/src/components/ipam/AddressDialog.test.tsx;WP-917
 IPM-09;[P3];G3;backend/internal/export/ipam_integration_test.go;WP-921
+TLC-05;[P3];F;backend/internal/export/orgexport_handler_test.go;WP-1151

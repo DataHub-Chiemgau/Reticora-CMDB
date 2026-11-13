@@ -257,6 +257,7 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 		silentCollector                    string
 		reviewItem                         string
 		exportJob                          string
+		orgExportJob                       string
 		failingJob                         *jobs.Job
 		jobService                         *jobs.Service
 		warned, expired                    string
@@ -1198,6 +1199,36 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 					t.Errorf("org.deletion_requested data %v", data)
 				}
 			}},
+		{typ: events.OrgExportCompleted,
+			// POST /org/exports (WP-1151) queues the full export of an
+			// org_admin with a second factor; its job succeeding writes
+			// org.export_completed in the transaction of the change.
+			setup: func(t *testing.T) {
+				r := callMFA(t, admin, http.MethodPost, "/api/v1/org/exports", "")
+				if r.Code != http.StatusAccepted {
+					t.Fatalf("setup: POST /org/exports = %d %s", r.Code, t6Short(r.Body))
+				}
+				orgExportJob = t6ID(r.Body)
+				if _, err := jobs.NewService(e.Repos.Jobs).ClaimJob(bg, f.OrgA, orgExportJob); err != nil {
+					t.Fatal(err)
+				}
+			},
+			act: func(t *testing.T, refused bool) string {
+				manifest := &export.OrgExportManifest{OrganizationID: f.OrgA, JobID: orgExportJob, Format: "jsonl",
+					Tables: []export.OrgExportTable{{Name: "ci", Rows: 3, Parts: []export.OrgExportPart{{Key: "k", Bytes: 120}}}}}
+				_, err := jobs.NewService(e.Repos.Jobs).Succeed(bg, f.OrgA, orgExportJob, manifest)
+				failed(t, "complete the full export", err, refused)
+				if refused {
+					unchanged(t, "job", scalar(t, `SELECT status FROM job WHERE id = $1`, orgExportJob), string(jobs.StatusRunning))
+				}
+				return orgExportJob
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["initiated_by"] != admin.User || data["rows"] != float64(3) ||
+					data["bytes"] != float64(120) || data["expires_at"] == nil {
+					t.Errorf("org.export_completed data %v", data)
+				}
+			}},
 		{typ: events.OrgDeletionCancelled,
 			// DELETE /org/deletion (WP-1152) withdraws the request of the
 			// case before during the grace period.
@@ -1911,7 +1942,6 @@ var plannedProducers = map[string]string{
 	"workflow.approval_decided":   "WP-1098",
 	"notification.escalated":      "WP-1146",
 	"notification.acknowledged":   "WP-1146",
-	"org.export_completed":        "WP-1151",
 }
 
 // evt02AlarmSource is the rule of the alarm cases.

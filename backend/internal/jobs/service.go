@@ -13,6 +13,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -266,12 +267,23 @@ func (s *Service) Succeed(ctx context.Context, orgID, id string, result any) (*J
 		return nil, fmt.Errorf("encode job result: %w", err)
 	}
 	done, now := 100, s.now()
-	job, err := s.repo.Transition(ctx, orgID, id, []Status{StatusRunning},
-		&Update{Status: StatusSucceeded, Progress: &done, Result: raw, FinishedAt: &now})
+	u := &Update{Status: StatusSucceeded, Progress: &done, Result: raw, FinishedAt: &now}
+	if e, ok := result.(SuccessEvents); ok {
+		u.Events = e.SucceededEvents
+	}
+	job, err := s.repo.Transition(ctx, orgID, id, []Status{StatusRunning}, u)
 	if err == nil {
 		observeEnd(job)
 	}
 	return job, err
+}
+
+// SuccessEvents is a job result that names the events of the job's
+// success (e.g. org.export_completed, WP-1151): Succeed appends them to the
+// outbox in the transaction that marks the job succeeded, with the
+// succeeded job (finished_at, created_by).
+type SuccessEvents interface {
+	SucceededEvents(j *Job) []*events.Event
 }
 
 // Fail records a failed attempt: the job goes back to the queue after the

@@ -165,6 +165,18 @@ var Subscriptions = map[string]Subscription{
 			return &Audience{DirectUserIDs: []string{str(d, "initiated_by")}}
 		},
 	},
+	// The full export of the organization (TLC-05, WP-1151) reaches the
+	// user who started it, personally: no webhook channel learns of the
+	// unsealed export.
+	events.OrgExportCompleted: {
+		Category: "export", Personal: true,
+		Audience: func(d map[string]any) *Audience {
+			if by := str(d, "initiated_by"); by != "" {
+				return &Audience{DirectUserIDs: []string{by}}
+			}
+			return nil
+		},
+	},
 	events.JobFailed: {
 		Category: "job",
 		Audience: func(d map[string]any) *Audience {

@@ -262,6 +262,18 @@ var Templates = map[string]map[string]render{
 				"Your export (" + str(d, "format") + ", " + fmt.Sprint(d["row_count"]) + " rows) is ready for download."}
 		},
 	},
+	events.OrgExportCompleted: {
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Vollexport der Organisation fertig",
+				"Der Vollexport der Organisation (" + fmt.Sprint(d["rows"]) + " Zeilen, " + fmt.Sprint(d["bytes"]) +
+					" Bytes) steht bis " + str(d, "expires_at") + " zum Download bereit. Der Download verlangt eine Anmeldung mit MFA."}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Full export of the organization ready",
+				"The full export of the organization (" + fmt.Sprint(d["rows"]) + " rows, " + fmt.Sprint(d["bytes"]) +
+					" bytes) can be downloaded until " + str(d, "expires_at") + ". The download needs a sign-in with MFA."}
+		},
+	},
 	events.JobFailed: {
 		LocaleDE: func(d map[string]any) Text {
 			return Text{"Job fehlgeschlagen: " + str(d, "kind"),

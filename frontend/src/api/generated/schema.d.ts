@@ -12036,13 +12036,13 @@ export interface paths {
     };
     /**
      * List the full exports of the organization
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description The full exports of the organization (TLC-05, WP-1151), newest first, with status (queued, running, completed, expired, failed, cancelled), progress and, once completed, expires_at (completion + 24 h). Requires org:export; module org_lifecycle.
      */
     get: operations['listOrganizationExports'];
     put?: never;
     /**
      * Start a full export of the organization
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Queues the job org.export (TLC-05, WP-1149 to WP-1151): every table of the organization as JSONL in one snapshot, the personal data unsealed (E-165), and the documents as ZIP. Requires org:export for the whole organization and a session opened with a second factor (403 with type urn:reticora:problem:mfa-required); an API key never has one. While another full export is queued or running 409. The export can be downloaded for 24 hours after it completed; the user who started it is notified (org.export_completed). Allowed during the grace period of a deletion. Module org_lifecycle.
      */
     post: operations['createOrganizationExport'];
     delete?: never;
@@ -12063,7 +12063,7 @@ export interface paths {
     };
     /**
      * Get a full export of the organization
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Status, progress and, once completed, the manifest (tables with rows, parts, bytes and SHA-256, documents) and expires_at of a full export. An export of another organization is 404. Requires org:export.
      */
     get: operations['getOrganizationExport'];
     put?: never;
@@ -12086,7 +12086,7 @@ export interface paths {
     };
     /**
      * Download a full export of the organization
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Every object of a completed full export (table parts, document ZIPs, manifest.json) with name, bytes, SHA-256 and a signed URL valid for at most 15 minutes and never beyond expires_at. Requires org:export for the whole organization and a session with a second factor; every call writes an audit entry (resource_type org). After expires_at 410; an export that is not complete 409.
      */
     get: operations['downloadOrganizationExport'];
     put?: never;
@@ -22402,6 +22402,88 @@ export interface components {
           | 'acs';
         /** @default 100 */
         priority: number;
+      }[];
+    };
+    /** @description A full export of the organization (TLC-05, WP-1151); its id is the id of its job. */
+    OrganizationExport: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      job_id: string;
+      /**
+       * @description The status of the job; a succeeded job is completed until expires_at, then expired.
+       * @enum {string}
+       */
+      status: 'queued' | 'running' | 'completed' | 'expired' | 'failed' | 'cancelled';
+      progress: number;
+      /** @description Surrogate of the user who started the export. */
+      initiated_by?: string;
+      error?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      started_at?: string;
+      /** Format: date-time */
+      completed_at?: string;
+      /**
+       * Format: date-time
+       * @description End of the download period, completion + 24 h.
+       */
+      expires_at?: string;
+      manifest?: components['schemas']['OrganizationExportManifest'];
+    };
+    /** @description manifest.json of a full export (WP-1149, WP-1150): per table the rows, the parts with key, bytes and SHA-256 and the snapshot it was read in; the documents with their ZIP parts and objects. */
+    OrganizationExportManifest: {
+      /** Format: uuid */
+      organization_id?: string;
+      /** Format: uuid */
+      job_id?: string;
+      format?: string;
+      /** Format: date-time */
+      started_at?: string;
+      /** Format: date-time */
+      completed_at?: string;
+      tables?: ({
+        name?: string;
+        rows?: number;
+        /** Format: date-time */
+        snapshot_at?: string;
+        snapshot?: string;
+        omitted_columns?: string[];
+        parts?: {
+          key?: string;
+          bytes?: number;
+          sha256?: string;
+        }[];
+      } & {
+        [key: string]: unknown;
+      })[];
+      documents?: {
+        [key: string]: unknown;
+      };
+    } & {
+      [key: string]: unknown;
+    };
+    OrganizationExportListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['OrganizationExport'][];
+    };
+    OrganizationExportDownload: {
+      /** Format: uuid */
+      id: string;
+      /** Format: date-time */
+      expires_at: string;
+      objects: {
+        /** @description Path of the object below the export (tables/<table>/part-0001.jsonl, documents-0001.zip, manifest.json). */
+        name: string;
+        bytes: number;
+        sha256: string;
+        /** @description Signed URL of the object. */
+        url: string;
+        /**
+         * Format: date-time
+         * @description End of the validity of the URL, at most expires_at.
+         */
+        url_expires_at: string;
       }[];
     };
     /** @description The deletion state of the organization (TLC-06, WP-1152). */
@@ -53311,6 +53393,11 @@ export interface operations {
          *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
       };
       header?: never;
       path?: never;
@@ -53318,12 +53405,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List the full exports of the organization. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description One page of the full exports */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['OrganizationExportListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -53340,18 +53429,28 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Accepted as a job. The schema comes with the implementing work package. */
+      /** @description The export is queued */
       202: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['OrganizationExport'];
+        };
       };
-      400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Missing org:export for the whole organization, or a session without second factor (type urn:reticora:problem:mfa-required). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   getOrganizationExport: {
@@ -53366,12 +53465,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get a full export of the organization. The schema comes with the implementing work package. */
+      /** @description The full export */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['OrganizationExport'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -53391,17 +53492,38 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Download a full export of the organization. The schema comes with the implementing work package. */
+      /** @description The objects with signed URLs */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['OrganizationExportDownload'];
+        };
       };
       401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
+      /** @description Missing org:export for the whole organization, or a session without second factor (type urn:reticora:problem:mfa-required). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      /** @description The download period of the export (24 h) has ended. */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['ProblemDetail'];
+        };
+      };
       500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   getOrganizationDeletion: {

@@ -28094,20 +28094,25 @@ paths:
 
   /api/v1/org/exports:
     x-phase: P3
-    x-status: planned
     get:
       operationId: listOrganizationExports
       tags: [Privacy]
       summary: List the full exports of the organization
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        The full exports of the organization (TLC-05, WP-1151), newest first,
+        with status (queued, running, completed, expired, failed,
+        cancelled), progress and, once completed, expires_at (completion +
+        24 h). Requires org:export; module org_lifecycle.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: List the full exports of the organization. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+          description: One page of the full exports
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrganizationExportListResponse' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -28121,25 +28126,39 @@ paths:
       tags: [Privacy]
       summary: Start a full export of the organization
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Queues the job org.export (TLC-05, WP-1149 to WP-1151): every table
+        of the organization as JSONL in one snapshot, the personal data
+        unsealed (E-165), and the documents as ZIP. Requires org:export for
+        the whole organization and a session opened with a second factor
+        (403 with type urn:reticora:problem:mfa-required); an API key never
+        has one. While another full export is queued or running 409. The
+        export can be downloaded for 24 hours after it completed; the user
+        who started it is notified (org.export_completed). Allowed during
+        the grace period of a deletion. Module org_lifecycle.
       responses:
         '202':
-          description: Accepted as a job. The schema comes with the implementing work package.
-        '400':
-          $ref: '#/components/responses/BadRequest'
+          description: The export is queued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrganizationExport' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            Missing org:export for the whole organization, or a session
+            without second factor (type urn:reticora:problem:mfa-required).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '409':
           $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/org/exports/{id}:
     x-phase: P3
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -28147,11 +28166,16 @@ paths:
       tags: [Privacy]
       summary: Get a full export of the organization
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Status, progress and, once completed, the manifest (tables with
+        rows, parts, bytes and SHA-256, documents) and expires_at of a full
+        export. An export of another organization is 404. Requires
+        org:export.
       responses:
         '200':
-          description: Get a full export of the organization. The schema comes with the implementing work package.
+          description: The full export
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrganizationExport' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -28163,7 +28187,6 @@ paths:
 
   /api/v1/org/exports/{id}/download:
     x-phase: P3
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -28171,19 +28194,40 @@ paths:
       tags: [Privacy]
       summary: Download a full export of the organization
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Every object of a completed full export (table parts, document
+        ZIPs, manifest.json) with name, bytes, SHA-256 and a signed URL
+        valid for at most 15 minutes and never beyond expires_at. Requires
+        org:export for the whole organization and a session with a second
+        factor; every call writes an audit entry (resource_type org). After
+        expires_at 410; an export that is not complete 409.
       responses:
         '200':
-          description: Download a full export of the organization. The schema comes with the implementing work package.
+          description: The objects with signed URLs
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrganizationExportDownload' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            Missing org:export for the whole organization, or a session
+            without second factor (type urn:reticora:problem:mfa-required).
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '410':
+          description: The download period of the export (24 h) has ended.
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ProblemDetail' }
         '500':
           $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/org/deletion:
     x-phase: P3
@@ -45019,6 +45063,106 @@ components:
               credential_id: { type: string, format: uuid }
               namespace: { type: string, enum: [snmp, ssh, redfish, ipmi, wmi, api, nut, nas, http, gnmi, acs] }
               priority: { type: integer, minimum: 0, maximum: 10000, default: 100 }
+    OrganizationExport:
+      type: object
+      description: A full export of the organization (TLC-05, WP-1151); its id is the id of its job.
+      required: [id, job_id, status, progress, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        job_id: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [queued, running, completed, expired, failed, cancelled]
+          description: The status of the job; a succeeded job is completed until expires_at, then expired.
+        progress: { type: integer, minimum: 0, maximum: 100 }
+        initiated_by:
+          type: string
+          description: Surrogate of the user who started the export.
+        error: { type: string }
+        created_at: { type: string, format: date-time }
+        started_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+        expires_at:
+          type: string
+          format: date-time
+          description: End of the download period, completion + 24 h.
+        manifest:
+          $ref: '#/components/schemas/OrganizationExportManifest'
+
+    OrganizationExportManifest:
+      type: object
+      description: >-
+        manifest.json of a full export (WP-1149, WP-1150): per table the
+        rows, the parts with key, bytes and SHA-256 and the snapshot it was
+        read in; the documents with their ZIP parts and objects.
+      additionalProperties: true
+      properties:
+        organization_id: { type: string, format: uuid }
+        job_id: { type: string, format: uuid }
+        format: { type: string }
+        started_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+        tables:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              name: { type: string }
+              rows: { type: integer }
+              snapshot_at: { type: string, format: date-time }
+              snapshot: { type: string }
+              omitted_columns:
+                type: array
+                items: { type: string }
+              parts:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    key: { type: string }
+                    bytes: { type: integer }
+                    sha256: { type: string }
+        documents:
+          type: object
+          additionalProperties: true
+
+    OrganizationExportListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/OrganizationExport'
+
+    OrganizationExportDownload:
+      type: object
+      required: [id, expires_at, objects]
+      properties:
+        id: { type: string, format: uuid }
+        expires_at: { type: string, format: date-time }
+        objects:
+          type: array
+          items:
+            type: object
+            required: [name, bytes, sha256, url, url_expires_at]
+            properties:
+              name:
+                type: string
+                description: Path of the object below the export (tables/<table>/part-0001.jsonl, documents-0001.zip, manifest.json).
+              bytes: { type: integer }
+              sha256: { type: string }
+              url:
+                type: string
+                description: Signed URL of the object.
+              url_expires_at:
+                type: string
+                format: date-time
+                description: End of the validity of the URL, at most expires_at.
+
     OrganizationDeletion:
       type: object
       description: The deletion state of the organization (TLC-06, WP-1152).

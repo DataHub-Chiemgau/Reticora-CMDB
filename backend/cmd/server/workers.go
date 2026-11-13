@@ -695,6 +695,12 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 		if d.modules.Enabled("findings") {
 			systemJobs = append(systemJobs, vulnfeedJobs(d.cfg, vulnfeed.NewPGRepository(pool))...)
 		}
+		// The full exports of an organization can be downloaded for 24
+		// hours (TLC-05, WP-1151): hourly org.export_cleanup removes the
+		// objects of the expired ones, with the module org_lifecycle.
+		if d.modules.Enabled("org_lifecycle") {
+			systemJobs = append(systemJobs, export.NewOrgExportCleanup(pool, d.blobs).Schedule())
+		}
 		// SLA breaches: every minute each missed due time once as
 		// ticket.sla_breached, the escalation to assignee and team lead
 		// (TKT-01, WP-769); module ticketing, ticketing_standard only.

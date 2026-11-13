@@ -829,6 +829,31 @@ snapshot; a cancel (JOB-03) stops before the next batch and removes the
 objects of the job. Documents, routes and download follow in WP-1150 and
 WP-1151.
 
+**Routes and download of the full export (TLC-05, WP-1151):** `POST
+/api/v1/org/exports` (`org:export` for the whole organization and a session
+opened with a second factor, else 403 `mfa-required`) queues `org.export` and
+answers 202; while another one is queued or running 409. `GET
+/api/v1/org/exports` lists the exports newest first, `GET
+/api/v1/org/exports/{id}` gives status (`queued`, `running`, `completed`,
+`expired`, `failed`, `cancelled`), progress and, once completed, the manifest
+and `expires_at` = completion + 24 h; an export of another organization is
+404. `GET /api/v1/org/exports/{id}/download` (MFA as well) lists every object
+(table parts, document ZIPs, `manifest.json`) with name, bytes, SHA-256 and a
+signed URL valid 15 minutes at most and never beyond `expires_at`
+(`blob.Download.MaxAge`); after it 410. Each download writes the audit entry
+`org.export_downloaded` (`resource_type` `org`). The success of the job
+writes `org.export_completed` (job id, `initiated_by`, rows, bytes,
+`expires_at`) in the transaction that marks it succeeded
+(`jobs.SuccessEvents`); the notification reaches the initiator personally
+(`DirectUserIDs`, no webhook channel). The hourly system job
+`org.export_cleanup` (module `org_lifecycle`) removes the objects of exports
+past their 24 hours and records `expired_at` in the job result (the job model
+has no status `expired`; the API derives it); cancelled and failed exports
+lose their objects 24 hours after their end, read from the stored
+`manifest.json`. Two starts at the same time queue one export (transaction
+lock of the organization). In the generic job API an `org.export` job is
+seen and cancelled only with `org:export`; `job:read` alone does not show it.
+
 **Read-only grace period of an organization deletion (TLC-06, WP-1153):**
 while `organization.deletion_state` is `requested` or `purging`, the route
 middleware `middleware.OrgState` (before validation and idempotency) answers

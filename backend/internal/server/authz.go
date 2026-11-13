@@ -315,6 +315,12 @@ var routeRules = []routeRule{
 	// segment org, so the banner of the grace period reaches every user.
 	{http.MethodPost, "org/deletion", identity.PermOrgDelete},
 	{http.MethodDelete, "org/deletion", identity.PermOrgDelete},
+	// The full export of the organization holds every row of it, the
+	// personal data unsealed (TLC-05, E-165, WP-1151): every method needs
+	// org:export; start and download also the second factor (handler).
+	{"*", "org/exports", identity.PermOrgExport},
+	{"*", "org/exports/*", identity.PermOrgExport},
+	{"*", "org/exports/*/download", identity.PermOrgExport},
 	// The ADMP accounts are local configuration, read and written with
 	// admp:manage (ADM-01, WP-925); the segment admp alone needs
 	// admp:read (WP-866).

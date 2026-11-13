@@ -502,6 +502,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// unlicensed_ci and adopted once the limit is raised (ENT-03, CH21).
 	// Export and discovery jobs register in the generic job model (JOB-01).
 	var jobTracker jobs.Tracker
+	// orgExportJobs starts and reads the full exports (WP-1151); nil
+	// without a job repository.
+	var orgExportJobs *jobs.Service
 	// The compliance evaluation runs as the job compliance.evaluate
 	// (WP-1126); without the job service POST /compliance/evaluations
 	// answers 503.
@@ -667,6 +670,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		jobService := jobs.NewService(repos.Jobs)
 		jobTracker = jobService
 		bffJobs = jobService
+		orgExportJobs = jobService
 		jobs.SetBacklogSource(repos.Jobs)
 		// A bulk job on CIs is reverted by the revert job bulk.revert
 		// within 24 hours, with ci:write also from its creator (BLK-02,
@@ -724,6 +728,12 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			WithReadKind(privacy.SubjectReportJobKind, identity.PermUserManage).
 			WithKind(privacy.SubjectEraseJobKind, identity.PermUserManage, nil).
 			WithReadKind(privacy.SubjectEraseJobKind, identity.PermUserManage).
+			// The full export holds every row of the organization, personal
+			// data unsealed (E-165): its job, manifest and result are seen
+			// and cancelled only with org:export like its start, job:read
+			// alone does not reveal them (WP-1151); it has no revert.
+			WithKind(export.OrgExportJobKind, identity.PermOrgExport, nil).
+			WithReadKind(export.OrgExportJobKind, identity.PermOrgExport).
 			// The merge is reverted by its unmerge within 30 days (CI-12, E-25).
 			// It answers 200 (no revert job).
 			WithKind(ci.MergeJobKind, identity.PermCIDelete, func(ctx context.Context, job *jobs.Job) (*jobs.Job, error) {
@@ -1043,6 +1053,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		// The deletion of the organization (TLC-06, WP-1152), module
 		// org_lifecycle; without a pool the state is none and writes 503.
 		tenantapi.NewDeletionHandler(opts.AuditPool),
+		// The full export of the organization (TLC-05, WP-1151), module
+		// org_lifecycle: start with MFA, status, manifest and the download
+		// for 24 hours.
+		export.NewOrgExportHandler(orgExportJobs, opts.AuditPool, opts.Blobs),
 		rack.NewHandler(repos.Rack),
 		contact.NewHandler(repos.Contact),
 		contract.NewHandler(repos.Supplier),

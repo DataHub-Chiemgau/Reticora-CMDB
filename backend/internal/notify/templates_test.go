@@ -29,6 +29,8 @@ var templateData = map[string]map[string]any{
 		"link": "https://cmdb.example/invitations/accept?token=t"},
 	events.ExportCompleted: {"format": "csv", "row_count": float64(3)},
 	events.JobFailed:       {"kind": "export", "error": "disk full"},
+	events.OrgExportCompleted: {"id": "e-1", "initiated_by": "u-1", "rows": float64(12), "bytes": float64(3400),
+		"expires_at": "2026-12-01T22:00:00Z"},
 	events.WebhookDead: {"event": "ci.updated", "subscription_id": "s-1", "attempts": float64(5),
 		"last_error": "timeout"},
 	events.CertificateExpiring: {"name": "www.acme.example", "expires_at": "2026-12-18T09:30:00Z"},
