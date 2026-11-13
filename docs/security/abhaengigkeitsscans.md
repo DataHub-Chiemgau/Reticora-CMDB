@@ -76,6 +76,11 @@ Risikoakzeptanz für MinIO, OpenSearch und keycloak-db offen (A-85).
 Nachtrag 2026-11-13: keycloak-db läuft auf `postgres:16.16-alpine`; das
 Hersteller-Release behebt die neuen High-Befunde in `krb5-libs` und
 `libxslt`, `gosu` trägt weiter Go 1.24.6 (dieselben IDs, A-85).
+Nachtrag 2026-11-13: Amazon Linux 2023 hat Fixes für `sqlite-libs`
+(CVE-2026-119371, -119372, -119373) und `rpm` (CVE-2026-95520, -95521)
+veröffentlicht; `opensearchproject/opensearch:2.19.7` ist weiter das neueste
+2.x-Release (Digest unverändert) und enthält sie nicht. Fünf neue High-Ausnahmen
+bis 2026-12-13 (75 IDs); OpenSearch ist optional und nur intern erreichbar (A-85).
 
 | Image | Ort | Scan |
 |---|---|---|
