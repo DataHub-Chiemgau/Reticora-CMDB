@@ -110,7 +110,10 @@ func (d *workerDeps) probeIngester() *probe.Ingester {
 // newProbeIngester builds the worker probe_ingest on the stream
 // RETICORA_PROBE.
 func newProbeIngester(q *discovery.NATSIngestQueue, pool *pgxpool.Pool, cfg *config.Config) *probe.Ingester {
-	return probe.NewIngester(q.JetStream(), probe.DefaultStream(cfg.ProbeStreamMaxBytes), probe.NewPGIngestStore(pool))
+	// The state changes run in the same worker (WP-961).
+	stream := probe.DefaultStream(cfg.ProbeStreamMaxBytes)
+	return probe.NewIngester(q.JetStream(), stream, probe.NewPGIngestStore(pool)).
+		WithStates(probe.NewStateApplier(q.JetStream(), stream, pool))
 }
 
 // every is the interval of a worker: def, or the one of the tests.

@@ -6771,6 +6771,8 @@ CRD-06;[P3];E;backend/internal/probe/ingest_integration_test.go;WP-960
 - docs/ops/workers.md
 - docs/traceability.csv
 
+**Nachtrag 2026-11-13 (Umsetzung):** Die Migration hat die vorläufige Nummer 000823 (000822 ist die Migration aus WP-948). Präzisierungen: `notify` steht in der Historie für jeden Wechsel, der nicht `stale` ist, auch für einen, der nur in die Historie geht (ein Ereignis entsteht weiter nur für einen angewendeten Wechsel); so ist die Historie in jeder Zustellreihenfolge gleich (AK6). Als Nachfolger nach AK4 zählt nur ein jüngerer Wechsel derselben Probe, den die Regel anwenden würde (Epoche der Zuweisung, zugewiesener Collector); ein abgewiesener oder `stale` Wechsel zählt nicht. Die Wechsel einer Probe serialisiert über Instanzen hinweg die Transaktionssperre `pg_advisory_xact_lock(hashtextextended('probe_state:' || probe_id, 0))`, auch den ersten vor der `probe_state`-Zeile; der Upsert von `probe_state` geht nie auf ein kleineres (Epoche, Sequenz) zurück. Scheitert ein Wechsel in einer Lane, gehen die späteren Wechsel derselben Probe der Abholung unangewendet zurück (`NakWithDelay`, AK1). Zusätzliche Tests: `TestLateWithoutRealSuccessorNotifies`, `TestStateLaneStopsProbeAfterFailure`, `TestStateApplyFirstChangeRace`.
+
 **Migration/RLS:** Migration `<nächste Nr.>_probe_state_change_dedup` (frühestens 000284, nach der Migration aus WP-944):
 - `probe_state_change.stale boolean NOT NULL DEFAULT false`.
 - `UNIQUE (probe_id, collector_id, epoch, seq)` auf `probe_state_change`; die Anwendung schreibt mit `ON CONFLICT DO NOTHING` und wertet die Zeilenzahl aus.

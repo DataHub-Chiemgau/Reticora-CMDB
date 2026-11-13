@@ -73,7 +73,7 @@ var (
 
 // RegisterMetrics registers the metrics of the probe ingest.
 func RegisterMetrics(reg prometheus.Registerer) {
-	reg.MustRegister(ingestDiscarded, ingestDeadLetters, ingestRows)
+	reg.MustRegister(ingestDiscarded, ingestDeadLetters, ingestRows, stateDropped, stateDeadLetters)
 }
 
 // ResultsMessage is one result batch of a collector as the stream holds it.
@@ -136,6 +136,16 @@ type Ingester struct {
 	mu       sync.Mutex
 	consumer jetstream.Consumer
 	sample   atomic.Pointer[IngestBacklog]
+	// states applies the state changes in the same worker (WP-961); nil
+	// runs the results only.
+	states *StateApplier
+}
+
+// WithStates runs the consumer of the state changes in the worker
+// probe_ingest (WP-961): it starts with Run, its backlog joins Backlog.
+func (i *Ingester) WithStates(a *StateApplier) *Ingester {
+	i.states = a
+	return i
 }
 
 // NewIngester returns the worker on the stream cfg of js writing to store.
@@ -181,6 +191,9 @@ func (i *Ingester) reset() {
 // Run fetches and writes until ctx ends; every fetch is a cycle of the
 // worker (reticora_worker_runs_total, a failed one counts as error).
 func (i *Ingester) Run(ctx context.Context) {
+	if i.states != nil {
+		go i.states.Run(ctx)
+	}
 	for ctx.Err() == nil {
 		if err := i.RunOnce(ctx); err != nil && ctx.Err() == nil {
 			observability.ObserveWorkerRun(config.WorkerProbeIngest, 1)
@@ -316,6 +329,13 @@ func (i *Ingester) Backlog(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	n := info.NumPending + uint64(info.NumAckPending) //nolint:gosec // a count
+	if i.states != nil {
+		states, serr := i.states.Backlog(ctx)
+		if serr != nil {
+			return 0, serr
+		}
+		n += uint64(states) //nolint:gosec // a count
+	}
 	i.sample.Store(&IngestBacklog{Pending: n, SampledAt: time.Now().UTC()})
 	return int(min(n, uint64(1<<31-1))), nil //nolint:gosec // bounded above
 }

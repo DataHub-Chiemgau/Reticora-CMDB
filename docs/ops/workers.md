@@ -828,6 +828,41 @@ the server log (`probe edge publish failed`) means the stream did not
 acknowledge: check NATS, the stream's fill level
 (`nats stream info RETICORA_PROBE`) and the probe workers.
 
+## Probe state changes (WP-961)
+
+The state changes of the stream (`probe.state.>`) are applied by the
+durable consumer `reticora-probe-state` inside the worker `probe_ingest`
+(same switch `RETICORA_WORKER_PROBE_INGEST_ENABLED`, no worker of its own).
+A fetch takes up to 500 changes or what arrived within 0.5 s and spreads
+them over 8 lanes by probe id; the changes of one probe are applied one
+after the other in delivery order, each in one tenant transaction
+(`probe_state_change`, `probe_state`, cursor `state` of
+`probe_ingest_cursor`, event `probe.state_changed` last), acknowledged after
+the commit. When a change fails, the later changes of the same probe in the
+fetch go back unapplied (redelivered after 2 s), so a probe's changes never
+overtake each other. Across instances the transaction lock
+`probe_state:<probe>` serializes the changes of a probe, also its first
+one, and `probe_state` only moves to a larger (epoch, seq). AckExplicit,
+MaxDeliver 5, then the change is given up
+(`reticora_probe_state_dead_letters_total{reason}`).
+
+| Case | Effect |
+|---|---|
+| Epoch of the assignment, assigned collector, newer epoch or larger seq | applied: state, history, one event |
+| Older seq in the same epoch | history only (with the `notify` it would have had), no event |
+| Older epoch, other collector, no assignment | history with `stale = true`, `notify = false`, no event |
+| Newer epoch than the assignment | refused, `reticora_probe_state_dropped_total{reason="future_epoch"}` |
+| Same (probe, collector, epoch, seq) again | nothing written, `…{reason="duplicate"}` |
+
+`late` is `observed_at < received_at − 2 × interval` (received_at is the
+stream time of the message); a late change followed by a younger one of the
+same probe in the same fetch that the rule applies (epoch of the
+assignment, assigned collector) has `notify = false` (E-180); a refused or
+stale younger change is no successor. The pending
+messages of the consumer count into the backlog of `probe_ingest` in
+`/readyz`. Target: p95 < 5 s from `observed_at` to `probe_state` (measured
+in the integration test at 353 results/s background load: below 1 s).
+
 ## Planned workers
 
 The OPS-02 workers below do not exist yet as separate runners. The job

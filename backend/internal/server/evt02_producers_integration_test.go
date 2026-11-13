@@ -75,6 +75,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 )
 
 // evt02Case is the production action of one event type.
@@ -269,6 +270,7 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 		resolvedFinding                    string
 		admpAccount                        string
 		probeGroup                         string
+		stateCollector, stateProbe         string
 		admpSync                           *admp.Sync
 		alarms                             = alarm.NewPGService(f.App)
 		ackAlarm, sevAlarm, resAlarm       *alarm.Alarm
@@ -767,6 +769,36 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 				fields, _ := data["changed_fields"].([]any)
 				if data["id"] != entity || data["client_id"] != f.Client1 || len(fields) == 0 {
 					t.Errorf("config.changed data %v", data)
+				}
+			}},
+		{typ: events.ProbeStateChanged,
+			// The worker probe-state applies a state change of the assigned
+			// collector (WP-961).
+			setup: func(t *testing.T) {
+				group := scalar(t, `INSERT INTO collector_group (organization_id, name) VALUES ($1, 'evt02-state') RETURNING id::text`, f.OrgA)
+				stateCollector = scalar(t, `INSERT INTO collector (organization_id, name, status) VALUES ($1, 'evt02-state', 'active')
+					RETURNING id::text`, f.OrgA)
+				exec(t, `UPDATE collector_group_member SET group_id = $1 WHERE collector_id = $2`, group, stateCollector)
+				stateProbe = scalar(t, `INSERT INTO probe (organization_id, client_id, collector_group_id, type, target)
+					VALUES ($1, $2, $3, 'icmp', '10.250.2.1') RETURNING id::text`, f.OrgA, f.Client1, group)
+				exec(t, `INSERT INTO probe_assignment (probe_id, organization_id, collector_id, epoch) VALUES ($1, $2, $3, 1)`,
+					stateProbe, f.OrgA, stateCollector)
+			},
+			act: func(t *testing.T, refused bool) string {
+				a := probe.NewStateApplier(nil, probe.StreamConfig{}, f.App)
+				err := a.Apply(context.Background(), f.OrgA, stateCollector, &probewire.StateChange{ProbeID: stateProbe, Epoch: 1, Seq: 1,
+					From: probewire.StateUnknown, To: probewire.StateDown, Reason: "timeout", ObservedAt: time.Now()}, time.Now())
+				failed(t, "probe state change", err, refused)
+				if refused {
+					unchanged(t, "probe state", count(t, `probe_state WHERE probe_id = $1`, stateProbe), "0")
+					return ""
+				}
+				return stateProbe
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["probe_id"] != entity || data["client_id"] != f.Client1 || data["from"] != "unknown" ||
+					data["to"] != "down" || data["collector_id"] != stateCollector || data["late"] != false || data["notify"] != true {
+					t.Errorf("probe.state_changed data %v", data)
 				}
 			}},
 		{typ: events.MonitoringSuspensionChanged,
@@ -1722,7 +1754,6 @@ func evt02ValidateValue(root map[string]any, path string, schema map[string]any,
 // package adds the producer case and removes its entry; before WP-1177
 // (p3-gate) the list is empty.
 var plannedProducers = map[string]string{
-	"probe.state_changed":         "WP-961",
 	"alarm.escalated":             "WP-1146",
 	"incident.opened":             "WP-1028",
 	"incident.updated":            "WP-1036",

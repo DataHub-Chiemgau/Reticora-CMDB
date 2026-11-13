@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000346_probe_credential_version
+Stand: Migration 000347_probe_state_change_dedup
 
 ## Prüfung
 

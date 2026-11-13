@@ -1830,3 +1830,6 @@ MON-02;[B];E;backend/internal/probe/autocreate_integration_test.go;WP-949
 PRB-01;[P3];E;backend/internal/probe/autocreate_integration_test.go;WP-949
 PRB-11;[P3];E;backend/internal/probe/distribution_integration_test.go;WP-948
 PRB-01;[P3];E;backend/internal/probe/distribution_integration_test.go;WP-948
+PRB-05;[P3];E;backend/internal/probe/state_apply_integration_test.go;WP-961
+PRB-07;[P3];E;backend/internal/probe/state_apply_integration_test.go;WP-961
+PRB-11;[P3];E;backend/internal/probe/state_apply_integration_test.go;WP-961
