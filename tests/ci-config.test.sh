@@ -15,6 +15,10 @@
 #     and digest and checks the pgBackRest tarball by sha256 (F-291); it
 #     replaces the Go helpers of the base image with ones rebuilt by the
 #     pinned repository toolchain at pinned module versions (E-96);
+#   - keycloak_db_image_pin: the reticora-keycloak-db Dockerfile pins the
+#     official postgres image and the repository toolchain by version and
+#     digest and replaces the vendor gosu with one rebuilt at a pinned module
+#     version (E-96, A-85), with a negative fixture;
 #   - timescale_image_refs: every TimescaleDB image reference of the
 #     repository (CI, deploy, compose, docs; not the historical records) is
 #     the TIMESCALE_IMAGE of that Dockerfile, version and digest (E-96), with
@@ -321,6 +325,69 @@ if [ -z "$db_pin" ]; then
     ok "db_image_pin: the postgres Dockerfile pins TimescaleDB and the Go toolchain by version and digest, rebuilds gosu and timescaledb-tune, checks the pgBackRest sha256"
 else
     fail "db_image_pin: the postgres Dockerfile pins TimescaleDB and the Go toolchain by version and digest, rebuilds gosu and timescaledb-tune, checks the pgBackRest sha256" "$db_pin"
+fi
+
+# ─── E-96, A-85: the own image of keycloak-db ───────────────────────────────
+# kcdb_pin <Dockerfile> <backend Dockerfile>: reticora-keycloak-db pins the
+# official postgres image and the Go toolchain of the repository by version
+# and digest, rebuilds gosu at a pinned module version (verified against
+# sum.golang.org) over the one of the vendor image and checks that it drops
+# to postgres (UID 70); one line per problem.
+kcdb_pin() {
+    python3 - "$1" "$2" <<'PY'
+import re, sys
+df = open(sys.argv[1]).read()
+backend = open(sys.argv[2]).read()
+problems = []
+m = re.search(r"^ARG POSTGRES_IMAGE=postgres:(\S+?)@sha256:[0-9a-f]{64}$", df, re.M)
+if not m:
+    problems.append("ARG POSTGRES_IMAGE is not postgres:<version>@sha256:<digest>")
+elif not re.fullmatch(r"[0-9]+\.[0-9]+-alpine", m.group(1)):
+    problems.append(f"POSTGRES_IMAGE uses a floating tag: {m.group(1)}")
+g = re.search(r"^ARG GO_IMAGE=golang:(\S+?)@sha256:[0-9a-f]{64}$", df, re.M)
+b = re.search(r"^FROM golang:(\S+)", backend, re.M)
+if not g:
+    problems.append("ARG GO_IMAGE is not golang:<version>@sha256:<digest>")
+elif not b or g.group(1) != b.group(1):
+    problems.append(f"GO_IMAGE golang:{g.group(1)} is not the toolchain of backend/Dockerfile ({b and b.group(1)})")
+froms = re.findall(r"^FROM\s+(\S+)", df, re.M)
+if froms != ["${GO_IMAGE}", "${POSTGRES_IMAGE}"]:
+    problems.append(f"FROM must be ${{GO_IMAGE}}, then ${{POSTGRES_IMAGE}}: {froms}")
+if not re.search(r"^ENV [^\n]*\bGOSUMDB=sum\.golang\.org\b", df, re.M) \
+        or re.search(r"GONOSUMDB|GONOSUMCHECK|GOINSECURE|GOPRIVATE|GOFLAGS=[^\n]*insecure|GOSUMDB=off", df):
+    problems.append("the Go stage does not verify modules against sum.golang.org (ENV GOSUMDB=sum.golang.org)")
+if not re.search(r"^ARG GOSU_VERSION=v[0-9]+\.[0-9]+\.[0-9]+(-[0-9]{14}-[0-9a-f]{12})?$", df, re.M):
+    problems.append("ARG GOSU_VERSION is not a module version or pseudo-version")
+if 'go install -trimpath -ldflags=\'-d -w\' "github.com/tianon/gosu@${GOSU_VERSION}"' not in df:
+    problems.append("gosu is not built with go install github.com/tianon/gosu@${GOSU_VERSION}")
+if "COPY --from=go-tools /go/bin/gosu /usr/local/bin/gosu" not in df:
+    problems.append("the final stage does not replace /usr/local/bin/gosu of the vendor image")
+if "@latest" in df:
+    problems.append("a go install uses @latest")
+if not re.search(r'\[ "\$\(gosu postgres id -un\)" = postgres \]', df) \
+        or not re.search(r'\[ "\$\(id -u postgres\):\$\(id -g postgres\)" = 70:70 \]', df):
+    problems.append("the build does not check that the rebuilt gosu drops to postgres (UID/GID 70)")
+print("\n".join(problems))
+PY
+}
+
+KCDB_DOCKERFILE=deploy/docker-compose/keycloak-db/Dockerfile
+kcdb="$(kcdb_pin "$KCDB_DOCKERFILE" backend/Dockerfile 2>&1)"
+if [ -z "$kcdb" ]; then
+    ok "keycloak_db_image_pin: the keycloak-db Dockerfile pins postgres and the Go toolchain by version and digest and rebuilds gosu"
+else
+    fail "keycloak_db_image_pin: the keycloak-db Dockerfile pins postgres and the Go toolchain by version and digest and rebuilds gosu" "$kcdb"
+fi
+# Negative fixture: the floating vendor tag and the vendor gosu are reported.
+sed -e 's#^ARG POSTGRES_IMAGE=.*#ARG POSTGRES_IMAGE=postgres:16-alpine#' \
+    -e '/^COPY --from=go-tools/d' "$KCDB_DOCKERFILE" > "$TMP_ROOT/kcdb.Dockerfile"
+kcdb="$(kcdb_pin "$TMP_ROOT/kcdb.Dockerfile" backend/Dockerfile 2>&1)"
+if [ "$(grep -c . <<<"$kcdb")" -eq 2 ] \
+    && grep -qx 'ARG POSTGRES_IMAGE is not postgres:<version>@sha256:<digest>' <<<"$kcdb" \
+    && grep -qx 'the final stage does not replace /usr/local/bin/gosu of the vendor image' <<<"$kcdb"; then
+    ok "keycloak_db_image_pin_negative: a floating postgres tag and the vendor gosu are reported"
+else
+    fail "keycloak_db_image_pin_negative: a floating postgres tag and the vendor gosu are reported" "$kcdb"
 fi
 
 # ─── E-96: one TimescaleDB reference everywhere ─────────────────────────────

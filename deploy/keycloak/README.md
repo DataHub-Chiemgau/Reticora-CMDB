@@ -146,6 +146,16 @@ run: Keycloak 26 migrates `keycloak-db` on its first start, then the
 installer applies the realm settings as above.
 `tests/keycloak-realm-upgrade.test.sh` runs the realm of step 1 on
 Keycloak 24 and every later step on Keycloak 26 on the same database.
+
+`keycloak-db` runs the own image `reticora-keycloak-db`
+(`deploy/docker-compose/keycloak-db`, E-96, A-85): the official
+`postgres:16.16-alpine`, pinned by digest, with its `gosu` rebuilt by the
+repository's Go toolchain. Major version, data directory and UID 70 are the
+vendor's, so the `keycloakdb` volume of an earlier installation
+(`postgres:16.15-alpine` or `16.16-alpine`) keeps running after the next
+installer run, which builds the image (`--build-from-source`) or verifies
+and pins the signed one (`RETICORA_KEYCLOAK_DB_IMAGE`, release mode);
+`tests/keycloak-db-image.test.sh` checks both predecessors.
 Changes of the version that the compose file carries:
 
 - `KC_PROXY=edge` no longer exists; `KC_PROXY_HEADERS=xforwarded` lets

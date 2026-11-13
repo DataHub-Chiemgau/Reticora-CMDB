@@ -27,9 +27,9 @@ curl -fsSL https://raw.githubusercontent.com/DataHub-Chiemgau/Reticora-CMDB/main
 the signed release artifacts of the newest release, or of the one named with
 `--ref v<version>`: the source of the release tag (checked against the signed
 `SOURCE_COMMIT` or source tarball), the images `reticora-server`,
-`reticora-frontend` and `reticora-postgres` (`cosign verify`, pinned by
-digest) and the collector (`cosign verify-blob` of the binary, or the signed
-image in the Docker mode). `--build-from-source` (`RETICORA_BUILD_FROM_SOURCE=1`)
+`reticora-frontend`, `reticora-postgres` and `reticora-keycloak-db`
+(`cosign verify`, pinned by digest) and the collector (`cosign verify-blob`
+of the binary, or the signed image in the Docker mode). `--build-from-source` (`RETICORA_BUILD_FROM_SOURCE=1`)
 builds everything locally from the sources instead — **not
 signature-verified**, the installer warns at the start; only then is a ref
 that is no release tag (e.g. `main`) accepted. Without the switch such a ref

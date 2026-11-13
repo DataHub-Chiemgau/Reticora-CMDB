@@ -19,9 +19,9 @@
 # idempotent: existing volumes, keys and configuration are preserved.
 #
 # Release mode (TEC-15; the default per E-69, Option 1): the signed release
-# images reticora-server, reticora-frontend and reticora-postgres of the
-# release (--release, otherwise the release tag of this checkout or the
-# newest release) are verified with 'cosign verify' against the identity of
+# images reticora-server, reticora-frontend, reticora-postgres and
+# reticora-keycloak-db of the release (--release, otherwise the release tag
+# of this checkout or the newest release) are verified with 'cosign verify' against the identity of
 # the release workflow and pinned by digest in .env before anything starts.
 # This checkout — compose file, realm, migrations — must be the signed source
 # of that release. --build-from-source builds the images from this checkout
@@ -820,6 +820,7 @@ RETICORA_IMAGE_TAG=$RETICORA_IMAGE_TAG
 RETICORA_SERVER_IMAGE=${RETICORA_SERVER_IMAGE:-}
 RETICORA_FRONTEND_IMAGE=${RETICORA_FRONTEND_IMAGE:-}
 RETICORA_POSTGRES_IMAGE=${RETICORA_POSTGRES_IMAGE:-}
+RETICORA_KEYCLOAK_DB_IMAGE=${RETICORA_KEYCLOAK_DB_IMAGE:-}
 
 # Container image garbage collection
 RETICORA_GC_KEEP_IMAGES=$RETICORA_GC_KEEP_IMAGES
@@ -1142,6 +1143,7 @@ collect_config() {
     RETICORA_SERVER_IMAGE=""
     RETICORA_FRONTEND_IMAGE=""
     RETICORA_POSTGRES_IMAGE=""
+    RETICORA_KEYCLOAK_DB_IMAGE=""
 
     RETICORA_GC_KEEP_IMAGES="$(env_get RETICORA_GC_KEEP_IMAGES || true)"
     RETICORA_GC_KEEP_IMAGES="${RETICORA_GC_KEEP_IMAGES:-3}"
@@ -2248,9 +2250,9 @@ provide_images() {
     if [ "$BUILD_FROM_SOURCE" != 1 ]; then
         # Release mode (TEC-15, the default per E-69): only the signed release
         # images, pinned in .env by the digest cosign verified; nothing is
-        # built locally, also not PostgreSQL. Disabling the source-build
-        # override removes every build: section, so compose can only use the
-        # pinned images.
+        # built locally, also not PostgreSQL (CMDB and Keycloak). Disabling
+        # the source-build override removes every build: section, so compose
+        # can only use the pinned images.
         if [ -z "$RETICORA_IMAGE_REGISTRY" ] || [ -z "$RETICORA_IMAGE_TAG" ]; then
             die "No registry or release selected for the signed images; name the release with --release v<version>, or build from this checkout with --build-from-source."
         fi
@@ -2261,10 +2263,12 @@ provide_images() {
         verify_release_image "$RETICORA_IMAGE_REGISTRY" reticora-server "$RETICORA_IMAGE_TAG" RETICORA_SERVER_IMAGE
         verify_release_image "$RETICORA_IMAGE_REGISTRY" reticora-frontend "$RETICORA_IMAGE_TAG" RETICORA_FRONTEND_IMAGE
         verify_release_image "$RETICORA_IMAGE_REGISTRY" reticora-postgres "$RETICORA_IMAGE_TAG" RETICORA_POSTGRES_IMAGE
+        verify_release_image "$RETICORA_IMAGE_REGISTRY" reticora-keycloak-db "$RETICORA_IMAGE_TAG" RETICORA_KEYCLOAK_DB_IMAGE
         env_set RETICORA_SERVER_IMAGE "$RETICORA_SERVER_IMAGE"
         env_set RETICORA_FRONTEND_IMAGE "$RETICORA_FRONTEND_IMAGE"
         env_set RETICORA_POSTGRES_IMAGE "$RETICORA_POSTGRES_IMAGE"
-        compose_cmd pull server frontend postgres || die "Pulling the verified images failed."
+        env_set RETICORA_KEYCLOAK_DB_IMAGE "$RETICORA_KEYCLOAK_DB_IMAGE"
+        compose_cmd pull server frontend postgres keycloak-db || die "Pulling the verified images failed."
     else
         # Local source build (--build-from-source): make sure the build
         # override is active. The images are not signature-verified.
@@ -2276,6 +2280,9 @@ provide_images() {
         # PostgreSQL with pgBackRest (WP-100).
         info "Building the PostgreSQL image with pgBackRest …"
         compose_cmd build postgres || die "Building the PostgreSQL image failed."
+        # PostgreSQL of Keycloak with the rebuilt gosu (E-96, A-85).
+        info "Building the PostgreSQL image of Keycloak …"
+        compose_cmd build keycloak-db || die "Building the PostgreSQL image of Keycloak failed."
     fi
     if [ -n "$RETICORA_TLS_DOMAIN" ]; then
         compose_cmd pull certbot || die "Pulling the certbot image failed."
@@ -2566,7 +2573,7 @@ db_image() {
     local service="${1:-postgres}" fallback img
     case "$service" in
         postgres) fallback="reticora-postgres:latest" ;;
-        *) fallback="postgres:16.16-alpine@sha256:0adbf25a9e96d38823bb813f3ac0ed41fadb665c88f1df7fe6dbfb060cbdc106" ;;
+        *) fallback="reticora-keycloak-db:latest" ;;
     esac
     img="$("${COMPOSE[@]}" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" config 2>/dev/null \
         | awk -v svc="$service" '$0 == "  " svc ":" {f=1; next} f && /^  [^ ]/ {exit} f && /^    image:/ {print $2; exit}')"

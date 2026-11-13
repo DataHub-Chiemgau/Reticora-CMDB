@@ -14,7 +14,7 @@ Request und bei jedem Push auf `main`.
 |---|---|---|---|
 | `govulncheck` (Matrix `backend`, `collector`, `edgecore`) | Go-Abhängigkeiten und Standardbibliothek jedes go.work-Moduls | Schwachstellen, deren betroffenes Symbol vom Code des Moduls erreicht wird | `govulncheck-<modul>` (JSON, auch nur importierte Funde) |
 | `npm-audit` | `frontend/package-lock.json` | High/Critical in Produktionsabhängigkeiten (`--omit=dev`, ausgeliefertes Bundle) | `npm-audit` (Produktion und alle inkl. Entwicklung) |
-| `image-scan` (Matrix `backend`, `collector`, `frontend`, `postgres`) | gebautes Container-Image: OS-Pakete und Anwendungsabhängigkeiten (Trivy) | Critical/High mit verfügbarem Fix (`ignore-unfixed`) | `trivy-<image>` (JSON) |
+| `image-scan` (Matrix `backend`, `collector`, `frontend`, `postgres`, `keycloak-db`) | gebautes Container-Image: OS-Pakete und Anwendungsabhängigkeiten (Trivy) | Critical/High mit verfügbarem Fix (`ignore-unfixed`) | `trivy-<image>` (JSON) |
 | `image-scan-thirdparty` (Matrix `clamd`) | gepinntes Fremdimage des Betriebs, das nicht vertrauenswürdige Eingaben parst: clamd aus WP-735 (`deploy/docker-compose/docker-compose.yml`, `deploy/k8s/base/components/clamav/clamd.yaml`); beide Pins müssen Version und Digest teilen (WP-329) | wie `image-scan` (Trivy 0.75.0 per Digest, `--severity CRITICAL,HIGH --ignore-unfixed`, `--ignorefile security/scan-exceptions.txt`) | `trivy-thirdparty-<image>` (JSON) |
 
 ### Abhängigkeiten der Phase 2
@@ -138,6 +138,12 @@ Ausnahmedatei entfernt (20 Einträge gestrichen, 11 bleiben für keycloak-db):
 brauchen `mc` und `sh` im Container. Alle Referenzen auf das Image sind
 gleich, `tests/ci-config.test.sh` (`objectstorage_image_refs`) prüft das.
 Restrisiko Bus-Faktor des Forks: E-246.
+Nachtrag 2026-11-13 (Update-Plan Upd-01, keycloak-db): keycloak-db läuft auf
+dem eigenen Image `reticora-keycloak-db` (siehe unten, E-96, A-85), das
+`image-scan` (`keycloak-db`) ohne Hersteller-Ausnahmen scannt. Die 26 IDs
+seines Hersteller-`gosu` (Go 1.24.6, darunter CVE-2025-68121 Critical) sind
+aus `security/scan-exceptions-thirdparty.txt` entfernt: 15 Zeilen entfallen,
+11 gelten weiter nur für minio (60 IDs, 5 Critical).
 
 | Image | Ort | Scan |
 |---|---|---|
@@ -147,6 +153,8 @@ Restrisiko Bus-Faktor des Forks: E-246.
 | `redis:7.4.12-alpine@sha256:7b1753b4c5ad8458906c272a8132b8c15f5557b000379eb115fb239706a384b7` | Compose (`redis`) | `image-scan-thirdparty` (`redis`) |
 | `pgsty/silo:RELEASE.2026-11-12T00-00-00Z@sha256:c20d112390b9a9ce8c11b8af95ad35bcaa62f4759663c09c936cd8d2b511f329` | Compose (`minio`) | `image-scan-thirdparty` (`minio`) |
 | `postgres:16.16-alpine@sha256:0adbf25a9e96d38823bb813f3ac0ed41fadb665c88f1df7fe6dbfb060cbdc106` | Compose (`keycloak-db`) | `image-scan-thirdparty` (`keycloak-db`) |
+| `pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372` | Compose (`minio`) | `image-scan-thirdparty` (`minio`) |
+| `postgres:16.16-alpine@sha256:0adbf25a9e96d38823bb813f3ac0ed41fadb665c88f1df7fe6dbfb060cbdc106` | Basis von `reticora-keycloak-db` (Compose `keycloak-db`, eigenes Image seit 2026-11-13) | über `image-scan` (`keycloak-db`), `keycloak_db_image_pin` |
 | `quay.io/keycloak/keycloak:26.8.2@sha256:723b1d6e254c0fc96d5cffec860c7e0744d6a3277822b865bb538cf891575e41` | Compose (`keycloak`); vom Hersteller gepflegte Major-Version 26 | `image-scan-thirdparty` (`keycloak`) |
 | `opensearchproject/opensearch:2.19.7@sha256:3bfa1ec74d56928c2e018033d45c460ce2c0ea65a5cedd577de3102326c31b89` | Compose (`opensearch`), `deploy/k8s/base/components/opensearch/statefulset.yaml` | `image-scan-thirdparty` (`opensearch`) |
 | `certbot/certbot:v5.9.0@sha256:bc93cb710b413e6b456d622f9b0133b3e109c0a78c2ed9976af43d209b0a1805` | Compose (`certbot`, TLS-Zertifikate) | `image-scan-thirdparty` (`certbot`) |
@@ -161,6 +169,7 @@ signiert und veröffentlicht:
 | `collector` | `reticora-collector` | `collector/Dockerfile` (`.`) |
 | `frontend` | `reticora-frontend` | `frontend/Dockerfile` (`frontend`) |
 | `postgres` | `reticora-postgres` | `deploy/docker-compose/postgres/Dockerfile` (`deploy/docker-compose/postgres`) |
+| `keycloak-db` | `reticora-keycloak-db` | `deploy/docker-compose/keycloak-db/Dockerfile` (`deploy/docker-compose/keycloak-db`) |
 
 `tests/ci-config.test.sh` (Job `gate`) prüft, dass jedes Image der
 Release-Matrix mit Dockerfile und Kontext in der Scan-Matrix steht; ein neues
@@ -336,3 +345,37 @@ auf, die CI auf 2.17.2. Geprüft am 2026-10-21 mit einer Datenbank, die mit
 
 `image-scan (postgres)` meldet 38 High-CVEs in PostgreSQL 16.15 (behoben in 16.16). Der Server der TimescaleDB-Basis ist ein Quell-Build in `/usr/local`, den Trivy nicht sieht; die gemeldeten apk-Pakete tragen dieselbe Version und stehen deshalb für das Risiko des Servers und der von pgBackRest, `psql` und `pg_dump` geladenen `libpq`. Ein `apk upgrade` würde den Befund verdecken und wird nicht verwendet. Die CVEs stehen befristet bis 2026-12-13 in `security/scan-exceptions.txt`; bis dahin wird auf ein TimescaleDB-Image mit 16.16 gewechselt oder PostgreSQL 16.16 aus dem Quelltext gebaut (Prüfpunkt 2026-12-06).
 
+## Datenbank-Image `reticora-keycloak-db`
+
+`deploy/docker-compose/keycloak-db/Dockerfile` (E-96, A-85, Update-Plan
+Upd-01) ist die PostgreSQL-Datenbank von Keycloak (Compose-Dienst
+`keycloak-db`). Das offizielle `postgres:16.16-alpine` liefert `gosu` mit
+Go 1.24.6 aus und baut es nicht neu; Trivy meldete darin 26 IDs der
+Go-Standardbibliothek (CVE-2025-68121 Critical, 25 High). Das eigene Image:
+
+- `POSTGRES_IMAGE` pinnt die Basis per Version und Digest des
+  Multi-Arch-Index:
+  `postgres:16.16-alpine@sha256:0adbf25a9e96d38823bb813f3ac0ed41fadb665c88f1df7fe6dbfb060cbdc106`.
+- Die Stufe `go-tools` baut `gosu` mit der Go-Toolchain des Repositorys neu
+  (`GO_IMAGE`, `golang:1.26.11-alpine` per Digest) in `GOSU_VERSION`
+  (`v0.0.0-20261025094355-29b939aa5bd4`, Commit des Tags 1.20);
+  `go install` prüft das Modul gegen sum.golang.org. Das Binary ersetzt
+  `/usr/local/bin/gosu` der Basis, denn `docker-entrypoint.sh` ruft `gosu`
+  beim Namen auf (`su-exec` ist dort nur ein Link darauf). Der Build prüft,
+  dass `gosu postgres` und `su-exec postgres` als UID 70 laufen.
+- Alles andere bleibt das Hersteller-Image: Major 16, `PGDATA`
+  `/var/lib/postgresql/data`, Benutzer `postgres` mit UID/GID 70. Ein Volume
+  `keycloakdb` von `postgres:16.15-alpine` oder `16.16-alpine` läuft
+  unverändert weiter; `tests/keycloak-db-image.test.sh` (install-smoke, Job
+  `reinstall`) weist das mit beiden Vorgängern und einem leeren Volume nach.
+- `release.yml` baut, scannt, signiert und attestiert es wie die übrigen
+  Release-Images; `install-cloud.sh` prüft es im Release-Modus mit
+  `cosign verify` und pinnt es als `RETICORA_KEYCLOAK_DB_IMAGE`, der
+  Quell-Build baut es über `docker-compose.override.yml`.
+
+Trivy 0.75.0 am 2026-11-13: 0 Critical/High (Hersteller-Image: 1 Critical,
+25 High); `govulncheck -mode=binary` auf dem neuen `gosu`: keine Funde.
+`tests/ci-config.test.sh` (`keycloak_db_image_pin`) prüft die Pins, die
+Toolchain-Gleichheit mit `backend/Dockerfile` und den Ersatz von `gosu`. Ein
+neues Hersteller-Release erneuert Version und Digest von `POSTGRES_IMAGE`;
+eine neue Repository-Toolchain zieht `GO_IMAGE` mit.

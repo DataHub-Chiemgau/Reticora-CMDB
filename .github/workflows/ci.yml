@@ -860,6 +860,11 @@ jobs:
           - image: postgres
             context: deploy/docker-compose/postgres
             dockerfile: deploy/docker-compose/postgres/Dockerfile
+          # reticora-keycloak-db of release.yml (E-96, A-85): the official
+          # postgres image with gosu rebuilt by the repository toolchain.
+          - image: keycloak-db
+            context: deploy/docker-compose/keycloak-db
+            dockerfile: deploy/docker-compose/keycloak-db/Dockerfile
     steps:
       - uses: actions/checkout@v4
 
@@ -928,9 +933,6 @@ jobs:
             manifest: deploy/k8s/base/components/nats-edge/nats-edge.yaml
           - image: redis
             compose_service: redis
-            manifest: ""
-          - image: keycloak-db
-            compose_service: keycloak-db
             manifest: ""
           - image: keycloak
             compose_service: keycloak

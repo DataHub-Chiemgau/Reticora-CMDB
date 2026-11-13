@@ -1559,8 +1559,9 @@ Continuous Integration runs on **GitHub Actions** (`.github/workflows/ci.yml`), 
 A version tag `v*` starts the release workflow. Tools follow E-31.
 
 1. It builds the edge binaries `reticora-collector` and `reticora-agent` for linux/amd64 and linux/arm64.
-2. It builds the images `reticora-server`, `reticora-collector`, `reticora-frontend` and `reticora-postgres` and pushes them to `ghcr.io/datahub-chiemgau`.
+2. It builds the images `reticora-server`, `reticora-collector`, `reticora-frontend`, `reticora-postgres` and `reticora-keycloak-db` and pushes them to `ghcr.io/datahub-chiemgau`.
    - `reticora-postgres` is TimescaleDB with pgBackRest (`deploy/docker-compose/postgres/Dockerfile`). Its base is pinned by version and digest (the same TimescaleDB reference as CI and the dev stack, E-96), its Go helpers `gosu` and `timescaledb-tune` are rebuilt with the repository's Go toolchain, and the pgBackRest tarball is checked by sha256.
+   - `reticora-keycloak-db` is the PostgreSQL of Keycloak (`deploy/docker-compose/keycloak-db/Dockerfile`): the official `postgres:16.16-alpine`, pinned by version and digest, with its `gosu` rebuilt by the repository's Go toolchain (the vendor's is built with an outdated Go, E-96, A-85). Major version, data directory and UID 70 are the vendor's, so the `keycloakdb` volume of an earlier installation (`postgres:16.x-alpine`) keeps running.
    - Before the push, Trivy scans each image with the threshold of the CI job `image-scan`: Critical/High findings with an available fix block. Exceptions follow `security/scan-exceptions.txt`, see [security/abhaengigkeitsscans.md](security/abhaengigkeitsscans.md).
 3. Syft generates an SPDX SBOM for every binary and every image, plus one for the source tree.
 4. Everything is signed keyless with cosign: a Fulcio certificate for the identity of the release workflow and an entry in the Rekor log.
@@ -1568,7 +1569,7 @@ A version tag `v*` starts the release workflow. Tools follow E-31.
    - Images are signed, and their SBOM is attached as a cosign attestation (`spdxjson`).
 5. The workflow verifies its own signatures with the real cosign before anything is published (WP-545):
    - For linux/amd64 and linux/arm64, `edgecore/update/cosign_real_test.go` (build tag `cosignreal`) runs the updater's `CosignVerifier` against the collector and its bundle: the signed binary passes with the pinned release identity; the binary changed by one byte, the bundle of another artifact and another identity are refused. A failing or skipped test stops the release.
-   - Every bundle passes `cosign verify-blob`; every image passes `cosign verify` and `cosign verify-attestation --type spdxjson`. The release is published only after all four images passed.
+   - Every bundle passes `cosign verify-blob`; every image passes `cosign verify` and `cosign verify-attestation --type spdxjson`. The release is published only after all five images passed.
    - It then publishes the files on the GitHub release, together with `SHA256SUMS` and one updater manifest per binary (`<binary>.release.json`, holding `downloadUrl`, `signatureBundleUrl` and `checksums.sha256`).
 
 Release candidate of gate G1 (WP-595, `docs/security/review-g1.md`, section „Läufe auf dem Release-Kandidaten“): commit `536e3ab8` on `main` (gate decision of 2026-11-10, result „bedingt bestanden“; CI run 42712217817 and install smoke run 42712217841 green); tag `v1.0.0-rc.1` on `9989d9d3`, release run 42780580858 green (attempt 2), install smoke with release mode 42780580723 green: pre-release with SBOMs, Sigstore bundles, image signatures, SBOM attestations and the `cosign_real` test.
@@ -1606,10 +1607,10 @@ sha256sum -c --ignore-missing SHA256SUMS
 
 The same `verify-blob` call checks an SBOM (`<binary>.spdx.json`, `reticora-source.spdx.json`) and the source tarball (`reticora-source-<tag>.tar.gz`).
 
-Images: the signature (`cosign verify`) and the SPDX SBOM attestation (`cosign verify-attestation --type spdxjson`) of all four images `reticora-server`, `reticora-collector`, `reticora-frontend` and `reticora-postgres`:
+Images: the signature (`cosign verify`) and the SPDX SBOM attestation (`cosign verify-attestation --type spdxjson`) of all five images `reticora-server`, `reticora-collector`, `reticora-frontend`, `reticora-postgres` and `reticora-keycloak-db`:
 
 ```bash
-for image in reticora-server reticora-collector reticora-frontend reticora-postgres; do
+for image in reticora-server reticora-collector reticora-frontend reticora-postgres reticora-keycloak-db; do
   cosign verify "ghcr.io/datahub-chiemgau/$image:$VERSION" \
     --certificate-identity-regexp "$IDENTITY" \
     --certificate-oidc-issuer "$ISSUER"

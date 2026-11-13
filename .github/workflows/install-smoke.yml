@@ -37,6 +37,7 @@ on:
       - 'tests/backup-*.sh'
       - 'tests/nats-mtls.test.sh'
       - 'tests/keycloak-realm-upgrade.test.sh'
+      - 'tests/keycloak-db-image.test.sh'
       - 'tests/keycloak/**'
       - 'frontend/e2e/onboarding.spec.ts'
       - 'frontend/e2e/fixtures/**'
@@ -1087,6 +1088,13 @@ jobs:
       - name: Keycloak realm upgrade from the realm before WP-044 (Keycloak 24 to 26)
         run: ./tests/keycloak-realm-upgrade.test.sh
 
+      # E-96, A-85: keycloak-db runs the own image reticora-keycloak-db; the
+      # volume of the vendor images it replaces (postgres:16.15-alpine and
+      # 16.16-alpine) keeps running on it (PostgreSQL 16.16, UID 70, data and
+      # password kept), and a fresh volume initializes.
+      - name: keycloak-db on the own image takes over the volume of the vendor image
+        run: ./tests/keycloak-db-image.test.sh
+
       # Local build of the checked-out state in every run (E-69).
       - name: First installation
         run: ./install.sh --cloud --non-interactive --build-from-source
@@ -1247,7 +1255,7 @@ jobs:
             gh release view "$GITHUB_REF_NAME" --json assets -q '.assets[].name' 2>/dev/null \
               | grep -qx 'SHA256SUMS.sigstore.json' || return 1
             local image
-            for image in reticora-server reticora-frontend reticora-postgres; do
+            for image in reticora-server reticora-frontend reticora-postgres reticora-keycloak-db; do
               "$RUNNER_TEMP/cosign" verify "$REGISTRY/$image:$GITHUB_REF_NAME" \
                 --certificate-identity-regexp "$identity" \
                 --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null 2>&1 || return 1
@@ -1280,13 +1288,14 @@ jobs:
             echo "FAIL: the default path reported an unverified installation"
             exit 1
           fi
-          for image in server frontend postgres; do
-            grep -qE "^RETICORA_${image^^}_IMAGE=${REGISTRY//./\\.}/reticora-${image}@sha256:[0-9a-f]{64}$" "$env_file"
+          for image in server frontend postgres keycloak-db; do
+            var="RETICORA_${image^^}_IMAGE"
+            grep -qE "^${var//-/_}=${REGISTRY//./\\.}/reticora-${image}@sha256:[0-9a-f]{64}$" "$env_file"
             grep -q "Signed image verified: reticora-${image}@sha256:" "$log"
           done
           grep -qx "RETICORA_IMAGE_TAG=$GITHUB_REF_NAME" "$env_file"
           [ -f deploy/docker-compose/docker-compose.override.yml.disabled ]
-          for image in reticora-server reticora-frontend reticora-postgres; do
+          for image in reticora-server reticora-frontend reticora-postgres reticora-keycloak-db; do
             if [ -n "$(docker images -q "$image:latest")" ]; then
               echo "FAIL: $image:latest was built locally"
               exit 1

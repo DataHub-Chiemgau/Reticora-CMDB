@@ -21,7 +21,8 @@
 #   cd deploy/docker-compose
 #   docker compose --env-file .env up -d
 # To run with prebuilt registry images instead, set RETICORA_SERVER_IMAGE /
-# RETICORA_FRONTEND_IMAGE / RETICORA_POSTGRES_IMAGE in .env and rename
+# RETICORA_FRONTEND_IMAGE / RETICORA_POSTGRES_IMAGE /
+# RETICORA_KEYCLOAK_DB_IMAGE in .env and rename
 # docker-compose.override.yml to docker-compose.override.yml.disabled.
 # install-cloud.sh does this in its release mode, the default (E-69): it
 # verifies the signed release images with cosign and pins them by digest
@@ -217,8 +218,15 @@ services:
       timeout: 3s
       retries: 5
 
+  # PostgreSQL of Keycloak: the own image reticora-keycloak-db
+  # (deploy/docker-compose/keycloak-db, E-96, A-85), the official
+  # postgres:16.16-alpine with its gosu rebuilt by the repository toolchain;
+  # same major, PGDATA and UID 70, so the volume of postgres:16.x-alpine
+  # keeps running. The release mode runs the signed image
+  # (RETICORA_KEYCLOAK_DB_IMAGE, pinned by digest); build: lives in
+  # docker-compose.override.yml.
   keycloak-db:
-    image: postgres:16.16-alpine@sha256:0adbf25a9e96d38823bb813f3ac0ed41fadb665c88f1df7fe6dbfb060cbdc106
+    image: ${RETICORA_KEYCLOAK_DB_IMAGE:-reticora-keycloak-db:latest}
     restart: unless-stopped
     logging: *logging
     environment:

@@ -205,6 +205,10 @@ jobs:
           - image: reticora-postgres
             context: deploy/docker-compose/postgres
             dockerfile: deploy/docker-compose/postgres/Dockerfile
+          # PostgreSQL of Keycloak with the rebuilt gosu (E-96, A-85).
+          - image: reticora-keycloak-db
+            context: deploy/docker-compose/keycloak-db
+            dockerfile: deploy/docker-compose/keycloak-db/Dockerfile
     steps:
       - uses: actions/checkout@v4
 
@@ -302,9 +306,10 @@ jobs:
           cosign sign --yes "$IMAGE"
           cosign attest --yes --type spdxjson --predicate "${{ matrix.image }}.spdx.json" "$IMAGE"
 
-      # WP-545: every image (the matrix, reticora-postgres included) is
-      # checked as an operator checks it (docs/README.md): its signature and
-      # its SPDX SBOM attestation for the release identity. A failure fails
+      # WP-545: every image (the matrix, reticora-postgres and
+      # reticora-keycloak-db included) is checked as an operator checks it
+      # (docs/README.md): its signature and its SPDX SBOM attestation for the
+      # release identity. A failure fails
       # this job, and the binaries job publishes the release only after every
       # image passed (needs: images).
       - name: Verify the image signature and SBOM attestation

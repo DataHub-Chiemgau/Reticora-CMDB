@@ -2,7 +2,8 @@
 #
 # install-reinstall.test.sh — Keycloak 24 integration test: a re-run of
 # install-cloud.sh applies rotated Keycloak values (WP-386, INS-05, F-125).
-# Needs Docker (the keycloak and keycloak-db images of deploy/docker-compose/docker-compose.yml).
+# Needs Docker (the keycloak image of deploy/docker-compose/docker-compose.yml and
+# the keycloak-db image built from deploy/docker-compose/keycloak-db).
 #
 # Runs the Keycloak steps of the installer — collect_config, write_env,
 # configure_realm and the Keycloak part of start_stack (keycloak-db and
@@ -51,6 +52,13 @@ KCADM_CALLS="$TMP_ROOT/kcadm-calls"
 mkdir -p "$T_COMPOSE_DIR"
 # A copy, so that the realm file lands in the throwaway .generated/.
 cp deploy/docker-compose/docker-compose.yml "$T_COMPOSE_DIR/"
+# keycloak-db runs the own image reticora-keycloak-db (E-96, A-85); the copy
+# has no build override, so the image of this checkout is built here, as the
+# installer's source build does (provide_images).
+if ! docker build -q -t reticora-keycloak-db:latest deploy/docker-compose/keycloak-db >/dev/null; then
+    echo "FAIL: building reticora-keycloak-db (deploy/docker-compose/keycloak-db) failed"
+    exit 1
+fi
 
 compose() { docker compose -p "$PROJECT" --env-file "$T_ENV" -f "$T_COMPOSE_DIR/docker-compose.yml" "$@"; }
 

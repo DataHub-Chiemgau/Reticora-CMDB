@@ -6,15 +6,15 @@
 # ID in the scans of the own release images, govulncheck or npm audit.
 #
 # The findings lie in the vendor images (Go and Java dependencies and OS
-# packages of opensearch, keycloak, certbot and the postgres image of
-# keycloak-db; the logical backup runs on the own image since WP-1178);
-# none of these images has a newer release (2026-11-10). On 2026-11-13 the
-# object storage moved from the frozen pgsty/minio (release 2026-08-04) to
-# pgsty/silo (release 2026-11-12, Trivy: no critical or high finding with a
-# fix), so its 31 IDs left this file (20 entries removed, 11 stay for
-# keycloak-db). keycloak-db moved to
-# postgres:16.16-alpine on 2026-11-13 (vendor fix of krb5-libs and libxslt);
-# its gosu still carries Go 1.24.6, the same IDs as before. On 2026-11-13
+# packages of opensearch, keycloak and certbot; the logical backup runs on
+# the own image since WP-1178); none of these images has a newer release
+# (2026-11-10). On 2026-11-13 the object storage moved from the frozen
+# pgsty/minio (release 2026-08-04) to pgsty/silo (release 2026-11-12, Trivy:
+# no critical or high finding with a fix), and keycloak-db moved to the own
+# image reticora-keycloak-db (deploy/docker-compose/keycloak-db:
+# postgres:16.16-alpine with gosu rebuilt by the repository toolchain, E-96,
+# A-85), scanned by image-scan with security/scan-exceptions.txt only; the
+# vendor IDs of both left this file. On 2026-11-13
 # Amazon Linux 2023 published fixes for sqlite-libs and rpm that the pinned
 # opensearch 2.19.7 (newest 2.x release, digest unchanged) does not carry yet;
 # their since: is that first report. Otherwise since: is the first scan of the
@@ -22,7 +22,6 @@
 # The resolution per image is E-246 (docs/plan/phase3/entscheidungen.md).
 
 # critical
-CVE-2025-68121 exp:2026-11-17 since:2026-11-10 sev:critical # keycloak-db: stdlib
 CVE-2025-14813 exp:2026-11-17 since:2026-11-10 sev:critical # opensearch: org.bouncycastle:bcprov-jdk15to18
 CVE-2026-8763 exp:2026-11-17 since:2026-11-10 sev:critical # opensearch: org.bouncycastle:bcprov-jdk15to18
 # high
@@ -32,31 +31,6 @@ CVE-2026-97687 exp:2026-12-10 since:2026-11-10 sev:high # certbot: urllib3
 CVE-2026-97689 exp:2026-12-10 since:2026-11-10 sev:high # certbot: urllib3
 GHSA-6v7p-g79w-8964 exp:2026-12-10 since:2026-11-10 sev:high # certbot: msgpack
 CVE-2026-102554 exp:2026-12-10 since:2026-11-10 sev:high # keycloak: com.google.guava:guava; opensearch: com.google.guava:guava
-CVE-2025-61726 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2025-61729 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-111943 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-25679 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-27145 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-32280 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-32281 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-32283 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-33811 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-33814 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-33818 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-39820 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-39821 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-39822 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-39836 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-42499 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-42504 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-56853 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-56858 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-56859 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-56860 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-56862 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-78667 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-78669 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
-CVE-2026-97031 exp:2026-12-10 since:2026-11-10 sev:high # keycloak-db: stdlib
 CVE-2026-10050 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: org.eclipse.jetty:jetty-security
 CVE-2026-103242 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: python3-rpm, rpm, rpm-build-libs, rpm-libs, rpm-sign-libs
 CVE-2026-106451 exp:2026-12-10 since:2026-11-10 sev:high # opensearch: at.yawk.lz4:lz4-java

@@ -6,7 +6,8 @@
 # WP-873 (SR-60): step 1 runs the previous Keycloak (LEGACY_KC_IMAGE, 24),
 # steps 2 and later the keycloak image of deploy/docker-compose/
 # docker-compose.yml (26) on the same keycloak-db, which migrates it. Needs
-# Docker (the keycloak and keycloak-db images of that file) and jq.
+# Docker (the keycloak image of that file, the keycloak-db image built from
+# deploy/docker-compose/keycloak-db) and jq.
 #
 # Runs keycloak-db and keycloak of deploy/docker-compose/docker-compose.yml in
 # a throwaway compose project (Keycloak on 127.0.0.1) and the Keycloak steps
@@ -63,6 +64,13 @@ DEFAULT_ORG="00000000-0000-0000-0000-000000000001"
 mkdir -p "$T_COMPOSE_DIR"
 # A copy, so that the realm file lands in the throwaway .generated/.
 cp deploy/docker-compose/docker-compose.yml "$T_COMPOSE_DIR/"
+# keycloak-db runs the own image reticora-keycloak-db (E-96, A-85); the copy
+# has no build override, so the image of this checkout is built here, as the
+# installer's source build does (provide_images).
+if ! docker build -q -t reticora-keycloak-db:latest deploy/docker-compose/keycloak-db >/dev/null; then
+    echo "FAIL: building reticora-keycloak-db (deploy/docker-compose/keycloak-db) failed"
+    exit 1
+fi
 # A source tree whose realm template is the legacy realm (step 1).
 LEGACY_TREE="$TMP_ROOT/legacy"
 mkdir -p "$LEGACY_TREE/deploy/keycloak"

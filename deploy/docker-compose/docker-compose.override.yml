@@ -2,13 +2,19 @@
 # ones. Merged automatically by `docker compose` only when it runs from this
 # directory (or when the file is passed with an explicit -f; install-cloud.sh
 # does exactly that). Rename it to docker-compose.override.yml.disabled when
-# RETICORA_SERVER_IMAGE / RETICORA_FRONTEND_IMAGE / RETICORA_POSTGRES_IMAGE
-# point to a registry (install-cloud.sh does this in its release mode).
+# RETICORA_SERVER_IMAGE / RETICORA_FRONTEND_IMAGE / RETICORA_POSTGRES_IMAGE /
+# RETICORA_KEYCLOAK_DB_IMAGE point to a registry (install-cloud.sh does this
+# in its release mode).
 services:
   # TimescaleDB with pgBackRest (WP-100); also the image of the backup service.
   postgres:
     build:
       context: ./postgres
+
+  # PostgreSQL of Keycloak with the rebuilt gosu (E-96, A-85).
+  keycloak-db:
+    build:
+      context: ./keycloak-db
 
   server:
     build:

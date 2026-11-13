@@ -7,7 +7,8 @@
 # --build-from-source):
 #
 #   - install-cloud.sh release mode (the default): reticora-server,
-#     reticora-frontend and reticora-postgres pass 'cosign verify' against the
+#     reticora-frontend, reticora-postgres and reticora-keycloak-db pass
+#     'cosign verify' against the
 #     release workflow identity and are pinned by digest in .env before
 #     anything starts, nothing is built; the release is --release, the tag of
 #     the checkout or the newest release, and the checkout must be its signed
@@ -392,7 +393,8 @@ wf = yaml.safe_load(open(sys.argv[1]))
 job = wf["jobs"]["images"]
 problems = []
 listed = {e["image"] for e in job["strategy"]["matrix"]["include"]}
-for image in ("reticora-server", "reticora-collector", "reticora-frontend", "reticora-postgres"):
+for image in ("reticora-server", "reticora-collector", "reticora-frontend", "reticora-postgres",
+              "reticora-keycloak-db"):
     if image not in listed:
         problems.append(f"{image} is not in the image matrix")
 steps = job["steps"]
@@ -411,9 +413,9 @@ print("; ".join(problems))
 PY
 )"
 if [ -z "$images" ]; then
-    ok "release.yml: every image (reticora-postgres included) passes cosign verify and verify-attestation --type spdxjson after signing"
+    ok "release.yml: every image (reticora-postgres and reticora-keycloak-db included) passes cosign verify and verify-attestation --type spdxjson after signing"
 else
-    fail "release.yml: every image (reticora-postgres included) passes cosign verify and verify-attestation --type spdxjson after signing" "$images"
+    fail "release.yml: every image (reticora-postgres and reticora-keycloak-db included) passes cosign verify and verify-attestation --type spdxjson after signing" "$images"
 fi
 RELEASES="$TMP_ROOT/releases"
 mkdir -p "$RELEASES/$TAG"
@@ -464,7 +466,7 @@ IMAGE_REGISTRY="ghcr.io/datahub-chiemgau"
 make_registry() { # <dir> <image tag> <release tag of the signature>
     local image n=0
     mkdir -p "$1"
-    for image in reticora-server reticora-frontend reticora-postgres reticora-collector; do
+    for image in reticora-server reticora-frontend reticora-postgres reticora-collector reticora-keycloak-db; do
         n=$((n + 1))
         printf 'digest=sha256:%s\nidentity=%s\nissuer=%s\nreference=%s\n' "$(printf '%064d' "$n")" \
             "$(identity_of "$3")" "$ISSUER" "$IMAGE_REGISTRY/$image" > "$1/$(printf '%s' "$IMAGE_REGISTRY/$image:$2" | tr '/:@' '___')"
@@ -885,27 +887,28 @@ cloud() {
     sandbox "$name" "$path" "${vars[@]}" bash -c 'set -euo pipefail; set -- ${T_ARGS:-}; . "$0"; NON_INTERACTIVE=1
         [ -z "${T_CHECKOUT:-}" ] || SCRIPT_DIR="$T_CHECKOUT"
         ENV_FILE="$CASE/.env"; OVERRIDE_FILE="$CASE/override.yml"; : > "$OVERRIDE_FILE"
-        printf "RETICORA_IMAGE_REGISTRY=x\nRETICORA_SERVER_IMAGE=\nRETICORA_FRONTEND_IMAGE=\nRETICORA_POSTGRES_IMAGE=\nRETICORA_HTTP_BIND=127.0.0.1\n" > "$ENV_FILE"
+        printf "RETICORA_IMAGE_REGISTRY=x\nRETICORA_SERVER_IMAGE=\nRETICORA_FRONTEND_IMAGE=\nRETICORA_POSTGRES_IMAGE=\nRETICORA_KEYCLOAK_DB_IMAGE=\nRETICORA_HTTP_BIND=127.0.0.1\n" > "$ENV_FILE"
         compose_cmd() { printf "compose %s\n" "$*" >> "$FAKE_LOG"; }
         RETICORA_IMAGE_REGISTRY="${T_REGISTRY-ghcr.io/datahub-chiemgau}"; RETICORA_IMAGE_TAG="${T_TAG:-v1.2.3}"; RETICORA_TLS_DOMAIN=""
         '"$1" "$CLOUD_DIR/harness.sh" 2>&1
 }
-pinned() { grep -c -E "^RETICORA_(SERVER|FRONTEND|POSTGRES)_IMAGE=ghcr\.io/datahub-chiemgau/reticora-(server|frontend|postgres)@sha256:[0-9]{64}$" "$(case_dir "$1")/.env"; }
+pinned() { grep -c -E "^RETICORA_(SERVER|FRONTEND|POSTGRES|KEYCLOAK_DB)_IMAGE=ghcr\.io/datahub-chiemgau/reticora-(server|frontend|postgres|keycloak-db)@sha256:[0-9]{64}$" "$(case_dir "$1")/.env"; }
 compose_calls() { grep '^compose' "$(case_dir "$1")/calls"; }
 
 OUT="$(cloud cl-ok "$P_ALL" -- provide_images)"; RC=$?
 env_file="$(case_dir cl-ok)/.env"
-if [ "$(pinned cl-ok)" -eq 3 ] \
+if [ "$(pinned cl-ok)" -eq 4 ] \
     && grep -qx "RETICORA_SERVER_IMAGE=$IMAGE_REGISTRY/reticora-server@sha256:$(printf '%064d' 1)" "$env_file" \
     && grep -qx "RETICORA_POSTGRES_IMAGE=$IMAGE_REGISTRY/reticora-postgres@sha256:$(printf '%064d' 3)" "$env_file" \
+    && grep -qx "RETICORA_KEYCLOAK_DB_IMAGE=$IMAGE_REGISTRY/reticora-keycloak-db@sha256:$(printf '%064d' 5)" "$env_file" \
     && grep -qx 'RETICORA_HTTP_BIND=127.0.0.1' "$env_file" && [ "$(stat -c %a "$env_file")" = 600 ] \
-    && [ "$(compose_calls cl-ok)" = "compose pull server frontend postgres" ] \
+    && [ "$(compose_calls cl-ok)" = "compose pull server frontend postgres keycloak-db" ] \
     && [ -f "$(case_dir cl-ok)/override.yml.disabled" ] && [ ! -e "$(case_dir cl-ok)/override.yml" ]; then :; else RC=91; fi
-expect "install-cloud.sh release mode: server, frontend and postgres verified, pinned by digest in .env, pulled — nothing built" 0 \
-    "Signed image verified: reticora-postgres@sha256:" "$OUT"
+expect "install-cloud.sh release mode: server, frontend, postgres and keycloak-db verified, pinned by digest in .env, pulled — nothing built" 0 \
+    "Signed image verified: reticora-keycloak-db@sha256:" "$OUT"
 calls="$(cat "$(case_dir cl-ok)/calls")"
-if [ "$(grep -cE "^cosign verify $IMAGE_REGISTRY/reticora-(server|frontend|postgres):$TAG " <<<"$calls")" -eq 3 ] \
-    && [ "$(grep -cF -- ":$TAG $SIGNER_ARGS" <<<"$calls")" -eq 3 ]; then
+if [ "$(grep -cE "^cosign verify $IMAGE_REGISTRY/reticora-(server|frontend|postgres|keycloak-db):$TAG " <<<"$calls")" -eq 4 ] \
+    && [ "$(grep -cF -- ":$TAG $SIGNER_ARGS" <<<"$calls")" -eq 4 ]; then
     ok "install-cloud.sh release mode: cosign verify pins the release identity of the tag and the GitHub Actions issuer"
 else
     fail "install-cloud.sh release mode: cosign verify pins the release identity of the tag and the GitHub Actions issuer" "$calls"
@@ -972,8 +975,9 @@ expect "install-cloud.sh release mode: a failed verification stops before compos
 OUT="$(cloud cl-src "$P_ALL" T_ARGS=--build-from-source -- "$CLOUD_MAIN")"; RC=$?
 calls="$(cat "$(case_dir cl-src)/calls")"
 { grep -qx 'compose build server frontend' <<<"$calls" && grep -qx 'compose build postgres' <<<"$calls" \
+    && grep -qx 'compose build keycloak-db' <<<"$calls" \
     && ! grep -qE '^(cosign|curl)' <<<"$calls"; } || RC=86
-expect "install-cloud.sh --build-from-source: 'not signature-verified' at the start, then server, frontend and postgres are built" 0 \
+expect "install-cloud.sh --build-from-source: 'not signature-verified' at the start, then server, frontend, postgres and keycloak-db are built" 0 \
     "Local source build: the images are built from this checkout and are not signature-verified \(--build-from-source\)" "$OUT"
 
 # The default of a real configuration (E-69, Option 1): an .env of an earlier
@@ -992,16 +996,16 @@ CLOUD_DEFAULT="$LEGACY_ENV"'preflight() { :; }; ensure_session_key() { :; }; con
     bootstrap_tls_cert() { :; }; issue_tls_certificate() { :; }; verify_stack() { :; }; gc_images() { :; }
     print_summary() { :; }; start_stack() { printf "start_stack\n" >> "$FAKE_LOG"; }; main'
 api_called() { grep -qx 'curl https://api.github.com/repos/DataHub-Chiemgau/Reticora-CMDB/releases/latest' "$(case_dir "$1")/calls"; }
-release_env() { # <case> — .env names the signed release and pins its three images
+release_env() { # <case> — .env names the signed release and pins its four images
     local f; f="$(case_dir "$1")/.env"
-    grep -qx "RETICORA_IMAGE_REGISTRY=$IMAGE_REGISTRY" "$f" && grep -qx "RETICORA_IMAGE_TAG=$TAG" "$f" && [ "$(pinned "$1")" -eq 3 ]
+    grep -qx "RETICORA_IMAGE_REGISTRY=$IMAGE_REGISTRY" "$f" && grep -qx "RETICORA_IMAGE_TAG=$TAG" "$f" && [ "$(pinned "$1")" -eq 4 ]
 }
 OUT="$(cloud cl-default "$P_ALL" T_CHECKOUT="$CO_TAG" -- "$CLOUD_DEFAULT")"; RC=$?
 calls="$(cat "$(case_dir cl-default)/calls")"
 order="$(grep -E '^(cosign verify|compose|start_stack)' <<<"$calls" | cut -d' ' -f1-2 | uniq | tr '\n' ',')"
 { [ "$order" = "cosign verify-blob,cosign verify,compose pull,start_stack," ] && release_env cl-default \
-    && [ "$(grep -cE "^cosign verify $IMAGE_REGISTRY/reticora-(server|frontend|postgres):$TAG " <<<"$calls")" -eq 3 ] \
-    && [ "$(grep -cF -- ":$TAG $SIGNER_ARGS" <<<"$calls")" -eq 3 ] \
+    && [ "$(grep -cE "^cosign verify $IMAGE_REGISTRY/reticora-(server|frontend|postgres|keycloak-db):$TAG " <<<"$calls")" -eq 4 ] \
+    && [ "$(grep -cF -- ":$TAG $SIGNER_ARGS" <<<"$calls")" -eq 4 ] \
     && ! grep -q '^compose build' <<<"$calls" && ! api_called cl-default; } || RC=76
 expect "install-cloud.sh default (no switch): the release of the checkout's tag — checkout and images verified, pinned, nothing built" 0 \
     "Release mode: the images are verified with cosign.*Source verified: $TAG is commit $commit" "$(printf '%s' "$OUT" | tr '\n' ' ')" "not signature-verified"
@@ -1061,7 +1065,7 @@ LEGACY="$LEGACY_ENV"'collect_config >/dev/null; write_env'
 OUT="$(cloud cl-stale "$P_ALL" RETICORA_BUILD_FROM_SOURCE=1 RETICORA_FRONTEND_IMAGE=evil/frontend:latest -- "$LEGACY")"; RC=$?
 env_file="$(case_dir cl-stale)/.env"
 { [ "$(grep -c '^RETICORA_SERVER_IMAGE=$' "$env_file")" -eq 1 ] && grep -qx 'RETICORA_FRONTEND_IMAGE=' "$env_file" \
-    && grep -qx 'RETICORA_POSTGRES_IMAGE=' "$env_file" && ! grep -q 'sha256:\|evil' "$env_file"; } || RC=85
+    && grep -qx 'RETICORA_POSTGRES_IMAGE=' "$env_file" && grep -qx 'RETICORA_KEYCLOAK_DB_IMAGE=' "$env_file" && ! grep -q 'sha256:\|evil' "$env_file"; } || RC=85
 expect "install-cloud.sh: write_env drops image pins of an earlier run and from the environment (source build)" 0 "" "$OUT"
 
 # ─── The hint of every message leads to the troubleshooting section ─────────
