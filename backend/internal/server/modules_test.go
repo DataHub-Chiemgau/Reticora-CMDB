@@ -100,8 +100,10 @@ func TestG2DefaultEnablesP2ModulesOnly(t *testing.T) {
 		t.Error("the reservation sweeper (module inventory) does not start with the G2 default")
 	}
 	for _, name := range config.WorkerNames {
-		if name != config.WorkerMonitoring && !g2.WorkerAllowed(name) {
-			t.Errorf("worker %s is switched off by a module in the G2 default", name)
+		p3 := slices.Contains(p3Workers, name)
+		if g2.WorkerAllowed(name) == p3 {
+			t.Errorf("worker %s: allowed %v in the G2 default, want %v (only the workers of the P3 modules are off)",
+				name, g2.WorkerAllowed(name), !p3)
 		}
 	}
 
@@ -780,7 +782,7 @@ func TestP3ModulePrefixesAreGated(t *testing.T) {
 // package that adds a worker of a P3 module (WP-980 monitoring, WP-1114
 // workflow) adds its name here, in LateModules[].Workers, in both
 // deployments (TestEveryWorkerSwitchIsDeployable) and in docs/ops/workers.md.
-var p3Workers = []string{config.WorkerMonitoring}
+var p3Workers = []string{config.WorkerMonitoring, config.WorkerProbeAssign}
 
 // TestP3WorkersBelongToTheirModule covers OPS-02 [P3] (WP-869, E-162):
 // every worker of a P3 module is listed in LateModules[].Workers of a P3

@@ -37,6 +37,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/probe"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
@@ -430,6 +431,18 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 		// monitoring.
 		if d.modules.Enabled(server.ModuleMonitoring) {
 			systemJobs = append(systemJobs, alarm.NewRetention(pool).Schedule())
+			// Probe assignment (PRB-03, PRB-11, WP-941): every 10 s each
+			// collector group under its lock probe_assign:<group>, the
+			// worker probe_assign under RETICORA_WORKER_PROBE_ASSIGN_ENABLED;
+			// a committed probe write assigns its groups at once on the
+			// instance that served it.
+			assigner := probe.NewAssigner(pool)
+			if store, ok := d.repos.Probes.(*probe.PGRepository); ok {
+				store.SetAssignTrigger(assigner)
+			}
+			if d.cfg.WorkerEnabled(config.WorkerProbeAssign) {
+				systemJobs = append(systemJobs, workerJob(config.WorkerProbeAssign, assigner.Schedule()))
+			}
 		}
 		// Credential age: daily each stored secret beyond its max_age_days
 		// once per secret_version as credential.rotation_due (CRD-05,

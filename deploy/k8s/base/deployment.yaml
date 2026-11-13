@@ -147,6 +147,11 @@ spec:
             # system job of the scheduler.
             - name: RETICORA_WORKER_COMPUTED_REFRESH_ENABLED
               value: "true"
+            # Probe assignment to the collector group members every 10 s
+            # (PRB-03, WP-941), a system job of the scheduler; module
+            # monitoring.
+            - name: RETICORA_WORKER_PROBE_ASSIGN_ENABLED
+              value: "true"
           volumeMounts:
             - name: session-key
               mountPath: /etc/reticora/session

@@ -525,6 +525,11 @@ const (
 	// attribute.computed_refresh of the scheduler: the hourly refresh of
 	// computed attributes (JOB-02 [P2], WP-718).
 	WorkerComputedRefresh = "computed_refresh"
+	// WorkerProbeAssign runs as the system job probe.assign of the
+	// scheduler: the assignment of the probes to the members of their
+	// collector group every 10 s (PRB-03, PRB-11, WP-941; module
+	// monitoring).
+	WorkerProbeAssign = "probe_assign"
 )
 
 // WorkerNames lists every registered worker.
@@ -543,6 +548,7 @@ var WorkerNames = []string{
 	WorkerDiscoveryScopes,
 	WorkerOfflineDetector,
 	WorkerComputedRefresh,
+	WorkerProbeAssign,
 }
 
 // OfflineDetectorAlias is the former switch of the offline detector (WP-157).

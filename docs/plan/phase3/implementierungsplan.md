@@ -5296,14 +5296,17 @@ PRT-01;[P3];E;backend/internal/entitlement/probe_budget_test.go;WP-940
 - [ ] AK5: Nach dem Commit erhält eine Schnittstelle `probe.AssignmentNotifier` die betroffenen Collectoren mit neuer Version; dieses WP liefert eine protokollierende Umsetzung, die Nachricht `.probes.changed` folgt mit WP-948.
 - [ ] AK6: Metriken `reticora_worker_runs_total` und `reticora_worker_errors_total` für `probe_assign` (`TestEveryWorkerExportsRunAndErrorMetrics`). `probe_assign` steht in `config.WorkerNames` und beim Modul `monitoring` in `LateModules[].Workers` (`modules.go`); der Schalter ist in `deploy/docker-compose/docker-compose.yml`, `deploy/k8s/base/deployment.yaml` und `deploy/k8s/base/deployment-monitoring.yaml` (aus WP-869, Monitoring-Worker aktiv) gesetzt und in `docs/README.md` und `docs/ops/workers.md` beschrieben. Der Systemjob `probe.assign` steht in `TestSystemJobsCoverJOB02`.
 
-**Dateien (15 Einträge):**
+**Dateien (18 Einträge):**
 
 - backend/internal/probe/assign.go (neu)
 - backend/internal/probe/assign_test.go (neu)
 - backend/internal/probe/assign_integration_test.go (neu)
 - backend/internal/probe/pg_repository.go (aus WP-937)
+- backend/migrations/000820_probe_epoch.up.sql (neu, vorläufige Nummer; Hochwassermarke der Epoche je Probe)
+- backend/migrations/000820_probe_epoch.down.sql (neu)
 - backend/internal/config/config.go
 - backend/internal/server/modules.go
+- backend/internal/server/modules_test.go (`p3Workers` und G2-Prüfung für den Monitoring-Worker `probe_assign`)
 - backend/cmd/server/workers.go
 - backend/cmd/server/workers_metrics_test.go
 - backend/cmd/server/main_test.go
@@ -5314,12 +5317,13 @@ PRT-01;[P3];E;backend/internal/entitlement/probe_budget_test.go;WP-940
 - docs/ops/workers.md
 - docs/traceability.csv
 
-**Migration/RLS:** keine. Der Worker liest Organisationen mit `database.WithSystem` und arbeitet je Organisation unter `database.OrgWideScope` mit `WithTenant`; es gelten die Policies aus WP-936.
+**Migration/RLS:** `probe_epoch(probe_id PK, organization_id, epoch)` mit zusammengesetztem Fremdschlüssel auf `probe` (ON DELETE CASCADE, Konvention 19), ENABLE und FORCE RLS mit Organisations-Policy (Muster `probe_ingest_cursor`), Truncate-Guard: Hochwassermarke der Epoche, damit sie auch nach Wegfall der Zuweisungszeile (Deaktivieren, Gruppenwechsel, Mitglied verlässt die Gruppe) nie sinkt und nie doppelt vergeben wird. Der Worker liest Organisationen mit `database.WithSystem` und arbeitet je Organisation unter `database.OrgWideScope` mit `WithTenant`; es gelten die Policies aus WP-936.
 
 **Tests:**
 
 - `backend/internal/probe/assign_test.go`: `TestAssignDistributesToHealthyMembers`, `TestAssignMinimalMovement` (10.000 Probes, 3 → 2 Mitglieder, 1/3 ± 2 %; 2 → 3 Mitglieder, nur Zugänge), `TestAssignFailoverMode` (höchste Priorität, Gleichstand), `TestAssignWeighting` (Gewicht 2:1 → Anteil 2/3 ± 2 %), `TestAssignWithoutHealthyMemberKeepsState`.
-- `backend/internal/probe/assign_integration_test.go` (PostgreSQL): `TestAssignmentEpochIncrements` (nur geänderte Zuweisungen, Epoche steigt monoton, `config_version` alter und neuer Collector + 1), `TestAssignSingleRunnerTwoInstances` (zwei Worker gleichzeitig, je Gruppe ein Lauf), `TestProbeWriteTriggersAssignAfterCommit` (Rollback löst nichts aus).
+- `backend/internal/probe/assign_integration_test.go` (PostgreSQL): `TestAssignmentEpochIncrements` (nur geänderte Zuweisungen, Epoche steigt monoton, `config_version` alter und neuer Collector + 1), `TestAssignSingleRunnerTwoInstances` (zwei Worker gleichzeitig, je Gruppe ein Lauf), `TestProbeWriteTriggersAssignAfterCommit` (Rollback löst nichts aus), `TestAssignmentEpochSurvivesRemoval` (Deaktivieren und Aktivieren, Gruppenwechsel hin und zurück, Mitglied verlässt die Gruppe: Epoche steigt jedes Mal), `TestAssignRunWaitsForProbeDelete` (Sperrreihenfolge Probe vor Zuweisung: Lauf und Löschen laufen ohne 40P01 und 23503 durch).
+- `backend/internal/server/modules_test.go`: `TestG2DefaultEnablesP2ModulesOnly`, `TestP3WorkersBelongToTheirModule` (`probe_assign` beim Modul `monitoring`).
 - `TestEveryWorkerExportsRunAndErrorMetrics`, `TestEveryWorkerSwitchIsDeployable` (`backend/cmd/server/workers_metrics_test.go`, Eintrag in `scheduledWorkers`), `TestSystemJobsCoverJOB02` (`backend/cmd/server/main_test.go`, Systemjob `probe.assign`).
 
 **Traceability (`docs/traceability.csv`):**

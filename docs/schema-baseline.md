@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000337_bgp_peering
+Stand: Migration 000338_probe_epoch
 
 ## Prüfung
 
@@ -2088,6 +2088,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `privacy_retention_policy` | ja | ja | privacy_retention_isolation (ALL) |
 | `probe` | ja | ja | probe_isolation (ALL), probe_scoped_delete (DELETE), probe_scoped_update (UPDATE) |
 | `probe_assignment` | ja | ja | probe_assignment_isolation (ALL), probe_assignment_scoped_delete (DELETE), probe_assignment_scoped_update (UPDATE) |
+| `probe_epoch` | ja | ja | probe_epoch_isolation (ALL) |
 | `probe_ingest_cursor` | ja | ja | probe_ingest_cursor_isolation (ALL), probe_ingest_cursor_system_select (SELECT) |
 | `probe_result` | nein | nein | – |
 | `probe_state` | ja | ja | probe_state_isolation (ALL), probe_state_scoped_delete (DELETE), probe_state_scoped_update (UPDATE) |

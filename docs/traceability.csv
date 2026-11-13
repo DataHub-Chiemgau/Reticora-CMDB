@@ -1788,3 +1788,5 @@ UI-14;[P2–P4, A];G3;frontend/src/pages/IpamPage.test.tsx;WP-915
 PKG-04;[P3];E;backend/internal/probe/budget_integration_test.go;WP-940
 NFR-11;[P3];E;backend/internal/entitlement/probe_budget_test.go;WP-940
 PRT-01;[P3];E;backend/internal/entitlement/probe_budget_test.go;WP-940
+PRB-03;[P3];E;backend/internal/probe/assign_test.go;WP-941
+PRB-11;[P3];E;backend/internal/probe/assign_integration_test.go;WP-941

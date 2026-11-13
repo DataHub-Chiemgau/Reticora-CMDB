@@ -467,6 +467,9 @@ services:
       # Hourly refresh of computed attributes (JOB-02, WP-718), a system job
       # of the scheduler.
       RETICORA_WORKER_COMPUTED_REFRESH_ENABLED: "${RETICORA_WORKER_COMPUTED_REFRESH_ENABLED:-true}"
+      # Probe assignment to the collector group members every 10 s
+      # (PRB-03, WP-941), a system job of the scheduler; module monitoring.
+      RETICORA_WORKER_PROBE_ASSIGN_ENABLED: "${RETICORA_WORKER_PROBE_ASSIGN_ENABLED:-true}"
       RETICORA_PKI_DIR: "/pki"
       RETICORA_NATS_EDGE_URL: "tls://nats-edge:4222"
       # Names on the server certificate of nats-edge. A collector connects to
@@ -537,6 +540,7 @@ services:
       RETICORA_WORKER_DISCOVERY_SCOPES_ENABLED: "${RETICORA_MONITORING_WORKER_DISCOVERY_SCOPES_ENABLED:-false}"
       RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED: "${RETICORA_MONITORING_WORKER_OFFLINE_DETECTOR_ENABLED:-false}"
       RETICORA_WORKER_COMPUTED_REFRESH_ENABLED: "${RETICORA_MONITORING_WORKER_COMPUTED_REFRESH_ENABLED:-false}"
+      RETICORA_WORKER_PROBE_ASSIGN_ENABLED: "${RETICORA_MONITORING_WORKER_PROBE_ASSIGN_ENABLED:-true}"
     volumes:
       - ./secrets/session-private.pem:/etc/reticora/session/private.pem:ro
       - ./letsencrypt:/etc/letsencrypt:ro

@@ -26,6 +26,56 @@ type PGRepository struct {
 	// budget admits the writes against the probe budget (WP-940); nil
 	// admits every write.
 	budget BudgetGate
+	// assign runs the assignment of the touched collector groups after a
+	// write committed (WP-941 AK4); nil leaves it to the next tick.
+	assign AssignTrigger
+}
+
+// SetAssignTrigger makes every committed write run the assignment of its
+// collector groups (WP-941 AK4).
+func (r *PGRepository) SetAssignTrigger(t AssignTrigger) { r.assign = t }
+
+// afterWrite registers the assignment of groups (and the notice of the
+// collectors the write raised itself) for after the commit; a rollback
+// drops it.
+func (r *PGRepository) afterWrite(ctx context.Context, tx pgx.Tx, orgID string, groups []string, raised []CollectorVersion) {
+	if r.assign == nil {
+		return
+	}
+	groups = slices.Compact(slices.Sorted(slices.Values(slices.DeleteFunc(groups, func(g string) bool { return g == "" }))))
+	database.AfterCommit(database.ContextWithTx(ctx, tx), func(ctx context.Context) {
+		r.assign.ProbesChanged(ctx, orgID, groups, raised)
+	})
+}
+
+// assignedCollector returns the collector the probe is assigned to (empty
+// without an assignment).
+func assignedCollector(ctx context.Context, tx pgx.Tx, orgID, probeID string) (string, error) {
+	var collector string
+	err := tx.QueryRow(ctx, `SELECT collector_id::text FROM probe_assignment WHERE organization_id = $1 AND probe_id = $2`,
+		orgID, probeID).Scan(&collector)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read probe assignment: %w", err)
+	}
+	return collector, nil
+}
+
+// releaseAssignment raises the config_version of the collector whose
+// assignment went with the write (a delete, or a move to another collector
+// group) after the write, so the row locks follow the order of the
+// assignment engine (probe, assignment, then member; the engine locks the
+// probes of its plan FOR SHARE first, lockPlanProbes); nothing for an empty
+// id. The collector is read after the row lock of the probe: an engine run
+// that moves the probe either committed before (the read sees the new
+// collector) or waits for the write.
+func releaseAssignment(ctx context.Context, tx pgx.Tx, orgID, collectorID string) ([]CollectorVersion, error) {
+	if collectorID == "" {
+		return nil, nil
+	}
+	return raiseVersions(ctx, tx, orgID, []string{collectorID})
 }
 
 // NewPGRepository returns the repository on pool.
@@ -488,6 +538,7 @@ func (r *PGRepository) Create(ctx context.Context, in *Probe, check Check) (*Pro
 			return probeWriteError(err)
 		}
 		out = created
+		r.afterWrite(ctx, tx, orgID, []string{out.CollectorGroupID}, nil)
 		return emitConfigChanged(ctx, tx, &out, createdFields(&out))
 	})
 	if err != nil {
@@ -543,6 +594,14 @@ func (r *PGRepository) Update(ctx context.Context, id string, change func(*Probe
 		if werr := r.admit(ctx, tx, orgID, &current, next); werr != nil {
 			return werr
 		}
+		// A move to another collector group takes the assignment along
+		// (migration 000308): its collector learns it with a new version.
+		var moved string
+		if next.CollectorGroupID != current.CollectorGroupID {
+			if moved, err = assignedCollector(ctx, tx, orgID, id); err != nil {
+				return err
+			}
+		}
 		out, err = scanProbe(tx.QueryRow(ctx, `UPDATE probe AS p SET target = $3, params = $4, enabled = $5,
 				parent_probe_id = $6, collector_group_id = $7
 			WHERE p.organization_id = $1 AND p.id = $2 RETURNING `+probeColumns,
@@ -553,6 +612,11 @@ func (r *PGRepository) Update(ctx context.Context, id string, change func(*Probe
 		if err != nil {
 			return probeWriteError(err)
 		}
+		raised, err := releaseAssignment(ctx, tx, orgID, moved)
+		if err != nil {
+			return err
+		}
+		r.afterWrite(ctx, tx, orgID, []string{current.CollectorGroupID, out.CollectorGroupID}, raised)
 		return emitConfigChanged(ctx, tx, &out, fields)
 	})
 	if err != nil {
@@ -586,6 +650,10 @@ func (r *PGRepository) Delete(ctx context.Context, id string) error {
 		if err != nil {
 			return err
 		}
+		assigned, err := assignedCollector(ctx, tx, orgID, id)
+		if err != nil {
+			return err
+		}
 		p, err := scanProbe(tx.QueryRow(ctx, `DELETE FROM probe AS p WHERE p.organization_id = $1 AND p.id = $2 RETURNING `+probeColumns,
 			orgID, id))
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -594,6 +662,13 @@ func (r *PGRepository) Delete(ctx context.Context, id string) error {
 		if err != nil {
 			return probeWriteError(err)
 		}
+		// The assignment went with the probe (ON DELETE CASCADE); its
+		// collector learns it with a new version (WP-941 AK3).
+		raised, err := releaseAssignment(ctx, tx, orgID, assigned)
+		if err != nil {
+			return err
+		}
+		r.afterWrite(ctx, tx, orgID, []string{p.CollectorGroupID}, raised)
 		for i := range children {
 			if err := emitConfigChanged(ctx, tx, &children[i], []string{"parent_probe_id"}); err != nil {
 				return err

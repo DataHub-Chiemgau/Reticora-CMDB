@@ -28,6 +28,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/probe"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 )
@@ -35,7 +36,19 @@ import (
 // scheduledWorkers are the registered workers that run as a system job of
 // the scheduler (systemJobs): name and job kind.
 var scheduledWorkers = map[string]string{config.WorkerOfflineDetector: lifecycle.OfflineDetectorKind,
-	config.WorkerComputedRefresh: ci.RefreshJobKind}
+	config.WorkerComputedRefresh: ci.RefreshJobKind, config.WorkerProbeAssign: probe.AssignKind}
+
+// monitoringWorker reports whether name is a worker of the module
+// monitoring: those run in the deployment profile monitoring (WP-869), the
+// others do not.
+func monitoringWorker(name string) bool {
+	for _, m := range server.LateModules {
+		if m.Key == server.ModuleMonitoring {
+			return slices.Contains(m.Workers, name)
+		}
+	}
+	return false
+}
 
 // testCycle is the interval of the polling workers and of the passes in
 // these tests.
@@ -337,6 +350,12 @@ func (env *workerTestEnv) systemJobs(t *testing.T) []jobs.Schedule {
 	t.Helper()
 	d := systemJobTestDeps(t, env.cfg, true)
 	d.pool = env.pool
+	// The module monitoring brings the system job of probe_assign.
+	modules, err := server.ParseModules(server.ModuleMonitoring)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.modules = modules
 	return systemJobs(d)
 }
 
@@ -484,7 +503,7 @@ func workerSwitchProblems(deployed deployedSwitches) []string {
 			problems = append(problems, fmt.Sprintf("docker-compose.yml, service server: %s = %q (set %v), want \"${%s:-true}\" (settable from .env)", key, got, ok, key))
 		}
 		def := "false"
-		if name == config.WorkerMonitoring {
+		if monitoringWorker(name) {
 			def = "true"
 		}
 		monitoringKey := "RETICORA_MONITORING_" + strings.TrimPrefix(key, "RETICORA_")
@@ -496,8 +515,8 @@ func workerSwitchProblems(deployed deployedSwitches) []string {
 			switch {
 			case !ok:
 				problems = append(problems, fmt.Sprintf("deploy/k8s/base, deployment %s: %s is not set", deployment, key))
-			case deployment == "reticora-monitoring" && (value == "true") != (name == config.WorkerMonitoring):
-				problems = append(problems, fmt.Sprintf("deployment reticora-monitoring: %s = %q, only the monitoring worker runs there", key, value))
+			case deployment == "reticora-monitoring" && (value == "true") != monitoringWorker(name):
+				problems = append(problems, fmt.Sprintf("deployment reticora-monitoring: %s = %q, only the monitoring workers run there", key, value))
 			}
 		}
 	}

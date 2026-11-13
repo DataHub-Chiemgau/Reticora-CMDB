@@ -42,6 +42,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/operator"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/probe"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
@@ -511,7 +512,26 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 			if job.Kind == alarm.RetentionKind && (job.Spec != "37 4 * * *" || job.MaxCatchUp != 1) {
 				t.Errorf("%s: spec %q, max catch-up %d; want daily 37 4 * * * and 1", job.Kind, job.Spec, job.MaxCatchUp)
 			}
+			if job.Kind == probe.AssignKind && job.Spec != "@every 10s" {
+				t.Errorf("%s: spec %q, want @every 10s", job.Kind, job.Spec)
+			}
 		}
+		// The probe assignment (PRB-03, WP-941): probe.assign with the
+		// module monitoring and the database, the worker probe_assign.
+		if kinds[probe.AssignKind] != withDB {
+			t.Errorf("JOB-02 probe assignment (PRB-03) with the module monitoring (database %v): registered %v",
+				withDB, kinds[probe.AssignKind])
+		}
+	}
+	if registered[probe.AssignKind] {
+		t.Errorf("without the module monitoring %s is registered", probe.AssignKind)
+	}
+	// Its worker switch off: not registered.
+	t.Setenv(config.WorkerEnvKey(config.WorkerProbeAssign), "false")
+	offDeps := systemJobTestDeps(t, config.Load(), true)
+	offDeps.modules = monitoringModules
+	if registeredSystemJobs(t, offDeps)[probe.AssignKind] {
+		t.Errorf("%s is registered with %s=false", probe.AssignKind, config.WorkerEnvKey(config.WorkerProbeAssign))
 	}
 
 	// The ADMP cache (ADM-03, WP-929): admp.refresh_linked every 15

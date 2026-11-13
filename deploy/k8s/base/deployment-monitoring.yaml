@@ -158,6 +158,10 @@ spec:
             # system job of the scheduler.
             - name: RETICORA_WORKER_COMPUTED_REFRESH_ENABLED
               value: "false"
+            # Probe assignment (PRB-03, WP-941), a monitoring worker; as a
+            # system job it runs where the scheduler runs.
+            - name: RETICORA_WORKER_PROBE_ASSIGN_ENABLED
+              value: "true"
           volumeMounts:
             - name: session-key
               mountPath: /etc/reticora/session
