@@ -70,7 +70,7 @@ func leaves(n *gpb.Notification) map[string]string {
 // sync response, can refuse Get with Unimplemented, checks
 // username/password and pads its answers to a set size (WP-1015, PRT-21).
 func TestFakeGNMITreeAndUpdates(t *testing.T) {
-	s, err := Start(Config{Tree: []byte(tree)})
+	s, err := Start(&Config{Tree: []byte(tree)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestFakeGNMITreeAndUpdates(t *testing.T) {
 	}
 
 	// Username and password.
-	secured, err := Start(Config{Tree: []byte(tree), Username: "probe", Password: "secret"})
+	secured, err := Start(&Config{Tree: []byte(tree), Username: "probe", Password: "secret"})
 	if err != nil {
 		t.Fatal(err)
 	}

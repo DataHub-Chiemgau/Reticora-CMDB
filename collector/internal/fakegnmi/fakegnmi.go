@@ -87,8 +87,9 @@ type Server struct {
 	tree map[string]any // leaf path → value
 }
 
-// Start starts a server on 127.0.0.1 with cfg.
-func Start(cfg Config) (*Server, error) {
+// Start starts a server on 127.0.0.1 with cfg; the server keeps its own
+// copy of cfg.
+func Start(cfg *Config) (*Server, error) {
 	tree := map[string]any{}
 	if len(cfg.Tree) > 0 {
 		var root map[string]any
@@ -99,10 +100,10 @@ func Start(cfg Config) (*Server, error) {
 		}
 		flatten("", root, tree)
 	}
-	if len(cfg.Encodings) == 0 {
-		cfg.Encodings = []gpb.Encoding{gpb.Encoding_JSON_IETF, gpb.Encoding_PROTO}
+	s := &Server{cfg: *cfg, tree: tree, served: make(chan struct{})}
+	if len(s.cfg.Encodings) == 0 {
+		s.cfg.Encodings = []gpb.Encoding{gpb.Encoding_JSON_IETF, gpb.Encoding_PROTO}
 	}
-	s := &Server{cfg: cfg, tree: tree, served: make(chan struct{})}
 	var opts []grpc.ServerOption
 	if !cfg.Plaintext {
 		tlsCfg, err := s.serverTLS()
@@ -184,7 +185,7 @@ func (s *Server) SetResponseBytes(n int) {
 	s.mu.Unlock()
 }
 
-func flatten(prefix string, node map[string]any, out map[string]any) {
+func flatten(prefix string, node, out map[string]any) {
 	for k, v := range node {
 		p := prefix + "/" + k
 		if child, ok := v.(map[string]any); ok {
@@ -360,7 +361,7 @@ func (s *Server) Subscribe(stream gpb.GNMI_SubscribeServer) error {
 	if err != nil {
 		return err
 	}
-	if err = stream.Send(&gpb.SubscribeResponse{Response: &gpb.SubscribeResponse_Update{Update: n}}); err != nil {
+	if err := stream.Send(&gpb.SubscribeResponse{Response: &gpb.SubscribeResponse_Update{Update: n}}); err != nil {
 		return err
 	}
 	return stream.Send(&gpb.SubscribeResponse{Response: &gpb.SubscribeResponse_SyncResponse{SyncResponse: true}})

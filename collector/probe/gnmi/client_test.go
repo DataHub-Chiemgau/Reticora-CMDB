@@ -29,7 +29,7 @@ func start(t *testing.T, cfg fakegnmi.Config) *fakegnmi.Server {
 	if cfg.Tree == nil {
 		cfg.Tree = []byte(tree)
 	}
-	s, err := fakegnmi.Start(cfg)
+	s, err := fakegnmi.Start(&cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,9 +102,9 @@ func TestGNMIClientCapabilitiesAndGet(t *testing.T) {
 	} {
 		s.SetEncodings(tc.offered...)
 		cc := dial(t, gnmi.Config{Target: s.Addr(), Credentials: withCA(s, nil)})
-		res, err := cc.Get(ctx, []string{"/interfaces/interface[name=eth1]/state/counters/in-octets"})
-		if err != nil || cc.Encoding() != tc.want.String() || values(t, res)["/interfaces/interface[name=eth1]/state/counters/in-octets"] != 1 {
-			t.Errorf("offered %v: encoding %s, %+v, %v; want %s", tc.offered, cc.Encoding(), res, err, tc.want)
+		res, gerr := cc.Get(ctx, []string{"/interfaces/interface[name=eth1]/state/counters/in-octets"})
+		if gerr != nil || cc.Encoding() != tc.want.String() || values(t, res)["/interfaces/interface[name=eth1]/state/counters/in-octets"] != 1 {
+			t.Errorf("offered %v: encoding %s, %+v, %v; want %s", tc.offered, cc.Encoding(), res, gerr, tc.want)
 		}
 	}
 	s.SetEncodings(gpb.Encoding_ASCII)
