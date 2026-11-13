@@ -636,7 +636,7 @@ func main() {
 	}
 	if err = registerSystemJobs(systemScheduler, &systemJobDeps{cfg: cfg, pool: auditPool, encryptor: encryptor,
 		repos: &repos, modules: modules, entitlements: entitlementSvc, dispatcher: webhookDispatcher,
-		jobQueue: jobQueue, notifier: notifier, blobs: blobStore, admp: admpSync}); err != nil {
+		jobQueue: jobQueue, coreNATS: coreNATS, notifier: notifier, blobs: blobStore, admp: admpSync}); err != nil {
 		slog.Error("failed to register a system job", "error", err)
 		os.Exit(1)
 	}

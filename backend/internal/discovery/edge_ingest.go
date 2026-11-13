@@ -173,6 +173,27 @@ func (h *Handler) checkCollectorFor(ctx context.Context, orgID, collectorID stri
 	return nil
 }
 
+// ErrCollectorPaused refuses the monitoring channel of a paused collector
+// (ENT-07, WP-948).
+var ErrCollectorPaused = errors.New("collector is paused")
+
+// CheckCollectorChannel checks a collector before its monitoring channel
+// reads anything (WP-948): an unknown collector is api.ErrNotFound, a
+// disabled one ErrCollectorDisabled, a paused one ErrCollectorPaused; a
+// lookup error is returned as it is (the caller refuses, fail-closed).
+func (h *Handler) CheckCollectorChannel(ctx context.Context, orgID, collectorID string) error {
+	status, err := h.repo.CollectorStatus(ctx, orgID, collectorID)
+	switch {
+	case err != nil:
+		return err
+	case status == CollectorDisabled:
+		return ErrCollectorDisabled
+	case status == CollectorPaused:
+		return ErrCollectorPaused
+	}
+	return nil
+}
+
 // edgeRefusal answers a request of a collector checkCollector refused:
 // 403 for a disabled, 404 for an unknown collector, 423 while the
 // organization is pending deletion.

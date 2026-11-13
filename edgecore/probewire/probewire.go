@@ -126,6 +126,9 @@ type ProbeSpec struct {
 	Thresholds json.RawMessage `json:"thresholds,omitempty"`
 	ParentID   string          `json:"parent_id,omitempty"`
 	Epoch      int64           `json:"epoch"`
+	// CredentialIDs name the credentials of the probe in the collector's
+	// credential bundle (WP-948); never a secret.
+	CredentialIDs []string `json:"credential_ids,omitempty"`
 }
 
 // Assignment set paging limits (AK6): a page holds at most MaxPageProbes
@@ -152,6 +155,42 @@ type AssignmentSet struct {
 	VersionChanged bool            `json:"version_changed,omitempty"`
 	Probes         []ProbeSpec     `json:"probes"`
 	TrapConfig     json.RawMessage `json:"trap_config,omitempty"`
+	// Skipped are the probes assigned to the collector that the set leaves
+	// out, with the reason (WP-948, e.g. SkipCredentialMissing); on the
+	// first page only.
+	Skipped []SkippedProbe `json:"skipped,omitempty"`
+}
+
+// SkippedProbe is a probe of the set the server did not hand out.
+type SkippedProbe struct {
+	ProbeID string `json:"probe_id"`
+	Reason  string `json:"reason"`
+}
+
+// SkipCredentialMissing: a credential of the probe is not in the
+// collector's current credential bundle (WP-948).
+const SkipCredentialMissing = "credential_missing"
+
+// AssignmentRequest is the body of .probes.request (WP-948): IfNoneMatch is
+// the version the collector holds (0: none), Page the page it asks for
+// (from 1) and Version the version of the pages it fetched so far (0 on
+// page 1).
+type AssignmentRequest struct {
+	IfNoneMatch int64 `json:"if_none_match,omitempty"`
+	Page        int   `json:"page,omitempty"`
+	Version     int64 `json:"version,omitempty"`
+}
+
+// NotModified answers .probes.request when the collector holds the current
+// version (if_none_match).
+type NotModified struct {
+	NotModified bool  `json:"not_modified"`
+	Version     int64 `json:"version"`
+}
+
+// ProbesChanged is the push .probes.changed: the new version of the set.
+type ProbesChanged struct {
+	Version int64 `json:"version"`
 }
 
 // ErrProbeTooLarge is returned by Paginate when a single probe does not fit

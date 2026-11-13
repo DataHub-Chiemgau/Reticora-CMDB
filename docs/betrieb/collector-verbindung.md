@@ -266,6 +266,48 @@ Subject-Baum des Collectors (`collector.<org>.<id>.>`):
 
 Stream, Grenzen und Handler-Pool: [`docs/ops/workers.md`](../ops/workers.md#probe-edge-and-stream-reticora_probe-wp-959).
 
+## Zuweisungssatz: `.probes.request` und `.probes.changed` (WP-948)
+
+Der Collector holt seine Probes über Request/Reply auf
+`collector.<org>.<id>.probes.request`; der Server bedient das Subject im
+Worker `probe_assign` (Schalter `RETICORA_WORKER_PROBE_ASSIGN_ENABLED`, mit
+NATS und Datenbank).
+
+- **Anfrage** (`probewire.AssignmentRequest`): `if_none_match` (die Version,
+  die der Collector hält), `page` (ab 1) und `version` (die Version der
+  bisher geholten Seiten, auf Seite 1 leer).
+- **Version** ist `collector_group_member.config_version` des Collectors. Sie
+  steigt bei jeder Änderung seiner Zuweisungen (WP-941), einer zugewiesenen
+  Probe (WP-939), eines Profils oder einer Monitoring-Gruppe in deren
+  Wirkungsbereich (WP-946) und einer Credential-Bindung einer zugewiesenen
+  Probe (Trigger `credential_binding_probe_version`). Gleiche Version →
+  `{"not_modified": true, "version": n}`.
+- **Inhalt** (`probewire.AssignmentSet`): alle dem Collector zugewiesenen
+  und eingeschalteten Probes mit effektiven Werten, Epoche je Probe und
+  `credential_ids` (nur IDs, nie ein Geheimnis). Gesperrte Probes (WP-942)
+  haben ihre Zuweisung verloren und fehlen deshalb. Das Credential-Bundle
+  des Collectors enthält die an seine Probes gebundenen Zugangsdaten
+  (außer Tresor-Logins und Zugangsdaten eines anderen Kunden als dem der
+  Probe). Eine Probe, deren Zugangsdaten nicht im aktuellen Bundle stehen,
+  fehlt und steht auf Seite 1 in `skipped` mit `credential_missing`.
+- **Last:** Seite 1 einer neuen Version kostet drei Abfragen für den Satz
+  (Probes mit ihren Credential-IDs, Gruppen und Profile) plus Prüfung des
+  Collectors und Version, jede weitere Seite nur Prüfung und Version; die
+  Freischaltungen kommen aus dem Cache des Entitlement-Dienstes.
+- **Paging:** höchstens 2.000 Probes und 768 KiB je Seite; `next_page` nennt
+  die nächste Seite. Ändert sich die Version zwischen zwei Seiten, antwortet
+  der Server mit `version_changed: true`, und der Collector beginnt mit
+  Seite 1 neu. Die Seiten einer Version hält der Server eine Minute vor.
+- **Änderungshinweis:** Nach jedem Commit, der Versionen erhöht hat, sendet
+  der Server `collector.<org>.<id>.probes.changed` mit `{"version": n}`.
+  Verpasst der Collector den Hinweis, sieht er die neue Version beim nächsten
+  Abruf über `if_none_match`.
+- **Ablehnungen** vor jedem Lesen: unbekannter Collector 404, deaktivierter
+  oder pausierter 403, Organisation ohne Feature `monitoring` 403 mit
+  Problemtyp `feature-not-entitled`. Ein Fehler bei diesen Prüfungen weist
+  ebenfalls ab (500, fail-closed) und zählt als fehlgeschlagener Zyklus des
+  Workers.
+
 ## ICMP und ICMPv6 (Ping-Probes, WP-953)
 
 Der Collector pingt über **einen** ICMP-Socket je Adressfamilie für den

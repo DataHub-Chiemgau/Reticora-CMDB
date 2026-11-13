@@ -1828,3 +1828,5 @@ PKG-09;[P3];E;backend/internal/probe/suspend_integration_test.go;WP-942
 ENT-08;[B];E;backend/internal/probe/suspend_integration_test.go;WP-942
 MON-02;[B];E;backend/internal/probe/autocreate_integration_test.go;WP-949
 PRB-01;[P3];E;backend/internal/probe/autocreate_integration_test.go;WP-949
+PRB-11;[P3];E;backend/internal/probe/distribution_integration_test.go;WP-948
+PRB-01;[P3];E;backend/internal/probe/distribution_integration_test.go;WP-948

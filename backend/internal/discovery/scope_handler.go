@@ -315,6 +315,10 @@ const (
 	// and the status it reports for one of them.
 	JobsRequestSuffix = ".jobs.request"
 	JobsStatusSuffix  = ".jobs.status"
+	// The assignment set of the monitoring probes (PRB-11, WP-948): the
+	// collector asks for its set, the server tells it a new version.
+	ProbesRequestSuffix = ".probes.request"
+	ProbesChangedSuffix = ".probes.changed"
 )
 
 // CollectorScope is a scope as the collector receives it; CredentialIDs are

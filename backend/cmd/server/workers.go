@@ -288,6 +288,28 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 	if d.ingestQueue != nil {
 		workers = append(workers, server.Worker{Name: config.WorkerIngest, Run: d.ingestQueue.Run, Backlog: d.ingestQueue.Backlog})
 	}
+	// Answer the assignment set requests of the collectors
+	// (.probes.request, PRB-11, WP-948) in the worker probe_assign, with
+	// NATS and the probe store on PostgreSQL.
+	if store, ok := d.repos.Probes.(*probe.PGRepository); ok && d.coreNATS != nil && d.pool != nil {
+		cycles := observability.NewCycles(config.WorkerProbeAssign)
+		cycles.Check("nats", d.coreNATS.FlushWithContext)
+		cycles.Check("database", d.pool.Ping)
+		channel := discovery.NewHandler(d.repos.Discovery, d.repos.CI)
+		// The credential ids of a probe must be in the collector's bundle:
+		// the gate computes them as VerifyBundleTarget does, the probe
+		// bindings of the collector included (AK2).
+		bundle := discovery.NewBundleGate(d.pool, d.collectorPKI).CredentialIDs
+		distributor := probe.NewDistributor(store, channel.CheckCollectorChannel).WithCycles(cycles).WithBundle(bundle)
+		if d.entitlements != nil {
+			distributor.WithFeatures(d.entitlements)
+		}
+		workers = append(workers, server.Worker{Name: config.WorkerProbeAssign, Run: serving(cycles, d.every(serviceCycle), func(ctx context.Context) {
+			if serr := distributor.ServeProbeRequests(ctx, d.coreNATS); serr != nil {
+				slog.Error("probe distribution", "error", serr)
+			}
+		})})
+	}
 	// Write the probe result batches of the stream RETICORA_PROBE to
 	// probe_result (NFR-11, PRB-07, WP-960; module monitoring); the backlog
 	// is the consumer's unacknowledged messages, also in /readyz.
@@ -391,6 +413,9 @@ type systemJobDeps struct {
 	dispatcher   *webhook.Dispatcher
 	// jobQueue is the job queue on NATS; nil without NATS.
 	jobQueue *jobs.Queue
+	// coreNATS sends .probes.changed to the collectors after an
+	// assignment change (WP-948); nil logs the changes only.
+	coreNATS *nats.Conn
 	// admp is the refresh of the ADMP cache the router queues admp.refresh
 	// with (WP-929); nil builds one on the repositories (tests).
 	admp *admp.Sync
@@ -515,6 +540,11 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 			// a committed probe write assigns its groups at once on the
 			// instance that served it.
 			assigner := probe.NewAssigner(pool)
+			var notifier probe.AssignmentNotifier = probe.LogNotifier{}
+			if d.coreNATS != nil {
+				notifier = probe.NewNATSAssignmentNotifier(d.coreNATS)
+			}
+			assigner.WithNotifier(notifier)
 			if store, ok := d.repos.Probes.(*probe.PGRepository); ok {
 				store.SetAssignTrigger(assigner)
 			}
@@ -524,7 +554,7 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 			// Suspension of the probes of a lost monitoring feature
 			// (PKG-09, ENT-08, WP-942): every minute per organization;
 			// resumed when the feature is active again.
-			systemJobs = append(systemJobs, probe.NewSuspender(pool, probe.LicensedBy(d.entitlements)).Schedule())
+			systemJobs = append(systemJobs, probe.NewSuspender(pool, probe.LicensedBy(d.entitlements)).WithNotifier(notifier).Schedule())
 			// Automatic ping probes (MON-02, WP-949): every 15 minutes one
 			// job probe.autocreate per organization with
 			// monitoring.auto_ping and the feature monitoring, on the job
