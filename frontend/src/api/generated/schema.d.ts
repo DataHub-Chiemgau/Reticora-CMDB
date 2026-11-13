@@ -10965,26 +10965,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/api/v1/ipam/imports': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Start an IPAM import
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
-     */
-    post: operations['createIPAMImport'];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   '/api/v1/ipam/ptr-mismatches': {
     parameters: {
       query?: never;
@@ -18690,8 +18670,19 @@ export interface components {
       organization_id: string;
       name: string;
       description: string | null;
-      /** @enum {string} */
-      entity: 'ci' | 'asset' | 'contract' | 'consumable' | 'location' | 'relationship';
+      /**
+       * @description The entity the rows write. subnet and ip_address (IPM-09, WP-920) take the column names of phpIPAM as targets; they need ipam:write beside import:run. subnet: section (name; empty is the default section), subnet with mask (prefix length or netmask) or cidr (both given must agree), description, vlan (number; several VLANs with it are a row error), vrf (name; empty is the default VRF), gateway, customer (client name, slug or external reference), nameserver (name of a set) and is_pool; the identity is VRF and CIDR. ip_address: ip_addr, hostname (dns_name), description, mac (binds the one interface with this MAC, else a warning and no binding), state (active, offline, unknown or the phpIPAM tags Used, Offline, Reserved, DHCP), is_gateway, vrf, subnet (CIDR; empty assigns the narrowest subnet) and type (static, reserved, dhcp); the identity is VRF and address. Imported addresses have origin import; a pinned address keeps interface, CI, DNS name and description (report code pinned_kept). The history rows carry source import; a real run checks the written addresses for duplicates (duplicate_ip).
+       * @enum {string}
+       */
+      entity:
+        | 'ci'
+        | 'asset'
+        | 'contract'
+        | 'consumable'
+        | 'location'
+        | 'relationship'
+        | 'subnet'
+        | 'ip_address';
       /** @enum {string} */
       format: 'csv' | 'xlsx' | 'json';
       /**
@@ -18714,8 +18705,19 @@ export interface components {
     CreateImportProfileRequest: {
       name: string;
       description?: string | null;
-      /** @enum {string} */
-      entity: 'ci' | 'asset' | 'contract' | 'consumable' | 'location' | 'relationship';
+      /**
+       * @description The entity the rows write. subnet and ip_address (IPM-09, WP-920) take the column names of phpIPAM as targets; they need ipam:write beside import:run. subnet: section (name; empty is the default section), subnet with mask (prefix length or netmask) or cidr (both given must agree), description, vlan (number; several VLANs with it are a row error), vrf (name; empty is the default VRF), gateway, customer (client name, slug or external reference), nameserver (name of a set) and is_pool; the identity is VRF and CIDR. ip_address: ip_addr, hostname (dns_name), description, mac (binds the one interface with this MAC, else a warning and no binding), state (active, offline, unknown or the phpIPAM tags Used, Offline, Reserved, DHCP), is_gateway, vrf, subnet (CIDR; empty assigns the narrowest subnet) and type (static, reserved, dhcp); the identity is VRF and address. Imported addresses have origin import; a pinned address keeps interface, CI, DNS name and description (report code pinned_kept). The history rows carry source import; a real run checks the written addresses for duplicates (duplicate_ip).
+       * @enum {string}
+       */
+      entity:
+        | 'ci'
+        | 'asset'
+        | 'contract'
+        | 'consumable'
+        | 'location'
+        | 'relationship'
+        | 'subnet'
+        | 'ip_address';
       /** @enum {string} */
       format: 'csv' | 'xlsx' | 'json';
       /** @enum {string} */
@@ -18730,8 +18732,19 @@ export interface components {
     UpdateImportProfileRequest: {
       name?: string;
       description?: string | null;
-      /** @enum {string} */
-      entity?: 'ci' | 'asset' | 'contract' | 'consumable' | 'location' | 'relationship';
+      /**
+       * @description The entity the rows write. subnet and ip_address (IPM-09, WP-920) take the column names of phpIPAM as targets; they need ipam:write beside import:run. subnet: section (name; empty is the default section), subnet with mask (prefix length or netmask) or cidr (both given must agree), description, vlan (number; several VLANs with it are a row error), vrf (name; empty is the default VRF), gateway, customer (client name, slug or external reference), nameserver (name of a set) and is_pool; the identity is VRF and CIDR. ip_address: ip_addr, hostname (dns_name), description, mac (binds the one interface with this MAC, else a warning and no binding), state (active, offline, unknown or the phpIPAM tags Used, Offline, Reserved, DHCP), is_gateway, vrf, subnet (CIDR; empty assigns the narrowest subnet) and type (static, reserved, dhcp); the identity is VRF and address. Imported addresses have origin import; a pinned address keeps interface, CI, DNS name and description (report code pinned_kept). The history rows carry source import; a real run checks the written addresses for duplicates (duplicate_ip).
+       * @enum {string}
+       */
+      entity?:
+        | 'ci'
+        | 'asset'
+        | 'contract'
+        | 'consumable'
+        | 'location'
+        | 'relationship'
+        | 'subnet'
+        | 'ip_address';
       /** @enum {string} */
       format?: 'csv' | 'xlsx' | 'json';
       /** @enum {string} */
@@ -50358,29 +50371,6 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      500: components['responses']['InternalServerError'];
-    };
-  };
-  createIPAMImport: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Accepted as a job. The schema comes with the implementing work package. */
-      202: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      400: components['responses']['BadRequest'];
-      401: components['responses']['Unauthorized'];
-      403: components['responses']['Forbidden'];
-      409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
     };
   };

@@ -24,6 +24,9 @@ const (
 	ChangeSourceManual     = "manual"
 	ChangeSourceDiscovery  = "discovery"
 	ChangeSourceAllocation = "allocation"
+	// ChangeSourceImport names the rows of the file import (IPM-09,
+	// WP-920): the import writer sets it in the transaction of its row.
+	ChangeSourceImport = "import"
 )
 
 // Object kinds of the history rows.
@@ -65,6 +68,17 @@ func setChangeSource(ctx context.Context, tx pgx.Tx, source string) error {
 		return fmt.Errorf("set change source: %w", err)
 	}
 	return nil
+}
+
+// SetChangeSource names the source of the IPAM history rows of the
+// transaction ctx carries (database.WithRequestTenant joins the row
+// transaction of the caller; the setting is transaction-local): the file
+// import names its rows import before it writes them (WP-920). source is
+// one of the sources of chk_ipam_change_source.
+func (r *PGRepository) SetChangeSource(ctx context.Context, orgID, source string) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		return setChangeSource(ctx, tx, source)
+	})
 }
 
 // historyObjectVisible is the visibility of the object of a history

@@ -938,6 +938,15 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	if repos.IPAMManagement != nil {
 		repos.IPAMManagement.WithReviews(discoveryHandler.ReviewService())
 	}
+	// Subnets and addresses with phpIPAM columns (IPM-09, WP-920): the rows
+	// write through the IPAM repository, the duplicate check after a run
+	// opens duplicate_ip reviews in the review queue of discovery, built
+	// here once its jobs and tickets are attached (ReviewService is built
+	// on its first call).
+	if ipamStore, ok := repos.Import.(importer.IPAMStore); ok && repos.IPAM != nil {
+		importHandler.WithWriter(importer.NewSubnetWriter(repos.IPAM, ipamStore)).
+			WithWriter(importer.NewAddressWriter(repos.IPAM, ipamStore, discoveryHandler.ReviewService()))
+	}
 	registrars := []registrar{
 		identityHandler,
 		operatorHandler(&opts),

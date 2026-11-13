@@ -25611,31 +25611,6 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-  /api/v1/ipam/imports:
-    x-phase: P3
-    x-feature: ipam
-    x-status: planned
-    post:
-      operationId: createIPAMImport
-      tags: [IPAM]
-      summary: Start an IPAM import
-      description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
-      responses:
-        '202':
-          description: Accepted as a job. The schema comes with the implementing work package.
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-
   /api/v1/ipam/ptr-mismatches:
     x-phase: P3
     x-feature: ipam
@@ -38698,7 +38673,26 @@ components:
           type: [string, 'null']
         entity:
           type: string
-          enum: [ci, asset, contract, consumable, location, relationship]
+          enum: [ci, asset, contract, consumable, location, relationship, subnet, ip_address]
+          description: >-
+            The entity the rows write. subnet and ip_address (IPM-09,
+            WP-920) take the column names of phpIPAM as targets; they need
+            ipam:write beside import:run. subnet: section (name; empty is
+            the default section), subnet with mask (prefix length or
+            netmask) or cidr (both given must agree), description, vlan
+            (number; several VLANs with it are a row error), vrf (name;
+            empty is the default VRF), gateway, customer (client name, slug
+            or external reference), nameserver (name of a set) and is_pool;
+            the identity is VRF and CIDR. ip_address: ip_addr, hostname
+            (dns_name), description, mac (binds the one interface with this
+            MAC, else a warning and no binding), state (active, offline,
+            unknown or the phpIPAM tags Used, Offline, Reserved, DHCP),
+            is_gateway, vrf, subnet (CIDR; empty assigns the narrowest
+            subnet) and type (static, reserved, dhcp); the identity is VRF
+            and address. Imported addresses have origin import; a pinned
+            address keeps interface, CI, DNS name and description (report
+            code pinned_kept). The history rows carry source import; a real
+            run checks the written addresses for duplicates (duplicate_ip).
         format:
           type: string
           enum: [csv, xlsx, json]
@@ -38741,7 +38735,26 @@ components:
           maxLength: 1000
         entity:
           type: string
-          enum: [ci, asset, contract, consumable, location, relationship]
+          enum: [ci, asset, contract, consumable, location, relationship, subnet, ip_address]
+          description: >-
+            The entity the rows write. subnet and ip_address (IPM-09,
+            WP-920) take the column names of phpIPAM as targets; they need
+            ipam:write beside import:run. subnet: section (name; empty is
+            the default section), subnet with mask (prefix length or
+            netmask) or cidr (both given must agree), description, vlan
+            (number; several VLANs with it are a row error), vrf (name;
+            empty is the default VRF), gateway, customer (client name, slug
+            or external reference), nameserver (name of a set) and is_pool;
+            the identity is VRF and CIDR. ip_address: ip_addr, hostname
+            (dns_name), description, mac (binds the one interface with this
+            MAC, else a warning and no binding), state (active, offline,
+            unknown or the phpIPAM tags Used, Offline, Reserved, DHCP),
+            is_gateway, vrf, subnet (CIDR; empty assigns the narrowest
+            subnet) and type (static, reserved, dhcp); the identity is VRF
+            and address. Imported addresses have origin import; a pinned
+            address keeps interface, CI, DNS name and description (report
+            code pinned_kept). The history rows carry source import; a real
+            run checks the written addresses for duplicates (duplicate_ip).
         format:
           type: string
           enum: [csv, xlsx, json]
@@ -38773,7 +38786,26 @@ components:
           maxLength: 1000
         entity:
           type: string
-          enum: [ci, asset, contract, consumable, location, relationship]
+          enum: [ci, asset, contract, consumable, location, relationship, subnet, ip_address]
+          description: >-
+            The entity the rows write. subnet and ip_address (IPM-09,
+            WP-920) take the column names of phpIPAM as targets; they need
+            ipam:write beside import:run. subnet: section (name; empty is
+            the default section), subnet with mask (prefix length or
+            netmask) or cidr (both given must agree), description, vlan
+            (number; several VLANs with it are a row error), vrf (name;
+            empty is the default VRF), gateway, customer (client name, slug
+            or external reference), nameserver (name of a set) and is_pool;
+            the identity is VRF and CIDR. ip_address: ip_addr, hostname
+            (dns_name), description, mac (binds the one interface with this
+            MAC, else a warning and no binding), state (active, offline,
+            unknown or the phpIPAM tags Used, Offline, Reserved, DHCP),
+            is_gateway, vrf, subnet (CIDR; empty assigns the narrowest
+            subnet) and type (static, reserved, dhcp); the identity is VRF
+            and address. Imported addresses have origin import; a pinned
+            address keeps interface, CI, DNS name and description (report
+            code pinned_kept). The history rows carry source import; a real
+            run checks the written addresses for duplicates (duplicate_ip).
         format:
           type: string
           enum: [csv, xlsx, json]

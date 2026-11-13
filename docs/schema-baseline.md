@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000342_workflow_schedule_slot
+Stand: Migration 000343_import_profile_ipam
 
 ## Prüfung
 
@@ -1124,7 +1124,9 @@ Policy `metamodel_draft_isolation` (FOR ALL, `app.org_id`), TRUNCATE-Schutz
 Import-Mapping-Profile (IMP-IO-01, API-06, WP-774, Migration 000219):
 `import_profile` speichert die Mapping-Profile des Dateiimports je
 Organisation. `entity` ist `ci`, `asset`, `contract`, `consumable`,
-`location` oder `relationship` (`import_profile_entity_check`), `format`
+`location`, `relationship`, `subnet` oder `ip_address`
+(`import_profile_entity_check`; `subnet` und `ip_address` seit WP-920,
+Migration 000343_import_profile_ipam, vorläufige Nummer), `format`
 `csv`, `xlsx` oder `json` (`import_profile_format_check`), `mode`
 `create_missing`, `update_existing` oder `both` (`import_profile_mode_check`).
 `mapping` (`jsonb`) muss ein Objekt sein (`import_profile_mapping_check`; je

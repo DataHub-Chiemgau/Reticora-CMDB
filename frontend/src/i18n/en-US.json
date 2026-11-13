@@ -1974,7 +1974,9 @@
       "contract": "Contracts",
       "consumable": "Consumables",
       "location": "Locations",
-      "relationship": "Relationships"
+      "relationship": "Relationships",
+      "subnet": "Subnets",
+      "ip_address": "IP addresses"
     },
     "modes": {
       "create_missing": "Create missing only",
@@ -2953,7 +2955,23 @@
       "target_management_ip": "Management IP of the target",
       "source_interface_id": "Interface of the source",
       "target_interface_id": "Interface of the target",
-      "confidence": "Confidence"
+      "confidence": "Confidence",
+      "section": "Section",
+      "subnet": "Subnet",
+      "mask": "Mask",
+      "cidr": "CIDR",
+      "description": "Description",
+      "vlan": "VLAN",
+      "vrf": "VRF",
+      "gateway": "Gateway",
+      "customer": "Client",
+      "nameserver": "Nameserver set",
+      "is_pool": "Pool",
+      "ip_addr": "IP address",
+      "mac": "MAC address",
+      "state": "State",
+      "is_gateway": "Gateway address",
+      "type": "Type"
     },
     "editor": {
       "newView": "New view",

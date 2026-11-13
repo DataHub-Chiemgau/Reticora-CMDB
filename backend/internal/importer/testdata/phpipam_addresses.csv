@@ -1,0 +1,8 @@
+ip_addr,hostname,description,mac,state,is_gateway,vrf,subnet,type
+10.92.1.1,gw.example.test,Gateway,,Used,1,,,
+10.92.1.10,srv1.example.test,Server,02:00:00:09:20:01,Used,0,,,
+10.92.1.11,,No interface,02:00:00:09:20:99,Offline,,,10.92.1.0/24,
+10.92.2.5,dhcp-5.example.test,,,DHCP,,,,
+10.92.1.20,renamed.example.test,changed,02:00:00:09:20:01,,,,,
+10.92.1.30,,,02:00:00:09:20:02,,,,,
+10.92.1.40,,,,Bogus,,,,

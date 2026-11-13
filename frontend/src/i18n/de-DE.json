@@ -1974,7 +1974,9 @@
       "contract": "Verträge",
       "consumable": "Verbrauchsmaterial",
       "location": "Standorte",
-      "relationship": "Beziehungen"
+      "relationship": "Beziehungen",
+      "subnet": "Subnetze",
+      "ip_address": "IP-Adressen"
     },
     "modes": {
       "create_missing": "Nur fehlende anlegen",
@@ -2953,7 +2955,23 @@
       "target_management_ip": "Management-IP des Ziels",
       "source_interface_id": "Schnittstelle der Quelle",
       "target_interface_id": "Schnittstelle des Ziels",
-      "confidence": "Konfidenz"
+      "confidence": "Konfidenz",
+      "section": "Section",
+      "subnet": "Subnetz",
+      "mask": "Maske",
+      "cidr": "CIDR",
+      "description": "Beschreibung",
+      "vlan": "VLAN",
+      "vrf": "VRF",
+      "gateway": "Gateway",
+      "customer": "Kunde",
+      "nameserver": "Nameserver-Set",
+      "is_pool": "Pool",
+      "ip_addr": "IP-Adresse",
+      "mac": "MAC-Adresse",
+      "state": "Zustand",
+      "is_gateway": "Gateway-Adresse",
+      "type": "Typ"
     },
     "editor": {
       "newView": "Neue Ansicht",

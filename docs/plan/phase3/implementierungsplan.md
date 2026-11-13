@@ -3916,6 +3916,8 @@ IPM-09;[P3];G3;backend/internal/importer/ipam_integration_test.go;WP-920
 
 **Entscheidungsbedarf:** keiner
 
+**Nachtrag 2026-11-13 (Umsetzung):** Die Erweiterung des OpenAPI-Enums `ImportProfile.entity` (AK7) erzwingt die Frontend-Konstanten im selben WP: Der Paritätstest `frontend/src/i18n/catalog.test.ts` vergleicht `IMPORT_ENTITIES` mit dem Enum, und `IMPORT_TARGETS` ist als `Record<ImportEntity, …>` typisiert. Die Dateiliste erweitert sich daher um `frontend/src/components/import/MappingEditor.tsx` (`IMPORT_ENTITIES` und `IMPORT_TARGETS` für `subnet` und `ip_address` mit den Zielen aus AK2/AK3), `frontend/src/i18n/de-DE.json` und `frontend/src/i18n/en-US.json` (Beschriftungen der Entitäten und Ziele). WP-922 AK3 übernimmt das als erledigt. Außerdem gelten für `subnet` mit `mask` (AK2) als Zeilenfehler am Ziel `mask`: eine Netzmaske in Punktnotation an einer IPv6-Adresse, eine Präfixlänge über 32 (IPv4) bzw. 128 (IPv6) und eine `mask`, die einem `subnet` in CIDR-Schreibweise widerspricht.
+
 **Nicht Bestandteil:**
 - Direkter Import aus der phpIPAM-API.
 - Export: WP-921 (`p3-ipam-export`). Oberfläche einschließlich Zielen im `MappingEditor`: WP-922 (`p3-ipam-ui-io`).
@@ -3997,7 +3999,7 @@ IPM-09;[P3];G3;backend/internal/export/ipam_integration_test.go;WP-921
 
 - [ ] **AK1:** Aktion „Import/Export“ auf der IPAM-Seite öffnet `IpamImportDialog` mit den Reitern Import und Export. Die Aktion erscheint nur mit `import:run` und `ipam:write` (Import) bzw. `export:run` und `ipam:read` (Export).
 - [ ] **AK2:** Import: Auswahl der Art (Subnetze, Adressen). Fehlt ein Profil der Entität mit dem Namen „phpIPAM Subnetze“ bzw. „phpIPAM Adressen“, legt der Dialog es an (`useCreateImportProfile`): Format `csv`, Modus `both`, Zuordnung Spalte = Ziel für alle phpIPAM-Spalten aus WP-920, Identität nach WP-920. Das Anlegen verlangt `import:manage` (`POST /api/v1/import-profiles`); fehlt das Recht und gibt es kein Profil, zeigt der Dialog einen Hinweis statt der Weiterleitung. Danach führt er auf `/import?profile=<id>`. Der Importassistent startet dort im Schritt Datei mit diesem Profil. Trockenlauf, Zeilenbericht und Start bleiben die des Assistenten.
-- [ ] **AK3:** `IMPORT_ENTITIES` und `IMPORT_TARGETS` enthalten `subnet` und `ip_address` mit den Zielen aus WP-920; `ImportPage` liest den Query-Parameter `profile`. Ein unbekanntes Profil zeigt den Assistenten ohne Vorwahl.
+- [ ] **AK3:** `IMPORT_ENTITIES` und `IMPORT_TARGETS` enthalten `subnet` und `ip_address` mit den Zielen aus WP-920; `ImportPage` liest den Query-Parameter `profile`. Ein unbekanntes Profil zeigt den Assistenten ohne Vorwahl. *Nachtrag 2026-11-13:* `IMPORT_ENTITIES` und `IMPORT_TARGETS` samt Beschriftungen kamen bereits mit WP-920 (Paritätstest gegen das OpenAPI-Enum); WP-922 ergänzt hier nur den Query-Parameter `profile` und die Tests in `ImportPage.test.tsx`.
 - [ ] **AK4:** Export: Auswahl der Art; die aktuellen Filter der IPAM-Seite (Section, VRF, Kunde, Standort, Suche, `contains`) werden als `filters.ipam` übernommen und angezeigt. Der Dialog erzeugt den Job über `useCreateExportJob` mit `format: 'csv'` und `filters.entity`. Danach erscheint ein Link auf den Job im Jobcenter. `ExportJobFilters` in `frontend/src/api/client.ts` erhält `entity` und `ipam`.
 - [ ] **AK5:** Fehler 403 (fehlendes `ipam:read`) und 400 erscheinen im Dialog. Texte unter `ipam.io.*` in de und en, axe ohne Befunde.
 

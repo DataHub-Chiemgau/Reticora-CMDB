@@ -23,7 +23,7 @@ import (
 )
 
 // Entities a profile can import (import_profile_entity_check).
-var Entities = []string{"ci", "asset", "contract", "consumable", "location", "relationship"}
+var Entities = []string{"ci", "asset", "contract", "consumable", "location", "relationship", "subnet", "ip_address"}
 
 // Formats of the import file (import_profile_format_check, E-49).
 var Formats = []string{"csv", "xlsx", "json"}

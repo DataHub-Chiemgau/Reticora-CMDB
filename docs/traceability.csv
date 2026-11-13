@@ -1820,3 +1820,4 @@ ADM-02;[P3];E;backend/internal/admp/readonly/readonly_spec_test.go;WP-1077
 IPM-19;[P3];G3;frontend/src/pages/SubnetDetailPage.test.tsx;WP-916
 UI-14;[P2–P4, A];G3;frontend/src/pages/SubnetDetailPage.test.tsx;WP-916
 IPM-19;[P3];G3;frontend/src/components/ipam/IpamTabs.test.tsx;WP-918
+IPM-09;[P3];G3;backend/internal/importer/ipam_integration_test.go;WP-920
