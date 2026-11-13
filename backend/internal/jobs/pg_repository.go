@@ -374,6 +374,16 @@ func (r *PGRepository) QueuedDue(ctx context.Context, now time.Time, limit int) 
 	return out, err
 }
 
+// DBNow returns the database clock, the clock of created_at and run_after
+// (backlog age, WP-550).
+func (r *PGRepository) DBNow(ctx context.Context) (time.Time, error) {
+	var now time.Time
+	err := database.WithSystem(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now)
+	})
+	return now, err
+}
+
 // Transition implements Repository; the status check and the change are
 // one statement. With u.ReportFailed a change to failed appends job.failed
 // to the outbox in its transaction (WP-550): a failed append rolls the
