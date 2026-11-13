@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/admp"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
@@ -108,6 +109,8 @@ func MemoryRepositories() Repositories {
 	// The ADMP cache takes the client of an account from the account store
 	// (WP-928).
 	admpAccounts := admp.NewMemoryAccountRepository()
+	slaRepo := sla.NewMemoryRepository()
+	ciTypes := citype.NewMemoryRepository()
 	return Repositories{
 		CI: cis,
 		// Graph walks pass only through visible, not deleted CIs (IMP-07),
@@ -116,7 +119,7 @@ func MemoryRepositories() Repositories {
 		Webhook:           webhook.NewMemoryRepository(),
 		WebhookDeliveries: webhook.NewMemoryDeliveryStore(),
 		Discovery:         discoveryRepo,
-		CIType:            citype.NewMemoryRepository(),
+		CIType:            ciTypes,
 		Import:            importer.NewMemoryRepository(),
 		Supplier:          contract.NewMemoryRepository(),
 		Contract:          contract.NewMemoryContracts(),
@@ -137,52 +140,53 @@ func MemoryRepositories() Repositories {
 			}
 			return "", false
 		}),
-		History:           history.NewMemoryRepository(),
-		SavedView:         savedview.NewMemoryRepository(),
-		FilterQuery:       nil, // memory mode: query engine requires SQL; endpoint reports 501
-		LifecycleStates:   lifecycleStates,
-		LifecycleResolver: lifecycleStates,
-		Asset:             assets,
-		Assignment:        assignment.NewMemoryRepository(),
-		Document:          document.NewMemoryRepository(),
-		Stocktake:         stocktake.NewMemoryRepository(assets),
-		Consumable:        consumables,
-		Order:             order.NewMemoryRepository(),
-		Maintenance:       maintenance.NewMemoryRepository(),
-		Disposal:          disposal.NewMemoryRepository(),
-		Key:               keymgmt.NewMemoryRepository(),
-		Training:          training.NewMemoryRepository(),
-		Desk:              desk.NewMemoryRepository(),
-		Location:          location.NewMemoryRepository(),
-		Agent:             agent.NewMemoryRepository(),
-		Security:          securityFindings,
-		Ticket:            ticket.NewMemoryRepository(),
-		User:              users,
-		Credential:        credential.NewMemoryRepository(),
-		ADMPAccounts:      admpAccounts,
-		ADMP:              admp.NewMemoryRepository(admpAccounts),
-		Entitlement:       entitlement.NewMemoryRepository(),
-		TenantHierarchy:   tenantapi.NewMemoryRepository(),
-		Rack:              rack.NewMemoryRepository(),
-		Contact:           contact.NewMemoryRepository(),
-		IPAM:              ipam.NewMemoryRepository(),
-		Metrics:           monitoring.NewMemoryMetricStore(),
-		Probes:            probes,
-		Alarms:            alarm.NewService(alarm.NewMemoryStore(), nil, &alarm.LogSink{}),
-		Permission:        permission.NewMemoryRepository(),
-		FieldGrants:       permission.NewMemoryFieldGrants(),
-		APIKeys:           identity.NewMemoryAPIKeyStore(),
-		ServiceAccounts:   serviceAccounts,
-		SLA:               sla.NewMemoryRepository(),
-		Form:              form.NewMemoryRepository(),
-		Workflow:          workflow.NewMemoryRepository(),
-		Compliance:        compliance.NewMemoryRepository().WithFindings(securityFindings),
-		IGA:               iga.NewMemoryRepository(),
-		Search:            search.NewMemoryRepository(),
-		AI:                ai.NewMemoryRepository(),
-		ExportJobs:        export.NewMemoryJobRepository(),
-		Jobs:              jobs.NewMemoryRepository(),
-		Privacy:           privacy.NewMemoryRepository(),
+		History:             history.NewMemoryRepository(),
+		SavedView:           savedview.NewMemoryRepository(),
+		FilterQuery:         nil, // memory mode: query engine requires SQL; endpoint reports 501
+		LifecycleStates:     lifecycleStates,
+		LifecycleResolver:   lifecycleStates,
+		Asset:               assets,
+		Assignment:          assignment.NewMemoryRepository(),
+		Document:            document.NewMemoryRepository(),
+		Stocktake:           stocktake.NewMemoryRepository(assets),
+		Consumable:          consumables,
+		Order:               order.NewMemoryRepository(),
+		Maintenance:         maintenance.NewMemoryRepository(),
+		Disposal:            disposal.NewMemoryRepository(),
+		Key:                 keymgmt.NewMemoryRepository(),
+		Training:            training.NewMemoryRepository(),
+		Desk:                desk.NewMemoryRepository(),
+		Location:            location.NewMemoryRepository(),
+		Agent:               agent.NewMemoryRepository(),
+		Security:            securityFindings,
+		Ticket:              ticket.NewMemoryRepository(),
+		User:                users,
+		Credential:          credential.NewMemoryRepository(),
+		ADMPAccounts:        admpAccounts,
+		ADMP:                admp.NewMemoryRepository(admpAccounts),
+		Entitlement:         entitlement.NewMemoryRepository(),
+		TenantHierarchy:     tenantapi.NewMemoryRepository(),
+		Rack:                rack.NewMemoryRepository(),
+		Contact:             contact.NewMemoryRepository(),
+		IPAM:                ipam.NewMemoryRepository(),
+		Metrics:             monitoring.NewMemoryMetricStore(),
+		Probes:              probes,
+		Alarms:              alarm.NewService(alarm.NewMemoryStore(), nil, &alarm.LogSink{}),
+		Permission:          permission.NewMemoryRepository(),
+		FieldGrants:         permission.NewMemoryFieldGrants(),
+		APIKeys:             identity.NewMemoryAPIKeyStore(),
+		ServiceAccounts:     serviceAccounts,
+		SLA:                 slaRepo,
+		AvailabilityTargets: sla.NewMemoryAvailabilityRepository(memoryTargetObjects{cis: cis, types: ciTypes}, slaRepo),
+		Form:                form.NewMemoryRepository(),
+		Workflow:            workflow.NewMemoryRepository(),
+		Compliance:          compliance.NewMemoryRepository().WithFindings(securityFindings),
+		IGA:                 iga.NewMemoryRepository(),
+		Search:              search.NewMemoryRepository(),
+		AI:                  ai.NewMemoryRepository(),
+		ExportJobs:          export.NewMemoryJobRepository(),
+		Jobs:                jobs.NewMemoryRepository(),
+		Privacy:             privacy.NewMemoryRepository(),
 	}
 }
 
@@ -239,46 +243,47 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Asset:             asset.NewPGRepository(pool).WithEvents(events.NewOutbox()),
 		Assignment:        assignment.NewPGRepository(pool),
 		// The assignment service books over the movement service (WP-275).
-		AssignmentService: assignments,
-		Document:          document.NewPGRepository(pool),
-		Stocktake:         stocktake.NewPGRepository(pool),
-		Consumable:        consumable.NewPGRepository(pool),
-		Order:             order.NewPGRepository(pool),
-		Maintenance:       maintenance.NewPGRepository(pool),
-		Disposal:          disposal.NewPGRepository(pool),
-		Key:               keymgmt.NewPGRepository(pool),
-		Training:          training.NewPGRepository(pool),
-		Desk:              desk.NewPGRepository(pool),
-		Location:          location.NewPGRepository(pool),
-		Agent:             agent.NewPGRepository(pool),
-		Security:          security.NewPGRepository(pool),
-		Ticket:            ticket.NewPGRepository(pool).WithEvents(events.NewOutbox()),
-		User:              user.NewPGRepository(pool),
-		Credential:        credential.NewPGRepository(pool),
-		ADMPAccounts:      admp.NewPGAccountRepository(pool),
-		ADMP:              admp.NewPGRepository(pool),
-		Entitlement:       entitlement.NewPGRepository(pool),
-		TenantHierarchy:   tenantapi.NewPGRepository(pool),
-		Rack:              rack.NewPGRepository(pool),
-		Contact:           contact.NewPGRepository(pool),
-		IPAM:              ipamRepo,
-		IPAMManagement:    management,
-		Metrics:           monitoring.NewPGMetricStore(pool),
-		Probes:            probe.NewPGRepository(pool),
-		Alarms:            alarm.NewPGService(pool),
-		Permission:        permission.NewPGRepository(pool),
-		FieldGrants:       permission.NewPGFieldGrants(pool),
-		APIKeys:           identity.NewPGAPIKeyStore(pool),
-		ServiceAccounts:   user.NewPGServiceAccounts(pool),
-		Invitations:       user.NewPGInvitations(pool),
-		SLA:               sla.NewPGRepository(pool),
-		Form:              form.NewPGRepository(pool),
-		Workflow:          workflow.NewPGRepository(pool),
-		Compliance:        compliance.NewPGRepository(pool),
-		IGA:               iga.NewPGRepository(pool),
-		Search:            search.NewPGRepository(pool),
-		AI:                ai.NewPGRepository(pool),
-		ExportJobs:        export.NewPGJobRepository(pool),
+		AssignmentService:   assignments,
+		Document:            document.NewPGRepository(pool),
+		Stocktake:           stocktake.NewPGRepository(pool),
+		Consumable:          consumable.NewPGRepository(pool),
+		Order:               order.NewPGRepository(pool),
+		Maintenance:         maintenance.NewPGRepository(pool),
+		Disposal:            disposal.NewPGRepository(pool),
+		Key:                 keymgmt.NewPGRepository(pool),
+		Training:            training.NewPGRepository(pool),
+		Desk:                desk.NewPGRepository(pool),
+		Location:            location.NewPGRepository(pool),
+		Agent:               agent.NewPGRepository(pool),
+		Security:            security.NewPGRepository(pool),
+		Ticket:              ticket.NewPGRepository(pool).WithEvents(events.NewOutbox()),
+		User:                user.NewPGRepository(pool),
+		Credential:          credential.NewPGRepository(pool),
+		ADMPAccounts:        admp.NewPGAccountRepository(pool),
+		ADMP:                admp.NewPGRepository(pool),
+		Entitlement:         entitlement.NewPGRepository(pool),
+		TenantHierarchy:     tenantapi.NewPGRepository(pool),
+		Rack:                rack.NewPGRepository(pool),
+		Contact:             contact.NewPGRepository(pool),
+		IPAM:                ipamRepo,
+		IPAMManagement:      management,
+		Metrics:             monitoring.NewPGMetricStore(pool),
+		Probes:              probe.NewPGRepository(pool),
+		Alarms:              alarm.NewPGService(pool),
+		Permission:          permission.NewPGRepository(pool),
+		FieldGrants:         permission.NewPGFieldGrants(pool),
+		APIKeys:             identity.NewPGAPIKeyStore(pool),
+		ServiceAccounts:     user.NewPGServiceAccounts(pool),
+		Invitations:         user.NewPGInvitations(pool),
+		SLA:                 sla.NewPGRepository(pool),
+		AvailabilityTargets: sla.NewPGAvailabilityRepository(pool),
+		Form:                form.NewPGRepository(pool),
+		Workflow:            workflow.NewPGRepository(pool),
+		Compliance:          compliance.NewPGRepository(pool),
+		IGA:                 iga.NewPGRepository(pool),
+		Search:              search.NewPGRepository(pool),
+		AI:                  ai.NewPGRepository(pool),
+		ExportJobs:          export.NewPGJobRepository(pool),
 		Jobs: jobs.NewPGRepository(pool).WithReadCondition(importer.JobKind, importer.JobReadSQL()).
 			WithReadCondition(labels.BatchJobKind, labels.JobReadSQL),
 		Privacy:          privacy.NewPGRepository(pool),
@@ -361,4 +366,44 @@ func (l locationLabels) Entries(ctx context.Context, orgID string) ([]labels.Ent
 		out = append(out, labels.Entry{Object: labels.Object{ID: it.ID, Name: it.Name}, Codes: []string{it.Barcode}})
 	}
 	return out, nil
+}
+
+// memoryTargetObjects answers the CI of an availability target from the
+// memory CI and type stores (--no-db, WP-1048): client and site of the CI
+// and whether its type or one of its ancestors is a service type.
+type memoryTargetObjects struct {
+	cis   ci.Repository
+	types citype.Repository
+}
+
+func (m memoryTargetObjects) ObjectCI(ctx context.Context, orgID, ciID string) (sla.ObjectCI, bool, error) {
+	item, err := m.cis.GetByID(ctx, orgID, ciID)
+	if err != nil {
+		return sla.ObjectCI{}, false, nil
+	}
+	out := sla.ObjectCI{}
+	if item.ClientID != "" {
+		c := item.ClientID
+		out.ClientID = &c
+	}
+	if item.SiteID != "" {
+		s := item.SiteID
+		out.SiteID = &s
+	}
+	typeID := item.CITypeID
+	for range 32 {
+		if typeID == "" {
+			break
+		}
+		typ, terr := m.types.GetByID(ctx, orgID, typeID)
+		if terr != nil {
+			break
+		}
+		if slices.Contains(sla.ServiceTypeKeys, typ.Key) {
+			out.Service = true
+			break
+		}
+		typeID = typ.ParentTypeID
+	}
+	return out, true, nil
 }

@@ -155,13 +155,15 @@ type Repositories struct {
 	// Invitations are the user invitations (TLC-03); nil answers 503.
 	Invitations user.InvitationRepository
 	SLA         sla.Repository
-	Form        form.Repository
-	Workflow    workflow.Repository
-	Compliance  compliance.Repository
-	IGA         iga.Repository
-	Search      search.Backend
-	AI          ai.Repository
-	ExportJobs  export.JobRepository
+	// Availability holds the availability targets (ALR-06, WP-1048).
+	AvailabilityTargets sla.AvailabilityRepository
+	Form                form.Repository
+	Workflow            workflow.Repository
+	Compliance          compliance.Repository
+	IGA                 iga.Repository
+	Search              search.Backend
+	AI                  ai.Repository
+	ExportJobs          export.JobRepository
 	// Jobs is the generic job model (JOB-01).
 	Jobs    jobs.Repository
 	Privacy privacy.Repository
@@ -994,6 +996,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		permission.NewHandler(repos.Permission),
 		searchHandler,
 		sla.NewHandler(repos.SLA, repos.Ticket),
+		// The availability targets under /api/v1/monitoring/sla (WP-1048).
+		sla.NewAvailabilityHandler(repos.AvailabilityTargets),
 		form.NewHandler(repos.Form),
 		workflow.NewHandler(repos.Workflow, workflowRuns),
 		compliance.NewHandler(repos.Compliance, compliance.NewEvaluator(repos.Compliance, repos.CI)).

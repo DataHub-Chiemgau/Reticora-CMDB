@@ -57,6 +57,7 @@ DELETE /api/v1/monitoring/groups/{id} monitoring:write
 DELETE /api/v1/monitoring/groups/{id}/members/{ci_id} monitoring:write
 DELETE /api/v1/monitoring/probes/{id} monitoring:write
 DELETE /api/v1/monitoring/profiles/{id} monitoring:write
+DELETE /api/v1/monitoring/sla/targets/{id} monitoring:write
 DELETE /api/v1/mounts/{id} rack:write
 DELETE /api/v1/nameserver-sets/{id} ipam:write
 DELETE /api/v1/nat-translations/{id} ipam:write
@@ -314,6 +315,8 @@ GET /api/v1/monitoring/probes/{id} monitoring:read
 GET /api/v1/monitoring/probes/{id}/effective monitoring:read
 GET /api/v1/monitoring/profiles monitoring:read
 GET /api/v1/monitoring/profiles/{id} monitoring:read
+GET /api/v1/monitoring/sla/targets monitoring:read
+GET /api/v1/monitoring/sla/targets/{id} monitoring:read
 GET /api/v1/mounts rack:read
 GET /api/v1/mounts/{id} rack:read
 GET /api/v1/nameserver-sets ipam:read
@@ -485,6 +488,7 @@ PATCH /api/v1/monitoring/alerts/{id} monitoring:write
 PATCH /api/v1/monitoring/groups/{id} monitoring:write
 PATCH /api/v1/monitoring/probes/{id} monitoring:write
 PATCH /api/v1/monitoring/profiles/{id} monitoring:write
+PATCH /api/v1/monitoring/sla/targets/{id} monitoring:write
 PATCH /api/v1/mounts/{id} rack:write
 PATCH /api/v1/nameserver-sets/{id} ipam:write
 PATCH /api/v1/nat-translations/{id} ipam:write
@@ -661,6 +665,7 @@ POST /api/v1/monitoring/incidents/{id}/root monitoring:write
 POST /api/v1/monitoring/metrics monitoring:write
 POST /api/v1/monitoring/probes monitoring:write
 POST /api/v1/monitoring/profiles monitoring:write
+POST /api/v1/monitoring/sla/targets monitoring:write
 POST /api/v1/mounts rack:write
 POST /api/v1/nameserver-sets ipam:write
 POST /api/v1/nat-translations ipam:write

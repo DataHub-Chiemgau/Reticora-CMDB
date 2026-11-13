@@ -24789,38 +24789,65 @@ paths:
   /api/v1/monitoring/sla/targets:
     x-phase: P3
     x-feature: monitoring_analytics
-    x-status: planned
     get:
       operationId: listAvailabilityTargets
       tags: [Monitoring]
       summary: List availability targets
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        The availability targets in the caller's scope (ALR-06, WP-1048),
+        ordered by name, paged with limit and the signed cursor (API-02). A
+        principal restricted to clients sees no organization-wide target.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
+        - name: scope_kind
+          in: query
+          schema: { type: string, enum: [ci, service, connection, client] }
+        - name: ci_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: client_id
+          in: query
+          schema: { type: string, format: uuid }
       responses:
         '200':
-          description: List availability targets. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+          description: Availability targets
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AvailabilityTargetListResponse' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
     post:
       operationId: createAvailabilityTarget
       tags: [Monitoring]
-      summary: Create a availability target
+      summary: Create an availability target
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        A target of a CI, a service (CI of type business_service or
+        application, with subtypes), a connection (port or CPE CI, every CI
+        but the service types) or a client. Client and site of a CI target
+        follow the CI. The calendar (service time) must be one without client
+        or of the target's client. A CI or client outside the caller's scope
+        is 403, an object with a target of the period already 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AvailabilityTargetCreateRequest' }
       responses:
         '201':
-          description: Created. The schema comes with the implementing work package.
+          description: The created target
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AvailabilityTarget' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -24837,19 +24864,19 @@ paths:
   /api/v1/monitoring/sla/targets/{id}:
     x-phase: P3
     x-feature: monitoring_analytics
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
       operationId: getAvailabilityTarget
       tags: [Monitoring]
-      summary: Get a availability target
-      description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+      summary: Get an availability target
+      description: A target outside the caller's scope is 404.
       responses:
         '200':
-          description: Get a availability target. The schema comes with the implementing work package.
+          description: The target
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AvailabilityTarget' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -24861,13 +24888,22 @@ paths:
     patch:
       operationId: updateAvailabilityTarget
       tags: [Monitoring]
-      summary: Update a availability target
+      summary: Update an availability target
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Changes name, target percent, period, warning share, calendar (null
+        clears it) and enabled; the object of a target (scope kind, CI,
+        client) does not change.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AvailabilityTargetUpdateRequest' }
       responses:
         '200':
-          description: Update a availability target. The schema comes with the implementing work package.
+          description: The updated target
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AvailabilityTarget' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -24885,21 +24921,16 @@ paths:
     delete:
       operationId: deleteAvailabilityTarget
       tags: [Monitoring]
-      summary: Delete a availability target
-      description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+      summary: Delete an availability target
       responses:
         '204':
-          description: Done.
+          description: Deleted
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -33033,6 +33064,82 @@ components:
           type: string
           minLength: 1
           maxLength: 1000
+    AvailabilityTarget:
+      type: object
+      description: An availability target (ALR-06, WP-1048).
+      required: [id, organization_id, client_id, site_id, name, scope_kind, ci_id, target_percent, period,
+        budget_warn_percent, calendar_id, enabled, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        client_id: { type: [string, 'null'], format: uuid }
+        site_id: { type: [string, 'null'], format: uuid }
+        name: { type: string }
+        scope_kind:
+          type: string
+          enum: [ci, service, connection, client]
+        ci_id: { type: [string, 'null'], format: uuid }
+        target_percent:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 100
+        period:
+          type: string
+          enum: [month, quarter, year]
+        budget_warn_percent: { type: integer, minimum: 1, maximum: 100 }
+        calendar_id: { type: [string, 'null'], format: uuid }
+        enabled: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AvailabilityTargetCreateRequest:
+      type: object
+      required: [name, scope_kind, target_percent, period]
+      additionalProperties: false
+      properties:
+        name: { type: string, maxLength: 200 }
+        scope_kind:
+          type: string
+          enum: [ci, service, connection, client]
+        ci_id:
+          type: string
+          format: uuid
+          description: The CI of a target of kind ci, service or connection.
+        client_id:
+          type: string
+          format: uuid
+          description: The client of a target of kind client; ignored for the other kinds (they follow the CI).
+        target_percent:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 100
+          description: At most three decimals (99.950).
+        period:
+          type: string
+          enum: [month, quarter, year]
+        budget_warn_percent: { type: integer, minimum: 1, maximum: 100, default: 80 }
+        calendar_id: { type: string, format: uuid }
+        enabled: { type: boolean, default: true }
+    AvailabilityTargetUpdateRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        name: { type: string, maxLength: 200 }
+        target_percent: { type: number, exclusiveMinimum: 0, maximum: 100 }
+        period:
+          type: string
+          enum: [month, quarter, year]
+        budget_warn_percent: { type: integer, minimum: 1, maximum: 100 }
+        calendar_id: { type: [string, 'null'], format: uuid }
+        enabled: { type: boolean }
+    AvailabilityTargetListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/AvailabilityTarget' }
     AlarmSettingsRequest:
       type: object
       additionalProperties: false

@@ -68,6 +68,8 @@ var matrixOverrides = map[string]map[string]string{
 	"asset_movement": {"asset_id": "@uuid"},
 	// An alert rule has at least one stage (alert_rule_stage_check, WP-985).
 	"alert_rule": {"warning_condition": `{"op":"gt","field":"value","value":1}`},
+	// An availability target of a CI names the CI (availability_target_object_check, WP-1048).
+	"availability_target": {"scope_kind": "ci", "ci_id": "@uuid"},
 	// One target column per target kind (credential_binding_target_check, WP-890).
 	"credential_binding": {"target_kind": "ci", "ci_id": "@uuid"},
 	// A stored credential carries its ciphertext (credential_source_ciphertext_check, WP-894).

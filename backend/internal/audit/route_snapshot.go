@@ -415,6 +415,8 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 			   FROM monitoring_group_member m WHERE m.organization_id = t.organization_id AND m.group_id = t.id))`}
 	m["DELETE "+v1+"monitoring/groups/{id}/members/{ci_id}"] = RouteSnapshot{Table: "monitoring_group_member",
 		Keys: []SnapshotKey{{"group_id", "id"}, {"ci_id", "ci_id"}}}
+	// Availability targets (ALR-06, WP-1048).
+	crud(m, v1+"monitoring/sla/targets", "availability_target", all...)
 	// The alarm settings of the organization (WP-1030): the row of the
 	// organization, absent while the defaults apply.
 	m["PUT "+v1+"monitoring/alarm-settings"] = RouteSnapshot{Table: "alarm_settings",

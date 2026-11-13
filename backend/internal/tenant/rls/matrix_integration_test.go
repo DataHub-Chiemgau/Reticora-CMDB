@@ -52,6 +52,8 @@ var matrixOrgWideDeletes = map[string]string{
 var matrixClientOnlyReads = map[string]string{
 	"admp_account": "ADMP accounts: the organization-wide account is configuration of the organization, " +
 		"a principal restricted to clients sees only its clients' accounts (WP-925 AK6): admp.TestAdmpAccountClientScope",
+	"availability_target": "availability targets: a principal restricted to clients sees no organization-wide target " +
+		"(WP-1048 AK4): sla.TestAvailabilityTargetClientScope",
 }
 
 // matrixSiteWrites lists the tables with a client but without a site column

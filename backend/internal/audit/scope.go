@@ -150,7 +150,7 @@ var resourceTables = map[string][]string{
 	// profiles and groups (WP-946) and the incidents (WP-1036); the member
 	// routes name the group as resource_id (monitoring_group_member has no
 	// id of its own).
-	"monitoring":                {"alert_rule", "probe", "alarm", "monitoring_profile", "monitoring_group", "incident"},
+	"monitoring":                {"alert_rule", "probe", "alarm", "monitoring_profile", "monitoring_group", "incident", "availability_target"},
 	"mounts":                    {"rack_mount"},
 	"network-interfaces":        {"network_interface"},
 	"notification-channels":     {"notification_channel"},

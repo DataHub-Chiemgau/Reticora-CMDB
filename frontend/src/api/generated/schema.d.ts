@@ -10531,13 +10531,13 @@ export interface paths {
     };
     /**
      * List availability targets
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description The availability targets in the caller's scope (ALR-06, WP-1048), ordered by name, paged with limit and the signed cursor (API-02). A principal restricted to clients sees no organization-wide target.
      */
     get: operations['listAvailabilityTargets'];
     put?: never;
     /**
-     * Create a availability target
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * Create an availability target
+     * @description A target of a CI, a service (CI of type business_service or application, with subtypes), a connection (port or CPE CI, every CI but the service types) or a client. Client and site of a CI target follow the CI. The calendar (service time) must be one without client or of the target's client. A CI or client outside the caller's scope is 403, an object with a target of the period already 409.
      */
     post: operations['createAvailabilityTarget'];
     delete?: never;
@@ -10557,22 +10557,19 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Get a availability target
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * Get an availability target
+     * @description A target outside the caller's scope is 404.
      */
     get: operations['getAvailabilityTarget'];
     put?: never;
     post?: never;
-    /**
-     * Delete a availability target
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
-     */
+    /** Delete an availability target */
     delete: operations['deleteAvailabilityTarget'];
     options?: never;
     head?: never;
     /**
-     * Update a availability target
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * Update an availability target
+     * @description Changes name, target percent, period, warning share, calendar (null clears it) and enabled; the object of a target (scope kind, CI, client) does not change.
      */
     patch: operations['updateAvailabilityTarget'];
     trace?: never;
@@ -15134,6 +15131,71 @@ export interface components {
        */
       alarm_id: string;
       reason: string;
+    };
+    /** @description An availability target (ALR-06, WP-1048). */
+    AvailabilityTarget: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      /** Format: uuid */
+      client_id: string | null;
+      /** Format: uuid */
+      site_id: string | null;
+      name: string;
+      /** @enum {string} */
+      scope_kind: 'ci' | 'service' | 'connection' | 'client';
+      /** Format: uuid */
+      ci_id: string | null;
+      target_percent: number;
+      /** @enum {string} */
+      period: 'month' | 'quarter' | 'year';
+      budget_warn_percent: number;
+      /** Format: uuid */
+      calendar_id: string | null;
+      enabled: boolean;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    AvailabilityTargetCreateRequest: {
+      name: string;
+      /** @enum {string} */
+      scope_kind: 'ci' | 'service' | 'connection' | 'client';
+      /**
+       * Format: uuid
+       * @description The CI of a target of kind ci, service or connection.
+       */
+      ci_id?: string;
+      /**
+       * Format: uuid
+       * @description The client of a target of kind client; ignored for the other kinds (they follow the CI).
+       */
+      client_id?: string;
+      /** @description At most three decimals (99.950). */
+      target_percent: number;
+      /** @enum {string} */
+      period: 'month' | 'quarter' | 'year';
+      /** @default 80 */
+      budget_warn_percent: number;
+      /** Format: uuid */
+      calendar_id?: string;
+      /** @default true */
+      enabled: boolean;
+    };
+    AvailabilityTargetUpdateRequest: {
+      name?: string;
+      target_percent?: number;
+      /** @enum {string} */
+      period?: 'month' | 'quarter' | 'year';
+      budget_warn_percent?: number;
+      /** Format: uuid */
+      calendar_id?: string | null;
+      enabled?: boolean;
+    };
+    AvailabilityTargetListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['AvailabilityTarget'][];
     };
     /** @description The alarm settings to store (WP-1030); an absent member takes its default. */
     AlarmSettingsRequest: {
@@ -49656,6 +49718,14 @@ export interface operations {
          *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+        scope_kind?: 'ci' | 'service' | 'connection' | 'client';
+        ci_id?: string;
+        client_id?: string;
       };
       header?: never;
       path?: never;
@@ -49663,16 +49733,19 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List availability targets. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description Availability targets */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['AvailabilityTargetListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -49683,14 +49756,20 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AvailabilityTargetCreateRequest'];
+      };
+    };
     responses: {
-      /** @description Created. The schema comes with the implementing work package. */
+      /** @description The created target */
       201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['AvailabilityTarget'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
@@ -49712,12 +49791,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get a availability target. The schema comes with the implementing work package. */
+      /** @description The target */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['AvailabilityTarget'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -49737,7 +49818,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Done. */
+      /** @description Deleted */
       204: {
         headers: {
           [name: string]: unknown;
@@ -49747,7 +49828,6 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -49761,14 +49841,20 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AvailabilityTargetUpdateRequest'];
+      };
+    };
     responses: {
-      /** @description Update a availability target. The schema comes with the implementing work package. */
+      /** @description The updated target */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['AvailabilityTarget'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];

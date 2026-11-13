@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000349_alarm_settings
+Stand: Migration 000350_availability_target
 
 ## Prüfung
 
@@ -1994,6 +1994,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `attribute_set` | ja | ja | attribute_set_isolation_delete (DELETE), attribute_set_isolation_insert (INSERT), attribute_set_isolation_select (SELECT), attribute_set_isolation_update (UPDATE) |
 | `audit_log` | ja | ja | audit_isolation (ALL) |
 | `audit_route_intent` | ja | ja | audit_route_intent_isolation (ALL), audit_route_intent_system_select (SELECT) |
+| `availability_target` | ja | ja | availability_target_isolation (ALL), availability_target_scoped_delete (DELETE), availability_target_scoped_update (UPDATE) |
 | `barcode_registry` | ja | ja | barcode_registry_isolation (ALL), barcode_registry_scoped_delete (DELETE), barcode_registry_scoped_update (UPDATE) |
 | `bgp_peering` | ja | ja | bgp_peering_isolation (ALL), bgp_peering_scoped_delete (DELETE), bgp_peering_scoped_update (UPDATE) |
 | `building` | ja | ja | building_isolation (ALL) |
