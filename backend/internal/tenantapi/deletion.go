@@ -312,3 +312,25 @@ func uuidString(s string) string {
 	}
 	return ""
 }
+
+// ReadDeletionState reads the deletion state and the end of the grace
+// period of the organization in the tenant context of ctx (the request,
+// or the org-wide scope of a system run): the read-only grace period of
+// WP-1153 (middleware.OrgState, collector status). An unknown organization
+// is none.
+func ReadDeletionState(ctx context.Context, pool *pgxpool.Pool, orgID string) (state string, dueAt *time.Time, err error) {
+	err = database.WithRequestTenant(ctx, pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT COALESCE(max(deletion_state), 'none'), max(deletion_due_at) FROM organization WHERE id = $1`,
+			orgID).Scan(&state, &dueAt)
+	})
+	return state, dueAt, err
+}
+
+// OrgPendingDeletion reports whether the organization is in the read-only
+// grace period of its deletion (requested or purging), read through
+// ReadDeletionState: the collector status run pauses its collectors
+// (discovery.LicensedUnlessPendingDeletion, WP-1153).
+func OrgPendingDeletion(ctx context.Context, pool *pgxpool.Pool, orgID string) (bool, error) {
+	state, _, err := ReadDeletionState(ctx, pool, orgID)
+	return state == DeletionRequested || state == DeletionPurging, err
+}

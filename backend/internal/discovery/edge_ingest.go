@@ -134,25 +134,54 @@ func (h *Handler) edgeLicense(ctx context.Context, orgID string) (state, problem
 
 // checkCollector fails for a collector that may not deliver over the edge:
 // api.ErrNotFound for an unknown collector, ErrCollectorDisabled for a
-// disabled one (COL-04). The edge grants the subject tree when the
-// collector connects; a collector disabled later still holds it.
+// disabled one (COL-04), ErrOrgPendingDeletion while its organization is
+// in the grace period of its deletion (TLC-06, WP-1153). The edge grants
+// the subject tree when the collector connects; a collector disabled
+// later, or one whose organization's deletion was requested later, still
+// holds it, so every data request is checked.
 func (h *Handler) checkCollector(ctx context.Context, orgID, collectorID string) error {
-	status, err := h.repo.CollectorStatus(ctx, orgID, collectorID)
+	return h.checkCollectorFor(ctx, orgID, collectorID, false)
+}
+
+// collectorAccessReader is a repository that reads the status of a
+// collector and the deletion state of its organization in one query
+// (PGRepository).
+type collectorAccessReader interface {
+	CollectorAccess(ctx context.Context, orgID, collectorID string) (status string, pendingDeletion bool, err error)
+}
+
+// checkCollectorFor is checkCollector; heartbeat lets a heartbeat pass the
+// grace period, so the collector learns that it is paused.
+func (h *Handler) checkCollectorFor(ctx context.Context, orgID, collectorID string, heartbeat bool) error {
+	var status string
+	var pending bool
+	var err error
+	if acc, ok := h.repo.(collectorAccessReader); ok {
+		status, pending, err = acc.CollectorAccess(ctx, orgID, collectorID)
+	} else {
+		status, err = h.repo.CollectorStatus(ctx, orgID, collectorID)
+	}
 	if err != nil {
 		return err
 	}
 	if status == CollectorDisabled {
 		return ErrCollectorDisabled
 	}
+	if pending && !heartbeat {
+		return ErrOrgPendingDeletion
+	}
 	return nil
 }
 
 // edgeRefusal answers a request of a collector checkCollector refused:
-// 403 for a disabled, 404 for an unknown collector.
+// 403 for a disabled, 404 for an unknown collector, 423 while the
+// organization is pending deletion.
 func edgeRefusal(err error) EdgeReply {
 	switch {
 	case errors.Is(err, ErrCollectorDisabled):
 		return EdgeReply{Status: http.StatusForbidden, Error: err.Error()}
+	case errors.Is(err, ErrOrgPendingDeletion):
+		return EdgeReply{Status: http.StatusLocked, Type: api.ProblemOrgPendingDeletion, Error: err.Error()}
 	case errors.Is(err, api.ErrNotFound):
 		return EdgeReply{Status: http.StatusNotFound, Error: "collector not found"}
 	}
@@ -504,12 +533,14 @@ func (h *Handler) edgeHandlers() map[string]edgeHandler {
 }
 
 // serveEdgeRequest answers one edge data request: a request of an unknown
-// or disabled collector is refused before its handler runs (COL-04).
+// or disabled collector is refused before its handler runs (COL-04), as is
+// every request but the heartbeat while the organization is pending
+// deletion (423, TLC-06).
 func (h *Handler) serveEdgeRequest(ctx context.Context, msg *nats.Msg, suffix string, handle edgeHandler) {
 	var reply any = EdgeReply{Status: http.StatusBadRequest, Error: "invalid subject"}
 	if orgID, collectorID, ok := subjectCollector(msg.Subject, suffix); ok {
 		sctx := systemContext(ctx, orgID)
-		if cerr := h.checkCollector(sctx, orgID, collectorID); cerr != nil {
+		if cerr := h.checkCollectorFor(sctx, orgID, collectorID, suffix == HeartbeatSuffix); cerr != nil {
 			slog.Warn("collector edge request refused", "organization_id", orgID, "collector_id", collectorID,
 				"suffix", suffix, "error", cerr)
 			reply = edgeRefusal(cerr)

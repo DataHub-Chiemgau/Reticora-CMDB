@@ -245,6 +245,27 @@ func (r *PGRepository) CollectorStatus(ctx context.Context, orgID, collectorID s
 	return status, err
 }
 
+// CollectorAccess returns the status of a collector of the organization
+// and whether the organization is in the grace period of its deletion
+// (deletion_state requested or purging, TLC-06), in one query; an unknown
+// collector fails with api.ErrNotFound. checkCollector reads it for every
+// edge data request.
+func (r *PGRepository) CollectorAccess(ctx context.Context, orgID, collectorID string) (status string, pending bool, err error) {
+	if !audit.IsUUID(collectorID) {
+		return "", false, api.ErrNotFound
+	}
+	err = database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		qerr := tx.QueryRow(ctx, `SELECT c.status, COALESCE(o.deletion_state IN ('requested', 'purging'), false)
+			FROM collector c LEFT JOIN organization o ON o.id = c.organization_id
+			WHERE c.id = $1 AND c.organization_id = $2`, collectorID, orgID).Scan(&status, &pending)
+		if errors.Is(qerr, pgx.ErrNoRows) {
+			return api.ErrNotFound
+		}
+		return qerr
+	})
+	return status, pending, err
+}
+
 // UpdateCollector implements Repository.
 func (r *PGRepository) UpdateCollector(ctx context.Context, orgID, collectorID string, patch *CollectorPatch) (*Collector, error) {
 	// A malformed id names no collector either (404, F-257).

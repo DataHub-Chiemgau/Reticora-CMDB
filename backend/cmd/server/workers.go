@@ -29,6 +29,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/importer"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
@@ -43,6 +44,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/sla"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenantapi"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
@@ -454,10 +456,17 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 		// Collector status: offline after five minutes without heartbeat,
 		// paused while the discovery license is not active (COL-01, COL-05).
 		collectorStatus := discovery.NewStatusMonitor(pool)
-		collectorStatus.Licensed = func(ctx context.Context, orgID string) (bool, error) {
-			_, status, serr := d.entitlements.Status(ctx, orgID, entitlement.FeatureDiscovery)
-			return status == entitlement.StatusActive, serr
-		}
+		// The collectors of an organization in the grace period of its
+		// deletion are paused as well (TLC-06, WP-1153); after the cancel
+		// the next run sets them offline, their next heartbeat active.
+		collectorStatus.Licensed = discovery.LicensedUnlessPendingDeletion(
+			func(ctx context.Context, orgID string) (bool, error) {
+				_, status, serr := d.entitlements.Status(ctx, orgID, entitlement.FeatureDiscovery)
+				return status == entitlement.StatusActive, serr
+			},
+			func(ctx context.Context, orgID string) (bool, error) {
+				return tenantapi.OrgPendingDeletion(ctx, pool, orgID)
+			})
 		systemJobs = append(systemJobs, collectorStatus.Schedule())
 		// Workflow runs of a CI whose wake-up was lost (WP-1089, EVT-01):
 		// one executor queues the runs of both workflow system jobs on the
@@ -711,4 +720,11 @@ func (d dekRotator) RotateOrgDEK(ctx context.Context, orgID string, enc *crypto.
 
 func (d dekRotator) RewrapOrgDEK(ctx context.Context, orgID string, enc *crypto.EnvelopeEncryptor) (bool, error) {
 	return d.repo.RewrapOrgDEK(ctx, orgID, enc)
+}
+
+// readOrgDeletionState is the deletion state of an organization for the
+// read-only grace period (WP-1153, tenantapi.ReadDeletionState).
+func readOrgDeletionState(ctx context.Context, pool *pgxpool.Pool, orgID string) (middleware.OrgDeletionState, error) {
+	state, due, err := tenantapi.ReadDeletionState(ctx, pool, orgID)
+	return middleware.OrgDeletionState{State: state, DueAt: due}, err
 }

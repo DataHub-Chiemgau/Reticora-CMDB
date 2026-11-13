@@ -617,7 +617,7 @@ func (h *Handler) ServeCollectorScopes(ctx context.Context, nc *nats.Conn) error
 			if ok {
 				sctx := systemContext(ctx, orgID)
 				if cerr := h.checkCollector(sctx, orgID, collectorID); cerr != nil {
-					if !errors.Is(cerr, ErrCollectorDisabled) && !errors.Is(cerr, api.ErrNotFound) {
+					if !errors.Is(cerr, ErrCollectorDisabled) && !errors.Is(cerr, api.ErrNotFound) && !errors.Is(cerr, ErrOrgPendingDeletion) {
 						h.scopeCycles.Fail()
 					}
 					slog.Warn("collector scope request refused", "organization_id", orgID, "collector_id", collectorID,

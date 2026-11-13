@@ -829,6 +829,30 @@ snapshot; a cancel (JOB-03) stops before the next batch and removes the
 objects of the job. Documents, routes and download follow in WP-1150 and
 WP-1151.
 
+**Read-only grace period of an organization deletion (TLC-06, WP-1153):**
+while `organization.deletion_state` is `requested` or `purging`, the route
+middleware `middleware.OrgState` (before validation and idempotency) answers
+every `POST`, `PUT`, `PATCH` and `DELETE` of the organization with 423 and the
+problem type `urn:reticora:problem:org-pending-deletion` (member `due_at`);
+REST ingest included. Open stay `DELETE /api/v1/org/deletion`,
+`POST /api/v1/org/exports`, `POST /api/v1/auth/logout`,
+`POST /api/v1/collectors/{id}/heartbeat` and the reading POST routes
+(`/bff/graphql`, `/api/v1/search/query`, `/api/v1/audit/verify`,
+`/api/v1/ai/ask`; `middleware.OrgStateExemptRoutes`). The state is kept per
+process for at most 15 s; request and cancel drop the entry of the own
+process at once. `jobs.Service.Enqueue` refuses every job kind but
+`org.export` with `ErrOrgPendingDeletion`, running jobs run to their end; a
+job route whose process still held the old state answers 423 as well (the
+refusal marks the request, the middleware replaces the error response and
+renews its entry). The NATS edge refuses new connections of the collectors
+of the organization (`discovery.ErrOrgPendingDeletion`); on a connection
+opened before the request every data request (ingest, metrics, probes,
+scope channel) is refused with 423, only the heartbeat passes. The collector
+status run sets them `paused`
+(`discovery.LicensedUnlessPendingDeletion`); after the cancel the next run
+sets them `offline`, their next heartbeat `active`. System runs without a request (retention, rotation,
+notifications) go on; the purge removes their results.
+
 **Privacy / GDPR:** `GET /api/v1/users/{id}/data-export` returns the full set
 of personal data stored about a user (account record plus all contact records
 carrying the user's e-mail address) — the Art. 15 access request.

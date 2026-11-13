@@ -616,6 +616,9 @@ func main() {
 		rateLimit:   middleware.RateLimiterWithLimits(middleware.RateLimits{PerCredential: cfg.RateLimitRPM, PerOrganization: cfg.RateLimitOrgRPM}, cacheStore),
 		validation:  middleware.OpenAPIValidation,
 		idempotency: middleware.IdempotencyWithStore(cacheStore),
+		// The grace period of an organization deletion makes it read-only
+		// (TLC-06, WP-1153).
+		orgState: orgStateMiddleware(auditPool),
 	})
 	if err != nil {
 		slog.Error("failed to build API router", "error", err)
@@ -707,6 +710,24 @@ type httpStages struct {
 	preAuth, auth, tenant, entitlement, rateLimit func(http.Handler) http.Handler
 	// validation and idempotency run per route after its authorization.
 	validation, idempotency func(http.Handler) http.Handler
+	// orgState refuses the writes of an organization in the grace period
+	// of its deletion (WP-1153); per route before validation, nil without
+	// a database.
+	orgState func(http.Handler) http.Handler
+}
+
+// orgStateMiddleware is the route middleware of the read-only grace period
+// (TLC-06, WP-1153): the deletion state of an organization read in the
+// tenant context of the request, kept 15 s per process; without a
+// database none.
+func orgStateMiddleware(pool *pgxpool.Pool) func(http.Handler) http.Handler {
+	if pool == nil {
+		return nil
+	}
+	cache := middleware.NewOrgStateCache(func(ctx context.Context, orgID string) (middleware.OrgDeletionState, error) {
+		return readOrgDeletionState(ctx, pool, orgID)
+	}, middleware.OrgStateTTL)
+	return middleware.OrgState(cache, middleware.OrgStateExempt)
 }
 
 // openAPINotLoadedReadiness is the informational /readyz detail
@@ -730,6 +751,9 @@ func openAPINotLoadedReadiness() server.ReadinessCheck {
 // populated from the request context.
 func newHTTPHandler(repos server.Repositories, opts server.Options, stages httpStages) (http.Handler, error) {
 	opts.RouteMiddleware = []func(http.Handler) http.Handler{stages.validation, stages.idempotency}
+	if stages.orgState != nil {
+		opts.RouteMiddleware = append([]func(http.Handler) http.Handler{stages.orgState}, opts.RouteMiddleware...)
+	}
 	mux, httpMetrics, err := server.NewRouter(repos, opts)
 	if err != nil {
 		return nil, err

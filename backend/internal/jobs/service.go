@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -141,6 +143,20 @@ func (s *Service) Enqueue(ctx context.Context, orgID, kind string, params any, o
 	if err != nil {
 		return nil, false, err
 	}
+	// The grace period of an organization deletion (TLC-06, WP-1153): no
+	// new job but the full export; running jobs run to their end.
+	if checker, ok := s.repo.(orgStateChecker); ok && kind != orgExportKind {
+		pending, cerr := checker.OrgPendingDeletion(ctx, orgID)
+		if cerr != nil {
+			return nil, false, cerr
+		}
+		if pending {
+			// The route middleware answers 423 even when the handler maps
+			// the error otherwise (its cached state was older).
+			api.SignalOrgPendingDeletion(ctx)
+			return nil, false, ErrOrgPendingDeletion
+		}
+	}
 	raw, err := json.Marshal(params)
 	if err != nil {
 		return nil, false, fmt.Errorf("encode job params: %w", err)
@@ -159,6 +175,37 @@ func (s *Service) Enqueue(ctx context.Context, orgID, kind string, params any, o
 	}
 	created, err := s.repo.Insert(ctx, job)
 	return job, created, err
+}
+
+// ErrOrgPendingDeletion refuses a job of an organization whose deletion is
+// requested or whose purge runs (TLC-06, WP-1153); the routes answer 423
+// (api.WriteRepoError, and the route middleware OrgState through the
+// signal of the request).
+var ErrOrgPendingDeletion = api.ErrOrgPendingDeletion
+
+// orgExportKind is the job kind of the full export (export.OrgExportJobKind),
+// the one kind the grace period of a deletion still starts (E-166).
+const orgExportKind = "org.export"
+
+// orgStateChecker is a repository that knows the deletion state of an
+// organization (PGRepository).
+type orgStateChecker interface {
+	OrgPendingDeletion(ctx context.Context, orgID string) (bool, error)
+}
+
+// OrgPendingDeletion reports whether the deletion of the organization is
+// requested or its purge runs; it reads organization.deletion_state in
+// the tenant context of the call.
+func (r *PGRepository) OrgPendingDeletion(ctx context.Context, orgID string) (bool, error) {
+	var pending bool
+	err := r.inScope(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT COALESCE(bool_or(deletion_state IN ('requested', 'purging')), false)
+			FROM organization WHERE id = $1`, orgID).Scan(&pending)
+	})
+	if err != nil {
+		return false, fmt.Errorf("read the deletion state: %w", err)
+	}
+	return pending, nil
 }
 
 // Claim starts the next due queued job of the given kinds; nil when none

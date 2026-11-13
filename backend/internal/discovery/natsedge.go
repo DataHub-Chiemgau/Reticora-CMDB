@@ -83,6 +83,9 @@ func CollectorInbox(collectorID string) string {
 var (
 	ErrNoClientCertificate = errors.New("no client certificate")
 	ErrCertificateRevoked  = errors.New("collector certificate revoked")
+	// ErrOrgPendingDeletion refuses the collectors of an organization whose
+	// deletion is requested or whose purge runs (TLC-06, WP-1153).
+	ErrOrgPendingDeletion = errors.New("the organization of the collector is pending deletion")
 )
 
 // EdgeIdentity is an authorized collector connection.
@@ -146,7 +149,8 @@ func (a *EdgeAuthorizer) Authorize(ctx context.Context, certs []string) (*EdgeId
 	sum := sha256.Sum256(leaf.Raw)
 	id := &EdgeIdentity{OrganizationID: leaf.Subject.Organization[0], CollectorID: leaf.Subject.CommonName,
 		NotBefore: leaf.NotBefore, NotAfter: leaf.NotAfter, PublicKey: leaf.PublicKey, Serial: serial, Fingerprint: hex.EncodeToString(sum[:])}
-	id.Status, id.ClientID, err = a.collector(ctx, id.OrganizationID, id.CollectorID)
+	var pending bool
+	id.Status, id.ClientID, pending, err = a.collectorAccess(ctx, id.OrganizationID, id.CollectorID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, errors.New("unknown collector")
 	}
@@ -156,7 +160,25 @@ func (a *EdgeAuthorizer) Authorize(ctx context.Context, certs []string) (*EdgeId
 	if id.Status == CollectorDisabled {
 		return nil, ErrCollectorDisabled
 	}
+	if pending {
+		return nil, ErrOrgPendingDeletion
+	}
 	return id, nil
+}
+
+// collectorAccess returns status and client of a collector of the
+// organization and whether the organization is in the grace period of its
+// deletion, in one query; an unknown collector fails with pgx.ErrNoRows.
+func (a *EdgeAuthorizer) collectorAccess(ctx context.Context, orgID, collectorID string) (status, clientID string, pending bool, err error) {
+	scope := database.OrgWideScope(orgID, "")
+	err = database.WithTenant(ctx, a.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT c.status, COALESCE(c.client_id::text, ''),
+				COALESCE(o.deletion_state IN ('requested', 'purging'), false)
+			FROM collector c LEFT JOIN organization o ON o.id = c.organization_id
+			WHERE c.id = $1 AND c.organization_id = $2`,
+			collectorID, orgID).Scan(&status, &clientID, &pending)
+	})
+	return status, clientID, pending, err
 }
 
 // collector returns the status and client of a collector of the
