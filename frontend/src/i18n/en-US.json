@@ -55,7 +55,8 @@
     "contracts": "Contracts",
     "suppliers": "Suppliers",
     "clients": "Customers",
-    "plan": "Plan and add-ons"
+    "plan": "Plan and add-ons",
+    "alarms": "Alarms"
   },
   "common": {
     "save": "Save",
@@ -124,7 +125,8 @@
       "import": "Open import assistant",
       "contracts": "Open contracts",
       "suppliers": "Open suppliers",
-      "plan": "Open plan and add-ons"
+      "plan": "Open plan and add-ons",
+      "alarms": "Open alarms"
     },
     "contact": {
       "label": "Contact",
@@ -402,7 +404,8 @@
       "hint": "User or team responsible for the CI in the system; not the contact with the role owner.",
       "teamForbidden": "This team is outside your team scope.",
       "forbidden": "You may not set the responsible owner."
-    }
+    },
+    "healthAlarms": "Show the alarms of the CI"
   },
   "form": {
     "createCI": "Create CI",
@@ -5347,6 +5350,74 @@
       "nameRequired": "Enter a name.",
       "serversCount": "Enter one to eight servers.",
       "serversInvalid": "Not a valid IP address: {{servers}}"
+    }
+  },
+  "alarms": {
+    "title": "Alarms",
+    "description": "Open and acknowledged alarms of rules and checks; acknowledge them one by one or in bulk.",
+    "detailTitle": "Alarm",
+    "empty": "No alarms",
+    "emptyDescription": "There are no alarms for the selected filters.",
+    "loadMore": "Load more",
+    "select": "Selection",
+    "selectOne": "Select {{summary}}",
+    "bulkComment": "Comment (optional)",
+    "bulkAck": "Acknowledge selection ({{count}})",
+    "bulkResult": "{{ok}} acknowledged, {{failed}} failed",
+    "noAckPermission": "Acknowledging requires the permission alert:acknowledge.",
+    "ack": "Acknowledge",
+    "unack": "Withdraw acknowledgement",
+    "comment": "Comment",
+    "details": "Details",
+    "timeline": "Timeline",
+    "truncated": "Only the first 500 state changes are shown.",
+    "new": "new",
+    "actor": "Actor",
+    "system": "System",
+    "reason": "Reason",
+    "source": "Source",
+    "resolvedAt": "Resolved",
+    "columns": {
+      "severity": "Severity",
+      "ci": "CI",
+      "summary": "Summary",
+      "state": "State",
+      "suppressed": "Suppressed",
+      "count": "Count",
+      "opened": "Opened"
+    },
+    "filters": {
+      "state": "State",
+      "severity": "Severity",
+      "client": "Client",
+      "suppressed": "Suppressed",
+      "all": "All",
+      "ci": "CI",
+      "incident": "Incident"
+    },
+    "stateFilter": {
+      "active": "Open and acknowledged"
+    },
+    "states": {
+      "pending": "Pending",
+      "open": "Open",
+      "acknowledged": "Acknowledged",
+      "resolved": "Resolved"
+    },
+    "severities": {
+      "critical": "Critical",
+      "warning": "Warning",
+      "info": "Info"
+    },
+    "suppression": {
+      "hide": "Hide",
+      "show": "Show",
+      "only": "Suppressed only"
+    },
+    "suppressedReasons": {
+      "maintenance": "Maintenance",
+      "symptom": "Symptom",
+      "flapping": "Flapping"
     }
   }
 }

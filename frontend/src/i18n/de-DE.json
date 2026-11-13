@@ -55,7 +55,8 @@
     "contracts": "Verträge",
     "suppliers": "Lieferanten",
     "clients": "Kunden",
-    "plan": "Paket und Add-ons"
+    "plan": "Paket und Add-ons",
+    "alarms": "Alarme"
   },
   "common": {
     "save": "Speichern",
@@ -124,7 +125,8 @@
       "import": "Import-Assistent öffnen",
       "contracts": "Verträge öffnen",
       "suppliers": "Lieferanten öffnen",
-      "plan": "Paket und Add-ons öffnen"
+      "plan": "Paket und Add-ons öffnen",
+      "alarms": "Alarme öffnen"
     },
     "contact": {
       "label": "Kontakt",
@@ -402,7 +404,8 @@
       "hint": "Nutzer oder Team, das im System für das CI verantwortlich ist; nicht der Kontakt mit der Rolle ‚Owner‘.",
       "teamForbidden": "Dieses Team liegt außerhalb Ihres Team-Bereichs.",
       "forbidden": "Keine Berechtigung, den Verantwortlichen zu setzen."
-    }
+    },
+    "healthAlarms": "Alarme des CIs anzeigen"
   },
   "form": {
     "createCI": "CI anlegen",
@@ -5347,6 +5350,74 @@
       "nameRequired": "Bitte einen Namen angeben.",
       "serversCount": "Bitte ein bis acht Server angeben.",
       "serversInvalid": "Keine gültige IP-Adresse: {{servers}}"
+    }
+  },
+  "alarms": {
+    "title": "Alarme",
+    "description": "Offene und bestätigte Alarme aus Regeln und Prüfungen; Bestätigen einzeln oder gesammelt.",
+    "detailTitle": "Alarm",
+    "empty": "Keine Alarme",
+    "emptyDescription": "Für die gewählten Filter gibt es keine Alarme.",
+    "loadMore": "Weitere laden",
+    "select": "Auswahl",
+    "selectOne": "{{summary}} auswählen",
+    "bulkComment": "Kommentar (optional)",
+    "bulkAck": "Auswahl bestätigen ({{count}})",
+    "bulkResult": "{{ok}} bestätigt, {{failed}} fehlgeschlagen",
+    "noAckPermission": "Bestätigen erfordert das Recht alert:acknowledge.",
+    "ack": "Bestätigen",
+    "unack": "Bestätigung zurücknehmen",
+    "comment": "Kommentar",
+    "details": "Details",
+    "timeline": "Zeitleiste",
+    "truncated": "Es werden nur die ersten 500 Zustandswechsel gezeigt.",
+    "new": "neu",
+    "actor": "Akteur",
+    "system": "System",
+    "reason": "Grund",
+    "source": "Quelle",
+    "resolvedAt": "Aufgelöst",
+    "columns": {
+      "severity": "Schwere",
+      "ci": "CI",
+      "summary": "Zusammenfassung",
+      "state": "Zustand",
+      "suppressed": "Unterdrückt",
+      "count": "Anzahl",
+      "opened": "Geöffnet"
+    },
+    "filters": {
+      "state": "Zustand",
+      "severity": "Schwere",
+      "client": "Kunde",
+      "suppressed": "Unterdrückte",
+      "all": "Alle",
+      "ci": "CI",
+      "incident": "Störung"
+    },
+    "stateFilter": {
+      "active": "Offen und bestätigt"
+    },
+    "states": {
+      "pending": "Ausstehend",
+      "open": "Offen",
+      "acknowledged": "Bestätigt",
+      "resolved": "Aufgelöst"
+    },
+    "severities": {
+      "critical": "Kritisch",
+      "warning": "Warnung",
+      "info": "Info"
+    },
+    "suppression": {
+      "hide": "Ausblenden",
+      "show": "Einblenden",
+      "only": "Nur unterdrückte"
+    },
+    "suppressedReasons": {
+      "maintenance": "Wartung",
+      "symptom": "Symptom",
+      "flapping": "Flattern"
     }
   }
 }

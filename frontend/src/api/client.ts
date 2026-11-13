@@ -3136,6 +3136,50 @@ export const monitoringApi = {
   },
 };
 
+// --- Alarms (ALR-01, WP-983, WP-991) ---
+
+export type Alarm = components['schemas']['Alarm'];
+export type AlarmDetail = components['schemas']['AlarmDetail'];
+export type AlarmTransition = components['schemas']['AlarmTransition'];
+export type AlarmState = components['schemas']['AlarmState'];
+export type AlarmSeverity = components['schemas']['AlarmSeverity'];
+
+/** AlarmListParams are the filters of GET /monitoring/alarms; lists are comma-separated. */
+export interface AlarmListParams {
+  state?: string;
+  severity?: string;
+  client_id?: string;
+  ci_id?: string;
+  incident_id?: string;
+  suppressed?: boolean;
+  limit?: number;
+  cursor?: string;
+}
+
+/** AlarmListPage is one cursor page of the alarms (API-02). */
+export type AlarmListPage = components['schemas']['AlarmListResponse'];
+
+export const alarmApi = {
+  list(params: AlarmListParams = {}): Promise<AlarmListPage> {
+    return fetchAPI(`/monitoring/alarms${buildQuery(params)}`);
+  },
+  get(id: string): Promise<AlarmDetail> {
+    return fetchAPI(`/monitoring/alarms/${encodeURIComponent(id)}`);
+  },
+  acknowledge(id: string, comment?: string): Promise<Alarm> {
+    return fetchAPI(`/monitoring/alarms/${encodeURIComponent(id)}/ack`, {
+      method: 'POST',
+      body: JSON.stringify(comment ? { comment } : {}),
+    });
+  },
+  unacknowledge(id: string, comment?: string): Promise<Alarm> {
+    return fetchAPI(`/monitoring/alarms/${encodeURIComponent(id)}/unack`, {
+      method: 'POST',
+      body: JSON.stringify(comment ? { comment } : {}),
+    });
+  },
+};
+
 // --- Audit (hash chain verification) ---
 
 /**

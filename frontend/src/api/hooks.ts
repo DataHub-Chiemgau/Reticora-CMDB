@@ -10,6 +10,7 @@ import {
   ciApi,
   relationshipApi,
   relationshipSuppressionApi,
+  alarmApi,
   collectorApi,
   discoveryScopeApi,
   scopeSuggestionApi,
@@ -127,6 +128,8 @@ import type {
   ExportJobCreateRequest,
   MetricQueryParams,
   AlertRuleCreateRequest,
+  AlarmListPage,
+  AlarmListParams,
 } from '../api/client';
 import { isActive, type Job } from '../hooks/useJobs';
 
@@ -2024,6 +2027,26 @@ export function useCIMetrics(ciId: string | undefined, enabled = false) {
     queryFn: () => monitoringApi.ciMetrics(ciId!, { step: '15m' }),
     enabled: !!ciId && enabled,
     retry: false,
+  });
+}
+
+/** useAlarms loads the alarms of the filters page by page over next_cursor (WP-991). */
+export function useAlarms(params: Omit<AlarmListParams, 'cursor'>) {
+  return useInfiniteQuery({
+    queryKey: ['alarms', params],
+    queryFn: ({ pageParam }) => alarmApi.list({ ...params, cursor: pageParam }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last: AlarmListPage) =>
+      last.has_more ? last.next_cursor || undefined : undefined,
+  });
+}
+
+/** useAlarm reads an alarm with its transitions. */
+export function useAlarm(id: string | undefined) {
+  return useQuery({
+    queryKey: ['alarm', id],
+    queryFn: () => alarmApi.get(id!),
+    enabled: !!id,
   });
 }
 

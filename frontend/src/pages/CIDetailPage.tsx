@@ -212,7 +212,18 @@ export function CIDetailPage() {
               {t(getStatusTranslationKey(ci.status))}
             </Badge>
             <Badge variant="info">{typeLabel}</Badge>
-            {ci.health ? (
+            {ci.health === 'warning' || ci.health === 'critical' ? (
+              // The degraded health links to the alarms of the CI (WP-991).
+              <Link
+                to={`/alarms?ci_id=${encodeURIComponent(ci.id)}`}
+                className="rounded focus-visible:outline-2 focus-visible:outline-offset-2"
+                title={t('ci.healthAlarms', 'Alarme des CIs anzeigen')}
+              >
+                <Badge variant={healthBadgeVariant(ci.health)}>
+                  {t(`ci.healthState.${ci.health}`)}
+                </Badge>
+              </Link>
+            ) : ci.health ? (
               <Badge variant={healthBadgeVariant(ci.health)}>
                 {t(`ci.healthState.${ci.health}`)}
               </Badge>

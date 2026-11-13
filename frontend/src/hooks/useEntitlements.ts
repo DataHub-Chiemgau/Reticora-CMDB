@@ -197,6 +197,8 @@ export const navFeatureFor: Record<string, string | undefined> = {
   // The import assistant (WP-322, E-44).
   import: 'import',
   monitoring: 'monitoring',
+  // The alarm list (ALR-01, WP-991) belongs to the module monitoring.
+  alarms: 'monitoring',
   audit: undefined,
   security: undefined,
   // Enterprise CMDB + asset/inventory extension. ci-types, saved-views and

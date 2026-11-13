@@ -36,6 +36,7 @@ export type AppPage =
   | 'webhooks'
   | 'export'
   | 'monitoring'
+  | 'alarms'
   | 'audit'
   | 'security'
   | 'map'
@@ -94,6 +95,7 @@ export const pageToPath: Record<AppPage, string> = {
   webhooks: '/webhooks',
   export: '/export',
   monitoring: '/monitoring',
+  alarms: '/alarms',
   audit: '/audit',
   security: '/security',
   map: '/map',
@@ -475,6 +477,12 @@ export function CommandPalette({
         label: t('commandPalette.commands.monitoring'),
         keywords: ['monitoring metrics alerts'],
         action: () => onNavigate('monitoring'),
+      },
+      {
+        id: 'nav-alarms',
+        label: t('commandPalette.commands.alarms'),
+        keywords: ['alarme alarms alerts ack bestätigen'],
+        action: () => onNavigate('alarms'),
       },
       {
         id: 'nav-audit',

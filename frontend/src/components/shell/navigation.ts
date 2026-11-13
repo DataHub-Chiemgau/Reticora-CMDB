@@ -1,6 +1,7 @@
 import {
   Binary,
   Activity,
+  BellRing,
   Archive,
   Armchair,
   BadgeCheck,
@@ -122,6 +123,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
       { page: 'slas', icon: Timer },
       { page: 'maintenance', icon: Wrench },
       { page: 'monitoring', icon: Activity },
+      { page: 'alarms', icon: BellRing },
       { page: 'workflows', icon: Workflow },
       { page: 'forms', icon: FileSignature },
     ],

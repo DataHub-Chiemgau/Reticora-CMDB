@@ -1234,6 +1234,7 @@ const ROUTES: A11yRoute[] = [
     ready: (page) => page.locator('#main-content td', { hasText: 'a11y-import-srv' }),
   },
   { path: '/monitoring', url: '/monitoring', ready: text(M.alert) },
+  { path: '/alarms', url: '/alarms', ready: text(M.alarm) },
   { path: '/audit', url: '/audit', ready: text(M.audit) },
   { path: '/security', url: '/security', ready: text(M.compliance) },
   // Unknown paths fall back to the CI list.
