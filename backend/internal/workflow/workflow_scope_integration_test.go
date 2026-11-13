@@ -44,9 +44,9 @@ func TestWorkflowRepositoryScope(t *testing.T) {
 	}
 }
 
-// TestWorkflowRunCIScope covers WP-1089 AK1/AK6: a run on a CI carries
-// the CI; until WP-1093 its scope follows the CI (rls.DerivedScopeTables,
-// runVisible). A principal restricted to client 1 does not see a run on a
+// TestWorkflowRunCIScope covers WP-1089 AK1/AK6 and WP-1093 AK1/AK4: a run
+// on a CI carries the CI and its client and site, which row level security
+// checks (no longer rls.DerivedScopeTables and runVisible). A principal restricted to client 1 does not see a run on a
 // CI of client 2 in the list or by id, and cannot start a run on that CI
 // (404 like an unknown CI).
 func TestWorkflowRunCIScope(t *testing.T) {
@@ -108,5 +108,103 @@ func TestWorkflowRunCIScope(t *testing.T) {
 	}
 	if _, err = exec.Start(org, f.OrgA, def, "manual", workflow.JSONMap{"ci_id": unseen}); !errors.Is(err, workflow.ErrCINotFound) {
 		t.Errorf("start on an unknown CI: %v, want ErrCINotFound", err)
+	}
+}
+
+// TestWorkflowStepFollowsRunScope covers WP-1093 AK2: a step carries the
+// client and site of its run; a principal of client 1 reads no step of a
+// run on a CI of client 2, and a CI moved to client 1 carries its runs and
+// their steps along.
+func TestWorkflowStepFollowsRunScope(t *testing.T) {
+	f := scopetest.Seed(t, "3f")
+	bg := context.Background()
+	repo := workflow.NewPGRepository(f.App)
+	exec := workflow.NewExecutor(repo, nil, ci.NewPGRepository(f.App), nil, nil)
+	org := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	client1 := tenant.WithTenant(f.ClientCtx(f.Client1), tenant.TenantInfo{OrganizationID: f.OrgA, ClientID: f.Client1, UserID: f.User})
+	def := &workflow.Definition{OrganizationID: f.OrgA, Name: "wf-step-scope", Trigger: workflow.JSONMap{"type": "manual"},
+		Actions: []workflow.JSONMap{{"type": "noop"}, {"type": "require_approval"}}, Active: true}
+	if err := repo.CreateDefinition(org, def); err != nil {
+		t.Fatal(err)
+	}
+	ci2 := f.CI(t, f.OrgA, f.Client2, "wf-step-scope-ci2")
+	run, err := exec.Trigger(org, f.OrgA, def, "manual", workflow.JSONMap{"ci_id": ci2})
+	if err != nil || run.Status != workflow.StatusWaitingApproval || len(run.Steps) != 2 {
+		t.Fatalf("run on CI 2: %+v %v", run, err)
+	}
+	var stepClients, mismatched int
+	if err = f.Admin.QueryRow(bg, `SELECT count(*) FILTER (WHERE s.client_id = $2), count(*) FILTER (WHERE s.client_id IS DISTINCT FROM r.client_id)
+		FROM workflow_step s JOIN workflow_run r ON r.id = s.run_id WHERE s.run_id = $1`, run.ID, f.Client2).Scan(&stepClients, &mismatched); err != nil {
+		t.Fatal(err)
+	}
+	if stepClients != 2 || mismatched != 0 {
+		t.Errorf("steps with client 2: %d, steps unlike their run: %d; want 2 and 0", stepClients, mismatched)
+	}
+	if steps, lerr := repo.ListSteps(client1, f.OrgA, run.ID); lerr != nil || len(steps) != 0 {
+		t.Errorf("steps of the client-2 run for client 1: %+v %v, want none", steps, lerr)
+	}
+	if _, err = f.Admin.Exec(bg, `UPDATE ci SET client_id = $2 WHERE id = $1`, ci2, f.Client1); err != nil {
+		t.Fatal(err)
+	}
+	got, err := repo.GetRun(client1, f.OrgA, run.ID)
+	if err != nil || len(got.Steps) != 2 {
+		t.Fatalf("run after the move of its CI to client 1: %+v %v, want visible with both steps", got, err)
+	}
+}
+
+// TestRunWithoutCIOnlyForOrgWidePrincipal covers WP-1093 AK1 (E-09): a run
+// an org-wide principal starts without CI has neither client nor site and
+// is visible to org-wide principals only; a principal restricted to client
+// 1 starts its runs without CI within its client.
+func TestRunWithoutCIOnlyForOrgWidePrincipal(t *testing.T) {
+	f := scopetest.Seed(t, "3f")
+	bg := context.Background()
+	repo := workflow.NewPGRepository(f.App)
+	exec := workflow.NewExecutor(repo, nil, ci.NewPGRepository(f.App), nil, nil)
+	org := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	client1 := tenant.WithTenant(f.ClientCtx(f.Client1), tenant.TenantInfo{OrganizationID: f.OrgA, ClientID: f.Client1, UserID: f.User})
+	def := &workflow.Definition{OrganizationID: f.OrgA, Name: "wf-no-ci-scope", Trigger: workflow.JSONMap{"type": "manual"},
+		Actions: []workflow.JSONMap{{"type": "noop"}}, Active: true}
+	if err := repo.CreateDefinition(org, def); err != nil {
+		t.Fatal(err)
+	}
+	orgRun, err := exec.Trigger(org, f.OrgA, def, "manual", workflow.JSONMap{})
+	if err != nil || orgRun.Status != workflow.StatusSucceeded {
+		t.Fatalf("org-wide run: %+v %v", orgRun, err)
+	}
+	var client, site *string
+	if err = f.Admin.QueryRow(bg, `SELECT client_id::text, site_id::text FROM workflow_run WHERE id = $1`, orgRun.ID).Scan(&client, &site); err != nil {
+		t.Fatal(err)
+	}
+	if client != nil || site != nil {
+		t.Errorf("org-wide run without CI: client %v site %v, want none", client, site)
+	}
+	if _, err = repo.GetRun(client1, f.OrgA, orgRun.ID); !errors.Is(err, workflow.ErrRunNotFound) {
+		t.Errorf("org-wide run for client 1: %v, want ErrRunNotFound", err)
+	}
+	if got, gerr := repo.GetRun(org, f.OrgA, orgRun.ID); gerr != nil || got.ID != orgRun.ID {
+		t.Errorf("org-wide run org-wide: %+v %v", got, gerr)
+	}
+	own, err := exec.Trigger(client1, f.OrgA, def, "manual", workflow.JSONMap{})
+	if err != nil || own.Status != workflow.StatusSucceeded {
+		t.Fatalf("run of client 1 without CI: %+v %v", own, err)
+	}
+	if err = f.Admin.QueryRow(bg, `SELECT client_id::text FROM workflow_run WHERE id = $1`, own.ID).Scan(&client); err != nil || client == nil || *client != f.Client1 {
+		t.Errorf("run of client 1 without CI: client %v %v, want client 1", client, err)
+	}
+	// Its events carry the client of the run row, so webhook scopes of
+	// client 1 receive them; those of the org-wide run carry none.
+	var evClient string
+	if err = f.Admin.QueryRow(bg, `SELECT COALESCE(data->>'client_id', '') FROM event_outbox WHERE entity_id = $1 AND type = 'workflow.run_succeeded'`,
+		own.ID).Scan(&evClient); err != nil || evClient != f.Client1 {
+		t.Errorf("event of the client-1 run: client %q %v, want client 1", evClient, err)
+	}
+	if err = f.Admin.QueryRow(bg, `SELECT COALESCE(data->>'client_id', '') FROM event_outbox WHERE entity_id = $1 AND type = 'workflow.run_succeeded'`,
+		orgRun.ID).Scan(&evClient); err != nil || evClient != "" {
+		t.Errorf("event of the org-wide run: client %q %v, want none", evClient, err)
+	}
+	list, _, err := repo.ListRuns(client1, f.OrgA, &workflow.RunFilter{WorkflowID: def.ID}, api.PaginationParams{Limit: 100})
+	if err != nil || len(list) != 1 || list[0].ID != own.ID {
+		t.Errorf("runs of client 1: %+v %v, want only its own", list, err)
 	}
 }

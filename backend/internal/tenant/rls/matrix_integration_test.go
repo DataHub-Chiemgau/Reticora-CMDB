@@ -54,6 +54,11 @@ var matrixClientOnlyReads = map[string]string{
 		"a principal restricted to clients sees only its clients' accounts (WP-925 AK6): admp.TestAdmpAccountClientScope",
 	"availability_target": "availability targets: a principal restricted to clients sees no organization-wide target " +
 		"(WP-1048 AK4): sla.TestAvailabilityTargetClientScope",
+	// Workflow runs and their steps without a client (no CI) are
+	// organization-wide, visible to org-wide principals only (WP-1093 AK1,
+	// E-09).
+	"workflow_run":  "workflow runs without CI, migration 000351 (WP-1093): workflow.TestRunWithoutCIOnlyForOrgWidePrincipal",
+	"workflow_step": "steps of workflow runs without CI, migration 000351 (WP-1093): workflow.TestWorkflowStepFollowsRunScope",
 }
 
 // matrixSiteWrites lists the tables with a client but without a site column

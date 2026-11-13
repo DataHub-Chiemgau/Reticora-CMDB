@@ -211,7 +211,7 @@ func (w *Worker) JobFailed(ctx context.Context, job *jobs.Job) {
 	if run.Status != StatusPending && run.Status != StatusRunning {
 		return
 	}
-	ctx = asInitiator(ctx, job.OrganizationID, run.InitiatedBy)
+	ctx = closingContext(ctx, job.OrganizationID, run.InitiatedBy)
 	at := attempt{job: true, number: job.Attempts, max: job.MaxAttempts}
 	if _, err := w.exec.finishFailed(ctx, job.OrganizationID, run, at, runLostText); err != nil {
 		slog.Error("workflow: failed to close the run of a failed job", "run_id", run.ID, "error", err)
@@ -236,7 +236,7 @@ func (w *Worker) closeOutOfScope(ctx context.Context, job *jobs.Job, runID strin
 	if run.Status != StatusPending && run.Status != StatusRunning {
 		return RunResult{RunID: run.ID, Status: run.Status}, nil
 	}
-	ctx = asInitiator(ctx, job.OrganizationID, run.InitiatedBy)
+	ctx = closingContext(ctx, job.OrganizationID, run.InitiatedBy)
 	at := attempt{job: true, number: job.Attempts, max: job.MaxAttempts}
 	out, err := w.exec.finishFailed(ctx, job.OrganizationID, run, at, runOutOfScopeText)
 	if err != nil {
@@ -364,6 +364,15 @@ func (s *SerialSweep) Run(ctx context.Context) (int, error) {
 		}
 	}
 	return total, errors.Join(errs...)
+}
+
+// closingContext is the context that closes a run its job no longer
+// executes (out of scope, lost): organization-wide as the initiator, since
+// the run's client and site in row level security (WP-1093) may lie outside
+// the scope snapshot of the job. It executes no action of the run.
+func closingContext(ctx context.Context, orgID, user string) context.Context {
+	scope := database.OrgWideScope(orgID, user)
+	return asInitiator(database.ContextWithTenantScope(ctx, &scope), orgID, user)
 }
 
 // asInitiator sets the user of the run on the tenant and the scope of ctx:

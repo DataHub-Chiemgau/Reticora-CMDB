@@ -209,6 +209,9 @@ type Config struct {
 	RetentionHistoryDays    int // ci_change, entity_change, location_change, 3 years
 	RetentionSoftDeleteDays int // soft-deleted CIs, 90 days
 	RetentionReviewItemDays int // resolved review items, 1 year
+	// RetentionWorkflowRunDays keeps ended workflow runs with their steps
+	// (WFL-02, E-241: 400 days by default, at least 30; WP-1093).
+	RetentionWorkflowRunDays int
 
 	// Retention of the event stream RETICORA_EVENTS (EVT-01, NFR-06): the
 	// age and size its messages are kept; published outbox rows keep their
@@ -354,21 +357,22 @@ func Load() *Config {
 		SMTPFrom:     l.str("RETICORA_SMTP_FROM", ""),
 		SMTPTLS:      l.str("RETICORA_SMTP_TLS", "starttls"),
 
-		RetentionAuditYears:     l.integer("RETICORA_RETENTION_AUDIT_YEARS", MinRetentionAuditYears),
-		RetentionHistoryDays:    l.integer("RETICORA_RETENTION_HISTORY_DAYS", MinRetentionHistoryDays),
-		RetentionSoftDeleteDays: l.integer("RETICORA_RETENTION_SOFT_DELETE_DAYS", MinRetentionSoftDeleteDays),
-		RetentionReviewItemDays: l.integer("RETICORA_RETENTION_REVIEW_ITEM_DAYS", MinRetentionReviewItemDays),
-		EventsMaxAge:            l.duration("RETICORA_EVENTS_MAX_AGE", DefaultEventsMaxAge),
-		EventsMaxBytes:          l.int64("RETICORA_EVENTS_MAX_BYTES", DefaultEventsMaxBytes),
-		ADMPCacheTTLDays:        l.integer("RETICORA_ADMP_CACHE_TTL_DAYS", DefaultADMPCacheTTLDays),
-		VulnfeedCSAFProviders:   splitList(l.str("RETICORA_VULNFEED_CSAF_PROVIDERS", "")),
-		VulnfeedCSAFInterval:    l.duration("RETICORA_VULNFEED_CSAF_INTERVAL", DefaultVulnfeedCSAFInterval),
-		VulnfeedNVDAPIKey:       strings.TrimSpace(l.str("RETICORA_VULNFEED_NVD_API_KEY", "")),
-		VulnfeedNVDInterval:     l.duration("RETICORA_VULNFEED_NVD_INTERVAL", DefaultVulnfeedNVDInterval),
-		VulnfeedKEVURL:          strings.TrimSpace(l.str("RETICORA_VULNFEED_KEV_URL", "")),
-		EgressAllowPrivate:      l.boolean("RETICORA_EGRESS_ALLOW_PRIVATE", false),
-		PreAuthRateLimitRPM:     l.integer("RETICORA_PREAUTH_RATE_LIMIT_RPM", 20),
-		TrustedProxies:          l.str("RETICORA_TRUSTED_PROXIES", "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"),
+		RetentionAuditYears:      l.integer("RETICORA_RETENTION_AUDIT_YEARS", MinRetentionAuditYears),
+		RetentionHistoryDays:     l.integer("RETICORA_RETENTION_HISTORY_DAYS", MinRetentionHistoryDays),
+		RetentionSoftDeleteDays:  l.integer("RETICORA_RETENTION_SOFT_DELETE_DAYS", MinRetentionSoftDeleteDays),
+		RetentionReviewItemDays:  l.integer("RETICORA_RETENTION_REVIEW_ITEM_DAYS", MinRetentionReviewItemDays),
+		RetentionWorkflowRunDays: l.integer("RETICORA_RETENTION_WORKFLOW_RUN_DAYS", DefaultRetentionWorkflowRunDays),
+		EventsMaxAge:             l.duration("RETICORA_EVENTS_MAX_AGE", DefaultEventsMaxAge),
+		EventsMaxBytes:           l.int64("RETICORA_EVENTS_MAX_BYTES", DefaultEventsMaxBytes),
+		ADMPCacheTTLDays:         l.integer("RETICORA_ADMP_CACHE_TTL_DAYS", DefaultADMPCacheTTLDays),
+		VulnfeedCSAFProviders:    splitList(l.str("RETICORA_VULNFEED_CSAF_PROVIDERS", "")),
+		VulnfeedCSAFInterval:     l.duration("RETICORA_VULNFEED_CSAF_INTERVAL", DefaultVulnfeedCSAFInterval),
+		VulnfeedNVDAPIKey:        strings.TrimSpace(l.str("RETICORA_VULNFEED_NVD_API_KEY", "")),
+		VulnfeedNVDInterval:      l.duration("RETICORA_VULNFEED_NVD_INTERVAL", DefaultVulnfeedNVDInterval),
+		VulnfeedKEVURL:           strings.TrimSpace(l.str("RETICORA_VULNFEED_KEV_URL", "")),
+		EgressAllowPrivate:       l.boolean("RETICORA_EGRESS_ALLOW_PRIVATE", false),
+		PreAuthRateLimitRPM:      l.integer("RETICORA_PREAUTH_RATE_LIMIT_RPM", 20),
+		TrustedProxies:           l.str("RETICORA_TRUSTED_PROXIES", "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"),
 
 		SearchBackend:      l.str("RETICORA_SEARCH_BACKEND", "postgres"),
 		OpenSearchURL:      l.str("RETICORA_OPENSEARCH_URL", ""),
@@ -484,6 +488,10 @@ const (
 	MinRetentionHistoryDays    = 3 * 365
 	MinRetentionSoftDeleteDays = 90
 	MinRetentionReviewItemDays = 365
+	// DefaultRetentionWorkflowRunDays and MinRetentionWorkflowRunDays bound
+	// the retention of ended workflow runs (E-241, WP-1093).
+	DefaultRetentionWorkflowRunDays = 400
+	MinRetentionWorkflowRunDays     = 30
 )
 
 // DefaultADMPCacheTTLDays and MaxADMPCacheTTLDays bound the TTL of the
@@ -766,6 +774,7 @@ func (c *Config) Validate(noDB bool) error {
 		{"RETICORA_RETENTION_HISTORY_DAYS", c.RetentionHistoryDays, MinRetentionHistoryDays},
 		{"RETICORA_RETENTION_SOFT_DELETE_DAYS", c.RetentionSoftDeleteDays, MinRetentionSoftDeleteDays},
 		{"RETICORA_RETENTION_REVIEW_ITEM_DAYS", c.RetentionReviewItemDays, MinRetentionReviewItemDays},
+		{"RETICORA_RETENTION_WORKFLOW_RUN_DAYS", c.RetentionWorkflowRunDays, MinRetentionWorkflowRunDays},
 	} {
 		if r.value < r.min {
 			errs = append(errs, fmt.Errorf("%s must be at least %d (NFR-06), got %d", r.key, r.min, r.value))

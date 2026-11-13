@@ -106,21 +106,11 @@ var DerivedScopeTables = map[string]DerivedScope{
 		Reason:   "a building carries its site; the site determines the client",
 		TestFile: "internal/tenantapi/tenantapi_scope_integration_test.go", TestName: "TestTenantRepositoryClientScope",
 	},
-	"form_submission": {
-		Path:     "form_id -> form_def, ci_id -> ci, ticket_id -> ticket (form.submissionVisible)",
-		Reason:   "a submission is visible only when its form, CI and ticket are",
-		TestFile: "internal/form/form_scope_integration_test.go", TestName: "TestFormRepositoryClientScope",
-	},
 	"internal_order": {
 		Path: "target_location_id -> location (bin check in the order repository on every write, order.checkTargetBin)",
 		Reason: "the target bin is a delivery target, not a location of the order; " +
 			"the visibility of the order follows its client_id",
 		TestFile: "internal/order/order_target_integration_test.go", TestName: "TestOrderTargetBinMatchesClient",
-	},
-	"workflow_run": {
-		Path:     "ci_id -> ci (workflow.runVisible in ListRuns and GetRun)",
-		Reason:   "a run is visible only when its CI is; own scope columns follow with WP-1093",
-		TestFile: "internal/workflow/workflow_scope_integration_test.go", TestName: "TestWorkflowRunCIScope",
 	},
 	"metric_sample": {
 		Path:     "ci_id -> ci (security-barrier views metric_sample_v and metric_sample_1h_v, migration 000143)",

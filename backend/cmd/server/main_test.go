@@ -486,6 +486,7 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 		{"trial end (ENT-07, WP-884)", operator.TrialEndKind},
 		{"credential age check (CRD-05, WP-897)", credential.AgeCheckKind},
 		{"retention of the configuration versions (ALR-07, WP-1052)", jobs.RetentionConfigSnapshot},
+		{"retention of the workflow runs (WFL-02, E-241, WP-1093)", jobs.RetentionWorkflowRuns},
 	} {
 		if !registered[job.kind] {
 			t.Errorf("JOB-02 %s: kind %s is not registered (registered: %v)", job.requirement, job.kind, registered)

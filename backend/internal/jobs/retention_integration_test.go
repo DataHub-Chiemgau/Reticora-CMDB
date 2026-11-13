@@ -871,3 +871,84 @@ func TestRetentionDeletesOldConfigSnapshots(t *testing.T) {
 		t.Errorf("audit entries of the run: %d, %v; want one with deleted 1", audited, err)
 	}
 }
+
+// TestRetentionDeletesOldWorkflowRuns covers WFL-02 (WP-1093, E-241):
+// retention.workflow_runs (daily 04:17) deletes the workflow runs that
+// ended more than 400 days ago with their steps; an IGA access request that
+// named one keeps NULL. A run that ended 399 days ago stays, and so does a
+// run created 600 days ago that still waits for its approval. The run is
+// audited.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestRetentionDeletesOldWorkflowRuns(t *testing.T) {
+	f := scopetest.Seed(t, "ea")
+	bg := context.Background()
+	now := time.Now().UTC()
+	day := 24 * time.Hour
+	var def, version string
+	if err := f.Admin.QueryRow(bg, `WITH v AS (SELECT gen_random_uuid() AS id), d AS (
+			INSERT INTO workflow_def (organization_id, name, current_version_id) SELECT $1, 'wf-retention', id FROM v RETURNING id, current_version_id)
+		INSERT INTO workflow_def_version (id, organization_id, workflow_id, version) SELECT current_version_id, $1, id, 1 FROM d
+		RETURNING workflow_id::text, id::text`, f.OrgA).Scan(&def, &version); err != nil {
+		t.Fatal(err)
+	}
+	run := func(status string, finishedAge time.Duration) string {
+		t.Helper()
+		var finished any
+		if finishedAge > 0 {
+			finished = now.Add(-finishedAge)
+		}
+		var id string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO workflow_run (organization_id, workflow_id, definition_version_id, status, trigger, created_at, finished_at)
+			VALUES ($1, $2, $3, $4, 'manual', $5, $6) RETURNING id::text`, f.OrgA, def, version, status, now.Add(-600*day), finished).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Admin.Exec(bg, `INSERT INTO workflow_step (organization_id, run_id, step_index, action_type, status) VALUES ($1, $2, 0, 'noop', 'succeeded')`,
+			f.OrgA, id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	old := run("succeeded", 401*day)
+	young := run("failed", 399*day)
+	waiting := run("waiting_approval", 0)
+	subject := f.AppUser(t, f.OrgA, "wf-retention-subject")
+	var request string
+	if err := f.Admin.QueryRow(bg, `INSERT INTO iga_access_request (organization_id, subject_user_id, entitlement, workflow_run_id)
+		VALUES ($1, $2, 'wf-retention', $3) RETURNING id::text`, f.OrgA, subject, old).Scan(&request); err != nil {
+		t.Fatal(err)
+	}
+
+	r := jobs.NewRetention(f.App, jobs.RetentionFromDays(10, 3*365, 90, 365)).WithClock(func() time.Time { return now })
+	if !slices.ContainsFunc(r.Schedules(), func(s jobs.Schedule) bool {
+		return s.Kind == jobs.RetentionWorkflowRuns && s.Spec == "17 4 * * *" && s.MaxCatchUp == 1
+	}) {
+		t.Fatalf("the schedules lack %s at 04:17", jobs.RetentionWorkflowRuns)
+	}
+	if err := r.RunWorkflowRuns(bg); err != nil {
+		t.Fatal(err)
+	}
+	count := func(sql string, args ...any) int {
+		t.Helper()
+		var n int
+		if err := f.Admin.QueryRow(bg, sql, args...).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if count(`SELECT count(*) FROM workflow_run WHERE id = $1`, old) != 0 || count(`SELECT count(*) FROM workflow_step WHERE run_id = $1`, old) != 0 {
+		t.Error("the run that ended 401 days ago stays with its steps")
+	}
+	for name, id := range map[string]string{"ended 399 days ago": young, "waiting for 600 days": waiting} {
+		if count(`SELECT count(*) FROM workflow_run WHERE id = $1`, id) != 1 {
+			t.Errorf("the run %s was deleted", name)
+		}
+	}
+	if count(`SELECT count(*) FROM iga_access_request WHERE id = $1 AND workflow_run_id IS NULL`, request) != 1 {
+		t.Error("the IGA access request still names the deleted run")
+	}
+	if n := count(`SELECT count(*) FROM audit_log WHERE organization_id = $1 AND action = $2 AND changes->>'deleted' = '1'`,
+		f.OrgA, jobs.RetentionWorkflowRuns); n != 1 {
+		t.Errorf("audit entries of the run: %d; want one with deleted 1", n)
+	}
+}

@@ -33,7 +33,14 @@ type RetentionPolicy struct {
 	History       time.Duration
 	SoftDeleted   time.Duration
 	ReviewItems   time.Duration
+	// WorkflowRuns is how long an ended workflow run is kept after
+	// finished_at (WFL-02, E-241 option 2: 400 days, WP-1093).
+	WorkflowRuns time.Duration
 }
+
+// DefaultWorkflowRunRetention is the retention of ended workflow runs
+// (E-241, RETICORA_RETENTION_WORKFLOW_RUN_DAYS).
+const DefaultWorkflowRunRetention = 400 * 24 * time.Hour
 
 // RetentionFromDays builds a policy from configured periods.
 func RetentionFromDays(auditYears, historyDays, softDeleteDays, reviewItemDays int) RetentionPolicy {
@@ -41,6 +48,7 @@ func RetentionFromDays(auditYears, historyDays, softDeleteDays, reviewItemDays i
 	return RetentionPolicy{
 		AuditLogYears: auditYears, History: time.Duration(historyDays) * day,
 		SoftDeleted: time.Duration(softDeleteDays) * day, ReviewItems: time.Duration(reviewItemDays) * day,
+		WorkflowRuns: DefaultWorkflowRunRetention,
 	}
 }
 
@@ -67,6 +75,12 @@ const (
 	// ConfigSnapshotBatch is the largest portion of versions one statement
 	// deletes.
 	ConfigSnapshotBatch = 10000
+	// RetentionWorkflowRuns ends the ended workflow runs with their steps
+	// (WFL-02, E-241, WP-1093).
+	RetentionWorkflowRuns = "retention.workflow_runs"
+	// WorkflowRunBatch is the largest portion of runs one statement
+	// deletes.
+	WorkflowRunBatch = 5000
 )
 
 // Retention deletes expired data.
@@ -116,6 +130,7 @@ func (r *Retention) Schedules() []Schedule {
 		{Kind: RetentionMergeSnapshots, Spec: "57 3 * * *", MaxCatchUp: 1, Timeout: time.Hour, Run: r.RunMergeSnapshots},
 		{Kind: RetentionBulkChangeSet, Spec: "7 4 * * *", MaxCatchUp: 1, Timeout: time.Hour, Run: r.RunBulkChangeSet},
 		{Kind: RetentionConfigSnapshot, Spec: "17 4 * * *", MaxCatchUp: 1, Timeout: time.Hour, Run: r.RunConfigSnapshot},
+		{Kind: RetentionWorkflowRuns, Spec: "17 4 * * *", MaxCatchUp: 1, Timeout: time.Hour, Run: r.RunWorkflowRuns},
 	}
 }
 
@@ -409,6 +424,37 @@ func (r *Retention) RunBulkChangeSet(ctx context.Context) error {
 			return 0, fmt.Errorf("delete bulk change sets: %w", err)
 		}
 		return int(tag.RowsAffected()), nil
+	})
+}
+
+// RunWorkflowRuns deletes the workflow runs that ended (succeeded, failed,
+// cancelled) more than WorkflowRuns ago, in portions of WorkflowRunBatch;
+// their steps go with them (ON DELETE CASCADE), an IGA access request that
+// names one keeps NULL (ON DELETE SET NULL). Pending, running and waiting
+// runs stay whatever their age. The audit entries of their status changes
+// stay under the audit retention (E-241, WP-1093).
+func (r *Retention) RunWorkflowRuns(ctx context.Context) error {
+	period := r.policy.WorkflowRuns
+	if period <= 0 {
+		period = DefaultWorkflowRunRetention
+	}
+	cutoff := r.now().Add(-period)
+	return r.eachOrganization(ctx, RetentionWorkflowRuns, true, func(ctx context.Context, tx pgx.Tx, orgID string) (int, error) {
+		total := 0
+		for {
+			tag, err := tx.Exec(ctx, `DELETE FROM workflow_run WHERE id IN (
+				SELECT w.id FROM workflow_run w
+				 WHERE w.organization_id = $1 AND w.finished_at < $2
+				   AND w.status IN ('succeeded', 'failed', 'cancelled')
+				 LIMIT $3)`, orgID, cutoff, WorkflowRunBatch)
+			if err != nil {
+				return total, fmt.Errorf("delete workflow runs: %w", err)
+			}
+			total += int(tag.RowsAffected())
+			if tag.RowsAffected() < WorkflowRunBatch {
+				return total, nil
+			}
+		}
 	})
 }
 

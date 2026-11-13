@@ -521,8 +521,14 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 	if pool := d.pool; pool != nil {
 		systemJobs = append(systemJobs, jobs.NewRotation(pool, d.encryptor, dekRotator{repo: credential.NewPGRepository(pool)},
 			webhook.NewPGRepository(pool)).Schedules()...)
-		systemJobs = append(systemJobs, jobs.NewRetention(pool, jobs.RetentionFromDays(d.cfg.RetentionAuditYears,
-			d.cfg.RetentionHistoryDays, d.cfg.RetentionSoftDeleteDays, d.cfg.RetentionReviewItemDays)).WithBlobs(d.blobs).Schedules()...)
+		// Ended workflow runs are kept RETICORA_RETENTION_WORKFLOW_RUN_DAYS
+		// (400 days, E-241, WP-1093) by retention.workflow_runs.
+		retention := jobs.RetentionFromDays(d.cfg.RetentionAuditYears,
+			d.cfg.RetentionHistoryDays, d.cfg.RetentionSoftDeleteDays, d.cfg.RetentionReviewItemDays)
+		if days := d.cfg.RetentionWorkflowRunDays; days > 0 {
+			retention.WorkflowRuns = time.Duration(days) * 24 * time.Hour
+		}
+		systemJobs = append(systemJobs, jobs.NewRetention(pool, retention).WithBlobs(d.blobs).Schedules()...)
 		// Collector status: offline after five minutes without heartbeat,
 		// paused while the discovery license is not active (COL-01, COL-05).
 		collectorStatus := discovery.NewStatusMonitor(pool)

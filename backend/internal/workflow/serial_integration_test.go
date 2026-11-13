@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -390,6 +391,44 @@ func TestSerialRunClosedWhenCILeavesJobScope(t *testing.T) {
 	}
 	if done := e.await(t, next.ID); done.Status != StatusSucceeded {
 		t.Fatalf("next run of the CI: %s %q, want succeeded", done.Status, done.LastError)
+	}
+}
+
+// TestJobFailedClosesRunOutsideJobScope: the job of a run failed for good
+// after the CI of the run moved to client 2, outside the client-1 scope of
+// the job. Row level security (WP-1093) hides the run from that scope;
+// JobFailed closes it in the organization-wide closingContext all the same,
+// so it does not stay pending and block its CI.
+func TestJobFailedClosesRunOutsideJobScope(t *testing.T) {
+	e := newWorkerEnv(t, 2, false)
+	bg := context.Background()
+	scope := database.OrgWideScope(e.f.OrgA, e.user)
+	scope.Clients = database.ScopeIDs(e.f.Client1)
+	client1 := tenant.WithTenant(database.ContextWithTenantScope(bg, &scope),
+		tenant.TenantInfo{OrganizationID: e.f.OrgA, ClientID: e.f.Client1, UserID: e.user})
+	ciID := e.f.CI(t, e.f.OrgA, e.f.Client1, "wf-lost-moved")
+	def := &Definition{OrganizationID: e.f.OrgA, Name: fmt.Sprintf("wf-lost-moved-%d", time.Now().UnixNano()), Trigger: JSONMap{"type": "manual"},
+		Actions: []JSONMap{{"type": "noop"}}, Active: true}
+	if err := e.repo.CreateDefinition(e.ctx, def); err != nil {
+		t.Fatal(err)
+	}
+	run, err := e.exec.Start(client1, e.f.OrgA, def, "manual", JSONMap{"ci_id": ciID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = e.exec.Execute(client1, e.f.OrgA, nil, run); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = e.f.Admin.Exec(bg, `UPDATE ci SET client_id = $2 WHERE id = $1`, ciID, e.f.Client2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = e.repo.GetRun(client1, e.f.OrgA, run.ID); !errors.Is(err, ErrRunNotFound) {
+		t.Fatalf("run in the job scope after the move: %v, want ErrRunNotFound", err)
+	}
+	NewWorker(e.exec).JobFailed(bg, e.job(t, run.ID))
+	got, err := e.repo.GetRunForJob(e.ctx, e.f.OrgA, run.ID)
+	if err != nil || got.Status != StatusFailed || got.LastError != runLostText {
+		t.Fatalf("run after the failed job: %+v %v, want failed with %q", got, err, runLostText)
 	}
 }
 

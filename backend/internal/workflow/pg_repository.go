@@ -23,16 +23,6 @@ const defCols = `id::text, organization_id::text, name, description, trigger, co
 const versionCols = `id::text, organization_id::text, workflow_id::text, version, trigger, conditions, actions, COALESCE(created_by::text, ''), created_at`
 const runCols = `id::text, organization_id::text, workflow_id::text, definition_version_id::text, status, trigger, context, started_at, finished_at, attempts, next_attempt_at, COALESCE(last_error, ''), COALESCE(initiated_by::text, ''), COALESCE(ci_id::text, ''), COALESCE(serial_key, ''), entity_seq, enqueues, created_at, updated_at`
 
-// runVisible restricts runs to those whose CI is visible under the
-// transaction's tenant scope (WP-1089 AK6, the pattern of
-// form.submissionVisible): until WP-1093 workflow_run carries no scope
-// columns of its own, its scope follows its CI (rls.DerivedScopeTables).
-// A run started without a CI has no serial key and is visible to all. A
-// run whose CI was deleted (ci_id set NULL, serial_key kept) fails closed:
-// only an organization-wide scope sees it.
-const runVisible = `(workflow_run.serial_key IS NULL OR EXISTS (SELECT 1 FROM ci WHERE ci.id = workflow_run.ci_id) OR ` +
-	database.OrgWideScopeSQL + `)`
-
 // serialLock takes the transaction advisory lock of a serial key of the
 // organization (WP-1089 AK2); claims and the pick of the next run of a key
 // wait for each other.
@@ -250,7 +240,9 @@ func (r *PGRepository) ListRuns(ctx context.Context, orgID string, f *RunFilter,
 	out := []Run{}
 	var total int
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		where := []string{"organization_id=$1", runVisible}
+		// The scope of a run is its client and site in row level security
+		// (WP-1093): a run without CI is org-wide.
+		where := []string{"organization_id=$1"}
 		args := []any{orgID}
 		add := func(cond string, v any) {
 			args = append(args, v)
@@ -318,7 +310,7 @@ func (r *PGRepository) GetRun(ctx context.Context, orgID, id string) (*Run, erro
 	var run *Run
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var err error
-		run, err = scanRun(tx.QueryRow(ctx, "SELECT "+runCols+" FROM workflow_run WHERE organization_id=$1 AND id=$2 AND "+runVisible, orgID, id))
+		run, err = scanRun(tx.QueryRow(ctx, "SELECT "+runCols+" FROM workflow_run WHERE organization_id=$1 AND id=$2", orgID, id))
 		if err == pgx.ErrNoRows {
 			return ErrRunNotFound
 		}
@@ -475,7 +467,7 @@ func (r *PGRepository) changeRun(ctx context.Context, orgID, id string, change f
 	var run *Run
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var prev string
-		err := tx.QueryRow(ctx, "SELECT status FROM workflow_run WHERE organization_id=$1 AND id=$2 AND "+runVisible+" FOR UPDATE OF workflow_run", orgID, id).Scan(&prev)
+		err := tx.QueryRow(ctx, "SELECT status FROM workflow_run WHERE organization_id=$1 AND id=$2 FOR UPDATE", orgID, id).Scan(&prev)
 		if err == pgx.ErrNoRows {
 			return ErrRunNotFound
 		}
@@ -543,18 +535,21 @@ func recordRunTransition(ctx context.Context, tx pgx.Tx, prev string, run *Run) 
 		"definition_version_id": run.DefinitionVersionID, "trigger": run.Trigger, "status": run.Status}
 	if run.CIID != "" {
 		data["ci_id"] = run.CIID
-		var client, site string
-		err := tx.QueryRow(ctx, "SELECT COALESCE(client_id::text, ''), COALESCE(site_id::text, '') FROM ci WHERE organization_id=$1 AND id=$2",
-			run.OrganizationID, run.CIID).Scan(&client, &site)
-		if err != nil && err != pgx.ErrNoRows {
-			return err
-		}
-		if client != "" {
-			data["client_id"] = client
-		}
-		if site != "" {
-			data["site_id"] = site
-		}
+	}
+	// Client and site of the event are those of the run row in row level
+	// security (WP-1093): a run without CI started by a principal of one
+	// client, and a run whose CI was deleted, keep them as well.
+	var client, site string
+	err := tx.QueryRow(ctx, "SELECT COALESCE(client_id::text, ''), COALESCE(site_id::text, '') FROM workflow_run WHERE organization_id=$1 AND id=$2",
+		run.OrganizationID, run.ID).Scan(&client, &site)
+	if err != nil && err != pgx.ErrNoRows {
+		return err
+	}
+	if client != "" {
+		data["client_id"] = client
+	}
+	if site != "" {
+		data["site_id"] = site
 	}
 	return database.BeforeCommit(ctx, func() error {
 		if _, err := events.NewOutbox().Append(ctx, tx, &events.Event{OrgID: run.OrganizationID, Type: typ, EntityID: run.ID, Data: data}); err != nil {

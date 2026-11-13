@@ -16425,6 +16425,12 @@ EVT-03;[P2–P3];F;backend/internal/workflow/run_api_integration_test.go;WP-1092
 - docs/ops/workers.md
 - docs/traceability.csv
 
+**Nachtrag 2026-11-13 (Prüfung):**
+- AK1/AK3, Single-Scope-Fallback: Ein Run ohne CI und eine Einreichung ohne CI zu einem organisationsweiten Formular erhalten beim INSERT den einzigen Client bzw. die einzige Site eines auf genau einen Client bzw. eine Site beschränkten Principals (`app_scope_single`); sonst NULL. Ohne diesen Fallback verwürfe das WITH CHECK aus AK4 jede solche Zeile eines beschränkten Principals (E-09). `TestRunWithoutCIOnlyForOrgWidePrincipal` erwartet deshalb für den Run eines Client-1-Principals Client 1.
+- AK3, Fail closed beim UPDATE: Verliert eine Einreichung ihr CI (endgültiges Löschen, `ON DELETE SET NULL`) oder liefert das Formular beim UPDATE keinen Client, behält sie Client und Site, die sie hatte; sie fällt nie auf NULL zurück, das die Lese-Policy jedem Client zeigt. Test `TestSubmissionKeepsScopeWhenItsCIIsDeleted` in `backend/internal/form/form_scope_integration_test.go`.
+- Die Ereignisse `workflow.run_*` tragen `client_id`/`site_id` der Run-Zeile (nicht mehr des CI), damit Webhook-Scopes auch Runs ohne CI bzw. mit gelöschtem CI zuordnen (`TestRunWithoutCIOnlyForOrgWidePrincipal`).
+- Zusätzlich geändert: `backend/internal/workflow/worker.go` (`closingContext`: `JobFailed` und `closeOutOfScope` schließen einen Run organisationsweit, weil RLS ihn dem Scope-Snapshot des Jobs nach einem Client-Wechsel seines CI verbirgt; Tests `TestSerialRunClosedWhenCILeavesJobScope` und `TestJobFailedClosesRunOutsideJobScope` in `backend/internal/workflow/serial_integration_test.go`) und `backend/internal/tenant/rls/matrix_integration_test.go` (`workflow_run`/`workflow_step` in `matrixClientOnlyReads`).
+
 **Migration/RLS:** Migration `<nächste Nr.>_workflow_scope`:
 - Spalten und Scope-Trigger aus AK1 bis AK3, Backfill der bestehenden Zeilen, Indizes `(organization_id, client_id)` und `(organization_id, site_id)` je Tabelle, Keyset-Index aus AK6.
 - Policies `workflow_run_tenant_isolation`, `workflow_step_tenant_isolation` und `form_submission_tenant_isolation` werden durch Scope-Policies ersetzt; RLS und FORCE RLS bleiben. Scope-Trigger, die über die Grenze lesen, nutzen `app_scope_widen()`/`app_scope_restore()` (000139).

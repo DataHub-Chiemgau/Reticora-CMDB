@@ -26,12 +26,12 @@ type PGRepository struct{ pool *pgxpool.Pool }
 
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository { return &PGRepository{pool: pool} }
 
-// submissionVisible restricts submissions to those whose form, CI and ticket
-// are visible under the transaction's tenant scope: their policies filter the
-// subqueries (tickets by their related CI and asset until WP-028), while
-// form_submission carries no client column yet (WP-025).
+// submissionVisible restricts submissions to those whose form and ticket are
+// visible under the transaction's tenant scope: their policies filter the
+// subqueries (tickets by their related CI and asset). The client and site of
+// the submission itself, from its CI or its form, are checked by its row
+// level security (WP-1093).
 const submissionVisible = `EXISTS (SELECT 1 FROM form_def WHERE form_def.id = form_submission.form_id)
-	AND (form_submission.ci_id IS NULL OR EXISTS (SELECT 1 FROM ci WHERE ci.id = form_submission.ci_id))
 	AND (form_submission.ticket_id IS NULL OR EXISTS (SELECT 1 FROM ticket WHERE ticket.id = form_submission.ticket_id
 		AND (ticket.related_ci_id IS NULL OR EXISTS (SELECT 1 FROM ci WHERE ci.id = ticket.related_ci_id))
 		AND (ticket.related_asset_id IS NULL OR EXISTS (SELECT 1 FROM asset WHERE asset.id = ticket.related_asset_id))))`

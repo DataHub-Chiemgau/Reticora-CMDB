@@ -61,7 +61,7 @@ func clearEnv(t *testing.T) {
 		"RETICORA_ENVIRONMENT", "RETICORA_RATE_LIMIT_RPM", "RETICORA_RATE_LIMIT_ORG_RPM", "RETICORA_METRICS_TENANT_LABEL", "RETICORA_NATS_URL",
 		"RETICORA_INGEST_LANES", "RETICORA_PROBE_STREAM_MAX_BYTES", "RETICORA_PROBE_EDGE_WORKERS", "RETICORA_INVITATION_ACCEPT_URL", "RETICORA_SIGNUP_VERIFY_URL", "RETICORA_EVENTS_MAX_AGE",
 		"RETICORA_EVENTS_MAX_BYTES", "RETICORA_DOCUMENT_MAX_UPLOAD_MB", "RETICORA_DOCUMENT_UPLOAD_CONCURRENCY",
-		"RETICORA_DOCUMENT_UPLOAD_TIMEOUT", "RETICORA_CLAMD_ADDR", "RETICORA_CLAMD_TIMEOUT", "RETICORA_MODULES",
+		"RETICORA_DOCUMENT_UPLOAD_TIMEOUT", "RETICORA_CLAMD_ADDR", "RETICORA_CLAMD_TIMEOUT", "RETICORA_MODULES", "RETICORA_RETENTION_WORKFLOW_RUN_DAYS",
 	}, requiredOutsideDevelopment...), s3Keys...) {
 		t.Setenv(key, "")
 	}
@@ -487,6 +487,24 @@ func TestEventsStreamRetentionSetting(t *testing.T) {
 	t.Setenv("RETICORA_EVENTS_MAX_BYTES", "")
 	if err := Load().Validate(false); err == nil || !strings.Contains(err.Error(), "RETICORA_EVENTS_MAX_AGE must be at least 30d") {
 		t.Errorf("production with 7 days: %v", err)
+	}
+}
+
+// TestWorkflowRunRetentionSetting covers WP-1093 (WFL-02, E-241):
+// RETICORA_RETENTION_WORKFLOW_RUN_DAYS keeps ended workflow runs 400 days by
+// default; a value below 30 days is a start error.
+func TestWorkflowRunRetentionSetting(t *testing.T) {
+	clearEnv(t)
+	if cfg := Load(); cfg.RetentionWorkflowRunDays != 400 || cfg.Validate(true) != nil {
+		t.Fatalf("default: %d days, %v; want 400", cfg.RetentionWorkflowRunDays, cfg.Validate(true))
+	}
+	t.Setenv("RETICORA_RETENTION_WORKFLOW_RUN_DAYS", "30")
+	if cfg := Load(); cfg.RetentionWorkflowRunDays != 30 || cfg.Validate(true) != nil {
+		t.Errorf("30 days: %d, %v", cfg.RetentionWorkflowRunDays, cfg.Validate(true))
+	}
+	t.Setenv("RETICORA_RETENTION_WORKFLOW_RUN_DAYS", "29")
+	if err := Load().Validate(true); err == nil || !strings.Contains(err.Error(), "RETICORA_RETENTION_WORKFLOW_RUN_DAYS must be at least 30") {
+		t.Errorf("29 days: %v, want a start error", err)
 	}
 }
 

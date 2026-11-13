@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000350_availability_target
+Stand: Migration 000351_workflow_scope
 
 ## Prüfung
 
@@ -480,10 +480,13 @@ des Artikels, und folgen deren Änderung.
 Tabellen mit Standort- oder CI-Bezug ohne eigene Scope-Spalten stehen mit
 Ableitungspfad, Begründung und prüfendem Test in `rls.DerivedScopeTables`
 (`backend/internal/tenant/rls/known_gaps.go`, Regel `located-scope`):
-`form_submission` (Sichtbarkeit über das referenzierte Formular, CI und
-Ticket per Repository-Prädikat), `building` (Standort per `site_id`, Client
+`building` (Standort per `site_id`, Client
 über die Site) und `metric_sample` (über die Views `metric_sample_v` und
-`metric_sample_1h_v`). `TestRLSCatalog` scheitert für einen Eintrag ohne
+`metric_sample_1h_v`). `workflow_run`, `workflow_step` und
+`form_submission` tragen seit Migration 000351 (WP-1093) eigene Spalten
+`client_id`/`site_id` (aus CI, Run bzw. Formular abgeleitet) mit
+Scope-Policies; Runs und Schritte ohne Client sind nur org-weit sichtbar.
+`TestRLSCatalog` scheitert für einen Eintrag ohne
 vorhandenen Test und für einen Eintrag, den die Regel nicht meldet.
 
 Globale Kataloge ohne Org-Spalte sind nach E-10 eine dokumentierte Ausnahme,
@@ -2052,7 +2055,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `form_def` | ja | ja | form_def_scoped_delete (DELETE), form_def_scoped_update (UPDATE), form_def_tenant_isolation (ALL) |
 | `form_def_version` | ja | ja | form_def_version_isolation (ALL), form_def_version_scoped_delete (DELETE), form_def_version_scoped_update (UPDATE) |
 | `form_layout` | ja | ja | form_layout_isolation (ALL) |
-| `form_submission` | ja | ja | form_submission_tenant_isolation (ALL) |
+| `form_submission` | ja | ja | form_submission_scoped_delete (DELETE), form_submission_scoped_update (UPDATE), form_submission_tenant_isolation (ALL) |
 | `iga_access_request` | ja | ja | iga_access_request_tenant_isolation (ALL) |
 | `iga_access_review` | ja | ja | iga_review_tenant_isolation (ALL) |
 | `iga_access_review_item` | ja | ja | iga_review_item_tenant_isolation (ALL) |
@@ -2178,7 +2181,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `webhook_subscription` | ja | ja | webhook_sub_isolation (ALL), webhook_sub_scope_select (SELECT) |
 | `workflow_def` | ja | ja | workflow_def_tenant_isolation (ALL) |
 | `workflow_def_version` | ja | ja | workflow_def_version_tenant_isolation (ALL) |
-| `workflow_run` | ja | ja | workflow_run_tenant_isolation (ALL) |
-| `workflow_step` | ja | ja | workflow_step_tenant_isolation (ALL) |
+| `workflow_run` | ja | ja | workflow_run_scoped_delete (DELETE), workflow_run_scoped_update (UPDATE), workflow_run_tenant_isolation (ALL) |
+| `workflow_step` | ja | ja | workflow_step_scoped_delete (DELETE), workflow_step_scoped_update (UPDATE), workflow_step_tenant_isolation (ALL) |
 
 <!-- schema-baseline:tables:end -->
