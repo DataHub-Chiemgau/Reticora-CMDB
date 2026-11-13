@@ -42,6 +42,19 @@ const (
 	// type and was discarded (dns: 4096 bytes over UDP, 64 KiB over TCP,
 	// WP-1010).
 	ReasonResponseTooLarge = "response_too_large"
+	// ReasonTLSUntrusted: the certificate of the target is not trusted by
+	// the system roots or a TLS scope; no request and no credential was
+	// sent (http, WP-971). An error (→ unknown), not a failed check.
+	ReasonTLSUntrusted = "tls_untrusted"
+	// ReasonStatusMismatch: the HTTP status lies outside expected_status
+	// (http, WP-971).
+	ReasonStatusMismatch = "status_mismatch"
+	// ReasonBodyMismatch: the body does not match body_regex (http,
+	// WP-971); a violated expected value counts towards down (E-177).
+	ReasonBodyMismatch = "body_mismatch"
+	// ReasonRedirectLimit: more redirects than follow_redirects, or a
+	// redirect from https to http with a credential (http, WP-971).
+	ReasonRedirectLimit = "redirect_limit"
 
 	// WarnThresholdExceeded: the check succeeded but a threshold (RTT,
 	// loss, value) was violated.
@@ -80,6 +93,10 @@ var reasons = map[string]bool{
 	ReasonTLS:                  true,
 	ReasonExpectMismatch:       true,
 	ReasonResponseTooLarge:     true,
+	ReasonTLSUntrusted:         true,
+	ReasonStatusMismatch:       true,
+	ReasonBodyMismatch:         true,
+	ReasonRedirectLimit:        true,
 }
 
 // ValidReason reports whether code is a known reason or warn code.

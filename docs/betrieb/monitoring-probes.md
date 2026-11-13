@@ -106,6 +106,53 @@ Messwerte in `values`: `probe_dns_response_seconds`, `probe_dns_rcode`,
 `probe_dns_answer_count` und bei SOA `probe_dns_soa_serial`. Fehlende
 erwartete Inhalte (und `AD`) nennt das Label `missing`.
 
+## HTTP/HTTPS (`http`)
+
+Standard nach PRT-04: Intervall 60 s (30 s–24 h), Timeout 10 s (1–60 s, je
+Probe unter dem Intervall), Down-Count 3, Up-Count 1, höchstens 2
+gleichzeitige Prüfungen je Ziel. Parameter: `url` (Pflicht, `http` oder
+`https` mit Host, ohne Benutzerangabe), `method` `GET|HEAD` (Standard `GET`;
+jede andere Methode weist die Validierung ab), `expected_status[]` (Codes
+und Bereiche wie `"200"` oder `"200-299"`, Standard `200-399`),
+`body_regex` (RE2, höchstens 1024 Zeichen, nur mit `GET`), `max_body`
+(Standard 64 KiB, höchstens 1 MiB; der Rest wird ohne Fehler abgeschnitten),
+`follow_redirects` 0–5 (Standard 0: eine Umleitung ist die Antwort),
+`headers` (nur `Accept`, `User-Agent`, `Host`), `cert_warn_days` (Standard
+21) und die Schwelle `rtt_warn_ms` (Gesamtzeit).
+
+Authentisierung über ein Credential der Art `http` (Namespace `http`):
+`username`/`password` als Basic, `token` als Bearer, ohne Credential
+anonym. Ein Credential an einer `http://`-URL lehnt der Executor mit
+`error`/`config` ab, bevor er etwas sendet (die Bindung ist zur
+Validierung der Probe nicht bekannt). Der Executor löst den Namen selbst
+auf, wählt die TLS-Prüfung über die TLS-Scopes des Collectors (CA-Bundle
+oder SPKI-Pin des Netzes der Adresse, sonst die Systemwurzeln; der
+Collector übergibt sie beim Start mit `probe.ConfigureHTTP` an den
+registrierten Executor) und folgt
+Umleitungen selbst: `Authorization` geht nur an denselben Ursprung
+(Schema, Host, Port), ein Wechsel von `https` nach `http` mit Credential
+ist `fail`/`redirect_limit`. Ein nicht vertrauenswürdiges Zertifikat
+beendet die Prüfung im Handshake; es erreicht keine Anfrage und kein
+Credential das Ziel.
+
+| Ergebnis | Bedeutung | Zustand |
+|---|---|---|
+| `ok` | Status erwartet, `body_regex` getroffen | `up`; `degraded`, wenn die Gesamtzeit `rtt_warn_ms` überschreitet |
+| `ok`/`cert_expiring` | Restlaufzeit des Zertifikats unter `cert_warn_days` | `degraded` |
+| `fail`/`status_mismatch` | Status außerhalb `expected_status` | zählt auf `down` |
+| `fail`/`body_mismatch` | `body_regex` im gelesenen Body nicht getroffen | zählt auf `down` (verletzter Sollwert, E-177) |
+| `fail`/`redirect_limit` | mehr Umleitungen als `follow_redirects`, oder `https` → `http` mit Credential | zählt auf `down` |
+| `fail`/`refused`, `timeout`, `unreachable` | Verbindungsfehler bzw. keine Antwort bis zum Timeout | zählt auf `down` |
+| `error`/`tls_untrusted` | Zertifikat nicht vertrauenswürdig | `unknown` |
+| `error`/`auth_failed` | 401 oder 403 (wenn nicht erwartet) | `unknown` |
+| `error`/`config` | ungültige Parameter, unvollständiges Credential oder Credential an `http://` | `unknown` |
+
+Messwerte: `rtt_ms` ist die Gesamtzeit; `values` enthält `dns_ms`,
+`connect_ms`, `tls_ms`, `ttfb_ms`, `status_code` und bei HTTPS
+`cert_expiry_s`. Für die Metrikbrücke heißen sie
+`probe_http_phase_seconds{phase=dns|connect|tls|ttfb|total}`,
+`probe_http_status_code` und `probe_http_cert_expiry_seconds`.
+
 ## Typtabelle
 
 Zeiten in Sekunden, Rate in Prüfungen je Sekunde. Die Werte sind Startwerte
@@ -116,7 +163,7 @@ nach E-154; WP-1023 misst die Raten nach.
 |---|---|---|---|---|---:|---:|---:|---:|---:|---:|---|---|
 | `icmp` | available | 30 / 10 / 3600 | 10 / 1 / 10 | 5 / 1 | 1 | 256 | 1000 | 4 | 1472 | 1 | – | icmp |
 | `tcp` | available | 60 / 10 / 86400 | 5 / 1 / 30 | 3 / 1 | 2 | 128 | 500 | 32 | 1024 | 1 | – | – |
-| `http` | planned | 60 / 30 / 86400 | 10 / 1 / 60 | 3 / 1 | 2 | 64 | 100 | 32 | 1048576 | 1 | http | – |
+| `http` | available | 60 / 30 / 86400 | 10 / 1 / 60 | 3 / 1 | 2 | 64 | 100 | 32 | 1048576 | 1 | http | – |
 | `snmp_status` | planned | 60 / 30 / 86400 | 5 / 1 / 15 | 3 / 1 | 1 | 32 | 200 | 4 | 65536 | 20 | snmp | – |
 | `snmp_if` | planned | 300 / 60 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 50 | 4 | 1048576 | 1024 | snmp | – |
 | `snmp_custom` | planned | 300 / 60 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 100 | 8 | 65536 | 256 | snmp | – |

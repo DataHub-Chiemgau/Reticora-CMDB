@@ -1805,3 +1805,4 @@ ALR-01;[P3];E;backend/internal/alarm/handler_integration_test.go;WP-983
 MON-04;[P3];E;backend/internal/alarm/handler_test.go;WP-983
 MON-04;[P3];E;backend/internal/monitoring/evaluator_series_test.go;WP-984
 ALR-05;[P3];E;backend/internal/monitoring/evaluator_series_integration_test.go;WP-984
+PRT-04;[P3];E;collector/probe/http_test.go;WP-971

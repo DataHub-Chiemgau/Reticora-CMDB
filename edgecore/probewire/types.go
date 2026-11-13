@@ -4,11 +4,14 @@ import (
 	"bytes"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
+	"net/url"
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -302,8 +305,70 @@ func Validate(spec *ProbeSpec) []FieldError {
 // WP-1010: qname as DNS name). They run on decodable params and report
 // field errors.
 var paramChecks = map[string]func(params map[string]any) []FieldError{
-	"tcp": checkTCPParams,
-	"dns": checkDNSParams,
+	"tcp":  checkTCPParams,
+	"dns":  checkDNSParams,
+	"http": checkHTTPParams,
+}
+
+// checkHTTPParams checks the parameters of the http type (PRT-04,
+// WP-971): url with scheme http or https and a host, body_regex as RE2
+// expression and only with GET, every entry of expected_status a code or
+// range between 100 and 599.
+func checkHTTPParams(params map[string]any) []FieldError {
+	var errs []FieldError
+	if raw, ok := params["url"].(string); ok {
+		if _, err := ParseHTTPURL(raw); err != nil {
+			errs = append(errs, FieldError{Field: "params.url", Message: err.Error()})
+		}
+	}
+	if re, ok := params["body_regex"].(string); ok {
+		if _, err := regexp.Compile(re); err != nil {
+			errs = append(errs, FieldError{Field: "params.body_regex", Message: "must be a valid RE2 regular expression"})
+		} else if m, _ := params["method"].(string); m == "HEAD" {
+			errs = append(errs, FieldError{Field: "params.body_regex", Message: "is allowed with method GET only"})
+		}
+	}
+	if list, ok := params["expected_status"].([]any); ok {
+		for i, item := range list {
+			if s, ok := item.(string); ok {
+				if _, _, err := ParseStatusRange(s); err != nil {
+					errs = append(errs, FieldError{Field: fmt.Sprintf("params.expected_status[%d]", i), Message: err.Error()})
+				}
+			}
+		}
+	}
+	return errs
+}
+
+// ParseHTTPURL parses the url of an http probe: scheme http or https and a
+// host.
+// validation: fixed texts.
+func ParseHTTPURL(raw string) (*url.URL, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.Hostname() == "" {
+		return nil, errors.New("must be an http or https URL with a host")
+	}
+	if u.User != nil {
+		return nil, errors.New("must not carry user information; use a credential of the namespace http")
+	}
+	return u, nil
+}
+
+// ParseStatusRange parses an expected status: a code ("200") or a range
+// ("200-299") between 100 and 599.
+// validation: fixed texts.
+func ParseStatusRange(s string) (lo, hi int, err error) {
+	from, to, isRange := strings.Cut(strings.TrimSpace(s), "-")
+	lo, err1 := strconv.Atoi(strings.TrimSpace(from))
+	hi = lo
+	var err2 error
+	if isRange {
+		hi, err2 = strconv.Atoi(strings.TrimSpace(to))
+	}
+	if err1 != nil || err2 != nil || lo < 100 || hi > 599 || lo > hi {
+		return 0, 0, errors.New("must be a status code or range between 100 and 599")
+	}
+	return lo, hi, nil
 }
 
 // checkDNSParams checks qname of the dns type (PRT-12): a DNS name whose

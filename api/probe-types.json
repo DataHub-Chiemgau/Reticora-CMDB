@@ -257,7 +257,7 @@
       }
     },
     "http": {
-      "status": "planned",
+      "status": "available",
       "min_interval_s": 30,
       "default_interval_s": 60,
       "max_interval_s": 86400,
@@ -279,10 +279,15 @@
       "params": {
         "type": "object",
         "additionalProperties": false,
+        "required": [
+          "url"
+        ],
         "properties": {
           "url": {
             "type": "string",
-            "maxLength": 2048
+            "minLength": 1,
+            "maxLength": 2048,
+            "description": "URL to check (required): http or https with a host."
           },
           "method": {
             "type": "string",
@@ -290,42 +295,71 @@
               "GET",
               "HEAD"
             ],
-            "default": "GET"
+            "default": "GET",
+            "description": "GET or HEAD; every other method is refused."
           },
           "expected_status": {
             "type": "array",
+            "maxItems": 20,
+            "default": [
+              "200-399"
+            ],
             "items": {
-              "type": "integer",
-              "minimum": 100,
-              "maximum": 599
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 7
             },
-            "maxItems": 20
+            "description": "Expected status codes and ranges (\"200\", \"200-299\"), each 100 to 599."
           },
           "body_regex": {
             "type": "string",
-            "maxLength": 1024
+            "maxLength": 1024,
+            "description": "RE2 expression the body must match (GET only), read up to max_body."
           },
-          "body_max_bytes": {
+          "max_body": {
             "type": "integer",
             "minimum": 1,
             "maximum": 1048576,
-            "default": 65536
+            "default": 65536,
+            "description": "Bytes of the body read for body_regex; the rest is cut off without error."
           },
-          "max_redirects": {
+          "follow_redirects": {
             "type": "integer",
             "minimum": 0,
             "maximum": 5,
-            "default": 5
+            "default": 0,
+            "description": "Redirects followed; with 0 a redirect is the answer, a further redirect is fail redirect_limit."
           },
-          "tls_verify": {
-            "type": "boolean",
-            "default": true
+          "headers": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "Accept": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "User-Agent": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "Host": {
+                "type": "string",
+                "maxLength": 255
+              }
+            },
+            "description": "Request headers; only Accept, User-Agent and Host."
           },
           "cert_warn_days": {
             "type": "integer",
             "minimum": 1,
             "maximum": 365,
-            "default": 14
+            "default": 21,
+            "description": "Remaining certificate lifetime below which an ok check gets the warn code cert_expiring."
+          },
+          "rtt_warn_ms": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Total time above which the probe is degraded (threshold)."
           }
         }
       }

@@ -61,7 +61,7 @@ func TestRegistryComplete(t *testing.T) {
 			t.Errorf("%s params schema: %v", key, err)
 		}
 		wantStatus := TypePlanned
-		if key == "icmp" || key == "tcp" || key == "dns" {
+		if key == "icmp" || key == "tcp" || key == "dns" || key == "http" {
 			wantStatus = TypeAvailable
 		}
 		if typ.Status != wantStatus {
@@ -140,6 +140,8 @@ func requiredParams(typ Type) json.RawMessage {
 			out[name] = false
 		case p.Type == "array":
 			out[name] = []any{}
+		case name == "url":
+			out[name] = "https://example.org/health"
 		default:
 			out[name] = "example.org"
 		}
@@ -398,5 +400,81 @@ func TestTCPLimits(t *testing.T) {
 	}
 	if got := UnescapeSend(`A\r\n\t\\\x`); got != "A\r\n\t\\\\x" {
 		t.Fatalf("UnescapeSend = %q", got)
+	}
+}
+
+// TestHTTPLimits covers WP-971 AK1 and AK7 (PRT-04): defaults 60 s / 10 s,
+// interval >= 30 s, timeout <= 60 s and below the interval, 2 parallel
+// checks per target, url required (http or https with a host), only GET and
+// HEAD, body_regex as RE2 and with GET only, expected_status as codes and
+// ranges, follow_redirects 0 to 5, max_body at most 1 MiB and only the
+// headers Accept, User-Agent and Host.
+func TestHTTPLimits(t *testing.T) {
+	typ, ok := Lookup("http")
+	if !ok || !typ.Available() {
+		t.Fatal("http missing or not available")
+	}
+	if typ.DefaultIntervalS != 60 || typ.DefaultTimeoutS != 10 || typ.MinIntervalS != 30 || typ.MaxTimeoutS != 60 ||
+		typ.MaxParallelPerTarget != 2 || !slices.Equal(typ.CredentialNamespaces, []string{"http"}) {
+		t.Fatalf("http limits = %+v", typ)
+	}
+	for name, want := range map[string]any{"method": "GET", "max_body": float64(65536), "follow_redirects": float64(0),
+		"cert_warn_days": float64(21)} {
+		if v, ok := typ.ParamDefault(name); !ok || v != want {
+			t.Errorf("%s default = %v, want %v", name, v, want)
+		}
+	}
+	if v, ok := typ.ParamDefault("expected_status"); !ok || fmt.Sprint(v) != "[200-399]" {
+		t.Errorf("expected_status default = %v", v)
+	}
+	base := ProbeSpec{ID: "p", Type: "http", Target: "192.0.2.1", IntervalMS: 60_000, TimeoutMS: 10_000, DownCount: 3, UpCount: 1}
+	cases := []struct {
+		name   string
+		params string
+		fields []string
+	}{
+		{"valid", `{"url":"https://example.org/health","method":"GET","expected_status":["200","301-302"],"body_regex":"^ok",
+			"max_body":1048576,"follow_redirects":5,"headers":{"Accept":"text/plain","User-Agent":"r","Host":"x"},"cert_warn_days":30,
+			"rtt_warn_ms":500}`, nil},
+		{"head", `{"url":"http://192.0.2.1:8080/","method":"HEAD"}`, nil},
+		{"url missing", `{}`, []string{"params.url"}},
+		{"url ftp", `{"url":"ftp://example.org/"}`, []string{"params.url"}},
+		{"url without host", `{"url":"https:///x"}`, []string{"params.url"}},
+		{"url with user info", `{"url":"https://u:p@example.org/"}`, []string{"params.url"}},
+		{"method POST", `{"url":"https://example.org/","method":"POST"}`, []string{"params.method"}},
+		{"method PUT", `{"url":"https://example.org/","method":"PUT"}`, []string{"params.method"}},
+		{"body_regex invalid", `{"url":"https://example.org/","body_regex":"("}`, []string{"params.body_regex"}},
+		{"body_regex with HEAD", `{"url":"https://example.org/","method":"HEAD","body_regex":"ok"}`, []string{"params.body_regex"}},
+		{"body_regex 1025", `{"url":"https://example.org/","body_regex":"` + strings.Repeat("a", 1025) + `"}`, []string{"params.body_regex"}},
+		{"status 600", `{"url":"https://example.org/","expected_status":["600"]}`, []string{"params.expected_status[0]"}},
+		{"status range reversed", `{"url":"https://example.org/","expected_status":["200","299-200"]}`, []string{"params.expected_status[1]"}},
+		{"status as number", `{"url":"https://example.org/","expected_status":[200]}`, []string{"params.expected_status[0]"}},
+		{"redirects 6", `{"url":"https://example.org/","follow_redirects":6}`, []string{"params.follow_redirects"}},
+		{"max_body 1 MiB + 1", `{"url":"https://example.org/","max_body":1048577}`, []string{"params.max_body"}},
+		{"header Authorization", `{"url":"https://example.org/","headers":{"Authorization":"Bearer x"}}`, []string{"params.headers.Authorization"}},
+		{"header Cookie", `{"url":"https://example.org/","headers":{"Cookie":"a=b"}}`, []string{"params.headers.Cookie"}},
+	}
+	for _, c := range cases {
+		s := base
+		s.Params = json.RawMessage(c.params)
+		var fields []string
+		for _, e := range Validate(s) {
+			fields = append(fields, e.Field)
+		}
+		if !slices.Equal(fields, c.fields) {
+			t.Errorf("%s: fields = %v, want %v", c.name, fields, c.fields)
+		}
+	}
+	params := json.RawMessage(`{"url":"https://example.org/"}`)
+	for name, spec := range map[string]ProbeSpec{
+		"interval 29 s":      {IntervalMS: 29_000, TimeoutMS: 10_000},
+		"timeout 61 s":       {IntervalMS: 120_000, TimeoutMS: 61_000},
+		"timeout = interval": {IntervalMS: 30_000, TimeoutMS: 30_000},
+	} {
+		s := base
+		s.IntervalMS, s.TimeoutMS, s.Params = spec.IntervalMS, spec.TimeoutMS, params
+		if errs := Validate(s); len(errs) != 1 {
+			t.Errorf("%s: errs = %v, want one", name, errs)
+		}
 	}
 }
