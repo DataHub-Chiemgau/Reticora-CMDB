@@ -5,13 +5,16 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -239,35 +242,54 @@ func (r *PGRepository) DeleteDefinition(ctx context.Context, orgID, id string) e
 		return nil
 	})
 }
-func (r *PGRepository) ListRuns(ctx context.Context, orgID, wid, status string, page api.PaginationParams) ([]Run, int, error) {
-	var out []Run
+
+// ListRuns implements Repository: the visible runs that match f, newest
+// first on (created_at, id) with the keyset of api.NewestFirstSQL (WP-1092
+// AK3), with their steps.
+func (r *PGRepository) ListRuns(ctx context.Context, orgID string, f *RunFilter, page api.PaginationParams) ([]Run, int, error) {
+	out := []Run{}
 	var total int
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		where := []string{"organization_id=$1", runVisible}
 		args := []any{orgID}
-		pos := 2
-		if wid != "" {
-			where = append(where, fmt.Sprintf("workflow_id=$%d", pos))
-			args = append(args, wid)
-			pos++
+		add := func(cond string, v any) {
+			args = append(args, v)
+			where = append(where, fmt.Sprintf(cond, len(args)))
 		}
-		if status != "" {
-			where = append(where, fmt.Sprintf("status=$%d", pos))
-			args = append(args, status)
-			pos++
+		if f.WorkflowID != "" {
+			add("workflow_id=$%d::uuid", f.WorkflowID)
+		}
+		if f.CIID != "" {
+			add("ci_id=$%d::uuid", f.CIID)
+		}
+		if f.Status != "" {
+			add("status=$%d", f.Status)
+		}
+		if f.Trigger != "" {
+			add("trigger=$%d", f.Trigger)
+		}
+		if f.From != nil {
+			add("created_at>=$%d", *f.From)
+		}
+		if f.To != nil {
+			add("created_at<$%d", *f.To)
 		}
 		clause := strings.Join(where, " AND ")
 		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM workflow_run WHERE "+clause, args...).Scan(&total); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, fmt.Sprintf("SELECT %s FROM workflow_run WHERE %s ORDER BY created_at DESC LIMIT $%d OFFSET $%d", runCols, clause, pos, pos+1), append(args, page.Limit, page.Offset)...)
+		keyset, tail, pageArgs, err := api.NewestFirstSQL(page, len(args)+1)
+		if err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, "SELECT "+runCols+" FROM workflow_run WHERE "+clause+" AND "+keyset+" "+tail, append(args, pageArgs...)...)
 		if err != nil {
 			return err
 		}
 		// Collect run ids and close the rows BEFORE issuing the per-run step
 		// queries: a nested query on the same connection while rows are open
 		// fails with "conn busy".
-		runIDs := make([]string, 0, page.Limit)
+		runIDs := make([]string, 0, page.Limit+1)
 		for rows.Next() {
 			run, err := scanRun(rows)
 			if err != nil {
@@ -349,19 +371,217 @@ func (r *PGRepository) CreateRun(ctx context.Context, run *Run) error {
 			run.CIID, run.SerialKey, run.EntitySeq).Scan(&run.ID, &run.InitiatedBy, &run.CreatedAt, &run.UpdatedAt)
 	})
 }
+
+// UpdateRunStatus implements Repository: the change of the status is
+// audited and, where a type exists, written to the outbox in the same
+// transaction (recordRunTransition, WP-1092 AK4); a refused event rolls the
+// change back.
 func (r *PGRepository) UpdateRunStatus(ctx context.Context, orgID, id, status string, finished *time.Time, ctxm JSONMap) (*Run, error) {
 	var run *Run
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		var err error
+		var prev string
+		err := tx.QueryRow(ctx, "SELECT status FROM workflow_run WHERE organization_id=$1 AND id=$2 FOR UPDATE", orgID, id).Scan(&prev)
+		if err == pgx.ErrNoRows {
+			return ErrRunNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if prev != status && endedStatus(prev) {
+			// An ended run is changed only by RetryRun (WP-1092): a late
+			// write of an executor that raced a cancel leaves it ended.
+			return ErrRunEnded
+		}
 		run, err = scanRun(tx.QueryRow(ctx, "UPDATE workflow_run SET status=$3, finished_at=$4, context=COALESCE($5, context), updated_at=now() WHERE organization_id=$1 AND id=$2 RETURNING "+runCols, orgID, id, status, finished, ctxm))
 		if err != nil {
 			return err
 		}
 		run.Steps, err = r.listStepsTx(ctx, tx, orgID, id)
-		return err
+		if err != nil {
+			return err
+		}
+		return recordRunTransition(ctx, tx, prev, run)
 	})
 	return run, err
 }
+
+// CancelRun implements Repository (WP-1092 AK1): the row lock orders the
+// cancel with the claim of the run's job, which then finds it cancelled.
+func (r *PGRepository) CancelRun(ctx context.Context, orgID, id string) (*Run, error) {
+	return r.changeRun(ctx, orgID, id, func(ctx context.Context, tx pgx.Tx, prev string) (*Run, error) {
+		if !slices.Contains(cancellableStatuses, prev) {
+			return nil, ErrRunNotCancellable
+		}
+		if _, err := tx.Exec(ctx, `UPDATE workflow_step SET status='cancelled', updated_at=now()
+			WHERE organization_id=$1 AND run_id=$2 AND status IN ('pending', 'running', 'waiting_approval', 'waiting_input')`, orgID, id); err != nil {
+			return nil, err
+		}
+		return scanRun(tx.QueryRow(ctx, `UPDATE workflow_run SET status='cancelled', finished_at=now(), next_attempt_at=NULL, updated_at=now()
+			WHERE organization_id=$1 AND id=$2 RETURNING `+runCols, orgID, id))
+	})
+}
+
+// DecideApproval implements Repository: under the row lock the run must
+// still wait for its approval, so a cancel committed just before wins and
+// the decision is ErrNotWaiting (WP-1092 AK1).
+func (r *PGRepository) DecideApproval(ctx context.Context, orgID, id string, approved bool, output JSONMap) (*Run, error) {
+	if output == nil {
+		output = JSONMap{}
+	}
+	return r.changeRun(ctx, orgID, id, func(ctx context.Context, tx pgx.Tx, prev string) (*Run, error) {
+		if prev != StatusWaitingApproval {
+			return nil, ErrNotWaiting
+		}
+		stepStatus, errText := StatusSucceeded, ""
+		if !approved {
+			stepStatus, errText = StatusCancelled, approvalRejectedText
+		}
+		tag, err := tx.Exec(ctx, `UPDATE workflow_step SET status=$3, output=$4, error=$5, updated_at=now()
+			WHERE organization_id=$1 AND run_id=$2 AND status='waiting_approval'`, orgID, id, stepStatus, output, errText)
+		if err != nil {
+			return nil, err
+		}
+		if tag.RowsAffected() == 0 {
+			return nil, fmt.Errorf("approval step not found: %w", ErrNotWaiting)
+		}
+		if !approved {
+			return scanRun(tx.QueryRow(ctx, `UPDATE workflow_run SET status='cancelled', finished_at=now(), next_attempt_at=NULL, updated_at=now()
+				WHERE organization_id=$1 AND id=$2 RETURNING `+runCols, orgID, id))
+		}
+		return scanRun(tx.QueryRow(ctx, `UPDATE workflow_run SET status='pending', enqueues=enqueues+1, updated_at=now()
+			WHERE organization_id=$1 AND id=$2 RETURNING `+runCols, orgID, id))
+	})
+}
+
+// RetryRun implements Repository (WP-1092 AK2).
+func (r *PGRepository) RetryRun(ctx context.Context, orgID, id string) (*Run, error) {
+	return r.changeRun(ctx, orgID, id, func(ctx context.Context, tx pgx.Tx, prev string) (*Run, error) {
+		if prev != StatusFailed {
+			return nil, ErrRunNotRetryable
+		}
+		if _, err := tx.Exec(ctx, `UPDATE workflow_step SET status='pending', output='{}'::jsonb, error='', updated_at=now()
+			WHERE organization_id=$1 AND run_id=$2 AND status='failed'`, orgID, id); err != nil {
+			return nil, err
+		}
+		return scanRun(tx.QueryRow(ctx, `UPDATE workflow_run SET status='pending', finished_at=NULL, attempts=0, next_attempt_at=NULL,
+			last_error=NULL, enqueues=enqueues+1, updated_at=now() WHERE organization_id=$1 AND id=$2 RETURNING `+runCols, orgID, id))
+	})
+}
+
+// changeRun locks the visible run id, lets change move it from its status
+// prev and records the transition (WP-1092): a run that is unknown, of
+// another organization or outside the scope is ErrRunNotFound (TEN-04).
+func (r *PGRepository) changeRun(ctx context.Context, orgID, id string, change func(ctx context.Context, tx pgx.Tx, prev string) (*Run, error)) (*Run, error) {
+	var run *Run
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var prev string
+		err := tx.QueryRow(ctx, "SELECT status FROM workflow_run WHERE organization_id=$1 AND id=$2 AND "+runVisible+" FOR UPDATE OF workflow_run", orgID, id).Scan(&prev)
+		if err == pgx.ErrNoRows {
+			return ErrRunNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if run, err = change(ctx, tx, prev); err != nil {
+			return err
+		}
+		if run.Steps, err = r.listStepsTx(ctx, tx, orgID, id); err != nil {
+			return err
+		}
+		return recordRunTransition(ctx, tx, prev, run)
+	})
+	return run, err
+}
+
+// recordRunTransition writes the trail of a status change of run from prev
+// in its transaction (WP-1092 AK4): the audit entry workflow_run.<status>
+// with origin workflow_run, as the user of the request or, in the worker
+// and the system jobs (no request), without a user; then, last before the
+// commit (database.BeforeCommit, convention 20), the event of the new
+// status. running raises workflow.run_started only on the first start of a
+// run (from pending, no audit entry workflow_run.running yet): a retry,
+// the continuation after an approval and a run retried through the API
+// are no new start. pending and
+// waiting_approval have no event type. An unchanged status writes nothing.
+func recordRunTransition(ctx context.Context, tx pgx.Tx, prev string, run *Run) error {
+	if prev == run.Status {
+		return nil
+	}
+	// The first start of the run is the one without an earlier audit
+	// entry workflow_run.running: a run that failed before its first step
+	// and is retried has no step either, but started before (WP-1092 AK4).
+	first := false
+	if prev == StatusPending && run.Status == StatusRunning {
+		if err := tx.QueryRow(ctx, `SELECT NOT EXISTS (SELECT 1 FROM audit_log WHERE organization_id=$1 AND resource_type='workflow_run'
+			AND resource_id=$2::uuid AND action='workflow_run.running')`, run.OrganizationID, run.ID).Scan(&first); err != nil {
+			return fmt.Errorf("read the starts of the workflow run: %w", err)
+		}
+	}
+	actor, actorType := "", "system"
+	if _, inRequest := audit.RequestInfoFrom(ctx); inRequest {
+		if id := tenant.FromContext(ctx).UserID; api.IsUUID(id) {
+			actor, actorType = id, "user"
+		}
+	}
+	if _, err := audit.NewPGRecorder().Record(ctx, tx, audit.Entry{
+		OrganizationID: run.OrganizationID, ActorID: actor, ActorType: actorType,
+		Action: "workflow_run." + run.Status, ResourceType: "workflow_run", ResourceID: run.ID,
+		Changes: map[string]any{
+			"status":                map[string]any{"old": prev, "new": run.Status},
+			"workflow_id":           run.WorkflowID,
+			"definition_version_id": run.DefinitionVersionID,
+			"trigger":               run.Trigger,
+		},
+	}); err != nil {
+		return fmt.Errorf("audit the workflow run: %w", err)
+	}
+	typ := runEventType(prev, run.Status, first)
+	if typ == "" {
+		return nil
+	}
+	data := map[string]any{"id": run.ID, "run_id": run.ID, "workflow_id": run.WorkflowID,
+		"definition_version_id": run.DefinitionVersionID, "trigger": run.Trigger, "status": run.Status}
+	if run.CIID != "" {
+		data["ci_id"] = run.CIID
+		var client, site string
+		err := tx.QueryRow(ctx, "SELECT COALESCE(client_id::text, ''), COALESCE(site_id::text, '') FROM ci WHERE organization_id=$1 AND id=$2",
+			run.OrganizationID, run.CIID).Scan(&client, &site)
+		if err != nil && err != pgx.ErrNoRows {
+			return err
+		}
+		if client != "" {
+			data["client_id"] = client
+		}
+		if site != "" {
+			data["site_id"] = site
+		}
+	}
+	return database.BeforeCommit(ctx, func() error {
+		if _, err := events.NewOutbox().Append(ctx, tx, &events.Event{OrgID: run.OrganizationID, Type: typ, EntityID: run.ID, Data: data}); err != nil {
+			return fmt.Errorf("event of the workflow run: %w", err)
+		}
+		return nil
+	})
+}
+
+// runEventType is the event of a change of a run from prev to status
+// (WP-1092 AK4); first reports that the run never ran before.
+func runEventType(prev, status string, first bool) string {
+	switch status {
+	case StatusRunning:
+		if prev == StatusPending && first {
+			return events.WorkflowRunStarted
+		}
+	case StatusSucceeded:
+		return events.WorkflowRunSucceeded
+	case StatusFailed:
+		return events.WorkflowRunFailed
+	case StatusCancelled:
+		return events.WorkflowRunCancelled
+	}
+	return ""
+}
+
 func (r *PGRepository) RecordAttempt(ctx context.Context, orgID, id string, a RunAttempt) error {
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		tag, err := tx.Exec(ctx, "UPDATE workflow_run SET attempts=$3, next_attempt_at=$4, last_error=NULLIF($5,''), updated_at=now() WHERE organization_id=$1 AND id=$2",
@@ -426,6 +646,18 @@ func claimRunTx(ctx context.Context, tx pgx.Tx, orgID, id string, enqueue int) (
 	if uerr := tx.QueryRow(ctx, `UPDATE workflow_run SET status='running', updated_at=now() WHERE organization_id=$1 AND id=$2
 		RETURNING GREATEST(EXTRACT(EPOCH FROM now() - created_at), 0)::float8`, orgID, id).Scan(&waited); uerr != nil {
 		return RunClaim{}, uerr
+	}
+	// The claim starts the run: its first start writes workflow.run_started
+	// (WP-1092 AK4).
+	run, rerr := scanRun(tx.QueryRow(ctx, "SELECT "+runCols+" FROM workflow_run WHERE organization_id=$1 AND id=$2", orgID, id))
+	if rerr != nil {
+		return RunClaim{}, rerr
+	}
+	if run.Steps, rerr = listSteps(ctx, tx, orgID, id); rerr != nil {
+		return RunClaim{}, rerr
+	}
+	if terr := recordRunTransition(ctx, tx, StatusPending, run); terr != nil {
+		return RunClaim{}, terr
 	}
 	return RunClaim{Claimed: true, Started: true, Waited: time.Duration(waited * float64(time.Second))}, nil
 }
@@ -624,6 +856,10 @@ func (r *PGRepository) ListSteps(ctx context.Context, orgID, runID string) ([]St
 	return out, err
 }
 func (r *PGRepository) listStepsTx(ctx context.Context, tx pgx.Tx, orgID, runID string) ([]Step, error) {
+	return listSteps(ctx, tx, orgID, runID)
+}
+
+func listSteps(ctx context.Context, tx pgx.Tx, orgID, runID string) ([]Step, error) {
 	rows, err := tx.Query(ctx, "SELECT "+stepCols+" FROM workflow_step WHERE organization_id=$1 AND run_id=$2 ORDER BY step_index ASC", orgID, runID)
 	if err != nil {
 		return nil, err

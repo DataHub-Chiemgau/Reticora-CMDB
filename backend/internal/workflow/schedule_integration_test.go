@@ -154,7 +154,7 @@ func TestTwoLeadersSameSlotOneRun(t *testing.T) {
 	if n != 1 || slots[0].Hour() != 6 || slots[0].Minute() != 0 || slots[0].After(now) {
 		t.Fatalf("scheduled runs: %v, want one at 06:00 UTC before now", slots)
 	}
-	runs, _, err := e.repo.ListRuns(e.ctx, e.f.OrgA, def.ID, "", pageAll)
+	runs, _, err := e.repo.ListRuns(e.ctx, e.f.OrgA, &RunFilter{WorkflowID: def.ID}, pageAll)
 	if err != nil || len(runs) != 1 {
 		t.Fatalf("runs: %+v %v", runs, err)
 	}

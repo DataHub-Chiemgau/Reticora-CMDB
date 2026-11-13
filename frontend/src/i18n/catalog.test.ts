@@ -259,6 +259,17 @@ const BACKEND_ENUMS = {
     'failed',
     'cancelled',
   ],
+  // backend/internal/workflow/model.go runStatuses: the step statuses and
+  // waiting_input (request_form, WP-1102; filter and cancel, WP-1092).
+  workflowRunStatuses: [
+    'pending',
+    'running',
+    'waiting_approval',
+    'waiting_input',
+    'succeeded',
+    'failed',
+    'cancelled',
+  ],
   // backend/internal/user/pg_repository.go (CASE WHEN is_active THEN 'active'
   // ELSE 'inactive') and internal/user/repository.go (anonymized).
   userStatuses: ['active', 'inactive', 'anonymized'],
@@ -298,6 +309,7 @@ const pageEnumerations: Array<[string, readonly string[]]> = [
   ['ci.statuses', specEnum('CIStatus')],
   ['workflows.statuses', specEnum('WorkflowRun', 'status')],
   ['workflows.statuses', BACKEND_ENUMS.workflowStepStatuses],
+  ['workflows.statuses', BACKEND_ENUMS.workflowRunStatuses],
   ['userMgmt.statuses', BACKEND_ENUMS.userStatuses],
   // WP-527: agent, maintenance, findings, desk, compliance, security and IGA
   // pages.
@@ -527,7 +539,7 @@ describe('i18n catalog', () => {
       'decommissioned',
       'unknown',
     ]);
-    expect(specEnum('WorkflowRun', 'status')).toEqual(BACKEND_ENUMS.workflowStepStatuses);
+    expect(specEnum('WorkflowRun', 'status')).toEqual(BACKEND_ENUMS.workflowRunStatuses);
     expect(specEnum('Agent', 'status')).toEqual(['online', 'offline', 'disabled']);
     expect(specEnum('MaintenanceWindow', 'status')).toEqual([
       'scheduled',

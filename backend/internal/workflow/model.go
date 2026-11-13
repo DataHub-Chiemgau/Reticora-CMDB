@@ -63,7 +63,7 @@ type Run struct {
 	InitiatedBy string `json:"initiated_by,omitempty"`
 	// CIID is the CI the run refers to (ci_id or ci.id of the context,
 	// read in the scope of the trigger, WP-1089); empty without one.
-	CIID string `json:"-"`
+	CIID string `json:"ci_id,omitempty"`
 	// SerialKey is "ci:<ci_id>" for a run with a CI: the runs of one key
 	// are executed one after the other (EVT-01, E-227). Empty otherwise.
 	SerialKey string `json:"-"`
@@ -145,6 +145,17 @@ type ApprovalRequest struct {
 	Comment  string `json:"comment,omitempty"`
 }
 
+// RunFilter narrows GET /api/v1/workflow-runs (WP-1092 AK3): empty fields
+// do not filter; From and To bound created_at (inclusive, exclusive).
+type RunFilter struct {
+	WorkflowID string
+	CIID       string
+	Status     string
+	Trigger    string
+	From       *time.Time
+	To         *time.Time
+}
+
 const (
 	StatusPending         = "pending"
 	StatusRunning         = "running"
@@ -152,4 +163,25 @@ const (
 	StatusSucceeded       = "succeeded"
 	StatusFailed          = "failed"
 	StatusCancelled       = "cancelled"
+	// StatusWaitingInput is the state of a run that waits for a form
+	// (request_form, WP-1102); it is cancellable like a waiting approval.
+	StatusWaitingInput = "waiting_input"
 )
+
+// runStatuses are the states a run can have; the status filter of the run
+// list accepts only these (422 otherwise).
+var runStatuses = []string{StatusPending, StatusRunning, StatusWaitingApproval, StatusWaitingInput, StatusSucceeded, StatusFailed, StatusCancelled}
+
+// endedStatus reports whether status ends a run: it is changed only by
+// RetryRun (WP-1092).
+func endedStatus(status string) bool {
+	return status == StatusSucceeded || status == StatusFailed || status == StatusCancelled
+}
+
+// approvalRejectedText is the error of an approval step that was rejected.
+const approvalRejectedText = "approval rejected"
+
+// cancellableStatuses are the states from which POST
+// /api/v1/workflow-runs/{id}/cancel ends a run (WP-1092 AK1): it waits for
+// its job, an approval or a form. A running run and an ended one are 409.
+var cancellableStatuses = []string{StatusPending, StatusWaitingApproval, StatusWaitingInput}

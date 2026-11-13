@@ -558,6 +558,8 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		"POST /api/v1/training-assignments/{id}/complete":  "training_assignment",
 		"POST /api/v1/webhooks/{id}/rotate-secret":         "webhook_subscription",
 		"POST /api/v1/workflow-runs/{id}/approval":         "workflow_run",
+		"POST /api/v1/workflow-runs/{id}/cancel":           "workflow_run",
+		"POST /api/v1/workflow-runs/{id}/retry":            "workflow_run",
 	} {
 		m[route] = row(table)
 	}

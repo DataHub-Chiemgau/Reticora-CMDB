@@ -1858,3 +1858,6 @@ ALR-12;[P3];E;backend/internal/alarm/settings_integration_test.go;WP-1030
 ALR-03;[P3];E;backend/internal/alarm/incident_handler_integration_test.go;WP-1036
 ALR-10;[P3];E;backend/internal/alarm/incident_handler_test.go;WP-1036
 ALR-06;[P3];E;backend/internal/sla/availability_test.go;WP-1048
+WFL-02;[P3];F;backend/internal/workflow/run_api_integration_test.go;WP-1092
+API-06;[P2]/[P3]/[P4]/[A];F;backend/internal/workflow/run_api_integration_test.go;WP-1092
+EVT-03;[P2–P3];F;backend/internal/workflow/run_api_integration_test.go;WP-1092

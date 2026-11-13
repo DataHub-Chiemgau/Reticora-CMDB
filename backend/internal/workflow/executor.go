@@ -178,6 +178,10 @@ func TriggerMatches(def *Definition, event string) bool {
 	return def != nil && triggerMatches(def.Trigger, event)
 }
 
+// Approve records decision on the approval step of a waiting run. The
+// decision and the change of the run happen in one transaction under the
+// run's row lock (Repository.DecideApproval): a run cancelled meanwhile
+// stays cancelled and the decision is ErrNotWaiting (WP-1092 AK1).
 func (e *Executor) Approve(ctx context.Context, orgID, runID, decision, comment string) (*Run, error) {
 	run, err := e.repo.GetRun(ctx, orgID, runID)
 	if err != nil {
@@ -186,33 +190,16 @@ func (e *Executor) Approve(ctx context.Context, orgID, runID, decision, comment 
 	if run.Status != StatusWaitingApproval {
 		return nil, ErrNotWaiting
 	}
-	steps, err := e.repo.ListSteps(ctx, orgID, runID)
-	if err != nil {
-		return nil, fmt.Errorf("list workflow steps: %w", err)
-	}
-	var waiting *Step
-	for i := range steps {
-		if steps[i].Status == StatusWaitingApproval {
-			waiting = &steps[i]
-			break
-		}
-	}
-	if waiting == nil {
-		return nil, fmt.Errorf("approval step not found: %w", ErrNotWaiting)
-	}
-	out := JSONMap{"decision": decision, "comment": comment}
-	if decision == "rejected" {
-		if _, err := e.repo.UpdateStep(ctx, orgID, waiting.ID, StatusCancelled, out, "approval rejected"); err != nil {
-			return nil, fmt.Errorf("cancel approval step: %w", err)
-		}
-		now := time.Now().UTC()
-		return e.repo.UpdateRunStatus(ctx, orgID, runID, StatusCancelled, &now, run.Context)
-	}
-	if decision != "approved" {
+	if decision != "approved" && decision != "rejected" {
 		return nil, ErrInvalidDecision
 	}
-	if _, err := e.repo.UpdateStep(ctx, orgID, waiting.ID, StatusSucceeded, out, ""); err != nil {
-		return nil, fmt.Errorf("complete approval step: %w", err)
+	out := JSONMap{"decision": decision, "comment": comment}
+	run, err = e.repo.DecideApproval(ctx, orgID, runID, decision == "approved", out)
+	if err != nil {
+		return nil, err
+	}
+	if decision == "rejected" {
+		return run, nil
 	}
 	if e.queue == nil {
 		return e.resume(ctx, orgID, run, attempt{})
@@ -220,17 +207,53 @@ func (e *Executor) Approve(ctx context.Context, orgID, runID, decision, comment 
 	return e.continueApproved(ctx, orgID, run)
 }
 
-// continueApproved queues an approved run with the job queue like a new
-// run (WP-1089 AK3): it waits for the runs ahead of it on its CI.
-func (e *Executor) continueApproved(ctx context.Context, orgID string, run *Run) (*Run, error) {
-	if _, err := e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusPending, nil, run.Context); err != nil {
-		return nil, fmt.Errorf("continue approved run: %w", err)
-	}
-	next, err := e.repo.RequeueRun(ctx, orgID, run.ID)
+// Cancel ends a pending or waiting run as cancelled (WP-1092 AK1): its open
+// step is cancelled with it, a job still queued for it finds it ended and
+// ends without effect. A running or ended run is ErrRunNotCancellable. The
+// serial key of the run is released, so the next run of its CI does not
+// wait for the sweep.
+func (e *Executor) Cancel(ctx context.Context, orgID, runID string) (*Run, error) {
+	run, err := e.repo.CancelRun(ctx, orgID, runID)
 	if err != nil {
-		return nil, fmt.Errorf("continue approved run: %w", err)
+		return nil, err
 	}
-	e.requeue(ctx, orgID, next)
+	e.releaseKey(ctx, orgID, run.SerialKey)
+	return run, nil
+}
+
+// Retry continues a failed run at its failed step (WP-1092 AK2): the run
+// is pending again with attempts 0 and is queued like after an approval,
+// under the scope snapshot of its first job (TEN-09); without one, or
+// without a queue, as Execute does. Any other run is ErrRunNotRetryable.
+func (e *Executor) Retry(ctx context.Context, orgID, runID string) (*Run, error) {
+	run, err := e.repo.RetryRun(ctx, orgID, runID)
+	if err != nil {
+		return nil, err
+	}
+	if e.queue == nil {
+		return e.resume(ctx, orgID, run, attempt{})
+	}
+	origin, err := e.repo.RunJobOrigin(ctx, orgID, run.ID)
+	if err != nil {
+		return nil, fmt.Errorf("read the first job of the run: %w", err)
+	}
+	if origin == nil {
+		return e.Execute(ctx, orgID, nil, run)
+	}
+	if err := e.submitRun(ctx, orgID, run, origin); err != nil {
+		// No job runs the pending run: it is failed again, retryable, and
+		// the route answers 500 instead of a run nobody executes.
+		e.failRun(ctx, orgID, run, err)
+		return nil, fmt.Errorf("queue workflow run: %w", err)
+	}
+	return e.repo.GetRun(ctx, orgID, run.ID)
+}
+
+// continueApproved queues an approved run, which DecideApproval set
+// pending with its enqueues raised, with the job queue like a new run
+// (WP-1089 AK3): it waits for the runs ahead of it on its CI.
+func (e *Executor) continueApproved(ctx context.Context, orgID string, run *Run) (*Run, error) {
+	e.requeue(ctx, orgID, run)
 	return e.repo.GetRun(ctx, orgID, run.ID)
 }
 
@@ -288,7 +311,9 @@ func (e *Executor) resume(ctx context.Context, orgID string, run *Run, at attemp
 		return e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusCancelled, &now, run.Context)
 	}
 	if _, err = e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusRunning, nil, run.Context); err != nil {
-		slog.Error("workflow: failed to mark run running", "run_id", run.ID, "error", err)
+		// The start writes its audit entry and workflow.run_started with
+		// it (WP-1092); a run that could not start executes no step.
+		return e.abort(ctx, orgID, run, at, fmt.Errorf("mark the run running: %w", err))
 	}
 	steps, err := e.repo.ListSteps(ctx, orgID, run.ID)
 	if err != nil {

@@ -1763,6 +1763,7 @@
       "pending": "Ausstehend",
       "running": "Läuft",
       "waiting_approval": "Wartet auf Freigabe",
+      "waiting_input": "Wartet auf Eingabe",
       "succeeded": "Erfolgreich",
       "failed": "Fehlgeschlagen",
       "cancelled": "Abgebrochen"

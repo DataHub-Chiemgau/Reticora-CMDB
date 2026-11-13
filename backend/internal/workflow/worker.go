@@ -286,15 +286,22 @@ func (e *Executor) requeue(ctx context.Context, orgID string, run *Run) {
 		slog.Error("workflow: failed to read the first job of a run", "run_id", run.ID, "error", err)
 		return
 	}
+	if err := e.submitRun(ctx, orgID, run, origin); err != nil {
+		slog.Error("workflow: failed to queue a run", "run_id", run.ID, "error", err)
+	}
+}
+
+// submitRun submits the job workflow.run of run's current enqueue under
+// the first job origin of the run (nil: an empty scope, fail closed).
+func (e *Executor) submitRun(ctx context.Context, orgID string, run *Run, origin *jobs.Job) error {
 	if origin == nil {
 		origin = &jobs.Job{OrganizationID: orgID, CreatedBy: run.InitiatedBy,
 			Scope: &jobs.Scope{Clients: []string{}, Sites: []string{}, Teams: []string{}}}
 	}
 	jctx := jobs.CreatorContext(database.WithoutTx(context.WithoutCancel(ctx)), origin)
-	if _, _, err = e.queue.Submit(jctx, orgID, RunJobKind, RunJobParams{RunID: run.ID, Enqueue: run.Enqueues},
-		jobs.EnqueueOptions{IdempotencyKey: RunJobKey(run.ID, run.Enqueues), CreatedBy: origin.CreatedBy}); err != nil {
-		slog.Error("workflow: failed to queue a run", "run_id", run.ID, "error", err)
-	}
+	_, _, err := e.queue.Submit(jctx, orgID, RunJobKind, RunJobParams{RunID: run.ID, Enqueue: run.Enqueues},
+		jobs.EnqueueOptions{IdempotencyKey: RunJobKey(run.ID, run.Enqueues), CreatedBy: origin.CreatedBy})
+	return err
 }
 
 // SerialSweep is the system job workflow.serial_sweep (WP-1089 AK4):

@@ -261,6 +261,8 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 		jobService                         *jobs.Service
 		warned, expired                    string
 		webhookWorkflow                    string
+		runWorkflow, failingWorkflow       string
+		approvalWorkflow                   string
 		rotatedCredential, agedCredential  string
 		usageCredential, usageCollector    string
 		usageScope, usageCI                string
@@ -1394,6 +1396,71 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 					t.Errorf("workflow.webhook data %v", data)
 				}
 			}},
+		// The status changes of a workflow run (WP-1092): the run of the
+		// router executes in the request (no job queue); each change writes
+		// its event in its transaction. While the outbox refuses the event
+		// the change is rolled back and the request fails.
+		{typ: events.WorkflowRunStarted,
+			setup: func(t *testing.T) {
+				runWorkflow = evt02Workflow(t, call, admin, "evt02-run", `[{"type": "noop"}]`)
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/workflows/"+runWorkflow+"/runs", `{"context": {}}`)
+				answered(t, "run workflow", r, refused, http.StatusCreated)
+				if refused {
+					// The run could not start: it failed without a step.
+					unchanged(t, "run that could not start", scalar(t, `SELECT status || '/' || (SELECT count(*) FROM workflow_step s WHERE s.run_id = r.id)
+						FROM workflow_run r WHERE workflow_id = $1 ORDER BY created_at DESC LIMIT 1`, runWorkflow), "failed/0")
+					return ""
+				}
+				return evt02RunID(t, r, "succeeded")
+			},
+			data: evt02RunData(&runWorkflow, "running")},
+		{typ: events.WorkflowRunSucceeded,
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/workflows/"+runWorkflow+"/runs", `{"context": {}}`)
+				answered(t, "run workflow", r, refused, http.StatusCreated)
+				if refused {
+					unchanged(t, "run whose success was refused", scalar(t, `SELECT status FROM workflow_run WHERE workflow_id = $1
+						ORDER BY created_at DESC LIMIT 1`, runWorkflow), "running")
+					return ""
+				}
+				return evt02RunID(t, r, "succeeded")
+			},
+			data: evt02RunData(&runWorkflow, "succeeded")},
+		{typ: events.WorkflowRunFailed,
+			setup: func(t *testing.T) {
+				// submit_form names no form: its step fails, so does the run.
+				failingWorkflow = evt02Workflow(t, call, admin, "evt02-run-failed", `[{"type": "submit_form", "form_id": "none"}]`)
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/workflows/"+failingWorkflow+"/runs", `{"context": {}}`)
+				answered(t, "run workflow", r, refused, http.StatusCreated)
+				if refused {
+					unchanged(t, "run whose failure was refused", scalar(t, `SELECT status FROM workflow_run WHERE workflow_id = $1
+						ORDER BY created_at DESC LIMIT 1`, failingWorkflow), "running")
+					return ""
+				}
+				return evt02RunID(t, r, "failed")
+			},
+			data: evt02RunData(&failingWorkflow, "failed")},
+		{typ: events.WorkflowRunCancelled,
+			setup: func(t *testing.T) {
+				approvalWorkflow = evt02Workflow(t, call, admin, "evt02-run-cancelled", `[{"type": "require_approval"}, {"type": "noop"}]`)
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/workflows/"+approvalWorkflow+"/runs", `{"context": {}}`)
+				answered(t, "run workflow", r, false, http.StatusCreated)
+				run := evt02RunID(t, r, "waiting_approval")
+				r = call(t, admin, http.MethodPost, "/api/v1/workflow-runs/"+run+"/cancel", "")
+				answered(t, "cancel run", r, refused, http.StatusOK)
+				if refused {
+					unchanged(t, "run whose cancel was refused", scalar(t, `SELECT status FROM workflow_run WHERE id = $1`, run), "waiting_approval")
+					return ""
+				}
+				return run
+			},
+			data: evt02RunData(&approvalWorkflow, "cancelled")},
 	}
 
 	// The table covers every type of events.Types without a frame in
@@ -1474,6 +1541,47 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 				c.data(t, entity, data)
 			}
 		})
+	}
+}
+
+// evt02Workflow stores a manual workflow with actions as admin and returns
+// its id (WP-1092).
+func evt02Workflow(t *testing.T, call func(t *testing.T, as t6As, method, path, body string) t6Response, admin t6As, name, actions string) string {
+	t.Helper()
+	r := call(t, admin, http.MethodPost, "/api/v1/workflows", `{"name": "`+name+`", "trigger": {"type": "manual"}, "actions": `+actions+`}`)
+	if r.Code != http.StatusCreated {
+		t.Fatalf("create workflow %s = %d %s", name, r.Code, t6Short(r.Body))
+	}
+	var def struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(r.Body, &def); err != nil || def.ID == "" {
+		t.Fatalf("workflow %s: %v", t6Short(r.Body), err)
+	}
+	return def.ID
+}
+
+// evt02RunID returns the id of the run of a response with status want.
+func evt02RunID(t *testing.T, r t6Response, want string) string {
+	t.Helper()
+	var run struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(r.Body, &run); err != nil || run.ID == "" || run.Status != want {
+		t.Fatalf("run %s (%v), want status %s", t6Short(r.Body), err, want)
+	}
+	return run.ID
+}
+
+// evt02RunData checks the data of a workflow.run_* event (WP-1092 AK4).
+func evt02RunData(workflowID *string, status string) func(t *testing.T, entity string, data map[string]any) {
+	return func(t *testing.T, entity string, data map[string]any) {
+		t.Helper()
+		if data["id"] != entity || data["run_id"] != entity || data["workflow_id"] != *workflowID || data["status"] != status ||
+			data["trigger"] != "manual" || data["definition_version_id"] == nil {
+			t.Errorf("workflow run data %v, want run %s of %s with status %s", data, entity, *workflowID, status)
+		}
 	}
 }
 
@@ -1799,10 +1907,6 @@ var plannedProducers = map[string]string{
 	"sla.violated":                "WP-1049",
 	"maintenance.started":         "WP-1033",
 	"maintenance.ended":           "WP-1033",
-	"workflow.run_started":        "WP-1092",
-	"workflow.run_succeeded":      "WP-1092",
-	"workflow.run_failed":         "WP-1092",
-	"workflow.run_cancelled":      "WP-1092",
 	"workflow.approval_requested": "WP-1098",
 	"workflow.approval_decided":   "WP-1098",
 	"notification.escalated":      "WP-1146",

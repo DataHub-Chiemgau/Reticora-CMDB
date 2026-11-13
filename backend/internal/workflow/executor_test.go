@@ -57,7 +57,15 @@ type failingWorkflowRepository struct {
 	listStepsErr   error
 	updateStepErr  error
 	updateRunErr   error
+	decideErr      error
 	failOnRunCalls map[string]bool
+}
+
+func (f *failingWorkflowRepository) DecideApproval(ctx context.Context, orgID, id string, approved bool, output JSONMap) (*Run, error) {
+	if f.decideErr != nil {
+		return nil, f.decideErr
+	}
+	return f.MemoryRepository.DecideApproval(ctx, orgID, id, approved, output)
 }
 
 func (f *failingWorkflowRepository) ListSteps(_ context.Context, orgID, runID string) ([]Step, error) {
@@ -92,7 +100,7 @@ func TestExecutorListStepsFailureFailsRun(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when ListSteps fails")
 	}
-	runs, _, lerr := repo.ListRuns(context.Background(), "org-1", "", "", api.PaginationParams{Limit: 10})
+	runs, _, lerr := repo.ListRuns(context.Background(), "org-1", &RunFilter{}, api.PaginationParams{Limit: 10})
 	if lerr != nil {
 		t.Fatal(lerr)
 	}
@@ -112,7 +120,7 @@ func TestExecutorUpdateStepFailurePropagates(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when UpdateStep fails")
 	}
-	runs, _, _ := repo.ListRuns(context.Background(), "org-1", "", "", api.PaginationParams{Limit: 10})
+	runs, _, _ := repo.ListRuns(context.Background(), "org-1", &RunFilter{}, api.PaginationParams{Limit: 10})
 	if len(runs) != 1 || runs[0].Status != StatusFailed {
 		t.Fatalf("expected run failed after UpdateStep failure, got %+v", runs)
 	}
@@ -132,16 +140,16 @@ func TestExecutorApproveListStepsFailure(t *testing.T) {
 	if run.Status != StatusWaitingApproval {
 		t.Fatalf("want waiting, got %s", run.Status)
 	}
-	repo.listStepsErr = errors.New("db down")
+	// The decision and the change of the run are one write
+	// (DecideApproval, WP-1092): when it fails, the run still waits.
+	repo.decideErr = errors.New("write denied")
 	if _, approveErr := exec.Approve(context.Background(), "org-1", run.ID, "approved", ""); approveErr == nil {
-		t.Fatal("expected error when ListSteps fails during approval")
+		t.Fatal("expected error when the decision cannot be stored")
 	}
-	repo.listStepsErr = nil
-	repo.updateStepErr = errors.New("write denied")
-	if _, approveErr := exec.Approve(context.Background(), "org-1", run.ID, "approved", ""); approveErr == nil {
-		t.Fatal("expected error when UpdateStep fails during approval")
+	if got, _ := repo.GetRun(context.Background(), "org-1", run.ID); got == nil || got.Status != StatusWaitingApproval {
+		t.Fatalf("run after the failed decision: %+v, want waiting", got)
 	}
-	repo.updateStepErr = nil
+	repo.decideErr = nil
 	run, err = exec.Approve(context.Background(), "org-1", run.ID, "rejected", "")
 	if err != nil {
 		t.Fatal(err)
@@ -161,7 +169,7 @@ func TestExecutorInvalidActionType(t *testing.T) {
 	if _, err := exec.Trigger(context.Background(), "org-1", def, "manual", JSONMap{}); err == nil {
 		t.Fatal("expected error for non-string action type")
 	}
-	runs, _, _ := repo.ListRuns(context.Background(), "org-1", "", "", api.PaginationParams{Limit: 10})
+	runs, _, _ := repo.ListRuns(context.Background(), "org-1", &RunFilter{}, api.PaginationParams{Limit: 10})
 	if len(runs) != 1 || runs[0].Status != StatusFailed {
 		t.Fatalf("expected run failed for invalid action type, got %+v", runs)
 	}

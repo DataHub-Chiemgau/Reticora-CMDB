@@ -747,6 +747,8 @@ POST /api/v1/webhooks/{id}/deliveries/{delivery_id}/retry webhook:manage
 POST /api/v1/webhooks/{id}/rotate-secret webhook:manage
 POST /api/v1/webhooks/{id}/test webhook:manage
 POST /api/v1/workflow-runs/{id}/approval workflow:write
+POST /api/v1/workflow-runs/{id}/cancel workflow:write
+POST /api/v1/workflow-runs/{id}/retry workflow:write
 POST /api/v1/workflows workflow:write
 POST /api/v1/workflows/{id}/runs workflow:write
 POST /bff/graphql authenticated

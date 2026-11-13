@@ -5876,7 +5876,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** List workflow runs */
+    /**
+     * List workflow runs
+     * @description The runs visible in the caller's scope, newest first on (created_at, id) with a keyset cursor (API-02, WP-1092). workflow_id that is no UUID is 400; ci_id that is no UUID, an unknown status and from or to that is no RFC 3339 time are 422 with the field.
+     */
     get: operations['listWorkflowRuns'];
     put?: never;
     post?: never;
@@ -5920,6 +5923,52 @@ export interface paths {
     put?: never;
     /** Approve or reject a waiting workflow run */
     post: operations['approveWorkflowRun'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/workflow-runs/{id}/cancel': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Cancel a pending or waiting workflow run
+     * @description A run that is pending or waits for an approval or a form ends as cancelled, its open step with it (WFL-02, WP-1092); a job still queued for it ends without effect. A running or ended run is 409. Requires workflow:write. Writes the audit entry workflow_run.cancelled and the event workflow.run_cancelled.
+     */
+    post: operations['cancelWorkflowRun'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/workflow-runs/{id}/retry': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Retry a failed workflow run
+     * @description A failed run is pending again with attempts 0, its failed step is reset to pending, and the run is queued as the job workflow.run: it continues at the failed step, the succeeded steps are not repeated (WFL-02, WP-1092). Without a job queue the run is executed in the request. Any other run is 409. Requires workflow:write.
+     */
+    post: operations['retryWorkflowRun'];
     delete?: never;
     options?: never;
     head?: never;
@@ -19792,7 +19841,14 @@ export interface components {
       /** @description The definition version the run executes (WFL-02). */
       definition_version_id: string;
       /** @enum {string} */
-      status: 'pending' | 'running' | 'waiting_approval' | 'succeeded' | 'failed' | 'cancelled';
+      status:
+        | 'pending'
+        | 'running'
+        | 'waiting_approval'
+        | 'waiting_input'
+        | 'succeeded'
+        | 'failed'
+        | 'cancelled';
       trigger: string;
       context: components['schemas']['JSONValue'];
       /** Format: date-time */
@@ -19810,6 +19866,8 @@ export interface components {
       last_error?: string;
       /** @description User who started the run; the worker executes the run as this user. Absent without a user. */
       initiated_by?: string;
+      /** @description The CI the run refers to (ci_id or ci.id of its context); its runs are executed one after the other (EVT-01). Absent without a CI. */
+      ci_id?: string;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -37648,8 +37706,24 @@ export interface operations {
          *     supplied.
          */
         offset?: components['parameters']['Offset'];
+        /** @description Runs of this workflow definition. */
         workflow_id?: string;
-        status?: string;
+        /** @description Runs on this CI. */
+        ci_id?: string;
+        status?:
+          | 'pending'
+          | 'running'
+          | 'waiting_approval'
+          | 'waiting_input'
+          | 'succeeded'
+          | 'failed'
+          | 'cancelled';
+        /** @description Runs of this trigger (manual, schedule or an event type). */
+        trigger?: string;
+        /** @description Runs created at or after this time (RFC 3339). */
+        from?: string;
+        /** @description Runs created before this time (RFC 3339). */
+        to?: string;
       };
       header?: never;
       path?: never;
@@ -37668,6 +37742,7 @@ export interface operations {
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -37724,6 +37799,60 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+    };
+  };
+  cancelWorkflowRun: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The cancelled run */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WorkflowRun'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+    };
+  };
+  retryWorkflowRun: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The run */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WorkflowRun'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
     };
   };
   listComplianceRules: {

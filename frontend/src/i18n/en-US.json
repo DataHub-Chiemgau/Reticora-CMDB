@@ -1763,6 +1763,7 @@
       "pending": "Pending",
       "running": "Running",
       "waiting_approval": "Waiting for approval",
+      "waiting_input": "Waiting for input",
       "succeeded": "Succeeded",
       "failed": "Failed",
       "cancelled": "Cancelled"

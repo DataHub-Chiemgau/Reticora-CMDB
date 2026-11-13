@@ -16354,6 +16354,8 @@ WFL-02;[P3];F;backend/internal/workflow/schedule_integration_test.go;WP-1091
 - backend/internal/server/testdata/route_permissions.txt
 - docs/traceability.csv
 
+**Nachtrag 2026-11-13 (Prüfung):** Zusätzlich geändert: `backend/internal/audit/scope.go` (Eintrag `workflow_run` in `resourceTables`, damit der Audit-Eintrag aus AK4 die Herkunft `workflow_run` dem Scope des Runs zuordnet), `backend/internal/workflow/worker.go` (Einreihen mit Fehlerrückgabe `submitRun`: scheitert die Einreihung eines Retry, steht der Run wieder auf `failed` und die Route antwortet 500), `frontend/src/i18n/catalog.test.ts`, `frontend/src/i18n/de-DE.json` und `frontend/src/i18n/en-US.json` (Status `waiting_input` im Filter-Enum aus AK3 und in `WorkflowRun.status`) sowie, als Anpassung an die geänderte `ListRuns`-Signatur bzw. die Genehmigung, `backend/internal/iga/iga_test.go`, `backend/internal/workflow/executor_test.go`, `schedule_test.go`, `schedule_integration_test.go` und `workflow_scope_integration_test.go`. Die Genehmigung entscheidet unter der Zeilensperre des Runs (`Repository.DecideApproval`): ein zuvor abgebrochener Run bleibt `cancelled`, Endzustände ändert nur noch `RetryRun` (`ErrRunEnded`); Test `TestCancelRacesApproval`. Der erste Start aus AK4 ist der ohne früheren Audit-Eintrag `workflow_run.running`, auch für einen Run, der vor seinem ersten Schritt scheiterte (Fall in `TestRetryFailedRunResumesAtFailedStep`).
+
 **Migration/RLS:** keine. Der Keyset-Index `(organization_id, created_at DESC, id DESC)` auf `workflow_run` entsteht mit WP-1093 (`p3-wfl-scope`); bis dahin reicht `idx_workflow_run_status` (`000027:73`) für die Testmengen.
 
 **Tests:**

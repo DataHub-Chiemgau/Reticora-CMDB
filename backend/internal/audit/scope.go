@@ -83,6 +83,9 @@ var resourceTables = map[string][]string{
 	// Ack and un-ack of an alarm (WP-983): the entry is visible where the
 	// alarm is, under the client and site of its row.
 	"alarm": {"alarm"},
+	// Status changes of a workflow run (WP-1092): the entry is visible
+	// where the run is.
+	"workflow_run": {"workflow_run"},
 
 	// Route audit (the first route segment): the route's resource_id is
 	// its first id parameter or the id of the created row, so the tables

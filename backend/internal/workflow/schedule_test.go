@@ -141,7 +141,7 @@ func TestMemorySchedulerOneRunPerSlot(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	runs, _, err := repo.ListRuns(ctx, "org-1", def.ID, "", api.PaginationParams{Limit: 10})
+	runs, _, err := repo.ListRuns(ctx, "org-1", &RunFilter{WorkflowID: def.ID}, api.PaginationParams{Limit: 10})
 	if err != nil || len(runs) != 1 {
 		t.Fatalf("runs: %+v %v, want one", runs, err)
 	}

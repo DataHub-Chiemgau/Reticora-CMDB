@@ -13830,20 +13830,43 @@ paths:
       operationId: listWorkflowRuns
       tags: [Workflows]
       summary: List workflow runs
+      description: >-
+        The runs visible in the caller's scope, newest first on
+        (created_at, id) with a keyset cursor (API-02, WP-1092). workflow_id
+        that is no UUID is 400; ci_id that is no UUID, an unknown status and
+        from or to that is no RFC 3339 time are 422 with the field.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Offset'
         - name: workflow_id
           in: query
-          schema: { type: string }
+          description: Runs of this workflow definition.
+          schema: { type: string, format: uuid }
+        - name: ci_id
+          in: query
+          description: Runs on this CI.
+          schema: { type: string, format: uuid }
         - name: status
           in: query
+          schema: { type: string, enum: [pending, running, waiting_approval, waiting_input, succeeded, failed, cancelled] }
+        - name: trigger
+          in: query
+          description: Runs of this trigger (manual, schedule or an event type).
           schema: { type: string }
+        - name: from
+          in: query
+          description: Runs created at or after this time (RFC 3339).
+          schema: { type: string, format: date-time }
+        - name: to
+          in: query
+          description: Runs created before this time (RFC 3339).
+          schema: { type: string, format: date-time }
       responses:
         '200': { description: Paginated workflow runs, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowRunListResponse' } } } }
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
         '500': { $ref: '#/components/responses/InternalServerError' }
   /api/v1/workflow-runs/{id}:
     x-phase: P3
@@ -13871,6 +13894,46 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/workflow-runs/{id}/cancel:
+    x-phase: P3
+    x-feature: workflows
+    parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
+    post:
+      operationId: cancelWorkflowRun
+      tags: [Workflows]
+      summary: Cancel a pending or waiting workflow run
+      description: >-
+        A run that is pending or waits for an approval or a form ends as
+        cancelled, its open step with it (WFL-02, WP-1092); a job still
+        queued for it ends without effect. A running or ended run is 409.
+        Requires workflow:write. Writes the audit entry
+        workflow_run.cancelled and the event workflow.run_cancelled.
+      responses:
+        '200': { description: The cancelled run, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowRun' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/workflow-runs/{id}/retry:
+    x-phase: P3
+    x-feature: workflows
+    parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
+    post:
+      operationId: retryWorkflowRun
+      tags: [Workflows]
+      summary: Retry a failed workflow run
+      description: >-
+        A failed run is pending again with attempts 0, its failed step is
+        reset to pending, and the run is queued as the job workflow.run: it
+        continues at the failed step, the succeeded steps are not repeated
+        (WFL-02, WP-1092). Without a job queue the run is executed in the
+        request. Any other run is 409. Requires workflow:write.
+      responses:
+        '200': { description: The run, pending while the job workflow.run executes it, content: { application/json: { schema: { $ref: '#/components/schemas/WorkflowRun' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /api/v1/compliance/rules:
     x-phase: P3
     x-feature: compliance_findings
@@ -40632,7 +40695,7 @@ components:
         organization_id: { type: string }
         workflow_id: { type: string }
         definition_version_id: { type: string, description: The definition version the run executes (WFL-02). }
-        status: { type: string, enum: [pending, running, waiting_approval, succeeded, failed, cancelled] }
+        status: { type: string, enum: [pending, running, waiting_approval, waiting_input, succeeded, failed, cancelled] }
         trigger: { type: string }
         context: { $ref: '#/components/schemas/JSONValue' }
         started_at: { type: string, format: date-time }
@@ -40641,6 +40704,7 @@ components:
         next_attempt_at: { type: string, format: date-time, description: When the job retries the run after a failed attempt; absent otherwise. }
         last_error: { type: string, description: Sanitized error of the last failed attempt. }
         initiated_by: { type: string, description: User who started the run; the worker executes the run as this user. Absent without a user. }
+        ci_id: { type: string, description: The CI the run refers to (ci_id or ci.id of its context); its runs are executed one after the other (EVT-01). Absent without a CI. }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         steps: { type: array, items: { $ref: '#/components/schemas/WorkflowStep' } }

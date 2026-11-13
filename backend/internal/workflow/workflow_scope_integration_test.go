@@ -72,7 +72,7 @@ func TestWorkflowRunCIScope(t *testing.T) {
 	if run2.CIID != ci2 || run2.SerialKey != "ci:"+ci2 {
 		t.Fatalf("run on CI 2: ci_id %q serial_key %q", run2.CIID, run2.SerialKey)
 	}
-	list, _, err := repo.ListRuns(client1, f.OrgA, def.ID, "", api.PaginationParams{Limit: 100})
+	list, _, err := repo.ListRuns(client1, f.OrgA, &workflow.RunFilter{WorkflowID: def.ID}, api.PaginationParams{Limit: 100})
 	if err != nil || len(list) != 1 || list[0].ID != run1.ID {
 		t.Errorf("runs of client 1: %+v err=%v, want only the run on CI 1", list, err)
 	}
@@ -90,7 +90,7 @@ func TestWorkflowRunCIScope(t *testing.T) {
 	if _, err = repo.GetRun(client1, f.OrgA, run2.ID); !errors.Is(err, workflow.ErrRunNotFound) {
 		t.Errorf("run on the deleted CI of client 2 for client 1: %v, want ErrRunNotFound", err)
 	}
-	if list, _, lerr := repo.ListRuns(client1, f.OrgA, def.ID, "", api.PaginationParams{Limit: 100}); lerr != nil || len(list) != 1 {
+	if list, _, lerr := repo.ListRuns(client1, f.OrgA, &workflow.RunFilter{WorkflowID: def.ID}, api.PaginationParams{Limit: 100}); lerr != nil || len(list) != 1 {
 		t.Errorf("runs of client 1 after the delete: %+v err=%v, want only the run on CI 1", list, lerr)
 	}
 	if got, gerr := repo.GetRun(org, f.OrgA, run2.ID); gerr != nil || got.CIID != "" || got.SerialKey != "ci:"+ci2 {

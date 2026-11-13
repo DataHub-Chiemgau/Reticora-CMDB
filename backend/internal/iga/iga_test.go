@@ -180,7 +180,7 @@ func TestCreateAccessRequestStartsWorkflowRun(t *testing.T) {
 	}
 	runsOf := func(repo *workflow.MemoryRepository) []workflow.Run {
 		t.Helper()
-		runs, _, err := repo.ListRuns(ctx, org, "", "", api.PaginationParams{Limit: 10})
+		runs, _, err := repo.ListRuns(ctx, org, &workflow.RunFilter{}, api.PaginationParams{Limit: 10})
 		if err != nil {
 			t.Fatal(err)
 		}
