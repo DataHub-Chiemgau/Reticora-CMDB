@@ -649,6 +649,11 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	if opts.CIService != nil {
 		workflowRuns.WithCIService(opts.CIService)
 	}
+	// submit_form checks signature fields like the form routes: with the
+	// release module documents only (WP-1101).
+	if opts.Modules.Enabled(ModuleDocuments) && repos.Document != nil {
+		workflowRuns.WithFormDocuments(repos.Document)
+	}
 	// The package limits of the workflow engine (WFL-08, WP-1112): active
 	// definitions and form definitions on create and switch-on, runs per
 	// hour in the worker of workflow.run.
@@ -1049,7 +1054,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		sla.NewHandler(repos.SLA, repos.Ticket),
 		// The availability targets under /api/v1/monitoring/sla (WP-1048).
 		sla.NewAvailabilityHandler(repos.AvailabilityTargets),
-		form.NewHandler(repos.Form).WithQuota(workflowQuotas),
+		formHandler(&repos, &opts, workflowQuotas),
 		workflow.NewHandler(repos.Workflow, workflowRuns).WithQuota(workflowQuotas),
 		compliance.NewHandler(repos.Compliance, complianceEvaluator).WithJobs(complianceJobs).
 			WithReports(compliance.NewReportService(repos.Compliance, reportAuditVerifier(&opts), entitlementLister{svc: opts.Entitlements})),
@@ -1802,6 +1807,20 @@ func exportDATEVGate(opts *Options) *export.DATEVGate {
 		entitlements = opts.Entitlements
 	}
 	return export.NewDATEVGate(entitlements, opts.Modules.Enabled(ModuleInventory))
+}
+
+// formHandler builds the form routes; signature fields (WP-1101) name
+// documents only with the release module documents, without it a form
+// definition with a signature field is refused with 422.
+func formHandler(repos *Repositories, opts *Options, quotas *workflow.Quotas) *form.Handler {
+	h := form.NewHandler(repos.Form)
+	if quotas != nil {
+		h.WithQuota(quotas)
+	}
+	if opts.Modules.Enabled(ModuleDocuments) && repos.Document != nil {
+		h.WithDocuments(repos.Document)
+	}
+	return h
 }
 
 // ticketHandler builds the ticket routes; the attachments (documents

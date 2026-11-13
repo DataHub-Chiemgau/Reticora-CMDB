@@ -5717,7 +5717,10 @@ export interface paths {
     /** List submissions for a form */
     get: operations['listFormSubmissions'];
     put?: never;
-    /** Submit values for a form */
+    /**
+     * Submit values for a form
+     * @description The values are checked against the schema and the conditional logic of ui_hints of the current schema version, to which the submission is bound (WFL-01, WP-1101): fields whose visible_when does not hold are dropped before they are stored; a missing required_when value ("is required") and a changed readonly_when value ("is read-only") are fields of the validation problem.
+     */
     post: operations['createFormSubmission'];
     delete?: never;
     options?: never;
@@ -19778,6 +19781,7 @@ export interface components {
       name: string;
       description?: string;
       schema: components['schemas']['JSONValue'];
+      /** @description Display hints of the client. ui_hints.fields.<field> (a dot path of the schema's properties) may name visible_when, required_when and readonly_when, each a MET-45 condition (api/rules.schema.json) over the other values of the submission, nested objects by dot path (WFL-01, WP-1101). The server evaluates them on submission like the catalog rules of CIs: a field whose visible_when does not hold is dropped and not validated, unless it is required; required_when asks for a value; readonly_when refuses a value other than the prefill. An invalid condition, or a condition on or about a field the schema lacks, is 422 on ui_hints.fields.<field>.<kind>. A property {"type": "string", "format": "signature"} holds the id of a PNG or JPEG document the submitter may read; without the module documents such a schema is 422. */
       ui_hints?: components['schemas']['JSONValue'];
       active?: boolean;
     };
@@ -19786,6 +19790,7 @@ export interface components {
       name?: string;
       description?: string;
       schema?: components['schemas']['JSONValue'];
+      /** @description Display hints of the client. ui_hints.fields.<field> (a dot path of the schema's properties) may name visible_when, required_when and readonly_when, each a MET-45 condition (api/rules.schema.json) over the other values of the submission, nested objects by dot path (WFL-01, WP-1101). The server evaluates them on submission like the catalog rules of CIs: a field whose visible_when does not hold is dropped and not validated, unless it is required; required_when asks for a value; readonly_when refuses a value other than the prefill. An invalid condition, or a condition on or about a field the schema lacks, is 422 on ui_hints.fields.<field>.<kind>. A property {"type": "string", "format": "signature"} holds the id of a PNG or JPEG document the submitter may read; without the module documents such a schema is 422. */
       ui_hints?: components['schemas']['JSONValue'];
       active?: boolean;
     };
@@ -37608,7 +37613,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description client_id is no UUID or names no client of the organization. */
+      /** @description client_id is no UUID or names no client of the organization; a condition of ui_hints.fields is invalid or names a field the schema lacks; a signature field without the module documents (WP-1101). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -37721,7 +37726,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description client_id is no UUID or names no client of the organization. */
+      /** @description client_id is no UUID or names no client of the organization; a condition of ui_hints.fields is invalid or names a field the schema lacks; a signature field without the module documents (WP-1101). */
       422: {
         headers: {
           [name: string]: unknown;
@@ -37890,7 +37895,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description ci_id or ticket_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope (all alike, TEN-04). */
+      /** @description ci_id or ticket_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope (all alike, TEN-04); a signature field names no PNG or JPEG document the submitter may read (values.<field>, WP-1101). */
       422: {
         headers: {
           [name: string]: unknown;

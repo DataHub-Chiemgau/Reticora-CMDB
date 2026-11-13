@@ -37,10 +37,13 @@ var (
 )
 
 type Executor struct {
-	repo       Repository
-	tickets    ticket.Repository
-	cis        ci.Repository
-	forms      form.Repository
+	repo    Repository
+	tickets ticket.Repository
+	cis     ci.Repository
+	forms   form.Repository
+	// formDocs reads the signature documents of submit_form (WP-1101);
+	// nil without the module documents (WithFormDocuments).
+	formDocs   form.DocumentReader
 	dispatcher *webhook.Dispatcher
 	guard      *override.Guard
 	conflicts  ConflictReviews
@@ -98,6 +101,13 @@ func NewExecutor(repo Repository, tickets ticket.Repository, cis ci.Repository, 
 
 // WithFieldGuard sets the central write decision for set_ci_field
 // (OVR-02). Without one the rank table alone decides.
+// WithFormDocuments sets the reader of the signature documents submit_form
+// checks (WP-1101 AK5); the router sets it with the module documents only.
+func (e *Executor) WithFormDocuments(docs form.DocumentReader) *Executor {
+	e.formDocs = docs
+	return e
+}
+
 func (e *Executor) WithFieldGuard(g *override.Guard) *Executor {
 	e.guard = g
 	return e
@@ -670,14 +680,25 @@ func (e *Executor) submitForm(ctx context.Context, orgID string, action JSONMap)
 	if !def.Active {
 		return nil, false, errFormInactive
 	}
-	if err := form.Validate(def.Schema, values); err != nil {
+	// Schema and conditional logic of the current version like POST
+	// /forms/{id}/submissions (WP-1101 AK2, AK3, AK5): hidden fields are
+	// dropped, required_when and readonly_when hold, a signature names a
+	// readable PNG or JPEG document; the repository binds that version.
+	checked, err := form.ValidateSubmission(ctx, &form.SubmissionCheck{OrganizationID: orgID, Schema: def.Schema, UIHints: def.UIHints,
+		Values: values, Documents: e.formDocs})
+	if err != nil {
 		var ve form.ValidationError
 		if errors.As(err, &ve) {
 			return JSONMap{"fields": ve.Fields}, false, err
 		}
+		var fe *api.FieldError
+		if errors.As(err, &fe) {
+			return JSONMap{"fields": []form.FieldError{{Field: fe.Field, Message: fe.Message}}}, false, err
+		}
 		return nil, false, err
 	}
-	sub := &form.Submission{OrganizationID: orgID, FormID: def.ID, Values: values, SubmittedBy: tenant.FromContext(ctx).UserID, Status: "submitted"}
+	sub := &form.Submission{OrganizationID: orgID, FormID: def.ID, Values: checked, SubmittedBy: tenant.FromContext(ctx).UserID, Status: "submitted",
+		ExpectedVersionID: def.CurrentVersionID}
 	if err := e.forms.CreateSubmission(ctx, sub); err != nil {
 		return nil, false, err
 	}

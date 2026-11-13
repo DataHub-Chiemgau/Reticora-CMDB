@@ -17,6 +17,9 @@ type Handler struct {
 	// quota admits a form definition (max_form_definitions, WithQuota,
 	// WFL-08); nil admits all.
 	quota DefinitionQuota
+	// docs reads the documents of signature fields (WithDocuments,
+	// WP-1101); nil without the module documents.
+	docs DocumentReader
 }
 
 // DefinitionQuota admits one more form definition of the organization
@@ -33,6 +36,30 @@ func (h *Handler) WithQuota(q DefinitionQuota) *Handler {
 	h.quota = q
 	return h
 }
+
+// WithDocuments lets signature fields name documents (WFL-01, WP-1101);
+// the router sets it with the module documents. Without it a definition
+// with a signature field is refused with 422.
+func (h *Handler) WithDocuments(docs DocumentReader) *Handler {
+	h.docs = docs
+	return h
+}
+
+// validateDefinition checks the conditional logic of hints and the
+// signature fields of schema of a definition that is written (WP-1101
+// AK1, AK5); a refusal is answered with 422 on its field.
+func (h *Handler) validateDefinition(w http.ResponseWriter, schema, hints JSONMap) bool {
+	if err := ValidateHints(schema, hints); err != nil {
+		api.WriteFieldError(w, err)
+		return false
+	}
+	if err := ValidateSignatureFields(schema, h.docs); err != nil {
+		api.WriteFieldError(w, err)
+		return false
+	}
+	return true
+}
+
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/forms", h.ListDefinitions)
 	r.Post("/api/v1/forms", h.CreateDefinition)
@@ -154,6 +181,9 @@ func (h *Handler) CreateDefinition(w http.ResponseWriter, r *http.Request) {
 	if !requireUUIDs(w, http.StatusUnprocessableEntity, "client_id", req.ClientID) {
 		return
 	}
+	if !h.validateDefinition(w, req.Schema, req.UIHints) {
+		return
+	}
 	if h.quota != nil {
 		if err := h.quota.AllowFormDefinition(r.Context(), t.OrganizationID); err != nil {
 			if !api.WriteEntitlementError(w, err) {
@@ -185,8 +215,9 @@ func (h *Handler) UpdateDefinition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// If-Match names the version the change is based on (API-07); the
-	// repository checks it on the locked row. Without it the change is
-	// applied as before.
+	// repository checks it on the locked row. Without it a change of name,
+	// description, client or active is applied as before; a change of
+	// schema or hints is bound to the version it was checked against.
 	version, sent, parseErr := api.ParseIfMatch(r)
 	if parseErr != nil {
 		api.WritePreconditionFailed(w, parseErr.Error())
@@ -202,6 +233,32 @@ func (h *Handler) UpdateDefinition(w http.ResponseWriter, r *http.Request) {
 	}
 	if sent {
 		req.IfMatch = &version
+	}
+	// A change of schema or hints is checked as the version it creates:
+	// the new part with the unchanged other part (WP-1101 AK1).
+	if req.Schema != nil || req.UIHints != nil {
+		current, gerr := h.repo.GetDefinition(r.Context(), t.OrganizationID, id)
+		if gerr != nil {
+			writeFormError(w, r, gerr)
+			return
+		}
+		schema, hints := current.Schema, current.UIHints
+		if req.Schema != nil {
+			schema = req.Schema
+		}
+		if req.UIHints != nil {
+			hints = req.UIHints
+		}
+		if !h.validateDefinition(w, schema, hints) {
+			return
+		}
+		// The check holds for the version it read: without If-Match the
+		// change is bound to it, so a concurrent change of schema or hints
+		// is 412 instead of an unchecked combination of both (AK1).
+		if req.IfMatch == nil {
+			v := current.Version
+			req.IfMatch = &v
+		}
 	}
 	req.CreatedBy = t.UserID
 	item, err := h.repo.UpdateDefinition(r.Context(), t.OrganizationID, id, req)
@@ -346,22 +403,30 @@ func (h *Handler) CreateSubmission(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req CreateSubmissionRequest
-	if err := api.ReadJSON(r, &req); err != nil {
-		api.WriteError(w, 400, "Bad Request", err.Error())
+	if rerr := api.ReadJSON(r, &req); rerr != nil {
+		api.WriteError(w, 400, "Bad Request", rerr.Error())
 		return
 	}
 	if req.Values == nil {
 		req.Values = JSONMap{}
 	}
-	if err := Validate(def.Schema, req.Values); err != nil {
+	// Schema and conditional logic of the current version, which the
+	// repository binds (WP-1101 AK2, AK3): hidden fields are dropped, a
+	// signature names a readable PNG or JPEG document.
+	values, err := ValidateSubmission(r.Context(), &SubmissionCheck{OrganizationID: t.OrganizationID, Schema: def.Schema, UIHints: def.UIHints,
+		Values: req.Values, Documents: h.docs})
+	if err != nil {
 		var ve ValidationError
 		if errors.As(err, &ve) {
 			writeValidationProblem(w, ve)
 			return
 		}
-		api.WriteError(w, 400, "Bad Request", err.Error())
+		if !api.WriteFieldError(w, err) {
+			writeFormError(w, r, err)
+		}
 		return
 	}
+	req.Values = values
 	status := req.Status
 	if status == "" {
 		status = "submitted"

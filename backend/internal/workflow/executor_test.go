@@ -13,6 +13,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -558,5 +559,74 @@ func TestCreateDefinitionInvalidCondition422(t *testing.T) {
 	}
 	if rec = do(http.MethodPatch, "/api/v1/workflows/"+legacy.ID, map[string]any{"name": "legacy-renamed"}); rec.Code != http.StatusOK {
 		t.Errorf("rename of a deactivated legacy definition: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// submitFormDocuments is the document reader of TestExecutorSubmitFormConditions.
+type submitFormDocuments map[string]*document.Document
+
+func (d submitFormDocuments) GetByID(_ context.Context, orgID, id string) (*document.Document, error) {
+	if doc := d[id]; doc != nil && doc.OrganizationID == orgID {
+		return doc, nil
+	}
+	return nil, api.ErrNotFound
+}
+
+// TestExecutorSubmitFormConditions: submit_form applies the conditional
+// logic of the form like POST /forms/{id}/submissions (WP-1101): a hidden
+// field is dropped before the submission is stored, and a signature naming
+// a document of another organization fails the step with 422 on the field.
+func TestExecutorSubmitFormConditions(t *testing.T) {
+	const (
+		own     = "11111111-1111-4111-8111-111111111111"
+		foreign = "33333333-3333-4333-8333-333333333333"
+	)
+	ctx := tenant.WithTenant(context.Background(), tenant.TenantInfo{OrganizationID: "org-1", UserID: "00000000-0000-4000-8000-0000000000aa"})
+	repo := NewMemoryRepository()
+	forms := form.NewMemoryRepository()
+	exec := NewExecutor(repo, nil, nil, forms, nil).WithFormDocuments(submitFormDocuments{
+		own:     {ID: own, OrganizationID: "org-1", MimeType: "image/png"},
+		foreign: {ID: foreign, OrganizationID: "org-2", MimeType: "image/png"},
+	})
+	def := &form.Definition{OrganizationID: "org-1", Name: "handover", Active: true,
+		Schema: form.JSONMap{"type": "object", "properties": map[string]any{
+			"kind":      map[string]any{"type": "string"},
+			"serial":    map[string]any{"type": "string"},
+			"signature": map[string]any{"type": "string", "format": form.FormatSignature},
+		}},
+		UIHints: form.JSONMap{"fields": map[string]any{"serial": map[string]any{form.VisibleWhen: map[string]any{"op": "eq", "field": "kind", "value": "router"}}}}}
+	if err := forms.CreateDefinition(ctx, def); err != nil {
+		t.Fatal(err)
+	}
+	run := func(values map[string]any) Step {
+		t.Helper()
+		wf := &Definition{OrganizationID: "org-1", Name: "wf", Trigger: JSONMap{"type": "manual"}, Active: true,
+			Actions: []JSONMap{{"type": "submit_form", "form_id": def.ID, "values": values}}}
+		if err := repo.CreateDefinition(ctx, wf); err != nil {
+			t.Fatal(err)
+		}
+		r, err := exec.Trigger(ctx, "org-1", wf, "manual", JSONMap{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		steps, err := repo.ListSteps(ctx, "org-1", r.ID)
+		if err != nil || len(steps) != 1 {
+			t.Fatalf("steps: %+v %v", steps, err)
+		}
+		return steps[0]
+	}
+	step := run(map[string]any{"kind": "switch", "serial": "SN-1", "signature": own})
+	id, _ := step.Output["submission_id"].(string)
+	sub, err := forms.GetSubmission(ctx, "org-1", id)
+	if step.Status != StatusSucceeded || err != nil {
+		t.Fatalf("submission with a hidden field: step %s %q, %v", step.Status, step.Error, err)
+	}
+	if _, kept := sub.Values["serial"]; kept || sub.Values["signature"] != own {
+		t.Errorf("stored values %v, want serial dropped and the signature kept", sub.Values)
+	}
+	step = run(map[string]any{"kind": "router", "serial": "SN-1", "signature": foreign})
+	fields, _ := step.Output["fields"].([]form.FieldError)
+	if step.Status != StatusFailed || len(fields) != 1 || fields[0].Field != "values.signature" {
+		t.Errorf("foreign signature: step %s %q fields %v, want failed on values.signature", step.Status, step.Error, fields)
 	}
 }

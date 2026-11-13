@@ -1,5 +1,5 @@
 {
-  "description": "Conformance cases of the rule AST (MET-45, api/rules.schema.json). backend/internal/rules/rules_test.go and frontend/src/rules/rules.test.ts both run every case. cases: rule must be a valid value rule and evaluate to exactly the listed violation codes; invalid_rules must be rejected. absent: true means the field has no value at all. condition_cases (WP-715): condition must be a valid condition and evaluate to result for the record values (a field missing from values is absent); the cases named reference: and reference list: compare reference attributes (WP-254: user, location, reference and the other alias types hold the id of the target as text, multi_value a list of ids, finding F-2 of WP-326); backend/internal/fieldmeta/fieldmeta_test.go also evaluates the cases of comparisons and all of comparisons through fieldmeta.Evaluate. invalid_conditions must be rejected, the error message starting with path and a colon. expressions (WP-258): expr must be a valid expression ($defs/expr) and evaluate to result (null: empty) for inputs (attributes by key, asset fields as asset.<field>; a key missing from inputs is absent), now (RFC 3339) and timezone (IANA); invalid_expressions must be rejected, the error message starting with path and a colon. backend/internal/rules/rules_test.go (rules.ParseExpr, rules.EvalExpr) and, as the second evaluation, frontend/src/rules/rules.test.ts (parseExpr, evalExpr in frontend/src/rules/expr.ts, WP-802) run every expression case. filter_cases (WP-789): filter must be a valid filter AST ($defs/filter) for entity_kind; invalid_filters must be rejected naming path (where.<path>) before a colon. backend/internal/savedview/filter_test.go runs both through Expr.Validate, frontend/src/rules/filter.test.ts through parseFilter; the cases check structure, operators, value forms, limits and related, while the field whitelist, attribute definitions, tags and relationship types stay in the Go tests.",
+  "description": "Conformance cases of the rule AST (MET-45, api/rules.schema.json). backend/internal/rules/rules_test.go and frontend/src/rules/rules.test.ts both run every case. cases: rule must be a valid value rule and evaluate to exactly the listed violation codes; invalid_rules must be rejected. absent: true means the field has no value at all. condition_cases (WP-715): condition must be a valid condition and evaluate to result for the record values (a field missing from values is absent); the cases named reference: and reference list: compare reference attributes (WP-254: user, location, reference and the other alias types hold the id of the target as text, multi_value a list of ids, finding F-2 of WP-326); the cases named form: hold the values of a form submission as backend/internal/form/conditions.go evaluates them, nested objects flattened to dot paths besides their keys (form.EvaluationValues, WP-1101); backend/internal/fieldmeta/fieldmeta_test.go also evaluates the cases of comparisons and all of comparisons through fieldmeta.Evaluate. invalid_conditions must be rejected, the error message starting with path and a colon. expressions (WP-258): expr must be a valid expression ($defs/expr) and evaluate to result (null: empty) for inputs (attributes by key, asset fields as asset.<field>; a key missing from inputs is absent), now (RFC 3339) and timezone (IANA); invalid_expressions must be rejected, the error message starting with path and a colon. backend/internal/rules/rules_test.go (rules.ParseExpr, rules.EvalExpr) and, as the second evaluation, frontend/src/rules/rules.test.ts (parseExpr, evalExpr in frontend/src/rules/expr.ts, WP-802) run every expression case. filter_cases (WP-789): filter must be a valid filter AST ($defs/filter) for entity_kind; invalid_filters must be rejected naming path (where.<path>) before a colon. backend/internal/savedview/filter_test.go runs both through Expr.Validate, frontend/src/rules/filter.test.ts through parseFilter; the cases check structure, operators, value forms, limits and related, while the field whitelist, attribute definitions, tags and relationship types stay in the Go tests.",
   "version": 1,
   "cases": [
     {
@@ -1761,6 +1761,120 @@
       "values": {
         "value": 5,
         "delta": 0
+      },
+      "result": true
+    },
+    {
+      "name": "form: nested path device.kind holds",
+      "condition": {
+        "op": "eq",
+        "field": "device.kind",
+        "value": "router"
+      },
+      "values": {
+        "device": {
+          "kind": "router"
+        },
+        "device.kind": "router",
+        "serial": "SN-1"
+      },
+      "result": true
+    },
+    {
+      "name": "form: nested path device.kind of another kind",
+      "condition": {
+        "op": "eq",
+        "field": "device.kind",
+        "value": "router"
+      },
+      "values": {
+        "device": {
+          "kind": "switch"
+        },
+        "device.kind": "switch"
+      },
+      "result": false
+    },
+    {
+      "name": "form: empty on a field the submission lacks",
+      "condition": {
+        "op": "empty",
+        "field": "serial"
+      },
+      "values": {
+        "device": {
+          "kind": "router"
+        },
+        "device.kind": "router"
+      },
+      "result": true
+    },
+    {
+      "name": "form: in with a list of kinds",
+      "condition": {
+        "op": "in",
+        "field": "device.kind",
+        "value": [
+          "router",
+          "firewall"
+        ]
+      },
+      "values": {
+        "device": {
+          "kind": "firewall"
+        },
+        "device.kind": "firewall"
+      },
+      "result": true
+    },
+    {
+      "name": "form: all over two fields, one fails",
+      "condition": {
+        "op": "all",
+        "rules": [
+          {
+            "op": "eq",
+            "field": "device.kind",
+            "value": "router"
+          },
+          {
+            "op": "gt",
+            "field": "count",
+            "value": 0
+          }
+        ]
+      },
+      "values": {
+        "device": {
+          "kind": "router"
+        },
+        "device.kind": "router",
+        "count": 0
+      },
+      "result": false
+    },
+    {
+      "name": "form: any over two fields, one holds",
+      "condition": {
+        "op": "any",
+        "rules": [
+          {
+            "op": "eq",
+            "field": "device.kind",
+            "value": "router"
+          },
+          {
+            "op": "not_empty",
+            "field": "serial"
+          }
+        ]
+      },
+      "values": {
+        "device": {
+          "kind": "switch"
+        },
+        "device.kind": "switch",
+        "serial": "SN-2"
       },
       "result": true
     }
