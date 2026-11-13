@@ -21,8 +21,8 @@ import (
 // The decorator lives at the repository boundary so that every write path
 // (REST handler, collector bulk ingest, workflow executor) keeps the index
 // in sync, not only the CI service. It offers every exported method of the
-// PostgreSQL repository (except WithEvents, WithComputed and
-// WithFeatureCheck, which construct it): callers find the optional
+// PostgreSQL repository (except WithEvents, WithComputed, WithFeatureCheck
+// and WithManagementSync, which construct it): callers find the optional
 // interfaces by type assertion, and a method the decorator hides is lost
 // in production, where the repository is always decorated (SR-11, F-037).
 type indexingRepository struct {
