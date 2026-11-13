@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/buffer"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
@@ -21,6 +22,8 @@ import (
 // then handed to the uplink at once (NotifyState), the result goes into
 // the current bundle of the result queue. The metric buffer of the
 // collector is not involved.
+//
+// Run also sends the monitoring alive message every 10 s (Alive, WP-957).
 //
 // The assignment set (WP-956) feeds Apply, the diff into Upsert and
 // Remove; a removed probe reports no more results from then on. The
@@ -37,6 +40,15 @@ type Engine struct {
 
 	applyMu       sync.Mutex
 	configVersion atomic.Int64
+
+	// Alive sends the monitoring alive message (WP-957).
+	Alive *AliveSender
+
+	icmp       *Mux
+	observed   atomic.Uint64 // results evaluated (results_per_s)
+	rate       resultRate
+	lossMu     sync.Mutex
+	prevLosses map[string]int64
 }
 
 // EngineConfig configures an engine.
@@ -56,6 +68,9 @@ type EngineConfig struct {
 	Run RunFunc
 	// Creds returns the resolved credentials of a probe; nil passes none.
 	Creds func(spec *probewire.ProbeSpec) map[string]string
+	// ICMP is the multiplexer whose sockets the alive message reports;
+	// nil uses DefaultMux.
+	ICMP *Mux
 }
 
 // NewEngine opens sequence, state machine and spool below cfg.SpoolDir.
@@ -81,10 +96,18 @@ func NewEngine(cfg *EngineConfig) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	e := &Engine{States: states, Outbox: outbox, specs: map[string]probewire.ProbeSpec{}}
+	// The loss counts persist across restarts; the first alive message
+	// compares with them, not with zero, so old losses are no overflow
+	// "since the last message" (WP-957 AK2).
+	e := &Engine{States: states, Outbox: outbox, specs: map[string]probewire.ProbeSpec{}, prevLosses: outbox.lossCounts()}
 	e.Uplink = NewUplink(outbox, cfg.Send)
 	e.Uplink.SyncRate = cfg.SyncRate
 	e.Scheduler = &Scheduler{Run: cfg.Run, Creds: cfg.Creds, Sink: e.observe}
+	e.icmp = cfg.ICMP
+	if e.icmp == nil {
+		e.icmp = DefaultMux()
+	}
+	e.Alive = &AliveSender{Send: cfg.Send, Snapshot: e.aliveSnapshot}
 	return e, nil
 }
 
@@ -183,6 +206,7 @@ func (e *Engine) Run(ctx context.Context) {
 	}
 	run(tail, e.Outbox.Run)
 	run(ctx, e.Uplink.Run)
+	run(ctx, e.Alive.Run)
 	run(tail, func(c context.Context) {
 		if err := e.States.RunPersist(c, PersistInterval); err != nil {
 			slog.Warn("probe engine: state counters not saved", "error", err)
@@ -231,7 +255,41 @@ func (e *Engine) observe(r probewire.Result) { //nolint:gocritic // Sink signatu
 			e.Uplink.NotifyState()
 		}
 	}
+	e.observed.Add(1)
 	if err := e.Outbox.AddResult(ctx, &res, change != nil); err != nil && !errors.Is(err, buffer.ErrSpoolFull) {
 		slog.Warn("probe engine: result bundle not written; kept", "error", err)
 	}
+}
+
+// aliveSnapshot returns the figures of the alive message (WP-957 AK1):
+// configuration version, probes, results per second over 60 s, the
+// entries of both spools, the losses per reason, the skipped and overrun
+// checks and the ICMP socket per family.
+func (e *Engine) aliveSnapshot(ctx context.Context, now time.Time) probewire.Alive {
+	sched := e.Scheduler.Stats()
+	a := probewire.Alive{
+		ConfigVersion:    e.ConfigVersion(),
+		Probes:           e.Probes(),
+		ResultsPerS:      e.rate.observe(now, e.observed.Load()),
+		QueueState:       probewire.QueueOK,
+		Skipped:          int64(sched.Skipped), //nolint:gosec // a counter of checks, far below 2^63
+		Overrun:          int64(sched.Overrun), //nolint:gosec // a counter of checks, far below 2^63
+		ICMPCapability:   e.icmp.Capability(4),
+		ICMPCapabilityV6: e.icmp.Capability(6),
+	}
+	st, err := e.Outbox.Stats(ctx)
+	if err != nil {
+		slog.Warn("probe engine: spool state for the alive message unavailable", "error", err)
+		return a
+	}
+	a.QueueResults, a.QueueStates = int64(st.ResultBundles), int64(st.StateMessages)
+	a.Dropped = st.Lost()
+	if len(st.Losses) > 0 {
+		a.DroppedByReason = st.Losses
+	}
+	e.lossMu.Lock()
+	a.QueueState = queueState(&st, e.prevLosses)
+	e.prevLosses = st.Losses
+	e.lossMu.Unlock()
+	return a
 }

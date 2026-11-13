@@ -1800,6 +1800,8 @@ COL-05;[B];E;collector/probe/outbox_test.go;WP-954
 PRB-05;[P3];E;collector/probe/uplink_test.go;WP-955
 PRB-07;[P3];E;collector/probe/uplink_test.go;WP-955
 PRB-11;[P3];E;collector/collectorcmd/probes_test.go;WP-956
+PRB-10;[P3];E;collector/probe/alive_test.go;WP-957
+PRB-09;[P3];E;collector/probe/alive_test.go;WP-957
 PRT-02;[P3];E;collector/probe/icmp_test.go;WP-969
 MON-04;[P3];E;collector/probe/icmp_test.go;WP-969
 PRT-08;[P3];E;collector/probe/bfd_test.go;WP-1003

@@ -195,6 +195,17 @@ func (o *Outbox) onDrop(state bool) func(buffer.Loss) {
 	}
 }
 
+// lossCounts is a copy of the loss counts by reason.
+func (o *Outbox) lossCounts() map[string]int64 {
+	o.lossMu.Lock()
+	defer o.lossMu.Unlock()
+	losses := make(map[string]int64, len(o.loss))
+	for k, v := range o.loss {
+		losses[k] = v
+	}
+	return losses
+}
+
 // count adds n to a loss reason and persists the counts.
 func (o *Outbox) count(reason string, n int64) {
 	if n <= 0 {
@@ -534,12 +545,7 @@ func (o *Outbox) Stats(ctx context.Context) (OutboxStats, error) {
 	o.mu.Lock()
 	pending := len(o.pending)
 	o.mu.Unlock()
-	o.lossMu.Lock()
-	losses := make(map[string]int64, len(o.loss))
-	for k, v := range o.loss {
-		losses[k] = v
-	}
-	o.lossMu.Unlock()
+	losses := o.lossCounts()
 	return OutboxStats{StateMessages: st.Messages, StateBytes: st.Bytes, ResultBundles: rs.Messages, ResultBytes: rs.Bytes,
 		Pending: pending, Losses: losses}, nil
 }

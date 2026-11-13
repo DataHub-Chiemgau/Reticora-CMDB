@@ -382,17 +382,37 @@ type StateChange struct {
 // CollectorTime is the collector's wall clock when sending; the server
 // derives the clock offset from it (E-175, PRB-09). The sender is the
 // authenticated edge identity.
+//
+// QueueResults and QueueStates are the entries of the two probe spools
+// (result bundles and state changes, WP-954), Dropped the entries or
+// results lost for good and DroppedByReason the losses per reason of the
+// spool (max_bytes, compacted, quarantined). Skipped counts the checks left
+// out for lack of budget (limit_exceeded), Overrun the starts left out
+// because the previous check of the probe was still running (WP-951).
+// ICMPCapability is the ICMP socket of IPv4, ICMPCapabilityV6 that of IPv6.
 type Alive struct {
 	Header
-	CollectorTime  time.Time `json:"collector_time"`
-	ConfigVersion  int64     `json:"config_version"`
-	Probes         int       `json:"probes"`
-	ResultsPerS    float64   `json:"results_per_s"`
-	QueueState     string    `json:"queue_state"`
-	QueueResults   int64     `json:"queue_results"`
-	Dropped        int64     `json:"dropped"`
-	Skipped        int64     `json:"skipped"`
-	ICMPCapability string    `json:"icmp_capability"`
+	CollectorTime    time.Time        `json:"collector_time"`
+	ConfigVersion    int64            `json:"config_version"`
+	Probes           int              `json:"probes"`
+	ResultsPerS      float64          `json:"results_per_s"`
+	QueueState       string           `json:"queue_state"`
+	QueueResults     int64            `json:"queue_results"`
+	QueueStates      int64            `json:"queue_states"`
+	Dropped          int64            `json:"dropped"`
+	DroppedByReason  map[string]int64 `json:"dropped_by_reason,omitempty"`
+	Skipped          int64            `json:"skipped"`
+	Overrun          int64            `json:"overrun"`
+	ICMPCapability   string           `json:"icmp_capability"`
+	ICMPCapabilityV6 string           `json:"icmp_capability_v6,omitempty"`
+}
+
+// AliveReply is the server's answer to an alive message: ServerTime is
+// the server's clock when it answered. With the round trip time the
+// collector measured it shows the clock offset; the server evaluates the
+// offset itself (WP-962).
+type AliveReply struct {
+	ServerTime time.Time `json:"server_time"`
 }
 
 // Queue states of Alive.QueueState.

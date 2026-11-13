@@ -43,6 +43,13 @@ func reply(status int, seq *uint64, problem string) []byte {
 
 func (f *fakeEdge) send(_ context.Context, kind string, data []byte) ([]byte, error) {
 	c := edgeCall{kind: kind, at: time.Now(), size: len(data)}
+	if kind == KindAlive {
+		// The alive message of the engine (WP-957) is answered and not
+		// recorded: the tests of the uplink look at state and results.
+		now := time.Now().UTC()
+		raw, _ := json.Marshal(UplinkReply{Status: http.StatusOK, ServerTime: &now})
+		return raw, nil
+	}
 	switch kind {
 	case KindState:
 		var sc probewire.StateChange

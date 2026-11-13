@@ -109,15 +109,22 @@ func goldenMessages() map[string]struct {
 		},
 		"alive.json": {
 			msg: &Alive{
-				CollectorTime:  observed,
-				ConfigVersion:  42,
-				Probes:         530,
-				ResultsPerS:    17.65,
-				QueueState:     QueueOK,
-				QueueResults:   0,
-				Dropped:        0,
-				Skipped:        2,
-				ICMPCapability: ICMPRaw,
+				CollectorTime: observed,
+				ConfigVersion: 42,
+				Probes:        530,
+				ResultsPerS:   17.65,
+				QueueState:    QueueOK,
+				QueueResults:  3,
+				QueueStates:   1,
+				Dropped:       4,
+				DroppedByReason: map[string]int64{
+					"compacted": 120,
+					"max_bytes": 4,
+				},
+				Skipped:          2,
+				Overrun:          1,
+				ICMPCapability:   ICMPRaw,
+				ICMPCapabilityV6: ICMPUnprivileged,
 			},
 			empty: func() Message { return &Alive{} },
 		},
@@ -155,6 +162,37 @@ func TestGoldenRoundtrip(t *testing.T) {
 				t.Fatalf("decode differs:\n got %#v\nwant %#v", back, tc.msg)
 			}
 		})
+	}
+}
+
+// TestGoldenAliveReply covers WP-957 AK3: the server's answer to the alive
+// message carries server_time; the fixture is the answer of the edge
+// (backend probe.Reply) with its status, which the collector ignores here.
+func TestGoldenAliveReply(t *testing.T) {
+	want := AliveReply{ServerTime: observed.Add(1500 * time.Millisecond)}
+	path := filepath.Join("testdata", "alive_reply.json")
+	got, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.Getenv("RETICORA_UPDATE_GOLDEN") == "1" {
+		if werr := os.WriteFile(path, append([]byte(`{"status":200,`), append(got[1:], '\n')...), 0o644); werr != nil {
+			t.Fatal(werr)
+		}
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back AliveReply
+	if err := json.Unmarshal(raw, &back); err != nil {
+		t.Fatal(err)
+	}
+	if !back.ServerTime.Equal(want.ServerTime) {
+		t.Fatalf("server_time %v, want %v", back.ServerTime, want.ServerTime)
+	}
+	if !bytes.Contains(raw, got[1:len(got)-1]) {
+		t.Fatalf("fixture %s lacks %s", raw, got)
 	}
 }
 
