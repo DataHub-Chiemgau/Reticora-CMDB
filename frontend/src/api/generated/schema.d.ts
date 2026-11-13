@@ -11049,7 +11049,7 @@ export interface paths {
     head?: never;
     /**
      * Update an IPAM section
-     * @description Changes name, description, strict_mode, show_vlan and show_vrf; the client of a section does not change. For a principal restricted to clients an org-wide section answers 404 (E-09). A name taken in the organization is 409 with field name. Requires ipam:write.
+     * @description Changes name, description, strict_mode, show_vlan and show_vrf; the client of a section does not change. For a principal restricted to clients an org-wide section answers 404 (E-09). A name taken in the organization is 409 with field name. Requires ipam:write. acl_enabled=false opens a restricted section again (E-256): the explicit, audited release after the last team with a permission was deleted. It needs a principal without client and site restriction (403 otherwise) that may write the section, or an org-wide administrator (team:manage without client, site and team restriction), who may also open a section it does not see; a principal that only reads the section gets 403, one that does not see it 404. While the section has permissions the release is 409 with field acl_enabled; acl_enabled=true is 422 (the first permission restricts a section).
      */
     patch: operations['updateIpamSection'];
     trace?: never;
@@ -20755,6 +20755,8 @@ export interface components {
       show_vlan: boolean;
       show_vrf: boolean;
       readonly is_default: boolean;
+      /** @description The section is restricted (IPM-10, E-256): the first permission sets it, and it stays set when the permissions are gone (also through a deleted team), so that the section stays closed to principals without a team permission (fail-closed). Only PATCH with acl_enabled=false opens it again. */
+      acl_enabled: boolean;
       /** @description The VRFs assigned to the section (IPM-07; set by PATCH /vrfs/{id} with section_ids). */
       readonly vrf_ids: string[];
       /** Format: date-time */
@@ -20781,6 +20783,8 @@ export interface components {
       strict_mode?: boolean;
       show_vlan?: boolean;
       show_vrf?: boolean;
+      /** @description false opens a restricted section without permissions (E-256, see the operation); true is 422. */
+      acl_enabled?: boolean;
     };
     /** @description Nameserver set of the organization (IPM-05): a reusable list of DNS servers that subnets reference (nameserver_set_id). Every principal of the organization reads the sets; only principals without client and site restriction write them (E-09). */
     NameserverSet: {

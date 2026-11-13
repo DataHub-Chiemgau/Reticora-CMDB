@@ -12,6 +12,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -36,6 +37,12 @@ type Section struct {
 	ShowVLAN       bool   `json:"show_vlan"`
 	ShowVRF        bool   `json:"show_vrf"`
 	IsDefault      bool   `json:"is_default"`
+	// ACLEnabled marks a restricted section (IPM-10, E-256): the first
+	// entry of ipam_section_permission sets it, and it stays set when the
+	// entries are gone (also through a deleted team), so that only the
+	// principals of a team with an entry read and write the section
+	// (fail-closed). Only PATCH with acl_enabled=false opens it again.
+	ACLEnabled bool `json:"acl_enabled"`
 	// VRFIDs are the VRFs assigned to the section (IPM-07, read-only here;
 	// PATCH /vrfs/{id} with section_ids sets them).
 	VRFIDs    []string  `json:"vrf_ids"`
@@ -62,6 +69,16 @@ type UpdateSectionRequest struct {
 	StrictMode  *bool   `json:"strict_mode,omitempty"`
 	ShowVLAN    *bool   `json:"show_vlan,omitempty"`
 	ShowVRF     *bool   `json:"show_vrf,omitempty"`
+	// ACLEnabled false opens a restricted section (E-256); true is 422
+	// (the first entry restricts a section). Opening is refused while
+	// entries exist (409 acl_enabled) and needs
+	// write on the section or an org-wide administrator (team:manage
+	// without client, site and team restriction); it is the explicit,
+	// audited release of a section whose last team was deleted.
+	ACLEnabled *bool `json:"acl_enabled,omitempty"`
+	// adminRelease is set by the handler for an org-wide administrator:
+	// it may open a section it cannot see or write.
+	adminRelease bool
 }
 
 // SectionRepository persists IPAM sections.
@@ -84,6 +101,8 @@ var (
 		Message: "the IPAM section belongs to another client", Status: http.StatusUnprocessableEntity}
 	errSectionClientNotFound = &api.FieldError{Field: "client_id", Message: "client not found",
 		Status: http.StatusUnprocessableEntity}
+	errSectionACLEntries = &api.ConflictError{Field: "acl_enabled",
+		Message: "the IPAM section still has permissions; remove them before opening the section"}
 )
 
 // sectionError maps the constraint violations of ipam_section onto the
@@ -167,7 +186,7 @@ func checkSubnetSection(ctx context.Context, tx pgx.Tx, orgID, id string, req *U
 // --- PostgreSQL ---
 
 const sectionCols = `id::text, organization_id::text, COALESCE(client_id::text, ''), name, COALESCE(description, ''),
-	strict_mode, show_vlan, show_vrf, is_default,
+	strict_mode, show_vlan, show_vrf, is_default, acl_enabled,
 	ARRAY(SELECT vs.vrf_id::text FROM vrf_section vs
 		WHERE vs.section_id = ipam_section.id AND vs.organization_id = ipam_section.organization_id ORDER BY vs.vrf_id),
 	created_at, updated_at`
@@ -175,7 +194,7 @@ const sectionCols = `id::text, organization_id::text, COALESCE(client_id::text, 
 func scanSection(s scanner) (*Section, error) {
 	sec := &Section{}
 	if err := s.Scan(&sec.ID, &sec.OrganizationID, &sec.ClientID, &sec.Name, &sec.Description, &sec.StrictMode,
-		&sec.ShowVLAN, &sec.ShowVRF, &sec.IsDefault, &sec.VRFIDs, &sec.CreatedAt, &sec.UpdatedAt); err != nil {
+		&sec.ShowVLAN, &sec.ShowVRF, &sec.IsDefault, &sec.ACLEnabled, &sec.VRFIDs, &sec.CreatedAt, &sec.UpdatedAt); err != nil {
 		return nil, err
 	}
 	if sec.VRFIDs == nil {
@@ -248,24 +267,95 @@ func (r *PGRepository) CreateSection(ctx context.Context, s *Section) error {
 
 // UpdateSection changes name, description and settings of a section. A
 // principal restricted to clients changes no org-wide section: ErrNotFound.
+// acl_enabled is changed only by a principal that may write the section
+// (errSectionNotWritable otherwise); opening a section (false) is refused
+// while it has entries, and an org-wide administrator (adminRelease) may
+// open a section it cannot see, for which the scope of the statement is
+// widened (E-256).
 func (r *PGRepository) UpdateSection(ctx context.Context, orgID, id string, req UpdateSectionRequest) (*Section, error) {
 	if !api.IsUUID(id) {
 		return nil, ErrNotFound
 	}
 	var sec *Section
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var previous []*string
+		if req.ACLEnabled != nil {
+			var err error
+			if previous, err = sectionACLWritable(ctx, tx, orgID, id, *req.ACLEnabled, req.adminRelease); err != nil {
+				return err
+			}
+		}
 		var err error
 		sec, err = scanSection(tx.QueryRow(ctx, `UPDATE ipam_section SET name = COALESCE($3, name),
 			description = CASE WHEN $4::text IS NULL THEN description ELSE NULLIF($4, '') END,
-			strict_mode = COALESCE($5, strict_mode), show_vlan = COALESCE($6, show_vlan), show_vrf = COALESCE($7, show_vrf)
+			strict_mode = COALESCE($5, strict_mode), show_vlan = COALESCE($6, show_vlan), show_vrf = COALESCE($7, show_vrf),
+			acl_enabled = COALESCE($8, acl_enabled)
 			WHERE organization_id = $1 AND id = $2 RETURNING `+sectionCols,
-			orgID, id, req.Name, req.Description, req.StrictMode, req.ShowVLAN, req.ShowVRF))
+			orgID, id, req.Name, req.Description, req.StrictMode, req.ShowVLAN, req.ShowVRF, req.ACLEnabled))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
-		return sectionError(err)
+		if err != nil {
+			return sectionError(err)
+		}
+		if previous != nil {
+			if _, err = tx.Exec(ctx, `SELECT app_scope_restore($1::text[])`, previous); err != nil {
+				return fmt.Errorf("restore scope: %w", err)
+			}
+		}
+		return nil
 	})
 	return sec, err
+}
+
+// sectionACLWritable checks a change of acl_enabled (E-256) in the writing
+// transaction and locks the section row until the commit: the caller must
+// see the section and may write it; opening it (enable false) is refused
+// while entries exist (409). The entries are counted in a statement of its
+// own after the lock, so under READ COMMITTED its snapshot holds an entry
+// whose writer held the lock first (its trigger sets acl_enabled); an
+// entry written after the lock waits in that trigger for the commit and
+// sets acl_enabled again. An org-wide administrator (adminRelease) that
+// does not see or may not write the section opens it with the scope
+// widened (app_scope_widen, which ipam_section_denied honours); the
+// previous scope is returned for the restore after the update, nil when
+// nothing was widened.
+func sectionACLWritable(ctx context.Context, tx pgx.Tx, orgID, id string, enable, adminRelease bool) ([]*string, error) {
+	read := func() (writable bool, entries int, err error) {
+		if lockErr := tx.QueryRow(ctx, `SELECT NOT (s.id = ANY (ipam_section_denied('write')))
+			FROM ipam_section s WHERE s.organization_id = $1 AND s.id = $2 FOR UPDATE OF s`, orgID, id).Scan(&writable); lockErr != nil {
+			return false, 0, lockErr
+		}
+		err = tx.QueryRow(ctx, `SELECT count(*) FROM ipam_section_permission p WHERE p.organization_id = $1 AND p.section_id = $2`,
+			orgID, id).Scan(&entries)
+		return writable, entries, err
+	}
+	writable, entries, err := read()
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("read ipam section: %w", err)
+	}
+	var previous []*string
+	if (errors.Is(err, pgx.ErrNoRows) || !writable) && adminRelease && !enable {
+		if err = tx.QueryRow(ctx, `SELECT app_scope_widen()`).Scan(&previous); err != nil {
+			return nil, fmt.Errorf("widen scope: %w", err)
+		}
+		if previous == nil {
+			previous = []*string{}
+		}
+		writable, entries, err = read()
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("read ipam section: %w", err)
+		}
+	}
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return nil, ErrNotFound
+	case !writable:
+		return nil, errSectionNotWritable
+	case !enable && entries > 0:
+		return nil, errSectionACLEntries
+	}
+	return previous, nil
 }
 
 // DeleteSection removes a section; the default section and sections with
@@ -402,6 +492,9 @@ func (r *MemoryRepository) UpdateSection(_ context.Context, orgID, id string, re
 	if req.ShowVRF != nil {
 		s.ShowVRF = *req.ShowVRF
 	}
+	if req.ACLEnabled != nil {
+		s.ACLEnabled = *req.ACLEnabled
+	}
 	s.UpdatedAt = time.Now().UTC()
 	cp := *s
 	cp.VRFIDs = r.vrfIDsOfSection(id)
@@ -519,8 +612,27 @@ func (h *Handler) UpdateSection(w http.ResponseWriter, r *http.Request) {
 		}
 		req.Name = &name
 	}
+	if req.ACLEnabled != nil {
+		// The first permission restricts a section; PATCH only opens it
+		// (E-256). Opening is a change of its rights: org-wide principals
+		// only, as for the entries (E-09).
+		if *req.ACLEnabled {
+			api.WriteFieldError(w, &api.FieldError{Field: "acl_enabled",
+				Message: "the first permission restricts the section; acl_enabled may only be set to false",
+				Status:  http.StatusUnprocessableEntity})
+			return
+		}
+		if !orgWideWriter(w, r) {
+			return
+		}
+		req.adminRelease = orgAdmin(r)
+	}
 	s, err := h.repo.UpdateSection(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
+		if errors.Is(err, errSectionNotWritable) {
+			api.WriteError(w, http.StatusForbidden, "Forbidden", "the IPAM section may only be read")
+			return
+		}
 		writeSectionError(w, err)
 		return
 	}
@@ -570,8 +682,10 @@ const (
 // addresses of a section (ipam_section_permission). A section with entries
 // is read only by principals of a team with an entry and written only by
 // principals of a team with level write, in addition to ipam:read and
-// ipam:write; a section without entries is open to every principal as
-// before. The database enforces it (row level security, migration 000320).
+// ipam:write; a section that never had entries is open to every principal
+// as before. A section whose entries are gone stays restricted (fail-closed,
+// acl_enabled, E-256). The database enforces it (row level security,
+// migrations 000320 and the Nachtrag of E-256).
 type SectionPermission struct {
 	ID             string `json:"id"`
 	OrganizationID string `json:"organization_id"`
@@ -770,8 +884,8 @@ func (r *PGRepository) UpdateSectionPermission(ctx context.Context, orgID, secti
 	return p, err
 }
 
-// DeleteSectionPermission removes an entry of the section; the last entry
-// opens the section to every principal again.
+// DeleteSectionPermission removes an entry of the section; without entries
+// the section stays restricted (acl_enabled, E-256) until PATCH opens it.
 func (r *PGRepository) DeleteSectionPermission(ctx context.Context, orgID, sectionID, id string) error {
 	if !api.IsUUID(id) {
 		return ErrNotFound
@@ -812,6 +926,19 @@ func orgWideWriter(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	return true
+}
+
+// orgAdmin reports an org-wide administrator of the section rights
+// (E-256): a principal with team:manage, the right that deletes the teams
+// of the entries, without client, site and team restriction. It may open a
+// section whose last team was deleted, also when it does not see it.
+func orgAdmin(r *http.Request) bool {
+	scope, ok := database.TenantScopeFromContext(r.Context())
+	if !ok || !scope.Clients.IsAll() || !scope.Sites.IsAll() || !scope.Teams.IsAll() {
+		return false
+	}
+	perms, ok := identity.PermissionsFromContext(r.Context())
+	return ok && identity.HasPermission(perms, identity.PermTeamManage)
 }
 
 // writeSectionPermissionError answers a failed permission request: 404 for

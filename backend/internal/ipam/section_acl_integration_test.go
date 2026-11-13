@@ -8,12 +8,14 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
@@ -240,9 +242,190 @@ func TestSectionACLReadWrite(t *testing.T) {
 	e.expect(a, "team A", http.MethodDelete, "/api/v1/ipam-sections/"+e.sectionX+"/permissions/"+permB, "", http.StatusNotFound)
 	e.reads(b, scopeB, "team B without entry", e.subnetX, e.addrX, false)
 
-	// The last entry removed opens the section again.
+	// The last entry removed does not open the section (E-256): it stays
+	// restricted until it is released explicitly.
 	e.expect(a, "team A", http.MethodDelete, "/api/v1/ipam-sections/"+e.sectionX+"/permissions/"+permA, "", http.StatusNoContent)
-	e.reads(b, scopeB, "team B after the last entry", e.subnetX, e.addrX, true)
+	e.reads(b, scopeB, "team B after the last entry", e.subnetX, e.addrX, false)
+	e.reads(a, scopeA, "team A after the last entry", e.subnetX, e.addrX, false)
+}
+
+// adminCtx is the request context of an org-wide administrator of the
+// section rights (team:manage, E-256).
+func (e *aclEnv) adminCtx(id string) context.Context {
+	return identity.WithPermissions(e.user(id), []identity.Permission{identity.PermIPAMRead, identity.PermIPAMWrite,
+		identity.PermTeamManage})
+}
+
+// aclEnabled reads ipam_section.acl_enabled as stored.
+func (e *aclEnv) aclEnabled(section string) bool {
+	e.t.Helper()
+	return e.scalar(`SELECT acl_enabled::text FROM ipam_section WHERE id = $1`, section) == "true"
+}
+
+// TestSectionACLLastTeamDeletedStaysClosed covers E-256 (IPM-10, TEN-05):
+// the first entry restricts the section (acl_enabled); deleting the last
+// team with an entry removes the entry through the cascade but leaves the
+// section restricted, so no principal without an entry reads or writes
+// its subnet and address, and the section itself stays hidden. A section
+// that never had entries is unchanged.
+func TestSectionACLLastTeamDeletedStaysClosed(t *testing.T) {
+	e := newACLEnv(t)
+	if e.aclEnabled(e.sectionX) {
+		t.Fatal("section X restricted before its first entry")
+	}
+	a := e.user(e.userA)
+	body := e.expect(a, "team A", http.MethodGet, "/api/v1/ipam-sections/"+e.sectionX, "", http.StatusOK)
+	if !strings.Contains(body, `"acl_enabled":false`) {
+		t.Errorf("section X before the first entry: %s, want acl_enabled false", body)
+	}
+	e.grant(e.user(e.userNone), e.sectionX, e.teamA, "write")
+	if !e.aclEnabled(e.sectionX) {
+		t.Fatal("first entry did not restrict section X")
+	}
+	body = e.expect(a, "team A", http.MethodGet, "/api/v1/ipam-sections/"+e.sectionX, "", http.StatusOK)
+	if !strings.Contains(body, `"acl_enabled":true`) {
+		t.Errorf("section X after the first entry: %s, want acl_enabled true", body)
+	}
+
+	e.exec(`DELETE FROM team WHERE id = $1`, e.teamA)
+	if n := e.scalar(`SELECT count(*)::text FROM ipam_section_permission WHERE section_id = $1`, e.sectionX); n != "0" {
+		t.Fatalf("%s entries left after the team was deleted", n)
+	}
+	if !e.aclEnabled(e.sectionX) {
+		t.Fatal("deleting the last team opened section X")
+	}
+	for _, u := range []string{e.userA, e.userB, e.userNone} {
+		ctx, scope := e.user(u), database.OrgWideScope(e.f.OrgA, u)
+		e.reads(ctx, scope, "user "+u, e.subnetX, e.addrX, false)
+		e.reads(ctx, scope, "user "+u+" in section Z", e.subnetZ, e.addrZ, true)
+		e.expect(ctx, "user "+u, http.MethodGet, "/api/v1/ipam-sections/"+e.sectionX, "", http.StatusNotFound)
+		e.expect(ctx, "user "+u, http.MethodPatch, "/api/v1/subnets/"+e.subnetX, `{"description":"open?"}`, http.StatusNotFound)
+	}
+	if e.aclEnabled(e.sectionZ) {
+		t.Error("section Z without entries is restricted")
+	}
+}
+
+// TestSectionACLReleaseIsExplicit covers E-256: only PATCH
+// /ipam-sections/{id} with acl_enabled=false opens a restricted section.
+// The release is refused while entries exist (409 acl_enabled), for a
+// principal restricted to clients (403), for one that only reads the
+// section (403) and for one that does not see it (404); acl_enabled=true
+// is 422. An org-wide administrator (team:manage) opens a section it does
+// not see; the change is in the IPAM history of the section.
+func TestSectionACLReleaseIsExplicit(t *testing.T) {
+	e := newACLEnv(t)
+	none := e.user(e.userNone)
+	permA := e.grant(none, e.sectionX, e.teamA, "write")
+	permB := e.grant(e.user(e.userA), e.sectionX, e.teamB, "read")
+	release := `{"acl_enabled":false}`
+	path := "/api/v1/ipam-sections/" + e.sectionX
+
+	// With entries: 409 for the writer, 403 for the reader.
+	body := e.expect(e.user(e.userA), "team A", http.MethodPatch, path, release, http.StatusConflict)
+	if !strings.Contains(body, `"field":"acl_enabled"`) {
+		t.Errorf("release with entries: %s, want field acl_enabled", body)
+	}
+	e.expect(e.user(e.userB), "team B with read", http.MethodPatch, path, release, http.StatusForbidden)
+	e.expect(e.user(e.userA), "team A", http.MethodPatch, path, `{"acl_enabled":true}`, http.StatusUnprocessableEntity)
+	clientA := database.OrgWideScope(e.f.OrgA, e.userA)
+	clientA.Clients = database.ScopeIDs(e.f.Client1)
+	e.expect(e.as(clientA), "team A restricted to client 1", http.MethodPatch, path, release, http.StatusForbidden)
+
+	// All entries removed: still restricted; the reader is gone with its
+	// entry, a principal without team does not see the section.
+	e.expect(e.user(e.userA), "team A", http.MethodDelete, path+"/permissions/"+permB, "", http.StatusNoContent)
+	e.expect(e.user(e.userA), "team A", http.MethodDelete, path+"/permissions/"+permA, "", http.StatusNoContent)
+	if !e.aclEnabled(e.sectionX) {
+		t.Fatal("removing the last entry opened section X")
+	}
+	e.expect(none, "no team", http.MethodPatch, path, release, http.StatusNotFound)
+	e.expect(e.user(e.userA), "former team A", http.MethodPatch, path, release, http.StatusNotFound)
+	if !e.aclEnabled(e.sectionX) {
+		t.Fatal("a refused release opened section X")
+	}
+
+	// The org-wide administrator releases it; everybody reads it again.
+	adminClient := database.OrgWideScope(e.f.OrgA, e.userNone)
+	adminClient.Teams = database.ScopeIDs(e.teamB)
+	restricted := identity.WithPermissions(e.as(adminClient), []identity.Permission{identity.PermTeamManage})
+	e.expect(restricted, "administrator restricted to team B", http.MethodPatch, path, release, http.StatusNotFound)
+	body = e.expect(e.adminCtx(e.userNone), "administrator", http.MethodPatch, path, release, http.StatusOK)
+	if !strings.Contains(body, `"acl_enabled":false`) {
+		t.Errorf("release: %s, want acl_enabled false", body)
+	}
+	if e.aclEnabled(e.sectionX) {
+		t.Fatal("release did not open section X")
+	}
+	for _, u := range []string{e.userA, e.userB, e.userNone} {
+		e.reads(e.user(u), database.OrgWideScope(e.f.OrgA, u), "user "+u+" after the release", e.subnetX, e.addrX, true)
+	}
+	if n := e.scalar(`SELECT count(*)::text FROM ipam_change WHERE object_kind = 'section' AND object_id = $1
+			AND field_name = 'acl_enabled' AND new_value = 'false'::jsonb`, e.sectionX); n != "1" {
+		t.Errorf("%s history rows of the release, want 1", n)
+	}
+
+	// A new entry restricts the section again; once its entries are gone
+	// nobody writes it, so only the administrator releases it.
+	permA = e.grant(none, e.sectionX, e.teamA, "write")
+	e.expect(e.user(e.userA), "team A", http.MethodDelete, path+"/permissions/"+permA, "", http.StatusNoContent)
+	e.expect(e.user(e.userA), "former team A", http.MethodPatch, path, release, http.StatusNotFound)
+	e.expect(e.adminCtx(e.userNone), "administrator", http.MethodPatch, path, release, http.StatusOK)
+}
+
+// TestSectionACLReleaseRacesEntry covers E-256 under concurrency: an
+// entry written while the release waits for the section lock is counted,
+// so the release is refused (409) and the section stays restricted.
+func TestSectionACLReleaseRacesEntry(t *testing.T) {
+	e := newACLEnv(t)
+	perm := e.grant(e.user(e.userNone), e.sectionX, e.teamA, "write")
+	e.expect(e.user(e.userA), "team A", http.MethodDelete, "/api/v1/ipam-sections/"+e.sectionX+"/permissions/"+perm, "",
+		http.StatusNoContent)
+	bg := context.Background()
+	tx, err := e.f.Admin.Begin(bg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(bg) }()
+	// The entry's trigger locks the section row until the commit.
+	if _, err = tx.Exec(bg, `INSERT INTO ipam_section_permission (organization_id, section_id, team_id, level)
+		VALUES ($1, $2, $3, 'read')`, e.f.OrgA, e.sectionX, e.teamB); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		done <- e.call(e.adminCtx(e.userNone), http.MethodPatch, "/api/v1/ipam-sections/"+e.sectionX, `{"acl_enabled":false}`)
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var waiting bool
+		if err = e.f.Admin.QueryRow(bg, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+			WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%FOR UPDATE OF s%')`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the release does not wait for the section lock")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err = tx.Commit(bg); err != nil {
+		t.Fatal(err)
+	}
+	w := <-done
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), `"field":"acl_enabled"`) {
+		t.Errorf("release racing an entry: %d %s, want 409 acl_enabled", w.Code, w.Body.String())
+	}
+	if !e.aclEnabled(e.sectionX) {
+		t.Error("release racing an entry opened the section")
+	}
+	// Defence in depth: a section with entries is restricted even without
+	// the flag.
+	e.exec(`UPDATE ipam_section SET acl_enabled = false WHERE id = $1`, e.sectionX)
+	e.reads(e.user(e.userA), database.OrgWideScope(e.f.OrgA, e.userA), "team A without entry, flag cleared", e.subnetX, e.addrX, false)
+	e.reads(e.user(e.userB), database.OrgWideScope(e.f.OrgA, e.userB), "team B with entry, flag cleared", e.subnetX, e.addrX, true)
 }
 
 // TestSectionACLWriteRequiresWrite covers AK6: with level read PATCH and

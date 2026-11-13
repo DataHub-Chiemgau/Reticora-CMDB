@@ -116,8 +116,10 @@ var Channels = []Channel{
 		Write: "POST /api/v1/labels/batch (assets of every side)"},
 	// IPM-10 (WP-910, E-214): the rights per IPAM section. A section with
 	// entries is read by the principals of a team with an entry and
-	// written by those of a team with level write; rows and scenario in
-	// channel_matrix_p2_integration_test.go.
+	// written by those of a team with level write; a section whose last
+	// team was deleted stays restricted until it is released explicitly
+	// (E-256), and a released one is read and written again; rows and
+	// scenario in channel_matrix_p2_integration_test.go.
 	{Name: "ipam-section", Read: "GET /api/v1/subnets, /subnets/{id}, /subnets/{id}/addresses, /ips, /ips/{id}, /search?q=<cidr>, " +
 		"POST /bff/graphql { searchEverything(q: <cidr>) }, GET /api/v1/topology?root_ci_id={id}&include=network",
 		Write: "PATCH /api/v1/subnets/{id}, DELETE /api/v1/subnets/{id}, POST /api/v1/ips"},

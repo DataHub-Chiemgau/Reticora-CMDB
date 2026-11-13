@@ -1128,19 +1128,25 @@ func bodyRef(status int) int {
 // X with an entry of team A (write), Y with entries of team A (read) and
 // team B (write), Z without entries. Organization B has its section with
 // a subnet and an address. CI ci1 has an interface with an address in the
-// subnets of X and Y (network projection of the topology). Index 0 is X,
-// 1 Y, 2 Z, 3 the section of organization B.
+// subnets of X and Y (network projection of the topology). Section W had
+// an entry of team C, which was deleted afterwards: without entries it
+// stays restricted (acl_enabled, E-256), so no principal reads or writes
+// its subnet and address until it is released explicitly. Section V went
+// the same way and was then released explicitly by the org-wide
+// administrator (PATCH /api/v1/ipam-sections/{id} with acl_enabled=false):
+// it is read and written again like Z. Index 0 is X, 1 Y, 2 Z, 3 the
+// section of organization B, 4 W, 5 V.
 type ipamSectionScenario struct {
 	teamA, teamB string
-	sections     [4]string
-	cidrs        [4]string
-	orgs         [4]string
-	clients      [4]string
-	sites        [4]string
+	sections     [6]string
+	cidrs        [6]string
+	orgs         [6]string
+	clients      [6]string
+	sites        [6]string
 	// subnets and addresses carry the principals that read them; writers
 	// are the principals that write the subnets and addresses of a section.
-	subnets, addresses [4]object
-	writers            [4]seen
+	subnets, addresses [6]object
+	writers            [6]seen
 	seq                int
 }
 
@@ -1151,20 +1157,20 @@ func newIPAMSectionScenario(t *testing.T, m *channelMatrix) *ipamSectionScenario
 	t.Helper()
 	f := m.f
 	s := &ipamSectionScenario{
-		orgs:    [4]string{f.OrgA, f.OrgA, f.OrgA, f.OrgB},
-		clients: [4]string{f.Client1, f.Client1, f.Client1, m.clientB},
-		sites:   [4]string{m.site1, m.site1, m.site1, m.siteB},
+		orgs:    [6]string{f.OrgA, f.OrgA, f.OrgA, f.OrgB, f.OrgA, f.OrgA},
+		clients: [6]string{f.Client1, f.Client1, f.Client1, m.clientB, f.Client1, f.Client1},
+		sites:   [6]string{m.site1, m.site1, m.site1, m.siteB, m.site1, m.site1},
 	}
 	s.teamA = m.scalar(t, `INSERT INTO team (organization_id, name) VALUES ($1, 'chmp2 ipam team a') RETURNING id::text`, f.OrgA)
 	s.teamB = m.scalar(t, `INSERT INTO team (organization_id, name) VALUES ($1, 'chmp2 ipam team b') RETURNING id::text`, f.OrgA)
 	m.exec(t, `INSERT INTO team_member (organization_id, team_id, user_id) VALUES ($1, $2, $3), ($1, $4, $5)`,
 		f.OrgA, s.teamA, m.userA, s.teamB, m.otherA)
-	owners := [4]*channelPrincipal{m.org, m.org, m.org, m.orgB}
-	names := [4]string{"x", "y", "z", "b"}
+	owners := [6]*channelPrincipal{m.org, m.org, m.org, m.orgB, m.org, m.org}
+	names := [6]string{"x", "y", "z", "b", "w", "v"}
 	onlyTeamA := m.one.without("other-user")
-	read := [4]seen{onlyTeamA, m.one, m.one, m.onlyB}
-	s.writers = [4]seen{onlyTeamA, seenBy("other-user"), m.one, m.onlyB}
-	for i := range 4 {
+	read := [6]seen{onlyTeamA, m.one, m.one, m.onlyB, {}, m.one}
+	s.writers = [6]seen{onlyTeamA, seenBy("other-user"), m.one, m.onlyB, {}, m.one}
+	for i := range 6 {
 		p := owners[i]
 		s.sections[i] = m.create(t, p, "/api/v1/ipam-sections", map[string]any{"name": p2Prefix + "-section-" + names[i]})
 		s.cidrs[i] = fmt.Sprintf("10.250.%d.0/24", i+1)
@@ -1185,6 +1191,27 @@ func newIPAMSectionScenario(t *testing.T, m *channelMatrix) *ipamSectionScenario
 	grant(m.org, 0, s.teamA, "write")
 	grant(m.otherUserP, 1, s.teamB, "write")
 	grant(m.otherUserP, 1, s.teamA, "read")
+	// W and V: the only team with an entry is deleted; the cascade removes
+	// the entry, the section stays restricted (E-256).
+	for i, name := range map[int]string{4: "c", 5: "d"} {
+		team := m.scalar(t, `INSERT INTO team (organization_id, name) VALUES ($1, $2) RETURNING id::text`, f.OrgA, "chmp2 ipam team "+name)
+		m.exec(t, `INSERT INTO team_member (organization_id, team_id, user_id) VALUES ($1, $2, $3)`, f.OrgA, team, m.userA)
+		grant(m.org, i, team, "write")
+		m.exec(t, `DELETE FROM team WHERE id = $1`, team)
+		if n := m.scalar(t, `SELECT count(*)::text FROM ipam_section_permission WHERE section_id = $1`, s.sections[i]); n != "0" {
+			t.Fatalf("setup: %s entries of section %s left after its team was deleted", n, names[i])
+		}
+		if m.scalar(t, `SELECT acl_enabled::text FROM ipam_section WHERE id = $1`, s.sections[i]) != "true" {
+			t.Fatalf("setup: section %s opened when its last team was deleted", names[i])
+		}
+	}
+	// V: released explicitly by the org-wide administrator.
+	if code, resp := m.env.call(m.org, http.MethodPatch, "/api/v1/ipam-sections/"+s.sections[5], map[string]any{"acl_enabled": false}); code != http.StatusOK {
+		t.Fatalf("setup: release of section V: %d %s", code, trim(resp))
+	}
+	if m.scalar(t, `SELECT acl_enabled::text FROM ipam_section WHERE id = $1`, s.sections[4]) != "true" {
+		t.Fatal("setup: the release of V opened W")
+	}
 	return s
 }
 
@@ -1208,7 +1235,7 @@ func (m *channelMatrix) ipamSectionRow() matrixRow {
 	return matrixRow{
 		read: func(p *channelPrincipal) []matrixProbe {
 			out := []matrixProbe{list(p, "/api/v1/subnets?limit=200", s.subnets[:]...), list(p, "/api/v1/ips?limit=200", s.addresses[:]...)}
-			for i := range 4 {
+			for i := range 6 {
 				sub, addr := s.subnets[i], s.addresses[i]
 				out = append(out, get("/api/v1/subnets/"+sub.id, sub.seen.status(p, http.StatusOK)),
 					get("/api/v1/ips/"+addr.id, addr.seen.status(p, http.StatusOK)))
@@ -1238,7 +1265,7 @@ func (m *channelMatrix) ipamSectionRow() matrixRow {
 		},
 		write: func(t *testing.T, p *channelPrincipal) []matrixProbe {
 			var out []matrixProbe
-			for i := range 4 {
+			for i := range 6 {
 				sub := s.subnets[i]
 				written := object{sub.id, s.writers[i]}
 				note := m.name(p2Prefix + "-ipam")

@@ -25690,6 +25690,16 @@ paths:
         client of a section does not change. For a principal restricted to
         clients an org-wide section answers 404 (E-09). A name taken in the
         organization is 409 with field name. Requires ipam:write.
+        acl_enabled=false opens a restricted section again (E-256): the
+        explicit, audited release after the last team with a permission
+        was deleted. It needs a principal without client and site
+        restriction (403 otherwise) that may write the section, or an
+        org-wide administrator (team:manage without client, site and team
+        restriction), who may also open a section it does not see; a
+        principal that only reads the section gets 403, one that does not
+        see it 404. While the section has permissions the release is 409
+        with field acl_enabled; acl_enabled=true is 422 (the first
+        permission restricts a section).
       requestBody:
         required: true
         content:
@@ -42152,7 +42162,7 @@ components:
 
     IPAMSection:
       type: object
-      required: [id, organization_id, name, strict_mode, show_vlan, show_vrf, is_default, vrf_ids, created_at, updated_at]
+      required: [id, organization_id, name, strict_mode, show_vlan, show_vrf, is_default, acl_enabled, vrf_ids, created_at, updated_at]
       description: >-
         IPAM section (IPM-01, E-209): groups the subnets of the organization
         with settings of its own. Every organization has exactly one org-wide
@@ -42174,6 +42184,14 @@ components:
         show_vlan: { type: boolean }
         show_vrf: { type: boolean }
         is_default: { type: boolean, readOnly: true }
+        acl_enabled:
+          type: boolean
+          description: >-
+            The section is restricted (IPM-10, E-256): the first permission
+            sets it, and it stays set when the permissions are gone (also
+            through a deleted team), so that the section stays closed to
+            principals without a team permission (fail-closed). Only PATCH
+            with acl_enabled=false opens it again.
         vrf_ids:
           type: array
           readOnly: true
@@ -42203,6 +42221,11 @@ components:
         strict_mode: { type: boolean }
         show_vlan: { type: boolean }
         show_vrf: { type: boolean }
+        acl_enabled:
+          type: boolean
+          description: >-
+            false opens a restricted section without permissions (E-256,
+            see the operation); true is 422.
 
     NameserverSet:
       type: object
