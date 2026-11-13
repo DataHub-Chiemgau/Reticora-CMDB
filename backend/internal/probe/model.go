@@ -64,7 +64,16 @@ type Probe struct {
 	// only for the API.
 	SuspendedReason string     `json:"suspended_reason,omitempty"`
 	SuspendedAt     *time.Time `json:"suspended_at,omitempty"`
+	// Origin is manual (the API) or auto (the job probe.autocreate,
+	// WP-949); read only for the API.
+	Origin string `json:"origin"`
 }
+
+// Origins of a probe (probe.origin, WP-949).
+const (
+	ProbeOriginManual = "manual"
+	ProbeOriginAuto   = "auto"
+)
 
 // SuspendedEntitlement is the suspended_reason of a probe whose feature
 // was lost (PKG-09, WP-942).

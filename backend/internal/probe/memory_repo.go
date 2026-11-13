@@ -37,6 +37,17 @@ type MemoryRepository struct {
 	profiles map[string]*MonitoringProfile
 	mgroups  map[string]*MonitoringGroup
 	members  map[memMember]*MonitoringGroupMember
+	// suppressed are the (organization, CI, type) of deleted auto probes
+	// (WP-949).
+	suppressed map[[3]string]bool
+}
+
+// Suppressed reports whether a deleted auto probe of the type suppresses
+// the automatic creation for the CI (WP-949).
+func (m *MemoryRepository) Suppressed(orgID, ciID, probeType string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.suppressed[[3]string{orgID, ciID, probeType}]
 }
 
 // SetBudget implements Store.
@@ -326,6 +337,9 @@ func (m *MemoryRepository) Create(ctx context.Context, in *Probe, check Check) (
 	}
 	now := time.Now().UTC()
 	p.CreatedAt, p.UpdatedAt = now, now
+	if p.Origin == "" {
+		p.Origin = ProbeOriginManual
+	}
 	stored := p
 	m.probes[p.ID] = &stored
 	return &p, nil
@@ -385,6 +399,12 @@ func (m *MemoryRepository) Delete(ctx context.Context, id string) error {
 		return ErrNotFound
 	}
 	delete(m.probes, id)
+	if p.Origin == ProbeOriginAuto && p.CIID != "" {
+		if m.suppressed == nil {
+			m.suppressed = map[[3]string]bool{}
+		}
+		m.suppressed[[3]string{p.OrganizationID, p.CIID, p.Type}] = true
+	}
 	for _, o := range m.probes {
 		if o.ParentProbeID == id {
 			o.ParentProbeID = ""

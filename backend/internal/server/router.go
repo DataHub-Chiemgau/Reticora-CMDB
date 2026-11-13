@@ -743,7 +743,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			repos.IPAMManagement,
 			// The full export of an organization (WP-1149, TLC-05) reads on
 			// the application pool and writes to the object storage.
-			export.NewOrgExporter(opts.AuditPool, opts.Blobs, jobService), subjectService, workflowRuns)
+			export.NewOrgExporter(opts.AuditPool, opts.Blobs, jobService), subjectService, workflowRuns,
+			// The automatic ping probes (WP-949) on the probe store of
+			// PostgreSQL.
+			probeAutocreator(&repos))
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -1723,6 +1726,13 @@ func alarmService(repos *Repositories) *alarm.Service {
 		return repos.Alarms
 	}
 	return alarm.NewService(alarm.NewMemoryStore(), nil, &alarm.MemorySink{})
+}
+
+// probeAutocreator returns the job probe.autocreate on the PostgreSQL probe
+// store; without one (--no-db) its jobs fail.
+func probeAutocreator(repos *Repositories) *probe.Autocreator {
+	pg, _ := repos.Probes.(*probe.PGRepository)
+	return probe.NewAutocreator(pg)
 }
 
 // probeStore returns the probe store of repos, an empty memory store when

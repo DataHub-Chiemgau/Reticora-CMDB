@@ -5974,6 +5974,8 @@ Org-Einstellungen liegen frei in `organization.settings` und werden über `PATCH
 - frontend/src/api/generated/schema.d.ts (generiert)
 - docs/traceability.csv
 
+**Nachtrag 2026-11-13 (Umsetzung):** Die Dateiliste umfasst 18 Einträge (Migration = 2). `backend/internal/probe/handler.go` bleibt unverändert: Die Sperrliste entsteht beim Löschen in `pg_repository.go` bzw. `memory_repo.go` (`Delete`) in derselben Transaktion wie das Löschen der Probe. Hinzu kommen `backend/internal/server/router.go` (Übergabe der Jobart `probe.autocreate`), `backend/internal/tenantapi/handler.go` (Prüfung von `settings.monitoring.auto_ping`, 400 mit Feld, AK1) und `backend/internal/tenant/rls/fixtures_test.go` (`matrixOverrides` der neuen Tabelle). Präzisierung der Migration: `client_id` und `site_id` von `probe_autocreate_suppression` leitet der Trigger `probe_autocreate_suppression_scope` wie `probe_ci_scope` aus dem CI ab, und `propagate_monitoring_scope` (000307) nimmt die Einträge eines verschobenen CI mit; der Fremdschlüssel `probe_autocreate_suppression_site_fkey` auf `site` trägt die Organisation (Konvention 19). Die Down-Migration stellt `propagate_monitoring_scope` aus 000307 wieder her.
+
 **Migration/RLS:** Migration `<nächste Nr.>_probe_autocreate` (frühestens 000284):
 - `ALTER TABLE probe ADD COLUMN origin text NOT NULL DEFAULT 'manual' CHECK (origin IN ('manual','auto'))`.
 - Neue Mandantentabelle `probe_autocreate_suppression`: Spalten `organization_id`, `client_id`, `site_id`, `ci_id`, `probe_type`, `created_at` und `actor_id` (ohne FK, Konvention 16). PK `(organization_id, ci_id, probe_type)`.

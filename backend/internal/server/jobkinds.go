@@ -22,6 +22,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/metamodel"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/privacy"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/probe"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
 )
@@ -162,7 +163,8 @@ func applicationJobKinds(ciService *ci.Service, bulkRevert *ci.BulkRevert, histo
 	templateJobs *ci.TemplateMigrationJobs, draftHandler *metamodel.Handler, importHandler *importer.ImportHandler,
 	scanner *document.Scanner, searchHandler *search.Handler, labelBatch *labels.BatchHandler, assets *asset.Handler,
 	assetRevert *asset.BulkRevert, credentials *credential.Handler, admpSync *admp.Sync, management *ipam.ManagementSync,
-	orgExport *export.OrgExporter, subjects *privacy.SubjectService, workflowRuns *workflow.Executor) []jobKind {
+	orgExport *export.OrgExporter, subjects *privacy.SubjectService, workflowRuns *workflow.Executor,
+	probeAutocreate *probe.Autocreator) []jobKind {
 	runWorker := workflow.NewWorker(workflowRuns)
 	kinds := []jobKind{{kind: snapshotJobKind, handler: historyHandler.RunSnapshotJob},
 		{kind: metamodelTestJobKind, handler: draftHandler.RunTestJob},
@@ -202,6 +204,12 @@ func applicationJobKinds(ciService *ci.Service, bulkRevert *ci.BulkRevert, histo
 	if management != nil {
 		kinds = append(kinds, jobKind{kind: mgmtBackfillJobKind, handler: management.RunBackfillJob})
 	}
+	// The automatic ping probes of an organization (MON-02, WP-949): one
+	// attempt, the system job probe.autocreate.dispatch submits it; with a
+	// probe store on PostgreSQL only (without it its jobs fail).
+	if probeAutocreate != nil {
+		kinds = append(kinds, jobKind{kind: probeAutocreate.Kind(), handler: probeAutocreate.RunJob})
+	}
 	return kinds
 }
 
@@ -226,7 +234,7 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 	importHandler *importer.ImportHandler, scanner *document.Scanner, searchHandler *search.Handler,
 	labelBatch *labels.BatchHandler, assets *asset.Handler, assetRevert *asset.BulkRevert, credentials *credential.Handler,
 	admpSync *admp.Sync, management *ipam.ManagementSync, orgExport *export.OrgExporter, subjects *privacy.SubjectService,
-	workflowRuns *workflow.Executor) {
+	workflowRuns *workflow.Executor, probeAutocreate *probe.Autocreator) {
 	svc.Register(exportJobKind)
 	subjects.WithJobs(svc)
 	importHandler.WithJobs(svc)
@@ -240,7 +248,8 @@ func registerJobKinds(svc *jobs.Service, queue *jobs.Queue, ciService *ci.Servic
 		ciService.WithBulkJobs(svc)
 	}
 	for _, k := range applicationJobKinds(ciService, bulkRevert, historyHandler, templateJobs, draftHandler, importHandler,
-		scanner, searchHandler, labelBatch, assets, assetRevert, credentials, admpSync, management, orgExport, subjects, workflowRuns) {
+		scanner, searchHandler, labelBatch, assets, assetRevert, credentials, admpSync, management, orgExport, subjects, workflowRuns,
+		probeAutocreate) {
 		svc.Register(k.kind)
 		if queue != nil {
 			queue.Handle(k.kind, k.handler)

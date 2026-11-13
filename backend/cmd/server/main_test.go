@@ -534,6 +534,23 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 				t.Errorf("%s: spec %q, max catch-up %d; want @every 1m and 1", job.Kind, job.Spec, job.MaxCatchUp)
 			}
 		}
+		// The dispatch of the automatic ping probes (MON-02, WP-949): every
+		// 15 minutes with the module monitoring, the database and the job
+		// queue.
+		if kinds[probe.AutocreateDispatchKind] {
+			t.Errorf("%s is registered without the job queue", probe.AutocreateDispatchKind)
+		}
+		deps.jobQueue = jobs.NewQueue(jobs.NewService(deps.repos.Jobs), nil)
+		queued := registeredSystemJobs(t, deps)
+		if queued[probe.AutocreateDispatchKind] != withDB {
+			t.Errorf("JOB-02 autocreate dispatch (MON-02) with the module monitoring and the job queue (database %v): registered %v",
+				withDB, queued[probe.AutocreateDispatchKind])
+		}
+		for _, job := range systemJobs(deps) {
+			if job.Kind == probe.AutocreateDispatchKind && job.Spec != "@every 15m" {
+				t.Errorf("%s: spec %q, want @every 15m", job.Kind, job.Spec)
+			}
+		}
 	}
 	if registered[probe.AssignKind] {
 		t.Errorf("without the module monitoring %s is registered", probe.AssignKind)

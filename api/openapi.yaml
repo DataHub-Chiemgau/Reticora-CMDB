@@ -32255,6 +32255,15 @@ components:
           format: date-time
           readOnly: true
           description: When the probe was suspended (with suspended_reason).
+        origin:
+          type: string
+          enum: [manual, auto]
+          readOnly: true
+          description: >-
+            manual: created through the API; auto: created by the automatic
+            ping probes (monitoring.auto_ping, WP-949), its target follows the
+            management IP of the CI. Deleting an auto probe keeps the job from
+            creating it again for the CI.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     ProbeCreateRequest:
@@ -41577,8 +41586,24 @@ components:
           minLength: 1
         settings:
           type: object
-          description: Free settings; `branding.sender_name` brands the notification e-mails (see Organization.settings).
+          description: >-
+            Free settings; `branding.sender_name` brands the notification
+            e-mails (see Organization.settings). `monitoring.auto_ping`
+            (boolean, default false) switches the automatic ping probes
+            (MON-02, WP-949): every 15 minutes the job probe.autocreate creates
+            an icmp probe (origin auto, type defaults) for every active,
+            observable CI with a management IP in the collector group of its
+            discovering collector, within the probe budget; a deleted auto
+            probe is not created again; switching it off deletes no probe. A
+            value that is no boolean is 400 with field
+            settings.monitoring.auto_ping.
           additionalProperties: true
+          properties:
+            monitoring:
+              type: object
+              additionalProperties: true
+              properties:
+                auto_ping: { type: boolean, default: false }
         timezone:
           type: string
         currency:

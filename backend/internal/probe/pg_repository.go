@@ -147,12 +147,12 @@ var _ Repository = (*PGRepository)(nil)
 const probeColumns = `p.id::text, p.organization_id::text, COALESCE(p.client_id::text, ''), COALESCE(p.site_id::text, ''),
 	COALESCE(p.ci_id::text, ''), p.collector_group_id::text, p.type, p.target, p.params, p.enabled,
 	COALESCE(p.parent_probe_id::text, ''), COALESCE(p.created_by_surrogate::text, ''), p.created_at, p.updated_at,
-	COALESCE(p.suspended_reason, ''), p.suspended_at`
+	COALESCE(p.suspended_reason, ''), p.suspended_at, p.origin`
 
 func scanProbe(row pgx.Row) (Probe, error) {
 	var p Probe
 	err := row.Scan(&p.ID, &p.OrganizationID, &p.ClientID, &p.SiteID, &p.CIID, &p.CollectorGroupID, &p.Type, &p.Target,
-		&p.Params, &p.Enabled, &p.ParentProbeID, &p.CreatedBySurrogate, &p.CreatedAt, &p.UpdatedAt, &p.SuspendedReason, &p.SuspendedAt)
+		&p.Params, &p.Enabled, &p.ParentProbeID, &p.CreatedBySurrogate, &p.CreatedAt, &p.UpdatedAt, &p.SuspendedReason, &p.SuspendedAt, &p.Origin)
 	return p, err
 }
 
@@ -321,7 +321,7 @@ func (r *PGRepository) ResolveForCollector(ctx context.Context, collectorID stri
 			var epoch int64
 			if scanErr := rows.Scan(&p.ID, &p.OrganizationID, &p.ClientID, &p.SiteID, &p.CIID, &p.CollectorGroupID, &p.Type, &p.Target,
 				&p.Params, &p.Enabled, &p.ParentProbeID, &p.CreatedBySurrogate, &p.CreatedAt, &p.UpdatedAt, &p.SuspendedReason,
-				&p.SuspendedAt, &epoch); scanErr != nil {
+				&p.SuspendedAt, &p.Origin, &epoch); scanErr != nil {
 				rows.Close()
 				return fmt.Errorf("scan assigned probe: %w", scanErr)
 			}
@@ -665,6 +665,14 @@ func (r *PGRepository) Delete(ctx context.Context, id string) error {
 		}
 		if err != nil {
 			return probeWriteError(err)
+		}
+		// A deleted auto probe keeps the job from creating it again
+		// (WP-949 AK4): the suppression of its CI and type, in this
+		// transaction.
+		if p.Origin == ProbeOriginAuto && p.CIID != "" {
+			if serr := suppressAutocreate(ctx, tx, &p); serr != nil {
+				return serr
+			}
 		}
 		// The assignment went with the probe (ON DELETE CASCADE); its
 		// collector learns it with a new version (WP-941 AK3).

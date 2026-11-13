@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000344_probe_suspend
+Stand: Migration 000345_probe_autocreate
 
 ## Prüfung
 
@@ -533,6 +533,24 @@ TestKnownGapsDocumented ./internal/tenant/rls/` neu.
 |---|---|---|
 
 <!-- rls-known-gaps:end -->
+
+### Automatische Ping-Probes (WP-949)
+
+Migration 000345 (vorläufige Nummer) ergänzt `probe.origin` (`text NOT NULL
+DEFAULT 'manual'`, `CONSTRAINT probe_origin_check CHECK (origin IN ('manual',
+'auto'))`): `auto` markiert die Probes des Jobs `probe.autocreate`, nur sie
+folgen einer Änderung der Management-IP. Die Tabelle
+`probe_autocreate_suppression` (Primärschlüssel `(organization_id, ci_id,
+probe_type)`) merkt sich gelöschte Auto-Probes. Ihre Verweise tragen die
+Organisation (K19): `probe_autocreate_suppression_ci_fkey` `(ci_id,
+organization_id) REFERENCES ci (id, organization_id) ON DELETE CASCADE`,
+`probe_autocreate_suppression_client_fkey` auf `client` und
+`probe_autocreate_suppression_site_fkey` auf `site`. `client_id` und
+`site_id` leitet der Trigger `probe_autocreate_suppression_scope` wie
+`probe_ci_scope` aus dem CI ab; ein verschobenes CI nimmt seine Einträge über
+`propagate_monitoring_scope` mit (Version aus 000307 plus diese Tabelle). Die
+Policies folgen Konvention 5 (located-scope, USING und WITH CHECK, RESTRICTIVE
+für UPDATE und DELETE), dazu FORCE RLS und Truncate-Guard.
 
 ## Indizes unter RLS (SR-04, K22, WP-836)
 
@@ -2090,6 +2108,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `privacy_retention_policy` | ja | ja | privacy_retention_isolation (ALL) |
 | `probe` | ja | ja | probe_isolation (ALL), probe_scoped_delete (DELETE), probe_scoped_update (UPDATE) |
 | `probe_assignment` | ja | ja | probe_assignment_isolation (ALL), probe_assignment_scoped_delete (DELETE), probe_assignment_scoped_update (UPDATE) |
+| `probe_autocreate_suppression` | ja | ja | probe_autocreate_suppression_isolation (ALL), probe_autocreate_suppression_scoped_delete (DELETE), probe_autocreate_suppression_scoped_update (UPDATE) |
 | `probe_epoch` | ja | ja | probe_epoch_isolation (ALL) |
 | `probe_ingest_cursor` | ja | ja | probe_ingest_cursor_isolation (ALL), probe_ingest_cursor_system_select (SELECT) |
 | `probe_result` | nein | nein | – |

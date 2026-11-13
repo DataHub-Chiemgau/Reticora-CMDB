@@ -1826,3 +1826,5 @@ TLC-06;[P3];F;backend/internal/server/orgstate_integration_test.go;WP-1153
 PRB-01;[P3];E;backend/internal/probe/profile_scope_integration_test.go;WP-946
 PKG-09;[P3];E;backend/internal/probe/suspend_integration_test.go;WP-942
 ENT-08;[B];E;backend/internal/probe/suspend_integration_test.go;WP-942
+MON-02;[B];E;backend/internal/probe/autocreate_integration_test.go;WP-949
+PRB-01;[P3];E;backend/internal/probe/autocreate_integration_test.go;WP-949

@@ -525,6 +525,14 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 			// (PKG-09, ENT-08, WP-942): every minute per organization;
 			// resumed when the feature is active again.
 			systemJobs = append(systemJobs, probe.NewSuspender(pool, probe.LicensedBy(d.entitlements)).Schedule())
+			// Automatic ping probes (MON-02, WP-949): every 15 minutes one
+			// job probe.autocreate per organization with
+			// monitoring.auto_ping and the feature monitoring, on the job
+			// queue only (the kind runs on its handlers, jobkinds.go).
+			if d.jobQueue != nil {
+				systemJobs = append(systemJobs, probe.NewAutocreateDispatcher(pool, d.jobQueue,
+					probe.LicensedBy(d.entitlements)).Schedule())
+			}
 		}
 		// Credential age: daily each stored secret beyond its max_age_days
 		// once per secret_version as credential.rotation_due (CRD-05,
