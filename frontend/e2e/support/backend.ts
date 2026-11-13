@@ -297,6 +297,23 @@ const DEFAULTS: Handler[] = [
       },
     }),
   },
+  // The session claims (GET /me) of the signed-in administrator: the whole
+  // organization (cls and sts null), so the IPAM tabs offer the writes of
+  // VRFs, VLAN domains and nameserver sets (WP-918).
+  {
+    path: '/me',
+    reply: () => ({
+      body: {
+        sub: '00000000-0000-0000-0000-000000000001',
+        org: '00000000-0000-0000-0000-0000000000aa',
+        scopes: [],
+        iat: 1767225600,
+        exp: 1893456000,
+        cls: null,
+        sts: null,
+      },
+    }),
+  },
   { path: '/ci-types', reply: () => ({ body: list(CI_TYPES) }) },
   {
     path: /^\/ci-types\/[0-9a-f-]{36}$/,

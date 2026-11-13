@@ -49,7 +49,6 @@ import {
   auditApi,
   privacyApi,
   credentialApi,
-  vrfApi,
   sourceRankApi,
   type SourceRankEntry,
   type SourceRankParams,
@@ -327,15 +326,6 @@ export function useCredentialMutations() {
       onSuccess: invalidate,
     }),
   };
-}
-
-/** The VRFs of the organization, the default first (TEN-10). */
-export function useVrfs(enabled = true) {
-  return useQuery({
-    queryKey: ['vrfs', 'options'],
-    queryFn: () => vrfApi.list({ limit: 200 }),
-    enabled,
-  });
 }
 
 export function useScopeSuggestions() {

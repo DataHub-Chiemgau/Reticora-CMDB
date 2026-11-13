@@ -7,15 +7,21 @@
  * dialog creates, edits and deletes sections and keeps their rights per
  * team; without ipam:write every write action is hidden. A new subnet is
  * created in the SubnetFormModal and opens its detail page (WP-916).
+ * Beside the subnet tree the tabs VLANs (with domains), VRFs (RD/RT) and
+ * nameserver sets (WP-918); the tab stays in the query parameter tab.
  */
 import { Network, Plus, Settings2 } from 'lucide-react';
 import { useMemo, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { IPAMSection } from '../api/cmdb';
 import { useClients } from '../api/cmdbHooks';
-import { useHasPermission, useSites, useVrfs } from '../api/hooks';
-import { useIPAMSections, useSubnetChain } from '../api/ipamHooks';
+import { useHasPermission, useSites } from '../api/hooks';
+import { useIPAMSections, useOrgWideWriter, useSubnetChain, useVrfs } from '../api/ipamHooks';
+import { IpamTabList, IPAM_TABS, type IpamTab } from '../components/ipam/IpamTabList';
+import { NameserverTab } from '../components/ipam/NameserverTab';
+import { VlanTab } from '../components/ipam/VlanTab';
+import { VrfTab } from '../components/ipam/VrfTab';
 import { SectionDialog } from '../components/ipam/SectionDialog';
 import { SubnetFormModal } from '../components/ipam/SubnetFormModal';
 import { SubnetTree } from '../components/ipam/SubnetTree';
@@ -30,6 +36,22 @@ import { Select } from '../components/ui/Select';
 export function IpamPage() {
   const { t } = useTranslation();
   const canWrite = useHasPermission('ipam:write') === true;
+  const canManageVRF = useHasPermission('vrf:manage') === true;
+  const orgWide = useOrgWideWriter() === true;
+  // The tab stays in the query (?tab=), so a reload keeps it.
+  const [params, setParams] = useSearchParams();
+  const requested = params.get('tab') as IpamTab | null;
+  const tab: IpamTab = requested && IPAM_TABS.includes(requested) ? requested : 'subnets';
+  const chooseTab = (next: IpamTab) =>
+    setParams(
+      (current) => {
+        const copy = new URLSearchParams(current);
+        if (next === 'subnets') copy.delete('tab');
+        else copy.set('tab', next);
+        return copy;
+      },
+      { replace: true },
+    );
   const sections = useIPAMSections();
   const vrfs = useVrfs();
   const [chosen, setChosen] = useState<string>();
@@ -93,111 +115,142 @@ export function IpamPage() {
         }
       />
 
-      {sections.isError ? (
-        <ErrorState title={t('ipam.loadFailed')} />
-      ) : (
-        <Card className="space-y-4 p-4">
-          <div className="flex flex-wrap items-end gap-3">
-            <Select
-              label={t('ipam.section.label')}
-              value={section?.id ?? ''}
-              onChange={(event) => setChosen(event.target.value)}
-              options={list.map((s) => ({
-                value: s.id,
-                label: s.is_default ? t('ipam.section.defaultName', { name: s.name }) : s.name,
-              }))}
-            />
-            {section && (
-              <Button variant="secondary" icon={<Settings2 />} onClick={() => setDialog('edit')}>
-                {canWrite ? t('ipam.section.edit') : t('ipam.section.show')}
-              </Button>
-            )}
-            {section?.strict_mode && <Badge>{t('ipam.section.strictMode')}</Badge>}
-            {section?.acl_enabled && <Badge>{t('ipam.section.restricted')}</Badge>}
-          </div>
+      <IpamTabList tab={tab} onChange={chooseTab} />
 
-          <div
-            className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"
-            role="group"
-            aria-label={t('ipam.filters.label')}
-          >
-            <Select
-              label={t('ipam.filters.vrf')}
-              value={vrfId}
-              onChange={(event) => setVrfId(event.target.value)}
-              options={[
-                { value: '', label: t('ipam.filters.all') },
-                ...(vrfs.data?.data ?? []).map((v) => ({ value: v.id, label: v.name })),
-              ]}
-            />
-            <Select
-              label={t('ipam.filters.client')}
-              value={clientId}
-              onChange={(event) => {
-                setClientId(event.target.value);
-                setSiteId('');
-              }}
-              options={[
-                { value: '', label: t('ipam.filters.all') },
-                ...(clients.data?.data ?? []).map((c) => ({ value: c.id, label: c.name })),
-              ]}
-            />
-            <Select
-              label={t('ipam.filters.site')}
-              value={siteId}
-              onChange={(event) => setSiteId(event.target.value)}
-              options={[
-                { value: '', label: t('ipam.filters.all') },
-                ...(sites.data?.data ?? []).map((s) => ({ value: s.id, label: s.name })),
-              ]}
-            />
-            <Input
-              label={t('ipam.filters.q')}
-              value={q}
-              onChange={(event) => setQ(event.target.value)}
-              placeholder={t('ipam.filters.qPlaceholder')}
-            />
-            <form onSubmit={applyContains} className="flex items-end gap-2">
-              <Input
-                label={t('ipam.filters.contains')}
-                value={containsInput}
-                onChange={(event) => setContainsInput(event.target.value)}
-                placeholder="10.0.0.1"
-              />
-              <Button type="submit" variant="secondary">
-                {t('ipam.filters.find')}
-              </Button>
-            </form>
-          </div>
-          {contains && chain.isError && (
-            <p role="alert" className="text-sm text-red-700 dark:text-red-300">
-              {t('ipam.filters.containsInvalid')}
-            </p>
-          )}
-          {contains && chain.isSuccess && chainIds.length === 0 && (
-            <p role="status" className="text-sm text-fg-muted">
-              {t('ipam.filters.containsNone', { address: contains })}
-            </p>
-          )}
-        </Card>
+      {tab === 'vlans' && (
+        <div role="tabpanel" id="ipam-panel-vlans" aria-labelledby="ipam-tab-vlans">
+          <VlanTab canWrite={canWrite} orgWide={orgWide} />
+        </div>
+      )}
+      {tab === 'vrfs' && (
+        <div role="tabpanel" id="ipam-panel-vrfs" aria-labelledby="ipam-tab-vrfs">
+          <VrfTab canManage={canManageVRF && orgWide} />
+        </div>
+      )}
+      {tab === 'nameservers' && (
+        <div role="tabpanel" id="ipam-panel-nameservers" aria-labelledby="ipam-tab-nameservers">
+          <NameserverTab canWrite={canWrite && orgWide} />
+        </div>
       )}
 
-      {section && (
-        <Card className="p-4">
-          <h2 className="mb-3 flex items-center gap-2 text-base font-semibold text-fg">
-            <Network className="h-4 w-4" aria-hidden />
-            {t('ipam.tree.title', { section: section.name })}
-          </h2>
-          {(!contains || chain.isSuccess || chain.isError) && (
-            <SubnetTree
-              key={`${section.id}|${contains}|${marked ?? ''}`}
-              query={query}
-              vrfNames={vrfNames}
-              expanded={expanded}
-              marked={marked}
-            />
+      {tab === 'subnets' && (
+        <div
+          role="tabpanel"
+          id="ipam-panel-subnets"
+          aria-labelledby="ipam-tab-subnets"
+          className="space-y-6"
+        >
+          {sections.isError ? (
+            <ErrorState title={t('ipam.loadFailed')} />
+          ) : (
+            <Card className="space-y-4 p-4">
+              <div className="flex flex-wrap items-end gap-3">
+                <Select
+                  label={t('ipam.section.label')}
+                  value={section?.id ?? ''}
+                  onChange={(event) => setChosen(event.target.value)}
+                  options={list.map((s) => ({
+                    value: s.id,
+                    label: s.is_default ? t('ipam.section.defaultName', { name: s.name }) : s.name,
+                  }))}
+                />
+                {section && (
+                  <Button
+                    variant="secondary"
+                    icon={<Settings2 />}
+                    onClick={() => setDialog('edit')}
+                  >
+                    {canWrite ? t('ipam.section.edit') : t('ipam.section.show')}
+                  </Button>
+                )}
+                {section?.strict_mode && <Badge>{t('ipam.section.strictMode')}</Badge>}
+                {section?.acl_enabled && <Badge>{t('ipam.section.restricted')}</Badge>}
+              </div>
+
+              <div
+                className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"
+                role="group"
+                aria-label={t('ipam.filters.label')}
+              >
+                <Select
+                  label={t('ipam.filters.vrf')}
+                  value={vrfId}
+                  onChange={(event) => setVrfId(event.target.value)}
+                  options={[
+                    { value: '', label: t('ipam.filters.all') },
+                    ...(vrfs.data?.data ?? []).map((v) => ({ value: v.id, label: v.name })),
+                  ]}
+                />
+                <Select
+                  label={t('ipam.filters.client')}
+                  value={clientId}
+                  onChange={(event) => {
+                    setClientId(event.target.value);
+                    setSiteId('');
+                  }}
+                  options={[
+                    { value: '', label: t('ipam.filters.all') },
+                    ...(clients.data?.data ?? []).map((c) => ({ value: c.id, label: c.name })),
+                  ]}
+                />
+                <Select
+                  label={t('ipam.filters.site')}
+                  value={siteId}
+                  onChange={(event) => setSiteId(event.target.value)}
+                  options={[
+                    { value: '', label: t('ipam.filters.all') },
+                    ...(sites.data?.data ?? []).map((s) => ({ value: s.id, label: s.name })),
+                  ]}
+                />
+                <Input
+                  label={t('ipam.filters.q')}
+                  value={q}
+                  onChange={(event) => setQ(event.target.value)}
+                  placeholder={t('ipam.filters.qPlaceholder')}
+                />
+                <form onSubmit={applyContains} className="flex items-end gap-2">
+                  <Input
+                    label={t('ipam.filters.contains')}
+                    value={containsInput}
+                    onChange={(event) => setContainsInput(event.target.value)}
+                    placeholder="10.0.0.1"
+                  />
+                  <Button type="submit" variant="secondary">
+                    {t('ipam.filters.find')}
+                  </Button>
+                </form>
+              </div>
+              {contains && chain.isError && (
+                <p role="alert" className="text-sm text-red-700 dark:text-red-300">
+                  {t('ipam.filters.containsInvalid')}
+                </p>
+              )}
+              {contains && chain.isSuccess && chainIds.length === 0 && (
+                <p role="status" className="text-sm text-fg-muted">
+                  {t('ipam.filters.containsNone', { address: contains })}
+                </p>
+              )}
+            </Card>
           )}
-        </Card>
+
+          {section && (
+            <Card className="p-4">
+              <h2 className="mb-3 flex items-center gap-2 text-base font-semibold text-fg">
+                <Network className="h-4 w-4" aria-hidden />
+                {t('ipam.tree.title', { section: section.name })}
+              </h2>
+              {(!contains || chain.isSuccess || chain.isError) && (
+                <SubnetTree
+                  key={`${section.id}|${contains}|${marked ?? ''}`}
+                  query={query}
+                  vrfNames={vrfNames}
+                  expanded={expanded}
+                  marked={marked}
+                />
+              )}
+            </Card>
+          )}
+        </div>
       )}
 
       {dialog === 'create' && (

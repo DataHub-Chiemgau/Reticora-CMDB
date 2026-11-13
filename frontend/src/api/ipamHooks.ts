@@ -1,15 +1,24 @@
 /**
  * ipamHooks — TanStack Query hooks of the IPAM page (WP-915, Konvention 27):
  * sections, their rights per team, one level of the subnet tree and the
- * usage of a subnet. The VRF hooks stay in hooks.ts until WP-918.
+ * usage of a subnet. useVrfs moved here from hooks.ts with WP-918.
  * WP-916 adds the subnet detail: the subnet with its parent chain, its
  * addresses (one page for the list, all for the address map), the
  * allocation of the next free address and subnet, reservations and the
  * subnet form.
  */
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { sessionApi, vrfApi, type PaginatedResponse } from './client';
 import {
   ipamApi,
+  type NameserverSetCreate,
+  type NameserverSetUpdate,
+  type VLANCreate,
+  type VLANDomainCreate,
+  type VLANDomainUpdate,
+  type VLANUpdate,
+  type VRFCreate,
+  type VRFUpdate,
   type IPAllocate,
   type IPReservationCreate,
   type SubnetAllocate,
@@ -268,4 +277,163 @@ export function useNameserverSetOptions(enabled = true) {
     queryFn: () => ipamApi.listNameserverSets(),
     enabled,
   });
+}
+
+// ─── Tabs VLANs, VRFs and nameserver sets (IPM-19, WP-918) ──────────────────
+
+/** The VRFs of the organization, the default first (TEN-10); the choices of forms and filters. */
+export function useVrfs(enabled = true) {
+  return useQuery({
+    queryKey: ['vrfs', 'options'],
+    queryFn: () => vrfApi.list({ limit: 200 }),
+    enabled,
+  });
+}
+
+/**
+ * useOrgWideWriter reports whether the session has no client and no site
+ * restriction (cls and sts null, GET /me): only such principals write VRFs,
+ * VLAN domains and nameserver sets (E-09). undefined while it loads.
+ */
+export function useOrgWideWriter(): boolean | undefined {
+  const session = useQuery({
+    queryKey: ['me'],
+    queryFn: () => sessionApi.me(),
+    retry: false,
+    staleTime: 60_000,
+  });
+  if (!session.data) return session.isError ? false : undefined;
+  return (session.data.cls ?? null) === null && (session.data.sts ?? null) === null;
+}
+
+/** paged follows the offset pagination of a list, one page of API_MAX_LIMIT rows per request. */
+function paged<T>(
+  queryKey: readonly unknown[],
+  fetchPage: (offset: number) => Promise<PaginatedResponse<T>>,
+  enabled = true,
+) {
+  return {
+    queryKey,
+    queryFn: ({ pageParam }: { pageParam: number }) => fetchPage(pageParam),
+    initialPageParam: 0,
+    getNextPageParam: (last: PaginatedResponse<T>) =>
+      last.has_more ? last.offset + (last.data?.length ?? 0) : undefined,
+    enabled,
+  };
+}
+
+const VLANS = ['ipam', 'vlans'] as const;
+const DOMAINS = ['ipam', 'vlan-domains'] as const;
+const VRFS = ['ipam', 'vrfs'] as const;
+const NAMESERVERS = ['ipam', 'nameserver-sets'] as const;
+
+/**
+ * useVLANList lists the VLANs: of a domain over GET /vlan-domains/{id}/vlans
+ * (GET /vlans has no domain filter), else GET /vlans with site_id.
+ */
+export function useVLANList(filter: { domainId?: string; siteId?: string }) {
+  return useInfiniteQuery(
+    paged([...VLANS, 'list', filter.domainId ?? '', filter.siteId ?? ''], (offset) =>
+      filter.domainId
+        ? ipamApi.listDomainVLANs(filter.domainId, { offset })
+        : ipamApi.listVLANs({ site_id: filter.siteId, offset }),
+    ),
+  );
+}
+
+export function useVLANDomains() {
+  return useInfiniteQuery(paged([...DOMAINS], (offset) => ipamApi.listVLANDomains({ offset })));
+}
+
+export function useVRFList() {
+  return useInfiniteQuery(paged([...VRFS], (offset) => ipamApi.listVRFs({ offset })));
+}
+
+export function useNameserverSets() {
+  return useInfiniteQuery(
+    paged([...NAMESERVERS, 'list'], (offset) => ipamApi.listNameserverSets({ offset })),
+  );
+}
+
+export function useVLANMutations() {
+  const qc = useQueryClient();
+  // The detail ['ipam','vlan',id] of the subnet detail refreshes as well.
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: VLANS });
+    void qc.invalidateQueries({ queryKey: ['ipam', 'vlan'] });
+  };
+  return {
+    create: useMutation({
+      mutationFn: (d: VLANCreate) => ipamApi.createVLAN(d),
+      onSuccess: refresh,
+    }),
+    update: useMutation({
+      mutationFn: ({ id, data }: { id: string; data: VLANUpdate }) => ipamApi.updateVLAN(id, data),
+      onSuccess: refresh,
+    }),
+    remove: useMutation({ mutationFn: (id: string) => ipamApi.deleteVLAN(id), onSuccess: refresh }),
+  };
+}
+
+export function useVLANDomainMutations() {
+  const qc = useQueryClient();
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: DOMAINS });
+    void qc.invalidateQueries({ queryKey: VLANS });
+    // Deleting a domain clears domain_id of its VLANs.
+    void qc.invalidateQueries({ queryKey: ['ipam', 'vlan'] });
+  };
+  return {
+    create: useMutation({
+      mutationFn: (d: VLANDomainCreate) => ipamApi.createVLANDomain(d),
+      onSuccess: refresh,
+    }),
+    update: useMutation({
+      mutationFn: ({ id, data }: { id: string; data: VLANDomainUpdate }) =>
+        ipamApi.updateVLANDomain(id, data),
+      onSuccess: refresh,
+    }),
+    remove: useMutation({
+      mutationFn: (id: string) => ipamApi.deleteVLANDomain(id),
+      onSuccess: refresh,
+    }),
+  };
+}
+
+export function useVRFMutations() {
+  const qc = useQueryClient();
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: VRFS });
+    void qc.invalidateQueries({ queryKey: ['vrfs'] });
+    // The detail ['ipam','vrf',id] of the subnet detail (name, RD, targets).
+    void qc.invalidateQueries({ queryKey: ['ipam', 'vrf'] });
+  };
+  return {
+    create: useMutation({ mutationFn: (d: VRFCreate) => ipamApi.createVRF(d), onSuccess: refresh }),
+    update: useMutation({
+      mutationFn: ({ id, data }: { id: string; data: VRFUpdate }) => ipamApi.updateVRF(id, data),
+      onSuccess: refresh,
+    }),
+    remove: useMutation({ mutationFn: (id: string) => ipamApi.deleteVRF(id), onSuccess: refresh }),
+  };
+}
+
+export function useNameserverSetMutations() {
+  const qc = useQueryClient();
+  const refresh = () => void qc.invalidateQueries({ queryKey: NAMESERVERS });
+  return {
+    create: useMutation({
+      mutationFn: (d: NameserverSetCreate) => ipamApi.createNameserverSet(d),
+      onSuccess: refresh,
+    }),
+    update: useMutation({
+      mutationFn: ({ id, data }: { id: string; data: NameserverSetUpdate }) =>
+        ipamApi.updateNameserverSet(id, data),
+      onSuccess: refresh,
+    }),
+    remove: useMutation({
+      mutationFn: (id: string) => ipamApi.deleteNameserverSet(id),
+      onSuccess: refresh,
+    }),
+  };
 }

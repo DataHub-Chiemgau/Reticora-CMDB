@@ -1882,6 +1882,62 @@ export const ipamApi = {
   ): Promise<PaginatedResponse<VLAN>> {
     return fetchAPI(`/vlans${qs({ limit: API_MAX_LIMIT, ...params })}`);
   },
+  // ─── VLANs with domains, VRFs, nameserver sets (IPM-05–07, WP-918) ──────
+  createVLAN(data: VLANCreate): Promise<VLAN> {
+    return fetchAPI('/vlans', { method: 'POST', body: JSON.stringify(data) });
+  },
+  updateVLAN(id: string, data: VLANUpdate): Promise<VLAN> {
+    return fetchAPI(`/vlans/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  deleteVLAN(id: string): Promise<void> {
+    return fetchAPI(`/vlans/${id}`, { method: 'DELETE' });
+  },
+  /** listVLANDomains reads one page (at most API_MAX_LIMIT) of the VLAN domains. */
+  listVLANDomains(
+    params: { limit?: number; offset?: number } = {},
+  ): Promise<PaginatedResponse<VLANDomain>> {
+    return fetchAPI(`/vlan-domains${qs({ limit: API_MAX_LIMIT, ...params })}`);
+  },
+  /** listDomainVLANs reads one page of the VLANs of a domain (the domain filter). */
+  listDomainVLANs(
+    domainId: string,
+    params: { limit?: number; offset?: number } = {},
+  ): Promise<PaginatedResponse<VLAN>> {
+    return fetchAPI(`/vlan-domains/${domainId}/vlans${qs({ limit: API_MAX_LIMIT, ...params })}`);
+  },
+  createVLANDomain(data: VLANDomainCreate): Promise<VLANDomain> {
+    return fetchAPI('/vlan-domains', { method: 'POST', body: JSON.stringify(data) });
+  },
+  updateVLANDomain(id: string, data: VLANDomainUpdate): Promise<VLANDomain> {
+    return fetchAPI(`/vlan-domains/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  deleteVLANDomain(id: string): Promise<void> {
+    return fetchAPI(`/vlan-domains/${id}`, { method: 'DELETE' });
+  },
+  /** listVRFs reads one page (at most API_MAX_LIMIT) of the VRFs with RD, RT and sections. */
+  listVRFs(params: { limit?: number; offset?: number } = {}): Promise<PaginatedResponse<IPAMVRF>> {
+    return fetchAPI(`/vrfs${qs({ limit: API_MAX_LIMIT, ...params })}`);
+  },
+  createVRF(data: VRFCreate): Promise<IPAMVRF> {
+    return fetchAPI('/vrfs', { method: 'POST', body: JSON.stringify(data) });
+  },
+  updateVRF(id: string, data: VRFUpdate): Promise<IPAMVRF> {
+    return fetchAPI(`/vrfs/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  /** deleteVRF: the default VRF and a VRF with subnets are refused (409). */
+  deleteVRF(id: string): Promise<void> {
+    return fetchAPI(`/vrfs/${id}`, { method: 'DELETE' });
+  },
+  createNameserverSet(data: NameserverSetCreate): Promise<NameserverSet> {
+    return fetchAPI('/nameserver-sets', { method: 'POST', body: JSON.stringify(data) });
+  },
+  updateNameserverSet(id: string, data: NameserverSetUpdate): Promise<NameserverSet> {
+    return fetchAPI(`/nameserver-sets/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  /** deleteNameserverSet: a set subnets use is refused (409). */
+  deleteNameserverSet(id: string): Promise<void> {
+    return fetchAPI(`/nameserver-sets/${id}`, { method: 'DELETE' });
+  },
   /** listNameserverSets reads one page (at most API_MAX_LIMIT) of the nameserver sets. */
   listNameserverSets(
     params: { limit?: number; offset?: number } = {},
@@ -1903,6 +1959,15 @@ export type VLAN = components['schemas']['VLAN'];
 /** IPAMVRF is a VRF with route distinguisher, route targets and sections (IPM-07). */
 export type IPAMVRF = components['schemas']['VRF'];
 export type NameserverSet = components['schemas']['NameserverSet'];
+export type NameserverSetCreate = components['schemas']['CreateNameserverSetRequest'];
+export type NameserverSetUpdate = components['schemas']['UpdateNameserverSetRequest'];
+export type VLANCreate = components['schemas']['CreateVLANRequest'];
+export type VLANUpdate = components['schemas']['UpdateVLANRequest'];
+export type VLANDomain = components['schemas']['VLANDomain'];
+export type VLANDomainCreate = components['schemas']['CreateVLANDomainRequest'];
+export type VLANDomainUpdate = components['schemas']['UpdateVLANDomainRequest'];
+export type VRFCreate = components['schemas']['CreateVRFRequest'];
+export type VRFUpdate = components['schemas']['UpdateVRFRequest'];
 
 /** IP_ADDRESS_STATES are the states of an address (IPM-04), labels ipam.states.*. */
 export const IP_ADDRESS_STATES = [

@@ -13,13 +13,14 @@ import { useTranslation } from 'react-i18next';
 import { ApiError, type FieldErrorInfo } from '../../api/client';
 import type { Subnet, SubnetCreate, SubnetUpdate } from '../../api/cmdb';
 import { useClients } from '../../api/cmdbHooks';
-import { useSites, useVrfs } from '../../api/hooks';
+import { useSites } from '../../api/hooks';
 import {
   useDeleteSubnet,
   useIPAMSections,
   useNameserverSetOptions,
   useSaveSubnet,
   useVLANOptions,
+  useVrfs,
 } from '../../api/ipamHooks';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';

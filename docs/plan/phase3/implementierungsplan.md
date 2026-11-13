@@ -3791,6 +3791,8 @@ IPM-19;[P3];G3;frontend/src/components/ipam/IpamTabs.test.tsx;WP-918
 
 **Entscheidungsbedarf:** keiner
 
+**Nachtrag 2026-11-13 (Umsetzung):** Die Reiterleiste liegt als eigene Komponente in `frontend/src/components/ipam/IpamTabList.tsx` (neu, Rollen `tablist`/`tab` mit Pfeiltasten), die `IpamPage.tsx` einbindet; ihre Beschriftungen stehen unter `ipam.tabs.*` (Liste und je Reiter ein Schlüssel, auch für den Subnetz-Reiter aus WP-915), ergänzend zu AK6. Der Umzug von `useVrfs` (AK5) zieht außer `DiscoveryPage.tsx` auch den Import in `frontend/src/components/ipam/SubnetFormModal.tsx` (WP-916) nach. Die Dateiliste erweitert sich damit um diese beiden Dateien. Die Schreib-Hooks für VRFs, VLANs und Domänen erneuern zusätzlich die Detailabfragen `['ipam','vrf']` und `['ipam','vlan']` der Subnetzdetailseite. Mit Domänen- und Standortfilter (lokal oder aus dem Layout-Scope, UI-01) lädt der Reiter VLANs die Folgeseiten, bis ein Treffer erscheint oder keine Seite mehr folgt.
+
 **Nicht Bestandteil:**
 - Reiter ASNs, Peerings und NAT: WP-1072 (`p3-asn-ui`).
 - Zuordnung eines Nameserver-Sets am Subnetz im Subnetzformular: WP-916 (`p3-ipam-ui-subnet`).
