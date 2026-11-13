@@ -1129,10 +1129,13 @@ jobs:
             curl -fsS "$kc/realms/master/protocol/openid-connect/token" -d grant_type=password -d client_id=admin-cli \
               --data-urlencode "username=$admin" --data-urlencode "password=$1" | jq -r .access_token
           }
-          # The rotated admin password works, the old one no longer.
+          # The rotated admin password works, the old one no longer: Keycloak
+          # 26.8 answers wrong user credentials with 400 invalid_grant (before
+          # 26.8 with 401), never with a token.
           token="$(admin_token "$(value KEYCLOAK_ADMIN_PASSWORD "$env_file")")"
-          [ "$(status "$kc/realms/master/protocol/openid-connect/token" -d grant_type=password -d client_id=admin-cli \
-            --data-urlencode "username=$admin" --data-urlencode "password=$(value KEYCLOAK_ADMIN_PASSWORD "$RUNNER_TEMP/env.first")")" = 401 ]
+          old_login="$(curl -s "$kc/realms/master/protocol/openid-connect/token" -d grant_type=password -d client_id=admin-cli \
+            --data-urlencode "username=$admin" --data-urlencode "password=$(value KEYCLOAK_ADMIN_PASSWORD "$RUNNER_TEMP/env.first")")"
+          jq -e '.error == "invalid_grant" and (has("access_token") | not)' <<<"$old_login" >/dev/null
           api() { curl -fsS -H "Authorization: Bearer $token" -H 'Content-Type: application/json' "$@"; }
           client="$(api "$kc/admin/realms/reticora/clients?clientId=reticora-app" | jq '.[0]')"
           jq -e '.redirectUris | index("http://127.0.0.1:3000/auth/callback")' <<<"$client" >/dev/null
