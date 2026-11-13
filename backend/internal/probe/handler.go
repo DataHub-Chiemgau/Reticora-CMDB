@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 )
@@ -38,7 +39,17 @@ import (
 // (probewire.Validate, timeout below interval), every violation 422 with
 // field; the target fitting the type; the parent chain without cycle (409)
 // and at most MaxProbeDepth levels deep (422), under the advisory lock
-// probe_parent:<org>. The last write of the transaction is the event
+// probe_parent:<org>. A create, a change and an enable are admitted against
+// the probe budget of the organization (PKG-04, WP-940; BudgetGate): the
+// first lock of the transaction is the budget lock database.LockQuota(ctx,
+// org, "probe_budget"), exclusive, before every row lock; the budget before
+// and after the write is counted in the same transaction over every active
+// probe of the organization (a create before its insert, a change after the
+// row lock of the changed probe only, before its update); a raise above a
+// quota is 403 entitlement-limit, an interval below min_probe_interval_s
+// 422 on interval_s, also on a disabled probe. A delete or a disable raises
+// nothing. The last write of the
+// transaction is the event
 // config.changed (WP-867, Konvention 20); the route audit writes the entry
 // with the snapshot of the probe row (audit.routeSnapshots).
 
@@ -126,6 +137,21 @@ type Store interface {
 	Update(ctx context.Context, id string, change func(current *Probe) (*Probe, []string, error), check Check) (*Probe, error)
 	// Delete removes the probe (ErrNotFound when missing or invisible).
 	Delete(ctx context.Context, id string) error
+	// SetBudget makes Create and Update admit the probe budget with gate
+	// and the resolution raise intervals to the plan minimum (WP-940);
+	// nil admits every write.
+	SetBudget(gate BudgetGate)
+}
+
+// BudgetGate admits the probe budget of an organization
+// (entitlement.Service, PKG-04, WP-940).
+type BudgetGate interface {
+	// AllowProbeChange refuses a raise of the budget above a quota (403
+	// entitlement-limit) or an interval below min_probe_interval_s (422
+	// on interval_s).
+	AllowProbeChange(ctx context.Context, orgID string, before, after entitlement.ProbeBudget) error
+	// MinProbeIntervalS returns min_probe_interval_s (0 without one).
+	MinProbeIntervalS(ctx context.Context, orgID string) (int64, error)
 }
 
 // Handler serves the probe routes.
@@ -135,6 +161,12 @@ type Handler struct {
 
 // NewHandler returns the handler on store.
 func NewHandler(store Store) *Handler { return &Handler{store: store} }
+
+// WithBudget admits the writes against the probe budget of gate (WP-940).
+func (h *Handler) WithBudget(gate BudgetGate) *Handler {
+	h.store.SetBudget(gate)
+	return h
+}
 
 // RegisterRoutes mounts the routes.
 func (h *Handler) RegisterRoutes(r chi.Router) {
@@ -160,6 +192,7 @@ func requireOrg(w http.ResponseWriter, r *http.Request) bool {
 func writeError(w http.ResponseWriter, err error) {
 	var ve *ValidationError
 	switch {
+	case api.WriteEntitlementError(w, err):
 	case errors.Is(err, ErrNotFound):
 		api.WriteError(w, http.StatusNotFound, "Not Found", "probe not found")
 	case errors.As(err, &ve):
@@ -476,6 +509,69 @@ func createdFields(p *Probe) []string {
 // DeletedField is the changed field config.changed names for a deleted
 // probe.
 const DeletedField = "deleted"
+
+// budgetTarget is the monitored target of a probe for the budget: the CI,
+// or without one the host of the target within the probe's client (an
+// icmp and a tcp probe of one host are one target).
+func budgetTarget(p *Probe) string {
+	if p.CIID != "" {
+		return "ci:" + p.CIID
+	}
+	host := p.Target
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return "host:" + p.ClientID + ":" + strings.ToLower(strings.TrimSuffix(strings.Trim(host, "[]"), "."))
+}
+
+// budgetSpec is the part of the effective values the budget counts.
+func budgetSpec(p *Probe, e *EffectiveSpec) entitlement.EffectiveSpec {
+	return entitlement.EffectiveSpec{Type: p.Type, Target: budgetTarget(p), IntervalS: e.IntervalS.Int(), Active: p.Enabled}
+}
+
+// admitBudget admits a write against the budget (WP-940 AK2, AK3): active
+// are the active probes of the organization as stored, read in the write
+// transaction after the budget lock, layersOf their override levels with
+// the plan minimum; current is the stored probe (nil for a create), next
+// the probe to store with its levels nextLayers (plan minimum set). The
+// stored probes run at their effective interval, raised to the plan
+// minimum; next runs at the interval the write asks for, unless the write
+// leaves the interval as it was on a running probe (stock below the plan
+// minimum stays changeable). Enabling a probe or asking for another
+// interval checks the interval the write asks for, also on a disabled
+// probe (PKG-04: an interval below min_probe_interval_s is 422 on
+// interval_s, so a disabled probe cannot carry one past the check); a
+// disabled next counts nothing else (active may be nil).
+func admitBudget(ctx context.Context, gate BudgetGate, orgID string, active []Probe, layersOf func(*Probe) Layers,
+	current, next *Probe, nextLayers Layers) error {
+	raw := nextLayers
+	raw.PlanMinIntervalS = 0
+	e := Resolve(next, raw)
+	asked := current == nil || !current.Enabled || Resolve(current, raw).IntervalS.Int() != e.IntervalS.Int()
+	if !next.Enabled {
+		if !asked || nextLayers.PlanMinIntervalS <= 0 || e.IntervalS.Int() >= nextLayers.PlanMinIntervalS {
+			return nil
+		}
+		// Only the interval rises: AllowProbeChange checks it (422).
+		return gate.AllowProbeChange(ctx, orgID, entitlement.ProbeBudget{}, entitlement.ProbeBudget{MinIntervalS: e.IntervalS.Int()})
+	}
+	if !asked {
+		e = Resolve(next, nextLayers)
+	}
+	before := make([]entitlement.EffectiveSpec, 0, len(active))
+	after := make([]entitlement.EffectiveSpec, 0, len(active)+1)
+	for i := range active {
+		p := &active[i]
+		stored := Resolve(p, layersOf(p))
+		spec := budgetSpec(p, &stored)
+		before = append(before, spec)
+		if current == nil || p.ID != current.ID {
+			after = append(after, spec)
+		}
+	}
+	after = append(after, budgetSpec(next, &e))
+	return gate.AllowProbeChange(ctx, orgID, entitlement.BudgetOf(before), entitlement.BudgetOf(after))
+}
 
 // checkStatic checks what needs no read: the reference ids are UUIDs, the
 // type is known and available, params is an object and the target is

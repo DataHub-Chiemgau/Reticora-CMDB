@@ -1785,3 +1785,6 @@ IPM-15;[P3];G3;backend/internal/ipam/nat_integration_test.go;WP-1071
 IPM-17;[P3];G3;backend/internal/ipam/bgp_integration_test.go;WP-1068
 IPM-19;[P3];G3;frontend/src/pages/IpamPage.test.tsx;WP-915
 UI-14;[P2–P4, A];G3;frontend/src/pages/IpamPage.test.tsx;WP-915
+PKG-04;[P3];E;backend/internal/probe/budget_integration_test.go;WP-940
+NFR-11;[P3];E;backend/internal/entitlement/probe_budget_test.go;WP-940
+PRT-01;[P3];E;backend/internal/entitlement/probe_budget_test.go;WP-940

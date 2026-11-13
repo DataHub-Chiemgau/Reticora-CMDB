@@ -517,6 +517,33 @@ default from an override. Monitoring quotas are admitted under the
 advisory lock `database.LockQuota` (`Service.AdmitCount`), so concurrent
 creations cannot pass the limit; an interval below `min_probe_interval_s`
 is 422 on `interval_s` (`Service.CheckInterval`).
+**Probe budget (PKG-04, NFR-11, WP-940):** the monitoring domain admits
+every create, change and enable of a probe with
+`entitlement.(*Service).AllowProbeChange(ctx, org, before, after)`; the
+budgets come from `entitlement.BudgetOf` over the effective values of the
+active probes: distinct targets (the CI, else the host of the target in
+the probe's client) against `max_monitored_targets`, Σ 60/`interval_s`
+exactly as a fraction against `max_probes_per_minute` (30 s are 2 checks
+per minute), distinct targets per registry type against
+`max_targets_<type>` and the shortest interval against
+`min_probe_interval_s`. Lock order: the write transaction takes the budget
+lock `database.LockQuota(ctx, org, "probe_budget")` exclusively first,
+before every row lock, and counts both budgets in the same transaction
+over every active probe of the organization (also those outside the
+caller's scope). A create counts before its insert. A change takes, after
+the budget lock, only the row lock of the changed probe (`probe` `FOR NO
+KEY UPDATE`; the count then sees the row it changes as stored, and no
+other write can change it before the commit) and counts before its update;
+the advisory lock `probe_parent:<org>` follows it. A disabled probe needs
+no budget lock: only the interval it asks for is checked.
+Error mapping: a raise above a quota is 403 `entitlement-limit` naming the
+quota and its limit, a shorter interval than the plan minimum 422 on
+`interval_s`, also on a disabled probe (a create, an interval change and
+an enable of a probe stored below the minimum); the limit is reachable
+exactly. Only raises are checked: delete and disable never refuse, and stock above a quota after a plan
+change keeps running. A stored interval below `min_probe_interval_s` runs
+at the minimum: the resolution of the effective values marks it with
+origin `plan` and `clamped`.
 `gps_standard` gates the GPS history in the P4 module `gps`; disposal
 records (MGT-02) are the P2 module `disposal` with `assets_basic`.
 Migration 000190 moved existing

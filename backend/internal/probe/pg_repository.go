@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 )
 
@@ -21,10 +23,72 @@ import (
 // principal may see.
 type PGRepository struct {
 	pool *pgxpool.Pool
+	// budget admits the writes against the probe budget (WP-940); nil
+	// admits every write.
+	budget BudgetGate
 }
 
 // NewPGRepository returns the repository on pool.
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository { return &PGRepository{pool: pool} }
+
+// SetBudget implements Store.
+func (r *PGRepository) SetBudget(gate BudgetGate) { r.budget = gate }
+
+// planMin returns min_probe_interval_s of the organization for the
+// resolution (0 without a budget gate).
+func (r *PGRepository) planMin(ctx context.Context, orgID string) (int64, error) {
+	if r.budget == nil {
+		return 0, nil
+	}
+	return r.budget.MinProbeIntervalS(ctx, orgID)
+}
+
+// lockBudget takes the budget lock of the organization (WP-940 AK3) as
+// the first lock of a write transaction, exclusive.
+func (r *PGRepository) lockBudget(ctx context.Context, tx pgx.Tx, orgID string) error {
+	if r.budget == nil {
+		return nil
+	}
+	return database.LockQuota(database.ContextWithTx(ctx, tx), orgID, entitlement.ProbeBudgetLock)
+}
+
+// admit counts the budget of the organization before and after the write
+// in the transaction (under the budget lock) and admits it: every active
+// probe of the organization, read with the client and site scope widened
+// (only the budget leaves it). A disabled next counts nothing and needs no
+// budget lock: only the interval it asks for is checked against the plan
+// minimum (admitBudget).
+func (r *PGRepository) admit(ctx context.Context, tx pgx.Tx, orgID string, current, next *Probe) error {
+	if r.budget == nil {
+		return nil
+	}
+	txCtx := database.ContextWithTx(ctx, tx)
+	planMin, err := r.budget.MinProbeIntervalS(txCtx, orgID)
+	if err != nil {
+		return err
+	}
+	if !next.Enabled {
+		return admitBudget(txCtx, r.budget, orgID, nil, nil, current, next, Layers{PlanMinIntervalS: planMin})
+	}
+	var (
+		active []Probe
+		x      *layerIndex
+	)
+	err = (&pgWriteTx{tx: tx, orgID: orgID}).widened(ctx, func() error {
+		var rerr error
+		active, rerr = collectProbes(ctx, tx, `SELECT `+probeColumns+` FROM probe p WHERE p.organization_id = $1 AND p.enabled`, orgID)
+		if rerr != nil {
+			return rerr
+		}
+		x, rerr = loadLayers(ctx, tx, orgID, append(slices.Clone(active), *next))
+		return rerr
+	})
+	if err != nil {
+		return fmt.Errorf("count probe budget: %w", err)
+	}
+	x.planMin = planMin
+	return admitBudget(txCtx, r.budget, orgID, active, x.layers, current, next, x.layers(next))
+}
 
 var _ Repository = (*PGRepository)(nil)
 
@@ -171,6 +235,9 @@ func (r *PGRepository) Layers(ctx context.Context, p *Probe) (Layers, error) {
 		if err != nil {
 			return err
 		}
+		if x.planMin, err = r.planMin(database.ContextWithTx(ctx, tx), orgID); err != nil {
+			return err
+		}
 		l = x.layers(p)
 		return nil
 	})
@@ -215,6 +282,9 @@ func (r *PGRepository) ResolveForCollector(ctx context.Context, collectorID stri
 		if err != nil {
 			return err
 		}
+		if x.planMin, err = r.planMin(database.ContextWithTx(ctx, tx), orgID); err != nil {
+			return err
+		}
 		out = x.resolveAll(probes, epochs)
 		return nil
 	})
@@ -235,6 +305,9 @@ func (r *PGRepository) ResolveForGroup(ctx context.Context, groupID string) ([]R
 		}
 		x, err := loadLayers(ctx, tx, orgID, probes)
 		if err != nil {
+			return err
+		}
+		if x.planMin, err = r.planMin(database.ContextWithTx(ctx, tx), orgID); err != nil {
 			return err
 		}
 		out = x.resolveAll(probes, nil)
@@ -388,6 +461,11 @@ func (r *PGRepository) Create(ctx context.Context, in *Probe, check Check) (*Pro
 	err := r.tenant(ctx, func(ctx context.Context, tx pgx.Tx, orgID string) error {
 		p := *in
 		p.OrganizationID = orgID
+		if p.Enabled {
+			if werr := r.lockBudget(ctx, tx, orgID); werr != nil {
+				return werr
+			}
+		}
 		if p.ParentProbeID != "" {
 			if werr := lockParents(ctx, tx, orgID); werr != nil {
 				return werr
@@ -397,6 +475,9 @@ func (r *PGRepository) Create(ctx context.Context, in *Probe, check Check) (*Pro
 			if err := check(ctx, &pgWriteTx{tx: tx, orgID: orgID}, &p, nil); err != nil {
 				return err
 			}
+		}
+		if err := r.admit(ctx, tx, orgID, nil, &p); err != nil {
+			return err
 		}
 		created, err := scanProbe(tx.QueryRow(ctx, `INSERT INTO probe AS p (organization_id, client_id, site_id, ci_id,
 				collector_group_id, type, target, params, enabled, parent_probe_id, created_by_surrogate)
@@ -422,6 +503,11 @@ func (r *PGRepository) Update(ctx context.Context, id string, change func(*Probe
 	}
 	var out Probe
 	err := r.tenant(ctx, func(ctx context.Context, tx pgx.Tx, orgID string) error {
+		// The budget lock comes before every row lock (WP-940 AK3); a
+		// delete takes none, so the row lock below cannot deadlock with it.
+		if err := r.lockBudget(ctx, tx, orgID); err != nil {
+			return err
+		}
 		// FOR NO KEY UPDATE, not FOR UPDATE: the change never touches the
 		// key, and the weaker lock does not conflict with the FOR KEY SHARE
 		// that the foreign key probe_parent_fkey takes on a parent. With
@@ -453,6 +539,9 @@ func (r *PGRepository) Update(ctx context.Context, id string, change func(*Probe
 		if len(fields) == 0 {
 			out = current
 			return nil
+		}
+		if werr := r.admit(ctx, tx, orgID, &current, next); werr != nil {
+			return werr
 		}
 		out, err = scanProbe(tx.QueryRow(ctx, `UPDATE probe AS p SET target = $3, params = $4, enabled = $5,
 				parent_probe_id = $6, collector_group_id = $7

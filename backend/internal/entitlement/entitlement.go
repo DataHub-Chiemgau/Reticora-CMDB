@@ -884,7 +884,9 @@ func (s *Service) StorageLimitBytes(ctx context.Context, orgID string) (*int64, 
 // when count + n exceeds the stored limit. Without a context transaction it
 // fails with database.ErrNoLockTx, without the feature of the quota with
 // FeatureNotEntitledError; without a stored limit or with enforcement off
-// it admits. WP-940 calls it for the probe targets.
+// it admits. The probes admit their whole budget instead (targets, checks
+// per minute, caps per type and the shortest interval: AllowProbeChange
+// under the lock ProbeBudgetLock, probe_budget.go, WP-940).
 func (s *Service) AdmitCount(ctx context.Context, orgID, quota string, n int64, count func(ctx context.Context) (int64, error)) error {
 	feature, ok := QuotaFeatureOf(quota)
 	if !ok {

@@ -36,9 +36,15 @@ import (
 // register; the other origins are the levels (LevelOrg … LevelProbe).
 const OriginDefault = "default"
 
+// OriginPlan is the origin of an interval raised to min_probe_interval_s
+// of the organization's plan (PKG-04, WP-940 AK4): a stored interval below
+// the plan minimum (stock after a plan change) runs at the minimum and is
+// marked clamped.
+const OriginPlan = "plan"
+
 // Origins lists the origins of an effective value from the widest to the
-// narrowest.
-var Origins = []string{OriginDefault, LevelOrg, LevelClient, LevelGroup, LevelCI, LevelProbe}
+// narrowest; plan overrides every level for the interval only.
+var Origins = []string{OriginDefault, LevelOrg, LevelClient, LevelGroup, LevelCI, LevelProbe, OriginPlan}
 
 // Reserved keys of an override set; every other key is a type parameter.
 const (
@@ -195,12 +201,14 @@ type GroupOverrides struct {
 // Layers are the override sets of the levels above the probe for the
 // probe's type: the organization's profile, the profile of the probe's
 // client, the profiles of the monitoring groups of its CI (any order) and
-// the CI's profile. A level without profile is nil.
+// the CI's profile. A level without profile is nil. PlanMinIntervalS is
+// min_probe_interval_s of the organization (0 without one, WP-940 AK4).
 type Layers struct {
-	Org    Overrides
-	Client Overrides
-	Groups []GroupOverrides
-	CI     Overrides
+	Org              Overrides
+	Client           Overrides
+	Groups           []GroupOverrides
+	CI               Overrides
+	PlanMinIntervalS int64
 }
 
 // rankedGroups returns the groups in rank order (priority descending, name,
@@ -243,6 +251,10 @@ func resolveWith(t *probewire.Type, p *Probe, own Overrides, layers Layers) Effe
 		Thresholds: map[string]Field{}, Params: map[string]Field{},
 	}
 	e.IntervalS = r.intField(KeyIntervalS, t.DefaultIntervalS, t.MinIntervalS, t.MaxIntervalS)
+	// PKG-04: the plan minimum raises a shorter interval (WP-940 AK4).
+	if planMin := min(layers.PlanMinIntervalS, t.MaxIntervalS); planMin > 0 && e.IntervalS.Int() < planMin {
+		e.IntervalS = Field{Value: planMin, Origin: OriginPlan, Clamped: true}
+	}
 	e.TimeoutS = r.intField(KeyTimeoutS, t.DefaultTimeoutS, t.MinTimeoutS, t.MaxTimeoutS)
 	e.DownCount = r.intField(KeyDownCount, int64(t.DefaultDownCount), probewire.MinCount, probewire.MaxCount)
 	e.UpCount = r.intField(KeyUpCount, int64(t.DefaultUpCount), probewire.MinCount, probewire.MaxCount)

@@ -979,7 +979,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		monitoringHandler,
 		// The probe definitions and the probe type register (PRB-01,
 		// PRT-01, WP-939).
-		probe.NewHandler(probeStore(&repos)),
+		probe.NewHandler(probeStore(&repos, opts.Entitlements)),
 		// The BFF gates the fields of late modules itself (WP-311): its
 		// route belongs to no module prefix.
 		graphqlbff.NewHandler(repos.CI, repos.Relationship).WithEntitlements(opts.Entitlements).
@@ -1682,11 +1682,17 @@ func UsageCounters(repos *Repositories) entitlement.UsageCounters {
 
 // probeStore returns the probe store of repos, an empty memory store when
 // the repositories carry none (tests that build them partly).
-func probeStore(repos *Repositories) probe.Store {
-	if repos.Probes != nil {
-		return repos.Probes
+func probeStore(repos *Repositories, ents *entitlement.Service) probe.Store {
+	store := repos.Probes
+	if store == nil {
+		store = probe.NewMemoryRepository()
 	}
-	return probe.NewMemoryRepository()
+	// Creates, changes and enables are admitted against the probe budget
+	// of the plan (PKG-04, WP-940).
+	if ents != nil {
+		store.SetBudget(ents)
+	}
+	return store
 }
 
 // admpTargetsOf resolves the interfaces and CIs of the ADMP read routes

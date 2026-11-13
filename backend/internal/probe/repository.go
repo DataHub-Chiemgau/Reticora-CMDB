@@ -59,6 +59,8 @@ type layerIndex struct {
 	ci     map[[2]string]Overrides
 	// groups are the monitoring groups of each CI.
 	groups map[string][]memberGroup
+	// planMin is min_probe_interval_s of the organization (WP-940 AK4).
+	planMin int64
 }
 
 // memberGroup is a monitoring group of a CI.
@@ -94,7 +96,7 @@ func (x *layerIndex) add(p *MonitoringProfile) {
 
 // layers assembles the levels of probe p.
 func (x *layerIndex) layers(p *Probe) Layers {
-	l := Layers{Org: x.org[p.Type]}
+	l := Layers{Org: x.org[p.Type], PlanMinIntervalS: x.planMin}
 	if p.ClientID != "" {
 		l.Client = x.client[[2]string{p.Type, p.ClientID}]
 	}

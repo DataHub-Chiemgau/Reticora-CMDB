@@ -5235,7 +5235,7 @@ PRT-01;[P3];E;backend/internal/probe/handler_test.go;WP-939
 - [ ] AK4: Die effektive Auflösung (WP-937) hebt ein Intervall unter `min_probe_interval_s` auf den Paketwert an und markiert das Feld mit `origin` `plan` und `clamped` (Bestand nach Paketwechsel).
 - [ ] AK5: `docs/README.md` beschreibt die Schnittstelle für die Monitoring-Domäne mit Sperrreihenfolge (Budget-Sperre vor Zeilensperren) und Fehlerabbildung.
 
-**Dateien (10 Einträge):**
+**Dateien (12 Einträge):**
 
 - backend/internal/entitlement/probe_budget.go (neu)
 - backend/internal/entitlement/probe_budget_test.go (neu)
@@ -5244,6 +5244,8 @@ PRT-01;[P3];E;backend/internal/probe/handler_test.go;WP-939
 - backend/internal/probe/memory_repo.go (aus WP-939)
 - backend/internal/probe/handler.go (aus WP-939)
 - backend/internal/probe/effective.go (aus WP-937)
+- backend/internal/probe/repository.go (aus WP-937; Planminimum im Ebenenindex der Auflösung)
+- backend/internal/server/router.go (Verdrahtung des Budgets: `probeStore` setzt `SetBudget` mit dem Entitlement-Dienst)
 - backend/internal/probe/budget_integration_test.go (neu)
 - docs/README.md
 - docs/traceability.csv
@@ -5253,7 +5255,7 @@ PRT-01;[P3];E;backend/internal/probe/handler_test.go;WP-939
 **Tests:**
 
 - `backend/internal/entitlement/probe_budget_test.go`: `TestBudgetPerMinute` (Intervall 30 s → 2/min je Ziel, 7 s exakt als Bruch), `TestAllowProbeChangeAtLimit` (genau an der Grenze erlaubt, eins darüber 403), `TestAllowProbeChangeTypeCap` (`max_targets_icmp`), `TestAllowProbeChangeIntervalBelowMinimum` (422 `interval_s`), `TestDecreaseNeverRefused`.
-- `backend/internal/probe/budget_integration_test.go` (PostgreSQL): `TestConcurrentProbeCreateRespectsQuota` (`max_monitored_targets` = 5, 20 parallele Anlagen → genau 5 erfolgreich), `TestIntervalChangeRespectsPerMinute` (Intervalländerung über das Budget → 403, keine Teiländerung), `TestResolveClampsToPlanMinimum` (`origin` `plan`).
+- `backend/internal/probe/budget_integration_test.go` (PostgreSQL): `TestConcurrentProbeCreateRespectsQuota` (`max_monitored_targets` = 5, 20 parallele Anlagen → genau 5 erfolgreich), `TestIntervalChangeRespectsPerMinute` (Intervalländerung über das Budget → 403, keine Teiländerung), `TestResolveClampsToPlanMinimum` (`origin` `plan`), `TestDisabledProbeIntervalBelowMinimum` (auch eine deaktivierte Probe: Anlage und Intervalländerung unter dem Minimum sowie Aktivieren eines Bestands darunter → 422 `interval_s`).
 
 **Traceability (`docs/traceability.csv`):**
 

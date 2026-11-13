@@ -27,6 +27,48 @@ type MemoryRepository struct {
 	// clients and sites are the known ones; nil accepts every id.
 	clients map[string]string
 	sites   map[string]memSite
+	// budget admits the writes against the probe budget under the mutex
+	// (WP-940 AK3); nil admits every write.
+	budget BudgetGate
+}
+
+// SetBudget implements Store.
+func (m *MemoryRepository) SetBudget(gate BudgetGate) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.budget = gate
+}
+
+// planMin returns min_probe_interval_s of the organization (0 without a
+// budget gate).
+func (m *MemoryRepository) planMin(ctx context.Context, orgID string) (int64, error) {
+	if m.budget == nil {
+		return 0, nil
+	}
+	return m.budget.MinProbeIntervalS(ctx, orgID)
+}
+
+// admit admits a write against the budget of the organization; the
+// store's lock is held, so the count is exact under concurrency.
+func (m *MemoryRepository) admit(ctx context.Context, orgID string, current, next *Probe) error {
+	if m.budget == nil {
+		return nil
+	}
+	planMin, err := m.planMin(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	if !next.Enabled {
+		return admitBudget(ctx, m.budget, orgID, nil, nil, current, next, Layers{PlanMinIntervalS: planMin})
+	}
+	active := make([]Probe, 0)
+	for _, p := range m.probes {
+		if p.OrganizationID == orgID && p.Enabled {
+			active = append(active, *p)
+		}
+	}
+	layers := Layers{PlanMinIntervalS: planMin}
+	return admitBudget(ctx, m.budget, orgID, active, func(*Probe) Layers { return layers }, current, next, layers)
 }
 
 // memGroup is a collector group of the memory store.
@@ -190,8 +232,14 @@ func (m *MemoryRepository) Count(ctx context.Context, f *ListFilter) (int, error
 	return len(m.matching(&s, f)), nil
 }
 
-// Layers implements Repository: the memory store keeps no profiles.
-func (m *MemoryRepository) Layers(context.Context, *Probe) (Layers, error) { return Layers{}, nil }
+// Layers implements Repository: the memory store keeps no profiles; only
+// the plan minimum applies.
+func (m *MemoryRepository) Layers(ctx context.Context, p *Probe) (Layers, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	planMin, err := m.planMin(ctx, p.OrganizationID)
+	return Layers{PlanMinIntervalS: planMin}, err
+}
 
 // ResolveForCollector implements Repository: the memory store keeps no
 // assignments.
@@ -206,6 +254,14 @@ func (m *MemoryRepository) ResolveForGroup(ctx context.Context, groupID string) 
 		return nil, err
 	}
 	x := newLayerIndex()
+	if s, ok := database.TenantScopeFromContext(ctx); ok {
+		m.mu.Lock()
+		x.planMin, err = m.planMin(ctx, s.OrgID)
+		m.mu.Unlock()
+		if err != nil {
+			return nil, err
+		}
+	}
 	return x.resolveAll(probes, nil), nil
 }
 
@@ -251,6 +307,9 @@ func (m *MemoryRepository) Create(ctx context.Context, in *Probe, check Check) (
 	if m.taken(&p) {
 		return nil, ErrTargetTaken
 	}
+	if werr := m.admit(ctx, s.orgID, nil, &p); werr != nil {
+		return nil, werr
+	}
 	if p.ID, err = newID(); err != nil {
 		return nil, err
 	}
@@ -292,6 +351,9 @@ func (m *MemoryRepository) Update(ctx context.Context, id string, change func(*P
 	}
 	if m.taken(next) {
 		return nil, ErrTargetTaken
+	}
+	if err := m.admit(ctx, s.orgID, &current, next); err != nil {
+		return nil, err
 	}
 	next.UpdatedAt = time.Now().UTC()
 	stored := *next
