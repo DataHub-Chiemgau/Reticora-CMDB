@@ -32,6 +32,9 @@ import (
 //	GET    /api/v1/monitoring/probe-types        the register api/probe-types.json (WP-934)
 //	GET    /api/v1/monitoring/probe-types/{key}  one entry of the register
 //
+// The query routes of the probe data (results, state, state-changes,
+// WP-975) are in query.go.
+//
 // A write checks in its transaction: the references (CI, client, site,
 // collector group, parent probe) in the caller's scope, unknown and
 // invisible alike 422; the type known and available, the override set of
@@ -181,6 +184,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/monitoring/probe-types", h.listTypes)
 	r.Get("/api/v1/monitoring/probe-types/{key}", h.getType)
 	h.registerProfileRoutes(r)
+	h.registerQueryRoutes(r)
 }
 
 // requireOrg answers 401 without tenant.

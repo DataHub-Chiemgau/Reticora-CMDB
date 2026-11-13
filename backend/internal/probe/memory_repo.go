@@ -40,6 +40,10 @@ type MemoryRepository struct {
 	// suppressed are the (organization, CI, type) of deleted auto probes
 	// (WP-949).
 	suppressed map[[3]string]bool
+	// states and changes are the probe states and state changes the query
+	// routes read (WP-975); RecordState and RecordStateChange feed them.
+	states  map[string]StateView
+	changes map[string][]StateChangeView
 }
 
 // Suppressed reports whether a deleted auto probe of the type suppresses
@@ -1055,4 +1059,99 @@ func (m *MemoryRepository) RemoveGroupMember(ctx context.Context, groupID, ciID 
 		delete(m.members, k)
 		return func() { m.members[k] = mem }, nil
 	})
+}
+
+// RecordState stores the current state of a probe for the query routes
+// (WP-975); the --no-db profile has no state worker.
+func (m *MemoryRepository) RecordState(st StateView) { //nolint:gocritic // stored as a copy
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.states == nil {
+		m.states = map[string]StateView{}
+	}
+	m.states[st.ProbeID] = st
+}
+
+// RecordStateChange stores a state change of a probe for the query routes
+// (WP-975); an empty id gets a random one.
+func (m *MemoryRepository) RecordStateChange(c StateChangeView) error { //nolint:gocritic // stored as a copy
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.changes == nil {
+		m.changes = map[string][]StateChangeView{}
+	}
+	if c.ID == "" {
+		id, err := newID()
+		if err != nil {
+			return err
+		}
+		c.ID = id
+	}
+	m.changes[c.ProbeID] = append(m.changes[c.ProbeID], c)
+	return nil
+}
+
+// ProbeResults implements QueryStore: the memory repository keeps no
+// results; the series is empty (WP-975 AK6).
+func (m *MemoryRepository) ProbeResults(context.Context, string, Tier, time.Time, time.Time) ([]ResultPoint, error) {
+	return []ResultPoint{}, nil
+}
+
+// ProbeState implements QueryStore.
+func (m *MemoryRepository) ProbeState(ctx context.Context, probeID string) (StateView, bool, error) {
+	s, err := scopeOf(ctx)
+	if err != nil {
+		return StateView{}, false, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.visible(&s, probeID); !ok {
+		return StateView{}, false, nil
+	}
+	st, ok := m.states[probeID]
+	return st, ok, nil
+}
+
+// ProbeStateChanges implements QueryStore with the order and keyset of
+// PGRepository.
+func (m *MemoryRepository) ProbeStateChanges(ctx context.Context, probeID string, from, to time.Time, page api.PaginationParams) ([]StateChangeView, int, error) {
+	s, err := scopeOf(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	m.mu.Lock()
+	var matching []StateChangeView
+	if _, ok := m.visible(&s, probeID); ok {
+		all := m.changes[probeID]
+		for i := range all {
+			if !all[i].ObservedAt.Before(from) && all[i].ObservedAt.Before(to) {
+				matching = append(matching, all[i])
+			}
+		}
+	}
+	m.mu.Unlock()
+	sort.SliceStable(matching, func(i, j int) bool {
+		a, b := matching[i], matching[j]
+		if !a.ObservedAt.Equal(b.ObservedAt) {
+			return a.ObservedAt.After(b.ObservedAt)
+		}
+		return a.ID > b.ID
+	})
+	start := min(page.Offset, len(matching))
+	if page.Cursor != nil {
+		at, id, perr := changePosition(page.Cursor)
+		if perr != nil {
+			return nil, 0, perr
+		}
+		start = len(matching)
+		for i := range matching {
+			c := &matching[i]
+			if c.ObservedAt.Before(at) || (c.ObservedAt.Equal(at) && c.ID < id) {
+				start = i
+				break
+			}
+		}
+	}
+	end := min(start+max(page.Limit, 0)+1, len(matching))
+	return slices.Clone(matching[start:end]), len(matching), nil
 }

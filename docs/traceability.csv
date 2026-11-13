@@ -1819,6 +1819,8 @@ ALR-05;[P3];E;backend/internal/monitoring/evaluator_series_integration_test.go;W
 PRT-04;[P3];E;collector/probe/http_test.go;WP-971
 PRB-06;[P3];E;backend/internal/probe/cagg_integration_test.go;WP-972
 NFR-06;[B];E;backend/internal/probe/cagg_integration_test.go;WP-972
+PRB-06;[P3];E;backend/internal/probe/query_integration_test.go;WP-975
+MON-03;[P3];E;backend/internal/probe/query_integration_test.go;WP-975
 PRT-20;[P3];E;collector/profiles/monitor_test.go;WP-1000
 WFL-02;[P3];F;backend/internal/workflow/serial_integration_test.go;WP-1089
 JOB-02;[B], Zusätze [P2], [P3];F;backend/internal/workflow/schedule_integration_test.go;WP-1091

@@ -315,6 +315,9 @@ GET /api/v1/monitoring/probe-types/{key} monitoring:read
 GET /api/v1/monitoring/probes monitoring:read
 GET /api/v1/monitoring/probes/{id} monitoring:read
 GET /api/v1/monitoring/probes/{id}/effective monitoring:read
+GET /api/v1/monitoring/probes/{id}/results monitoring:read
+GET /api/v1/monitoring/probes/{id}/state monitoring:read
+GET /api/v1/monitoring/probes/{id}/state-changes monitoring:read
 GET /api/v1/monitoring/profiles monitoring:read
 GET /api/v1/monitoring/profiles/{id} monitoring:read
 GET /api/v1/monitoring/sla/targets monitoring:read

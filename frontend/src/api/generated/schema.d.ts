@@ -10039,7 +10039,7 @@ export interface paths {
     };
     /**
      * Get the state of a probe
-     * @description Planned (WP-938, E-160); implemented by WP-975. The current state from probe_state (PRB-05); without a row state unknown with reason no_result. Requires monitoring:read; the feature and module monitoring gate the path.
+     * @description Implemented by WP-975 (E-160). The current state from probe_state (PRB-05); without a row state unknown with reason no_result. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['getProbeState'];
     put?: never;
@@ -10062,7 +10062,7 @@ export interface paths {
     };
     /**
      * List the results of a probe
-     * @description Planned (WP-938, E-160); implemented by WP-975. The results between from and to at most 400 days apart (else 422). Without step the server picks the finest tier of raw, 5m, 1h and 1d with at most 2,000 points whose retention covers from; step forces a tier (outside its retention or above 2,000 points: 422 step). Not a list: one series with its tier. Requires monitoring:read; the feature and module monitoring gate the path.
+     * @description Implemented by WP-975 (E-160). The results between from and to at most 400 days apart (else 422); without to the series ends now, without from it starts 24 hours before to. The probe is loaded in the caller's scope first: a probe outside it is 404. Without step the server picks the finest tier of raw, 5m, 1h and 1d with at most 2,000 points whose retention covers from; step forces a tier (outside its retention or above 2,000 points: 422 step). Not a list: one series with its tier. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['listProbeResults'];
     put?: never;
@@ -10085,7 +10085,7 @@ export interface paths {
     };
     /**
      * List the state changes of a probe
-     * @description Planned (WP-938, E-160); implemented by WP-975. The state changes (PRB-05, PRB-07) between from and to, newest observed_at first, cursor-paginated. Requires monitoring:read; the feature and module monitoring gate the path.
+     * @description Implemented by WP-975 (E-160). The state changes (PRB-05, PRB-07) between from and to (both optional; to not after from is 422), newest observed_at first, cursor-paginated. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['listProbeStateChanges'];
     put?: never;
