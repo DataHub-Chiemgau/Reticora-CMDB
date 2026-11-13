@@ -20,9 +20,9 @@ func TestSequenceMonotonicAcrossRestart(t *testing.T) {
 	}
 	var last uint64
 	for i := 0; i < 1500; i++ {
-		n, err := s.Next(StreamState)
-		if err != nil {
-			t.Fatal(err)
+		n, nerr := s.Next(StreamState)
+		if nerr != nil {
+			t.Fatal(nerr)
 		}
 		if n <= last {
 			t.Fatalf("sequence not rising: %d after %d", n, last)
@@ -107,7 +107,7 @@ func TestSequenceSurvivesCrashDuringWrite(t *testing.T) {
 		t.Fatalf("sequence file changed by the interrupted write: %s → %s", before, after)
 	}
 	// A leftover temporary file of a real crash is ignored.
-	if err := os.WriteFile(filepath.Join(dir, "."+SeqFile+".tmp-crash"), []byte(`{"reserved":{"res`), 0o600); err != nil {
+	if err = os.WriteFile(filepath.Join(dir, "."+SeqFile+".tmp-crash"), []byte(`{"reserved":{"res`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	entries, _ := os.ReadDir(dir)

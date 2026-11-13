@@ -31,7 +31,9 @@ func failResultOf(code string) probewire.Result {
 func errResult(code string) probewire.Result {
 	return probewire.Result{Status: probewire.StatusError, Code: code}
 }
-func warnResult() probewire.Result { return probewire.Result{Status: probewire.StatusOK, RTTMS: f64(500)} }
+func warnResult() probewire.Result {
+	return probewire.Result{Status: probewire.StatusOK, RTTMS: f64(500)}
+}
 
 // stateSpec is a tcp probe with rtt_warn_ms 100 as threshold.
 func stateSpec(down, up int) probewire.ProbeSpec {
