@@ -9897,7 +9897,7 @@ export interface paths {
     };
     /**
      * Get the effective settings of a probe
-     * @description Planned (WP-938, E-160); implemented by WP-946. The effective values of the probe (PRB-01, WP-937): every field with value, origin (default, org, client, group, ci, probe), clamped (a stored value moved to the current type limits) and, for origin group, the deciding monitoring group. Requires monitoring:read; the feature and module monitoring gate the path.
+     * @description Implemented by WP-946 (E-160). The effective values of the probe (PRB-01, WP-937): every field with value, origin (default, org, client, group, ci, probe), clamped (a stored value moved to the current type limits) and, for origin group, the deciding monitoring group. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['getProbeEffectiveSettings'];
     put?: never;
@@ -10052,13 +10052,13 @@ export interface paths {
     };
     /**
      * List monitoring profiles
-     * @description Planned (WP-938, E-160); implemented by WP-946. The overrides per level (org, client, group, ci) and probe type in the caller's scope; filters level, level_id and probe_type. Requires monitoring:read; the feature and module monitoring gate the path.
+     * @description Implemented by WP-946 (E-160). The overrides per level (org, client, group, ci) and probe type in the caller's scope; filters level, level_id and probe_type. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['listMonitoringProfiles'];
     put?: never;
     /**
      * Create a monitoring profile
-     * @description Planned (WP-938, E-160); implemented by WP-946. Values outside the type limits, timeout not below interval and an unknown or planned type are 422 with field (and the list in violations); an interval below min_probe_interval_s of the plan is 422 interval_s. One profile per level, level_id and probe type (409). A level_id outside the organization or the caller's scope is 404. An increase of the probe budget is 403 entitlement-limit. Requires monitoring:write; the feature and module monitoring gate the path.
+     * @description Implemented by WP-946 (E-160). Values outside the type limits, timeout not below interval and an unknown or planned type are 422 with field (and the list in violations); an interval below min_probe_interval_s of the plan is 422 interval_s. One profile per level, level_id and probe type (409). A level_id outside the organization or the caller's scope is 404. An org profile is written only by a principal without client and site restriction (403). An increase of the probe budget is 403 entitlement-limit, without partial change (WP-940). Every write on profiles and groups raises the config_version of the collectors the probes in its scope are assigned to, so their next assignment set request carries the new effective values (WP-948). Requires monitoring:write; the feature and module monitoring gate the path.
      */
     post: operations['createMonitoringProfile'];
     delete?: never;
@@ -10079,21 +10079,21 @@ export interface paths {
     };
     /**
      * Get a monitoring profile
-     * @description Planned (WP-938, E-160); implemented by WP-946. Requires monitoring:read; the feature and module monitoring gate the path.
+     * @description Implemented by WP-946 (E-160). Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['getMonitoringProfile'];
     put?: never;
     post?: never;
     /**
      * Delete a monitoring profile
-     * @description Planned (WP-938, E-160); implemented by WP-946. Requires monitoring:write; the feature and module monitoring gate the path.
+     * @description Implemented by WP-946 (E-160). Requires monitoring:write; the feature and module monitoring gate the path.
      */
     delete: operations['deleteMonitoringProfile'];
     options?: never;
     head?: never;
     /**
      * Update a monitoring profile
-     * @description Planned (WP-938, E-160); implemented by WP-946. Replaces the params with the checks of the creation. Requires monitoring:write; the feature and module monitoring gate the path.
+     * @description Implemented by WP-946 (E-160). Replaces the params with the checks of the creation. Requires monitoring:write; the feature and module monitoring gate the path.
      */
     patch: operations['updateMonitoringProfile'];
     trace?: never;
@@ -10107,13 +10107,13 @@ export interface paths {
     };
     /**
      * List monitoring groups
-     * @description Planned (WP-938, E-160); implemented by WP-946. The monitoring groups (device groups of PRB-01 and CRD-04, E-178) in the caller's scope: its clients' groups and the org-wide ones. Requires monitoring:read; the feature and module monitoring gate the path.
+     * @description Implemented by WP-946 (E-160). The monitoring groups (device groups of PRB-01 and CRD-04, E-178) in the caller's scope: its clients' groups and the org-wide ones. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['listMonitoringGroups'];
     put?: never;
     /**
      * Create a monitoring group
-     * @description Planned (WP-938, E-160); implemented by WP-946. A group of a client takes only CIs of that client; without client_id it is org-wide. The name is unique per organization (409). Requires monitoring:write; the feature and module monitoring gate the path.
+     * @description Implemented by WP-946 (E-160). A group of a client takes only CIs of that client; without client_id it is org-wide. The name is unique per organization (409). Requires monitoring:write; the feature and module monitoring gate the path.
      */
     post: operations['createMonitoringGroup'];
     delete?: never;
@@ -10134,21 +10134,21 @@ export interface paths {
     };
     /**
      * Get a monitoring group
-     * @description Planned (WP-938, E-160); implemented by WP-946. Requires monitoring:read; the feature and module monitoring gate the path.
+     * @description Implemented by WP-946 (E-160). Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['getMonitoringGroup'];
     put?: never;
     post?: never;
     /**
      * Delete a monitoring group
-     * @description Planned (WP-938, E-160); implemented by WP-946. Deletes the group with its memberships and profiles; the answer names the number of deleted profiles. Requires monitoring:write; the feature and module monitoring gate the path.
+     * @description Implemented by WP-946 (E-160). Deletes the group with its memberships and profiles; the answer names the number of deleted profiles. Requires monitoring:write; the feature and module monitoring gate the path.
      */
     delete: operations['deleteMonitoringGroup'];
     options?: never;
     head?: never;
     /**
      * Update a monitoring group
-     * @description Planned (WP-938, E-160); implemented by WP-946. Changes name and priority; of several groups of a CI the higher priority wins per field, on a tie the smaller name. A change of priority or name that raises the probe budget of the member probes is 403 entitlement-limit (WP-940), without partial change. Requires monitoring:write; the feature and module monitoring gate the path.
+     * @description Implemented by WP-946 (E-160). Changes name and priority; of several groups of a CI the higher priority wins per field, on a tie the smaller name. A change of priority or name that raises the probe budget of the member probes is 403 entitlement-limit (WP-940), without partial change. Requires monitoring:write; the feature and module monitoring gate the path.
      */
     patch: operations['updateMonitoringGroup'];
     trace?: never;
@@ -10165,13 +10165,13 @@ export interface paths {
     };
     /**
      * List the members of a monitoring group
-     * @description Planned (WP-938, E-160); implemented by WP-946. The member CIs in the caller's scope. Requires monitoring:read; the feature and module monitoring gate the path.
+     * @description Implemented by WP-946 (E-160). The member CIs in the caller's scope. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['listMonitoringGroupMembers'];
     put?: never;
     /**
      * Add CIs to a monitoring group
-     * @description Planned (WP-938, E-160); implemented by WP-946. Adds up to 500 CIs; a CI of another client than the group's is 422 ci_ids, an invisible CI 404. An increase of the probe budget is 403 entitlement-limit. Requires monitoring:write; the feature and module monitoring gate the path.
+     * @description Implemented by WP-946 (E-160). Adds up to 500 CIs; a CI of another client than the group's is 422 ci_ids, an invisible CI 404. An increase of the probe budget is 403 entitlement-limit. Requires monitoring:write; the feature and module monitoring gate the path.
      */
     post: operations['addMonitoringGroupMembers'];
     delete?: never;
@@ -10196,7 +10196,7 @@ export interface paths {
     post?: never;
     /**
      * Remove a CI from a monitoring group
-     * @description Planned (WP-938, E-160); implemented by WP-946. Requires monitoring:write; the feature and module monitoring gate the path.
+     * @description Implemented by WP-946 (E-160). Requires monitoring:write; the feature and module monitoring gate the path.
      */
     delete: operations['removeMonitoringGroupMember'];
     options?: never;
@@ -14557,10 +14557,10 @@ export interface components {
       data: components['schemas']['Probe'][];
     };
     /**
-     * @description The level an effective value comes from (PRB-01); default is the type default of the register.
+     * @description The level an effective value comes from (PRB-01); default is the type default of the register, plan an interval raised to min_probe_interval_s of the plan (WP-940).
      * @enum {string}
      */
-    ProbeValueOrigin: 'default' | 'org' | 'client' | 'group' | 'ci' | 'probe';
+    ProbeValueOrigin: 'default' | 'org' | 'client' | 'group' | 'ci' | 'probe' | 'plan';
     EffectiveProbeField: {
       /** @description The effective value; null for a type parameter without default and override. */
       value: unknown;

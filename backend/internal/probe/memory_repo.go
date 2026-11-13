@@ -3,6 +3,7 @@ package probe
 import (
 	"context"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"sort"
@@ -13,12 +14,13 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 )
 
 // MemoryRepository is the Store of --no-db and of the handler tests: the
 // rules of PGRepository (scope of the context, references, collector group,
-// parent chain, uniqueness) on maps. It keeps no monitoring profiles (the
-// levels above a probe are empty) and writes no events.
+// parent chain, uniqueness, monitoring profiles and groups with the budget)
+// on maps. It keeps no assignments and writes no events.
 type MemoryRepository struct {
 	mu     sync.Mutex
 	probes map[string]*Probe
@@ -30,6 +32,11 @@ type MemoryRepository struct {
 	// budget admits the writes against the probe budget under the mutex
 	// (WP-940 AK3); nil admits every write.
 	budget BudgetGate
+	// profiles, mgroups and members are the monitoring profiles, groups
+	// and memberships (WP-946); nil until the first write.
+	profiles map[string]*MonitoringProfile
+	mgroups  map[string]*MonitoringGroup
+	members  map[memMember]*MonitoringGroupMember
 }
 
 // SetBudget implements Store.
@@ -67,8 +74,9 @@ func (m *MemoryRepository) admit(ctx context.Context, orgID string, current, nex
 			active = append(active, *p)
 		}
 	}
-	layers := Layers{PlanMinIntervalS: planMin}
-	return admitBudget(ctx, m.budget, orgID, active, func(*Probe) Layers { return layers }, current, next, layers)
+	x := m.index(orgID)
+	x.planMin = planMin
+	return admitBudget(ctx, m.budget, orgID, active, x.layers, current, next, x.layers(next))
 }
 
 // memGroup is a collector group of the memory store.
@@ -232,13 +240,15 @@ func (m *MemoryRepository) Count(ctx context.Context, f *ListFilter) (int, error
 	return len(m.matching(&s, f)), nil
 }
 
-// Layers implements Repository: the memory store keeps no profiles; only
-// the plan minimum applies.
+// Layers implements Repository: the stored profiles and memberships with
+// the plan minimum.
 func (m *MemoryRepository) Layers(ctx context.Context, p *Probe) (Layers, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	planMin, err := m.planMin(ctx, p.OrganizationID)
-	return Layers{PlanMinIntervalS: planMin}, err
+	x := m.index(p.OrganizationID)
+	x.planMin = planMin
+	return x.layers(p), err
 }
 
 // ResolveForCollector implements Repository: the memory store keeps no
@@ -256,6 +266,7 @@ func (m *MemoryRepository) ResolveForGroup(ctx context.Context, groupID string) 
 	x := newLayerIndex()
 	if s, ok := database.TenantScopeFromContext(ctx); ok {
 		m.mu.Lock()
+		x = m.index(s.OrgID)
 		x.planMin, err = m.planMin(ctx, s.OrgID)
 		m.mu.Unlock()
 		if err != nil {
@@ -476,4 +487,552 @@ func (t *memWriteTx) SubtreeHeight(_ context.Context, id string, limit int) (int
 	return height, nil
 }
 
-func (t *memWriteTx) Layers(context.Context, *Probe) (Layers, error) { return Layers{}, nil }
+func (t *memWriteTx) Layers(_ context.Context, p *Probe) (Layers, error) {
+	return t.m.index(t.s.orgID).layers(p), nil
+}
+
+// --- monitoring profiles and groups (WP-946) --------------------------------
+
+var _ ProfileStore = (*MemoryRepository)(nil)
+
+// memMember is the key of a membership: group and CI.
+type memMember struct{ groupID, ciID string }
+
+// ensureMonitoring creates the maps of the profiles and groups; the lock
+// is held.
+func (m *MemoryRepository) ensureMonitoring() {
+	if m.profiles == nil {
+		m.profiles = map[string]*MonitoringProfile{}
+		m.mgroups = map[string]*MonitoringGroup{}
+		m.members = map[memMember]*MonitoringGroupMember{}
+	}
+}
+
+// index builds the override levels of the organization from the stored
+// profiles and memberships; the lock is held.
+func (m *MemoryRepository) index(orgID string) *layerIndex {
+	x := newLayerIndex()
+	for _, p := range m.profiles {
+		if p.OrganizationID == orgID {
+			x.add(p)
+		}
+	}
+	for _, mem := range m.members {
+		g, ok := m.mgroups[mem.GroupID]
+		if mem.OrganizationID == orgID && ok {
+			x.groups[mem.CIID] = append(x.groups[mem.CIID], memberGroup{id: g.ID, name: g.Name, priority: g.Priority})
+		}
+	}
+	return x
+}
+
+// memBudget counts the probe budget of the organization's active probes
+// at their effective values; the lock is held.
+func (m *MemoryRepository) memBudget(ctx context.Context, orgID string) (entitlement.ProbeBudget, error) {
+	planMin, err := m.planMin(ctx, orgID)
+	if err != nil {
+		return entitlement.ProbeBudget{}, err
+	}
+	x := m.index(orgID)
+	x.planMin = planMin
+	var specs []entitlement.EffectiveSpec
+	for _, p := range m.probes {
+		if p.OrganizationID == orgID && p.Enabled {
+			e := Resolve(p, x.layers(p))
+			specs = append(specs, budgetSpec(p, &e))
+		}
+	}
+	return entitlement.BudgetOf(specs), nil
+}
+
+// monitoringWrite runs a profile or group write under the lock with the
+// budget rules of PGRepository.monitoringWrite: write changes the maps and
+// returns how to undo the change, which runs when the budget refuses it.
+func (m *MemoryRepository) monitoringWrite(ctx context.Context, write func(s *memScope) (undo func(), err error)) error {
+	s, err := scopeOf(ctx)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ensureMonitoring()
+	var before entitlement.ProbeBudget
+	if m.budget != nil {
+		if before, err = m.memBudget(ctx, s.orgID); err != nil {
+			return err
+		}
+	}
+	undo, err := write(&s)
+	if err != nil {
+		return err
+	}
+	if m.budget != nil {
+		after, berr := m.memBudget(ctx, s.orgID)
+		if berr == nil {
+			berr = m.budget.AllowProbeChange(ctx, s.orgID, before, after)
+		}
+		if berr != nil {
+			undo()
+			return berr
+		}
+	}
+	return nil
+}
+
+// profileVisible reports whether the scope reads the profile.
+func (s *memScope) profileVisible(p *MonitoringProfile) bool {
+	return p.OrganizationID == s.orgID && s.reads(p.ClientID, p.SiteID)
+}
+
+// ListProfiles implements ProfileStore.
+func (m *MemoryRepository) ListProfiles(ctx context.Context, f *ProfileFilter) ([]MonitoringProfile, int, error) {
+	s, err := scopeOf(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	if f == nil {
+		f = &ProfileFilter{}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]MonitoringProfile, 0)
+	for _, p := range m.profiles {
+		if !s.profileVisible(p) || (f.Level != "" && p.Level != f.Level) || (f.LevelID != "" && p.TargetID() != f.LevelID) ||
+			(f.ProbeType != "" && p.ProbeType != f.ProbeType) {
+			continue
+		}
+		out = append(out, *p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return pageOf(out, f.Limit, f.Offset), len(out), nil
+}
+
+// pageOf returns the page of items.
+func pageOf[T any](items []T, limit, offset int) []T {
+	start := min(max(offset, 0), len(items))
+	end := len(items)
+	if limit > 0 {
+		end = min(start+limit, len(items))
+	}
+	return items[start:end]
+}
+
+// GetProfile implements ProfileStore.
+func (m *MemoryRepository) GetProfile(ctx context.Context, id string) (*MonitoringProfile, error) {
+	s, err := scopeOf(ctx)
+	if err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.profiles[id]
+	if !ok || !s.profileVisible(p) {
+		return nil, ErrProfileNotFound
+	}
+	out := *p
+	return &out, nil
+}
+
+// profileScope sets client and site of the profile from its target (the
+// trigger monitoring_profile_scope); ok false when the target is not
+// visible.
+func (m *MemoryRepository) profileScope(ctx context.Context, s *memScope, p *MonitoringProfile) bool {
+	t := &memWriteTx{m: m, s: s}
+	switch p.Level {
+	case LevelOrg:
+		p.ClientID, p.SiteID = "", ""
+		return true
+	case LevelClient:
+		ok, _ := t.ClientVisible(ctx, p.ClientID)
+		p.SiteID = ""
+		return ok
+	case LevelGroup:
+		g, ok := m.mgroups[p.GroupID]
+		if !ok || g.OrganizationID != s.orgID || !s.reads(g.ClientID, "") {
+			return false
+		}
+		p.ClientID, p.SiteID = g.ClientID, ""
+		return true
+	case LevelCI:
+		client, site, ok, _ := t.CI(ctx, p.CIID)
+		p.ClientID, p.SiteID = client, site
+		return ok
+	}
+	return false
+}
+
+// profileTaken reports whether another profile has the level, target and
+// type of p.
+func (m *MemoryRepository) profileTaken(p *MonitoringProfile) bool {
+	for _, o := range m.profiles {
+		if o.ID != p.ID && o.OrganizationID == p.OrganizationID && o.Level == p.Level && o.TargetID() == p.TargetID() &&
+			o.ProbeType == p.ProbeType {
+			return true
+		}
+	}
+	return false
+}
+
+// CreateProfile implements ProfileStore.
+func (m *MemoryRepository) CreateProfile(ctx context.Context, in *MonitoringProfile) (*MonitoringProfile, error) {
+	if in.Level == LevelOrg && !orgWide(ctx) {
+		return nil, errOrgWideOnly
+	}
+	var out MonitoringProfile
+	err := m.monitoringWrite(ctx, func(s *memScope) (func(), error) {
+		if err := checkPlanInterval(ctx, m.budget, s.orgID, in.Params); err != nil {
+			return nil, err
+		}
+		p := *in
+		p.OrganizationID = s.orgID
+		if !m.profileScope(ctx, s, &p) {
+			return nil, ErrLevelNotFound
+		}
+		if !s.writes(p.ClientID, p.SiteID) {
+			return nil, errRowSecurity
+		}
+		if m.profileTaken(&p) {
+			return nil, ErrProfileTaken
+		}
+		id, err := newID()
+		if err != nil {
+			return nil, err
+		}
+		p.ID, p.UpdatedAt = id, time.Now().UTC()
+		stored := p
+		m.profiles[id] = &stored
+		out = p
+		return func() { delete(m.profiles, id) }, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// writableProfile returns the stored profile the scope may change.
+func (m *MemoryRepository) writableProfile(ctx context.Context, s *memScope, id string) (*MonitoringProfile, error) {
+	p, ok := m.profiles[id]
+	if !ok || !s.profileVisible(p) {
+		return nil, ErrProfileNotFound
+	}
+	if p.Level == LevelOrg && !orgWide(ctx) {
+		return nil, errOrgWideOnly
+	}
+	if !s.writes(p.ClientID, p.SiteID) {
+		return nil, ErrProfileNotFound
+	}
+	return p, nil
+}
+
+// UpdateProfile implements ProfileStore.
+func (m *MemoryRepository) UpdateProfile(ctx context.Context, id string, params json.RawMessage) (*MonitoringProfile, error) {
+	var out MonitoringProfile
+	err := m.monitoringWrite(ctx, func(s *memScope) (func(), error) {
+		p, err := m.writableProfile(ctx, s, id)
+		if err != nil {
+			return nil, err
+		}
+		if err := checkProfileParams(p.ProbeType, params); err != nil {
+			return nil, err
+		}
+		if err := checkPlanInterval(ctx, m.budget, s.orgID, params); err != nil {
+			return nil, err
+		}
+		old := *p
+		p.Params, p.UpdatedAt = params, time.Now().UTC()
+		out = *p
+		return func() { *p = old }, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// DeleteProfile implements ProfileStore.
+func (m *MemoryRepository) DeleteProfile(ctx context.Context, id string) error {
+	return m.monitoringWrite(ctx, func(s *memScope) (func(), error) {
+		p, err := m.writableProfile(ctx, s, id)
+		if err != nil {
+			return nil, err
+		}
+		delete(m.profiles, id)
+		return func() { m.profiles[id] = p }, nil
+	})
+}
+
+// groupVisible reports whether the scope reads the group.
+func (s *memScope) groupVisible(g *MonitoringGroup) bool {
+	return g.OrganizationID == s.orgID && s.reads(g.ClientID, "")
+}
+
+// withCount returns the group with the members the scope sees; the lock is
+// held.
+func (m *MemoryRepository) withCount(s *memScope, g *MonitoringGroup) MonitoringGroup {
+	out := *g
+	out.MemberCount = 0
+	for _, mem := range m.members {
+		if mem.GroupID == g.ID && s.reads(mem.ClientID, mem.SiteID) {
+			out.MemberCount++
+		}
+	}
+	return out
+}
+
+// ListGroups implements ProfileStore.
+func (m *MemoryRepository) ListGroups(ctx context.Context, clientID string, limit, offset int) ([]MonitoringGroup, int, error) {
+	s, err := scopeOf(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]MonitoringGroup, 0)
+	for _, g := range m.mgroups {
+		if s.groupVisible(g) && (clientID == "" || g.ClientID == clientID) {
+			out = append(out, m.withCount(&s, g))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return pageOf(out, limit, offset), len(out), nil
+}
+
+// visibleGroup returns the stored group the scope reads.
+func (m *MemoryRepository) visibleGroup(s *memScope, id string) (*MonitoringGroup, error) {
+	g, ok := m.mgroups[id]
+	if !ok || !s.groupVisible(g) {
+		return nil, ErrGroupNotFound
+	}
+	return g, nil
+}
+
+// GetGroup implements ProfileStore.
+func (m *MemoryRepository) GetGroup(ctx context.Context, id string) (*MonitoringGroup, error) {
+	s, err := scopeOf(ctx)
+	if err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	g, err := m.visibleGroup(&s, id)
+	if err != nil {
+		return nil, err
+	}
+	out := m.withCount(&s, g)
+	return &out, nil
+}
+
+// nameTaken reports whether another group of the organization has name.
+func (m *MemoryRepository) nameTaken(orgID, id, name string) bool {
+	for _, g := range m.mgroups {
+		if g.ID != id && g.OrganizationID == orgID && g.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// CreateGroup implements ProfileStore.
+func (m *MemoryRepository) CreateGroup(ctx context.Context, in *MonitoringGroup) (*MonitoringGroup, error) {
+	if in.ClientID == "" && !orgWide(ctx) {
+		return nil, errOrgWideGroup
+	}
+	s, err := scopeOf(ctx)
+	if err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ensureMonitoring()
+	if in.ClientID != "" {
+		if ok, _ := (&memWriteTx{m: m, s: &s}).ClientVisible(ctx, in.ClientID); !ok {
+			return nil, unprocessable("client_id", "client not found")
+		}
+	}
+	if !s.writes(in.ClientID, "") {
+		return nil, errRowSecurity
+	}
+	if m.nameTaken(s.orgID, "", in.Name) {
+		return nil, ErrGroupNameTaken
+	}
+	g := *in
+	g.OrganizationID = s.orgID
+	if g.ID, err = newID(); err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	g.CreatedAt, g.UpdatedAt = now, now
+	stored := g
+	m.mgroups[g.ID] = &stored
+	return &g, nil
+}
+
+// writableGroup returns the stored group the scope may change.
+func (m *MemoryRepository) writableGroup(ctx context.Context, s *memScope, id string) (*MonitoringGroup, error) {
+	g, err := m.visibleGroup(s, id)
+	if err != nil {
+		return nil, err
+	}
+	if g.ClientID == "" && !orgWide(ctx) {
+		return nil, errOrgWideOnly
+	}
+	if !s.writes(g.ClientID, "") {
+		return nil, ErrGroupNotFound
+	}
+	return g, nil
+}
+
+// UpdateGroup implements ProfileStore.
+func (m *MemoryRepository) UpdateGroup(ctx context.Context, id string, u *GroupUpdate) (*MonitoringGroup, error) {
+	var out MonitoringGroup
+	err := m.monitoringWrite(ctx, func(s *memScope) (func(), error) {
+		g, err := m.writableGroup(ctx, s, id)
+		if err != nil {
+			return nil, err
+		}
+		if u.Name != nil && m.nameTaken(s.orgID, id, *u.Name) {
+			return nil, ErrGroupNameTaken
+		}
+		old := *g
+		if u.Name != nil {
+			g.Name = *u.Name
+		}
+		if u.Priority != nil {
+			g.Priority = *u.Priority
+		}
+		g.UpdatedAt = time.Now().UTC()
+		out = m.withCount(s, g)
+		return func() { *g = old }, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// DeleteGroup implements ProfileStore.
+func (m *MemoryRepository) DeleteGroup(ctx context.Context, id string) (int, error) {
+	deleted := 0
+	err := m.monitoringWrite(ctx, func(s *memScope) (func(), error) {
+		g, err := m.writableGroup(ctx, s, id)
+		if err != nil {
+			return nil, err
+		}
+		profiles := map[string]*MonitoringProfile{}
+		for pid, p := range m.profiles {
+			if p.Level == LevelGroup && p.GroupID == id {
+				profiles[pid] = p
+				delete(m.profiles, pid)
+			}
+		}
+		members := map[memMember]*MonitoringGroupMember{}
+		for k, mem := range m.members {
+			if k.groupID == id {
+				members[k] = mem
+				delete(m.members, k)
+			}
+		}
+		delete(m.mgroups, id)
+		deleted = len(profiles)
+		return func() {
+			m.mgroups[id] = g
+			for k, v := range profiles {
+				m.profiles[k] = v
+			}
+			for k, v := range members {
+				m.members[k] = v
+			}
+		}, nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return deleted, nil
+}
+
+// ListGroupMembers implements ProfileStore.
+func (m *MemoryRepository) ListGroupMembers(ctx context.Context, groupID string, limit, offset int) ([]MonitoringGroupMember, int, error) {
+	s, err := scopeOf(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, err := m.visibleGroup(&s, groupID); err != nil {
+		return nil, 0, err
+	}
+	out := make([]MonitoringGroupMember, 0)
+	for k, mem := range m.members {
+		if k.groupID == groupID && s.reads(mem.ClientID, mem.SiteID) {
+			out = append(out, *mem)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CIID < out[j].CIID })
+	return pageOf(out, limit, offset), len(out), nil
+}
+
+// AddGroupMembers implements ProfileStore.
+func (m *MemoryRepository) AddGroupMembers(ctx context.Context, groupID string, ciIDs []string) ([]MonitoringGroupMember, error) {
+	var out []MonitoringGroupMember
+	err := m.monitoringWrite(ctx, func(s *memScope) (func(), error) {
+		g, err := m.writableGroup(ctx, s, groupID)
+		if err != nil {
+			return nil, err
+		}
+		t := &memWriteTx{m: m, s: s}
+		type ciScope struct{ client, site string }
+		scopes := make(map[string]ciScope, len(ciIDs))
+		for _, id := range ciIDs {
+			client, site, ok, _ := t.CI(ctx, id)
+			if !ok {
+				return nil, ErrCINotFound
+			}
+			if g.ClientID != "" && client != g.ClientID {
+				return nil, errMemberOfOtherClient
+			}
+			if !s.writes(client, site) {
+				return nil, errRowSecurity
+			}
+			scopes[id] = ciScope{client, site}
+		}
+		var added []memMember
+		now := time.Now().UTC()
+		out = make([]MonitoringGroupMember, 0, len(ciIDs))
+		for _, id := range ciIDs {
+			k := memMember{groupID, id}
+			if _, ok := m.members[k]; !ok {
+				m.members[k] = &MonitoringGroupMember{GroupID: groupID, CIID: id, OrganizationID: s.orgID,
+					ClientID: scopes[id].client, SiteID: scopes[id].site, CreatedAt: now}
+				added = append(added, k)
+			}
+			out = append(out, *m.members[k])
+		}
+		sort.Slice(out, func(i, j int) bool { return out[i].CIID < out[j].CIID })
+		return func() {
+			for _, k := range added {
+				delete(m.members, k)
+			}
+		}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// RemoveGroupMember implements ProfileStore.
+func (m *MemoryRepository) RemoveGroupMember(ctx context.Context, groupID, ciID string) error {
+	return m.monitoringWrite(ctx, func(s *memScope) (func(), error) {
+		if _, err := m.writableGroup(ctx, s, groupID); err != nil {
+			return nil, err
+		}
+		k := memMember{groupID, ciID}
+		mem, ok := m.members[k]
+		if !ok || !s.writes(mem.ClientID, mem.SiteID) {
+			return nil, ErrMemberNotFound
+		}
+		delete(m.members, k)
+		return func() { m.members[k] = mem }, nil
+	})
+}

@@ -66,23 +66,27 @@ type Probe struct {
 // Priority decides between groups of one CI: the higher wins, on a tie the
 // lexicographically smaller name (WP-937, E-178).
 type MonitoringGroup struct {
-	ID             string    `json:"id"`
-	OrganizationID string    `json:"organization_id"`
-	ClientID       string    `json:"client_id,omitempty"`
-	Name           string    `json:"name"`
-	Priority       int       `json:"priority"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	ClientID       string `json:"client_id,omitempty"`
+	Name           string `json:"name"`
+	Priority       int    `json:"priority"`
+	// MemberCount is the number of member CIs in the caller's client and
+	// site scope (F-414); the API fills it.
+	MemberCount int       `json:"member_count"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 // MonitoringGroupMember is the membership of a CI in a group; client and
 // site are those of the CI.
 type MonitoringGroupMember struct {
-	GroupID        string `json:"group_id"`
-	CIID           string `json:"ci_id"`
-	OrganizationID string `json:"organization_id"`
-	ClientID       string `json:"client_id,omitempty"`
-	SiteID         string `json:"site_id,omitempty"`
+	GroupID        string    `json:"group_id"`
+	CIID           string    `json:"ci_id"`
+	OrganizationID string    `json:"organization_id"`
+	ClientID       string    `json:"client_id,omitempty"`
+	SiteID         string    `json:"site_id,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
 }
 
 // MonitoringProfile holds the overrides of one level for one probe type.

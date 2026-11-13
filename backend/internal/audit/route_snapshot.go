@@ -404,6 +404,17 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	// Probe definitions (PRB-01, WP-939); config.changed goes to the
 	// outbox in the write transaction.
 	crud(m, v1+"monitoring/probes", "probe", all...)
+	// Monitoring profiles and groups (PRB-01, WP-946): the profile and the
+	// group row; adding members shows the members of the group, removing
+	// one the member row. No outbox event.
+	crud(m, v1+"monitoring/profiles", "monitoring_profile", all...)
+	crud(m, v1+"monitoring/groups", "monitoring_group", all...)
+	m["POST "+v1+"monitoring/groups/{id}/members"] = RouteSnapshot{Table: "monitoring_group", Keys: []SnapshotKey{{"id", "id"}},
+		Select: `jsonb_build_object('id', t.id, 'organization_id', t.organization_id, 'members',
+			(SELECT COALESCE(jsonb_agg(m.ci_id ORDER BY m.ci_id), '[]'::jsonb)
+			   FROM monitoring_group_member m WHERE m.organization_id = t.organization_id AND m.group_id = t.id))`}
+	m["DELETE "+v1+"monitoring/groups/{id}/members/{ci_id}"] = RouteSnapshot{Table: "monitoring_group_member",
+		Keys: []SnapshotKey{{"group_id", "id"}, {"ci_id", "ci_id"}}}
 	// Collector groups (PRB-03, WP-947): the group row; adding or moving a
 	// member shows the members of the group, removing one the member row.
 	crud(m, v1+"collector-groups", "collector_group", all...)

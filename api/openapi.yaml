@@ -23579,7 +23579,6 @@ paths:
   /api/v1/monitoring/probes/{id}/effective:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -23587,7 +23586,7 @@ paths:
       tags: [Monitoring]
       summary: Get the effective settings of a probe
       description: >-
-        Planned (WP-938, E-160); implemented by WP-946. The effective values of the probe
+        Implemented by WP-946 (E-160). The effective values of the probe
         (PRB-01, WP-937): every field with value, origin (default, org, client,
         group, ci, probe), clamped (a stored value moved to the current type
         limits) and, for origin group, the deciding monitoring group. Requires monitoring:read; the feature and module monitoring gate the path.
@@ -23811,13 +23810,12 @@ paths:
   /api/v1/monitoring/profiles:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     get:
       operationId: listMonitoringProfiles
       tags: [Monitoring]
       summary: List monitoring profiles
       description: >-
-        Planned (WP-938, E-160); implemented by WP-946. The overrides per level (org, client,
+        Implemented by WP-946 (E-160). The overrides per level (org, client,
         group, ci) and probe type in the caller's scope; filters level, level_id
         and probe_type. Requires monitoring:read; the feature and module monitoring gate the path.
       parameters:
@@ -23845,12 +23843,17 @@ paths:
       tags: [Monitoring]
       summary: Create a monitoring profile
       description: >-
-        Planned (WP-938, E-160); implemented by WP-946. Values outside the type limits, timeout
+        Implemented by WP-946 (E-160). Values outside the type limits, timeout
         not below interval and an unknown or planned type are 422 with field (and
         the list in violations); an interval below min_probe_interval_s of the
         plan is 422 interval_s. One profile per level, level_id and probe type
         (409). A level_id outside the organization or the caller's scope is 404.
-        An increase of the probe budget is 403 entitlement-limit. Requires monitoring:write; the feature and module monitoring gate the path.
+        An org profile is written only by a principal without client and site
+        restriction (403). An increase of the probe budget is 403
+        entitlement-limit, without partial change (WP-940). Every write on
+        profiles and groups raises the config_version of the collectors the
+        probes in its scope are assigned to, so their next assignment set
+        request carries the new effective values (WP-948). Requires monitoring:write; the feature and module monitoring gate the path.
       requestBody:
         required: true
         content:
@@ -23880,7 +23883,6 @@ paths:
   /api/v1/monitoring/profiles/{id}:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -23888,7 +23890,7 @@ paths:
       tags: [Monitoring]
       summary: Get a monitoring profile
       description: >-
-        Planned (WP-938, E-160); implemented by WP-946. Requires monitoring:read; the feature and module monitoring gate the path.
+        Implemented by WP-946 (E-160). Requires monitoring:read; the feature and module monitoring gate the path.
       responses:
         '200':
           description: Monitoring profile
@@ -23908,7 +23910,7 @@ paths:
       tags: [Monitoring]
       summary: Update a monitoring profile
       description: >-
-        Planned (WP-938, E-160); implemented by WP-946. Replaces the params with the checks of the creation. Requires monitoring:write; the feature and module monitoring gate the path.
+        Implemented by WP-946 (E-160). Replaces the params with the checks of the creation. Requires monitoring:write; the feature and module monitoring gate the path.
       requestBody:
         required: true
         content:
@@ -23939,7 +23941,7 @@ paths:
       tags: [Monitoring]
       summary: Delete a monitoring profile
       description: >-
-        Planned (WP-938, E-160); implemented by WP-946. Requires monitoring:write; the feature and module monitoring gate the path.
+        Implemented by WP-946 (E-160). Requires monitoring:write; the feature and module monitoring gate the path.
       responses:
         '204':
           description: Monitoring profile deleted
@@ -23957,13 +23959,12 @@ paths:
   /api/v1/monitoring/groups:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     get:
       operationId: listMonitoringGroups
       tags: [Monitoring]
       summary: List monitoring groups
       description: >-
-        Planned (WP-938, E-160); implemented by WP-946. The monitoring groups (device groups of
+        Implemented by WP-946 (E-160). The monitoring groups (device groups of
         PRB-01 and CRD-04, E-178) in the caller's scope: its clients' groups and
         the org-wide ones. Requires monitoring:read; the feature and module monitoring gate the path.
       parameters:
@@ -23989,7 +23990,7 @@ paths:
       tags: [Monitoring]
       summary: Create a monitoring group
       description: >-
-        Planned (WP-938, E-160); implemented by WP-946. A group of a client takes only CIs of that
+        Implemented by WP-946 (E-160). A group of a client takes only CIs of that
         client; without client_id it is org-wide. The name is unique per
         organization (409). Requires monitoring:write; the feature and module monitoring gate the path.
       requestBody:
@@ -24019,7 +24020,6 @@ paths:
   /api/v1/monitoring/groups/{id}:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -24027,7 +24027,7 @@ paths:
       tags: [Monitoring]
       summary: Get a monitoring group
       description: >-
-        Planned (WP-938, E-160); implemented by WP-946. Requires monitoring:read; the feature and module monitoring gate the path.
+        Implemented by WP-946 (E-160). Requires monitoring:read; the feature and module monitoring gate the path.
       responses:
         '200':
           description: Monitoring group
@@ -24047,7 +24047,7 @@ paths:
       tags: [Monitoring]
       summary: Update a monitoring group
       description: >-
-        Planned (WP-938, E-160); implemented by WP-946. Changes name and priority; of several
+        Implemented by WP-946 (E-160). Changes name and priority; of several
         groups of a CI the higher priority wins per field, on a tie the smaller
         name. A change of priority or name that raises the probe budget of the
         member probes is 403 entitlement-limit (WP-940), without partial change.
@@ -24082,7 +24082,7 @@ paths:
       tags: [Monitoring]
       summary: Delete a monitoring group
       description: >-
-        Planned (WP-938, E-160); implemented by WP-946. Deletes the group with its memberships and
+        Implemented by WP-946 (E-160). Deletes the group with its memberships and
         profiles; the answer names the number of deleted profiles. Requires monitoring:write; the feature and module monitoring gate the path.
       responses:
         '200':
@@ -24104,7 +24104,6 @@ paths:
   /api/v1/monitoring/groups/{id}/members:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -24112,7 +24111,7 @@ paths:
       tags: [Monitoring]
       summary: List the members of a monitoring group
       description: >-
-        Planned (WP-938, E-160); implemented by WP-946. The member CIs in the caller's scope. Requires monitoring:read; the feature and module monitoring gate the path.
+        Implemented by WP-946 (E-160). The member CIs in the caller's scope. Requires monitoring:read; the feature and module monitoring gate the path.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
@@ -24137,7 +24136,7 @@ paths:
       tags: [Monitoring]
       summary: Add CIs to a monitoring group
       description: >-
-        Planned (WP-938, E-160); implemented by WP-946. Adds up to 500 CIs; a CI of another
+        Implemented by WP-946 (E-160). Adds up to 500 CIs; a CI of another
         client than the group's is 422 ci_ids, an invisible CI 404. An increase
         of the probe budget is 403 entitlement-limit. Requires monitoring:write; the feature and module monitoring gate the path.
       requestBody:
@@ -24167,7 +24166,6 @@ paths:
   /api/v1/monitoring/groups/{id}/members/{ci_id}:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
       - { name: ci_id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -24176,7 +24174,7 @@ paths:
       tags: [Monitoring]
       summary: Remove a CI from a monitoring group
       description: >-
-        Planned (WP-938, E-160); implemented by WP-946. Requires monitoring:write; the feature and module monitoring gate the path.
+        Implemented by WP-946 (E-160). Requires monitoring:write; the feature and module monitoring gate the path.
       responses:
         '204':
           description: Member removed
@@ -32282,8 +32280,11 @@ components:
               items: { $ref: '#/components/schemas/Probe' }
     ProbeValueOrigin:
       type: string
-      description: The level an effective value comes from (PRB-01); default is the type default of the register.
-      enum: [default, org, client, group, ci, probe]
+      description: >-
+        The level an effective value comes from (PRB-01); default is the type
+        default of the register, plan an interval raised to
+        min_probe_interval_s of the plan (WP-940).
+      enum: [default, org, client, group, ci, probe, plan]
     EffectiveProbeField:
       type: object
       required: [value, origin, clamped]

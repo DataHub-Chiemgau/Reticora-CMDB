@@ -152,6 +152,9 @@ type BudgetGate interface {
 	AllowProbeChange(ctx context.Context, orgID string, before, after entitlement.ProbeBudget) error
 	// MinProbeIntervalS returns min_probe_interval_s (0 without one).
 	MinProbeIntervalS(ctx context.Context, orgID string) (int64, error)
+	// CheckInterval refuses an interval below min_probe_interval_s (422
+	// on interval_s; a monitoring profile, WP-946 AK6).
+	CheckInterval(ctx context.Context, orgID string, seconds int) error
 }
 
 // Handler serves the probe routes.
@@ -177,6 +180,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Delete("/api/v1/monitoring/probes/{id}", h.delete)
 	r.Get("/api/v1/monitoring/probe-types", h.listTypes)
 	r.Get("/api/v1/monitoring/probe-types/{key}", h.getType)
+	h.registerProfileRoutes(r)
 }
 
 // requireOrg answers 401 without tenant.

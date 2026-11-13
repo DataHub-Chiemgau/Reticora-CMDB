@@ -2,8 +2,10 @@ package probe
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 
@@ -843,4 +845,763 @@ func (t *pgWriteTx) Layers(ctx context.Context, p *Probe) (Layers, error) {
 		return Layers{}, err
 	}
 	return x.layers(p), nil
+}
+
+// --- monitoring profiles and groups (WP-946) --------------------------------
+
+var _ ProfileStore = (*PGRepository)(nil)
+
+const profileColumns = `m.id::text, m.organization_id::text, m.level, COALESCE(m.client_id::text, ''), COALESCE(m.group_id::text, ''),
+	COALESCE(m.ci_id::text, ''), COALESCE(m.site_id::text, ''), m.probe_type, m.params, m.updated_at`
+
+func scanProfile(row pgx.Row) (MonitoringProfile, error) {
+	var p MonitoringProfile
+	err := row.Scan(&p.ID, &p.OrganizationID, &p.Level, &p.ClientID, &p.GroupID, &p.CIID, &p.SiteID, &p.ProbeType, &p.Params, &p.UpdatedAt)
+	return p, err
+}
+
+// groupColumns reads a monitoring group with the number of its members the
+// caller sees (RLS of monitoring_group_member, F-414).
+const groupColumns = `g.id::text, g.organization_id::text, COALESCE(g.client_id::text, ''), g.name, g.priority,
+	(SELECT count(*) FROM monitoring_group_member gm WHERE gm.organization_id = g.organization_id AND gm.group_id = g.id)::int,
+	g.created_at, g.updated_at`
+
+func scanGroup(row pgx.Row) (MonitoringGroup, error) {
+	var g MonitoringGroup
+	err := row.Scan(&g.ID, &g.OrganizationID, &g.ClientID, &g.Name, &g.Priority, &g.MemberCount, &g.CreatedAt, &g.UpdatedAt)
+	return g, err
+}
+
+// scopeEffect is the part of the probes of an organization a profile or
+// group write changes the effective values of: the probes of the types
+// (nil: every type) of the organization (org), of a client or of the CIs.
+type scopeEffect struct {
+	types    []string
+	org      bool
+	clientID string
+	ciIDs    []string
+}
+
+// empty reports whether the write touches no probe.
+func (e *scopeEffect) empty() bool { return !e.org && e.clientID == "" && len(e.ciIDs) == 0 }
+
+// orgBudget counts the probe budget of every active probe of the
+// organization at its effective values (raised to the plan minimum), read
+// with the client and site scope widened (only the budget leaves it).
+func (r *PGRepository) orgBudget(ctx context.Context, tx pgx.Tx, orgID string) (entitlement.ProbeBudget, error) {
+	planMin, err := r.budget.MinProbeIntervalS(database.ContextWithTx(ctx, tx), orgID)
+	if err != nil {
+		return entitlement.ProbeBudget{}, err
+	}
+	var specs []entitlement.EffectiveSpec
+	err = (&pgWriteTx{tx: tx, orgID: orgID}).widened(ctx, func() error {
+		active, rerr := collectProbes(ctx, tx, `SELECT `+probeColumns+` FROM probe p WHERE p.organization_id = $1 AND p.enabled`, orgID)
+		if rerr != nil {
+			return rerr
+		}
+		x, rerr := loadLayers(ctx, tx, orgID, active)
+		if rerr != nil {
+			return rerr
+		}
+		x.planMin = planMin
+		specs = make([]entitlement.EffectiveSpec, 0, len(active))
+		for i := range active {
+			e := Resolve(&active[i], x.layers(&active[i]))
+			specs = append(specs, budgetSpec(&active[i], &e))
+		}
+		return nil
+	})
+	if err != nil {
+		return entitlement.ProbeBudget{}, fmt.Errorf("count probe budget: %w", err)
+	}
+	return entitlement.BudgetOf(specs), nil
+}
+
+// monitoringWrite runs a profile or group write in one tenant transaction:
+// the budget lock first (WP-940 AK3), the budget of the organization before
+// the write, the write with its row locks, the budget after it (a raise
+// above a quota is 403 entitlement-limit and rolls everything back) and
+// the raise of the config_version of every collector a probe of the
+// write's effect is assigned to (AK4); the raised collectors are told after
+// the commit.
+func (r *PGRepository) monitoringWrite(ctx context.Context, write func(ctx context.Context, tx pgx.Tx, orgID string) (scopeEffect, error)) error {
+	return r.tenant(ctx, func(ctx context.Context, tx pgx.Tx, orgID string) error {
+		var before entitlement.ProbeBudget
+		if r.budget != nil {
+			if err := r.lockBudget(ctx, tx, orgID); err != nil {
+				return err
+			}
+			var err error
+			if before, err = r.orgBudget(ctx, tx, orgID); err != nil {
+				return err
+			}
+		}
+		effect, err := write(ctx, tx, orgID)
+		if err != nil {
+			return err
+		}
+		if r.budget != nil {
+			after, berr := r.orgBudget(ctx, tx, orgID)
+			if berr != nil {
+				return berr
+			}
+			if berr := r.budget.AllowProbeChange(database.ContextWithTx(ctx, tx), orgID, before, after); berr != nil {
+				return berr
+			}
+		}
+		raised, err := raiseScopeVersions(ctx, tx, orgID, &effect)
+		if err != nil {
+			return err
+		}
+		if len(raised) > 0 {
+			r.afterWrite(ctx, tx, orgID, nil, raised)
+		}
+		return nil
+	})
+}
+
+// raiseScopeVersions raises the config_version of every collector a probe
+// of the effect is assigned to (probe_assignment), with the scope widened:
+// the collector of an org-wide group learns a change of a client's
+// profile as well.
+func raiseScopeVersions(ctx context.Context, tx pgx.Tx, orgID string, e *scopeEffect) ([]CollectorVersion, error) {
+	if e.empty() {
+		return nil, nil
+	}
+	conds := []string{"a.organization_id = $1"}
+	args := []any{orgID}
+	if e.types != nil {
+		args = append(args, e.types)
+		conds = append(conds, fmt.Sprintf("p.type = ANY ($%d::text[])", len(args)))
+	}
+	switch {
+	case e.org:
+	case e.clientID != "":
+		args = append(args, e.clientID)
+		conds = append(conds, fmt.Sprintf("p.client_id = $%d", len(args)))
+	default:
+		args = append(args, e.ciIDs)
+		conds = append(conds, fmt.Sprintf("p.ci_id = ANY ($%d::uuid[])", len(args)))
+	}
+	var out []CollectorVersion
+	err := (&pgWriteTx{tx: tx, orgID: orgID}).widened(ctx, func() error {
+		rows, err := tx.Query(ctx, `UPDATE collector_group_member SET config_version = config_version + 1
+			WHERE organization_id = $1 AND collector_id IN (
+				SELECT a.collector_id FROM probe_assignment a
+				JOIN probe p ON p.organization_id = a.organization_id AND p.id = a.probe_id
+				WHERE `+strings.Join(conds, " AND ")+`)
+			RETURNING collector_id::text, config_version`, args...)
+		if err != nil {
+			return err
+		}
+		out, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (CollectorVersion, error) {
+			var v CollectorVersion
+			scanErr := row.Scan(&v.CollectorID, &v.ConfigVersion)
+			return v, scanErr
+		})
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("raise config versions: %w", err)
+	}
+	slices.SortFunc(out, func(a, b CollectorVersion) int { return strings.Compare(a.CollectorID, b.CollectorID) })
+	return out, nil
+}
+
+// groupMembers returns the member CIs of a group, read with the scope
+// widened (only the ids leave it).
+func groupMembers(ctx context.Context, tx pgx.Tx, orgID, groupID string) ([]string, error) {
+	ids := []string{}
+	err := (&pgWriteTx{tx: tx, orgID: orgID}).widened(ctx, func() error {
+		rows, err := tx.Query(ctx, `SELECT ci_id::text FROM monitoring_group_member WHERE organization_id = $1 AND group_id = $2 ORDER BY ci_id`,
+			orgID, groupID)
+		if err != nil {
+			return err
+		}
+		ids, err = pgx.CollectRows(rows, pgx.RowTo[string])
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read monitoring group members: %w", err)
+	}
+	return ids, nil
+}
+
+// profileEffect is the effect of a write on profile p.
+func profileEffect(ctx context.Context, tx pgx.Tx, orgID string, p *MonitoringProfile) (scopeEffect, error) {
+	e := scopeEffect{types: []string{p.ProbeType}}
+	switch p.Level {
+	case LevelOrg:
+		e.org = true
+	case LevelClient:
+		e.clientID = p.ClientID
+	case LevelGroup:
+		ids, err := groupMembers(ctx, tx, orgID, p.GroupID)
+		if err != nil {
+			return e, err
+		}
+		e.ciIDs = ids
+	case LevelCI:
+		e.ciIDs = []string{p.CIID}
+	}
+	return e, nil
+}
+
+// profileWriteError maps the constraints of monitoring_profile.
+func profileWriteError(err error) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return err
+	}
+	switch pgErr.ConstraintName {
+	case "uq_monitoring_profile_target":
+		return ErrProfileTaken
+	case "monitoring_profile_client_fkey", "monitoring_profile_group_fkey", "monitoring_profile_ci_fkey":
+		return ErrLevelNotFound
+	case "monitoring_profile_params_check":
+		return unprocessable("params", "params must be a JSON object")
+	case "monitoring_profile_probe_type_check":
+		return unprocessable("probe_type", "unknown probe type")
+	}
+	return err
+}
+
+// groupWriteError maps the constraints of monitoring_group and its members.
+func groupWriteError(err error) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return err
+	}
+	switch pgErr.ConstraintName {
+	case "monitoring_group_name_key":
+		return ErrGroupNameTaken
+	case "monitoring_group_name_check":
+		return unprocessable("name", "name must not be blank and at most 200 characters")
+	case "monitoring_group_client_fkey":
+		return unprocessable("client_id", "client not found")
+	case "monitoring_group_member_client_rule":
+		return errMemberOfOtherClient
+	case "monitoring_group_member_ci_fkey":
+		return ErrCINotFound
+	}
+	return err
+}
+
+// ListProfiles implements ProfileStore.
+func (r *PGRepository) ListProfiles(ctx context.Context, f *ProfileFilter) ([]MonitoringProfile, int, error) {
+	if f == nil {
+		f = &ProfileFilter{}
+	}
+	out := make([]MonitoringProfile, 0)
+	total := 0
+	err := r.tenant(ctx, func(ctx context.Context, tx pgx.Tx, orgID string) error {
+		conds := []string{"m.organization_id = $1"}
+		args := []any{orgID}
+		add := func(cond string, v any) {
+			args = append(args, v)
+			conds = append(conds, fmt.Sprintf(cond, len(args)))
+		}
+		if f.Level != "" {
+			add("m.level = $%d", f.Level)
+		}
+		if f.LevelID != "" {
+			if !api.IsUUID(f.LevelID) {
+				return nil
+			}
+			add("COALESCE(m.ci_id, m.group_id, m.client_id) = $%d", f.LevelID)
+		}
+		if f.ProbeType != "" {
+			add("m.probe_type = $%d", f.ProbeType)
+		}
+		where := strings.Join(conds, " AND ")
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM monitoring_profile m WHERE `+where, args...).Scan(&total); err != nil {
+			return fmt.Errorf("count monitoring profiles: %w", err)
+		}
+		query := `SELECT ` + profileColumns + ` FROM monitoring_profile m WHERE ` + where + ` ORDER BY m.id`
+		if f.Limit > 0 {
+			query += fmt.Sprintf(" LIMIT %d", f.Limit)
+		}
+		if f.Offset > 0 {
+			query += fmt.Sprintf(" OFFSET %d", f.Offset)
+		}
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("list monitoring profiles: %w", err)
+		}
+		out, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (MonitoringProfile, error) { return scanProfile(row) })
+		if err != nil {
+			return fmt.Errorf("list monitoring profiles: %w", err)
+		}
+		return nil
+	})
+	return out, total, err
+}
+
+// GetProfile implements ProfileStore.
+func (r *PGRepository) GetProfile(ctx context.Context, id string) (*MonitoringProfile, error) {
+	if !api.IsUUID(id) {
+		return nil, ErrProfileNotFound
+	}
+	var p MonitoringProfile
+	err := r.tenant(ctx, func(ctx context.Context, tx pgx.Tx, orgID string) error {
+		var err error
+		p, err = scanProfile(tx.QueryRow(ctx, `SELECT `+profileColumns+` FROM monitoring_profile m WHERE m.organization_id = $1 AND m.id = $2`, orgID, id))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrProfileNotFound
+		}
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+// levelVisible reports whether the target of the profile's level exists in
+// the caller's scope.
+func levelVisible(ctx context.Context, tx pgx.Tx, orgID string, p *MonitoringProfile) (bool, error) {
+	w := &pgWriteTx{tx: tx, orgID: orgID}
+	switch p.Level {
+	case LevelClient:
+		return w.ClientVisible(ctx, p.ClientID)
+	case LevelGroup:
+		return w.exists(ctx, "monitoring_group", p.GroupID)
+	case LevelCI:
+		_, _, ok, err := w.CI(ctx, p.CIID)
+		return ok, err
+	}
+	return true, nil
+}
+
+// CreateProfile implements ProfileStore.
+func (r *PGRepository) CreateProfile(ctx context.Context, in *MonitoringProfile) (*MonitoringProfile, error) {
+	if in.Level == LevelOrg && !orgWide(ctx) {
+		return nil, errOrgWideOnly
+	}
+	var out MonitoringProfile
+	err := r.monitoringWrite(ctx, func(ctx context.Context, tx pgx.Tx, orgID string) (scopeEffect, error) {
+		if err := checkPlanInterval(database.ContextWithTx(ctx, tx), r.budget, orgID, in.Params); err != nil {
+			return scopeEffect{}, err
+		}
+		ok, err := levelVisible(ctx, tx, orgID, in)
+		if err != nil {
+			return scopeEffect{}, err
+		}
+		if !ok {
+			return scopeEffect{}, ErrLevelNotFound
+		}
+		client := in.ClientID
+		if in.Level != LevelClient {
+			client = ""
+		}
+		out, err = scanProfile(tx.QueryRow(ctx, `INSERT INTO monitoring_profile AS m (organization_id, level, client_id, group_id, ci_id, probe_type, params)
+			VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING `+profileColumns,
+			orgID, in.Level, nullID(client), nullID(in.GroupID), nullID(in.CIID), in.ProbeType, []byte(in.Params)))
+		if err != nil {
+			return scopeEffect{}, profileWriteError(err)
+		}
+		return profileEffect(ctx, tx, orgID, &out)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// lockProfile reads the profile FOR UPDATE; an org profile is changed only
+// by an org-wide principal.
+func lockProfile(ctx context.Context, tx pgx.Tx, orgID, id string) (MonitoringProfile, error) {
+	if !api.IsUUID(id) {
+		return MonitoringProfile{}, ErrProfileNotFound
+	}
+	// The plain read tells an org profile apart before the lock: the
+	// restrictive update policy hides it from FOR UPDATE of a scoped
+	// principal.
+	for _, lock := range []string{"", " FOR UPDATE"} {
+		p, err := scanProfile(tx.QueryRow(ctx, `SELECT `+profileColumns+` FROM monitoring_profile m
+			WHERE m.organization_id = $1 AND m.id = $2`+lock, orgID, id))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return p, ErrProfileNotFound
+		}
+		if err != nil {
+			return p, fmt.Errorf("read monitoring profile: %w", err)
+		}
+		if p.Level == LevelOrg && !orgWide(ctx) {
+			return p, errOrgWideOnly
+		}
+		if lock != "" {
+			return p, nil
+		}
+	}
+	return MonitoringProfile{}, ErrProfileNotFound
+}
+
+// UpdateProfile implements ProfileStore.
+func (r *PGRepository) UpdateProfile(ctx context.Context, id string, params json.RawMessage) (*MonitoringProfile, error) {
+	var out MonitoringProfile
+	err := r.monitoringWrite(ctx, func(ctx context.Context, tx pgx.Tx, orgID string) (scopeEffect, error) {
+		current, lerr := lockProfile(ctx, tx, orgID, id)
+		if lerr != nil {
+			return scopeEffect{}, lerr
+		}
+		if cerr := checkProfileParams(current.ProbeType, params); cerr != nil {
+			return scopeEffect{}, cerr
+		}
+		if cerr := checkPlanInterval(database.ContextWithTx(ctx, tx), r.budget, orgID, params); cerr != nil {
+			return scopeEffect{}, cerr
+		}
+		var err error
+		out, err = scanProfile(tx.QueryRow(ctx, `UPDATE monitoring_profile AS m SET params = $3
+			WHERE m.organization_id = $1 AND m.id = $2 RETURNING `+profileColumns, orgID, id, []byte(params)))
+		if errors.Is(err, pgx.ErrNoRows) {
+			return scopeEffect{}, ErrProfileNotFound
+		}
+		if err != nil {
+			return scopeEffect{}, profileWriteError(err)
+		}
+		return profileEffect(ctx, tx, orgID, &out)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// DeleteProfile implements ProfileStore.
+func (r *PGRepository) DeleteProfile(ctx context.Context, id string) error {
+	return r.monitoringWrite(ctx, func(ctx context.Context, tx pgx.Tx, orgID string) (scopeEffect, error) {
+		current, err := lockProfile(ctx, tx, orgID, id)
+		if err != nil {
+			return scopeEffect{}, err
+		}
+		effect, err := profileEffect(ctx, tx, orgID, &current)
+		if err != nil {
+			return effect, err
+		}
+		tag, err := tx.Exec(ctx, `DELETE FROM monitoring_profile WHERE organization_id = $1 AND id = $2`, orgID, id)
+		if err != nil {
+			return effect, fmt.Errorf("delete monitoring profile: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return effect, ErrProfileNotFound
+		}
+		return effect, nil
+	})
+}
+
+// ListGroups implements ProfileStore.
+func (r *PGRepository) ListGroups(ctx context.Context, clientID string, limit, offset int) ([]MonitoringGroup, int, error) {
+	out := make([]MonitoringGroup, 0)
+	total := 0
+	err := r.tenant(ctx, func(ctx context.Context, tx pgx.Tx, orgID string) error {
+		where := "g.organization_id = $1"
+		args := []any{orgID}
+		if clientID != "" {
+			if !api.IsUUID(clientID) {
+				return nil
+			}
+			where += " AND g.client_id = $2"
+			args = append(args, clientID)
+		}
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM monitoring_group g WHERE `+where, args...).Scan(&total); err != nil {
+			return fmt.Errorf("count monitoring groups: %w", err)
+		}
+		query := `SELECT ` + groupColumns + ` FROM monitoring_group g WHERE ` + where + ` ORDER BY g.id`
+		if limit > 0 {
+			query += fmt.Sprintf(" LIMIT %d", limit)
+		}
+		if offset > 0 {
+			query += fmt.Sprintf(" OFFSET %d", offset)
+		}
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("list monitoring groups: %w", err)
+		}
+		out, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (MonitoringGroup, error) { return scanGroup(row) })
+		if err != nil {
+			return fmt.Errorf("list monitoring groups: %w", err)
+		}
+		return nil
+	})
+	return out, total, err
+}
+
+// readGroup reads a visible group (lock: a locking clause or empty).
+func readGroup(ctx context.Context, tx pgx.Tx, orgID, id, lock string) (MonitoringGroup, error) {
+	if !api.IsUUID(id) {
+		return MonitoringGroup{}, ErrGroupNotFound
+	}
+	g, err := scanGroup(tx.QueryRow(ctx, `SELECT `+groupColumns+` FROM monitoring_group g WHERE g.organization_id = $1 AND g.id = $2 `+lock,
+		orgID, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return g, ErrGroupNotFound
+	}
+	if err != nil {
+		return g, fmt.Errorf("read monitoring group: %w", err)
+	}
+	return g, nil
+}
+
+// lockGroup reads the group FOR UPDATE for a change; an org-wide group is
+// changed only by an org-wide principal.
+func lockGroup(ctx context.Context, tx pgx.Tx, orgID, id string) (MonitoringGroup, error) {
+	// The plain read first, like lockProfile.
+	g, err := readGroup(ctx, tx, orgID, id, "")
+	if err != nil {
+		return g, err
+	}
+	if g.ClientID == "" && !orgWide(ctx) {
+		return g, errOrgWideOnly
+	}
+	return readGroup(ctx, tx, orgID, id, "FOR UPDATE OF g")
+}
+
+// shareGroup reads the group FOR SHARE for a membership change. Like
+// lockGroup, the members of an org-wide group are changed only by an org-wide
+// principal (403); the plain read comes first so that a scoped principal who
+// can read the group gets 403 instead of the 404 of the UPDATE policies.
+func shareGroup(ctx context.Context, tx pgx.Tx, orgID, id string) (MonitoringGroup, error) {
+	g, err := readGroup(ctx, tx, orgID, id, "")
+	if err != nil {
+		return g, err
+	}
+	if g.ClientID == "" && !orgWide(ctx) {
+		return g, errOrgWideOnly
+	}
+	return readGroup(ctx, tx, orgID, id, "FOR SHARE OF g")
+}
+
+// GetGroup implements ProfileStore.
+func (r *PGRepository) GetGroup(ctx context.Context, id string) (*MonitoringGroup, error) {
+	var g MonitoringGroup
+	err := r.tenant(ctx, func(ctx context.Context, tx pgx.Tx, orgID string) error {
+		var err error
+		g, err = readGroup(ctx, tx, orgID, id, "")
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &g, nil
+}
+
+// errOrgWideGroup: an org-wide monitoring group is created only by an
+// org-wide principal (403).
+var errOrgWideGroup = &api.FieldError{Field: "client_id", Status: http.StatusForbidden,
+	Message: "only a principal without client and site restriction creates an org-wide monitoring group"}
+
+// CreateGroup implements ProfileStore. A new group has neither members nor
+// profiles: it changes no probe and no budget.
+func (r *PGRepository) CreateGroup(ctx context.Context, in *MonitoringGroup) (*MonitoringGroup, error) {
+	if in.ClientID == "" && !orgWide(ctx) {
+		return nil, errOrgWideGroup
+	}
+	var out MonitoringGroup
+	err := r.tenant(ctx, func(ctx context.Context, tx pgx.Tx, orgID string) error {
+		if in.ClientID != "" {
+			ok, err := (&pgWriteTx{tx: tx, orgID: orgID}).ClientVisible(ctx, in.ClientID)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return unprocessable("client_id", "client not found")
+			}
+		}
+		var id string
+		if err := tx.QueryRow(ctx, `INSERT INTO monitoring_group (organization_id, client_id, name, priority)
+			VALUES ($1, $2, $3, $4) RETURNING id::text`, orgID, nullID(in.ClientID), in.Name, in.Priority).Scan(&id); err != nil {
+			return groupWriteError(err)
+		}
+		var err error
+		out, err = readGroup(ctx, tx, orgID, id, "")
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// UpdateGroup implements ProfileStore: name and priority decide which group
+// wins for a CI, so the change counts against the budget.
+func (r *PGRepository) UpdateGroup(ctx context.Context, id string, u *GroupUpdate) (*MonitoringGroup, error) {
+	var out MonitoringGroup
+	err := r.monitoringWrite(ctx, func(ctx context.Context, tx pgx.Tx, orgID string) (scopeEffect, error) {
+		current, err := lockGroup(ctx, tx, orgID, id)
+		if err != nil {
+			return scopeEffect{}, err
+		}
+		name, priority := current.Name, current.Priority
+		if u.Name != nil {
+			name = *u.Name
+		}
+		if u.Priority != nil {
+			priority = *u.Priority
+		}
+		if _, err = tx.Exec(ctx, `UPDATE monitoring_group SET name = $3, priority = $4 WHERE organization_id = $1 AND id = $2`,
+			orgID, id, name, priority); err != nil {
+			return scopeEffect{}, groupWriteError(err)
+		}
+		if out, err = readGroup(ctx, tx, orgID, id, ""); err != nil {
+			return scopeEffect{}, err
+		}
+		members, err := groupMembers(ctx, tx, orgID, id)
+		return scopeEffect{ciIDs: members}, err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// DeleteGroup implements ProfileStore: the memberships and profiles go with
+// the group (ON DELETE CASCADE).
+func (r *PGRepository) DeleteGroup(ctx context.Context, id string) (int, error) {
+	deleted := 0
+	err := r.monitoringWrite(ctx, func(ctx context.Context, tx pgx.Tx, orgID string) (scopeEffect, error) {
+		if _, err := lockGroup(ctx, tx, orgID, id); err != nil {
+			return scopeEffect{}, err
+		}
+		members, err := groupMembers(ctx, tx, orgID, id)
+		if err != nil {
+			return scopeEffect{}, err
+		}
+		if err = tx.QueryRow(ctx, `SELECT count(*) FROM monitoring_profile WHERE organization_id = $1 AND group_id = $2`,
+			orgID, id).Scan(&deleted); err != nil {
+			return scopeEffect{}, fmt.Errorf("count monitoring profiles: %w", err)
+		}
+		tag, err := tx.Exec(ctx, `DELETE FROM monitoring_group WHERE organization_id = $1 AND id = $2`, orgID, id)
+		if err != nil {
+			return scopeEffect{}, groupWriteError(err)
+		}
+		if tag.RowsAffected() == 0 {
+			return scopeEffect{}, ErrGroupNotFound
+		}
+		return scopeEffect{ciIDs: members}, nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return deleted, nil
+}
+
+const memberColumns = `gm.group_id::text, gm.ci_id::text, gm.organization_id::text, COALESCE(gm.client_id::text, ''),
+	COALESCE(gm.site_id::text, ''), gm.created_at`
+
+func collectMembers(rows pgx.Rows) ([]MonitoringGroupMember, error) {
+	out, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (MonitoringGroupMember, error) {
+		var m MonitoringGroupMember
+		scanErr := row.Scan(&m.GroupID, &m.CIID, &m.OrganizationID, &m.ClientID, &m.SiteID, &m.CreatedAt)
+		return m, scanErr
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read monitoring group members: %w", err)
+	}
+	return out, nil
+}
+
+// ListGroupMembers implements ProfileStore: the members in the caller's
+// scope.
+func (r *PGRepository) ListGroupMembers(ctx context.Context, groupID string, limit, offset int) ([]MonitoringGroupMember, int, error) {
+	out := make([]MonitoringGroupMember, 0)
+	total := 0
+	err := r.tenant(ctx, func(ctx context.Context, tx pgx.Tx, orgID string) error {
+		g, err := readGroup(ctx, tx, orgID, groupID, "")
+		if err != nil {
+			return err
+		}
+		total = g.MemberCount
+		query := `SELECT ` + memberColumns + ` FROM monitoring_group_member gm WHERE gm.organization_id = $1 AND gm.group_id = $2 ORDER BY gm.ci_id`
+		if limit > 0 {
+			query += fmt.Sprintf(" LIMIT %d", limit)
+		}
+		if offset > 0 {
+			query += fmt.Sprintf(" OFFSET %d", offset)
+		}
+		rows, err := tx.Query(ctx, query, orgID, groupID)
+		if err != nil {
+			return fmt.Errorf("read monitoring group members: %w", err)
+		}
+		out, err = collectMembers(rows)
+		return err
+	})
+	return out, total, err
+}
+
+// AddGroupMembers implements ProfileStore: every CI must be visible (404)
+// and of the group's client when the group has one (422 ci_ids).
+func (r *PGRepository) AddGroupMembers(ctx context.Context, groupID string, ciIDs []string) ([]MonitoringGroupMember, error) {
+	var out []MonitoringGroupMember
+	err := r.monitoringWrite(ctx, func(ctx context.Context, tx pgx.Tx, orgID string) (scopeEffect, error) {
+		g, err := shareGroup(ctx, tx, orgID, groupID)
+		if err != nil {
+			return scopeEffect{}, err
+		}
+		rows, err := tx.Query(ctx, `SELECT id::text, COALESCE(client_id::text, '') FROM ci
+			WHERE organization_id = $1 AND id = ANY ($2::uuid[]) AND deleted_at IS NULL`, orgID, ciIDs)
+		if err != nil {
+			return scopeEffect{}, fmt.Errorf("read cis: %w", err)
+		}
+		clients := map[string]string{}
+		for rows.Next() {
+			var id, client string
+			if scanErr := rows.Scan(&id, &client); scanErr != nil {
+				rows.Close()
+				return scopeEffect{}, fmt.Errorf("read cis: %w", scanErr)
+			}
+			clients[id] = client
+		}
+		rows.Close()
+		if err = rows.Err(); err != nil {
+			return scopeEffect{}, fmt.Errorf("read cis: %w", err)
+		}
+		for _, id := range ciIDs {
+			client, ok := clients[id]
+			if !ok {
+				return scopeEffect{}, ErrCINotFound
+			}
+			if g.ClientID != "" && client != g.ClientID {
+				return scopeEffect{}, errMemberOfOtherClient
+			}
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO monitoring_group_member (group_id, ci_id, organization_id)
+			SELECT $2, u.ci_id, $1 FROM unnest($3::uuid[]) AS u (ci_id)
+			ON CONFLICT (group_id, ci_id) DO NOTHING`, orgID, groupID, ciIDs); err != nil {
+			return scopeEffect{}, groupWriteError(err)
+		}
+		rows, err = tx.Query(ctx, `SELECT `+memberColumns+` FROM monitoring_group_member gm
+			WHERE gm.organization_id = $1 AND gm.group_id = $2 AND gm.ci_id = ANY ($3::uuid[]) ORDER BY gm.ci_id`, orgID, groupID, ciIDs)
+		if err != nil {
+			return scopeEffect{}, fmt.Errorf("read monitoring group members: %w", err)
+		}
+		if out, err = collectMembers(rows); err != nil {
+			return scopeEffect{}, err
+		}
+		return scopeEffect{ciIDs: ciIDs}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// RemoveGroupMember implements ProfileStore.
+func (r *PGRepository) RemoveGroupMember(ctx context.Context, groupID, ciID string) error {
+	return r.monitoringWrite(ctx, func(ctx context.Context, tx pgx.Tx, orgID string) (scopeEffect, error) {
+		if _, err := shareGroup(ctx, tx, orgID, groupID); err != nil {
+			return scopeEffect{}, err
+		}
+		if !api.IsUUID(ciID) {
+			return scopeEffect{}, ErrMemberNotFound
+		}
+		tag, err := tx.Exec(ctx, `DELETE FROM monitoring_group_member WHERE organization_id = $1 AND group_id = $2 AND ci_id = $3`,
+			orgID, groupID, ciID)
+		if err != nil {
+			return scopeEffect{}, fmt.Errorf("remove monitoring group member: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return scopeEffect{}, ErrMemberNotFound
+		}
+		return scopeEffect{ciIDs: []string{ciID}}, nil
+	})
 }

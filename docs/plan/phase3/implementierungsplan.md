@@ -5724,6 +5724,8 @@ PRB-07;[P3];E;backend/internal/probe/result_schema_integration_test.go;WP-945
 - frontend/src/api/generated/schema.d.ts (generiert)
 - docs/traceability.csv
 
+**Nachtrag 2026-11-13 (Umsetzung):** Die Dateiliste umfasst 15 Einträge. Hinzu kommen `backend/internal/probe/model.go` (Felder `MonitoringGroup.MemberCount` für `member_count` nach F-414 und `MonitoringGroupMember.CreatedAt` für `created_at` der Mitgliedsliste) und `backend/internal/server/monitoring_contract_test.go` (Register der umgesetzten Operationen `monitoringImplemented` und Herkunftswert `plan` von `ProbeValueOrigin` aus WP-940). Präzisierung von AK5: Die Scope-Regel des Segments `monitoring` nennt `monitoring_profile` und `monitoring_group`; die Mitgliedsrouten führen die Gruppe als `resource_id`, weil `monitoring_group_member` keine eigene `id` hat und `resourceTables` die Ressource über `id` auflöst. Der Snapshot-Eintrag von `DELETE …/members/{ci_id}` nennt `monitoring_group_member`, der von `POST …/members` die Gruppe samt Mitgliederliste aus `monitoring_group_member`. Mitglieder einer org-weiten Gruppe ändern nur org-weite Principals (403 wie beim Ändern der Gruppe), auch für CIs des eigenen Kunden; PostgreSQL und Memory-Repository prüfen das gleich (AK8).
+
 **Migration/RLS:** keine Migration. Tabellen und Policies stammen aus WP-935.
 
 **Tests:**

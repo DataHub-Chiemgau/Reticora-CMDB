@@ -146,8 +146,10 @@ var resourceTables = map[string][]string{
 	"locations":             {"location"},
 	"maintenance-windows":   {"maintenance_window"},
 	"metamodel":             {"metamodel_draft"},
-	// Alert rules and the probe definitions (WP-939).
-	"monitoring":                {"alert_rule", "probe", "alarm"},
+	// Alert rules, the probe definitions (WP-939) and the monitoring
+	// profiles and groups (WP-946); the member routes name the group as
+	// resource_id (monitoring_group_member has no id of its own).
+	"monitoring":                {"alert_rule", "probe", "alarm", "monitoring_profile", "monitoring_group"},
 	"mounts":                    {"rack_mount"},
 	"network-interfaces":        {"network_interface"},
 	"notification-channels":     {"notification_channel"},
