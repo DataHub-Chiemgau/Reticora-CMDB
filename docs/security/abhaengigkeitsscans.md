@@ -126,6 +126,10 @@ Nachtrag 2026-11-13: Amazon Linux 2023 hat Fixes für `sqlite-libs`
 veröffentlicht; `opensearchproject/opensearch:2.19.7` ist weiter das neueste
 2.x-Release (Digest unverändert) und enthält sie nicht. Fünf neue High-Ausnahmen
 bis 2026-12-13 (75 IDs); OpenSearch ist optional und nur intern erreichbar (A-85).
+Nachtrag 2026-11-13 (abends): Amazon Linux 2023 hat drei weitere Fixes für
+`sqlite-libs` (CVE-2026-119375, -119376, -119378; 3.40.0-1.amzn2023.0.9)
+veröffentlicht, die das OpenSearch-Image des Herstellers noch nicht enthält.
+Drei neue High-Ausnahmen bis 2026-12-13, Prüfpunkt wie bei E-246 am 2026-12-06.
 Nachtrag 2026-11-13 (Update-Plan Upd-01): Der Objektspeicher läuft auf
 `pgsty/silo` (Release 2026-11-12, Pin in der Tabelle) statt auf dem
 eingefrorenen `pgsty/minio` (Release 2026-08-04; Upstream `minio/minio` ist
@@ -164,8 +168,6 @@ einem Hersteller-Image; sie behalten ihr `since:` (Ablauf 2026-12-10 bzw.
 | `nats:2.14.10-alpine@sha256:311da47e2f31c26e99c623cd78d486a1e8ab039c49b32652770bb91a4f70512e` | Compose (`nats`, `nats-edge`), `deploy/k8s/base/components/nats-edge/nats-edge.yaml` | `image-scan-thirdparty` (`nats`) |
 | `redis:7.4.12-alpine@sha256:7b1753b4c5ad8458906c272a8132b8c15f5557b000379eb115fb239706a384b7` | Compose (`redis`) | `image-scan-thirdparty` (`redis`) |
 | `pgsty/silo:RELEASE.2026-11-12T00-00-00Z@sha256:c20d112390b9a9ce8c11b8af95ad35bcaa62f4759663c09c936cd8d2b511f329` | Compose (`minio`) | `image-scan-thirdparty` (`minio`) |
-| `postgres:16.16-alpine@sha256:0adbf25a9e96d38823bb813f3ac0ed41fadb665c88f1df7fe6dbfb060cbdc106` | Compose (`keycloak-db`) | `image-scan-thirdparty` (`keycloak-db`) |
-| `pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372` | Compose (`minio`) | `image-scan-thirdparty` (`minio`) |
 | `postgres:16.16-alpine@sha256:0adbf25a9e96d38823bb813f3ac0ed41fadb665c88f1df7fe6dbfb060cbdc106` | Basis von `reticora-keycloak-db` (Compose `keycloak-db`, eigenes Image seit 2026-11-13) | über `image-scan` (`keycloak-db`), `keycloak_db_image_pin` |
 | `quay.io/keycloak/keycloak:26.8.2@sha256:723b1d6e254c0fc96d5cffec860c7e0744d6a3277822b865bb538cf891575e41` | Compose (`keycloak`); vom Hersteller gepflegte Major-Version 26 | `image-scan-thirdparty` (`keycloak`) |
 | `opensearchproject/opensearch:3.9.0@sha256:3b55f6b6249cfdb92b52ee59adc8a266203ba9ef9f5d82544fad6f1af2f3609e` | Compose (`opensearch`), `deploy/k8s/base/components/opensearch/statefulset.yaml`, CI-Service des Jobs `migrations` | `image-scan-thirdparty` (`opensearch`) |
