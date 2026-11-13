@@ -12941,7 +12941,7 @@ export interface components {
         [key: string]: 'subscribed' | 'muted';
       };
       /**
-       * @description Categories whose e-mails are bundled into one digest per window (NTF-04): category → hourly (ends at the full hour) or daily (ends at midnight in time_zone). Allowed are the categories with a non-critical event (contract, entitlement, export, job, maintenance, review, stock, ticket, warranty, webhook); critical notifications, the in-app center and webhooks are never bundled. Omitted: the default `{"review":"hourly"}`; `{}`: every e-mail on its own.
+       * @description Categories whose e-mails are bundled into one digest per window (NTF-04): category → hourly (ends at the full hour) or daily (ends at midnight in time_zone). Allowed are the categories with a non-critical event (contract, entitlement, export, job, maintenance, review, stock, ticket, warranty, webhook) and workflow (send_notification, NTF-05 [P3]); critical notifications, the in-app center and webhooks are never bundled. Omitted: the default `{"review":"hourly"}`; `{}`: every e-mail on its own.
        * @example {
        *       "review": "hourly"
        *     }
@@ -19486,6 +19486,7 @@ export interface components {
       trigger: components['schemas']['JSONValue'];
       /** @description MET-45 condition nodes of api/rules.schema.json (eq, ne, in, not_in, gt, gte, lt, lte, contains, empty, not_empty, all, any, not; CH18, E-229) combined with all; an empty list always holds. They are evaluated over the run context flattened to dot paths (event.type, data.<field>, ci.status, ci.attributes.<name>). A refused node is 422 on conditions[i] with the path of the error. */
       conditions: components['schemas']['JSONValue'][];
+      /** @description Actions executed in order, each {"type": "<action>", ...}: noop, create_ticket, set_ci_field, require_approval, submit_form and send_notification (NTF-05 [P3]): {"type": "send_notification", "recipients": {"users": [<user id>], "teams": [<team id>], "roles": [<role name>], "contact_roles": [owner | escalation | operator | responsible | vendor of the run's CI], "client_contacts": {"roles": [<contact role>], "organization": <boolean>}}, "subject": <text or {"de": ..., "en": ...}>, "body": <text or {"de": ..., "en": ...}>, "critical": <boolean, default false>, "channel_ids": [<channel id>]}. Texts may name values of the run context as {{path}}. The notification has the category workflow; users receive it only with ci:read in client and site of the run's CI (workflow:read without a CI). An unknown user, team or role or no recipient fails the step with "notification has no recipient". */
       actions: components['schemas']['JSONValue'][];
       active: boolean;
       /** @description Number of the current definition version (WFL-02); the ETag. */
@@ -19505,6 +19506,7 @@ export interface components {
       version: number;
       trigger: components['schemas']['JSONValue'];
       conditions: components['schemas']['JSONValue'][];
+      /** @description Actions executed in order, each {"type": "<action>", ...}: noop, create_ticket, set_ci_field, require_approval, submit_form and send_notification (NTF-05 [P3]): {"type": "send_notification", "recipients": {"users": [<user id>], "teams": [<team id>], "roles": [<role name>], "contact_roles": [owner | escalation | operator | responsible | vendor of the run's CI], "client_contacts": {"roles": [<contact role>], "organization": <boolean>}}, "subject": <text or {"de": ..., "en": ...}>, "body": <text or {"de": ..., "en": ...}>, "critical": <boolean, default false>, "channel_ids": [<channel id>]}. Texts may name values of the run context as {{path}}. The notification has the category workflow; users receive it only with ci:read in client and site of the run's CI (workflow:read without a CI). An unknown user, team or role or no recipient fails the step with "notification has no recipient". */
       actions: components['schemas']['JSONValue'][];
       /** @description User who stored the version; absent for migrated versions and callers without a user. */
       created_by?: string;
@@ -19518,6 +19520,7 @@ export interface components {
       trigger: components['schemas']['JSONValue'];
       /** @description MET-45 condition nodes of api/rules.schema.json (eq, ne, in, not_in, gt, gte, lt, lte, contains, empty, not_empty, all, any, not; CH18, E-229) combined with all; an empty list always holds. They are evaluated over the run context flattened to dot paths (event.type, data.<field>, ci.status, ci.attributes.<name>). A refused node is 422 on conditions[i] with the path of the error. */
       conditions?: components['schemas']['JSONValue'][];
+      /** @description Actions executed in order, each {"type": "<action>", ...}: noop, create_ticket, set_ci_field, require_approval, submit_form and send_notification (NTF-05 [P3]): {"type": "send_notification", "recipients": {"users": [<user id>], "teams": [<team id>], "roles": [<role name>], "contact_roles": [owner | escalation | operator | responsible | vendor of the run's CI], "client_contacts": {"roles": [<contact role>], "organization": <boolean>}}, "subject": <text or {"de": ..., "en": ...}>, "body": <text or {"de": ..., "en": ...}>, "critical": <boolean, default false>, "channel_ids": [<channel id>]}. Texts may name values of the run context as {{path}}. The notification has the category workflow; users receive it only with ci:read in client and site of the run's CI (workflow:read without a CI). An unknown user, team or role or no recipient fails the step with "notification has no recipient". */
       actions: components['schemas']['JSONValue'][];
       active?: boolean;
     };
@@ -19528,6 +19531,7 @@ export interface components {
       trigger?: components['schemas']['JSONValue'];
       /** @description MET-45 condition nodes of api/rules.schema.json (eq, ne, in, not_in, gt, gte, lt, lte, contains, empty, not_empty, all, any, not; CH18, E-229) combined with all; an empty list always holds. They are evaluated over the run context flattened to dot paths (event.type, data.<field>, ci.status, ci.attributes.<name>). A refused node is 422 on conditions[i] with the path of the error. */
       conditions?: components['schemas']['JSONValue'][];
+      /** @description Actions executed in order, each {"type": "<action>", ...}: noop, create_ticket, set_ci_field, require_approval, submit_form and send_notification (NTF-05 [P3]): {"type": "send_notification", "recipients": {"users": [<user id>], "teams": [<team id>], "roles": [<role name>], "contact_roles": [owner | escalation | operator | responsible | vendor of the run's CI], "client_contacts": {"roles": [<contact role>], "organization": <boolean>}}, "subject": <text or {"de": ..., "en": ...}>, "body": <text or {"de": ..., "en": ...}>, "critical": <boolean, default false>, "channel_ids": [<channel id>]}. Texts may name values of the run context as {{path}}. The notification has the category workflow; users receive it only with ci:read in client and site of the run's CI (workflow:read without a CI). An unknown user, team or role or no recipient fails the step with "notification has no recipient". */
       actions?: components['schemas']['JSONValue'][];
       active?: boolean;
     };

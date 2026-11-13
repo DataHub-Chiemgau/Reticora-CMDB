@@ -620,6 +620,12 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// workflow.run (WP-1088, registerJobKinds).
 	workflowRuns := workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher).
 		WithFieldGuard(override.NewGuard(repos.Override))
+	// send_notification queues on the notifier of the application with
+	// the recipients of the database (WP-1095); without them (--no-db) its
+	// step fails with "notifications unavailable".
+	if opts.Notifier != nil && opts.AuditPool != nil && repos.Permission != nil {
+		workflowRuns.WithNotifier(opts.Notifier, notify.NewPGResolver(opts.AuditPool, repos.Permission))
+	}
 	if repos.Jobs != nil {
 		jobService := jobs.NewService(repos.Jobs)
 		jobTracker = jobService

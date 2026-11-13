@@ -34,8 +34,10 @@ func DefaultDigest() map[string]string { return map[string]string{"review": Dige
 // DigestCategories are the categories a digest may bundle: those of the
 // subscriptions with a non-critical event. A category whose events are all
 // critical (collector, invitation, certificate, apikey) is never bundled.
+// The direct categories (workflow) are bundled as well; a critical request
+// of them never is.
 func DigestCategories() []string {
-	var out []string
+	out := slices.Clone(directCategories)
 	for _, sub := range Subscriptions {
 		if !sub.Critical && !slices.Contains(out, sub.Category) {
 			out = append(out, sub.Category)

@@ -321,9 +321,20 @@ const (
 	SubscriptionMuted      = "muted"
 )
 
-// Categories are the notification categories of Subscriptions, sorted.
+// CategoryWorkflow is the category of the notifications of the workflow
+// action send_notification (NTF-05 [P3], WP-1095).
+const CategoryWorkflow = "workflow"
+
+// directCategories are the categories of notifications that no event
+// subscription sends but an application path directly (Notifier.Notify):
+// users mute and bundle them like the others. They are never critical by
+// themselves; a single request may be (Request.Critical).
+var directCategories = []string{CategoryWorkflow}
+
+// Categories are the notification categories of Subscriptions and the
+// direct ones (directCategories), sorted.
 func Categories() []string {
-	var out []string
+	out := slices.Clone(directCategories)
 	for _, sub := range Subscriptions {
 		if !slices.Contains(out, sub.Category) {
 			out = append(out, sub.Category)

@@ -11,6 +11,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -42,6 +43,10 @@ type Executor struct {
 	guard      *override.Guard
 	conflicts  ConflictReviews
 	queue      RunQueue
+	// notifier and recipients send the notifications of
+	// send_notification (WithNotifier, WP-1095).
+	notifier   *notify.Notifier
+	recipients notify.Resolver
 	// afterStep is a test hook called after each succeeded step; an error
 	// ends the attempt there like a worker that dies.
 	afterStep func(index int) error
@@ -302,7 +307,7 @@ func (e *Executor) resume(ctx context.Context, orgID string, run *Run, at attemp
 		if err != nil || end {
 			return out, err
 		}
-		output, wait, err := e.executeAction(ctx, orgID, run, action)
+		output, wait, err := e.executeAction(ctx, orgID, run, i, action)
 		if wait {
 			if _, markErr := e.repo.UpdateStep(ctx, orgID, step.ID, StatusWaitingApproval, output, ""); markErr != nil {
 				slog.Error("workflow: failed to mark step waiting for approval", "step_id", step.ID, "error", markErr)
@@ -524,7 +529,7 @@ func actionType(action JSONMap) (string, error) {
 	return typ, nil
 }
 
-func (e *Executor) executeAction(ctx context.Context, orgID string, run *Run, action JSONMap) (JSONMap, bool, error) {
+func (e *Executor) executeAction(ctx context.Context, orgID string, run *Run, index int, action JSONMap) (JSONMap, bool, error) {
 	typ, err := actionType(action)
 	if err != nil {
 		return nil, false, err
@@ -565,6 +570,9 @@ func (e *Executor) executeAction(ctx context.Context, orgID string, run *Run, ac
 		return e.setCIField(ctx, orgID, action)
 	case "require_approval":
 		return JSONMap{"message": str(action, "message", "Approval required")}, true, nil
+	case "send_notification":
+		out, err := e.sendNotification(ctx, orgID, run, index, action)
+		return out, false, err
 	case "submit_form":
 		if e.forms == nil {
 			return nil, false, fmt.Errorf("form repository unavailable")

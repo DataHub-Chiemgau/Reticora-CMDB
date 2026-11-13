@@ -75,9 +75,29 @@ type Text struct {
 // render renders the subject and the text of an event from its data.
 type render func(d map[string]any) Text
 
+// WorkflowNotification is the template of the workflow action
+// send_notification (WP-1095); no event subscription renders it.
+const WorkflowNotification = "workflow.notification"
+
+// DirectTemplates are the templates of the direct notifications
+// (directCategories), which no subscription renders.
+var DirectTemplates = []string{WorkflowNotification}
+
 // Templates are the texts of the events of Subscriptions by event type and
 // template locale.
 var Templates = map[string]map[string]render{
+	// The workflow action send_notification (NTF-05 [P3], WP-1095): subject
+	// and text come from the action, the template names the workflow.
+	WorkflowNotification: {
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Workflow: " + str(d, "subject"),
+				str(d, "body") + "\n\nGesendet vom Workflow " + str(d, "workflow_name") + " (Lauf " + str(d, "run_id") + ")."}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Workflow: " + str(d, "subject"),
+				str(d, "body") + "\n\nSent by the workflow " + str(d, "workflow_name") + " (run " + str(d, "run_id") + ")."}
+		},
+	},
 	events.ReviewCreated: {
 		LocaleDE: func(d map[string]any) Text {
 			return Text{"Neues Review-Item: " + str(d, "kind"),

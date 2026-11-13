@@ -224,7 +224,7 @@ func TestTemplatesCoverEveryEvent(t *testing.T) {
 		}
 	}
 	for typ := range Templates {
-		if _, ok := Subscriptions[typ]; !ok {
+		if _, ok := Subscriptions[typ]; !ok && !slices.Contains(DirectTemplates, typ) {
 			t.Errorf("template of %s, which no subscription notifies", typ)
 		}
 	}
@@ -540,5 +540,47 @@ func TestMaintenanceScheduledTemplate(t *testing.T) {
 	}
 	if a := sub.Audience(map[string]any{"id": "w-1"}); a != nil {
 		t.Errorf("audience without client %+v, want nobody", a)
+	}
+}
+
+// TestWorkflowCategoryKnown covers NTF-05 [P3] (WP-1095): the category
+// workflow of send_notification is a notification category without an
+// event subscription; users mute it (muted_categories, subscriptions) and
+// bundle it in a digest.
+func TestWorkflowCategoryKnown(t *testing.T) {
+	if !slices.Contains(Categories(), CategoryWorkflow) || !slices.Contains(DigestCategories(), CategoryWorkflow) {
+		t.Fatalf("workflow in categories %v, digest categories %v", Categories(), DigestCategories())
+	}
+	p := &Preference{MutedCategories: []string{CategoryWorkflow}}
+	if err := p.Validate(); err != nil || p.Subscriptions[CategoryWorkflow] != SubscriptionMuted {
+		t.Errorf("muted_categories [workflow]: %v, subscriptions %v", err, p.Subscriptions)
+	}
+	p = &Preference{Subscriptions: map[string]string{CategoryWorkflow: SubscriptionMuted}, Digest: map[string]string{CategoryWorkflow: DigestDaily}}
+	if err := p.Validate(); err != nil || !slices.Contains(p.MutedCategories, CategoryWorkflow) {
+		t.Errorf("subscriptions {workflow: muted} with a daily digest: %v, muted %v", err, p.MutedCategories)
+	}
+}
+
+// TestWorkflowNotificationTemplateLocales: the template
+// workflow.notification has a German and an English text that carry the
+// subject and the body of the action and name workflow and run.
+func TestWorkflowNotificationTemplateLocales(t *testing.T) {
+	data := map[string]any{"subject": "Server srv-1", "body": "Bitte prüfen.", "workflow_name": "Nachtlauf", "run_id": "r-1"}
+	de, en := Render(WorkflowNotification, LocaleDE, data), Render(WorkflowNotification, LocaleEN, data)
+	if de.Subject != "Workflow: Server srv-1" || !strings.Contains(de.Body, "Bitte prüfen.") || !strings.Contains(de.Body, "Nachtlauf") ||
+		!strings.Contains(de.Body, "r-1") {
+		t.Errorf("German text %+v", de)
+	}
+	if w := namesAny(de.Body, englishWords); w != "" {
+		t.Errorf("German text names %q: %q", w, de.Body)
+	}
+	if en.Subject != "Workflow: Server srv-1" || !strings.Contains(en.Body, "Sent by the workflow Nachtlauf (run r-1).") {
+		t.Errorf("English text %+v", en)
+	}
+	if de.Body == en.Body {
+		t.Errorf("German and English text are the same: %q", de.Body)
+	}
+	if !slices.Contains(DirectTemplates, WorkflowNotification) {
+		t.Errorf("direct templates %v, want %s", DirectTemplates, WorkflowNotification)
 	}
 }

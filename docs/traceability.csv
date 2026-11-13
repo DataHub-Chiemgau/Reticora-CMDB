@@ -1812,3 +1812,5 @@ PRT-20;[P3];E;collector/profiles/monitor_test.go;WP-1000
 WFL-02;[P3];F;backend/internal/workflow/serial_integration_test.go;WP-1089
 JOB-02;[B], Zusätze [P2], [P3];F;backend/internal/workflow/schedule_integration_test.go;WP-1091
 WFL-02;[P3];F;backend/internal/workflow/schedule_integration_test.go;WP-1091
+WFL-02;[P3];F;backend/internal/workflow/notify_action_integration_test.go;WP-1095
+NTF-05;[B], Zusätze [P2], [P3];F;backend/internal/workflow/notify_action_integration_test.go;WP-1095
