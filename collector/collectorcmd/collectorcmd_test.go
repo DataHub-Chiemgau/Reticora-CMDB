@@ -661,13 +661,40 @@ func TestUpdateCheckerWarnsWithoutCosign(t *testing.T) {
 		t.Errorf("verifier = %#v, want CosignVerifier running cosign", c.Verifier)
 	}
 
-	if err := os.WriteFile(filepath.Join(dir, "cosign"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "cosign"), []byte("#!/bin/sh\necho 'GitVersion:    v3.1.4'\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	logs = captureLogs(t)
 	newUpdateChecker(&cfg)
-	if strings.Contains(logs.String(), "collector.update.cosign_missing") {
-		t.Errorf("warning although cosign is on PATH: %s", logs.String())
+	if strings.Contains(logs.String(), "collector.update.cosign_missing") || strings.Contains(logs.String(), "collector.update.cosign_outdated") {
+		t.Errorf("warning although cosign v3.1.4 is on PATH: %s", logs.String())
+	}
+}
+
+// E-258: with auto-updates on, the start warns when the cosign on PATH is
+// older than update.MinCosignVersion (v2.4.1 of earlier installations) or
+// reports no version, because the verifier refuses every update with it.
+func TestUpdateCheckerWarnsWithOutdatedCosign(t *testing.T) {
+	cfg := collectorConfig{UpdateURL: "https://updates.example.com", UpdateChannel: update.ChannelStable}
+	for name, script := range map[string]string{
+		"v2.4.1":     "echo 'GitVersion:    v2.4.1'",
+		"v3.1.2":     "echo 'GitVersion:    v3.1.2'",
+		"no version": "echo 'cosign: unknown'",
+		"failing":    "exit 1",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("PATH", dir)
+			if err := os.WriteFile(filepath.Join(dir, "cosign"), []byte("#!/bin/sh\n"+script+"\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			logs := captureLogs(t)
+			newUpdateChecker(&cfg)
+			warnings := logLines(t, logs, "auto-updates are enabled, but the cosign on PATH is older than "+update.MinCosignVersion+": every update is refused until it is replaced")
+			if len(warnings) != 1 || warnings[0]["level"] != "WARN" || warnings[0]["event"] != "collector.update.cosign_outdated" {
+				t.Errorf("start with cosign %s: warnings %v, log %s", name, warnings, logs.String())
+			}
+		})
 	}
 }
 

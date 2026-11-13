@@ -44,10 +44,11 @@ func TestNewUpdateCheckerComposesSourceVerifierAndProbe(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	// The cosign on PATH records its arguments.
+	// The cosign on PATH reports v3.1.4 and records its arguments.
 	dir := t.TempDir()
 	argsFile := filepath.Join(dir, "cosign.args")
-	stub := "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > '" + argsFile + "'\n"
+	stub := "#!/bin/sh\nif [ \"$1\" = version ]; then echo 'GitVersion:    v3.1.4'; exit 0; fi\n" +
+		"for a in \"$@\"; do printf '%s\\n' \"$a\"; done > '" + argsFile + "'\n"
 	if err := os.WriteFile(filepath.Join(dir, "cosign"), []byte(stub), 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -25,8 +25,10 @@
 # are stubbed, all paths lie below a temporary directory, nothing is
 # installed on the host. The sandbox pins the checksum of a fake cosign;
 # the real pin is compared with install-smoke.yml, refuses the fake, and
-# with RETICORA_TEST_COSIGN=<cosign v2.4.1 binary> (CI: install-smoke.yml)
-# installs the real release binary.
+# with RETICORA_TEST_COSIGN=<cosign v3.1.4 binary> (CI: install-smoke.yml)
+# installs the real release binary. The pin is the same in release.yml,
+# ci.yml (cosign-verify) and install-smoke.yml, cosign-installer is pinned
+# by commit (E-258).
 #
 # Usage: ./tests/install-vm-cosign.test.sh
 set -uo pipefail
@@ -128,12 +130,12 @@ MAIN='preflight() { :; }; ensure_sources() { :; }; verify() { :; }; print_summar
 # ─── With and without RETICORA_UPDATE_URL ────────────────────────────────────
 OUT="$(vm upd RETICORA_UPDATE_URL="$UPDATE_URL" RETICORA_UPDATE_CHANNEL=beta -- "$MAIN")"; RC=$?
 if [ "$RC" -eq 0 ] && [ -x "$(cosign_of upd)" ] && [ "$(sha_of "$(cosign_of upd)")" = "$FAKE_SHA" ] \
-    && grep -qx "curl https://github.com/sigstore/cosign/releases/download/v2.4.1/cosign-linux-$ARCH" "$(case_dir upd)/calls" \
+    && grep -qx "curl https://github.com/sigstore/cosign/releases/download/v3.1.4/cosign-linux-$ARCH" "$(case_dir upd)/calls" \
     && grep -q 'STUB provide_collector_systemd (cosign: present)' <<<"$OUT" \
-    && grep -q "cosign v2.4.1 for the signed auto-updates: $(cosign_of upd) (sha256 checked)" <<<"$OUT"; then
-    ok "with RETICORA_UPDATE_URL: the pinned cosign v2.4.1 (sha256 checked) is installed before the collector"
+    && grep -q "cosign v3.1.4 for the signed auto-updates: $(cosign_of upd) (sha256 checked)" <<<"$OUT"; then
+    ok "with RETICORA_UPDATE_URL: the pinned cosign v3.1.4 (sha256 checked) is installed before the collector"
 else
-    fail "with RETICORA_UPDATE_URL: the pinned cosign v2.4.1 (sha256 checked) is installed before the collector" \
+    fail "with RETICORA_UPDATE_URL: the pinned cosign v3.1.4 (sha256 checked) is installed before the collector" \
         "rc=$RC calls: $(cat "$(case_dir upd)/calls")
 $OUT"
 fi
@@ -165,7 +167,7 @@ fi
 # ─── Fail-closed ─────────────────────────────────────────────────────────────
 OUT="$(vm bad RETICORA_UPDATE_URL="$UPDATE_URL" FAKE_COSIGN_DOWNLOAD="$OTHER_COSIGN" -- "$MAIN")"; RC=$?
 if [ "$RC" -ne 0 ] && [ ! -e "$(cosign_of bad)" ] && [ ! -e "$(cosign_of bad).part" ] \
-    && grep -q 'The downloaded cosign v2.4.1 does not match its published sha256 checksum; it was not installed' <<<"$OUT" \
+    && grep -q 'The downloaded cosign v3.1.4 does not match its published sha256 checksum; it was not installed' <<<"$OUT" \
     && ! grep -q 'STUB provide_collector_systemd' <<<"$OUT"; then
     ok "a downloaded cosign with another checksum is not installed, the installation stops before the collector"
 else
@@ -175,7 +177,7 @@ fi
 
 OUT="$(vm nodl RETICORA_UPDATE_URL="$UPDATE_URL" FAKE_COSIGN_DOWNLOAD=/nonexistent -- "$MAIN")"; RC=$?
 if [ "$RC" -ne 0 ] && [ ! -e "$(cosign_of nodl)" ] && [ ! -e "$(cosign_of nodl).part" ] \
-    && grep -q 'cosign v2.4.1 for the auto-updates could not be downloaded' <<<"$OUT" \
+    && grep -q 'cosign v3.1.4 for the auto-updates could not be downloaded' <<<"$OUT" \
     && ! grep -q 'STUB provide_collector_systemd' <<<"$OUT"; then
     ok "a failed cosign download installs nothing, the installation stops before the collector"
 else
@@ -196,9 +198,9 @@ mkdir -p "$(case_dir replace)/usr-local-bin"
 cp "$OTHER_COSIGN" "$(cosign_of replace)"
 OUT="$(vm replace RETICORA_UPDATE_URL="$UPDATE_URL" -- "$MAIN")"; RC=$?
 if [ "$RC" -eq 0 ] && [ "$(sha_of "$(cosign_of replace)")" = "$FAKE_SHA" ] && [ "$(downloads replace)" -eq 1 ]; then
-    ok "another cosign at the path is replaced by the pinned one"
+    ok "another cosign at the path (e.g. v2.4.1 of an earlier installation, E-258) is replaced by the pinned one"
 else
-    fail "another cosign at the path is replaced by the pinned one" "rc=$RC
+    fail "another cosign at the path (e.g. v2.4.1 of an earlier installation, E-258) is replaced by the pinned one" "rc=$RC
 $OUT"
 fi
 
@@ -239,6 +241,24 @@ else
         "installer: $defaults; install-smoke.yml: $wf_pin"
 fi
 
+# The release is signed with the same cosign (release.yml), the updater test
+# runs it (ci.yml cosign-verify), and sigstore/cosign-installer is pinned by
+# its commit; the minimum of the installers is a v3 release not above the pin.
+pins="$(for f in .github/workflows/release.yml .github/workflows/ci.yml .github/workflows/install-smoke.yml; do
+    sed -nE 's/^ +COSIGN_VERSION: (v[0-9.]+)$/\1/p' "$f"; done | sort -u | tr '\n' ' ')"
+installer_uses="$(grep -hE 'uses: sigstore/cosign-installer@' .github/workflows/*.yml | sed -E 's/^ *- *uses: *//' | sort -u)"
+min="$(env -i PATH="$SYS" bash -c 'set -euo pipefail; . "$0" --non-interactive; printf "%s" "$COSIGN_MIN_VERSION"' "$TMP_ROOT/install-vm-lib.sh" 2>&1)"
+pinned="$(cut -d' ' -f2 <<<"$defaults")"
+if [ "$pins" = "$pinned " ] \
+    && [ "$installer_uses" = "sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3" ] \
+    && [[ "$min" =~ ^v3\.[0-9]+\.[0-9]+$ ]] \
+    && [ "$(printf '%s\n' "$min" "$pinned" | sort -V | head -n 1)" = "$min" ]; then
+    ok "pin: release.yml, ci.yml and install-smoke.yml use cosign $pins(minimum $min), cosign-installer pinned by commit (v4.1.3)"
+else
+    fail "pin: release.yml, ci.yml and install-smoke.yml use cosign $pins(minimum $min), cosign-installer pinned by commit (v4.1.3)" \
+        "installer: $defaults; workflows: $pins; uses: $installer_uses; minimum: $min"
+fi
+
 OUT="$(vm realpin PIN=real RETICORA_UPDATE_URL="$UPDATE_URL" -- "$MAIN")"; RC=$?
 if [ "$RC" -ne 0 ] && [ ! -e "$(cosign_of realpin)" ] && grep -q 'does not match its published sha256 checksum' <<<"$OUT"; then
     ok "pin: the published checksum refuses a file other than the cosign release"
@@ -254,10 +274,10 @@ elif [ "$ARCH" != amd64 ]; then
 else
     OUT="$(vm real PIN=real RETICORA_UPDATE_URL="$UPDATE_URL" FAKE_COSIGN_DOWNLOAD="$RETICORA_TEST_COSIGN" -- \
         "$MAIN"'; "$UPDATE_COSIGN" version 2>&1 | grep -E "GitVersion"')"; RC=$?
-    if [ "$RC" -eq 0 ] && grep -qE 'GitVersion: +v2\.4\.1' <<<"$OUT"; then
-        ok "real cosign: the release binary v2.4.1 linux-amd64 matches the pin and is installed for the updater"
+    if [ "$RC" -eq 0 ] && grep -qE 'GitVersion: +v3\.1\.4' <<<"$OUT"; then
+        ok "real cosign: the release binary v3.1.4 linux-amd64 matches the pin and is installed for the updater"
     else
-        fail "real cosign: the release binary v2.4.1 linux-amd64 matches the pin and is installed for the updater" "rc=$RC
+        fail "real cosign: the release binary v3.1.4 linux-amd64 matches the pin and is installed for the updater" "rc=$RC
 $OUT"
     fi
 fi

@@ -1292,13 +1292,16 @@ jobs:
   # changed artifact and the foreign bundle are refused; with the pinned
   # release identity (no COSIGN_EXPECT_IDENTITY) the signature is refused for
   # the identity. Release bundles are checked in release.yml (WP-545).
+  # E-258: the bundles are Sigstore bundles (v0.3) of cosign v3, and the
+  # legacy bundle of the published release v1.0.0-rc.1 (cosign v2, fixture in
+  # edgecore/update/testdata) stays verifiable with it.
   cosign-verify:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write   # keyless signing (Fulcio) with the identity of this workflow
     env:
-      COSIGN_VERSION: v2.4.1
+      COSIGN_VERSION: v3.1.4
     steps:
       - uses: actions/checkout@v4
 
@@ -1307,7 +1310,7 @@ jobs:
           go-version: "1.26.11"
           cache-dependency-path: edgecore/go.mod
 
-      - uses: sigstore/cosign-installer@v3.7.0
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
         with:
           cosign-release: ${{ env.COSIGN_VERSION }}
 
@@ -1320,6 +1323,10 @@ jobs:
           printf 'reticora cosign-verify foreign artifact %s run %s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" > "$dir/reticora-foreign-artifact"
           for file in reticora-test-artifact reticora-foreign-artifact; do
             cosign sign-blob --yes --bundle "$dir/$file.sigstore.json" "$dir/$file"
+            if ! jq -e '.mediaType == "application/vnd.dev.sigstore.bundle.v0.3+json"' "$dir/$file.sigstore.json" > /dev/null; then
+              echo "::error::$file.sigstore.json is no Sigstore bundle v0.3"
+              exit 1
+            fi
           done
           # The certificate names this workflow at the ref of the run
           # (owner/repo/.github/workflows/ci.yml@refs/...), as a regexp.
@@ -1383,3 +1390,26 @@ jobs:
             exit 1
           fi
           echo "refused for the pinned release identity (exit $rc): identity mismatch"
+
+      - name: Real cosign with the legacy bundle of a published release (accepted; changed, foreign, other tag refused)
+        working-directory: edgecore
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/cosign-legacy.log"
+          COSIGN_BIN="$(command -v cosign)" \
+            go test -tags cosignreal -count=1 -v -run '^TestCosignVerifierWithLegacyReleaseBundle$' ./update/ 2>&1 | tee "$log"
+          for name in 'TestCosignVerifierWithLegacyReleaseBundle' \
+            'TestCosignVerifierWithLegacyReleaseBundle/legacy_bundle_with_the_pinned_release_identity_is_accepted' \
+            'TestCosignVerifierWithLegacyReleaseBundle/legacy_bundle_with_the_identity_of_exactly_its_tag_is_accepted' \
+            'TestCosignVerifierWithLegacyReleaseBundle/manifest_changed_by_one_byte_is_refused' \
+            'TestCosignVerifierWithLegacyReleaseBundle/bundle_of_another_file_is_refused' \
+            'TestCosignVerifierWithLegacyReleaseBundle/identity_of_another_tag_is_refused'; do
+            if ! grep -qE -- "--- PASS: ${name} \(" "$log"; then
+              echo "::error::$name did not pass"
+              exit 1
+            fi
+          done
+          if grep -qE -- '--- (SKIP|FAIL)|no tests to run' "$log"; then
+            echo "::error::TestCosignVerifierWithLegacyReleaseBundle skipped or failed a case"
+            exit 1
+          fi

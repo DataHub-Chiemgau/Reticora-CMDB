@@ -385,12 +385,17 @@ Connection rules, log events and diagnosis:
 `docs/betrieb/collector-verbindung.md`.
 
 With `RETICORA_UPDATE_URL` (systemd mode) the installer also installs cosign
-`v2.4.1` — the version the release is signed with, checked against its
+`v3.1.4` — the version the release is signed with, checked against its
 published sha256 before it is installed — as `/usr/local/bin/cosign`, where
-the updater of the service finds it; another file there is replaced. Without
-an update URL nothing is installed, and the collector warns at start when
-auto-updates are on but cosign is missing. The Docker mode updates through the
-signed image (re-run with `--release v<version>`) and ignores the update URL.
+the updater of the service finds it; another file there (e.g. cosign v2.4.1
+of an earlier installation) is replaced. Without an update URL nothing is
+installed, and the collector warns at start when auto-updates are on but
+cosign is missing (`collector.update.cosign_missing`) or older than v3.1.3
+(`collector.update.cosign_outdated`, E-258); the updater then refuses every
+update until a re-run of the installer replaces it
+(`docs/betrieb/collector-updates.md`, "cosign v3"). The Docker mode updates
+through the signed image (re-run with `--release v<version>`) and ignores the
+update URL.
 
 ### Enrollment
 

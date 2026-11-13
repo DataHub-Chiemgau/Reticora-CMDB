@@ -20,7 +20,10 @@ permissions:
   contents: read
 
 env:
-  COSIGN_VERSION: v2.4.1
+  # cosign v3 (E-258): writes Sigstore bundles (v0.3) and stores the image
+  # signatures as OCI referrers; the installers and the updater accept
+  # COSIGN_MIN_VERSION (v3.1.3) or newer.
+  COSIGN_VERSION: v3.1.4
   REGISTRY: ghcr.io/datahub-chiemgau
 
 jobs:
@@ -64,7 +67,7 @@ jobs:
         with:
           go-version: "1.26.11"
 
-      - uses: sigstore/cosign-installer@v3.7.0
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
         with:
           cosign-release: ${{ env.COSIGN_VERSION }}
 
@@ -99,11 +102,17 @@ jobs:
           git archive --format=tar.gz --prefix="reticora-source-$GITHUB_REF_NAME/" \
             -o "dist/reticora-source-$GITHUB_REF_NAME.tar.gz" HEAD
 
+      # cosign v3 writes the Sigstore bundle format (v0.3, E-258) by
+      # default; a legacy bundle stops the release.
       - name: Sign binaries and SBOMs (cosign keyless)
         run: |
           set -euo pipefail
           for file in dist/*; do
             cosign sign-blob --yes --bundle "$file.sigstore.json" "$file"
+            if ! jq -e '.mediaType == "application/vnd.dev.sigstore.bundle.v0.3+json"' "$file.sigstore.json" > /dev/null; then
+              echo "::error::$file.sigstore.json is no Sigstore bundle v0.3"
+              exit 1
+            fi
           done
 
       # WP-545 (TEC-15, COL-06): the updater's CosignVerifier runs the real
@@ -165,6 +174,10 @@ jobs:
         run: |
           set -euo pipefail
           cosign sign-blob --yes --bundle dist/SHA256SUMS.sigstore.json dist/SHA256SUMS
+          if ! jq -e '.mediaType == "application/vnd.dev.sigstore.bundle.v0.3+json"' dist/SHA256SUMS.sigstore.json > /dev/null; then
+            echo "::error::dist/SHA256SUMS.sigstore.json is no Sigstore bundle v0.3"
+            exit 1
+          fi
           cosign verify-blob --bundle dist/SHA256SUMS.sigstore.json \
             --certificate-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@$GITHUB_REF" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
@@ -216,7 +229,7 @@ jobs:
       - name: Check scan exceptions (SEC-11 SLA)
         run: ./scripts/ci/check-scan-exceptions.sh
 
-      - uses: sigstore/cosign-installer@v3.7.0
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
         with:
           cosign-release: ${{ env.COSIGN_VERSION }}
 
@@ -311,16 +324,26 @@ jobs:
       # (docs/README.md): its signature and its SPDX SBOM attestation for the
       # release identity. A failure fails
       # this job, and the binaries job publishes the release only after every
-      # image passed (needs: images).
+      # image passed (needs: images). The signature names the image with the
+      # pushed digest, as the installers require (verify_release_image,
+      # docker-reference with the digest since cosign v3, E-258).
       - name: Verify the image signature and SBOM attestation
         env:
           IMAGE: ${{ env.REGISTRY }}/${{ matrix.image }}@${{ steps.push.outputs.digest }}
+          DIGEST: ${{ steps.push.outputs.digest }}
         run: |
           set -euo pipefail
           identity="^https://github\.com/${GITHUB_REPOSITORY//./\\.}/\.github/workflows/release\.yml@refs/tags/v.+$"
           cosign verify "$IMAGE" \
             --certificate-identity-regexp "$identity" \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com > "$RUNNER_TEMP/verify.json"
+          if ! jq -e --arg ref "$IMAGE" --arg digest "$DIGEST" \
+            'any(.[]; .critical.identity["docker-reference"] == $ref and .critical.image["docker-manifest-digest"] == $digest)' \
+            "$RUNNER_TEMP/verify.json" > /dev/null; then
+            echo "::error::the signature of $IMAGE does not name the image with its digest"
+            jq -c '[.[].critical]' "$RUNNER_TEMP/verify.json"
+            exit 1
+          fi
           cosign verify-attestation --type spdxjson "$IMAGE" \
             --certificate-identity-regexp "$identity" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null

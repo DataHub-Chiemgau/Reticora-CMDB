@@ -1567,12 +1567,13 @@ A version tag `v*` starts the release workflow. Tools follow E-31.
    - `reticora-keycloak-db` is the PostgreSQL of Keycloak (`deploy/docker-compose/keycloak-db/Dockerfile`): the official `postgres:16.16-alpine`, pinned by version and digest, with its `gosu` rebuilt by the repository's Go toolchain (the vendor's is built with an outdated Go, E-96, A-85). Major version, data directory and UID 70 are the vendor's, so the `keycloakdb` volume of an earlier installation (`postgres:16.x-alpine`) keeps running.
    - Before the push, Trivy scans each image with the threshold of the CI job `image-scan`: Critical/High findings with an available fix block. Exceptions follow `security/scan-exceptions.txt`, see [security/abhaengigkeitsscans.md](security/abhaengigkeitsscans.md).
 3. Syft generates an SPDX SBOM for every binary and every image, plus one for the source tree.
-4. Everything is signed keyless with cosign: a Fulcio certificate for the identity of the release workflow and an entry in the Rekor log.
-   - Binaries and SBOMs get a Sigstore bundle (`<file>.sigstore.json`).
-   - Images are signed, and their SBOM is attached as a cosign attestation (`spdxjson`).
+4. Everything is signed keyless with cosign v3.1.4 (E-258): a Fulcio certificate for the identity of the release workflow and an entry in the transparency log.
+   - Binaries and SBOMs get a Sigstore bundle v0.3 (`<file>.sigstore.json`); a bundle in another format stops the release.
+   - Images are signed, and their SBOM is attached as a cosign attestation (`spdxjson`); cosign v3 stores both as OCI referrers of the image digest.
+   - Releases up to `v1.0.0-rc.1` were signed with cosign v2.4.1 (legacy bundle, signatures as `.sig` tags). The same verification commands accept them; `ci.yml` (job `cosign-verify`) proves this with the legacy bundle of `v1.0.0-rc.1`.
 5. The workflow verifies its own signatures with the real cosign before anything is published (WP-545):
    - For linux/amd64 and linux/arm64, `edgecore/update/cosign_real_test.go` (build tag `cosignreal`) runs the updater's `CosignVerifier` against the collector and its bundle: the signed binary passes with the pinned release identity; the binary changed by one byte, the bundle of another artifact and another identity are refused. A failing or skipped test stops the release.
-   - Every bundle passes `cosign verify-blob`; every image passes `cosign verify` and `cosign verify-attestation --type spdxjson`. The release is published only after all five images passed.
+   - Every bundle passes `cosign verify-blob`; every image passes `cosign verify` (the signature names the image with the pushed digest, as the installers require) and `cosign verify-attestation --type spdxjson`. The release is published only after all five images passed.
    - It then publishes the files on the GitHub release, together with `SHA256SUMS` and one updater manifest per binary (`<binary>.release.json`, holding `downloadUrl`, `signatureBundleUrl` and `checksums.sha256`).
 
 Release candidate of gate G1 (WP-595, `docs/security/review-g1.md`, section „Läufe auf dem Release-Kandidaten“): commit `536e3ab8` on `main` (gate decision of 2026-11-10, result „bedingt bestanden“; CI run 42712217817 and install smoke run 42712217841 green); tag `v1.0.0-rc.1` on `9989d9d3`, release run 42780580858 green (attempt 2), install smoke with release mode 42780580723 green: pre-release with SBOMs, Sigstore bundles, image signatures, SBOM attestations and the `cosign_real` test.
@@ -1586,8 +1587,9 @@ Mandatory signature check in the updater (`edgecore/update`):
   - verification fails;
   - no verifier is configured.
 - `CosignVerifier` calls `cosign verify-blob --bundle`. It pins the signer to `release.yml` of this repository on a `v*` tag, with the GitHub Actions OIDC issuer.
+- It runs cosign only when `cosign version` reports at least v3.1.3 (`update.MinCosignVersion`, the same as `COSIGN_MIN_VERSION` of the installers, E-258, GHSA-fx35-mq7g-6g98); otherwise every update is refused and the collector warns at start (`collector.update.cosign_outdated`). Collector hosts with the cosign v2.4.1 of earlier installations: [`docs/betrieb/collector-updates.md`](betrieb/collector-updates.md), "cosign v3".
 
-Check a release by hand (operators, before an installation or an air-gapped transfer). Every command must exit 0 (`verify-blob` prints `Verified OK`, `verify` the verified signature payload); any other result means the file or image is not the one the release workflow signed. The signer is the release workflow of this repository on a version tag:
+Check a release by hand (operators, before an installation or an air-gapped transfer) with cosign v3.1.3 or newer. Every command must exit 0 (`verify-blob` prints `Verified OK`, `verify` the verified signature payload); any other result means the file or image is not the one the release workflow signed. The signer is the release workflow of this repository on a version tag:
 
 ```bash
 VERSION=v1.2.3   # the release tag
@@ -1623,7 +1625,7 @@ for image in reticora-server reticora-collector reticora-frontend reticora-postg
 done
 ```
 
-`cosign verify` prints the image digest (`docker-manifest-digest`); pin that digest (`ghcr.io/datahub-chiemgau/<image>@sha256:…`) instead of the tag, as the installers do in release mode. Without `> /dev/null`, `verify-attestation` prints the attestation; the SBOM is the `predicate` of the in-toto statement in its base64 `payload`.
+`cosign verify` prints the image digest (`docker-manifest-digest`) and the signed reference (`docker-reference`: the repository for releases signed with cosign v2, `<image>@<digest>` since cosign v3); pin that digest (`ghcr.io/datahub-chiemgau/<image>@sha256:…`) instead of the tag, as the installers do in release mode. Without `> /dev/null`, `verify-attestation` prints the attestation; the SBOM is the `predicate` of the in-toto statement in its base64 `payload`.
 
 **Planned additions:**
 

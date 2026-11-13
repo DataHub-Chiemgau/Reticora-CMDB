@@ -234,6 +234,34 @@ Major-Sprung behebbar:
 | `i18next` 24.2.3 (Bundle) | GHSA-6jcc-5g8w-32mx (CVE-2026-63402, Moderate, Fix 26.3.4) | erreichbar nur über `addResourceBundle(…, deep, overwrite)` mit fremden Daten; `frontend/src` ruft die Funktion nicht auf, die Übersetzungen sind statisch | i18next 26 mit react-i18next 17 (Upd-11) |
 | `tldts` 6.1.86, `@asamuzakjp/css-color` 3.2.0 | GHSA-mf82-cgp5-3vmq, GHSA-6g4c-jm42-jc5r (Moderate) | nur Testumgebung (`jsdom` 25) | jsdom 31 (Upd-11) |
 | `esbuild` 0.25.12 | GHSA-gv7w-rqvm-qjhr (High) | betrifft nur das Deno-Modul von esbuild (`lib/deno/mod.ts`), nicht die npm-Installation mit Prüfsummenkontrolle | Vite 8 führt esbuild nur noch als optionalen Peer `^0.27.0 \|\| ^0.28.0` (Upd-11) |
+### Signierwerkzeug cosign (Release, Installer, Updater)
+
+cosign ist kein Bestandteil der Images oder Go-Module. Die Jobs oben erfassen
+es deshalb nicht. Gepinnt ist es mit Version und SHA256 der Release-Binaries
+(`cosign_checksums.txt` des Herstellers) an diesen Stellen:
+
+- `install-preflight.sh`/`install.sh` (`COSIGN_VERSION`, `COSIGN_SHA256_*`)
+- `release.yml`, `ci.yml` (`cosign-verify`) und `install-smoke.yml`
+  (`COSIGN_VERSION`)
+- `sigstore/cosign-installer` per Commit-SHA
+
+`tests/install-vm-cosign.test.sh` erzwingt, dass alle Stellen gleich sind.
+
+| Stand | Version | Prüfsumme linux-amd64 / linux-arm64 | Behobene Advisories |
+|---|---|---|---|
+| bis 2026-11-13 | v2.4.1 | `8b24b946…` / `3b2e2e38…` | – |
+| ab 2026-11-13 (Upd-06, [E-258](../plan/phase3/entscheidungen.md#e-258)) | v3.1.4 (2026-10-20); cosign-installer v4.1.3 (`756fe2d2…`) | `424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa` / `ade83b7aac62e131cacfe96d958948b2150cc9efec46a570a2649b8e27dedad2` | GHSA-fx35-mq7g-6g98 (high, Fix v3.1.3), GHSA-whqx-f9j3-ch6m (medium, v3.0.4), GHSA-w6c6-c85g-mmv6 (medium, v3.0.6), GHSA-wfqv-66vq-46rm (low, v3.0.5) |
+
+Diese Advisories veröffentlicht sigstore als Repository-Advisories
+(`gh api repos/sigstore/cosign/security-advisories`). Neue Advisories prüft
+das Team vor jedem Release dort.
+
+Ein installiertes cosign unterhalb von `v3.1.3` nutzen weder die Installer
+(`COSIGN_MIN_VERSION`, sie greifen dann auf das gepinnte cosign zurück) noch
+der Updater (`update.MinCosignVersion`, er lehnt das Update ab). Hinweise
+für bestehende Collector-Hosts mit cosign v2.4.1:
+[`docs/betrieb/collector-updates.md`](../betrieb/collector-updates.md),
+Abschnitt „cosign v3“.
 
 ## Ausnahmen und CVE-Fix-SLA
 

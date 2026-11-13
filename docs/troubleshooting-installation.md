@@ -778,11 +778,16 @@ a git mirror (`--repo`) is accepted when its tag is the signed commit, an
 image mirror (`RETICORA_IMAGE_REGISTRY`) when it keeps the signatures
 (`cosign copy`).
 
-**cosign:** an installed `cosign` (v2) is used. Otherwise the installer
-downloads cosign v2.4.1 for linux/amd64 or linux/arm64 from the sigstore
+**cosign:** an installed `cosign` v3.1.3 or newer is used. An older one
+(cosign v2, or v3 before v3.1.3: GHSA-fx35-mq7g-6g98, a forged legacy bundle
+passes the identity check) is not used, with a warning. Then the installer
+downloads cosign v3.1.4 for linux/amd64 or linux/arm64 from the sigstore
 release and checks it against its published sha256 before every use (cache:
 `RETICORA_TOOLS_DIR`, default `/var/cache/reticora` as root, otherwise
-`~/.cache/reticora`).
+`~/.cache/reticora`). Releases are signed with cosign v3 (Sigstore bundle
+v0.3, image signatures as OCI referrers); releases signed before with cosign
+v2 (legacy bundles, e.g. v1.0.0-rc.1) are verified by the same commands
+(E-258).
 
 **Typical calls:**
 
@@ -837,8 +842,9 @@ curl -fsSL "$base/SOURCE_COMMIT"; git -C /opt/reticora-cmdb rev-parse HEAD
 | `Signature check failed: <file or image> is not signed by the release workflow …` | cosign rejected the signature: manipulated file or image, a signature of another identity (fork, other workflow) or of another release, a tag without signed images, or no registry access | Do not install. Check the tag and the registry (`docker login` for a private registry) and verify by hand as above; a mirror must keep the signatures (`cosign copy`). |
 | `Signature check failed: the verified signatures of <ref> do not name <image> with one digest` | The tag carries a signed image of another name (e.g. the frontend image under `reticora-server`) | Do not install; the registry content is wrong. |
 | `Checksum mismatch: <file> … is not the file of the signed manifest SHA256SUMS` | The downloaded binary, tarball or `SOURCE_COMMIT` is not the one of the release | Do not install; download again from the release page. |
-| `cosign is required to verify the signed release artifacts …` | No cosign installed and the download from github.com/sigstore failed (or no build for this CPU) | Install cosign v2 (https://docs.sigstore.dev/cosign/system_config/installation/) and re-run. |
-| `The downloaded cosign v2.4.1 does not match its published sha256 checksum` | The cosign download was manipulated or truncated | Re-run; install cosign yourself if it persists. |
+| `cosign is required to verify the signed release artifacts …` | No cosign v3.1.3 or newer installed and the download from github.com/sigstore failed (or no build for this CPU) | Install cosign v3.1.3 or newer (https://docs.sigstore.dev/cosign/system_config/installation/) and re-run. |
+| `The installed cosign <path> (<version>) is older than v3.1.3 (GHSA-fx35-mq7g-6g98) and is not used …` (warning) | An older cosign (e.g. v2.4.1) is on `PATH` | Nothing to do for the installation (the pinned v3.1.4 is used); update or remove the old cosign. |
+| `The downloaded cosign v3.1.4 does not match its published sha256 checksum` | The cosign download was manipulated or truncated | Re-run; install cosign v3.1.3 or newer yourself if it persists. |
 | `Could not download <file> of release <tag> …` | The release has no such file (tag not released, or released before WP-387 without `SHA256SUMS.sigstore.json`) or no network | Use a release that publishes the signed manifest, or `--build-from-source`. |
 | `… --build-from-source …; use one of them` | `--release` together with `--build-from-source` | Choose the signed release or the local build. |
 | `No release selected for the signed collector …` / `No registry or release selected for the signed images …` | A function of the installer ran without a selected release (internal call) | Name the release with `--release v<version>`, or use `--build-from-source`. |

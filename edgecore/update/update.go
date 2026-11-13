@@ -251,9 +251,63 @@ const (
 	GitHubActionsIssuer   = "https://token.actions.githubusercontent.com"
 )
 
+// MinCosignVersion is the oldest cosign CosignVerifier runs (E-258, the same
+// as COSIGN_MIN_VERSION of the installers): earlier v3 releases accept a
+// forged legacy bundle despite the identity pinning (GHSA-fx35-mq7g-6g98,
+// fixed in v3.1.3), and cosign v2 reads the Sigstore bundles (v0.3) that
+// release.yml writes since cosign v3 only with an extra flag.
+const MinCosignVersion = "v3.1.3"
+
+// ErrCosignOutdated refuses the verification with a cosign older than
+// MinCosignVersion, or one that reports no release version.
+var ErrCosignOutdated = errors.New("update: cosign is older than " + MinCosignVersion + " or reports no release version; updates are refused until it is replaced (re-run install-vm.sh with RETICORA_UPDATE_URL, which installs the pinned cosign as /usr/local/bin/cosign, see docs/betrieb/collector-updates.md)")
+
+// CosignVersion runs '<binary> version' and returns the release version it
+// reports (GitVersion, e.g. v3.1.4). run nil uses os/exec.
+func CosignVersion(ctx context.Context, binary string, run func(ctx context.Context, name string, args ...string) ([]byte, error)) (string, error) {
+	if binary == "" {
+		binary = "cosign"
+	}
+	if run == nil {
+		run = runCommand
+	}
+	out, err := run(ctx, binary, "version")
+	if err != nil {
+		return "", fmt.Errorf("cosign version: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	for line := range strings.Lines(string(out)) {
+		if value, found := strings.CutPrefix(strings.TrimSpace(line), "GitVersion:"); found {
+			if v := strings.TrimSpace(value); v != "" {
+				return v, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("cosign version: no GitVersion in its output: %s", strings.TrimSpace(string(out)))
+}
+
+// CheckCosignVersion returns the version of binary, or an error wrapping
+// ErrCosignOutdated when it is older than MinCosignVersion or reports no
+// release version (a pre-release of MinCosignVersion is older).
+func CheckCosignVersion(ctx context.Context, binary string, run func(ctx context.Context, name string, args ...string) ([]byte, error)) (string, error) {
+	v, err := CosignVersion(ctx, binary, run)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrCosignOutdated, err)
+	}
+	if c, ok := CompareVersions(v, MinCosignVersion); !ok || c < 0 {
+		return v, fmt.Errorf("%w: found %s", ErrCosignOutdated, v)
+	}
+	return v, nil
+}
+
+func runCommand(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+}
+
 // CosignVerifier verifies keyless cosign signatures with the cosign CLI
 // (cosign verify-blob --bundle), which checks the Fulcio certificate chain,
-// the Rekor transparency-log entry and the signer identity.
+// the Rekor transparency-log entry and the signer identity. It reads the
+// Sigstore bundles of cosign v3 and the legacy bundles of releases signed
+// with cosign v2; a cosign older than MinCosignVersion is not run.
 type CosignVerifier struct {
 	// Binary is the cosign executable (default "cosign" from PATH).
 	Binary string
@@ -280,9 +334,10 @@ func (v CosignVerifier) Verify(ctx context.Context, artifactPath, bundlePath str
 	}
 	run := v.run
 	if run == nil {
-		run = func(ctx context.Context, name string, args ...string) ([]byte, error) {
-			return exec.CommandContext(ctx, name, args...).CombinedOutput()
-		}
+		run = runCommand
+	}
+	if _, err := CheckCosignVersion(ctx, binary, run); err != nil {
+		return err
 	}
 	out, err := run(ctx, binary, "verify-blob",
 		"--bundle", bundlePath,
