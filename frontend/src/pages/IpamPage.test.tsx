@@ -143,7 +143,9 @@ function mockApi({
     }
     if (path === '/sites') {
       return json(
-        page([{ id: SITE, organization_id: ORG, client_id: CLIENT, name: 'Werk 1', created_at: AT }]),
+        page([
+          { id: SITE, organization_id: ORG, client_id: CLIENT, name: 'Werk 1', created_at: AT },
+        ]),
       );
     }
     if (path === '/subnets') {

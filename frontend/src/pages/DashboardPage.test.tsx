@@ -377,8 +377,12 @@ describe('DashboardPage', () => {
       user: { sub: 'user-1' },
     });
     const routes = (featureKey: string) => ({
-      '/modules': { data: [{ key: 'compliance', phase: 'P3', nav: ['compliance'], enabled: true }] },
-      '/entitlements': paginated([{ organization_id: 'org-1', feature_key: featureKey, enabled: true }]),
+      '/modules': {
+        data: [{ key: 'compliance', phase: 'P3', nav: ['compliance'], enabled: true }],
+      },
+      '/entitlements': paginated([
+        { organization_id: 'org-1', feature_key: featureKey, enabled: true },
+      ]),
       '/compliance/score': { overall: { score: 80, passed: 4, failed: 1, total: 5 }, rules: [] },
       '/cis': paginated([]),
       '/collectors': paginated([]),

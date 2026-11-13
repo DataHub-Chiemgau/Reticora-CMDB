@@ -158,6 +158,14 @@ nicht installiert. Der Lauf im CI-Job `e2e` in allen sechs Projekten
 Datum wird nach dem Merge hier nachgetragen (datierter Vermerk); bis dahin
 ist (c) für G2 nicht freigegeben.
 
+Änderung nach dem Einfrieren, 2026-11-13 (WP-880, Nachtrag `p3-pkg-model`):
+`GET /api/v1/entitlements` antwortet seit WP-880 mit `plan`,
+`plan_changed_at` und `origin`. Der Mock in
+`frontend/e2e/metamodel-scenario.spec.ts` baut die Antwort daher über den
+gemeinsamen Helfer `entitlements()` aus `e2e/support/backend.ts` statt über
+eine eigene Liste. Daten, Schritte und Erwartungen bleiben unverändert; die
+Prüfsumme der Spec in `artefakte/SHA256SUMS` ist neu.
+
 ## (d) Onboarding-Szenario
 
 **Ablauf:** Self-Signup, Collector-Enrollment, Scope bestätigen, 30 simulierte
@@ -320,6 +328,13 @@ unter `main tbody tr button` statt `main ul li button`. Daten, Schritte und
 Erwartungen bleiben unverändert; die Prüfsumme der Spec in
 `artefakte/SHA256SUMS` ist neu. PR #137 hatte die Spec angepasst, die
 Prüfsumme aber nicht nachgezogen (Job `gate` auf `main` rot).
+
+Änderung nach dem Einfrieren, 2026-11-13 (WP-873, Nachtrag `p3-sr60-thirdparty-pins`):
+Keycloak 26.8.2 verlangt für die Admin-REST-API den Client-Scope
+`kc-admin-api`. `frontend/e2e/fixtures/setup-onboarding.sh` legt ihn für den
+Admin-Client als Default-Scope an, wie `install-cloud.sh`. Daten, Schritte und
+Erwartungen bleiben unverändert; die Prüfsumme der Fixture in
+`artefakte/SHA256SUMS` ist neu.
 
 | # | Schritt | Erwartung | Ergebnis |
 |---|---|---|---|

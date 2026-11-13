@@ -910,7 +910,8 @@ const ROUTES: A11yRoute[] = [
     path: '/operator/*',
     url: '/operator',
     signedIn: false,
-    ready: (page) => page.getByRole('button', { name: /als operator anmelden|sign in as operator/i }),
+    ready: (page) =>
+      page.getByRole('button', { name: /als operator anmelden|sign in as operator/i }),
   },
   {
     path: '/onboarding',
@@ -1409,7 +1410,9 @@ const SCAN_HANDLERS: Handler[] = [
   FLOW_HANDLERS[0]!,
   {
     path: '/entitlements',
-    reply: () => ({ body: entitlements('standard', ['assets_basic', 'stock', 'barcode', 'signature']) }),
+    reply: () => ({
+      body: entitlements('standard', ['assets_basic', 'stock', 'barcode', 'signature']),
+    }),
   },
 ];
 
