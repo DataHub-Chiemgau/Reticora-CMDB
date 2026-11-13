@@ -91,9 +91,9 @@ func TestWalkColumnsIPv4Index(t *testing.T) {
 	}{{"10.0.0.2", 6, 65001}, {"192.0.2.17", 3, 64512}}
 	for i, w := range want {
 		row := rows.Rows[i]
-		addr, rest, err := IndexIPv4(row.Index)
-		if err != nil || len(rest) != 0 || addr.String() != w.peer {
-			t.Errorf("row %d: peer %s rest %v err %v, want %s", i, addr, rest, err, w.peer)
+		addr, rest, ierr := IndexIPv4(row.Index)
+		if ierr != nil || len(rest) != 0 || addr.String() != w.peer {
+			t.Errorf("row %d: peer %s rest %v err %v, want %s", i, addr, rest, ierr, w.peer)
 		}
 		state, _ := row.Value(oidBgpPeerState)
 		asn, _ := row.Value(oidBgpPeerRemoteAs)
@@ -128,9 +128,9 @@ func TestWalkColumnsInetAddressIndex(t *testing.T) {
 		t.Fatalf("rows = %+v, %v", rows, err)
 	}
 	for i, want := range []string{"192.0.2.1", "2001:db8::1"} {
-		addr, rest, err := IndexInetAddress(rows.Rows[i].Index)
-		if err != nil || len(rest) != 0 || addr != netip.MustParseAddr(want) {
-			t.Errorf("row %d: %s rest %v err %v, want %s", i, addr, rest, err, want)
+		addr, rest, ierr := IndexInetAddress(rows.Rows[i].Index)
+		if ierr != nil || len(rest) != 0 || addr != netip.MustParseAddr(want) {
+			t.Errorf("row %d: %s rest %v err %v, want %s", i, addr, rest, ierr, want)
 		}
 	}
 	for name, index := range map[string][]uint32{
@@ -143,8 +143,8 @@ func TestWalkColumnsInetAddressIndex(t *testing.T) {
 		"octet over 255":   {1, 4, 192, 0, 2, 256},
 		"no length at all": {1},
 	} {
-		if _, _, err := IndexInetAddress(index); !errors.Is(err, ErrIndex) {
-			t.Errorf("%s accepted: %v", name, err)
+		if _, _, ierr := IndexInetAddress(index); !errors.Is(ierr, ErrIndex) {
+			t.Errorf("%s accepted: %v", name, ierr)
 		}
 	}
 	// The InetAddress may be followed by further index parts.
@@ -180,9 +180,9 @@ func TestWalkColumnsCompositeIndex(t *testing.T) {
 		lessIdx       int
 		state, router string
 	}{{"10.1.1.2", 0, "8", "1.1.1.2"}, {"10.1.2.2", 7, "2", "1.1.1.3"}} {
-		parts, err := decode(rows.Rows[i].Index)
-		if err != nil || len(parts) != 2 {
-			t.Fatalf("row %d: %v %v", i, parts, err)
+		parts, derr := decode(rows.Rows[i].Index)
+		if derr != nil || len(parts) != 2 {
+			t.Fatalf("row %d: %v %v", i, parts, derr)
 		}
 		if parts[0].(netip.Addr).String() != want.addr || parts[1].(int) != want.lessIdx {
 			t.Errorf("row %d: index %v, want %s/%d", i, parts, want.addr, want.lessIdx)

@@ -123,7 +123,7 @@ func openSession(ctx context.Context, target string, creds map[string]string, op
 	} else if s.community = creds["community"]; s.community == "" {
 		s.community = "public"
 	}
-	if err = s.connect(); err != nil {
+	if err := s.connect(); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -388,8 +388,9 @@ func compareIndex(a, b []uint32) int { return slices.Compare(a, b) }
 // ErrIndex is returned by the index decoders for an index of the wrong form.
 var ErrIndex = errors.New("snmp: malformed table index")
 
-// IndexInt decodes an integer index (one sub-identifier), e.g. ifIndex.
-func IndexInt(index []uint32) (int, []uint32, error) {
+// IndexInt decodes an integer index (one sub-identifier), e.g. ifIndex,
+// and returns the remaining sub-identifiers.
+func IndexInt(index []uint32) (value int, rest []uint32, err error) {
 	if len(index) < 1 {
 		return 0, nil, fmt.Errorf("%w: integer expected", ErrIndex)
 	}
