@@ -170,17 +170,27 @@
           },
           "spacing_ms": {
             "type": "integer",
-            "minimum": 10,
-            "maximum": 10000,
+            "minimum": 200,
+            "maximum": 1000,
             "default": 1000,
-            "description": "Gap between echo requests."
+            "description": "Gap between echo requests; (count - 1) x spacing_ms must stay below the timeout."
           },
-          "payload_bytes": {
+          "size": {
             "type": "integer",
             "minimum": 0,
             "maximum": 1472,
             "default": 56,
-            "description": "ICMP payload size."
+            "description": "ICMP payload size in bytes (at most 1452 over IPv6)."
+          },
+          "family": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "v4",
+              "v6"
+            ],
+            "default": "auto",
+            "description": "Address family: auto takes the family of an address literal, for a host name IPv6 first, then IPv4."
           },
           "rtt_warn_ms": {
             "type": "number",

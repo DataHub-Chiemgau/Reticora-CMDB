@@ -1799,6 +1799,8 @@ NFR-04;[B], Teilumfang [P5];E;collector/probe/outbox_test.go;WP-954
 COL-05;[B];E;collector/probe/outbox_test.go;WP-954
 PRB-05;[P3];E;collector/probe/uplink_test.go;WP-955
 PRB-07;[P3];E;collector/probe/uplink_test.go;WP-955
+PRT-02;[P3];E;collector/probe/icmp_test.go;WP-969
+MON-04;[P3];E;collector/probe/icmp_test.go;WP-969
 NFR-11;[P3];E;backend/internal/probe/ingest_integration_test.go;WP-960
 PRB-07;[P3];E;backend/internal/probe/ingest_integration_test.go;WP-960
 OPS-02;[B], [P3], [A];E;backend/internal/probe/ingest_test.go;WP-960

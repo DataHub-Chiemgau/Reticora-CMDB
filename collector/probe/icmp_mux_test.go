@@ -33,7 +33,8 @@ type fakeICMP struct {
 	closed  bool
 	replies chan fakePacket
 	sent    atomic.Int64
-	seqs    sync.Map // seq → struct{} of the requests written
+	dataLen atomic.Int64 // payload length of the last request
+	seqs    sync.Map     // seq → struct{} of the requests written
 }
 
 type fakePacket struct {
@@ -80,6 +81,7 @@ func (c *fakeICMP) writeTo(b []byte, dst, from net.Addr) (int, error) {
 	}
 	echo := msg.Body.(*icmp.Echo)
 	c.sent.Add(1)
+	c.dataLen.Store(int64(len(echo.Data)))
 	c.seqs.Store(echo.Seq, struct{}{})
 	peer := peerAddr(dst)
 	if _, isUDP := dst.(*net.UDPAddr); isUDP != c.unpriv {
@@ -355,7 +357,7 @@ func TestMuxUnprivilegedMatchesBySequenceAndPeer(t *testing.T) {
 	}
 }
 
-// TestMuxShortPayloadCarriesToken covers AK5 for payload_bytes 0 to 7:
+// TestMuxShortPayloadCarriesToken covers AK5 for size 0 to 7:
 // the request still carries the whole token, so a late reply of an
 // earlier request with the same sequence and peer (after the 16-bit
 // wrap-around) does not answer a waiting request.

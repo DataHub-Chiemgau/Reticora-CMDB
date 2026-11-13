@@ -304,7 +304,7 @@ func (f *familyMux) send(ip netip.Addr, size int, token uint64) (*echoWaiter, er
 		return nil, ErrICMPBusy
 	}
 	// The payload carries the whole token, also when the check asks for
-	// fewer bytes (payload_bytes 0 to 7): a late reply of an earlier
+	// fewer bytes (size 0 to 7): a late reply of an earlier
 	// request with the same sequence (after the 16-bit wrap-around) never
 	// answers this one (AK5).
 	size = max(size, icmpTokenLen)

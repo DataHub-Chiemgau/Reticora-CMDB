@@ -135,6 +135,40 @@ func TestResolveIcmpDefaults(t *testing.T) {
 	}
 }
 
+// TestResolveFitsICMPSpacingToTimeout: a short timeout (own or inherited)
+// with the default spacing would break the packet rule (count - 1) x
+// spacing_ms < timeout; the resolution lowers the spacing and marks it as
+// clamped, so the collector does not reject the spec as error/config
+// (WP-969 AK3).
+func TestResolveFitsICMPSpacingToTimeout(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		probe  *Probe
+		layers Layers
+		want   float64
+	}{
+		{"own timeout 2 s", &Probe{ID: "p1", Type: "icmp", Target: "192.0.2.1", Params: json.RawMessage(`{"timeout_s":2}`)}, Layers{}, 999},
+		{"inherited timeout 1 s, 5 packets", icmpProbe(`{"count":5}`), Layers{Org: ov(`{"timeout_s":1}`)}, 249},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := Resolve(c.probe, c.layers)
+			f := e.Params["spacing_ms"]
+			if got := number(t, f); got != c.want || !f.Clamped {
+				t.Fatalf("spacing_ms = %+v, want %v clamped", f, c.want)
+			}
+			spec := e.ProbeSpec(1)
+			if errs := probewire.Validate(&spec); len(errs) != 0 {
+				t.Fatalf("resolved spec invalid: %v", errs)
+			}
+		})
+	}
+	// A spacing that fits stays as it is.
+	e := Resolve(icmpProbe(`{"count":2,"spacing_ms":500}`), Layers{Org: ov(`{"timeout_s":1}`)})
+	if f := e.Params["spacing_ms"]; number(t, f) != 500 || f.Clamped {
+		t.Fatalf("spacing_ms = %+v, want 500 unchanged", f)
+	}
+}
+
 // TestResolveGroupPriorityAndTie: of several groups of the CI the higher
 // priority wins per field, on a tie the smaller name; the read order does
 // not matter (AK3, E-178).

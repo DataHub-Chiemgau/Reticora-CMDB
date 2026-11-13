@@ -317,11 +317,13 @@ der wartenden Anfrage zu, auf einem unprivilegierten Socket, dessen ID der
 Kernel umschreibt, über (Ziel, Sequenz); die ersten 8 Byte der Nutzlast
 tragen zusätzlich ein Kennzeichen der Anfrage, sodass eine verspätete
 Antwort nie eine spätere Anfrage mit derselben Sequenz beantwortet (bei
-`payload_bytes` unter 8 sendet der Collector 8 Byte). Link-Local-Ziele
+`size` unter 8 sendet der Collector 8 Byte). Link-Local-Ziele
 mit Zone (`fe80::1%eth0`) gehen über die Schnittstelle der Zone. Eine
 Prüfung des Typs `icmp` sendet standardmäßig 3 Echo-Anfragen im Abstand
-von 1 s innerhalb des Timeouts (`count` 1–5, `spacing_ms`,
-`payload_bytes` höchstens 1472 Byte über IPv4 und 1452 Byte über IPv6) und
+von 1 s innerhalb des Timeouts (`count` 1–5, `spacing_ms` 200–1000 ms,
+`size` höchstens 1472 Byte über IPv4 und 1452 Byte über IPv6, `family`
+`auto`, `v4` oder `v6`; alle Parameter in der Tabelle in
+[monitoring-probes.md](monitoring-probes.md)) und
 meldet `rtt_ms` (Mittel), `rtt_min_ms`, `rtt_max_ms`, `jitter_ms` und
 `loss`; ohne Antwort `fail` mit `timeout`. Auch der Sweep der Discovery
 pingt über diesen Socket.

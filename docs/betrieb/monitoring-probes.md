@@ -39,10 +39,43 @@ Ein Konformitätstest hält Kopie, Vertrag und die Tabelle unten gleich.
 ## ICMP-Ping (`icmp`)
 
 Standard nach PRT-02 und E-177: Intervall 30 s (10 s–1 h), Timeout 10 s
-(1–10 s), Down-Count 5 (1–20), Up-Count 1. Parameter: `count` 3 Echo-Requests
-je Prüfung (1–5), `spacing_ms` 1000, `payload_bytes` 56 (0–1472),
-`rtt_warn_ms` ohne Standard, `loss_warn` 0,5. Mehrere Pakete je Prüfung
-liefern Verlust und RTT-Streuung, ohne die Prüfrate zu erhöhen.
+(1–10 s und unter dem Intervall), Down-Count 5 (1–20), Up-Count 1; alle
+Werte sind je Probe überschreibbar (E-154). Das Poll-Minimum von 5 min aus
+DIS-10 gilt für diesen Typ nicht. Parameter:
+
+| Parameter | Bereich | Standard | Bedeutung |
+|---|---|---|---|
+| `count` | 1–5 | 3 | Echo-Requests je Prüfung |
+| `size` | 0–1472 Byte | 56 | Payload je Request (über IPv6 höchstens 1452 Byte) |
+| `spacing_ms` | 200–1000 | 1000 | Abstand der Requests |
+| `family` | `auto`, `v4`, `v6` | `auto` | Adressfamilie; `auto` nimmt die Familie eines Adressliterals, bei Hostnamen zuerst IPv6, dann IPv4 |
+| `rtt_warn_ms` | ≥ 1 | – | Schwelle der mittleren RTT für `degraded` |
+| `loss_warn` | 0–1 | 0,5 | Schwelle der Verlustquote für `degraded` |
+
+Die Prüfung weist feldbezogen ab (422 bzw. `error/config` im Collector):
+Timeout ≥ Intervall, Timeout außerhalb 1–10 s, Intervall außerhalb 10 s–1 h,
+`(count − 1) × spacing_ms` ≥ Timeout (Feld `params.spacing_ms`, sonst
+`params.count`), `size` außerhalb 0–1472 und `family` `v6` bei einem
+IPv4-Literal oder `v4` bei einem IPv6-Literal (`params.family`).
+
+Ergebnis: `ok` bei mindestens einer Antwort, `fail` mit `timeout` bei 100 %
+Verlust; `rtt_ms` ist der Mittelwert, `loss` die Verlustquote, `values`
+enthält `rtt_min_ms`, `rtt_max_ms` und ab zwei Antworten `jitter_ms`
+(mittlerer Betrag der Differenz aufeinanderfolgender RTTs). `degraded`
+entsteht in der Zustandsmaschine über `rtt_warn_ms` und `loss_warn`. Ohne
+ICMP-Socket der Adressfamilie liefert der Collector `error` mit
+`icmp_unavailable` (Zustand `unknown`, nie `down`). Mehrere Pakete je
+Prüfung liefern Verlust und RTT-Streuung, ohne die Prüfrate zu erhöhen.
+
+Messwertnamen für die Metrikbrücke:
+
+| Serie | Quelle |
+|---|---|
+| `probe_icmp_rtt_seconds{stat="min"}` | `rtt_min_ms` / 1000 |
+| `probe_icmp_rtt_seconds{stat="avg"}` | `rtt_ms` / 1000 |
+| `probe_icmp_rtt_seconds{stat="max"}` | `rtt_max_ms` / 1000 |
+| `probe_icmp_loss_ratio` | `loss` |
+| `probe_icmp_jitter_seconds` | `jitter_ms` / 1000 |
 
 ## TCP-Connect (`tcp`)
 

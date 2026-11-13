@@ -403,6 +403,95 @@ func TestTCPLimits(t *testing.T) {
 	}
 }
 
+// TestICMPLimits covers WP-969 AK1 to AK3 (PRT-02): parameter schema of
+// icmp (count 1-5, size 0-1472, spacing_ms 200-1000, family auto|v4|v6,
+// rtt_warn_ms, loss_warn 0-1) and the field errors of Validate for
+// interval 10 s-1 h, timeout 1-10 s and below the interval (also timeout
+// = interval), (count - 1) x spacing_ms >= timeout and a family that does
+// not match an address literal.
+func TestICMPLimits(t *testing.T) {
+	typ, ok := Lookup("icmp")
+	if !ok || !typ.Available() {
+		t.Fatal("icmp missing or not available")
+	}
+	for name, want := range map[string]any{"count": 3.0, "size": 56.0, "spacing_ms": 1000.0, "family": "auto", "loss_warn": 0.5} {
+		if v, ok := typ.ParamDefault(name); !ok || v != want {
+			t.Errorf("default of %s = %v (%v), want %v", name, v, ok, want)
+		}
+	}
+	if typ.MaxPayloadBytes != 1472 {
+		t.Errorf("max_payload_bytes = %d, want 1472", typ.MaxPayloadBytes)
+	}
+	base := ProbeSpec{ID: "p", Type: "icmp", Target: "192.0.2.1", IntervalMS: 30_000, TimeoutMS: 10_000, DownCount: 5, UpCount: 1}
+	cases := []struct {
+		name   string
+		mutate func(*ProbeSpec)
+		fields []string
+	}{
+		{"defaults", func(*ProbeSpec) {}, nil},
+		{"all parameters", func(s *ProbeSpec) {
+			s.Params = json.RawMessage(`{"count":5,"size":1472,"spacing_ms":200,"family":"v4","rtt_warn_ms":100,"loss_warn":1}`)
+		}, nil},
+		{"interval 10 s, timeout 9 s", func(s *ProbeSpec) { s.IntervalMS, s.TimeoutMS = 10_000, 9_000 }, nil},
+		{"interval 1 h", func(s *ProbeSpec) { s.IntervalMS = 3_600_000 }, nil},
+		{"interval 9.999 s", func(s *ProbeSpec) { s.IntervalMS, s.TimeoutMS = 9_999, 5_000 }, []string{"interval_s"}},
+		{"interval above 1 h", func(s *ProbeSpec) { s.IntervalMS = 3_600_001 }, []string{"interval_s"}},
+		{"timeout 1 s with one packet", func(s *ProbeSpec) {
+			s.TimeoutMS = 1_000
+			s.Params = json.RawMessage(`{"count":1}`)
+		}, nil},
+		{"timeout below 1 s", func(s *ProbeSpec) {
+			s.TimeoutMS = 999
+			s.Params = json.RawMessage(`{"count":1}`)
+		}, []string{"timeout_s"}},
+		{"timeout above 10 s", func(s *ProbeSpec) { s.TimeoutMS = 10_001 }, []string{"timeout_s"}},
+		{"timeout = interval", func(s *ProbeSpec) { s.IntervalMS, s.TimeoutMS = 10_000, 10_000 }, []string{"timeout_s"}},
+		{"timeout above interval", func(s *ProbeSpec) { s.IntervalMS, s.TimeoutMS = 10_000, 10_001 }, []string{"timeout_s"}},
+		{"defaults do not fit 2 s", func(s *ProbeSpec) { s.TimeoutMS = 2_000 }, []string{"params.count"}},
+		{"packets fit 2 s", func(s *ProbeSpec) {
+			s.TimeoutMS = 2_000
+			s.Params = json.RawMessage(`{"count":5,"spacing_ms":400}`)
+		}, nil},
+		{"packets exactly the timeout", func(s *ProbeSpec) {
+			s.TimeoutMS = 2_000
+			s.Params = json.RawMessage(`{"count":5,"spacing_ms":500}`)
+		}, []string{"params.spacing_ms"}},
+		{"count 0", func(s *ProbeSpec) { s.Params = json.RawMessage(`{"count":0}`) }, []string{"params.count"}},
+		{"count 6", func(s *ProbeSpec) { s.Params = json.RawMessage(`{"count":6}`) }, []string{"params.count"}},
+		{"size -1", func(s *ProbeSpec) { s.Params = json.RawMessage(`{"size":-1}`) }, []string{"params.size"}},
+		{"size 1473", func(s *ProbeSpec) { s.Params = json.RawMessage(`{"size":1473}`) }, []string{"params.size"}},
+		{"spacing 199", func(s *ProbeSpec) { s.Params = json.RawMessage(`{"spacing_ms":199}`) }, []string{"params.spacing_ms"}},
+		{"spacing 1001", func(s *ProbeSpec) { s.Params = json.RawMessage(`{"spacing_ms":1001}`) }, []string{"params.spacing_ms"}},
+		{"family unknown", func(s *ProbeSpec) { s.Params = json.RawMessage(`{"family":"ipx"}`) }, []string{"params.family"}},
+		{"family v6 for an IPv4 literal", func(s *ProbeSpec) { s.Params = json.RawMessage(`{"family":"v6"}`) }, []string{"params.family"}},
+		{"family v4 for an IPv6 literal", func(s *ProbeSpec) {
+			s.Target = "2001:db8::1"
+			s.Params = json.RawMessage(`{"family":"v4"}`)
+		}, []string{"params.family"}},
+		{"family v6 for an IPv6 literal", func(s *ProbeSpec) {
+			s.Target = "2001:db8::1"
+			s.Params = json.RawMessage(`{"family":"v6"}`)
+		}, nil},
+		{"family v4 for a host name", func(s *ProbeSpec) {
+			s.Target = "router.example"
+			s.Params = json.RawMessage(`{"family":"v4"}`)
+		}, nil},
+		{"loss_warn above 1", func(s *ProbeSpec) { s.Params = json.RawMessage(`{"loss_warn":1.5}`) }, []string{"params.loss_warn"}},
+		{"old parameter payload_bytes", func(s *ProbeSpec) { s.Params = json.RawMessage(`{"payload_bytes":56}`) }, []string{"params.payload_bytes"}},
+	}
+	for _, c := range cases {
+		spec := base
+		c.mutate(&spec)
+		var got []string
+		for _, e := range Validate(&spec) {
+			got = append(got, e.Field)
+		}
+		if !slices.Equal(got, c.fields) {
+			t.Errorf("%s: fields = %v, want %v", c.name, got, c.fields)
+		}
+	}
+}
+
 // TestHTTPLimits covers WP-971 AK1 and AK7 (PRT-04): defaults 60 s / 10 s,
 // interval >= 30 s, timeout <= 60 s and below the interval, 2 parallel
 // checks per target, url required (http or https with a host), only GET and

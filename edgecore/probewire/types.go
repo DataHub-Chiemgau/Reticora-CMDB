@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"slices"
@@ -308,9 +309,15 @@ func Validate(spec *ProbeSpec) []FieldError {
 	thresholds.Required = nil
 	errs = append(errs, validateObject(&thresholds, spec.Thresholds, "thresholds", false)...)
 	if check := paramChecks[t.Key]; check != nil {
-		if params, ok := decodeObject(spec.Params); ok {
+		params, ok := decodeObject(spec.Params)
+		if !ok && len(bytes.TrimSpace(spec.Params)) == 0 {
+			// Absent params take the defaults; the checks across fields
+			// (icmp: packets within the timeout) apply to them as well.
+			params, ok = map[string]any{}, true
+		}
+		if ok {
 			// A field the schema already rejected is reported once.
-			for _, e := range check(params) {
+			for _, e := range check(spec, params) {
 				if !slices.ContainsFunc(errs, func(x FieldError) bool { return x.Field == e.Field }) {
 					errs = append(errs, e)
 				}
@@ -322,12 +329,53 @@ func Validate(spec *ProbeSpec) []FieldError {
 
 // paramChecks are the checks of a type's parameters that the schema subset
 // cannot express (WP-970: send in bytes, expect as RE2 expression;
-// WP-1010: qname as DNS name). They run on decodable params and report
+// WP-1010: qname as DNS name; WP-969: icmp packets within the timeout and
+// family against the target). They run on decodable params and report
 // field errors.
-var paramChecks = map[string]func(params map[string]any) []FieldError{
-	"tcp":  checkTCPParams,
-	"dns":  checkDNSParams,
-	"http": checkHTTPParams,
+var paramChecks = map[string]func(spec *ProbeSpec, params map[string]any) []FieldError{
+	"icmp": checkICMPParams,
+	"tcp":  func(_ *ProbeSpec, params map[string]any) []FieldError { return checkTCPParams(params) },
+	"dns":  func(_ *ProbeSpec, params map[string]any) []FieldError { return checkDNSParams(params) },
+	"http": func(_ *ProbeSpec, params map[string]any) []FieldError { return checkHTTPParams(params) },
+}
+
+// Defaults of the icmp parameters count and spacing_ms (api/probe-types.json).
+const (
+	icmpDefaultCount     = 3
+	icmpDefaultSpacingMS = 1000
+)
+
+// checkICMPParams checks the icmp parameters against the rest of the spec
+// (PRT-02, WP-969 AK3): every echo request goes out within the timeout,
+// (count - 1) x spacing_ms below timeout_ms (reported on spacing_ms when
+// it is set, else on count), and family v4 or v6 matches an address
+// literal target.
+func checkICMPParams(spec *ProbeSpec, params map[string]any) []FieldError {
+	var errs []FieldError
+	count, spacing := float64(icmpDefaultCount), float64(icmpDefaultSpacingMS)
+	if v, ok := numberOf(params["count"]); ok {
+		count = v
+	}
+	_, spacingSet := params["spacing_ms"]
+	if v, ok := numberOf(params["spacing_ms"]); ok {
+		spacing = v
+	}
+	if spec.TimeoutMS > 0 && (count-1)*spacing >= float64(spec.TimeoutMS) {
+		field := "params.count"
+		if spacingSet {
+			field = "params.spacing_ms"
+		}
+		errs = append(errs, FieldError{Field: field, Message: "(count - 1) x spacing_ms must be below the timeout"})
+	}
+	if family, ok := params["family"].(string); ok {
+		if ip, err := netip.ParseAddr(strings.TrimSpace(spec.Target)); err == nil {
+			ip = ip.Unmap()
+			if (family == "v6" && ip.Is4()) || (family == "v4" && ip.Is6()) {
+				errs = append(errs, FieldError{Field: "params.family", Message: "does not match the address family of the target"})
+			}
+		}
+	}
+	return errs
 }
 
 // checkHTTPParams checks the parameters of the http type (PRT-04,

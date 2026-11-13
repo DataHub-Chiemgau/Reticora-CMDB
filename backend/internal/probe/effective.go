@@ -267,6 +267,9 @@ func resolveWith(t *probewire.Type, p *Probe, own Overrides, layers Layers) Effe
 		prop := ps.props[name]
 		e.Params[name] = r.valueField(name, prop, false)
 	}
+	if p.Type == "icmp" {
+		fitICMPSpacing(&e)
+	}
 	for _, name := range r.thresholdKeys() {
 		prop, known := ps.props[name]
 		if !known {
@@ -277,6 +280,44 @@ func resolveWith(t *probewire.Type, p *Probe, own Overrides, layers Layers) Effe
 		}
 	}
 	return e
+}
+
+// icmpMinSpacingMS is the lower limit of params.spacing_ms of the icmp
+// type (api/probe-types.json).
+const icmpMinSpacingMS = 200
+
+// fitICMPSpacing keeps the packet rule of the icmp type, (count - 1) x
+// spacing_ms below the timeout (WP-969 AK3), for a resolved spec: a
+// timeout from another level (or one lowered below the interval) with the
+// default spacing of 1000 ms would otherwise give a spec the collector
+// rejects as error/config. The spacing is lowered to the longest one that
+// fits and marked as clamped; with at most 5 packets and a timeout of at
+// least 1 s a spacing of at least 200 ms always fits.
+func fitICMPSpacing(e *EffectiveSpec) {
+	count, okCount := fieldNumber(e.Params["count"])
+	spacing, okSpacing := fieldNumber(e.Params["spacing_ms"])
+	timeoutMS := float64(e.TimeoutS.Int()) * 1000
+	if !okCount || !okSpacing || count <= 1 || timeoutMS <= 0 || (count-1)*spacing < timeoutMS {
+		return
+	}
+	fitted := max(math.Floor((timeoutMS-1)/(count-1)), icmpMinSpacingMS)
+	f := e.Params["spacing_ms"]
+	f.Value, f.Clamped = json.Number(strconv.FormatFloat(fitted, 'f', -1, 64)), true
+	e.Params["spacing_ms"] = f
+}
+
+// fieldNumber returns the numeric value of a resolved field.
+func fieldNumber(f Field) (float64, bool) {
+	switch v := f.Value.(type) {
+	case json.Number:
+		n, err := v.Float64()
+		return n, err == nil
+	case int64:
+		return float64(v), true
+	case float64:
+		return v, true
+	}
+	return 0, false
 }
 
 // resolver looks a key up over the levels.
@@ -554,8 +595,9 @@ func ValidateLayer(typeKey string, params json.RawMessage) []probewire.FieldErro
 	}
 	var errs []probewire.FieldError
 	// A field the set leaves out takes the value that cannot conflict:
-	// the widest interval and the shortest timeout, so the check "timeout
-	// below the interval" fires only for a set with both.
+	// the widest interval and (below) the longest timeout under the
+	// interval, so the check "timeout below the interval" fires only for a
+	// set with both.
 	spec := probewire.ProbeSpec{
 		Type: typeKey, Target: "-",
 		IntervalMS: t.MaxIntervalS * 1000, TimeoutMS: t.MinTimeoutS * 1000,
@@ -584,6 +626,18 @@ func ValidateLayer(typeKey string, params json.RawMessage) []probewire.FieldErro
 		}
 		present[f.key] = true
 		f.set(v)
+	}
+	if !present[KeyTimeoutS] {
+		// Without a timeout in the set the longest timeout that stays
+		// below the interval: a type check that needs time within the
+		// timeout (icmp: (count - 1) x spacing_ms) fires only for a set
+		// with a timeout, and timeout < interval only for a set with both.
+		spec.TimeoutMS = t.MaxTimeoutS * 1000
+		if spec.IntervalMS > t.MinTimeoutS*1000 {
+			spec.TimeoutMS = min(spec.TimeoutMS, spec.IntervalMS-1)
+		} else {
+			spec.TimeoutMS = t.MinTimeoutS * 1000
+		}
 	}
 	typeParams := map[string]any{}
 	for k, v := range set {
