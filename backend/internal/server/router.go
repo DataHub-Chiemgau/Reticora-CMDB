@@ -84,6 +84,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/topology"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/training"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/vulnfeed"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
 	"github.com/go-chi/chi/v5"
@@ -1365,6 +1366,9 @@ func metricsHandler(version string, includeTenantLabel bool) (handler http.Handl
 	ipam.RegisterMetrics(registry)
 	credential.RegisterMetrics(registry)
 	admp.RegisterMetrics(registry)
+	// The vulnerability feeds (SEC-02, WP-1118): documents, failed syncs
+	// and the age of the last sync per source.
+	vulnfeed.RegisterMetrics(registry)
 	workflow.RegisterMetrics(registry)
 
 	httpMetrics := middleware.RegisterHTTPMetrics(registry, includeTenantLabel)

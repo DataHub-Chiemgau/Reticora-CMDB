@@ -221,6 +221,15 @@ type Config struct {
 	// it (RETICORA_ADMP_CACHE_TTL_DAYS, 1 to 3650, default 30).
 	ADMPCacheTTLDays int
 
+	// Vulnerability feeds (SEC-02, WP-1118): the CSAF providers
+	// (RETICORA_VULNFEED_CSAF_PROVIDERS, comma separated https URLs of
+	// provider-metadata.json or aggregator.json; default the CSAF provider
+	// of the BSI) and the interval of vulnfeed.csaf
+	// (RETICORA_VULNFEED_CSAF_INTERVAL, default 6 h). In the air-gapped
+	// profile the import runs only with an explicitly set list (E-235).
+	VulnfeedCSAFProviders []string
+	VulnfeedCSAFInterval  time.Duration
+
 	// Search
 	SearchBackend      string
 	OpenSearchURL      string
@@ -344,6 +353,8 @@ func Load() *Config {
 		EventsMaxAge:            l.duration("RETICORA_EVENTS_MAX_AGE", DefaultEventsMaxAge),
 		EventsMaxBytes:          l.int64("RETICORA_EVENTS_MAX_BYTES", DefaultEventsMaxBytes),
 		ADMPCacheTTLDays:        l.integer("RETICORA_ADMP_CACHE_TTL_DAYS", DefaultADMPCacheTTLDays),
+		VulnfeedCSAFProviders:   splitList(l.str("RETICORA_VULNFEED_CSAF_PROVIDERS", "")),
+		VulnfeedCSAFInterval:    l.duration("RETICORA_VULNFEED_CSAF_INTERVAL", DefaultVulnfeedCSAFInterval),
 		EgressAllowPrivate:      l.boolean("RETICORA_EGRESS_ALLOW_PRIVATE", false),
 		PreAuthRateLimitRPM:     l.integer("RETICORA_PREAUTH_RATE_LIMIT_RPM", 20),
 		TrustedProxies:          l.str("RETICORA_TRUSTED_PROXIES", "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"),
@@ -604,6 +615,45 @@ var s3Keys = []string{"RETICORA_S3_ENDPOINT", "RETICORA_S3_ACCESS_KEY", "RETICOR
 const natsIngestWarning = "RETICORA_NATS_URL is not set: the discovery ingest runs in the request without identity locks; " +
 	"several instances can duplicate devices with a weak identity, so run one instance or configure NATS (docs/betrieb/ingest-spuren.md)"
 
+// DefaultVulnfeedCSAFInterval is the default of
+// RETICORA_VULNFEED_CSAF_INTERVAL (WP-1118).
+const DefaultVulnfeedCSAFInterval = 6 * time.Hour
+
+// MinVulnfeedInterval is the shortest interval of a vulnerability feed.
+const MinVulnfeedInterval = 5 * time.Minute
+
+// VulnfeedCSAFExplicit reports whether RETICORA_VULNFEED_CSAF_PROVIDERS
+// was set explicitly (the air-gapped profile runs the CSAF import only
+// then, E-235).
+func (c *Config) VulnfeedCSAFExplicit() bool { return c.explicit["RETICORA_VULNFEED_CSAF_PROVIDERS"] }
+
+// vulnfeedErrors refuses a CSAF provider without HTTPS and an interval
+// below MinVulnfeedInterval (WP-1118 AK4).
+func (c *Config) vulnfeedErrors() []error {
+	var errs []error
+	for _, p := range c.VulnfeedCSAFProviders {
+		u, err := url.Parse(p)
+		if err != nil || !strings.EqualFold(u.Scheme, "https") || u.Hostname() == "" || u.User != nil {
+			errs = append(errs, fmt.Errorf("RETICORA_VULNFEED_CSAF_PROVIDERS: %q is no absolute https URL with a host", p))
+		}
+	}
+	if c.VulnfeedCSAFInterval < MinVulnfeedInterval {
+		errs = append(errs, fmt.Errorf("RETICORA_VULNFEED_CSAF_INTERVAL must be at least %s, got %s", MinVulnfeedInterval, c.VulnfeedCSAFInterval))
+	}
+	return errs
+}
+
+// splitList splits a comma separated list and drops empty entries.
+func splitList(raw string) []string {
+	var out []string
+	for _, item := range strings.Split(raw, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
 // IsDevelopment reports whether the local development defaults apply.
 func (c *Config) IsDevelopment() bool { return c.Environment == EnvDevelopment }
 
@@ -702,6 +752,7 @@ func (c *Config) Validate(noDB bool) error {
 	if c.ADMPCacheTTLDays < 1 || c.ADMPCacheTTLDays > MaxADMPCacheTTLDays {
 		errs = append(errs, fmt.Errorf("RETICORA_ADMP_CACHE_TTL_DAYS must be between 1 and %d, got %d", MaxADMPCacheTTLDays, c.ADMPCacheTTLDays))
 	}
+	errs = append(errs, c.vulnfeedErrors()...)
 	if c.RateLimitOrgRPM < c.RateLimitRPM {
 		errs = append(errs, fmt.Errorf("RETICORA_RATE_LIMIT_ORG_RPM (%d) must not be below RETICORA_RATE_LIMIT_RPM (%d)", c.RateLimitOrgRPM, c.RateLimitRPM))
 	}

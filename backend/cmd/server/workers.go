@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -46,6 +47,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/sla"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenantapi"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/vulnfeed"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
 )
@@ -431,6 +433,26 @@ type systemJobDeps struct {
 	blobs blob.Store
 }
 
+// vulnfeedJobs are the system jobs of the vulnerability feeds on store
+// (WP-1118): vulnfeed.csaf, unless the air-gapped profile has no explicit
+// provider list.
+func vulnfeedJobs(cfg *config.Config, store vulnfeed.Store) []jobs.Schedule {
+	var out []jobs.Schedule
+	csaf, err := vulnfeed.NewCSAF(store, &vulnfeed.CSAFConfig{Providers: cfg.VulnfeedCSAFProviders,
+		Explicit: cfg.VulnfeedCSAFExplicit(), AirGapped: cfg.AirGapped, Interval: cfg.VulnfeedCSAFInterval,
+		Egress: egress.Options{AllowPrivate: cfg.EgressAllowPrivate}})
+	switch {
+	case err == nil:
+		out = append(out, csaf.Schedule())
+	case errors.Is(err, vulnfeed.ErrCSAFDisabled):
+		slog.Info("CSAF import off: air-gapped without RETICORA_VULNFEED_CSAF_PROVIDERS", "event", "vulnfeed.csaf.disabled")
+	default:
+		// Validate refuses the start for an invalid provider list.
+		slog.Error("CSAF import not registered", "event", "vulnfeed.csaf.disabled", "error", err)
+	}
+	return out
+}
+
 // registerSystemJobs registers the system jobs (systemJobs) with the
 // scheduler.
 func registerSystemJobs(scheduler *jobs.Scheduler, d *systemJobDeps) error {
@@ -571,6 +593,13 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 		// once per secret_version as credential.rotation_due (CRD-05,
 		// WP-897).
 		systemJobs = append(systemJobs, credential.NewAgeCheck(pool).Schedule())
+		// Vulnerability feeds (SEC-02, E-234, WP-1118): vulnfeed.csaf every
+		// RETICORA_VULNFEED_CSAF_INTERVAL with the module findings, over
+		// the egress client; air-gapped only with an explicit provider
+		// list (E-235).
+		if d.modules.Enabled("findings") {
+			systemJobs = append(systemJobs, vulnfeedJobs(d.cfg, vulnfeed.NewPGRepository(pool))...)
+		}
 		// SLA breaches: every minute each missed due time once as
 		// ticket.sla_breached, the escalation to assignee and team lead
 		// (TKT-01, WP-769); module ticketing, ticketing_standard only.

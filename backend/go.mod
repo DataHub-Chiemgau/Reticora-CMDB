@@ -12,6 +12,7 @@ require (
 	github.com/99designs/gqlgen v0.17.93
 	github.com/DataHub-Chiemgau/Reticora-CMDB/collector v0.0.0-00010101000000-000000000000
 	github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore v0.0.0-00010101000000-000000000000
+	github.com/ProtonMail/go-crypto v1.5.2
 	github.com/boombuler/barcode v1.1.0
 	github.com/go-chi/chi/v5 v5.5.0
 	github.com/go-pdf/fpdf v0.9.0
@@ -40,6 +41,7 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/cloudflare/circl v1.6.3 // indirect
 	github.com/coder/websocket v1.8.15 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect

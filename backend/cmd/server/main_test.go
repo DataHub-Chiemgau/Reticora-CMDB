@@ -45,6 +45,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/probe"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/vulnfeed"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
 )
@@ -1022,5 +1023,48 @@ func TestInvitationMailerNeedsTheCentralSMTPServer(t *testing.T) {
 	}
 	if got, ok := invitationMailer(sender).(notify.InvitationMailer); !ok || got.Sender != sender {
 		t.Errorf("central SMTP: invitation mailer %#v, want notify.InvitationMailer over the central sender", got)
+	}
+}
+
+// TestVulnfeedCSAFJobRegistration covers WP-1118 AK4: vulnfeed.csaf runs
+// with the module findings and the database every
+// RETICORA_VULNFEED_CSAF_INTERVAL; without the module, without the
+// database or air-gapped without an explicit provider list it is not
+// registered.
+func TestVulnfeedCSAFJobRegistration(t *testing.T) {
+	t.Setenv("RETICORA_VULNFEED_CSAF_PROVIDERS", "")
+	t.Setenv("RETICORA_VULNFEED_CSAF_INTERVAL", "3h")
+	t.Setenv("RETICORA_AIR_GAPPED", "")
+	findings, err := server.ParseModules("findings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := func(withDB bool, modules *server.ModuleSet) map[string]string {
+		deps := systemJobTestDeps(t, config.Load(), withDB)
+		if modules != nil {
+			deps.modules = modules
+		}
+		out := map[string]string{}
+		for _, job := range systemJobs(deps) {
+			out[job.Kind] = job.Spec
+		}
+		return out
+	}
+	if spec := kinds(true, findings)[vulnfeed.CSAFKind]; spec != "@every 3h0m0s" {
+		t.Fatalf("with the module findings: %s spec %q, want @every 3h0m0s", vulnfeed.CSAFKind, spec)
+	}
+	if _, ok := kinds(true, nil)[vulnfeed.CSAFKind]; ok {
+		t.Errorf("without the module findings %s is registered", vulnfeed.CSAFKind)
+	}
+	if _, ok := kinds(false, findings)[vulnfeed.CSAFKind]; ok {
+		t.Errorf("without a database %s is registered", vulnfeed.CSAFKind)
+	}
+	t.Setenv("RETICORA_AIR_GAPPED", "true")
+	if _, ok := kinds(true, findings)[vulnfeed.CSAFKind]; ok {
+		t.Errorf("air-gapped without RETICORA_VULNFEED_CSAF_PROVIDERS %s is registered", vulnfeed.CSAFKind)
+	}
+	t.Setenv("RETICORA_VULNFEED_CSAF_PROVIDERS", "https://csaf-mirror.internal.example/.well-known/csaf/provider-metadata.json")
+	if _, ok := kinds(true, findings)[vulnfeed.CSAFKind]; !ok {
+		t.Errorf("air-gapped with an own mirror %s is not registered", vulnfeed.CSAFKind)
 	}
 }

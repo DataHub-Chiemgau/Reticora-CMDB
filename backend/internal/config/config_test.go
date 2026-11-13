@@ -801,3 +801,36 @@ func TestModuleAliasAlertingIsReported(t *testing.T) {
 		}
 	}
 }
+
+// TestVulnfeedCSAFProvidersMustBeHTTPS covers WP-1118 AK4: a provider
+// URL without HTTPS (or without host, with user info) refuses the start;
+// a list of https URLs is split at commas and marked explicit.
+func TestVulnfeedCSAFProvidersMustBeHTTPS(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("RETICORA_VULNFEED_CSAF_PROVIDERS", "")
+	t.Setenv("RETICORA_VULNFEED_CSAF_INTERVAL", "")
+	cfg := Load()
+	if len(cfg.VulnfeedCSAFProviders) != 0 || cfg.VulnfeedCSAFExplicit() || cfg.VulnfeedCSAFInterval != DefaultVulnfeedCSAFInterval {
+		t.Fatalf("defaults: %v explicit %v interval %s", cfg.VulnfeedCSAFProviders, cfg.VulnfeedCSAFExplicit(), cfg.VulnfeedCSAFInterval)
+	}
+	for _, bad := range []string{"http://csaf.example/.well-known/csaf/provider-metadata.json", "ftp://csaf.example/x",
+		"https:///no-host", "https://reader:secret1@csaf.example/provider-metadata.json", "csaf.example/provider-metadata.json"} {
+		t.Setenv("RETICORA_VULNFEED_CSAF_PROVIDERS", "https://ok.example/provider-metadata.json,"+bad)
+		err := Load().Validate(true)
+		if err == nil || !strings.Contains(err.Error(), "RETICORA_VULNFEED_CSAF_PROVIDERS") {
+			t.Errorf("%s: %v, want a start error naming RETICORA_VULNFEED_CSAF_PROVIDERS", bad, err)
+		}
+	}
+	t.Setenv("RETICORA_VULNFEED_CSAF_PROVIDERS", " https://a.example/provider-metadata.json , https://b.example/aggregator.json ")
+	cfg = Load()
+	if err := cfg.Validate(true); err != nil {
+		t.Fatalf("https providers: %v", err)
+	}
+	if len(cfg.VulnfeedCSAFProviders) != 2 || cfg.VulnfeedCSAFProviders[1] != "https://b.example/aggregator.json" || !cfg.VulnfeedCSAFExplicit() {
+		t.Fatalf("providers %v explicit %v", cfg.VulnfeedCSAFProviders, cfg.VulnfeedCSAFExplicit())
+	}
+	t.Setenv("RETICORA_VULNFEED_CSAF_INTERVAL", "1m")
+	if err := Load().Validate(true); err == nil || !strings.Contains(err.Error(), "RETICORA_VULNFEED_CSAF_INTERVAL") {
+		t.Fatalf("1 min interval: %v", err)
+	}
+}
