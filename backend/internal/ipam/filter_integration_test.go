@@ -299,9 +299,9 @@ func TestIPAMListPlansUnderRLS(t *testing.T) {
 	} {
 		uses := false
 		for _, index := range strings.Split(c.index, "|") {
-			uses = uses || strings.Contains(c.plan, "using "+index+" on ")
+			uses = uses || planScansIndexOn(c.plan, index, c.column)
 		}
-		if !uses || !planHasIndexCond(c.plan, c.column) {
+		if !uses {
 			t.Errorf("%s: plan does not use %s with %s in the index condition:\n%s", c.name, c.index, c.column, c.plan)
 		}
 		if strings.Contains(c.plan, "Seq Scan on subnet") || strings.Contains(c.plan, "Seq Scan on ip_address") {
@@ -310,12 +310,25 @@ func TestIPAMListPlansUnderRLS(t *testing.T) {
 	}
 }
 
-// planHasIndexCond reports whether an index condition of plan compares
-// column.
-func planHasIndexCond(plan, column string) bool {
-	for _, line := range strings.Split(plan, "\n") {
-		if strings.Contains(line, "Index Cond:") && (strings.Contains(line, column+" =") || strings.Contains(line, column+" >>=")) {
-			return true
+// planScansIndexOn reports whether plan scans index, as an index scan, an
+// index only scan or a bitmap index scan (the planner picks one by the
+// statistics, a BitmapAnd with the organization index on PostgreSQL 16 in
+// the CI), and the index condition of that node compares column.
+func planScansIndexOn(plan, index, column string) bool {
+	lines := strings.Split(plan, "\n")
+	for i, line := range lines {
+		if !strings.HasSuffix(line, "Bitmap Index Scan on "+index) && !strings.Contains(line, "Scan using "+index+" on ") {
+			continue
+		}
+		// The details of the node follow it up to the next node.
+		for _, detail := range lines[i+1:] {
+			detail = strings.TrimSpace(detail)
+			if strings.HasPrefix(detail, "->") || strings.HasPrefix(detail, "SubPlan") || strings.HasPrefix(detail, "InitPlan") {
+				break
+			}
+			if strings.HasPrefix(detail, "Index Cond:") && (strings.Contains(detail, column+" =") || strings.Contains(detail, column+" >>=")) {
+				return true
+			}
 		}
 	}
 	return false
