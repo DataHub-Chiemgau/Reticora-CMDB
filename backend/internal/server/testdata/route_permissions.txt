@@ -186,6 +186,8 @@ GET /api/v1/collector-groups monitoring:read
 GET /api/v1/collector-groups/{id} monitoring:read
 GET /api/v1/collectors discovery:read
 GET /api/v1/collectors/pki discovery:read
+GET /api/v1/compliance/controls compliance:read
+GET /api/v1/compliance/controls/coverage compliance:read
 GET /api/v1/compliance/report compliance:read
 GET /api/v1/compliance/results compliance:read
 GET /api/v1/compliance/rules compliance:read
@@ -766,6 +768,7 @@ PUT /api/v1/cis/{id}/instance-attributes/{key} ci_instance_attribute:manage
 PUT /api/v1/cis/{id}/tags ci:write
 PUT /api/v1/cis/{id}/templates ci:write
 PUT /api/v1/clients/{id}/hidden-ci-types user:manage
+PUT /api/v1/compliance/rules/{id}/controls compliance:write
 PUT /api/v1/credentials/{id}/secret credential:manage
 PUT /api/v1/documents/{id}/content document:write
 PUT /api/v1/monitoring/alarm-settings monitoring:write

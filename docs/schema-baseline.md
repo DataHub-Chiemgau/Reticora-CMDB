@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000354_compliance_result_upsert
+Stand: Migration 000355_compliance_controls
 
 ## Prüfung
 
@@ -496,7 +496,8 @@ vorhandenen Test und für einen Eintrag, den die Regel nicht meldet.
 
 Globale Kataloge ohne Org-Spalte sind nach E-10 eine dokumentierte Ausnahme,
 keine Lücke: Sie werden nur durch Migrationen gepflegt und sind für die
-App-Rolle schreibgeschützt. Heute ist das nur `permission` (WP-024). Globale
+App-Rolle schreibgeschützt: `permission` (WP-024) und der Kontrollkatalog
+`compliance_control` (ISO 27001, NIS2, KRITIS; Migration 000355, WP-1128). Globale
 Katalogzeilen in Tabellen mit Org-Spalte (`organization_id IS NULL`, z. B.
 System-CI-Typen) sind über getrennte Policies je Kommando nur lesbar. Ein CI
 hat einen System-Typ oder einen Typ seiner Organisation: Der einspaltige
@@ -2030,8 +2031,10 @@ SECURITY`), Policies mit ihrem Kommando.
 | `collector_enrollment_code` | ja | ja | collector_enrollment_code_isolation (ALL), collector_enrollment_code_scope_delete (DELETE), collector_enrollment_code_scope_insert (INSERT), collector_enrollment_code_scope_select (SELECT), collector_enrollment_code_scope_update (UPDATE), collector_enrollment_code_system_select (SELECT) |
 | `collector_group` | ja | ja | collector_group_isolation (ALL), collector_group_scoped_delete (DELETE), collector_group_scoped_update (UPDATE) |
 | `collector_group_member` | ja | ja | collector_group_member_isolation (ALL), collector_group_member_scoped_delete (DELETE), collector_group_member_scoped_update (UPDATE) |
+| `compliance_control` | nein | nein | – |
 | `compliance_result` | ja | ja | compliance_result_scoped_delete (DELETE), compliance_result_scoped_update (UPDATE), compliance_result_tenant_isolation (ALL) |
 | `compliance_rule` | ja | ja | compliance_rule_tenant_isolation (ALL) |
+| `compliance_rule_control` | ja | ja | compliance_rule_control_isolation (ALL) |
 | `config_snapshot` | ja | ja | config_snapshot_isolation (ALL), config_snapshot_scoped_delete (DELETE), config_snapshot_scoped_update (UPDATE) |
 | `consumable` | ja | ja | consumable_isolation (ALL), consumable_scoped_delete (DELETE), consumable_scoped_update (UPDATE) |
 | `contact` | ja | ja | contact_scoped_delete (DELETE), contact_scoped_update (UPDATE), org_isolation (ALL) |

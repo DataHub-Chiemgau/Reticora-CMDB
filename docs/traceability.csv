@@ -1869,3 +1869,4 @@ WFL-02;[P3];F;backend/internal/workflow/trigger_integration_test.go;WP-1090
 WFL-03;[P3];F;backend/internal/workflow/trigger_integration_test.go;WP-1090
 WFL-08;[P3];F;backend/internal/workflow/quota_integration_test.go;WP-1112
 SEC-03;[P3];F;backend/internal/compliance/eval_job_integration_test.go;WP-1126
+SEC-04;[P3], Rechte-Doku AD/Entra [A];F;backend/internal/compliance/controls_integration_test.go;WP-1128

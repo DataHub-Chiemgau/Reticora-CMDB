@@ -134,7 +134,9 @@ var ViewProtectedTables = map[string]string{"metric_sample": "metric_sample_v", 
 // WP-024). They are maintained by migrations only; the application role may
 // read but not write them. This is a documented exception to RuleOrgColumn,
 // not a gap: the catalog test checks RuleReadOnlyCatalog for them instead.
-var GlobalCatalogTables = []string{"permission"}
+// compliance_control is the control catalog of ISO 27001, NIS2 and KRITIS
+// (SEC-04, WP-1128, E-238).
+var GlobalCatalogTables = []string{"permission", "compliance_control"}
 
 // OperatorTables are organization-spanning tables of the operator path
 // (SEC-07, WP-070) without organization_id, signup_request, which exists

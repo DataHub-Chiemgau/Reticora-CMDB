@@ -2,6 +2,7 @@
 package compliance
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"time"
@@ -113,4 +114,55 @@ func (r *UpdateRuleRequest) decodeAppliesWhen() error {
 	}
 	r.appliesWhen = m
 	return nil
+}
+
+// Standards of the control catalog.
+var Standards = []string{"iso27001", "nis2", "kritis"}
+
+// maxRuleControls bounds the controls of one rule.
+const maxRuleControls = 200
+
+// Control is one control of the catalog with the rules of the organization
+// assigned to it.
+type Control struct {
+	ID              string `json:"id"`
+	Standard        string `json:"standard"`
+	ControlID       string `json:"control_id"`
+	TitleDE         string `json:"title_de"`
+	TitleEN         string `json:"title_en"`
+	SortOrder       int    `json:"sort_order"`
+	RuleCount       int    `json:"rule_count"`
+	ActiveRuleCount int    `json:"active_rule_count"`
+}
+
+// RuleControls is the assignment of a rule (PUT
+// /api/v1/compliance/rules/{id}/controls).
+type RuleControls struct {
+	RuleID     string   `json:"rule_id"`
+	ControlIDs []string `json:"control_ids"`
+}
+
+// RuleWithControls is a rule with the controls assigned to it (GET
+// /api/v1/compliance/rules/{id}).
+type RuleWithControls struct {
+	*Rule
+	ControlIDs []string `json:"control_ids"`
+}
+
+// ErrControlsUnavailable: the repository keeps no control catalog (the
+// memory profile).
+var ErrControlsUnavailable = errors.New("the control catalog needs PostgreSQL")
+
+// ControlStore reads the catalog and assigns rules to controls.
+type ControlStore interface {
+	// ListControls lists the controls of standard with the counts of the
+	// organization's rules; withoutActiveRule keeps only the controls
+	// without an active rule (coverage gaps).
+	ListControls(ctx context.Context, orgID, standard string, withoutActiveRule bool) ([]Control, error)
+	// RuleControlIDs returns the controls assigned to a rule.
+	RuleControlIDs(ctx context.Context, orgID, ruleID string) ([]string, error)
+	// ReplaceRuleControls replaces the assignment of a rule: ErrNotFound
+	// for a rule unknown or of another organization, a 422 field error
+	// controls[i] for an unknown control.
+	ReplaceRuleControls(ctx context.Context, orgID, ruleID string, controlIDs []string) error
 }

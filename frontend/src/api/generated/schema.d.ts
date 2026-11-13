@@ -6041,6 +6041,66 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/v1/compliance/controls': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the controls of a standard with the rules assigned to them
+     * @description The control catalog (SEC-04, WP-1128, E-238): ISO/IEC 27001:2022 Annex A 5.1 to 8.34, NIS2 Art. 21 para. 2 a to j, KRITIS § 8a para. 1, 1a and 3 BSIG, with short titles of their own (no normative text) and the number of rules and active rules of the organization assigned to each. Without standard or with an unknown one 400.
+     */
+    get: operations['listComplianceControls'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/compliance/controls/coverage': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List the controls of a standard without an active rule */
+    get: operations['listComplianceControlGaps'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/compliance/rules/{id}/controls': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Replace the controls a compliance rule is assigned to
+     * @description Replaces the assignment of the rule (SEC-04, WP-1128); an empty list removes it; a body without control_ids (missing or null) is 422 on control_ids and changes nothing. An unknown control is 422 on control_ids[i], a rule of another organization 404. Requires compliance:write; audited with the controls before and after.
+     */
+    put: operations['replaceComplianceRuleControls'];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/compliance/results': {
     parameters: {
       query?: never;
@@ -19984,6 +20044,34 @@ export interface components {
       created_at: string;
       /** Format: date-time */
       updated_at: string;
+    };
+    ComplianceControl: {
+      /** Format: uuid */
+      id: string;
+      /** @enum {string} */
+      standard: 'iso27001' | 'nis2' | 'kritis';
+      /** @description The identifier in the standard, e.g. 5.15, 21.2.a, 8a.1a. */
+      control_id: string;
+      title_de: string;
+      title_en: string;
+      sort_order: number;
+      /** @description Rules of the organization assigned to the control. */
+      rule_count: number;
+      /** @description Active rules of the organization assigned to the control. */
+      active_rule_count: number;
+    };
+    ComplianceControlListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['ComplianceControl'][];
+    };
+    /** @description A compliance rule with the controls of the catalog assigned to it (GET /api/v1/compliance/rules/{id}, WP-1128). */
+    ComplianceRuleDetail: components['schemas']['ComplianceRule'] & {
+      /** @description Controls assigned to the rule (WP-1128), ordered by standard and catalog order. */
+      control_ids: string[];
+    };
+    ComplianceRuleControls: {
+      /** Format: uuid */
+      rule_id: string;
+      control_ids: string[];
     };
     ComplianceScore: {
       ci_type_id?: string;
@@ -37976,13 +38064,13 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Compliance rule */
+      /** @description The compliance rule with the controls assigned to it */
       200: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['ComplianceRule'];
+          'application/json': components['schemas']['ComplianceRuleDetail'];
         };
       };
       401: components['responses']['Unauthorized'];
@@ -38074,6 +38162,90 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  listComplianceControls: {
+    parameters: {
+      query: {
+        standard: 'iso27001' | 'nis2' | 'kritis';
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The controls of the standard */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ComplianceControlListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  listComplianceControlGaps: {
+    parameters: {
+      query: {
+        standard: 'iso27001' | 'nis2' | 'kritis';
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The controls without an active rule */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ComplianceControlListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  replaceComplianceRuleControls: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          control_ids: string[];
+        };
+      };
+    };
+    responses: {
+      /** @description The controls of the rule */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ComplianceRuleControls'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
       503: components['responses']['ServiceUnavailable'];
     };
   };

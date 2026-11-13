@@ -13994,7 +13994,7 @@ paths:
       tags: [Compliance]
       summary: Get a compliance rule
       responses:
-        '200': { description: Compliance rule, content: { application/json: { schema: { $ref: '#/components/schemas/ComplianceRule' } } } }
+        '200': { description: The compliance rule with the controls assigned to it, content: { application/json: { schema: { $ref: '#/components/schemas/ComplianceRuleDetail' } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
     patch:
@@ -14048,6 +14048,76 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '500': { $ref: '#/components/responses/InternalServerError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/v1/compliance/controls:
+    x-phase: P3
+    x-feature: compliance_findings
+    get:
+      operationId: listComplianceControls
+      tags: [Compliance]
+      summary: List the controls of a standard with the rules assigned to them
+      description: >-
+        The control catalog (SEC-04, WP-1128, E-238): ISO/IEC 27001:2022
+        Annex A 5.1 to 8.34, NIS2 Art. 21 para. 2 a to j, KRITIS § 8a para.
+        1, 1a and 3 BSIG, with short titles of their own (no normative
+        text) and the number of rules and active rules of the organization
+        assigned to each. Without standard or with an unknown one 400.
+      parameters:
+        - name: standard
+          in: query
+          required: true
+          schema: { type: string, enum: [iso27001, nis2, kritis] }
+      responses:
+        '200': { description: The controls of the standard, content: { application/json: { schema: { $ref: '#/components/schemas/ComplianceControlListResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/v1/compliance/controls/coverage:
+    x-phase: P3
+    x-feature: compliance_findings
+    get:
+      operationId: listComplianceControlGaps
+      tags: [Compliance]
+      summary: List the controls of a standard without an active rule
+      parameters:
+        - name: standard
+          in: query
+          required: true
+          schema: { type: string, enum: [iso27001, nis2, kritis] }
+      responses:
+        '200': { description: The controls without an active rule, content: { application/json: { schema: { $ref: '#/components/schemas/ComplianceControlListResponse' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/v1/compliance/rules/{id}/controls:
+    x-phase: P3
+    x-feature: compliance_findings
+    parameters: [ { $ref: '#/components/parameters/ResourceID' } ]
+    put:
+      operationId: replaceComplianceRuleControls
+      tags: [Compliance]
+      summary: Replace the controls a compliance rule is assigned to
+      description: >-
+        Replaces the assignment of the rule (SEC-04, WP-1128); an empty list
+        removes it; a body without control_ids (missing or null) is 422 on
+        control_ids and changes nothing. An unknown control is 422 on
+        control_ids[i], a rule of another organization 404. Requires
+        compliance:write; audited with the controls before and after.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [control_ids]
+              properties:
+                control_ids: { type: array, maxItems: 200, items: { type: string, format: uuid } }
+      responses:
+        '200': { description: The controls of the rule, content: { application/json: { schema: { $ref: '#/components/schemas/ComplianceRuleControls' } } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /api/v1/compliance/results:
     x-phase: P3
@@ -40987,6 +41057,41 @@ components:
         status_changed_at: { type: string, format: date-time, description: When the status of the result last changed (WP-1126). }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    ComplianceControl:
+      type: object
+      required: [id, standard, control_id, title_de, title_en, sort_order, rule_count, active_rule_count]
+      properties:
+        id: { type: string, format: uuid }
+        standard: { type: string, enum: [iso27001, nis2, kritis] }
+        control_id: { type: string, description: 'The identifier in the standard, e.g. 5.15, 21.2.a, 8a.1a.' }
+        title_de: { type: string, maxLength: 120 }
+        title_en: { type: string, maxLength: 120 }
+        sort_order: { type: integer }
+        rule_count: { type: integer, minimum: 0, description: Rules of the organization assigned to the control. }
+        active_rule_count: { type: integer, minimum: 0, description: Active rules of the organization assigned to the control. }
+    ComplianceControlListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties: { data: { type: array, items: { $ref: '#/components/schemas/ComplianceControl' } } }
+    ComplianceRuleDetail:
+      description: A compliance rule with the controls of the catalog assigned to it (GET /api/v1/compliance/rules/{id}, WP-1128).
+      allOf:
+        - $ref: '#/components/schemas/ComplianceRule'
+        - type: object
+          required: [control_ids]
+          properties:
+            control_ids:
+              type: array
+              items: { type: string, format: uuid }
+              description: Controls assigned to the rule (WP-1128), ordered by standard and catalog order.
+    ComplianceRuleControls:
+      type: object
+      required: [rule_id, control_ids]
+      properties:
+        rule_id: { type: string, format: uuid }
+        control_ids: { type: array, items: { type: string, format: uuid } }
     ComplianceScore:
       type: object
       required: [passed, failed, not_applicable, score]

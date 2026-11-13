@@ -41,6 +41,10 @@ type Repository interface {
 	// acknowledged, compliance_violation is left out. A CI without open
 	// finding has no entry.
 	FindingFacts(ctx context.Context, orgID string, ciIDs []string) (map[string]FindingFacts, error)
+	// ControlStore: the control catalog and the assignment of rules
+	// (WP-1128); the memory profile has no catalog
+	// (ErrControlsUnavailable).
+	ControlStore
 }
 
 // FindingSource lists the findings of an organization (security.Repository
@@ -225,8 +229,11 @@ func (r *MemoryRepository) DeleteStaleResults(_ context.Context, orgID string, b
 	}
 	return nil
 }
+
 // Now implements Repository: the process clock.
-func (r *MemoryRepository) Now(context.Context, string) (time.Time, error) { return time.Now().UTC(), nil }
+func (r *MemoryRepository) Now(context.Context, string) (time.Time, error) {
+	return time.Now().UTC(), nil
+}
 
 func (r *MemoryRepository) ListResults(_ context.Context, orgID, ciTypeID, status string, page api.PaginationParams) ([]Result, int, error) {
 	r.mu.RLock()
@@ -251,4 +258,19 @@ func pageResults(items []Result, page api.PaginationParams) ([]Result, int, erro
 	start := min(page.Offset, total)
 	end := min(start+page.Limit, total)
 	return items[start:end], total, nil
+}
+
+// ListControls implements ControlStore: the memory profile has no catalog.
+func (r *MemoryRepository) ListControls(context.Context, string, string, bool) ([]Control, error) {
+	return nil, ErrControlsUnavailable
+}
+
+// RuleControlIDs implements ControlStore.
+func (r *MemoryRepository) RuleControlIDs(context.Context, string, string) ([]string, error) {
+	return []string{}, nil
+}
+
+// ReplaceRuleControls implements ControlStore.
+func (r *MemoryRepository) ReplaceRuleControls(context.Context, string, string, []string) error {
+	return ErrControlsUnavailable
 }

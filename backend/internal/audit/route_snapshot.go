@@ -598,6 +598,13 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		Select: `to_jsonb(t) || jsonb_build_object('test_report', t.test_report - 'violations')`}
 	m["POST /api/v1/tickets/{id}/sla"] = RouteSnapshot{Table: "ticket_sla", Keys: []SnapshotKey{{"ticket_id", "id"}}}
 	// The tags of an asset are its rows of asset_tag_link (WP-755).
+	// The control assignment of a rule (WP-1128) lives in
+	// compliance_rule_control: the snapshot names the assigned controls,
+	// so the entry shows them old and new.
+	m["PUT /api/v1/compliance/rules/{id}/controls"] = RouteSnapshot{Table: "compliance_rule", Keys: []SnapshotKey{{"id", "id"}},
+		Select: `jsonb_build_object('id', t.id, 'organization_id', t.organization_id, 'control_ids',
+			(SELECT COALESCE(jsonb_agg(rc.control_id ORDER BY rc.control_id), '[]'::jsonb) FROM compliance_rule_control rc
+			  WHERE rc.organization_id = t.organization_id AND rc.rule_id = t.id))`}
 	m["PUT /api/v1/assets/{id}/tags"] = RouteSnapshot{Table: "asset", Keys: []SnapshotKey{{"id", "id"}},
 		Select: `jsonb_build_object('id', t.id, 'organization_id', t.organization_id, 'tags',
 			(SELECT COALESCE(jsonb_agg(g.key ORDER BY g.key), '[]'::jsonb) FROM asset_tag_link l

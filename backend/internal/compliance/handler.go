@@ -44,6 +44,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/compliance/results", h.ListResults)
 	r.Get("/api/v1/compliance/score", h.Score)
 	r.Get("/api/v1/compliance/report", h.Report)
+	r.Get("/api/v1/compliance/controls", h.ListControls)
+	r.Get("/api/v1/compliance/controls/coverage", h.ControlCoverage)
+	r.Put("/api/v1/compliance/rules/{id}/controls", h.PutRuleControls)
 }
 func org(w http.ResponseWriter, r *http.Request) (tenant.TenantInfo, bool) {
 	t := tenant.FromContext(r.Context())
@@ -63,6 +66,8 @@ func writeComplianceError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, ErrNotFound):
 		api.WriteError(w, http.StatusNotFound, "Not Found", ErrNotFound.Error())
+	case errors.Is(err, ErrControlsUnavailable):
+		api.WriteUnavailable(w, ErrControlsUnavailable.Error())
 	case api.WriteFieldError(w, err):
 	default:
 		slog.WarnContext(r.Context(), "compliance request failed", "error", err)
@@ -112,7 +117,13 @@ func (h *Handler) GetRule(w http.ResponseWriter, r *http.Request) {
 		writeComplianceError(w, r, err)
 		return
 	}
-	api.WriteJSON(w, 200, item)
+	// The controls of the rule, additive (WP-1128).
+	out := RuleWithControls{Rule: item, ControlIDs: []string{}}
+	if out.ControlIDs, err = h.repo.RuleControlIDs(r.Context(), t.OrganizationID, id); err != nil {
+		writeComplianceError(w, r, err)
+		return
+	}
+	api.WriteJSON(w, 200, out)
 }
 func (h *Handler) CreateRule(w http.ResponseWriter, r *http.Request) {
 	t, ok := org(w, r)

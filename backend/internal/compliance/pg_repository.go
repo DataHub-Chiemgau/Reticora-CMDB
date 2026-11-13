@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -351,4 +352,87 @@ func scanResult(s scanner) (*Result, error) {
 		return nil, err
 	}
 	return r, nil
+}
+
+// ListControls implements ControlStore.
+func (r *PGRepository) ListControls(ctx context.Context, orgID, standard string, withoutActiveRule bool) ([]Control, error) {
+	out := []Control{}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT c.id::text, c.standard, c.control_id, c.title_de, c.title_en, c.sort_order,
+				count(rc.rule_id)::int, count(rc.rule_id) FILTER (WHERE cr.active)::int
+			FROM compliance_control c
+			LEFT JOIN compliance_rule_control rc ON rc.control_id = c.id AND rc.organization_id = $1
+			LEFT JOIN compliance_rule cr ON cr.id = rc.rule_id AND cr.organization_id = $1
+			WHERE c.standard = $2
+			GROUP BY c.id
+			HAVING NOT $3 OR count(rc.rule_id) FILTER (WHERE cr.active) = 0
+			ORDER BY c.sort_order, c.control_id`, orgID, standard, withoutActiveRule)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var c Control
+			if err := rows.Scan(&c.ID, &c.Standard, &c.ControlID, &c.TitleDE, &c.TitleEN, &c.SortOrder, &c.RuleCount, &c.ActiveRuleCount); err != nil {
+				return err
+			}
+			out = append(out, c)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// RuleControlIDs implements ControlStore.
+func (r *PGRepository) RuleControlIDs(ctx context.Context, orgID, ruleID string) ([]string, error) {
+	out := []string{}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT rc.control_id::text FROM compliance_rule_control rc JOIN compliance_control c ON c.id = rc.control_id
+			WHERE rc.organization_id = $1 AND rc.rule_id = $2 ORDER BY c.standard, c.sort_order`, orgID, ruleID)
+		if err != nil {
+			return err
+		}
+		ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err == nil {
+			out = append(out, ids...)
+		}
+		return err
+	})
+	return out, err
+}
+
+// ReplaceRuleControls implements ControlStore in one transaction.
+func (r *PGRepository) ReplaceRuleControls(ctx context.Context, orgID, ruleID string, controlIDs []string) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM compliance_rule WHERE organization_id = $1 AND id = $2 FOR UPDATE)`,
+			orgID, ruleID).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return ErrNotFound
+		}
+		unique := []string{}
+		for i, c := range controlIDs {
+			var known bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM compliance_control WHERE id = $1::uuid)`, c).Scan(&known); err != nil {
+				return err
+			}
+			if !known {
+				return controlFieldError(i)
+			}
+			if !slices.Contains(unique, c) {
+				unique = append(unique, c)
+			}
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM compliance_rule_control WHERE organization_id = $1 AND rule_id = $2`, orgID, ruleID); err != nil {
+			return err
+		}
+		if len(unique) == 0 {
+			return nil
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO compliance_rule_control (organization_id, rule_id, control_id)
+			SELECT $1, $2, c FROM unnest($3::uuid[]) AS c`, orgID, ruleID, unique)
+		return err
+	})
 }
