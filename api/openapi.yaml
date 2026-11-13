@@ -24226,33 +24226,69 @@ paths:
   /api/v1/monitoring/alarms:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     get:
       operationId: listAlarms
       tags: [Monitoring]
       summary: List alarms
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Implemented by WP-983 (ALR-01, E-160). The alarms in the caller's client
+        and site scope, newest first on (opened_at, id) (a pending alarm,
+        not opened yet, on its first_seen_at), keyset-paginated
+        (next_cursor). state, severity and source_kind repeat (or are
+        comma-separated); without state every alarm that is not resolved is
+        listed. from and to select the alarms opened in the period (opened_at; a
+        pending alarm was never opened). total is capped like GET /cis (E-104).
+        details holds only the measured value, the threshold and the reference
+        to the rule or probe, no CI attribute values. Requires monitoring:read;
+        the feature and module monitoring gate the path.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
+        - name: state
+          in: query
+          required: false
+          style: form
+          explode: true
+          schema: { type: array, items: { $ref: '#/components/schemas/AlarmState' } }
+        - name: severity
+          in: query
+          required: false
+          style: form
+          explode: true
+          schema: { type: array, items: { $ref: '#/components/schemas/AlarmSeverity' } }
+        - name: source_kind
+          in: query
+          required: false
+          style: form
+          explode: true
+          schema: { type: array, items: { $ref: '#/components/schemas/AlarmSourceKind' } }
+        - { name: ci_id, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: client_id, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: site_id, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: incident_id, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: suppressed, in: query, required: false, schema: { type: boolean } }
+        - { name: from, in: query, required: false, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: false, schema: { type: string, format: date-time } }
       responses:
         '200':
-          description: List alarms. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+          description: Alarms
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlarmListResponse' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
   /api/v1/monitoring/alarms/{id}:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     get:
@@ -24260,11 +24296,16 @@ paths:
       tags: [Monitoring]
       summary: Get an alarm
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Implemented by WP-983 (ALR-01). The alarm with its transitions, oldest
+        first, at most 500; transitions_truncated is true when more exist. A
+        foreign alarm or one outside the caller's scope is 404. Requires
+        monitoring:read; the feature and module monitoring gate the path.
       responses:
         '200':
-          description: Get an alarm. The schema comes with the implementing work package.
+          description: The alarm with its transitions
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AlarmDetail' }
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -24277,7 +24318,6 @@ paths:
   /api/v1/monitoring/alarms/{id}/ack:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -24285,11 +24325,25 @@ paths:
       tags: [Monitoring]
       summary: Acknowledge an alarm
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Implemented by WP-983 (ALR-01, E-159). Acknowledges an open alarm with
+        an optional comment (at most 1,000 characters, else 422 comment); the
+        transition names the acting user. Another state (pending, acknowledged,
+        resolved) is 409 invalid-transition. Audited as alarm.acknowledged
+        (resource_type alarm); the event alarm.acknowledged follows. Requires
+        alert:acknowledge for the client and site of the alarm (403 when
+        the scope of alert:acknowledge does not cover them); the feature and
+        module monitoring gate the path.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AlarmActionRequest' }
       responses:
         '200':
-          description: Acknowledge an alarm. The schema comes with the implementing work package.
+          description: The acknowledged alarm
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Alarm' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -24300,13 +24354,14 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
   /api/v1/monitoring/alarms/{id}/unack:
     x-phase: P3
     x-feature: monitoring
-    x-status: planned
     parameters:
       - $ref: '#/components/parameters/ResourceID'
     post:
@@ -24314,11 +24369,24 @@ paths:
       tags: [Monitoring]
       summary: Withdraw the acknowledgement of an alarm
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        Implemented by WP-983 (ALR-01, E-159). Moves an acknowledged alarm back
+        to open, with an optional comment (at most 1,000 characters). Another
+        state is 409 invalid-transition. Audited as alarm.unacknowledged
+        (resource_type alarm); there is no event (E-161). Requires
+        alert:acknowledge for the client and site of the alarm (403 when
+        the scope of alert:acknowledge does not cover them); the feature and
+        module monitoring gate the path.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AlarmActionRequest' }
       responses:
         '200':
-          description: Withdraw the acknowledgement of an alarm. The schema comes with the implementing work package.
+          description: The alarm, open again
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Alarm' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -24329,6 +24397,8 @@ paths:
           $ref: '#/components/responses/NotFound'
         '409':
           $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -32655,6 +32725,103 @@ components:
             data:
               type: array
               items: { $ref: '#/components/schemas/MonitoringEvent' }
+    AlarmState:
+      type: string
+      description: State of an alarm (ALR-01).
+      enum: [pending, open, acknowledged, resolved]
+    AlarmSeverity:
+      type: string
+      enum: [info, warning, critical]
+    AlarmSourceKind:
+      type: string
+      description: Source of an alarm (ALR-01).
+      enum: [rule, check, collector, config, capacity, sla]
+    Alarm:
+      type: object
+      description: >-
+        An alarm instance of one source and series (ALR-01, WP-981). details
+        holds only the measured value, the threshold and the reference to the
+        rule or probe (Konvention 11).
+      required: [id, organization_id, client_id, site_id, ci_id, source_kind, source_id, series_key, labels, dedup_key,
+        severity, state, suppressed_reason, incident_id, occurrence_count, first_seen_at, last_seen_at, opened_at,
+        acknowledged_at, acknowledged_by, resolved_at, summary, details, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        client_id: { type: [string, 'null'], format: uuid }
+        site_id: { type: [string, 'null'], format: uuid }
+        ci_id: { type: [string, 'null'], format: uuid }
+        source_kind: { $ref: '#/components/schemas/AlarmSourceKind' }
+        source_id: { type: string }
+        series_key: { type: string }
+        labels:
+          type: object
+          additionalProperties: { type: string }
+        dedup_key: { type: string, description: 'source_kind:source_id:series_key' }
+        severity: { $ref: '#/components/schemas/AlarmSeverity' }
+        state: { $ref: '#/components/schemas/AlarmState' }
+        suppressed_reason: { type: [string, 'null'], enum: [maintenance, symptom, flapping, null] }
+        incident_id: { type: [string, 'null'], format: uuid }
+        occurrence_count: { type: integer }
+        first_seen_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        opened_at: { type: [string, 'null'], format: date-time }
+        acknowledged_at: { type: [string, 'null'], format: date-time }
+        acknowledged_by: { type: [string, 'null'] }
+        resolved_at: { type: [string, 'null'], format: date-time }
+        summary: { type: string }
+        details:
+          type: object
+          additionalProperties: true
+        updated_at: { type: string, format: date-time }
+    AlarmTransition:
+      type: object
+      description: One entry of the append-only state log of an alarm (alarm_transition).
+      required: [id, organization_id, client_id, site_id, alarm_id, from_state, to_state, from_severity, to_severity, at,
+        actor_id, reason, comment]
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        client_id: { type: [string, 'null'], format: uuid }
+        site_id: { type: [string, 'null'], format: uuid }
+        alarm_id: { type: string, format: uuid }
+        from_state: { type: [string, 'null'] }
+        to_state: { $ref: '#/components/schemas/AlarmState' }
+        from_severity: { type: [string, 'null'] }
+        to_severity: { type: [string, 'null'] }
+        at: { type: string, format: date-time }
+        actor_id: { type: [string, 'null'], description: The acting user; null is the system. }
+        reason: { type: string }
+        comment: { type: [string, 'null'] }
+    AlarmDetail:
+      allOf:
+        - $ref: '#/components/schemas/Alarm'
+        - type: object
+          required: [transitions, transitions_truncated]
+          properties:
+            transitions:
+              type: array
+              maxItems: 500
+              items: { $ref: '#/components/schemas/AlarmTransition' }
+            transitions_truncated:
+              type: boolean
+              description: True when the alarm has more than 500 transitions.
+    AlarmActionRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        comment:
+          type: string
+          maxLength: 1000
+    AlarmListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/Alarm' }
     ProblemDetail:
       type: object
       description: >-

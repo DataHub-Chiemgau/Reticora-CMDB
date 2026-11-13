@@ -174,6 +174,10 @@ type ListFilter struct {
 	// From and To select the alarms active in the period: first seen
 	// before To and not resolved before From.
 	From, To *time.Time
+	// OpenedFrom and OpenedTo select the alarms opened in the period
+	// (opened_at at or after OpenedFrom, before OpenedTo; REST from/to,
+	// WP-983). A pending alarm was never opened and does not match.
+	OpenedFrom, OpenedTo *time.Time
 	// After continues the list after the alarm of a previous page.
 	After *Cursor
 	// Limit is the page size; 0 or less is DefaultLimit.
@@ -184,10 +188,21 @@ type ListFilter struct {
 const DefaultLimit = 50
 
 // Cursor is the position of an alarm in the list order: newest first on
-// (first_seen_at, id).
+// (opened_at, id), a pending alarm without opened_at on its first_seen_at
+// (SortAt).
 type Cursor struct {
-	FirstSeenAt time.Time
-	ID          string
+	At time.Time
+	ID string
+}
+
+// SortAt is the sort key of an alarm in the list: opened_at, for a pending
+// alarm that has not opened yet first_seen_at (COALESCE(opened_at,
+// first_seen_at) in PostgreSQL).
+func (a *Alarm) SortAt() time.Time {
+	if a.OpenedAt != nil {
+		return *a.OpenedAt
+	}
+	return a.FirstSeenAt
 }
 
 // Page is one page of alarms; Next is set when more alarms follow.

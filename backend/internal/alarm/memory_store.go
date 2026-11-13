@@ -85,7 +85,9 @@ func matches(a *Alarm, f *ListFilter) bool {
 		!eq(a.CIID, f.CIID), !eq(a.ClientID, f.ClientID), !eq(a.SiteID, f.SiteID), !eq(a.IncidentID, f.IncidentID),
 		f.Suppressed != nil && *f.Suppressed != (a.SuppressedReason != nil),
 		f.To != nil && !a.FirstSeenAt.Before(*f.To),
-		f.From != nil && a.ResolvedAt != nil && a.ResolvedAt.Before(*f.From):
+		f.From != nil && a.ResolvedAt != nil && a.ResolvedAt.Before(*f.From),
+		f.OpenedFrom != nil && (a.OpenedAt == nil || a.OpenedAt.Before(*f.OpenedFrom)),
+		f.OpenedTo != nil && (a.OpenedAt == nil || !a.OpenedAt.Before(*f.OpenedTo)):
 		return false
 	}
 	return true
@@ -102,7 +104,7 @@ func (m *MemoryStore) List(_ context.Context, orgID string, f *ListFilter) (Page
 	}
 	m.mu.Unlock()
 	slices.SortFunc(items, func(a, b Alarm) int {
-		if c := b.FirstSeenAt.Compare(a.FirstSeenAt); c != 0 {
+		if c := b.SortAt().Compare(a.SortAt()); c != 0 {
 			return c
 		}
 		return strings.Compare(b.ID, a.ID)
@@ -110,7 +112,7 @@ func (m *MemoryStore) List(_ context.Context, orgID string, f *ListFilter) (Page
 	if f.After != nil {
 		after := f.After
 		items = slices.DeleteFunc(items, func(a Alarm) bool {
-			c := a.FirstSeenAt.Compare(after.FirstSeenAt)
+			c := a.SortAt().Compare(after.At)
 			return c > 0 || (c == 0 && a.ID >= after.ID)
 		})
 	}
@@ -119,6 +121,22 @@ func (m *MemoryStore) List(_ context.Context, orgID string, f *ListFilter) (Page
 		items = items[:limit+1]
 	}
 	return paged(items, limit), nil
+}
+
+// Count implements Store.
+func (m *MemoryStore) Count(_ context.Context, orgID string, f *ListFilter, limit int) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := 0
+	for _, a := range m.alarms {
+		if a.OrganizationID == orgID && matches(a, f) {
+			n++
+			if limit > 0 && n >= limit {
+				break
+			}
+		}
+	}
+	return n, nil
 }
 
 // UpsertOpen implements Store.
@@ -211,7 +229,12 @@ func (m *MemoryStore) AppendTransition(_ context.Context, orgID string, in *Tran
 }
 
 // Transitions implements Store.
-func (m *MemoryStore) Transitions(_ context.Context, orgID, alarmID string) ([]Transition, error) {
+func (m *MemoryStore) Transitions(ctx context.Context, orgID, alarmID string) ([]Transition, error) {
+	return m.TransitionsUpTo(ctx, orgID, alarmID, 0)
+}
+
+// TransitionsUpTo implements Store.
+func (m *MemoryStore) TransitionsUpTo(_ context.Context, orgID, alarmID string, limit int) ([]Transition, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var out []Transition
@@ -220,7 +243,15 @@ func (m *MemoryStore) Transitions(_ context.Context, orgID, alarmID string) ([]T
 			out = append(out, *t)
 		}
 	}
-	slices.SortStableFunc(out, func(a, b Transition) int { return a.At.Compare(b.At) })
+	slices.SortStableFunc(out, func(a, b Transition) int {
+		if c := a.At.Compare(b.At); c != 0 {
+			return c
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
 	return out, nil
 }
 

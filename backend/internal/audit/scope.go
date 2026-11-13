@@ -80,6 +80,9 @@ var resourceTables = map[string][]string{
 	"admp_holder": {"admp_connection"},
 	"document":    {"document"},
 	"ticket":      {"ticket"},
+	// Ack and un-ack of an alarm (WP-983): the entry is visible where the
+	// alarm is, under the client and site of its row.
+	"alarm": {"alarm"},
 
 	// Route audit (the first route segment): the route's resource_id is
 	// its first id parameter or the id of the created row, so the tables
@@ -144,7 +147,7 @@ var resourceTables = map[string][]string{
 	"maintenance-windows":   {"maintenance_window"},
 	"metamodel":             {"metamodel_draft"},
 	// Alert rules and the probe definitions (WP-939).
-	"monitoring":                {"alert_rule", "probe"},
+	"monitoring":                {"alert_rule", "probe", "alarm"},
 	"mounts":                    {"rack_mount"},
 	"network-interfaces":        {"network_interface"},
 	"notification-channels":     {"notification_channel"},

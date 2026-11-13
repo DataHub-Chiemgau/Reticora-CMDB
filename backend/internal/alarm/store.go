@@ -14,8 +14,14 @@ import (
 type Store interface {
 	// Get returns the alarm, or ErrNotFound.
 	Get(ctx context.Context, orgID, id string) (*Alarm, error)
-	// List returns one page of alarms newest first on (first_seen_at, id).
+	// List returns one page of alarms newest first on (opened_at, id); a
+	// pending alarm without opened_at sorts on its first_seen_at
+	// (Alarm.SortAt).
 	List(ctx context.Context, orgID string, f *ListFilter) (Page, error)
+	// Count counts the alarms of the filter (cursor and limit ignored),
+	// reading at most limit rows (0: all); E-104 caps the total of the
+	// REST list with it.
+	Count(ctx context.Context, orgID string, f *ListFilter, limit int) (int, error)
 	// UpsertOpen inserts a new alarm for the key of in, or, when an alarm
 	// of that key is not resolved, increments its occurrence_count and sets
 	// last_seen_at (INSERT … ON CONFLICT … DO UPDATE). created reports a
@@ -35,6 +41,10 @@ type Store interface {
 	AppendTransition(ctx context.Context, orgID string, tr *Transition) (*Transition, error)
 	// Transitions returns the state log of an alarm, oldest first.
 	Transitions(ctx context.Context, orgID, alarmID string) ([]Transition, error)
+	// TransitionsUpTo returns the oldest limit entries of the state log
+	// (0: all), so the detail of an alarm with a long log does not read
+	// every row.
+	TransitionsUpTo(ctx context.Context, orgID, alarmID string, limit int) ([]Transition, error)
 
 	// Incidents (ALR-03, WP-1027). Every change appends to
 	// incident_transition in the same transaction.

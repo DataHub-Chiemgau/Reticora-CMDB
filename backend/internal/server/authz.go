@@ -777,14 +777,18 @@ var domainRecordedRoutes = map[string]string{
 	// Locations and rack placement (DOD-01).
 	// CI types hidden per client (WP-858): client.hidden_ci_types_changed.
 	"PUT /api/v1/clients/{id}/hidden-ci-types": "tenantapi.PGRepository.SetHiddenCITypes",
-	"POST /api/v1/locations":                   "locations.PGRepository",
-	"DELETE /api/v1/locations/{id}":            "locations.PGRepository",
-	"POST /api/v1/mounts":                      "rack placement",
-	"PATCH /api/v1/mounts/{id}":                "rack placement",
-	"DELETE /api/v1/mounts/{id}":               "rack placement",
-	"POST /api/v1/racks/{id}/mounts":           "rack placement",
-	"PUT /api/v1/racks/{id}/mounts/{ci_id}":    "rack placement",
-	"DELETE /api/v1/racks/{id}/mounts/{ci_id}": "rack placement",
+	// Ack and un-ack of an alarm (ALR-01, WP-983): alarm.acknowledged and
+	// alarm.unacknowledged with resource_type alarm.
+	"POST /api/v1/monitoring/alarms/{id}/ack":   "alarm.Handler (alarm.acknowledged)",
+	"POST /api/v1/monitoring/alarms/{id}/unack": "alarm.Handler (alarm.unacknowledged)",
+	"POST /api/v1/locations":                    "locations.PGRepository",
+	"DELETE /api/v1/locations/{id}":             "locations.PGRepository",
+	"POST /api/v1/mounts":                       "rack placement",
+	"PATCH /api/v1/mounts/{id}":                 "rack placement",
+	"DELETE /api/v1/mounts/{id}":                "rack placement",
+	"POST /api/v1/racks/{id}/mounts":            "rack placement",
+	"PUT /api/v1/racks/{id}/mounts/{ci_id}":     "rack placement",
+	"DELETE /api/v1/racks/{id}/mounts/{ci_id}":  "rack placement",
 	// Access: API keys, service accounts, users (RBA-05, AUT-08).
 	"POST /api/v1/api-keys":                   "identity.PGAPIKeyStore",
 	"POST /api/v1/api-keys/{id}/rotate":       "identity.PGAPIKeyStore",

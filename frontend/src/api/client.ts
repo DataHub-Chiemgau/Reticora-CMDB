@@ -652,6 +652,8 @@ export const SCOPED_LISTS: Record<string, readonly ('client_id' | 'site_id')[]> 
   '/monitoring/probes': ['client_id'],
   '/monitoring/groups': ['client_id'],
   '/collector-groups': ['client_id', 'site_id'],
+  // The alarms filter by client and site (ALR-01, WP-983).
+  '/monitoring/alarms': ['client_id', 'site_id'],
 };
 
 /** withScope adds the selected scope to a GET of a scoped list. */

@@ -294,6 +294,8 @@ GET /api/v1/metamodel/drafts/{id} citype:manage
 GET /api/v1/metamodel/drafts/{id}/items citype:manage
 GET /api/v1/metamodel/drafts/{id}/test metamodel:publish
 GET /api/v1/modules entitlement:read
+GET /api/v1/monitoring/alarms monitoring:read
+GET /api/v1/monitoring/alarms/{id} monitoring:read
 GET /api/v1/monitoring/alerts monitoring:read
 GET /api/v1/monitoring/metrics monitoring:read
 GET /api/v1/monitoring/probe-types monitoring:read
@@ -635,6 +637,8 @@ POST /api/v1/metamodel/drafts/{id}/items citype:manage
 POST /api/v1/metamodel/drafts/{id}/publish metamodel:publish
 POST /api/v1/metamodel/drafts/{id}/test metamodel:publish
 POST /api/v1/metamodel/import citype:manage
+POST /api/v1/monitoring/alarms/{id}/ack alert:acknowledge
+POST /api/v1/monitoring/alarms/{id}/unack alert:acknowledge
 POST /api/v1/monitoring/alerts monitoring:write
 POST /api/v1/monitoring/metrics monitoring:write
 POST /api/v1/monitoring/probes monitoring:write

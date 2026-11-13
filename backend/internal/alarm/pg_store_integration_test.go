@@ -139,7 +139,10 @@ func TestAlarmUpsertAfterResolvedCreatesNewRow(t *testing.T) {
 	})
 }
 
-func TestAlarmListFiltersAndCursor(t *testing.T) {
+// TestAlarmStoreListFiltersAndCursor is TestAlarmListFiltersAndCursor of
+// WP-981 on the store; WP-983 gives that name to the REST list
+// (handler_test.go).
+func TestAlarmStoreListFiltersAndCursor(t *testing.T) {
 	eachStore(t, func(t *testing.T, e *storeEnv) {
 		ci := e.ci("list-ci")
 		t0 := time.Now().UTC().Truncate(time.Second).Add(-time.Hour)
@@ -388,6 +391,92 @@ func TestAlarmRetentionRemovesResolvedOlderThan400Days(t *testing.T) {
 			if _, err := m.Get(e.ctx, e.orgID, id); err != nil {
 				t.Errorf("alarm %s removed: %v", id, err)
 			}
+		}
+	})
+}
+
+// TestAlarmStoreCountAndOpenedRange checks the parts of the store the REST
+// list uses (WP-983) on both stores: the range on opened_at (from at or
+// after, to before; a pending alarm without opened_at matches neither), the
+// capped count, the order on (opened_at, id) with a pending alarm on its
+// first_seen_at, the cursor on that key and the capped transition log.
+func TestAlarmStoreCountAndOpenedRange(t *testing.T) {
+	eachStore(t, func(t *testing.T, e *storeEnv) {
+		base := time.Now().UTC().Truncate(time.Second).Add(-time.Hour)
+		var opened []*alarm.Alarm
+		for i := range 4 {
+			a, _ := raise(t, e, "range"+string(rune('a'+i)), nil, base.Add(time.Duration(i)*time.Minute))
+			opened = append(opened, a)
+		}
+		pending, _, perr := e.store.UpsertOpen(e.ctx, e.orgID, &alarm.UpsertInput{
+			SourceKind: alarm.SourceRule, SourceID: ruleID, SeriesKey: "range-pending", Severity: alarm.SeverityWarning,
+			State: alarm.StatePending, Summary: "cpu high", ObservedAt: base.Add(150 * time.Second),
+		})
+		if perr != nil || pending.OpenedAt != nil {
+			t.Fatalf("%s: pending: %+v %v", e.name, pending, perr)
+		}
+		at := func(d time.Duration) *time.Time { v := base.Add(d); return &v }
+		cases := []struct {
+			name     string
+			from, to *time.Time
+			want     []string
+		}{
+			{"from at the boundary", at(time.Minute), nil, []string{opened[3].ID, opened[2].ID, opened[1].ID}},
+			{"to before the boundary", nil, at(2 * time.Minute), []string{opened[1].ID, opened[0].ID}},
+			{"both", at(time.Minute), at(3 * time.Minute), []string{opened[2].ID, opened[1].ID}},
+		}
+		for _, c := range cases {
+			page, err := e.store.List(e.ctx, e.orgID, &alarm.ListFilter{OpenedFrom: c.from, OpenedTo: c.to})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(ids(page.Items), ","); got != strings.Join(c.want, ",") {
+				t.Errorf("%s: %s: %s, want %s", e.name, c.name, got, strings.Join(c.want, ","))
+			}
+			n, err := e.store.Count(e.ctx, e.orgID, &alarm.ListFilter{OpenedFrom: c.from, OpenedTo: c.to}, 0)
+			if err != nil || n != len(c.want) {
+				t.Errorf("%s: %s: count %d %v, want %d", e.name, c.name, n, err, len(c.want))
+			}
+		}
+		all := &alarm.ListFilter{}
+		if n, err := e.store.Count(e.ctx, e.orgID, all, 0); err != nil || n != 5 {
+			t.Errorf("%s: count without limit %d %v, want 5", e.name, n, err)
+		}
+		if n, err := e.store.Count(e.ctx, e.orgID, all, 3); err != nil || n != 3 {
+			t.Errorf("%s: count capped at 3: %d %v, want 3", e.name, n, err)
+		}
+		// Order and cursor: opened_at DESC, the pending alarm on its
+		// first_seen_at (2:30) between the alarms opened at 3:00 and 2:00.
+		want := []string{opened[3].ID, pending.ID, opened[2].ID, opened[1].ID, opened[0].ID}
+		var got []string
+		f := &alarm.ListFilter{Limit: 2}
+		for range 4 {
+			page, err := e.store.List(e.ctx, e.orgID, f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got = append(got, ids(page.Items)...)
+			if page.Next == nil {
+				break
+			}
+			f.After = page.Next
+		}
+		if strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Errorf("%s: order %v, want %v", e.name, got, want)
+		}
+		// The transition log is read up to a limit, oldest first.
+		for i := range 3 {
+			if _, err := e.store.AppendTransition(e.ctx, e.orgID, &alarm.Transition{AlarmID: opened[0].ID,
+				ToState: alarm.StateOpen, At: base.Add(time.Duration(i+1) * time.Second), Reason: "raised"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		trs, err := e.store.TransitionsUpTo(e.ctx, e.orgID, opened[0].ID, 2)
+		if err != nil || len(trs) != 2 || !trs[0].At.Equal(base.Add(time.Second)) || !trs[1].At.Equal(base.Add(2*time.Second)) {
+			t.Errorf("%s: transitions up to 2: %+v %v, want the two oldest", e.name, trs, err)
+		}
+		if full, ferr := e.store.TransitionsUpTo(e.ctx, e.orgID, opened[0].ID, 0); ferr != nil || len(full) != 3 {
+			t.Errorf("%s: transitions without limit: %d %v, want 3", e.name, len(full), ferr)
 		}
 	})
 }

@@ -10227,7 +10227,7 @@ export interface paths {
     };
     /**
      * List alarms
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Implemented by WP-983 (ALR-01, E-160). The alarms in the caller's client and site scope, newest first on (opened_at, id) (a pending alarm, not opened yet, on its first_seen_at), keyset-paginated (next_cursor). state, severity and source_kind repeat (or are comma-separated); without state every alarm that is not resolved is listed. from and to select the alarms opened in the period (opened_at; a pending alarm was never opened). total is capped like GET /cis (E-104). details holds only the measured value, the threshold and the reference to the rule or probe, no CI attribute values. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['listAlarms'];
     put?: never;
@@ -10250,7 +10250,7 @@ export interface paths {
     };
     /**
      * Get an alarm
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Implemented by WP-983 (ALR-01). The alarm with its transitions, oldest first, at most 500; transitions_truncated is true when more exist. A foreign alarm or one outside the caller's scope is 404. Requires monitoring:read; the feature and module monitoring gate the path.
      */
     get: operations['getAlarm'];
     put?: never;
@@ -10275,7 +10275,7 @@ export interface paths {
     put?: never;
     /**
      * Acknowledge an alarm
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Implemented by WP-983 (ALR-01, E-159). Acknowledges an open alarm with an optional comment (at most 1,000 characters, else 422 comment); the transition names the acting user. Another state (pending, acknowledged, resolved) is 409 invalid-transition. Audited as alarm.acknowledged (resource_type alarm); the event alarm.acknowledged follows. Requires alert:acknowledge for the client and site of the alarm (403 when the scope of alert:acknowledge does not cover them); the feature and module monitoring gate the path.
      */
     post: operations['acknowledgeAlarm'];
     delete?: never;
@@ -10298,7 +10298,7 @@ export interface paths {
     put?: never;
     /**
      * Withdraw the acknowledgement of an alarm
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Implemented by WP-983 (ALR-01, E-159). Moves an acknowledged alarm back to open, with an optional comment (at most 1,000 characters). Another state is 409 invalid-transition. Audited as alarm.unacknowledged (resource_type alarm); there is no event (E-161). Requires alert:acknowledge for the client and site of the alarm (403 when the scope of alert:acknowledge does not cover them); the feature and module monitoring gate the path.
      */
     post: operations['unacknowledgeAlarm'];
     delete?: never;
@@ -14956,6 +14956,97 @@ export interface components {
     };
     MonitoringEventListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['MonitoringEvent'][];
+    };
+    /**
+     * @description State of an alarm (ALR-01).
+     * @enum {string}
+     */
+    AlarmState: 'pending' | 'open' | 'acknowledged' | 'resolved';
+    /** @enum {string} */
+    AlarmSeverity: 'info' | 'warning' | 'critical';
+    /**
+     * @description Source of an alarm (ALR-01).
+     * @enum {string}
+     */
+    AlarmSourceKind: 'rule' | 'check' | 'collector' | 'config' | 'capacity' | 'sla';
+    /** @description An alarm instance of one source and series (ALR-01, WP-981). details holds only the measured value, the threshold and the reference to the rule or probe (Konvention 11). */
+    Alarm: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      /** Format: uuid */
+      client_id: string | null;
+      /** Format: uuid */
+      site_id: string | null;
+      /** Format: uuid */
+      ci_id: string | null;
+      source_kind: components['schemas']['AlarmSourceKind'];
+      source_id: string;
+      series_key: string;
+      labels: {
+        [key: string]: string;
+      };
+      /** @description source_kind:source_id:series_key */
+      dedup_key: string;
+      severity: components['schemas']['AlarmSeverity'];
+      state: components['schemas']['AlarmState'];
+      /** @enum {string|null} */
+      suppressed_reason: 'maintenance' | 'symptom' | 'flapping' | null;
+      /** Format: uuid */
+      incident_id: string | null;
+      occurrence_count: number;
+      /** Format: date-time */
+      first_seen_at: string;
+      /** Format: date-time */
+      last_seen_at: string;
+      /** Format: date-time */
+      opened_at: string | null;
+      /** Format: date-time */
+      acknowledged_at: string | null;
+      acknowledged_by: string | null;
+      /** Format: date-time */
+      resolved_at: string | null;
+      summary: string;
+      details: {
+        [key: string]: unknown;
+      };
+      /** Format: date-time */
+      updated_at: string;
+    };
+    /** @description One entry of the append-only state log of an alarm (alarm_transition). */
+    AlarmTransition: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      organization_id: string;
+      /** Format: uuid */
+      client_id: string | null;
+      /** Format: uuid */
+      site_id: string | null;
+      /** Format: uuid */
+      alarm_id: string;
+      from_state: string | null;
+      to_state: components['schemas']['AlarmState'];
+      from_severity: string | null;
+      to_severity: string | null;
+      /** Format: date-time */
+      at: string;
+      /** @description The acting user; null is the system. */
+      actor_id: string | null;
+      reason: string;
+      comment: string | null;
+    };
+    AlarmDetail: components['schemas']['Alarm'] & {
+      transitions: components['schemas']['AlarmTransition'][];
+      /** @description True when the alarm has more than 500 transitions. */
+      transitions_truncated: boolean;
+    };
+    AlarmActionRequest: {
+      comment?: string;
+    };
+    AlarmListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['Alarm'][];
     };
     /** @description RFC 7807 Problem Details object (API-03). Every error response (4xx/5xx) is `application/problem+json` and carries `trace_id`, the request id also returned in the `X-Request-ID` header. */
     ProblemDetail: {
@@ -48822,6 +48913,16 @@ export interface operations {
          *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
+        state?: components['schemas']['AlarmState'][];
+        severity?: components['schemas']['AlarmSeverity'][];
+        source_kind?: components['schemas']['AlarmSourceKind'][];
+        ci_id?: string;
+        client_id?: string;
+        site_id?: string;
+        incident_id?: string;
+        suppressed?: boolean;
+        from?: string;
+        to?: string;
       };
       header?: never;
       path?: never;
@@ -48829,16 +48930,19 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List alarms. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description Alarms */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['AlarmListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -48854,12 +48958,14 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Get an alarm. The schema comes with the implementing work package. */
+      /** @description The alarm with its transitions */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['AlarmDetail'];
+        };
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
@@ -48877,20 +48983,27 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        'application/json': components['schemas']['AlarmActionRequest'];
+      };
+    };
     responses: {
-      /** @description Acknowledge an alarm. The schema comes with the implementing work package. */
+      /** @description The acknowledged alarm */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Alarm'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };
@@ -48904,20 +49017,27 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        'application/json': components['schemas']['AlarmActionRequest'];
+      };
+    };
     responses: {
-      /** @description Withdraw the acknowledgement of an alarm. The schema comes with the implementing work package. */
+      /** @description The alarm, open again */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['Alarm'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
       409: components['responses']['Conflict'];
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };

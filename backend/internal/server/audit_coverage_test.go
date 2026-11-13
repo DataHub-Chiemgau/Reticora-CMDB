@@ -541,10 +541,13 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	"POST /api/v1/org/deletion": {"", `{"confirm_slug":"scopetest-a5-a"}`},
 	// The report and the pseudonymization of a contact (WP-1158) start
 	// their jobs.
-	"POST /api/v1/privacy/subjects/report":             {"", `{"contact_id":"<id:/api/v1/contacts>"}`},
-	"POST /api/v1/privacy/subjects/erase":              {"", `{"contact_id":"<id:/api/v1/contacts>","mode":"pseudonymize"}`},
-	"PUT /api/v1/clients/{id}/hidden-ci-types":         {"/api/v1/clients/<id:/api/v1/clients>/hidden-ci-types", `{"ci_type_ids":["<id:/api/v1/ci-types>"]}`}, // WP-858
-	"PUT /api/v1/documents/{id}/content":               {"", `a5 content`},
+	"POST /api/v1/privacy/subjects/report":     {"", `{"contact_id":"<id:/api/v1/contacts>"}`},
+	"POST /api/v1/privacy/subjects/erase":      {"", `{"contact_id":"<id:/api/v1/contacts>","mode":"pseudonymize"}`},
+	"PUT /api/v1/clients/{id}/hidden-ci-types": {"/api/v1/clients/<id:/api/v1/clients>/hidden-ci-types", `{"ci_type_ids":["<id:/api/v1/ci-types>"]}`}, // WP-858
+	"PUT /api/v1/documents/{id}/content":       {"", `a5 content`},
+	// Ack and un-ack of the open alarm (WP-983).
+	"POST /api/v1/monitoring/alarms/{id}/ack":          {"/api/v1/monitoring/alarms/<alarm>/ack", `{"comment":"a5 ack"}`},
+	"POST /api/v1/monitoring/alarms/{id}/unack":        {"/api/v1/monitoring/alarms/<alarm>/unack", `{}`},
 	"DELETE /api/v1/ci-fields/global/{name}":           {"/api/v1/ci-fields/global/a5_global", ""},
 	"DELETE /api/v1/ci-types/{id}/fields/{name}":       {"/api/v1/ci-types/<id:/api/v1/ci-types>/fields/a5_field", ""},
 	"DELETE /api/v1/cis/{id}/field-definitions/{name}": {"/api/v1/cis/<id:/api/v1/cis>/field-definitions/a5_ci_field", ""},
@@ -739,6 +742,14 @@ func TestEveryWriteRouteAuditedOnPostgreSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixed["<publish_draft>"] = publishDraft
+	// An open alarm for POST /monitoring/alarms/{id}/ack and /unack
+	// (WP-983); the un-ack follows the ack in the order of the table.
+	var openAlarm string
+	if err = f.Admin.QueryRow(bg, `INSERT INTO alarm (organization_id, client_id, source_kind, source_id, severity, state, opened_at)
+		VALUES ($1, $2, 'collector', gen_random_uuid(), 'warning', 'open', now()) RETURNING id::text`, f.OrgA, f.Client1).Scan(&openAlarm); err != nil {
+		t.Fatal(err)
+	}
+	fixed["<alarm>"] = openAlarm
 	ids := map[string]string{}
 	fill := func(s string) string {
 		for k, v := range fixed {

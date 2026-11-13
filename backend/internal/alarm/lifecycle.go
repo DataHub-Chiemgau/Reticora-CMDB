@@ -159,6 +159,17 @@ func (s *Service) WithClock(clock func() time.Time) *Service {
 // Store returns the store of the service.
 func (s *Service) Store() Store { return s.store }
 
+// InTx runs fn in one transaction of the organization, the caller's when
+// the context carries one, so several operations of the service and a
+// domain audit entry commit together (WP-983). Without a database fn runs
+// directly: every operation of the service serializes itself.
+func (s *Service) InTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {
+	if s.pool == nil {
+		return fn(ctx)
+	}
+	return database.WithRequestTenantTx(ctx, s.pool, orgID, fn)
+}
+
 // inTx runs fn in one transaction of the organization, the caller's when
 // the context carries one.
 func (s *Service) inTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {

@@ -17,6 +17,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/admp"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
@@ -139,7 +140,10 @@ type Repositories struct {
 	IPAMManagement *ipam.ManagementSync
 	Metrics        monitoring.MetricStore
 	// Probes are the probe definitions of monitoring P3 (PRB-01, WP-939).
-	Probes     probe.Store
+	Probes probe.Store
+	// Alarms is the lifecycle of the alarm instances (ALR-01, WP-982); the
+	// REST routes of WP-983 serve it. nil uses a memory store.
+	Alarms     *alarm.Service
 	Permission permission.Repository
 	// FieldGrants stores the field permissions (RBA-07, WP-264).
 	FieldGrants permission.FieldGrantRepository
@@ -980,6 +984,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		// The probe definitions and the probe type register (PRB-01,
 		// PRT-01, WP-939).
 		probe.NewHandler(probeStore(&repos, opts.Entitlements)),
+		// The alarms with ack and un-ack (ALR-01, WP-983, E-160).
+		alarm.NewHandler(alarmService(&repos)),
 		// The BFF gates the fields of late modules itself (WP-311): its
 		// route belongs to no module prefix.
 		graphqlbff.NewHandler(repos.CI, repos.Relationship).WithEntitlements(opts.Entitlements).
@@ -1680,6 +1686,15 @@ func UsageCounters(repos *Repositories) entitlement.UsageCounters {
 		}
 	}
 	return counters
+}
+
+// alarmService returns the alarm lifecycle of the repositories; without one
+// a memory store (both profiles serve the same routes).
+func alarmService(repos *Repositories) *alarm.Service {
+	if repos.Alarms != nil {
+		return repos.Alarms
+	}
+	return alarm.NewService(alarm.NewMemoryStore(), nil, &alarm.MemorySink{})
 }
 
 // probeStore returns the probe store of repos, an empty memory store when

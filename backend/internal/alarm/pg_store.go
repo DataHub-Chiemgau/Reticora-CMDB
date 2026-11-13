@@ -115,14 +115,21 @@ func (s *PGStore) LockOpenByKey(ctx context.Context, orgID, dedupKey string) (*A
 	return out, err
 }
 
-// List implements Store.
-func (s *PGStore) List(ctx context.Context, orgID string, f *ListFilter) (Page, error) {
-	args := []any{orgID}
-	where := []string{"organization_id = $1"}
-	arg := func(v any) string {
-		args = append(args, v)
-		return "$" + strconv.Itoa(len(args))
-	}
+// sqlArgs collects the arguments of a statement.
+type sqlArgs struct{ values []any }
+
+// add appends v and returns its placeholder.
+func (a *sqlArgs) add(v any) string {
+	a.values = append(a.values, v)
+	return "$" + strconv.Itoa(len(a.values))
+}
+
+// listWhere renders the conditions of a filter (without cursor and limit)
+// with their arguments; $1 is the organization.
+func listWhere(orgID string, f *ListFilter) (where []string, args *sqlArgs) {
+	args = &sqlArgs{values: []any{orgID}}
+	where = []string{"organization_id = $1"}
+	arg := args.add
 	if len(f.States) > 0 {
 		where = append(where, "state = ANY("+arg(f.States)+"::text[])")
 	}
@@ -157,16 +164,49 @@ func (s *PGStore) List(ctx context.Context, orgID string, f *ListFilter) (Page, 
 	if f.From != nil {
 		where = append(where, "(resolved_at IS NULL OR resolved_at >= "+arg(*f.From)+")")
 	}
+	if f.OpenedFrom != nil {
+		where = append(where, "opened_at >= "+arg(*f.OpenedFrom))
+	}
+	if f.OpenedTo != nil {
+		where = append(where, "opened_at < "+arg(*f.OpenedTo))
+	}
+	return where, args
+}
+
+// Count implements Store.
+func (s *PGStore) Count(ctx context.Context, orgID string, f *ListFilter, limit int) (int, error) {
+	where, args := listWhere(orgID, f)
+	query := `SELECT 1 FROM alarm WHERE ` + strings.Join(where, " AND ")
+	if limit > 0 {
+		query += ` LIMIT ` + args.add(limit)
+	}
+	var n int
+	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM (`+query+`) AS matching`, args.values...).Scan(&n)
+	})
+	if err != nil {
+		return 0, fmt.Errorf("alarm: count: %w", err)
+	}
+	return n, nil
+}
+
+// listSortKey is the sort key of the list (Alarm.SortAt).
+const listSortKey = "COALESCE(opened_at, first_seen_at)"
+
+// List implements Store.
+func (s *PGStore) List(ctx context.Context, orgID string, f *ListFilter) (Page, error) {
+	where, args := listWhere(orgID, f)
+	arg := args.add
 	if f.After != nil {
-		at := arg(f.After.FirstSeenAt)
-		where = append(where, "(first_seen_at, id) < ("+at+"::timestamptz, "+arg(f.After.ID)+"::uuid)")
+		at := arg(f.After.At)
+		where = append(where, "("+listSortKey+", id) < ("+at+"::timestamptz, "+arg(f.After.ID)+"::uuid)")
 	}
 	limit := limitOf(f)
 	query := `SELECT ` + alarmColumns + ` FROM alarm WHERE ` + strings.Join(where, " AND ") +
-		` ORDER BY first_seen_at DESC, id DESC LIMIT ` + arg(limit+1)
+		` ORDER BY ` + listSortKey + ` DESC, id DESC LIMIT ` + arg(limit+1)
 	var page Page
 	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		rows, err := tx.Query(ctx, query, args...)
+		rows, err := tx.Query(ctx, query, args.values...)
 		if err != nil {
 			return err
 		}
@@ -193,7 +233,7 @@ func paged(items []Alarm, limit int) Page {
 		return Page{Items: items}
 	}
 	last := items[limit-1]
-	return Page{Items: items[:limit], Next: &Cursor{FirstSeenAt: last.FirstSeenAt, ID: last.ID}}
+	return Page{Items: items[:limit], Next: &Cursor{At: last.SortAt(), ID: last.ID}}
 }
 
 // UpsertOpen implements Store.
@@ -285,10 +325,19 @@ func (s *PGStore) AppendTransition(ctx context.Context, orgID string, tr *Transi
 
 // Transitions implements Store.
 func (s *PGStore) Transitions(ctx context.Context, orgID, alarmID string) ([]Transition, error) {
+	return s.TransitionsUpTo(ctx, orgID, alarmID, 0)
+}
+
+// TransitionsUpTo implements Store.
+func (s *PGStore) TransitionsUpTo(ctx context.Context, orgID, alarmID string, limit int) ([]Transition, error) {
 	var out []Transition
+	var lim any // NULL: LIMIT ALL
+	if limit > 0 {
+		lim = limit
+	}
 	err := database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT `+transitionColumns+` FROM alarm_transition
-			WHERE organization_id = $1 AND alarm_id = $2 ORDER BY at, id`, orgID, alarmID)
+			WHERE organization_id = $1 AND alarm_id = $2 ORDER BY at, id LIMIT $3::int`, orgID, alarmID, lim)
 		if err != nil {
 			return err
 		}

@@ -7,6 +7,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/admp"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
@@ -167,6 +168,7 @@ func MemoryRepositories() Repositories {
 		IPAM:              ipam.NewMemoryRepository(),
 		Metrics:           monitoring.NewMemoryMetricStore(),
 		Probes:            probes,
+		Alarms:            alarm.NewService(alarm.NewMemoryStore(), nil, &alarm.MemorySink{}),
 		Permission:        permission.NewMemoryRepository(),
 		FieldGrants:       permission.NewMemoryFieldGrants(),
 		APIKeys:           identity.NewMemoryAPIKeyStore(),
@@ -263,6 +265,7 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		IPAMManagement:    management,
 		Metrics:           monitoring.NewPGMetricStore(pool),
 		Probes:            probe.NewPGRepository(pool),
+		Alarms:            alarm.NewPGService(pool),
 		Permission:        permission.NewPGRepository(pool),
 		FieldGrants:       permission.NewPGFieldGrants(pool),
 		APIKeys:           identity.NewPGAPIKeyStore(pool),

@@ -8348,6 +8348,7 @@ Der Entwurf sah `/api/v1/alarms` mit `monitoring:write` und einem Eintrag in `en
 - [ ] **AK1:** `GET /api/v1/monitoring/alarms`:
   - Filter `state` (mehrfach; ohne Angabe alle außer `resolved`), `severity`, `ci_id`, `client_id`, `site_id`, `source_kind`, `incident_id`, `suppressed` (bool) sowie `from`/`to` auf `opened_at`.
   - Cursor-Paginierung über `api.ParsePagination` (`limit` ≤ 200), `total` gedeckelt nach E-104, Sortierung `opened_at DESC, id`.
+  - *Umsetzungsvermerk (Prüfung 2026-11-13):* Ein `pending`-Alarm hat noch kein `opened_at`; er sortiert nach `first_seen_at` (Sortierschlüssel `COALESCE(opened_at, first_seen_at)`, auch im Cursor).
 - [ ] **AK2:** `GET /api/v1/monitoring/alarms/{id}` liefert den Alarm mit `transitions` (chronologisch, höchstens 500, darüber `transitions_truncated: true`). Ein fremder oder außerhalb des Scopes liegender Alarm ergibt 404.
 - [ ] **AK3:** `POST /api/v1/monitoring/alarms/{id}/ack` und `/unack` mit `{comment}` (höchstens 1.000 Zeichen):
   - Recht `alert:acknowledge` über die `routeRules` aus WP-866; `route_permissions.txt` wird mit den registrierten Routen neu erzeugt.
@@ -8359,6 +8360,7 @@ Der Entwurf sah `/api/v1/alarms` mit `monitoring:write` und einem Eintrag in `en
   - `api/openapi.yaml` ersetzt das Gerüst aus WP-864 und beschreibt die vier Operationen mit `x-phase: P3` und `x-feature: monitoring`; `x-status` entfällt.
   - `frontend/src/api/client.ts` nimmt `/monitoring/alarms` mit `client_id` und `site_id` in `SCOPED_LISTS` auf (`client.ts:626`), geprüft gegen das erzeugte Schema in `client.test.ts`.
 - [ ] **AK5:** DTOs laufen durch den zentralen Sichtbarkeitsfilter (Konvention 11) mit der Objektart `alarm`. `details` enthält keine CI-Attributwerte, nur Messwert, Schwelle und Regel- bzw. Probe-Bezug.
+  - *Umsetzungsvermerk (Prüfung 2026-11-13):* Die Objektart `alarm` gibt es in den Feldrechten nicht (`permission.ObjectKinds`; die CHECK-Constraints von `field_grant`, `object_grant` und `field_sensitivity` aus Migration 000226 kennen nur `ci`, `asset`, `contract`, `ticket`, `document`, `relationship`), und `permission.Project` unterstützt sie nicht. Sie einzuführen bräuchte eine Migration, Feldlisten, die Oberfläche der Feldrechte und die Kanalmatrix, also Änderungen außerhalb der Dateiliste und von „Migration/RLS: keine“. WP-983 setzt den Filter deshalb als feste Positivliste um: `alarm.DetailKeys` lässt in `details` nur Messwert, Schwelle und Regel- bzw. Probe-Bezug durch (`TestAlarmListFiltersAndCursor`). Alarm-DTOs enthalten keine CI-Felder außer `ci_id`. Feldrechte auf Alarme sind damit nicht konfigurierbar; das bleibt einem eigenen Nachtrag vorbehalten, falls sie gebraucht werden.
 - [ ] **AK6:** Memory- und PG-Repository verhalten sich gleich (`--no-db`, Paritätstest beider Profile).
 
 **Dateien (12 Einträge):**

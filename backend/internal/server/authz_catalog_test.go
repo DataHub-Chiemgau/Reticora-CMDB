@@ -118,7 +118,6 @@ var unroutedKeys = map[string]string{
 // first route. The phase-3 keys of WP-866 gate scaffold routes only until
 // their domain work packages register them.
 var unroutedUntil = map[string]string{
-	"alert:acknowledge": "WP-982 (alarm acknowledgement)",
 	"workflow:approve":  "WP-1098 (workflow approvals)",
 	"escalation:manage": "WP-1145 (escalation policies)",
 	"org:export":        "WP-1151 (organization export)",
