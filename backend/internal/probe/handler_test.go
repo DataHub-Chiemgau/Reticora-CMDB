@@ -111,8 +111,8 @@ func TestCreateProbeValidation(t *testing.T) {
 		{"unknown parameter", `{"type":"icmp","target":"10.0.0.1","client_id":"` + hClient + `","params":{"bogus":1}}`, "params.bogus"},
 		{"invalid icmp target", `{"type":"icmp","target":"not a host","client_id":"` + hClient + `"}`, "target"},
 		{"icmp target with bad label", `{"type":"icmp","target":"-bad-.example","client_id":"` + hClient + `"}`, "target"},
-		{"tcp without port", `{"type":"tcp","target":"db.example","client_id":"` + hClient + `"}`, "target"},
-		{"tcp port out of range", `{"type":"tcp","target":"db.example:70000","client_id":"` + hClient + `"}`, "target"},
+		{"tcp without port", `{"type":"tcp","target":"db.example","client_id":"` + hClient + `"}`, "params.port"},
+		{"tcp port out of range", `{"type":"tcp","target":"db.example","client_id":"` + hClient + `","params":{"port":70000}}`, "params.port"},
 		{"no client", `{"type":"icmp","target":"10.0.0.1"}`, "client_id"},
 		{"unknown ci", `{"type":"icmp","target":"10.0.0.1","ci_id":"` + hGroup2 + `"}`, "ci_id"},
 		{"unknown collector group", `{"type":"icmp","target":"10.0.0.1","client_id":"` + hClient + `","collector_group_id":"` + hGroup2 + `"}`, "collector_group_id"},
@@ -134,7 +134,7 @@ func TestCreateProbeValidation(t *testing.T) {
 		t.Fatalf("created %+v", p)
 	}
 	e.mustCreate(`{"type":"tcp","target":"db.example","client_id":"` + hClient + `","params":{"port":5432}}`)
-	e.mustCreate(`{"type":"tcp","target":"[2001:db8::1]:443","client_id":"` + hClient + `"}`)
+	e.mustCreate(`{"type":"tcp","target":"2001:db8::1","client_id":"` + hClient + `","params":{"port":443}}`)
 	// The same CI, type and target again: 409.
 	want(t, "duplicate", e.create(`{"type":"icmp","target":"10.0.0.1","ci_id":"`+hCI+`"}`), http.StatusConflict, "target")
 	// A change keeps the checks: timeout = interval is 422, the type is
@@ -227,7 +227,7 @@ func TestListProbesFilterAndTotal(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		e.mustCreate(fmt.Sprintf(`{"type":"icmp","target":"10.2.0.%d","client_id":"%s"}`, i, hClient))
 	}
-	e.mustCreate(`{"type":"tcp","target":"10.2.0.9:22","client_id":"` + hClient + `","enabled":false}`)
+	e.mustCreate(`{"type":"tcp","target":"10.2.0.9","client_id":"` + hClient + `","params":{"port":22},"enabled":false}`)
 	e.mustCreate(`{"type":"icmp","target":"10.2.1.1","ci_id":"` + hCI + `"}`)
 	list := func(query string) (total int, n int) {
 		t.Helper()
