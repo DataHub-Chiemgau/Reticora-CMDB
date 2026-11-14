@@ -1944,7 +1944,8 @@
       "infected": "The file is infected and quarantined. The import has been aborted.",
       "scanFailed": "The scan of the file failed. The import has been aborted.",
       "notClean": "The file has not been scanned clean yet.",
-      "another": "Upload another file"
+      "another": "Upload another file",
+      "preset": "Preselected: profile “{{name}}” ({{entity}})."
     },
     "preview": {
       "title": "Column preview",
@@ -5484,6 +5485,41 @@
       "assignFailed": "The address could not be assigned.",
       "bindFailed": "The address could not be bound to the CI and was released again: {{detail}}",
       "bindFailedKept": "The address could not be bound to the CI; releasing it failed as well: {{detail}}"
+    },
+    "io": {
+      "action": "Import/Export",
+      "title": "Import and export",
+      "tabsLabel": "Import or export",
+      "tab_import": "Import",
+      "tab_export": "Export",
+      "noRights": "The rights for import and export are missing.",
+      "entity": "Kind",
+      "entities": {
+        "subnet": "Subnets",
+        "ip_address": "Addresses"
+      },
+      "importHint": "The import runs in the import assistant with the phpIPAM profile of the chosen kind: upload the file, dry run with row report, then start.",
+      "profileFound": "The profile “{{name}}” is used.",
+      "profileCreate": "The profile “{{name}}” is created with the phpIPAM columns.",
+      "profileMissing": "The profile “{{name}}” is missing; creating it needs the right import:manage.",
+      "profileNameTaken": "The name “{{name}}” already belongs to an import profile of another kind; please rename that profile.",
+      "toImport": "To the import assistant",
+      "exportHint": "The export creates a CSV file with the phpIPAM columns as a job; the file is then available in the job center.",
+      "filters": "Filters taken over from the IPAM page",
+      "noFilters": "No filters set – all visible objects.",
+      "filter_section_id": "Section",
+      "filter_vrf_id": "VRF",
+      "filter_client_id": "Client",
+      "filter_site_id": "Site",
+      "filter_q": "Search",
+      "filter_contains": "Contains address",
+      "notApplied": "does not apply to addresses",
+      "startExport": "Start export",
+      "exportStarted": "The export job {{id}} has been created.",
+      "openJobCenter": "View in the job center",
+      "forbidden": "The right for this action is missing (e.g. ipam:read).",
+      "badRequest": "The request was refused: {{detail}}",
+      "failed": "The action failed."
     }
   },
   "alarms": {

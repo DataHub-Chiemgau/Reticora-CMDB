@@ -9,8 +9,10 @@
  * created in the SubnetFormModal and opens its detail page (WP-916).
  * Beside the subnet tree the tabs VLANs (with domains), VRFs (RD/RT) and
  * nameserver sets (WP-918); the tab stays in the query parameter tab.
+ * The action Import/Export (WP-922) opens IpamImportDialog with the current
+ * filters of the page.
  */
-import { Network, Plus, Settings2 } from 'lucide-react';
+import { ArrowDownUp, Network, Plus, Settings2 } from 'lucide-react';
 import { useMemo, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router';
@@ -18,6 +20,7 @@ import type { IPAMSection } from '../api/cmdb';
 import { useClients } from '../api/cmdbHooks';
 import { useHasPermission, useSites } from '../api/hooks';
 import { useIPAMSections, useOrgWideWriter, useSubnetChain, useVrfs } from '../api/ipamHooks';
+import { IpamImportDialog, useIpamIORights } from '../components/ipam/IpamImportDialog';
 import { IpamTabList, IPAM_TABS, type IpamTab } from '../components/ipam/IpamTabList';
 import { NameserverTab } from '../components/ipam/NameserverTab';
 import { VlanTab } from '../components/ipam/VlanTab';
@@ -61,7 +64,9 @@ export function IpamPage() {
   const [q, setQ] = useState('');
   const [containsInput, setContainsInput] = useState('');
   const [contains, setContains] = useState('');
-  const [dialog, setDialog] = useState<'create' | 'edit' | 'subnet' | undefined>();
+  const [dialog, setDialog] = useState<'create' | 'edit' | 'subnet' | 'io' | undefined>();
+  const ioRights = useIpamIORights();
+  const canIO = !!ioRights && (ioRights.import || ioRights.export);
   const navigate = useNavigate();
   const clients = useClients();
   const sites = useSites(clientId || undefined);
@@ -102,14 +107,23 @@ export function IpamPage() {
         title={t('ipam.title')}
         description={t('ipam.description')}
         actions={
-          canWrite && (
+          (canWrite || canIO) && (
             <>
-              <Button variant="secondary" icon={<Plus />} onClick={() => setDialog('subnet')}>
-                {t('ipam.subnetForm.new')}
-              </Button>
-              <Button icon={<Plus />} onClick={() => setDialog('create')}>
-                {t('ipam.section.new')}
-              </Button>
+              {canIO && (
+                <Button variant="secondary" icon={<ArrowDownUp />} onClick={() => setDialog('io')}>
+                  {t('ipam.io.action')}
+                </Button>
+              )}
+              {canWrite && (
+                <>
+                  <Button variant="secondary" icon={<Plus />} onClick={() => setDialog('subnet')}>
+                    {t('ipam.subnetForm.new')}
+                  </Button>
+                  <Button icon={<Plus />} onClick={() => setDialog('create')}>
+                    {t('ipam.section.new')}
+                  </Button>
+                </>
+              )}
             </>
           )
         }
@@ -253,6 +267,19 @@ export function IpamPage() {
         </div>
       )}
 
+      {dialog === 'io' && (
+        <IpamImportDialog
+          open
+          onOpenChange={(open) => !open && setDialog(undefined)}
+          filters={{ ...query, contains: contains || undefined }}
+          labels={{
+            section_id: section?.name,
+            vrf_id: vrfId ? vrfNames[vrfId] : undefined,
+            client_id: (clients.data?.data ?? []).find((c) => c.id === clientId)?.name,
+            site_id: (sites.data?.data ?? []).find((s) => s.id === siteId)?.name,
+          }}
+        />
+      )}
       {dialog === 'create' && (
         <SectionDialog
           open

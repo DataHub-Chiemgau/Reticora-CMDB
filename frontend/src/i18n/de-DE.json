@@ -1944,7 +1944,8 @@
       "infected": "Die Datei ist infiziert und in Quarantäne. Der Import ist abgebrochen.",
       "scanFailed": "Die Prüfung der Datei ist fehlgeschlagen. Der Import ist abgebrochen.",
       "notClean": "Die Datei ist noch nicht sauber geprüft.",
-      "another": "Andere Datei hochladen"
+      "another": "Andere Datei hochladen",
+      "preset": "Vorgewählt: Profil „{{name}}“ ({{entity}})."
     },
     "preview": {
       "title": "Spaltenvorschau",
@@ -5484,6 +5485,41 @@
       "assignFailed": "Die Adresse konnte nicht zugewiesen werden.",
       "bindFailed": "Die Adresse konnte nicht an das CI gebunden werden und wurde wieder freigegeben: {{detail}}",
       "bindFailedKept": "Die Adresse konnte nicht an das CI gebunden werden; die Freigabe ist ebenfalls fehlgeschlagen: {{detail}}"
+    },
+    "io": {
+      "action": "Import/Export",
+      "title": "Import und Export",
+      "tabsLabel": "Import oder Export",
+      "tab_import": "Import",
+      "tab_export": "Export",
+      "noRights": "Für Import und Export fehlen die Rechte.",
+      "entity": "Art",
+      "entities": {
+        "subnet": "Subnetze",
+        "ip_address": "Adressen"
+      },
+      "importHint": "Der Import läuft im Importassistenten mit dem phpIPAM-Profil der gewählten Art: Datei hochladen, Trockenlauf mit Zeilenbericht, dann starten.",
+      "profileFound": "Das Profil „{{name}}“ wird verwendet.",
+      "profileCreate": "Das Profil „{{name}}“ wird mit den phpIPAM-Spalten angelegt.",
+      "profileMissing": "Das Profil „{{name}}“ fehlt; zum Anlegen ist das Recht import:manage nötig.",
+      "profileNameTaken": "Der Name „{{name}}“ gehört bereits einem Importprofil einer anderen Art; bitte das Profil umbenennen.",
+      "toImport": "Zum Importassistenten",
+      "exportHint": "Der Export erzeugt eine CSV-Datei mit den phpIPAM-Spalten als Job; die Datei steht danach im Jobcenter bereit.",
+      "filters": "Übernommene Filter der IPAM-Seite",
+      "noFilters": "Keine Filter gesetzt – alle sichtbaren Objekte.",
+      "filter_section_id": "Section",
+      "filter_vrf_id": "VRF",
+      "filter_client_id": "Kunde",
+      "filter_site_id": "Standort",
+      "filter_q": "Suche",
+      "filter_contains": "Enthält Adresse",
+      "notApplied": "gilt nicht für Adressen",
+      "startExport": "Export starten",
+      "exportStarted": "Der Exportjob {{id}} wurde angelegt.",
+      "openJobCenter": "Im Jobcenter ansehen",
+      "forbidden": "Für diese Aktion fehlt das Recht (z. B. ipam:read).",
+      "badRequest": "Die Anfrage wurde abgelehnt: {{detail}}",
+      "failed": "Die Aktion ist fehlgeschlagen."
     }
   },
   "alarms": {

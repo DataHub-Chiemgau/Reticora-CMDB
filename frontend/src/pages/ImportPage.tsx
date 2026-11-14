@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router';
 import type { TFunction } from 'i18next';
 import { ArrowLeft, ArrowRight, Download, Play, RotateCcw, Save, Trash2 } from 'lucide-react';
 import {
@@ -483,6 +484,9 @@ function PreviewTable({ preview }: { preview: ImportPreview }) {
  * editing of a mapping profile with the MappingEditor, a dry run and the
  * run itself as import.run job with their report. Running needs import:run,
  * saving a profile import:manage (E-106); the server decides every request.
+ * The query parameter profile (WP-922, e.g. from the IPAM dialog) chooses a
+ * stored profile in advance; an unknown one leaves the assistant without a
+ * choice.
  */
 export function ImportPage() {
   const { t, i18n } = useTranslation();
@@ -505,7 +509,11 @@ export function ImportPage() {
   const uploaded = useDocument(documentId ?? '');
   const scan = uploaded.data?.scan_status;
   const preview = useImportPreview(documentId, sheet, step !== 'file' && scan === 'clean');
-  const profiles = useImportProfiles(step !== 'file');
+  // ?profile=<id> chooses a stored profile once its list is loaded (WP-922).
+  const [params] = useSearchParams();
+  const presetId = params.get('profile') ?? '';
+  const [presetDone, setPresetDone] = useState(false);
+  const profiles = useImportProfiles(step !== 'file' || (presetId !== '' && !presetDone));
   const createProfile = useCreateImportProfile();
   const updateProfile = useUpdateImportProfile();
   const deleteProfile = useDeleteImportProfile();
@@ -532,6 +540,18 @@ export function ImportPage() {
 
   const profileList = profiles.data?.data ?? [];
   const savedProfile = profileList.find((p) => p.id === profileId);
+  // The preset applies once, while rendering (no effect): a known profile
+  // is chosen as if picked, an unknown one is ignored.
+  if (presetId && !presetDone && (profiles.isSuccess || profiles.isError)) {
+    setPresetDone(true);
+    const preset = profileList.find((p) => p.id === presetId);
+    if (preset) {
+      setProfileId(preset.id);
+      setDraft(draftOf(preset));
+      if (preset.sheet) setSheet(preset.sheet);
+      setDirty(false);
+    }
+  }
 
   function open(next: Step) {
     setStep(next);
@@ -645,6 +665,14 @@ export function ImportPage() {
       {step === 'file' ? (
         <Card title={t('import.file.title')} className="space-y-4">
           <p className="text-sm text-fg-muted">{t('import.file.hint')}</p>
+          {savedProfile && !dirty ? (
+            <p role="status" className="text-sm text-fg" data-testid="import-preset">
+              {t('import.file.preset', {
+                name: savedProfile.name,
+                entity: t(`import.entities.${savedProfile.entity}`),
+              })}
+            </p>
+          ) : null}
           <FileUpload
             key={uploadKey}
             accept={IMPORT_ACCEPT}

@@ -2985,7 +2985,17 @@ export const webhookApi = {
 
 // --- Export ---
 
+/**
+ * ExportJobIPAMFilters are the filters of an export of subnets or addresses
+ * (filters.ipam, WP-921): those of GET /subnets resp. GET /ips (WP-909).
+ */
+export type ExportJobIPAMFilters = components['schemas']['ExportJobIPAMFilters'];
+
 export interface ExportJobFilters {
+  /** What a csv or json export renders; subnet and ip_address export IPAM as CSV (WP-921). */
+  entity?: components['schemas']['ExportJobFilters']['entity'];
+  /** The filters of an IPAM export (entity subnet or ip_address, WP-922). */
+  ipam?: ExportJobIPAMFilters;
   status?: string;
   ci_type_id?: string;
   client_id?: string;

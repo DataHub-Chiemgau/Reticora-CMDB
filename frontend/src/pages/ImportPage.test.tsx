@@ -521,6 +521,60 @@ describe('ImportPage', () => {
     expect(calls.some((c) => c.method === 'POST' && c.path === '/imports')).toBe(false);
   });
 
+  // WP-922 (IPM-09): the IPAM dialog leads here with ?profile=<id>.
+  it('chooses the profile of ?profile=<id> in advance and starts in the step file', async () => {
+    const ipamProfile = profile({
+      id: 'prof-ipam',
+      name: 'phpIPAM Subnetze',
+      entity: 'subnet',
+      mapping: { columns: { cidr: { target: 'cidr', transforms: [] } }, defaults: {} },
+      identity_keys: ['cidr'],
+    });
+    stubApi({ profiles: [profile(), ipamProfile] });
+    renderWithProviders(<ImportPage />, { route: '/imports?profile=prof-ipam' });
+
+    expect(await screen.findByTestId('import-preset')).toHaveTextContent(
+      'Vorgewählt: Profil „phpIPAM Subnetze“ (Subnetze).',
+    );
+    expect(screen.getByLabelText('Importdatei hochladen')).toBeInTheDocument();
+    await toMapping();
+    expect(screen.getByLabelText('Profil')).toHaveValue('prof-ipam');
+    expect(screen.getByLabelText('Objektart')).toHaveValue('subnet');
+    expect(screen.getByLabelText('Name des Profils')).toHaveValue('phpIPAM Subnetze');
+  });
+
+  it('shows the assistant without a choice for an unknown profile', async () => {
+    stubApi({ profiles: [profile()] });
+    renderWithProviders(<ImportPage />, { route: '/imports?profile=prof-unknown' });
+
+    await toMapping();
+    expect(screen.getByLabelText('Profil')).toHaveValue('');
+    expect(screen.queryByTestId('import-preset')).not.toBeInTheDocument();
+  });
+
+  it('offers subnet and ip_address with their phpIPAM targets', async () => {
+    stubApi();
+    renderWithProviders(<ImportPage />);
+    await toMapping();
+
+    const entity = screen.getByLabelText('Objektart');
+    expect(within(entity).getByRole('option', { name: 'Subnetze' })).toHaveValue('subnet');
+    expect(within(entity).getByRole('option', { name: 'IP-Adressen' })).toHaveValue('ip_address');
+
+    const targetValues = () =>
+      within(screen.getByLabelText('Ziel von Hostname'))
+        .getAllByRole('option')
+        .map((o) => (o as HTMLOptionElement).value);
+    fireEvent.change(entity, { target: { value: 'subnet' } });
+    expect(targetValues()).toEqual(
+      expect.arrayContaining(['section', 'subnet', 'mask', 'cidr', 'vrf']),
+    );
+    fireEvent.change(entity, { target: { value: 'ip_address' } });
+    expect(targetValues()).toEqual(
+      expect.arrayContaining(['ip_addr', 'hostname', 'mac', 'state', 'is_gateway', 'subnet']),
+    );
+  });
+
   it('describes the API import', () => {
     stubApi();
     renderWithProviders(<ImportPage />);
