@@ -46,6 +46,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/probe"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/security"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/sla"
@@ -537,6 +538,44 @@ type systemJobDeps struct {
 	// (import.staging.sweep, WP-303); nil keeps documents with stored
 	// content and registers no staging sweep.
 	blobs blob.Store
+	// eventStream is RETICORA_EVENTS, whose messages of a purged
+	// organization the purge removes (WP-1155); nil without NATS.
+	eventStream jetstream.JetStream
+	// cache holds the entitlement and field permission snapshots the purge
+	// invalidates (WP-1155); nil keeps a memory store.
+	cache cache.Store
+}
+
+// externalPurge are the stores outside the tables the purge of an
+// organization empties (WP-1155): the buckets with keys of organizations,
+// the remote search index (OpenSearch; the PostgreSQL index goes with the
+// rows), the event stream (without NATS none) and the caches of the
+// entitlements and the field permissions.
+func externalPurge(d *systemJobDeps) *tenantapi.ExternalPurge {
+	x := &tenantapi.ExternalPurge{Blobs: d.blobs, Buckets: []string{export.ExportBucket, document.Bucket, d.cfg.S3Bucket},
+		// Keys outside org/<id>/: the CI exports with manifest and DATEV
+		// error report (<org>/<job>.<ext>) and the document versions from
+		// before migration 000066 (documents/<org>/<doc>/…).
+		Prefixes: []tenantapi.ObjectPrefix{
+			{Name: "exports", Bucket: export.ExportBucket, Prefix: export.JobPrefix},
+			{Name: "legacy-documents", Bucket: document.Bucket, Prefix: document.LegacyPrefix},
+		}}
+	backend := d.repos.Search
+	if hybrid, ok := backend.(*search.HybridBackend); ok {
+		backend = hybrid.Remote
+	}
+	if deleter, ok := backend.(tenantapi.TenantIndexDeleter); ok {
+		x.Search = deleter
+	}
+	if d.eventStream != nil {
+		x.Stream = events.NewPublisher(d.pool, d.eventStream)
+	}
+	if d.entitlements != nil {
+		x.Caches = append(x.Caches, d.entitlements.InvalidateOrganization)
+	}
+	// The field permission snapshot: a failed deletion keeps the step open.
+	x.Caches = append(x.Caches, permission.NewFieldResolver(nil, nil, nil, d.cache).InvalidateOrganization)
+	return x
 }
 
 // vulnfeedJobs are the system jobs of the vulnerability feeds on store:
@@ -789,6 +828,10 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 			if d.notifier != nil {
 				purger.WithNotices(d.notifier, notify.NewPGResolver(pool, permission.NewPGRepository(pool)))
 			}
+			// Then the vault (crypto-shredding), the objects of every
+			// bucket, the search index, the event stream and the caches
+			// (TLC-06, SEC-05, WP-1155).
+			purger.WithExternal(externalPurge(d))
 			systemJobs = append(systemJobs, purger.Schedule())
 		}
 		// SLA breaches: every minute each missed due time once as

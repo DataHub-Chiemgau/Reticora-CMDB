@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -264,6 +266,39 @@ func (p *Publisher) deliver(ctx context.Context, env, revealed *Envelope) error 
 		}
 	}
 	return nil
+}
+
+// PurgeOrganization removes every message of the organization from the
+// stream RETICORA_EVENTS (TLC-06, WP-1155): Stream.Purge with the subject
+// filter events.<org>.>, and returns how many messages it removed. Without
+// NATS or the stream it removes nothing; repeated it removes nothing more.
+func (p *Publisher) PurgeOrganization(ctx context.Context, orgID string) (uint64, error) {
+	if p.js == nil {
+		return 0, nil
+	}
+	if orgID == "" || strings.ContainsAny(orgID, ".*> ") {
+		return 0, fmt.Errorf("purge events: invalid organization %q", orgID)
+	}
+	stream, err := p.js.Stream(ctx, StreamName)
+	if errors.Is(err, jetstream.ErrStreamNotFound) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("purge events: open stream %s: %w", StreamName, err)
+	}
+	subject := SubjectPrefix + orgID + ".>"
+	info, err := stream.Info(ctx, jetstream.WithSubjectFilter(subject))
+	if err != nil {
+		return 0, fmt.Errorf("purge events: read stream %s: %w", StreamName, err)
+	}
+	var n uint64
+	for _, count := range info.State.Subjects {
+		n += count
+	}
+	if err := stream.Purge(ctx, jetstream.WithPurgeSubject(subject)); err != nil {
+		return 0, fmt.Errorf("purge events of %s: %w", orgID, err)
+	}
+	return n, nil
 }
 
 // Cleanup removes the rows published longer than KeepPublished ago. The

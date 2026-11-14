@@ -71,6 +71,13 @@ type Store interface {
 	// verified type, or leaves them empty for a nameless
 	// application/octet-stream attachment.
 	PresignedGetURL(ctx context.Context, bucket, key string, dl Download) (string, error)
+	// List returns the keys of the current objects below prefix, a
+	// directory of keys such as OrgPrefix (TLC-06, WP-1155).
+	List(ctx context.Context, bucket, prefix string) ([]string, error)
+	// DeleteAll removes every object below prefix for good, in a versioned
+	// bucket every version and delete marker, and returns how many it
+	// removed; repeated it removes nothing more (WP-1155).
+	DeleteAll(ctx context.Context, bucket, prefix string) (int, error)
 }
 
 // FileStore stores blobs on the local filesystem.
@@ -717,6 +724,265 @@ func AbortUploads(ctx context.Context, s Store, bucket, key string) error {
 		return a.AbortUploads(ctx, bucket, key)
 	}
 	return nil
+}
+
+// listPage is the page size of List and DeleteAll (the S3 maximum).
+const listPage = 1000
+
+// maxListPages bounds the pages of one List or DeleteAll call (10 million
+// objects). A listing still truncated after them is an error
+// (ErrListTruncated): a caller never takes a partial deletion for a
+// complete one; it repeats DeleteAll, which continues with what is left.
+// A variable for the tests.
+var maxListPages = 10000
+
+// ErrListTruncated: List or DeleteAll stopped after maxListPages pages
+// with more keys below the prefix.
+var ErrListTruncated = errors.New("blob: more pages below the prefix than one call reads")
+
+// bucketGet sends a signed GET to the bucket with the query and decodes the
+// XML answer into out.
+func (s *S3Store) bucketGet(ctx context.Context, bucket string, query url.Values, out any) error {
+	scheme := "http"
+	if s.useSSL {
+		scheme = "https"
+	}
+	listURL := &url.URL{Scheme: scheme, Host: s.endpoint, Path: "/" + bucket, RawQuery: canonicalQueryString(query)}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, listURL.String(), http.NoBody)
+	if err != nil {
+		return fmt.Errorf("blob: create list request: %w", err)
+	}
+	if serr := s.signRequest(req, emptyPayloadSHA256); serr != nil {
+		return serr
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("blob: list %s: %w", bucket, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+		return statusError(http.MethodGet, listURL.Path, resp, strings.TrimSpace(string(body)))
+	}
+	if derr := xml.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(out); derr != nil {
+		return fmt.Errorf("blob: list %s: %w", bucket, derr)
+	}
+	return nil
+}
+
+// List returns the keys of the current objects below prefix
+// (ListObjectsV2, pages of listPage); a missing bucket lists nothing.
+func (s *S3Store) List(ctx context.Context, bucket, prefix string) ([]string, error) {
+	if err := checkListPrefix(bucket, prefix); err != nil {
+		return nil, err
+	}
+	keys := []string{}
+	query := url.Values{"list-type": {"2"}, "prefix": {prefix}, "max-keys": {strconv.Itoa(listPage)}}
+	for range maxListPages {
+		var out struct {
+			Contents []struct {
+				Key string `xml:"Key"`
+			} `xml:"Contents"`
+			IsTruncated           bool   `xml:"IsTruncated"`
+			NextContinuationToken string `xml:"NextContinuationToken"`
+		}
+		if err := s.bucketGet(ctx, bucket, query, &out); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				return keys, nil
+			}
+			return nil, err
+		}
+		for _, c := range out.Contents {
+			keys = append(keys, c.Key)
+		}
+		if !out.IsTruncated || out.NextContinuationToken == "" {
+			return keys, nil
+		}
+		query.Set("continuation-token", out.NextContinuationToken)
+	}
+	return nil, fmt.Errorf("blob: list %s/%s: %w", bucket, prefix, ErrListTruncated)
+}
+
+// DeleteAll removes every object below prefix for good (TLC-06, WP-1155):
+// in a versioned bucket a DELETE only adds a delete marker, so it lists the
+// versions (ListObjectVersions, pages of listPage) and deletes each version
+// and each delete marker by its versionId; then it aborts the unfinished
+// multipart uploads below prefix (ListMultipartUploads), whose parts S3
+// keeps until then (a crashed streaming export). It returns how many
+// versions, markers and uploads it removed; a missing bucket deletes
+// nothing. A listing still truncated after maxListPages pages is
+// ErrListTruncated with the count so far.
+func (s *S3Store) DeleteAll(ctx context.Context, bucket, prefix string) (int, error) {
+	if err := checkListPrefix(bucket, prefix); err != nil {
+		return 0, err
+	}
+	deleted, err := s.deleteVersions(ctx, bucket, prefix)
+	if err != nil {
+		return deleted, err
+	}
+	aborted, err := s.abortUploadsBelow(ctx, bucket, prefix)
+	return deleted + aborted, err
+}
+
+// deleteVersions deletes every version and delete marker below prefix.
+func (s *S3Store) deleteVersions(ctx context.Context, bucket, prefix string) (int, error) {
+	deleted := 0
+	query := url.Values{"versions": {""}, "prefix": {prefix}, "max-keys": {strconv.Itoa(listPage)}}
+	for range maxListPages {
+		type entry struct {
+			Key       string `xml:"Key"`
+			VersionID string `xml:"VersionId"`
+		}
+		var out struct {
+			Versions            []entry `xml:"Version"`
+			DeleteMarkers       []entry `xml:"DeleteMarker"`
+			IsTruncated         bool    `xml:"IsTruncated"`
+			NextKeyMarker       string  `xml:"NextKeyMarker"`
+			NextVersionIDMarker string  `xml:"NextVersionIdMarker"`
+		}
+		if err := s.bucketGet(ctx, bucket, query, &out); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				return deleted, nil
+			}
+			return deleted, err
+		}
+		for _, e := range append(out.Versions, out.DeleteMarkers...) {
+			if !strings.HasPrefix(e.Key, prefix) {
+				continue
+			}
+			version := e.VersionID
+			if version == "" {
+				version = "null"
+			}
+			resp, err := s.queryRequest(ctx, http.MethodDelete, bucket, e.Key, url.Values{"versionId": {version}}, nil, "")
+			if err != nil {
+				if errors.Is(err, ErrNotFound) {
+					continue
+				}
+				return deleted, fmt.Errorf("blob: delete %s version %s: %w", e.Key, version, err)
+			}
+			_ = resp.Body.Close()
+			deleted++
+		}
+		if !out.IsTruncated || out.NextKeyMarker == "" {
+			return deleted, nil
+		}
+		query.Set("key-marker", out.NextKeyMarker)
+		query.Set("version-id-marker", out.NextVersionIDMarker)
+	}
+	return deleted, fmt.Errorf("blob: delete %s/%s: %w", bucket, prefix, ErrListTruncated)
+}
+
+// abortUploadsBelow aborts every unfinished multipart upload below prefix
+// (ListMultipartUploads, pages with key and upload id markers).
+func (s *S3Store) abortUploadsBelow(ctx context.Context, bucket, prefix string) (int, error) {
+	aborted := 0
+	query := url.Values{"uploads": {""}, "prefix": {prefix}, "max-uploads": {strconv.Itoa(listPage)}}
+	for range maxListPages {
+		var out struct {
+			Uploads []struct {
+				Key      string `xml:"Key"`
+				UploadID string `xml:"UploadId"`
+			} `xml:"Upload"`
+			IsTruncated        bool   `xml:"IsTruncated"`
+			NextKeyMarker      string `xml:"NextKeyMarker"`
+			NextUploadIDMarker string `xml:"NextUploadIdMarker"`
+		}
+		if err := s.bucketGet(ctx, bucket, query, &out); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				return aborted, nil
+			}
+			return aborted, err
+		}
+		for _, u := range out.Uploads {
+			if !strings.HasPrefix(u.Key, prefix) || u.UploadID == "" {
+				continue
+			}
+			if err := s.abortMultipart(ctx, bucket, u.Key, u.UploadID); err != nil {
+				if errors.Is(err, ErrNotFound) {
+					continue
+				}
+				return aborted, fmt.Errorf("blob: abort upload of %s: %w", u.Key, err)
+			}
+			aborted++
+		}
+		if !out.IsTruncated || out.NextKeyMarker == "" {
+			return aborted, nil
+		}
+		query.Set("key-marker", out.NextKeyMarker)
+		query.Set("upload-id-marker", out.NextUploadIDMarker)
+	}
+	return aborted, fmt.Errorf("blob: abort the uploads below %s/%s: %w", bucket, prefix, ErrListTruncated)
+}
+
+// checkListPrefix refuses an empty bucket and a prefix that is not a
+// directory of keys (a non-empty prefix ending in /, without empty, . or
+// .. segments): DeleteAll never removes a whole bucket.
+func checkListPrefix(bucket, prefix string) error {
+	if strings.TrimSpace(bucket) == "" {
+		return fmt.Errorf("blob: bucket is required")
+	}
+	if !strings.HasSuffix(prefix, "/") || len(prefix) < 2 {
+		return fmt.Errorf("blob: prefix %q must name a directory of keys", prefix)
+	}
+	for _, segment := range strings.Split(strings.TrimSuffix(prefix, "/"), "/") {
+		if segment == "" || segment == "." || segment == ".." || strings.Contains(segment, "\\") {
+			return fmt.Errorf("blob: invalid prefix %q", prefix)
+		}
+	}
+	return nil
+}
+
+// List returns the keys of the files below prefix, sorted.
+func (s *FileStore) List(_ context.Context, bucket, prefix string) ([]string, error) {
+	if err := checkListPrefix(bucket, prefix); err != nil {
+		return nil, err
+	}
+	dir, err := s.objectPath(bucket, strings.TrimSuffix(prefix, "/"))
+	if err != nil {
+		return nil, err
+	}
+	root := filepath.Join(filepath.Clean(s.baseDir), filepath.FromSlash(bucket))
+	keys := []string{}
+	err = filepath.WalkDir(dir, func(path string, d os.DirEntry, werr error) error {
+		if werr != nil {
+			if errors.Is(werr, os.ErrNotExist) {
+				return filepath.SkipDir
+			}
+			return werr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, rerr := filepath.Rel(root, path)
+		if rerr != nil {
+			return rerr
+		}
+		keys = append(keys, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("blob: list %q: %w", prefix, err)
+	}
+	sort.Strings(keys)
+	return keys, nil
+}
+
+// DeleteAll removes the directory of prefix with every file below it and
+// returns the number of files (the file store keeps no versions).
+func (s *FileStore) DeleteAll(ctx context.Context, bucket, prefix string) (int, error) {
+	keys, err := s.List(ctx, bucket, prefix)
+	if err != nil {
+		return 0, err
+	}
+	dir, err := s.objectPath(bucket, strings.TrimSuffix(prefix, "/"))
+	if err != nil {
+		return 0, err
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		return 0, fmt.Errorf("blob: delete %q: %w", prefix, err)
+	}
+	return len(keys), nil
 }
 
 // AbortUploads implements UploadAborter: ListMultipartUploads with the key

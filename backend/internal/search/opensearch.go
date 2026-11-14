@@ -242,6 +242,50 @@ func (b *OpenSearchBackend) Delete(ctx context.Context, orgID, entityType, entit
 	}
 	return nil
 }
+
+// DeleteTenant removes every document of the organization from the index
+// (TLC-06, WP-1155): _delete_by_query on organization_id, refreshed and
+// proceeding over version conflicts; it returns the number deleted. A
+// missing index deletes nothing. Repeated it deletes nothing more.
+func (b *OpenSearchBackend) DeleteTenant(ctx context.Context, orgID string) (int64, error) {
+	if strings.TrimSpace(orgID) == "" {
+		return 0, fmt.Errorf("opensearch delete tenant: organization is required")
+	}
+	body, err := json.Marshal(map[string]any{"query": map[string]any{"term": map[string]any{"organization_id": orgID}}})
+	if err != nil {
+		return 0, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		fmt.Sprintf("%s/%s/_delete_by_query?conflicts=proceed&refresh=true", b.cfg.URL, b.cfg.Index), bytes.NewReader(body))
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	b.auth(req)
+	res, err := b.client.Do(req)
+	if err != nil {
+		return 0, err
+	}
+	defer res.Body.Close()
+	if res.StatusCode == http.StatusNotFound {
+		return 0, nil
+	}
+	if res.StatusCode >= 300 {
+		return 0, fmt.Errorf("opensearch delete tenant failed: %s", res.Status)
+	}
+	var out struct {
+		Deleted  int64 `json:"deleted"`
+		Failures []any `json:"failures"`
+	}
+	if err := json.NewDecoder(io.LimitReader(res.Body, b.cfg.MaxResponseBytes)).Decode(&out); err != nil {
+		return 0, fmt.Errorf("opensearch delete tenant: %w", err)
+	}
+	if len(out.Failures) > 0 {
+		return out.Deleted, fmt.Errorf("opensearch delete tenant: %d failures", len(out.Failures))
+	}
+	return out.Deleted, nil
+}
+
 func (b *OpenSearchBackend) ReindexTenant(ctx context.Context, orgID string) (ReindexResult, error) {
 	return ReindexResult{}, fmt.Errorf("opensearch reindex requires the PostgreSQL coordinator")
 }

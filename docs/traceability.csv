@@ -1932,3 +1932,5 @@ SEC-02;[P3];F;backend/internal/security/mapping_integration_test.go;WP-1122
 SEC-02;[P3];F;frontend/src/components/findings/ProductMappingPanel.test.tsx;WP-1122
 SEC-04;[P3], Rechte-Doku AD/Entra [A];F;backend/internal/compliance/report_job_integration_test.go;WP-1129
 API-06;[P2]/[P3]/[P4]/[A];F;backend/internal/graphqlbff/p3_test.go;WP-1136
+TLC-06;[P3];F;backend/internal/tenantapi/purge_external_test.go;WP-1155
+SEC-05;[B];F;backend/internal/tenantapi/purge_external_test.go;WP-1155

@@ -506,6 +506,13 @@ func (r *FieldResolver) snapshot(ctx context.Context, orgID string) (Snapshot, e
 	return snap, nil
 }
 
+// InvalidateOrganization drops the cached snapshot of the organization and
+// returns the error of the cache: the purge of a deleted organization
+// (WP-1155) keeps its cache step open until the entry is gone.
+func (r *FieldResolver) InvalidateOrganization(ctx context.Context, orgID string) error {
+	return r.cache.Delete(ctx, fieldGrantsKey(orgID))
+}
+
 // Invalidate drops the cached snapshot of the organization; with Redis the
 // change reaches every instance.
 func (r *FieldResolver) Invalidate(ctx context.Context, orgID string) {

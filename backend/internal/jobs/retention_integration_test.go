@@ -384,6 +384,10 @@ func (b *fakeBlobs) PresignedGetURL(context.Context, string, string, blob.Downlo
 	return "", nil
 }
 
+func (b *fakeBlobs) List(context.Context, string, string) ([]string, error) { return []string{}, nil }
+
+func (b *fakeBlobs) DeleteAll(context.Context, string, string) (int, error) { return 0, nil }
+
 func (b *fakeBlobs) Delete(_ context.Context, bucket, key string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()

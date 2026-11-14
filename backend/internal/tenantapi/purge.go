@@ -40,7 +40,8 @@ import (
 // {}), the state becomes purged and operator_audit receives
 // org.deletion.db_purged with rows and hashes per table, no personal
 // value. The vault (org_dek, pii_subject), the object storage, the search
-// index and the event stream follow in WP-1155 before that transition.
+// index, the event stream and the caches follow before that transition
+// (purge_external.go, WP-1155).
 // The run also reminds the org_admins 7 and 1 day before the end of the
 // grace period, once per threshold (notice_sent).
 
@@ -110,6 +111,9 @@ type Purger struct {
 	// afterTable runs after every table of the first pass (tests): an
 	// error ends the run like a crash.
 	afterTable func(ctx context.Context, table string) error
+	// external are the stores outside the tables (WP-1155); nil keeps the
+	// vault and touches nothing outside PostgreSQL.
+	external *ExternalPurge
 }
 
 // NewPurger builds the purge on the application pool with the table
@@ -241,6 +245,13 @@ func (p *Purger) PurgeOrganization(ctx context.Context, orgID string) ([]PurgeTa
 	results, err := p.purgeRows(ctx, orgID)
 	if err != nil {
 		return nil, err
+	}
+	// The vault, the objects, the search index, the event stream and the
+	// caches (WP-1155): purged only once all of them succeeded.
+	if p.external != nil {
+		if _, err := p.purgeExternal(ctx, orgID); err != nil {
+			return nil, err
+		}
 	}
 	if err := p.finish(ctx, orgID, results); err != nil {
 		return nil, err

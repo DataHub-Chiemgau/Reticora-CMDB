@@ -670,6 +670,11 @@ func ownsStorageKey(orgID, docID, key string) bool {
 	if blob.CheckOrgKey(orgID, key) == nil {
 		return strings.HasPrefix(key, blob.OrgKey(orgID, "documents", docID)+"/")
 	}
-	legacy := "documents/" + orgID + "/" + docID + "/"
+	legacy := LegacyPrefix(orgID) + docID + "/"
 	return strings.HasPrefix(key, legacy) && !strings.Contains(key, "..")
 }
+
+// LegacyPrefix is the prefix of the document versions of an organization
+// stored before migration 000066 (documents/<org>/<doc>/…); they are still
+// read, and the purge of a deleted organization removes them (WP-1155).
+func LegacyPrefix(orgID string) string { return "documents/" + orgID + "/" }

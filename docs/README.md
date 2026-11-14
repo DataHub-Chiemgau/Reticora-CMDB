@@ -878,6 +878,27 @@ status run sets them `paused`
 sets them `offline`, their next heartbeat `active`. System runs without a request (retention, rotation,
 notifications) go on; the purge removes their results.
 
+**Purge outside the tables (TLC-06, SEC-05, WP-1155):** after the rows of
+the organization (WP-1154) the system job `org.purge` runs these steps, each
+idempotent and counted, before it sets `purged`: (1) crypto-shredding of the
+vault, `pii.ShredOrganizationTx` through `org_purge_batch`, the data key in
+`org_dek` first and then every `pii_subject` (from the first commit no value
+of the organization can be decrypted); (2) every object below `org/<id>/`
+in the buckets `exports`, `reticora-documents` and `RETICORA_S3_BUCKET` with
+all versions and delete markers (`blob.Store.DeleteAll`, S3
+`ListObjectVersions` in pages of 1,000, each version deleted by its
+`versionId`); (3) the documents of the organization in OpenSearch
+(`_delete_by_query` on `organization_id`; without OpenSearch the PostgreSQL
+index went with the rows); (4) the messages under `events.<id>.>` of
+`RETICORA_EVENTS` (`Stream.Purge` with the subject filter; without NATS
+nothing); (5) the cache entries `entitlements:<id>` and the field permission
+snapshot. The counts of the finished steps are kept in
+`organization.settings.org_purge_external`: a failed step leaves the state
+`purging`, the next run repeats only the open steps. When all succeeded,
+`operator_audit` receives `org.deletion.external_purged` with the counts,
+then `org.deletion.db_purged` and the state `purged`. Backups expire with
+their retention; a customer vault (WP-893) is not touched.
+
 **Privacy / GDPR:** `GET /api/v1/users/{id}/data-export` returns the full set
 of personal data stored about a user (account record plus all contact records
 carrying the user's e-mail address) — the Art. 15 access request.

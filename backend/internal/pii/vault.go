@@ -425,3 +425,36 @@ func DeleteManyTx(ctx context.Context, tx pgx.Tx, orgID string, ids []string) (i
 	}
 	return tag.RowsAffected(), nil
 }
+
+// ShredResult counts what one call of ShredOrganizationTx removed.
+type ShredResult struct {
+	// Keys is the data key of the organization (org_dek, 0 or 1).
+	Keys int64
+	// Subjects are the deleted entries of pii_subject.
+	Subjects int64
+}
+
+// ShredOrganizationTx is the crypto-shredding of a deleted organization
+// (TLC-06, SEC-05, WP-1155) in tx, a tenant transaction of the purge of
+// the organization (deletion_state purging): first its data key (org_dek),
+// then up to limit entries of pii_subject, both through org_purge_batch
+// (migration 000356, which refuses unless the organization is purging).
+// With the commit of the first call no value of the organization can be
+// decrypted any more; the caller repeats in transactions of their own until
+// a call removes nothing. The values are never read.
+func ShredOrganizationTx(ctx context.Context, tx pgx.Tx, orgID string, limit int) (ShredResult, error) {
+	var res ShredResult
+	if !isUUID(orgID) {
+		return res, ErrNotFound
+	}
+	if limit <= 0 {
+		limit = 5000
+	}
+	if err := tx.QueryRow(ctx, `SELECT org_purge_batch($1, 'public.org_dek'::regclass, 1)`, orgID).Scan(&res.Keys); err != nil {
+		return res, fmt.Errorf("shred the data key: %w", err)
+	}
+	if err := tx.QueryRow(ctx, `SELECT org_purge_batch($1, 'public.pii_subject'::regclass, $2)`, orgID, limit).Scan(&res.Subjects); err != nil {
+		return res, fmt.Errorf("shred the pii subjects: %w", err)
+	}
+	return res, nil
+}

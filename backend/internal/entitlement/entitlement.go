@@ -1074,6 +1074,12 @@ func (s *Service) load(ctx context.Context, orgID string) ([]Entitlement, error)
 	return items, nil
 }
 
+// InvalidateOrganization drops the cached entitlements of a purged
+// organization (entitlements:<org>, TLC-06, WP-1155).
+func (s *Service) InvalidateOrganization(ctx context.Context, orgID string) error {
+	return s.cache.Delete(ctx, cacheKey(orgID))
+}
+
 // invalidate drops the cached entitlements of the organization; with Redis
 // the change reaches every instance.
 func (s *Service) invalidate(ctx context.Context, orgID string) {

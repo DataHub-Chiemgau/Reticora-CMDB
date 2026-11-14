@@ -40,14 +40,20 @@ var exportExtensions = map[string]string{
 	"json":  "json",
 }
 
-// ObjectKey returns the blob key the rendered job is stored under.
+// ObjectKey returns the blob key the rendered job is stored under (below
+// JobPrefix of its organization).
 func ObjectKey(job *Job) string {
 	ext := exportExtensions[job.Format]
 	if ext == "" {
 		ext = "bin"
 	}
-	return fmt.Sprintf("%s/%s.%s", job.OrganizationID, job.ID, ext)
+	return fmt.Sprintf("%s%s.%s", JobPrefix(job.OrganizationID), job.ID, ext)
 }
+
+// JobPrefix is the prefix of the keys of the CI exports of an organization
+// in ExportBucket (file, manifest, DATEV error report): outside org/<id>/,
+// so the purge of a deleted organization removes it separately (WP-1155).
+func JobPrefix(orgID string) string { return orgID + "/" }
 
 // JobWorker processes pending export jobs: it renders the CI set into blob
 // storage and marks the job completed with the object key and expiry. All
