@@ -575,6 +575,11 @@ const (
 	// the instance still queues runs (jobs.Queue.Declare), another instance
 	// executes them.
 	WorkerWorkflow = "workflow"
+	// WorkerIPAMScanApply runs as the system job ipam.scan.apply of the
+	// scheduler: every minute the probe states of the subnet scan become
+	// address states, last_seen_at and new hosts (IPM-11, WP-1063; module
+	// ipam).
+	WorkerIPAMScanApply = "ipam_scan_apply"
 )
 
 // WorkerNames lists every registered worker.
@@ -596,6 +601,7 @@ var WorkerNames = []string{
 	WorkerProbeAssign,
 	WorkerProbeIngest,
 	WorkerWorkflow,
+	WorkerIPAMScanApply,
 }
 
 // OfflineDetectorAlias is the former switch of the offline detector (WP-157).

@@ -30,6 +30,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/importer"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
@@ -729,6 +730,17 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 					probe.LicensedBy(d.entitlements)).Schedule())
 			}
 		}
+		// The results of the subnet scan (IPM-11, WP-1063): every minute per
+		// organization with a scanned subnet and the features ipam and
+		// monitoring the probe states become address states, last_seen_at
+		// and new hosts, under the lock ipam_scan_apply:<org>; the worker
+		// ipam_scan_apply under RETICORA_WORKER_IPAM_SCAN_APPLY_ENABLED,
+		// with the module ipam and the probe store on PostgreSQL.
+		if d.modules.Enabled("ipam") && d.cfg.WorkerEnabled(config.WorkerIPAMScanApply) {
+			if probes, ok := d.repos.Probes.(*probe.PGRepository); ok {
+				systemJobs = append(systemJobs, workerJob(config.WorkerIPAMScanApply, scanApplier(pool, probes, d.entitlements).Schedule()))
+			}
+		}
 		// Credential age: daily each stored secret beyond its max_age_days
 		// once per secret_version as credential.rotation_due (CRD-05,
 		// WP-897).
@@ -945,6 +957,25 @@ func workerJob(worker string, s jobs.Schedule) jobs.Schedule {
 		return err
 	}
 	return s
+}
+
+// scanApplier is the system job ipam.scan.apply (WP-1063) on pool: its own
+// IPAM repository with the outbox and the managed scan probes of the probe
+// store; an organization needs the features ipam and monitoring.
+func scanApplier(pool *pgxpool.Pool, probes *probe.PGRepository, ents *entitlement.Service) *ipam.ScanApplier {
+	repo := ipam.NewPGRepository(pool).WithEvents(events.NewOutbox())
+	repo.SetScanProbes(probe.ScanProbes{Repo: probes})
+	applier := ipam.NewScanApplier(pool, repo)
+	licensed := probe.LicensedBy(ents)
+	applier.Licensed = func(ctx context.Context, orgID string) bool {
+		for _, feature := range []string{entitlement.FeatureIPAM, entitlement.FeatureMonitoring} {
+			if ok, err := licensed(ctx, orgID, feature); err != nil || !ok {
+				return false
+			}
+		}
+		return true
+	}
+	return applier
 }
 
 // dekRotator adapts the credential store to the rotation runs.

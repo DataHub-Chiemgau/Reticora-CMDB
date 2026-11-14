@@ -22,6 +22,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
@@ -36,7 +37,8 @@ import (
 // scheduledWorkers are the registered workers that run as a system job of
 // the scheduler (systemJobs): name and job kind.
 var scheduledWorkers = map[string]string{config.WorkerOfflineDetector: lifecycle.OfflineDetectorKind,
-	config.WorkerComputedRefresh: ci.RefreshJobKind, config.WorkerProbeAssign: probe.AssignKind}
+	config.WorkerComputedRefresh: ci.RefreshJobKind, config.WorkerProbeAssign: probe.AssignKind,
+	config.WorkerIPAMScanApply: ipam.ScanApplyKind}
 
 // monitoringWorker reports whether name is a worker of the module
 // monitoring: those run in the deployment profile monitoring (WP-869), the
@@ -350,8 +352,9 @@ func (env *workerTestEnv) systemJobs(t *testing.T) []jobs.Schedule {
 	t.Helper()
 	d := systemJobTestDeps(t, env.cfg, true)
 	d.pool = env.pool
-	// The module monitoring brings the system job of probe_assign.
-	modules, err := server.ParseModules(server.ModuleMonitoring)
+	// The module monitoring brings the system job of probe_assign, the
+	// module ipam that of ipam_scan_apply (WP-1063).
+	modules, err := server.ParseModules(server.ModuleMonitoring + ",ipam")
 	if err != nil {
 		t.Fatal(err)
 	}

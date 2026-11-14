@@ -37,6 +37,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
@@ -567,6 +568,11 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 			t.Errorf("JOB-02 probe assignment (PRB-03) with the module monitoring (database %v): registered %v",
 				withDB, kinds[probe.AssignKind])
 		}
+		// The results of the subnet scan (IPM-11, WP-1063) need the module
+		// ipam: not with monitoring alone.
+		if kinds[ipam.ScanApplyKind] {
+			t.Errorf("JOB-02 %s is registered without the module ipam", ipam.ScanApplyKind)
+		}
 		// The probe suspension (PKG-09, WP-942): every minute with the
 		// module monitoring and the database.
 		if kinds[probe.SuspendKind] != withDB {
@@ -599,6 +605,37 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 	if registered[probe.AssignKind] {
 		t.Errorf("without the module monitoring %s is registered", probe.AssignKind)
 	}
+	// The results of the subnet scan (IPM-11, WP-1063): ipam.scan.apply
+	// every minute with the module ipam and the database, the worker
+	// ipam_scan_apply; switched off not registered.
+	if registered[ipam.ScanApplyKind] {
+		t.Errorf("without the module ipam %s is registered", ipam.ScanApplyKind)
+	}
+	ipamModules, err := server.ParseModules("ipam")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, withDB := range []bool{true, false} {
+		deps := systemJobTestDeps(t, cfg, withDB)
+		deps.modules = ipamModules
+		if kinds := registeredSystemJobs(t, deps); kinds[ipam.ScanApplyKind] != withDB {
+			t.Errorf("JOB-02 subnet scan results (IPM-11) with the module ipam (database %v): registered %v",
+				withDB, kinds[ipam.ScanApplyKind])
+		}
+		for _, job := range systemJobs(deps) {
+			if job.Kind == ipam.ScanApplyKind && (job.Spec != "@every 1m" || job.MaxCatchUp != 1) {
+				t.Errorf("%s: spec %q, max catch-up %d; want @every 1m and 1", job.Kind, job.Spec, job.MaxCatchUp)
+			}
+		}
+	}
+	t.Run("ipam_scan_apply off", func(t *testing.T) {
+		t.Setenv(config.WorkerEnvKey(config.WorkerIPAMScanApply), "false")
+		deps := systemJobTestDeps(t, config.Load(), true)
+		deps.modules = ipamModules
+		if registeredSystemJobs(t, deps)[ipam.ScanApplyKind] {
+			t.Errorf("%s is registered with its worker switched off", ipam.ScanApplyKind)
+		}
+	})
 	// The nightly compliance evaluation (SEC-03, WP-1126): with the module
 	// compliance and the database, daily 02:30.
 	if registered[compliance.NightlyKind] || registered[compliance.SnapshotKind] {

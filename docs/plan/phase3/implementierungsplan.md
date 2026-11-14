@@ -13758,6 +13758,10 @@ IPM-11;[P3];G3;backend/internal/ipam/scan_integration_test.go;WP-1062
 - docs/ops/workers.md
 - docs/traceability.csv
 
+*Nachtrag 2026-11-14 (Dateiliste):* AK8 verlangt die Laufmetriken des Systemjobs über `TestEveryWorkerExportsRunAndErrorMetrics`; dieser Test erfasst nur registrierte Worker. Der Job läuft deshalb als Worker `ipam_scan_apply` (Schalter `RETICORA_WORKER_IPAM_SCAN_APPLY_ENABLED`, OPS-02) zusätzlich zu `modules.Enabled("ipam")`. Dafür ändern sich außerdem `backend/internal/config/config.go`, `backend/cmd/server/workers_metrics_test.go`, `deploy/docker-compose/docker-compose.yml`, `deploy/k8s/base/deployment.yaml`, `deploy/k8s/base/deployment-monitoring.yaml` und `docs/README.md`; `backend/internal/ipam/duplicate.go` registriert die Metrik `reticora_ipam_scan_updates_total` in `RegisterMetrics`. `backend/internal/ipam/scan_handler.go` bleibt unverändert: `last_applied_at`, `target_states` und `new_hosts` liefert `readScan` in `scan.go`, der Handler gibt sie unverändert aus.
+
+*Nachtrag 2026-11-14 (AK2, AK6):* Die Offline-Frist zählt nach einer Unknown-Phase (Adresse `unknown`) ab `since` des Down-Zustands, sonst wie in AK2 ab `coalesce(last_seen_at, since)`. Der Zielabgleich prüft Zustände statt Zeitstempeln (Adresse ohne Ziel, Ziel ohne Adresse außerhalb von `discover_new_hosts`); der Verlauf ergänzt mit 10 Minuten Spielraum nur Lösch- und Verschiebe-Einträge in Subnetzen mit `discover_new_hosts`. Jedes Subnetz wird unter einem eigenen Savepoint abgeglichen; ein Fehler wird geloggt, in der neuen Spalte `subnet.scan_sync_failed_at` vermerkt und reiht das Subnetz ans Ende. `scan_applied_at` wird vor den Adressen geschrieben (Sperrreihenfolge Subnetz → Adresse wie `PATCH /subnets/{id}`).
+
 **Migration/RLS:** Migration `<nächste Nr.>_ipam_scan_apply`:
 
 - Spalte `subnet.scan_applied_at timestamptz NULL`.

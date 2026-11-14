@@ -160,6 +160,8 @@ spec:
             # WP-1114); module workflows.
             - name: RETICORA_WORKER_WORKFLOW_ENABLED
               value: "true"
+            - name: RETICORA_WORKER_IPAM_SCAN_APPLY_ENABLED
+              value: "true"
           volumeMounts:
             - name: session-key
               mountPath: /etc/reticora/session

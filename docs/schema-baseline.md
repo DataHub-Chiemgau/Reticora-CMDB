@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000363_cpe_mapping
+Stand: Migration 000364_ipam_scan_apply
 
 ## Prüfung
 
@@ -853,6 +853,16 @@ Trigger auf `subnet` zieht sie nach, ein AFTER-DELETE-Trigger löscht die Probe
 einer Zeile mit `owned`. ENABLE und FORCE RLS mit den Policies nach Konvention 5
 und `reticora_truncate_guard`. `subnet_id_organization_key` besteht seit 000287
 und wird nur angelegt, wenn er fehlt.
+
+Migration `ipam_scan_apply` (WP-1063, IPM-11, vorläufige Nummer 000364) gibt
+`subnet` die Spalten `scan_applied_at` (letzter Lauf des Systemjobs
+`ipam.scan.apply`) und `scan_sync_failed_at` (letzter gescheiterter
+Zielabgleich des Jobs; das Subnetz rückt ans Ende der Reihenfolge).
+`trg_subnet_updated_at` erhält eine WHEN-Bedingung: eine Änderung nur von
+`scan_applied_at` oder `scan_sync_failed_at` lässt `updated_at` stehen.
+`ipam_change_record()` (000302) wird ersetzt und protokolliert zusätzlich
+`scan_applied_at`, `scan_synced_at` und `scan_sync_failed_at` nicht als Feldänderung (`last_seen_at`
+schon seit 000302 nicht). Keine neue Tabelle, RLS unverändert.
 
 Migration `bgp_peering` (WP-1068, IPM-17, vorläufige Nummer 000337) legt
 `bgp_peering` als Soll-Inventar an: Gerät, VRF, lokale ASN, entfernte

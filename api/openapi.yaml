@@ -27832,8 +27832,10 @@ paths:
         IPM-11 (WP-1062): the scan configuration of the subnet, the members
         of its collector group (read only) and the target numbers (targets,
         owned: managed probes of the scan, reused: probes of the
-        organization the scan uses). Requires ipam:read; the features ipam
-        and monitoring gate the path. Without PostgreSQL 501.
+        organization the scan uses). WP-1063: the last application of the
+        probe states (last_applied_at), the targets per address state and
+        the hosts the scan created (new_hosts). Requires ipam:read; the
+        features ipam and monitoring gate the path. Without PostgreSQL 501.
       responses:
         '200':
           description: Scan settings
@@ -33129,7 +33131,7 @@ components:
         member_status: { type: string, enum: [healthy, degraded, down] }
     SubnetScan:
       type: object
-      required: [subnet_id, scan_enabled, scan_interval_s, discover_new_hosts, offline_after_s, scan_synced_at, members, targets, owned, reused]
+      required: [subnet_id, scan_enabled, scan_interval_s, discover_new_hosts, offline_after_s, scan_synced_at, members, targets, owned, reused, last_applied_at, target_states, new_hosts]
       properties:
         subnet_id: { type: string, format: uuid }
         scan_enabled: { type: boolean }
@@ -33144,6 +33146,29 @@ components:
         targets: { type: integer }
         owned: { type: integer }
         reused: { type: integer }
+        last_applied_at:
+          type: [string, 'null']
+          format: date-time
+          description: >-
+            The last run of the system job ipam.scan.apply that applied the
+            probe states to the addresses of the subnet (IPM-11, WP-1063);
+            null before the first one.
+        target_states:
+          $ref: '#/components/schemas/SubnetScanTargetStates'
+        new_hosts:
+          type: integer
+          description: Addresses of the subnet the scan created (origin scan, type discovered).
+    SubnetScanTargetStates:
+      type: object
+      description: >-
+        The targets of the scan per state of their address (IPM-04); none is
+        a target without an address or an address without a state.
+      required: [active, offline, unknown, none]
+      properties:
+        active: { type: integer }
+        offline: { type: integer }
+        unknown: { type: integer }
+        none: { type: integer }
     SubnetScanUpdate:
       type: object
       additionalProperties: false

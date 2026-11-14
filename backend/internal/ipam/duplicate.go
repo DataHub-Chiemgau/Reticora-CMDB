@@ -112,9 +112,10 @@ var DuplicateIPReviews = prometheus.NewCounter(prometheus.CounterOpts{
 	Help:      "duplicate_ip review items opened for an address at interfaces of several CIs, or next to a static or dhcp address, in one VRF (NET-06).",
 })
 
-// RegisterMetrics registers the IPAM metrics on reg.
+// RegisterMetrics registers the IPAM metrics on reg: the duplicate check
+// and the results of the subnet scan (ScanUpdates, WP-1063).
 func RegisterMetrics(reg prometheus.Registerer) {
-	reg.MustRegister(DuplicateIPReviews)
+	reg.MustRegister(DuplicateIPReviews, ScanUpdates)
 }
 
 // duplicatesQuery finds the duplicate addresses among the keys k (a

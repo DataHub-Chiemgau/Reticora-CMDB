@@ -11861,7 +11861,7 @@ export interface paths {
     };
     /**
      * Get the scan settings of a subnet
-     * @description IPM-11 (WP-1062): the scan configuration of the subnet, the members of its collector group (read only) and the target numbers (targets, owned: managed probes of the scan, reused: probes of the organization the scan uses). Requires ipam:read; the features ipam and monitoring gate the path. Without PostgreSQL 501.
+     * @description IPM-11 (WP-1062): the scan configuration of the subnet, the members of its collector group (read only) and the target numbers (targets, owned: managed probes of the scan, reused: probes of the organization the scan uses). WP-1063: the last application of the probe states (last_applied_at), the targets per address state and the hosts the scan created (new_hosts). Requires ipam:read; the features ipam and monitoring gate the path. Without PostgreSQL 501.
      */
     get: operations['getSubnetScan'];
     put?: never;
@@ -14956,6 +14956,21 @@ export interface components {
       targets: number;
       owned: number;
       reused: number;
+      /**
+       * Format: date-time
+       * @description The last run of the system job ipam.scan.apply that applied the probe states to the addresses of the subnet (IPM-11, WP-1063); null before the first one.
+       */
+      last_applied_at: string | null;
+      target_states: components['schemas']['SubnetScanTargetStates'];
+      /** @description Addresses of the subnet the scan created (origin scan, type discovered). */
+      new_hosts: number;
+    };
+    /** @description The targets of the scan per state of their address (IPM-04); none is a target without an address or an address without a state. */
+    SubnetScanTargetStates: {
+      active: number;
+      offline: number;
+      unknown: number;
+      none: number;
     };
     SubnetScanUpdate: {
       scan_enabled?: boolean;

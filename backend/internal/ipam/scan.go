@@ -28,7 +28,8 @@ import (
 // collector group and client (e.g. an auto probe of WP-949) is reused
 // (owned false) instead of a second one. subnet_scan_target holds the targets;
 // switching the scan off deletes them and with them the probes of the scan.
-// The results (address state, last_seen_at, new hosts) are WP-1063.
+// The results (address state, last_seen_at, new hosts) apply the system
+// job ipam.scan.apply (scan_results.go, WP-1063).
 
 // MaxDiscoverPrefixIPv4 is the widest IPv4 subnet discover_new_hosts takes
 // (/22: 1,022 hosts).
@@ -81,6 +82,23 @@ type SubnetScan struct {
 	Targets          int          `json:"targets"`
 	Owned            int          `json:"owned"`
 	Reused           int          `json:"reused"`
+	// LastAppliedAt is the last run of ipam.scan.apply that applied the
+	// probe states (subnet.scan_applied_at, WP-1063 AK7).
+	LastAppliedAt *time.Time `json:"last_applied_at"`
+	// TargetStates counts the targets per state of their address; none is
+	// a target without an address or an address without a state.
+	TargetStates ScanTargetStates `json:"target_states"`
+	// NewHosts counts the addresses the scan created (origin scan, type
+	// discovered).
+	NewHosts int `json:"new_hosts"`
+}
+
+// ScanTargetStates are the targets of a scan per address state (AK7).
+type ScanTargetStates struct {
+	Active  int `json:"active"`
+	Offline int `json:"offline"`
+	Unknown int `json:"unknown"`
+	None    int `json:"none"`
 }
 
 // ScanUpdate are the fields of PATCH /subnets/{id}/scan; a nil field
@@ -176,10 +194,10 @@ func readScan(ctx context.Context, tx pgx.Tx, orgID, subnetID, groupID string, l
 	var row scanRow
 	var group, client *string
 	var cidr string
-	var members []byte
+	var members, states []byte
 	err := tx.QueryRow(ctx, `WITH cur AS (
-			SELECT s.id, s.client_id, s.cidr, s.scan_enabled, s.collector_group_id, s.scan_interval_s, s.discover_new_hosts,
-			       s.offline_after_s, s.scan_synced_at
+			SELECT s.id, s.client_id, s.cidr, s.vrf_id, s.scan_enabled, s.collector_group_id, s.scan_interval_s, s.discover_new_hosts,
+			       s.offline_after_s, s.scan_synced_at, s.scan_applied_at
 			  FROM subnet s WHERE s.organization_id = $1 AND s.id = $2`+forUpdate+`
 		), grp AS (
 			SELECT g.id, g.client_id FROM collector_group g, cur
@@ -192,10 +210,23 @@ func readScan(ctx context.Context, tx pgx.Tx, orgID, subnetID, groupID string, l
 		                 'member_status', m.member_status) ORDER BY m.priority, m.collector_id)
 		                   FROM collector_group_member m, grp WHERE m.organization_id = $1 AND m.group_id = grp.id), '[]'),
 		       (SELECT count(*) FROM subnet_scan_target t WHERE t.organization_id = $1 AND t.subnet_id = cur.id),
-		       (SELECT count(*) FROM subnet_scan_target t WHERE t.organization_id = $1 AND t.subnet_id = cur.id AND t.owned)
+		       (SELECT count(*) FROM subnet_scan_target t WHERE t.organization_id = $1 AND t.subnet_id = cur.id AND t.owned),
+		       cur.scan_applied_at,
+		       COALESCE((SELECT json_build_object(
+		                   'active', count(*) FILTER (WHERE x.state = 'active'),
+		                   'offline', count(*) FILTER (WHERE x.state = 'offline'),
+		                   'unknown', count(*) FILTER (WHERE x.state = 'unknown'),
+		                   'none', count(*) FILTER (WHERE x.state IS NULL))
+		                   FROM subnet_scan_target t
+		                   LEFT JOIN LATERAL (SELECT a.state FROM ip_address a
+		                                       WHERE a.organization_id = $1 AND a.vrf_id = cur.vrf_id AND a.address_host = host(t.address)
+		                                       ORDER BY (a.subnet_id = cur.id) DESC NULLS LAST LIMIT 1) x ON true
+		                  WHERE t.organization_id = $1 AND t.subnet_id = cur.id), '{}'),
+		       (SELECT count(*) FROM ip_address a
+		         WHERE a.organization_id = $1 AND a.subnet_id = cur.id AND a.origin = 'scan' AND a.type = 'discovered')
 		  FROM cur`, orgID, subnetID, nilIfEmpty(groupID)).Scan(&row.SubnetID, &client, &cidr, &row.ScanEnabled, &group,
 		&row.ScanIntervalS, &row.DiscoverNewHosts, &row.OfflineAfterS, &row.ScanSyncedAt, &row.groupFound, &row.groupClient,
-		&members, &row.Targets, &row.Owned)
+		&members, &row.Targets, &row.Owned, &row.LastAppliedAt, &states, &row.NewHosts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -213,6 +244,15 @@ func readScan(ctx context.Context, tx pgx.Tx, orgID, subnetID, groupID string, l
 	}
 	if err := json.Unmarshal(members, &row.Members); err != nil {
 		return nil, fmt.Errorf("read subnet scan members: %w", err)
+	}
+	if err := json.Unmarshal(states, &row.TargetStates); err != nil {
+		return nil, fmt.Errorf("read subnet scan states: %w", err)
+	}
+	for _, at := range []**time.Time{&row.LastAppliedAt, &row.ScanSyncedAt} {
+		if *at != nil {
+			utc := (*at).UTC()
+			*at = &utc
+		}
 	}
 	row.Reused = row.Targets - row.Owned
 	return &row, nil
@@ -296,16 +336,16 @@ func (r *PGRepository) UpdateSubnetScan(ctx context.Context, orgID, subnetID str
 			return scanWriteError(err)
 		}
 		row.SubnetScan = next
-		counts, err := syncScanTargets(ctx, tx, probes, orgID, row)
+		if _, err = syncScanTargets(ctx, tx, probes, orgID, row); err != nil {
+			return err
+		}
+		// The answer is the stored state: the targets, their address
+		// states and scan_synced_at as written (WP-1063 AK7).
+		stored, err := readScan(ctx, tx, orgID, subnetID, "", false)
 		if err != nil {
 			return err
 		}
-		next.Targets, next.Owned, next.Reused = counts.targets, counts.owned, counts.targets-counts.owned
-		if next.ScanEnabled {
-			now := time.Now().UTC()
-			next.ScanSyncedAt = &now
-		}
-		out = &next
+		out = &stored.SubnetScan
 		return nil
 	})
 	if err != nil {
