@@ -246,6 +246,8 @@ var typeMetrics = map[string][]string{
 		"probe_isis_truncated", "probe_isis_adjacencies_unseen"},
 	"tr069": {"probe_tr069_devices", "probe_tr069_devices_stale", "probe_tr069_last_inform_age_seconds",
 		"probe_tr069_parameter", "probe_tr069_truncated"},
+	"rpki_rtr": {"probe_rpki_rtr_up", "probe_rpki_serial", "probe_rpki_vrps", "probe_rpki_data_age_seconds",
+		"probe_rpki_protocol_version"},
 }
 
 // MetricNames returns the value names the type declares (none for an

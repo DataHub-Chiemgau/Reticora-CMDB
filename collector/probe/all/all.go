@@ -14,4 +14,7 @@ import (
 	_ "github.com/DataHub-Chiemgau/Reticora-CMDB/collector/probe/routing"
 	// tr069: read-only ACS adapter, GenieACS NBI (WP-1018).
 	_ "github.com/DataHub-Chiemgau/Reticora-CMDB/collector/probe/tr069"
+	// rpki_rtr: RTR client with the shared VRP cache per validator
+	// (WP-1020).
+	_ "github.com/DataHub-Chiemgau/Reticora-CMDB/collector/probe/rpki"
 )

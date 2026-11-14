@@ -61,6 +61,10 @@ const (
 	// ReasonLOS: loss of signal, the Rx level of a transceiver below
 	// -40 dBm (optical, WP-1004, PRT-09).
 	ReasonLOS = "los"
+	// ReasonVRPLimit: an RPKI validator delivered more than 2,000,000
+	// VRPs (rpki_rtr, WP-1020, PRT-17); the incomplete state is discarded,
+	// the previous table stays. An error (→ unknown).
+	ReasonVRPLimit = "vrp_limit"
 
 	// WarnThresholdExceeded: the check succeeded but a threshold (RTT,
 	// loss, value) was violated.
@@ -87,6 +91,9 @@ const (
 	// WarnNoDevices: the selector of a tr069 probe found no device in the
 	// ACS (WP-1018); ok → degraded.
 	WarnNoDevices = "no_devices"
+	// WarnRPKIStale: the VRP data of an RPKI validator is older than its
+	// Expire interval (rpki_rtr, WP-1020); ok → degraded.
+	WarnRPKIStale = "rpki_stale"
 )
 
 // WarnCodes are the codes of a successful check with a warning; a result
@@ -99,6 +106,7 @@ var WarnCodes = map[string]bool{
 	WarnCheckFailed:       true,
 	WarnInformStale:       true,
 	WarnNoDevices:         true,
+	WarnRPKIStale:         true,
 }
 
 // reasons lists every valid reason code apart from the warn codes.
@@ -122,6 +130,7 @@ var reasons = map[string]bool{
 	ReasonRedirectLimit:        true,
 	ReasonSessionDown:          true,
 	ReasonLOS:                  true,
+	ReasonVRPLimit:             true,
 }
 
 // ValidReason reports whether code is a known reason or warn code.

@@ -423,6 +423,49 @@ Parameter als `probe_tr069_parameter{device_id,parameter,serial}`.
 
 TR-369/USP ist nicht Teil dieses Typs (WP-1019, bedingt nach A-63).
 
+## RPKI-RTR (`rpki_rtr`)
+
+Standard nach PRT-17 und E-154: Intervall 300 s (60 s–24 h), Timeout 30 s
+(1–120 s), Parallelität 1 je Ziel, 1 Prüfung/s je Collector, höchstens
+2.000.000 VRPs je Validator, keine Zugangsdaten. Parameter: `port`
+(Standard 323; Validatoren verwenden auch 3323 oder 8282); Ziel ist die
+Adresse des Validators. RTR über SSH oder TLS ist nicht Teil des Typs.
+
+Der Collector implementiert RTR selbst (E-194, E-195, ohne neue
+Bibliothek): Version 1 nach RFC 8210 mit Serial Notify, Serial Query,
+Reset Query, Cache Response, IPv4/IPv6 Prefix, End of Data (Refresh,
+Retry, Expire), Cache Reset und Error Report; Router-Key-PDUs werden
+überlesen. Antwortet der Cache mit Error Report „Unsupported Protocol
+Version“ in Version 0, baut der Collector die Session mit Version 0
+(RFC 6810) neu auf und nimmt die Standardintervalle 3600/600/7200 s.
+Intervalle aus End of Data werden auf die Bereiche aus RFC 8210 Abschnitt 6
+begrenzt (Refresh 1–86400 s, Retry 1–7200 s, Expire 600–172800 s);
+zwischen zwei Verbindungsversuchen liegt mindestens eine Sekunde. Eine
+PDU über 64 KiB oder mit ungültiger Länge beendet die Session mit Error
+Report „Corrupt Data“.
+
+Je Validator (`host:port`) und Collector gibt es höchstens eine Session,
+die alle `rpki_rtr`- und `rpki_roa`-Probes dieses Validators teilen. Die
+erste Prüfung baut sie auf und wartet auf das erste End of Data; danach
+folgt eine Serial Query im Refresh-Intervall und nach jedem Serial Notify,
+nach Cache Reset oder einer neuen Session-ID eine Reset Query mit
+vollständigem Neuaufbau. Verwendet zwei Refresh-Intervalle lang keine
+Probe den Validator, endet die Session, auch wenn er nicht erreichbar ist
+(dann im Retry-Takt geprüft). Die VRP-Tabelle liegt je
+Adressfamilie sortiert im Speicher (12 bzw. 24 Byte je VRP); Ankündigungen
+und Rücknahmen gelten erst mit End of Data. Mehr als 2.000.000 VRPs (nach
+Anwendung des Deltas erneut geprüft; auch die gepufferten PDUs eines
+Deltas sind begrenzt) verwerfen den unvollständigen Stand, der alte bleibt
+(`error`/`vrp_limit`).
+
+Ergebnis: Validator nicht erreichbar → `fail`/`refused`, `timeout` bzw.
+`unreachable`; Daten älter als das Expire-Intervall → `ok` mit
+`rpki_stale` (`degraded`); Error Report des Caches → `error`/`unsupported`
+mit den Labels `error_code` (Zahl) und `error` (z. B.
+`no_data_available`). Werte: `probe_rpki_rtr_up`, `probe_rpki_serial`,
+`probe_rpki_vrps{af=ipv4|ipv6}`, `probe_rpki_data_age_seconds` (seit dem
+letzten End of Data) und `probe_rpki_protocol_version`.
+
 ## Typtabelle
 
 Zeiten in Sekunden, Rate in Prüfungen je Sekunde. Die Werte sind Startwerte
@@ -452,7 +495,7 @@ nach E-154; WP-1023 misst die Raten nach.
 | `gnmi` | planned | 60 / 10 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 50 | 4 | 4194304 | 10000 | gnmi | – |
 | `tr069` | available | 900 / 300 / 86400 | 30 / 1 / 60 | 3 / 1 | 1 | 4 | 5 | 1 | 1048576 | 10000 | acs | – |
 | `usp` | planned | 900 / 300 / 86400 | 30 / 1 / 60 | 3 / 1 | 1 | 4 | 5 | 1 | 1048576 | 256 | acs | – |
-| `rpki_rtr` | planned | 300 / 60 / 86400 | 30 / 1 / 120 | 3 / 1 | 1 | 4 | 1 | 1 | 67108864 | 2000000 | – | – |
+| `rpki_rtr` | available | 300 / 60 / 86400 | 30 / 1 / 120 | 3 / 1 | 1 | 4 | 1 | 1 | 67108864 | 2000000 | – | – |
 | `rpki_roa` | planned | 300 / 60 / 86400 | 1 / 1 / 5 | 3 / 1 | 1 | 64 | 100 | 100 | 65536 | 100 | – | – |
 <!-- probe-types:end -->
 

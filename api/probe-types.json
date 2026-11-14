@@ -1450,7 +1450,7 @@
       }
     },
     "rpki_rtr": {
-      "status": "planned",
+      "status": "available",
       "min_interval_s": 60,
       "default_interval_s": 300,
       "max_interval_s": 86400,
@@ -1475,14 +1475,8 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 65535,
-            "default": 323
-          },
-          "stale_warn_s": {
-            "type": "integer",
-            "minimum": 60,
-            "maximum": 86400,
-            "default": 3600,
-            "description": "Cache age for degraded."
+            "default": 323,
+            "description": "RTR port of the validator (RFC 6810: 323; validators also use 3323 or 8282)."
           }
         }
       }
