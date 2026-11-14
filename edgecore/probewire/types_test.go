@@ -21,7 +21,7 @@ var registerKeys = []string{
 
 // availableKeys are the types whose work package has set them available.
 var availableKeys = []string{
-	"icmp", "tcp", "dns", "http", "snmp_status", "bfd", "optical", "redfish", "ospf", "isis", "tr069", "rpki_rtr",
+	"icmp", "tcp", "dns", "http", "snmp_status", "snmp_if", "bfd", "optical", "redfish", "ospf", "isis", "tr069", "rpki_rtr",
 }
 
 func repoFile(t *testing.T, rel string) []byte {
@@ -240,6 +240,52 @@ func TestValidateLimits(t *testing.T) {
 	}
 	if errs := Validate(&ProbeSpec{Type: "icmp_ping"}); !hasField(errs, "type") {
 		t.Fatalf("unknown type: %v", errs)
+	}
+	typeLimitCases(t)
+}
+
+// typeLimitCases are the type-specific limits of TestValidateLimits: the
+// rows and thresholds of snmp_if (WP-996 AK2, AK6).
+func typeLimitCases(t *testing.T) {
+	t.Helper()
+	for name, c := range map[string]struct {
+		typ, params, thresholds, field string
+		intervalMS, timeoutMS          int64
+	}{
+		"snmp_if max_interfaces 1025": {typ: "snmp_if", params: `{"max_interfaces":1025}`, field: "params.max_interfaces"},
+		"snmp_if interval 59 s":       {typ: "snmp_if", intervalMS: 59_000, field: "interval_s"},
+		"snmp_if timeout 31 s":        {typ: "snmp_if", timeoutMS: 31_000, field: "timeout_s"},
+		"snmp_if util_warn 1.5":       {typ: "snmp_if", params: `{"util_warn":1.5}`, field: "params.util_warn"},
+		"snmp_if util_crit below warn": {typ: "snmp_if", params: `{"util_warn":0.8}`, thresholds: `{"util_crit":0.7}`,
+			field: "thresholds.util_crit"},
+		"snmp_if bad regex": {typ: "snmp_if", params: `{"name_regex":"(Gi"}`, field: "params.name_regex"},
+	} {
+		typ, _ := Lookup(c.typ)
+		s := validSpec(typ)
+		if c.params != "" {
+			s.Params = json.RawMessage(c.params)
+		}
+		if c.thresholds != "" {
+			s.Thresholds = json.RawMessage(c.thresholds)
+		}
+		if c.intervalMS > 0 {
+			s.IntervalMS = c.intervalMS
+		}
+		if c.timeoutMS > 0 {
+			s.IntervalMS, s.TimeoutMS = 300_000, c.timeoutMS
+		}
+		if errs := Validate(&s); !hasField(errs, c.field) {
+			t.Errorf("%s: errs = %v, want field %s", name, errs, c.field)
+		}
+	}
+	typ, _ := Lookup("snmp_if")
+	if typ.MaxRows != 1024 || typ.MinIntervalS != 60 || typ.MaxTimeoutS != 30 {
+		t.Errorf("snmp_if limits = rows %d, interval ≥ %d s, timeout ≤ %d s", typ.MaxRows, typ.MinIntervalS, typ.MaxTimeoutS)
+	}
+	edge := validSpec(typ)
+	edge.Params = json.RawMessage(`{"max_interfaces":1024,"util_warn":0.7,"util_crit":0.9,"name_regex":"^Gi"}`)
+	if errs := Validate(&edge); len(errs) > 0 {
+		t.Errorf("snmp_if edges rejected: %v", errs)
 	}
 }
 
@@ -589,7 +635,8 @@ func TestTypesDeclareMetricNames(t *testing.T) {
 	for typ, name := range map[string]string{"icmp": "jitter_ms", "http": "ttfb_ms", "dns": "probe_dns_rcode",
 		"redfish": "probe_redfish_temperature_celsius", "ospf": "probe_ospf_neighbor_state", "isis": "probe_isis_adjacency_state",
 		"tr069": "probe_tr069_last_inform_age_seconds", "rpki_rtr": "probe_rpki_vrps",
-		"bfd": "probe_bfd_session_state", "optical": "probe_optical_rx_dbm", "snmp_status": "probe_snmp_reboot"} {
+		"bfd": "probe_bfd_session_state", "optical": "probe_optical_rx_dbm", "snmp_status": "probe_snmp_reboot",
+		"snmp_if": "probe_if_in_bps"} {
 		if !DeclaresMetric(typ, name) || !slices.Contains(MetricNames(typ), name) {
 			t.Errorf("%s does not declare %s", typ, name)
 		}

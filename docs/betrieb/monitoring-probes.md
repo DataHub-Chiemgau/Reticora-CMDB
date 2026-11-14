@@ -311,6 +311,56 @@ und die Prüfwerte: Das ergibt `fail` mit `check_failed`, das Label
 `error_status` nennt den Status (gilt für alle SNMP-Probetypen). Der
 Collector sendet nur GET.
 
+## SNMP-Interfaces (`snmp_if`)
+
+Standard nach PRT-06: Intervall 300 s (60 s–24 h), Timeout 10 s (1–30 s),
+Down-Count 3, Up-Count 1, höchstens 1024 Interfaces je Prüfung (je
+Interface 12 Spalten), Zugangsdaten aus dem Namespace `snmp`. Der Typ
+liegt im Unterpaket `collector/probe/snmpif`. Gelesen werden aus der
+IF-MIB `ifOperStatus`, `ifAdminStatus`, `ifName`, `ifAlias`,
+`ifHighSpeed`, `ifHCInOctets`/`ifHCOutOctets`, `ifInErrors`,
+`ifOutErrors`, `ifInDiscards`, `ifOutDiscards` und
+`ifCounterDiscontinuityTime`; Interfaces ohne ifXTable-Zähler nutzen
+`ifInOctets`/`ifOutOctets` (32 Bit) und `ifSpeed`.
+
+Parameter: `name_regex` (auf `ifName`), `alias_regex` (auf `ifAlias`),
+`if_index[]`, `only_admin_up` (Standard `true`), `max_interfaces`
+(Standard 256, höchstens 1024), `critical[]` (ifName-Liste; kritische
+Interfaces sind immer ausgewählt), `util_warn` und `util_crit` (Anteil
+0–1, `util_crit` über `util_warn`) und `errors_warn` (Fehler je Sekunde,
+ein- und ausgehend zusammen). Alle angegebenen Filter müssen passen; die
+Auswahl filtert vor der Ratenberechnung. Schwellen in `thresholds` haben
+Vorrang vor `params` (E-186).
+
+Raten rechnet der Collector aus dem Vorwertspeicher der Probe (E-185,
+WP-994): Wrap bei 32 bzw. 64 Bit, keine Rate nach einer geänderten
+`ifCounterDiscontinuityTime` oder einem Rücksprung von `sysUpTime`; eine
+Rate über `ifHighSpeed` × 1,1 wird als unplausibel verworfen. Die erste
+Prüfung liefert nur Status, keine Raten. Werte je Interface (Labels
+`ifIndex`, `ifName`): `probe_if_oper_status`, `probe_if_admin_status`,
+`probe_if_in_bps`, `probe_if_out_bps`, `probe_if_util_ratio` (höhere der
+beiden Richtungen), `probe_if_errors_per_s`, `probe_if_discards_per_s`;
+dazu `probe_if_interfaces` (ausgewählte Interfaces).
+
+Zustand: Ein kritisches Interface, das admin-up und oper-down ist (down,
+unknown, notPresent, lowerLayerDown; nicht testing oder dormant), oder
+ein kritisches Interface, das bei vollständigem Walk fehlt, ergibt `fail`
+mit `check_failed` (Label `ifName`). Ein anderes ausgewähltes Interface
+admin-up und oper-down ergibt `ok` mit `check_failed`, eine Auslastung
+über `util_warn` oder Fehler über `errors_warn` `ok` mit
+`threshold_exceeded` (`degraded`), eine Auslastung über `util_crit`
+`fail` mit `threshold_exceeded`. Admin-down-Interfaces gehen in keine
+Bewertung ein. Erreicht der Walk `max_interfaces`, meldet die Probe
+`probe_if_truncated` = 1; aus nicht gelesenen Zeilen entsteht kein
+Zustand, ein kritisches Interface dahinter ergibt `ok` mit `check_failed`
+(`probe_if_critical_unseen`). Ein Ergebnis muss in eine Uplink-Nachricht
+(256 KiB) passen: Die Werte je Interface enden bei einem Budget von
+192 KiB (`probe.MaxResultValueBytes`, bei langen `ifName` etwa ab 400
+Interfaces); weitere Interfaces liefern dann keine Werte, die Probe meldet
+ebenfalls `probe_if_truncated` = 1, bewertet den Zustand aber weiter über
+alle gelesenen Zeilen. SNMP-Timeout → `fail`/`timeout`,
+abgewiesener SNMPv3-Zugang → `error`/`auth_failed`.
+
 ## Redfish (`redfish`)
 
 Standard nach MON-03: Intervall 300 s (60 s–24 h), Timeout 15 s (1–60 s),
@@ -515,7 +565,7 @@ nach E-154; WP-1023 misst die Raten nach.
 | `tcp` | available | 60 / 10 / 86400 | 5 / 1 / 30 | 3 / 1 | 2 | 128 | 500 | 32 | 1024 | 1 | – | – |
 | `http` | available | 60 / 30 / 86400 | 10 / 1 / 60 | 3 / 1 | 2 | 64 | 100 | 32 | 1048576 | 1 | http | – |
 | `snmp_status` | available | 60 / 30 / 86400 | 5 / 1 / 15 | 3 / 1 | 1 | 32 | 200 | 4 | 65536 | 20 | snmp | – |
-| `snmp_if` | planned | 300 / 60 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 50 | 4 | 1048576 | 1024 | snmp | – |
+| `snmp_if` | available | 300 / 60 / 86400 | 10 / 1 / 30 | 3 / 1 | 1 | 16 | 50 | 4 | 1048576 | 1024 | snmp | – |
 | `snmp_custom` | planned | 300 / 60 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 100 | 8 | 65536 | 256 | snmp | – |
 | `redfish` | available | 300 / 60 / 86400 | 15 / 1 / 60 | 3 / 1 | 1 | 8 | 20 | 2 | 1048576 | 256 | redfish | – |
 | `bgp` | planned | 60 / 30 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 4096 | snmp, gnmi | – |

@@ -470,13 +470,13 @@
       }
     },
     "snmp_if": {
-      "status": "planned",
+      "status": "available",
       "min_interval_s": 60,
       "default_interval_s": 300,
       "max_interval_s": 86400,
       "min_timeout_s": 1,
       "default_timeout_s": 10,
-      "max_timeout_s": 60,
+      "max_timeout_s": 30,
       "default_down_count": 3,
       "default_up_count": 1,
       "max_parallel_per_target": 1,
@@ -493,34 +493,64 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "name_pattern": {
+          "name_regex": {
             "type": "string",
-            "maxLength": 256
+            "maxLength": 256,
+            "description": "RE2 expression on ifName; only matching interfaces are read."
+          },
+          "alias_regex": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "RE2 expression on ifAlias."
           },
           "if_index": {
             "type": "array",
             "items": {
               "type": "integer",
-              "minimum": 1
+              "minimum": 1,
+              "maximum": 2147483647
             },
-            "maxItems": 1024
+            "maxItems": 1024,
+            "description": "ifIndex list; only these interfaces."
           },
-          "admin_up_only": {
+          "only_admin_up": {
             "type": "boolean",
-            "default": true
+            "default": true,
+            "description": "Only interfaces with ifAdminStatus up."
+          },
+          "max_interfaces": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024,
+            "default": 256,
+            "description": "Interface rows read per check; more truncate the walk."
           },
           "critical": {
             "type": "array",
             "items": {
-              "type": "integer",
-              "minimum": 1
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
             },
-            "maxItems": 1024
+            "maxItems": 1024,
+            "description": "ifName of critical interfaces: admin up and oper down is down (else degraded)."
           },
-          "util_warn_pct": {
+          "util_warn": {
             "type": "number",
             "minimum": 0,
-            "maximum": 100
+            "maximum": 1,
+            "description": "Utilization (share 0-1, higher of in and out) for degraded."
+          },
+          "util_crit": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Utilization for down; above util_warn."
+          },
+          "errors_warn": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Errors per second (in + out) for degraded."
           }
         }
       }

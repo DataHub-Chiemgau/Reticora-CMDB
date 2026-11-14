@@ -12,6 +12,8 @@ import (
 	_ "github.com/DataHub-Chiemgau/Reticora-CMDB/collector/probe/redfish"
 	// snmp_status: reachability, reboot and OID checks (WP-995).
 	_ "github.com/DataHub-Chiemgau/Reticora-CMDB/collector/probe/snmpstatus"
+	// snmp_if: interfaces with selection, rates and utilization (WP-996).
+	_ "github.com/DataHub-Chiemgau/Reticora-CMDB/collector/probe/snmpif"
 	// ospf and isis over the standard MIBs (WP-1002).
 	_ "github.com/DataHub-Chiemgau/Reticora-CMDB/collector/probe/routing"
 	// tr069: read-only ACS adapter, GenieACS NBI (WP-1018).

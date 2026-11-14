@@ -241,6 +241,9 @@ var typeMetrics = map[string][]string{
 	"redfish": {"probe_redfish_health", "probe_redfish_temperature_celsius", "probe_redfish_fan_rpm",
 		"probe_redfish_psu_input_watts", "probe_redfish_psu_state", "probe_redfish_truncated"},
 	"snmp_status": {"probe_snmp_reboot", "probe_snmp_uptime_seconds", "probe_snmp_response_seconds"},
+	"snmp_if": {"probe_if_oper_status", "probe_if_admin_status", "probe_if_in_bps", "probe_if_out_bps",
+		"probe_if_util_ratio", "probe_if_errors_per_s", "probe_if_discards_per_s", "probe_if_truncated",
+		"probe_if_interfaces", "probe_if_critical_unseen"},
 	"ospf": {"probe_ospf_neighbor_state", "probe_ospf_neighbor_events_total", "probe_ospf_neighbors",
 		"probe_ospf_neighbors_full", "probe_ospf_truncated", "probe_ospf_neighbors_unseen"},
 	"isis": {"probe_isis_adjacency_state", "probe_isis_adjacencies", "probe_isis_adjacencies_up",
@@ -353,6 +356,7 @@ func Validate(spec *ProbeSpec) []FieldError {
 var paramChecks = map[string]func(spec *ProbeSpec, params map[string]any) []FieldError{
 	"icmp":        checkICMPParams,
 	"snmp_status": func(_ *ProbeSpec, params map[string]any) []FieldError { return checkSNMPStatusParams(params) },
+	"snmp_if":     checkSNMPIfParams,
 	"bfd":         checkBFDParams,
 	"optical":     checkOpticalParams,
 	"redfish":     checkRedfishParams,
@@ -404,6 +408,40 @@ func checkSNMPStatusParams(params map[string]any) []FieldError {
 				errs = append(errs, FieldError{Field: prefix + ".value", Message: "must be a valid RE2 regular expression"})
 			}
 		}
+	}
+	return errs
+}
+
+// checkSNMPIfParams checks the selection and thresholds of the snmp_if
+// type (PRT-06, WP-996 AK2): name_regex and alias_regex are RE2
+// expressions and util_crit lies above util_warn (thresholds before
+// params, like the executor reads them).
+func checkSNMPIfParams(spec *ProbeSpec, params map[string]any) []FieldError {
+	var errs []FieldError
+	for _, name := range []string{"name_regex", "alias_regex"} {
+		if re, ok := params[name].(string); ok {
+			if _, err := regexp.Compile(re); err != nil {
+				errs = append(errs, FieldError{Field: "params." + name, Message: "must be a valid RE2 regular expression"})
+			}
+		}
+	}
+	var thresholds map[string]any
+	if spec != nil {
+		thresholds, _ = decodeObject(spec.Thresholds)
+	}
+	level := func(name string) (float64, string, bool) {
+		if v, ok := numberOf(thresholds[name]); ok {
+			return v, "thresholds." + name, true
+		}
+		if v, ok := numberOf(params[name]); ok {
+			return v, "params." + name, true
+		}
+		return 0, "", false
+	}
+	warn, _, hasWarn := level("util_warn")
+	crit, critField, hasCrit := level("util_crit")
+	if hasWarn && hasCrit && crit <= warn {
+		errs = append(errs, FieldError{Field: critField, Message: "util_crit must be above util_warn"})
 	}
 	return errs
 }
