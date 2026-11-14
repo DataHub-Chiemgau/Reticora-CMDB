@@ -606,6 +606,46 @@ Zeilen am Limit von 1024 Zeilen ab, ist die Summe keine Messung: Das
 Ergebnis ist `error`/`response_too_large` (`unknown`), kein Einbruch. Ein
 SNMP-Timeout ergibt `fail`/`timeout`.
 
+## PON/OLT/ONU (`pon`)
+
+Standard nach PRT-11: Intervall 300 s (300 s–24 h), Timeout 60 s (1–60 s,
+Walk-Budget je OLT), Down-Count 3, Up-Count 1, höchstens 8192 ONUs je OLT,
+GETBULK mit MaxRepetitions 50, Zugangsdaten aus dem Namespace `snmp`. Der
+Typ liegt flach in `collector/probe/pon.go` (Modell in `pon_model.go`).
+Eine Standard-MIB gibt es nicht; die Quelle ist allein der Profilabschnitt
+`monitor.pon` (logisches Modell OLT → PON-Port → ONU mit `sn`, `status`,
+`rx_onu`, `rx_olt`, `last_down_cause`, optional `distance`; Beispiel in
+`collector/profiles/README.md`). Ohne Profiltreffer ist das Ergebnis
+`error`/`unsupported` (`unknown`). Die Herstellerprofile folgen mit
+WP-1008 und WP-1009.
+
+Parameter: `ports[]` (höchstens 64 Ports nach ihrem Label; ohne Angabe
+alle), `onu_rx_warn_dbm` (Standard −27 dBm), `port_offline_warn` (Anteil
+0–1, Standard 0,1) und `power_event_min` (Standard 8). Ausgabe nach
+E-188 (Option 1): je Port `probe_pon_onu_online`, `probe_pon_onu_offline`
+und `probe_pon_rx_dbm` mit Label `stat` (`min`, `avg`, `p05` über die
+ONUs online, gemessen an der ONU aus `rx_onu`; den Pegel an der OLT aus
+`rx_olt` meldet dieselbe Statistik getrennt mit dem Label `side` = `olt`,
+die beiden Messpunkte werden nie gemischt); je ONU nur Zustandswechsel
+als `probe_pon_onu_status_change` (Labels `sn`, `port`, `from`, `to` und
+beim Wechsel nach offline `cause`: `los`, `dying_gasp`, `other`; der
+Vorzustand liegt im Vorwertspeicher) und der Rx-Pegel
+`probe_pon_onu_rx_dbm{sn,port}` nur unter `onu_rx_warn_dbm` und im ersten
+Lauf jeder UTC-Stunde.
+
+Ein Statuswert, den das Profil weder auf `online`/`up` noch auf
+`offline`/`down` abbildet (etwa `initializing` oder `unknown`), zählt
+weder als online noch als offline und erzeugt keinen Zustandswechsel.
+
+Ergebnis: `fail` nur bei Unerreichbarkeit der OLT (`fail`/`timeout`). Ein
+Anteil offline über `port_offline_warn` auf einem Port ergibt `ok` mit
+`threshold_exceeded` (`degraded`, Label `port`). Wechseln in einem Lauf
+mindestens `power_event_min` ONUs der OLT mit Ursache `dying_gasp` nach
+offline, meldet die Probe `probe_pon_power_event` = 1. Mehr als 8192 ONUs
+brechen den Walk ab (`probe_pon_truncated` = 1); für den Port an der
+Schnittstelle entsteht kein Portwert, aus nicht gelesenen Zeilen kein
+ONU-Wechsel.
+
 ## TR-069 über den ACS (`tr069`)
 
 Standard nach PRT-15 und E-154: Intervall 900 s (300 s–24 h), Timeout 30 s
@@ -723,7 +763,7 @@ nach E-154; WP-1023 misst die Raten nach.
 | `bfd` | available | 60 / 30 / 86400 | 5 / 1 / 30 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 1000 | snmp | – |
 | `optical` | available | 300 / 60 / 86400 | 15 / 1 / 60 | 3 / 1 | 1 | 8 | 20 | 2 | 1048576 | 512 | snmp | – |
 | `bng` | available | 60 / 60 / 86400 | 10 / 1 / 30 | 3 / 1 | 1 | 8 | 20 | 2 | 1048576 | 256 | snmp | – |
-| `pon` | planned | 300 / 120 / 86400 | 60 / 1 / 120 | 3 / 1 | 1 | 4 | 5 | 2 | 4194304 | 8192 | snmp | – |
+| `pon` | available | 300 / 300 / 86400 | 60 / 1 / 60 | 3 / 1 | 1 | 4 | 5 | 2 | 4194304 | 8192 | snmp | – |
 | `dns` | available | 60 / 10 / 86400 | 5 / 1 / 10 | 3 / 1 | 4 | 64 | 200 | 16 | 65535 | 1 | – | – |
 | `dhcp` | planned | 300 / 60 / 86400 | 10 / 1 / 30 | 3 / 1 | 1 | 1 | 1 | 1 | 4096 | 1 | – | privileged_udp_ports |
 | `stamp` | planned | 60 / 10 / 86400 | 5 / 1 / 30 | 3 / 1 | 1 | 16 | 20 | 4 | 1472 | 1 | – | – |

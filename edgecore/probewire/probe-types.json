@@ -1130,13 +1130,13 @@
       }
     },
     "pon": {
-      "status": "planned",
-      "min_interval_s": 120,
+      "status": "available",
+      "min_interval_s": 300,
       "default_interval_s": 300,
       "max_interval_s": 86400,
       "min_timeout_s": 1,
       "default_timeout_s": 60,
-      "max_timeout_s": 120,
+      "max_timeout_s": 60,
       "default_down_count": 3,
       "default_up_count": 1,
       "max_parallel_per_target": 1,
@@ -1157,12 +1157,32 @@
             "type": "array",
             "items": {
               "type": "string",
+              "minLength": 1,
               "maxLength": 128
             },
-            "maxItems": 64
+            "maxItems": 64,
+            "description": "PON ports (name or ifIndex as the profile labels them); absent: every port."
           },
-          "rx_warn_dbm": {
-            "type": "number"
+          "onu_rx_warn_dbm": {
+            "type": "number",
+            "minimum": -60,
+            "maximum": 10,
+            "default": -27,
+            "description": "ONU receive level below which the level of the ONU is reported in every run."
+          },
+          "port_offline_warn": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.1,
+            "description": "Share of offline ONUs of a port above which the probe is degraded."
+          },
+          "power_event_min": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8192,
+            "default": 8,
+            "description": "ONUs going offline with dying gasp in one run that mark a power event."
           }
         }
       }

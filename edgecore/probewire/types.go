@@ -252,6 +252,8 @@ var typeMetrics = map[string][]string{
 		"probe_bgp_updates_in_total", "probe_bgp_updates_out_total", "probe_bgp_truncated", "probe_bgp_peers", "probe_bgp_peers_established",
 		"probe_bgp_peers_unseen", "probe_bgp_session_resets"},
 	"bng": {"probe_bng_sessions", "probe_bng_truncated"},
+	"pon": {"probe_pon_onu_online", "probe_pon_onu_offline", "probe_pon_rx_dbm", "probe_pon_onu_status_change",
+		"probe_pon_onu_rx_dbm", "probe_pon_truncated", "probe_pon_power_event"},
 	"ospf": {"probe_ospf_neighbor_state", "probe_ospf_neighbor_events_total", "probe_ospf_neighbors",
 		"probe_ospf_neighbors_full", "probe_ospf_truncated", "probe_ospf_neighbors_unseen"},
 	"isis": {"probe_isis_adjacency_state", "probe_isis_adjacencies", "probe_isis_adjacencies_up",

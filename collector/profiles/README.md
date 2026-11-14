@@ -122,8 +122,59 @@ Example: the peers of a BGP4-V2 table with an `inet` index and the state
         prefixes:
           index: composite:[inet, int, int]
           columns:
-            accepted: 1.3.6.1.4.1.99999.5.1.6.1.3
+            prefixes: 1.3.6.1.4.1.99999.5.1.6.1.3
 ```
+
+### `monitor.pon` (WP-1007)
+
+The pon type (PRT-11) has no standard MIB; its source is this section only
+(without it a probe is `error`/`unsupported`). It maps the logical model
+OLT → PON port → ONU:
+
+- table `onus` (required): one row per ONU, the first index part is the
+  PON port (its ifIndex), the rest the ONU on the port; columns `status`
+  (enum on `online`/`offline` or `up`/`down`; a value mapped to neither
+  skips the row), `sn` (serial number; eight
+  octets are shown as vendor letters plus hex), `rx_onu` and `rx_olt`
+  (receive levels at the ONU and at the OLT, reported apart; `scale`
+  converts them to dBm, values outside −60 to +10 dBm count as no level), `last_down_cause` (enum on `los`,
+  `dying_gasp` or `other`) and optionally `distance` (metres);
+- table `ports` (optional): column `name` per port ifIndex (e.g. ifName);
+  without it the port label is its ifIndex.
+
+Example (levels in hundredths of dBm):
+
+```yaml
+- name: example-olt
+  vendor: Example
+  ciType: switch
+  sysObjectIds:
+  - 1.3.6.1.4.1.99997.1
+  monitor:
+    pon:
+      tables:
+        onus:
+          index: composite:[int,int]
+          scale: 0.01
+          unit: dBm
+          columns:
+            status: 1.3.6.1.4.1.99997.2.1.1.2
+            sn: 1.3.6.1.4.1.99997.2.1.1.3
+            rx_onu: 1.3.6.1.4.1.99997.2.1.1.4
+            rx_olt: 1.3.6.1.4.1.99997.2.1.1.5
+            last_down_cause: 1.3.6.1.4.1.99997.2.1.1.6
+          enums:
+            status: {"1": online, "2": offline}
+            last_down_cause: {"1": los, "2": dying_gasp, "3": other}
+        ports:
+          index: int
+          columns:
+            name: 1.3.6.1.2.1.31.1.1.1.1
+```
+
+At most 8192 ONUs are read per OLT; the tests of the core use
+`collector/probe/testdata/generic-pon-profile.yaml`. The vendor profiles
+follow in WP-1008 and WP-1009.
 
 Every profile is validated when it is loaded, also without `ciType`: an
 unknown probe type, an invalid OID, an unknown index kind, an enum or a
