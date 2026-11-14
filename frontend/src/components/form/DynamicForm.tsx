@@ -9,8 +9,12 @@
  * the width as share of a 12-column grid. The server state of a field is
  * OR-combined with the live evaluation (required, read only); its
  * visibility applies to fields without a conditional visibility rule.
+ *
+ * renderControl (WP-1133) replaces the control of single fields by name,
+ * e.g. the signature pad of the form renderer; the replacement gets the
+ * same label, state, value, error and change handler.
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { localizedText, type LocalizedText } from '../../api/cmdb';
 import { useTranslation } from 'react-i18next';
 import { LocationPicker } from '../pickers/LocationPicker';
@@ -44,6 +48,21 @@ export interface DynamicFormProps {
    * are grouped by ui_group and sort_order.
    */
   layout?: DynamicFormSection[];
+  /**
+   * renderControl maps a field name to its own control (WP-1133); the
+   * other fields keep the control of their type.
+   */
+  renderControl?: Record<string, (props: DynamicFormControlProps) => ReactNode>;
+}
+
+/** The props a control of renderControl receives: those of the field. */
+export interface DynamicFormControlProps {
+  name: string;
+  label: string;
+  state: FieldState;
+  value: unknown;
+  error?: string;
+  onChange: (value: unknown) => void;
 }
 
 /** The server state of a field in a layout (fieldmeta.FieldState, read_only as readOnly). */
@@ -174,6 +193,7 @@ export function DynamicForm({
   errors = {},
   referenceOptions = {},
   layout,
+  renderControl,
 }: DynamicFormProps) {
   const { t, i18n } = useTranslation();
   const language = i18n.language;
@@ -219,6 +239,7 @@ export function DynamicForm({
                 error={errorText(errors[def.name])}
                 options={referenceOptions[def.name]}
                 onChange={(v) => onChange(def.name, v)}
+                render={renderControl?.[def.name]}
               />
             ))}
           </div>
@@ -237,12 +258,23 @@ interface DynamicFieldProps {
   onChange: (value: unknown) => void;
   /** The width in the 12-column grid of a layout; absent outside a layout. */
   width?: number;
+  /** render replaces the control (DynamicFormProps.renderControl). */
+  render?: (props: DynamicFormControlProps) => ReactNode;
 }
 
 /** Long-form controls take the full row; the others sit two to a row. */
 const WIDE_TYPES = new Set(['multiline', 'textarea', 'json']);
 
 function DynamicField(props: DynamicFieldProps) {
+  // The own control of renderControl, with the label and state of the field.
+  const custom = props.render?.({
+    name: props.def.name,
+    label: (props.def.label || props.def.name) + (props.state.required ? ' *' : ''),
+    state: props.state,
+    value: props.value,
+    error: props.error,
+    onChange: props.onChange,
+  });
   const span =
     props.width !== undefined
       ? `min-w-0 ${spanOf(props.width)}`
@@ -251,7 +283,7 @@ function DynamicField(props: DynamicFieldProps) {
         : 'min-w-0';
   return (
     <div className={span} data-field-name={props.width !== undefined ? props.def.name : undefined}>
-      <DynamicFieldControl {...props} />
+      {custom ?? <DynamicFieldControl {...props} />}
     </div>
   );
 }

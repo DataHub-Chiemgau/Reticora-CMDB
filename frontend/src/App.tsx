@@ -69,6 +69,7 @@ const IpamPage = lazyPage(() => import('./pages/IpamPage'), 'IpamPage');
 const SubnetDetailPage = lazyPage(() => import('./pages/SubnetDetailPage'), 'SubnetDetailPage');
 const SLAPage = lazyPage(() => import('./pages/SLAPage'), 'SLAPage');
 const FormsPage = lazyPage(() => import('./pages/FormsPage'), 'FormsPage');
+const FormEditorPage = lazyPage(() => import('./pages/FormEditorPage'), 'FormEditorPage');
 const WorkflowPage = lazyPage(() => import('./pages/WorkflowPage'), 'WorkflowPage');
 const CompliancePage = lazyPage(() => import('./pages/CompliancePage'), 'CompliancePage');
 const IGAPage = lazyPage(() => import('./pages/IGAPage'), 'IGAPage');
@@ -307,6 +308,8 @@ function App() {
           <Route path="/permissions" element={<PermissionsPage />} />
           <Route path="/slas" element={<SLAPage />} />
           <Route path="/forms" element={<FormsPage />} />
+          <Route path="/forms/new" element={<FormEditorPage />} />
+          <Route path="/forms/:id/edit" element={<FormEditorPage />} />
           <Route path="/workflows" element={<WorkflowPage />} />
           <Route path="/compliance" element={<CompliancePage />} />
           <Route path="/iga" element={<IGAPage />} />

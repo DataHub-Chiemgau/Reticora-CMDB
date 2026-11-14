@@ -2523,14 +2523,45 @@ export interface FormDefinition {
   schema: JsonRecord;
   ui_hints: JsonRecord;
   active: boolean;
+  /** Counter of every change of the definition, the ETag (API-07, WP-1133). */
+  version?: number;
+  /** The stored schema version that schema and ui_hints copy (WFL-01). */
+  current_version_id?: string;
+  /** Number of the current schema version. */
+  schema_version?: number;
   created_at: string;
   updated_at: string;
+}
+
+/** One immutable version of schema and ui_hints of a form (WFL-01, WP-1133). */
+export interface FormDefinitionVersion {
+  id: string;
+  organization_id: string;
+  form_id: string;
+  client_id?: string;
+  version: number;
+  schema: JsonRecord;
+  ui_hints: JsonRecord;
+  created_by?: string;
+  created_at: string;
+}
+
+/** The fields of POST /forms and PATCH /forms/{id} the form editor sends. */
+export interface FormDefinitionWrite {
+  name?: string;
+  description?: string;
+  schema?: JsonRecord;
+  ui_hints?: JsonRecord;
+  active?: boolean;
 }
 
 export interface FormSubmission {
   id: string;
   organization_id: string;
   form_id: string;
+  /** The schema version the values were captured against (WFL-01). */
+  form_version_id?: string;
+  form_version?: number;
   values: JsonRecord;
   submitted_by?: string;
   ci_id?: string;
@@ -2626,8 +2657,29 @@ export const formApi = {
   list(params: ListParams & { active?: boolean } = {}): Promise<PaginatedResponse<FormDefinition>> {
     return fetchAPI(`/forms${buildQuery(params)}`);
   },
-  create(data: Partial<FormDefinition>): Promise<FormDefinition> {
+  create(data: FormDefinitionWrite): Promise<FormDefinition> {
     return fetchAPI('/forms', { method: 'POST', body: JSON.stringify(data) });
+  },
+  get(id: string): Promise<FormDefinition> {
+    return fetchAPI(`/forms/${id}`);
+  },
+  /**
+   * update sends PATCH /forms/{id} with If-Match on version (API-07): 412
+   * when another change came first (WP-1133).
+   */
+  update(id: string, data: FormDefinitionWrite, version?: number): Promise<FormDefinition> {
+    return fetchAPI(`/forms/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+      headers: version !== undefined ? { 'If-Match': `"${version}"` } : undefined,
+    });
+  },
+  /** The schema versions of a form, newest first (WFL-01). */
+  versions(id: string): Promise<FormDefinitionVersion[]> {
+    return fetchAllPages(`/forms/${id}/versions`);
+  },
+  version(id: string, version: number): Promise<FormDefinitionVersion> {
+    return fetchAPI(`/forms/${id}/versions/${version}`);
   },
   submit(id: string, data: { values: JsonRecord; ci_id?: string; ticket_id?: string }) {
     return fetchAPI<FormSubmission>(`/forms/${id}/submissions`, {
@@ -2637,6 +2689,10 @@ export const formApi = {
   },
   submissions(params: ListParams & { form_id?: string } = {}) {
     return fetchAPI<PaginatedResponse<FormSubmission>>(`/form-submissions${buildQuery(params)}`);
+  },
+  /** Every submission of a form, page by page (grouped by version, WP-1133). */
+  allSubmissions(formId: string): Promise<FormSubmission[]> {
+    return fetchAllPages(`/form-submissions`, { form_id: formId });
   },
 };
 

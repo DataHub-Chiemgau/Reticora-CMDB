@@ -53,6 +53,7 @@ import {
   sourceRankApi,
   type SourceRankEntry,
   type SourceRankParams,
+  type FormDefinitionWrite,
   bffQueryPartial,
   ApiError,
 } from '../api/client';
@@ -1793,10 +1794,57 @@ export function useFormDefinitions() {
   return useQuery({ queryKey: ['forms'], queryFn: () => formApi.list({ active: true }) });
 }
 
+/** useFormDefinition reads one form definition for the editor (WP-1133). */
+export function useFormDefinition(id: string | undefined) {
+  return useQuery({
+    queryKey: ['forms', 'detail', id ?? ''],
+    queryFn: () => formApi.get(id ?? ''),
+    enabled: !!id,
+  });
+}
+
+/** useFormVersions lists the schema versions of a form, newest first. */
+export function useFormVersions(id: string | undefined) {
+  return useQuery({
+    queryKey: ['forms', 'versions', id ?? ''],
+    queryFn: () => formApi.versions(id ?? ''),
+    enabled: !!id,
+  });
+}
+
+/**
+ * useSaveForm creates (no id) or changes a form with If-Match on version;
+ * the lists, the definition and its versions refresh.
+ */
+export function useSaveForm() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      data,
+      version,
+    }: {
+      id?: string;
+      data: FormDefinitionWrite;
+      version?: number;
+    }) => (id ? formApi.update(id, data, version) : formApi.create(data)),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['forms'] }),
+  });
+}
+
 export function useFormSubmissions(formId?: string) {
   return useQuery({
     queryKey: ['form-submissions', formId],
     queryFn: () => formApi.submissions({ form_id: formId }),
+  });
+}
+
+/** useAllFormSubmissions reads every submission of a form (grouped by version, WP-1133). */
+export function useAllFormSubmissions(formId: string | undefined) {
+  return useQuery({
+    queryKey: ['form-submissions', 'all', formId ?? ''],
+    queryFn: () => formApi.allSubmissions(formId ?? ''),
+    enabled: !!formId,
   });
 }
 

@@ -220,3 +220,65 @@ describe('DynamicForm with layout (WP-803)', () => {
     expect(screen.queryByLabelText('Versteckt')).not.toBeInTheDocument();
   });
 });
+
+/**
+ * WP-1133: renderControl replaces the control of a field by name; the
+ * replacement receives the label and state of the field, the other fields
+ * keep their control.
+ */
+describe('DynamicForm renderControl', () => {
+  it('replaces the control of one field and passes its state', () => {
+    const seen: { label: string; required: boolean; readOnly: boolean; value: unknown }[] = [];
+    let changed: unknown;
+    renderWithProviders(
+      <DynamicForm
+        fields={fields}
+        values={{ hostname: 'srv-01', cores: 4 }}
+        onChange={(_name, value) => {
+          changed = value;
+        }}
+        layout={[
+          {
+            key: 's',
+            title: {},
+            visible: true,
+            fields: [
+              {
+                name: 'hostname',
+                width: 12,
+                state: { visible: true, required: true, readOnly: true },
+              },
+              { name: 'cores', width: 12 },
+            ],
+          },
+        ]}
+        renderControl={{
+          hostname: (props) => {
+            seen.push({
+              label: props.label,
+              required: props.state.required,
+              readOnly: props.state.readOnly,
+              value: props.value,
+            });
+            return (
+              <button type="button" onClick={() => props.onChange('custom')}>
+                eigenes Steuerelement
+              </button>
+            );
+          },
+        }}
+      />,
+    );
+
+    expect(screen.queryByLabelText('Hostname *')).not.toBeInTheDocument();
+    act(() => screen.getByRole('button', { name: 'eigenes Steuerelement' }).click());
+    expect(changed).toBe('custom');
+    expect(seen[0]).toEqual({
+      label: 'Hostname *',
+      required: true,
+      readOnly: true,
+      value: 'srv-01',
+    });
+    expect(screen.getByLabelText('Kerne')).toHaveValue(4);
+  });
+});
