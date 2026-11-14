@@ -44,7 +44,7 @@ func (e *Executor) MaxSeries() int { return MaxMetrics*MaxRows + 16 }
 // and the index label of a column, so that the metric bridge stores the
 // values under one declared name (WP-976).
 const (
-	ValueCustom    = "probe_snmp_custom"
+	ValueCustom = "probe_snmp_custom"
 	// ValueTruncated is 1 with the label metric for a metric whose values
 	// are incomplete: its column walk stopped at MaxRows, the result ran
 	// out of room for its values (probe.MaxResultValueBytes) or the
