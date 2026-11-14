@@ -2705,6 +2705,7 @@
     "acknowledged": "Bestätigt",
     "resolved": "Gelöst",
     "falsePositive": "Fehlalarm",
+    "ciFilter": "Nur CI {{id}} (Filter entfernen)",
     "acknowledge": "Bestätigen",
     "resolve": "Lösen",
     "markFalsePositive": "Fehlalarm",
@@ -5908,6 +5909,48 @@
       "topology": "Topologie",
       "collector_unreachable": "Collector nicht erreichbar",
       "unknown": "Unbekannt"
+    }
+  },
+  "ciP3": {
+    "loading": "Wird geladen …",
+    "error": "Die Daten konnten nicht geladen werden.",
+    "findings": {
+      "title": "Findings",
+      "count": "{{severity}}: {{count}}",
+      "countAtLeast": "{{severity}}: {{count}}+",
+      "capped": "Die ersten {{count}} Findings; alle zeigt die Findings-Seite.",
+      "empty": "Keine offenen Findings",
+      "kev": "KEV",
+      "fixedVersion": "Behoben in {{version}}",
+      "all": "Alle Findings des CIs",
+      "statuses": {
+        "open": "Offen",
+        "acknowledged": "Bestätigt",
+        "resolved": "Behoben",
+        "false_positive": "Fehlalarm",
+        "accepted": "Akzeptiert"
+      }
+    },
+    "compliance": {
+      "title": "Compliance",
+      "score": "Score {{score}} %: {{passed}} bestanden, {{failed}} nicht bestanden",
+      "empty": "Keine Compliance-Ergebnisse",
+      "changedAt": "geändert {{time}}"
+    },
+    "runs": {
+      "title": "Automationen",
+      "empty": "Keine Workflow-Läufe",
+      "link": "{{name}} (Version {{version}})",
+      "times": "Auslöser {{trigger}}, erstellt {{created}}, Start {{started}}, Ende {{finished}}",
+      "statuses": {
+        "pending": "Ausstehend",
+        "running": "Läuft",
+        "waiting_approval": "Wartet auf Genehmigung",
+        "waiting_input": "Wartet auf Eingabe",
+        "succeeded": "Erfolgreich",
+        "failed": "Fehlgeschlagen",
+        "cancelled": "Abgebrochen"
+      }
     }
   }
 }

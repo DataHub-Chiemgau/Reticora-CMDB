@@ -38,6 +38,9 @@ import {
   formatDateTime,
   useLocationNames,
 } from '../components/cmdb/CIDetailSections';
+import { CIFindingsSection } from '../components/cmdb/CIFindingsSection';
+import { CIComplianceSection } from '../components/cmdb/CIComplianceSection';
+import { CIRunsSection } from '../components/cmdb/CIRunsSection';
 import { CIRelationshipsCard } from '../components/cmdb/CIRelationshipsCard';
 import { NetworkSection } from '../components/cmdb/NetworkSection';
 import { ScopeBanner } from '../components/ScopeBanner';
@@ -392,6 +395,11 @@ export function CIDetailPage() {
         <ImpactSection ciId={ci.id} />
         <ProvenanceSection ciId={ci.id} />
         <CIMetricsSection ciId={ci.id} />
+        {/* Findings, compliance and automations (WP-1137): one BFF query on
+            the first expand, each section only with its module. */}
+        <CIFindingsSection ciId={ci.id} />
+        <CIComplianceSection ciId={ci.id} />
+        <CIRunsSection ciId={ci.id} />
         <CIHistorySection ciId={ci.id} />
       </div>
 

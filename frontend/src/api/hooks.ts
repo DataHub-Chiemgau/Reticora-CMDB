@@ -797,6 +797,88 @@ export function assetDetailQuery(id: string) {
   };
 }
 
+/** A finding of a CI in the BFF (WP-1136). */
+export interface CIP3Finding {
+  id: string;
+  severity: string;
+  title: string;
+  status: string;
+  cveIds: string[];
+  kev: boolean;
+  fixedVersion?: string | null;
+}
+
+/** A compliance result of a CI in the BFF (WP-1136). */
+export interface CIP3ComplianceResult {
+  ruleId: string;
+  ruleName: string;
+  status: string;
+  severity: string;
+  evaluatedAt: string;
+  statusChangedAt: string;
+}
+
+/** A workflow run on a CI in the BFF (WP-1136). */
+export interface CIP3WorkflowRun {
+  id: string;
+  workflowId: string;
+  workflowName: string;
+  version: number;
+  status: string;
+  trigger: string;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  createdAt: string;
+}
+
+/** The P3 fields of a CI the detail page reads (WP-1137). */
+export interface CIP3Detail {
+  ci: {
+    id: string;
+    findings: CIP3Finding[];
+    complianceResults: CIP3ComplianceResult[];
+    complianceScore: {
+      score: number;
+      passed: number;
+      failed: number;
+      notApplicable: number;
+    } | null;
+    workflowRuns: CIP3WorkflowRun[];
+  } | null;
+}
+
+/** CI_P3_QUERY reads findings, compliance and runs of a CI in one BFF query (WP-1137). */
+/** How many findings the CI detail reads; a full page means there may be more. */
+export const CI_FINDINGS_LIMIT = 50;
+
+export const CI_P3_QUERY = `query CIP3Detail($id: ID!) {
+  ci(id: $id) {
+    id
+    findings(first: ${CI_FINDINGS_LIMIT}) { id severity title status cveIds kev fixedVersion }
+    complianceResults(first: 100) { ruleId ruleName status severity evaluatedAt statusChangedAt }
+    complianceScore { score passed failed notApplicable }
+    workflowRuns(first: 20) { id workflowId workflowName version status trigger startedAt finishedAt createdAt }
+  }
+}`;
+
+/**
+ * useCIP3Detail reads the findings, compliance results and score and the
+ * workflow runs of a CI in one BFF query (WP-1137 AK1), only once enabled
+ * (the first expand of one of the three sections); the sections share the
+ * answer. A field the server refuses (FORBIDDEN) or leaves out
+ * (UNAVAILABLE) comes back as an error of its path.
+ */
+export function useCIP3Detail(ciId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['cis', ciId, 'p3'] as const,
+    queryFn: () => bffQueryPartial<CIP3Detail>(CI_P3_QUERY, { id: ciId }),
+    enabled: enabled && !!ciId,
+    retry: false,
+    // The sections share one answer: a second section opened later reads it.
+    staleTime: 60_000,
+  });
+}
+
 /**
  * useAssetDetail reads the lists of the asset detail page in exactly one
  * BFF query (WP-809); a field the server refuses comes back as an error of

@@ -1,6 +1,7 @@
 import { ShieldAlert } from 'lucide-react';
 import { useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { securityFindingApi } from '../api/client';
 import type { SecurityFinding } from '../api/client';
@@ -127,10 +128,18 @@ export function FindingsPage() {
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState('open');
   const [view, setView] = useState<View>('findings');
+  // ?ci_id= limits the list to one CI (the link of the CI detail, WP-1137).
+  const [params, setParams] = useSearchParams();
+  const ciId = params.get('ci_id') ?? '';
 
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['security-findings', statusFilter],
-    queryFn: () => securityFindingApi.list({ status: statusFilter || undefined, limit: 100 }),
+    queryKey: ['security-findings', statusFilter, ciId],
+    queryFn: () =>
+      securityFindingApi.list({
+        status: statusFilter || undefined,
+        ci_id: ciId || undefined,
+        limit: 100,
+      }),
   });
   const summary = useQuery({
     queryKey: ['security-findings-summary'],
@@ -197,6 +206,21 @@ export function FindingsPage() {
                 { value: 'false_positive', label: t('findings.falsePositive', 'Fehlalarm') },
               ]}
             />
+            {ciId ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() =>
+                  setParams((prev) => {
+                    const next = new URLSearchParams(prev);
+                    next.delete('ci_id');
+                    return next;
+                  })
+                }
+              >
+                {t('findings.ciFilter', { id: ciId })}
+              </Button>
+            ) : null}
             {data ? (
               <ToolbarEnd>
                 <span className="text-sm text-fg-muted tabular-nums">

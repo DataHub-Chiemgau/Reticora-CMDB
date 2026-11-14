@@ -4011,7 +4011,7 @@ export interface SecurityFinding {
 
 export const securityFindingApi = {
   list(
-    params: ListParams & { status?: string; severity?: string; kind?: string } = {},
+    params: ListParams & { status?: string; severity?: string; kind?: string; ci_id?: string } = {},
   ): Promise<PaginatedResponse<SecurityFinding>> {
     return fetchAPI(`/security/findings${buildQuery(params)}`);
   },
