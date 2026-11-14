@@ -78,6 +78,8 @@ const CI_DETAIL_PANELS: Unused[] = [
 export const UNUSED: Record<string, Unused[]> = {
   'ci.spec.ts': CI_DETAIL_PANELS,
   'keyboard.spec.ts': CI_DETAIL_PANELS,
+  // The network section of the CI detail is the subject there (WP-919).
+  'ipam.spec.ts': CI_DETAIL_PANELS,
   // The provenance panel is the subject of conflict.spec.ts; it has a handler.
   'conflict.spec.ts': CI_DETAIL_PANELS.filter((u) => !String(u.path).includes('provenance')),
   // ABN-01 (c) (WP-330): the templates and the provenance of the reference

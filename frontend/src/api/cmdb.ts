@@ -1897,6 +1897,15 @@ export const ipamApi = {
   ciInterfaces(ciId: string): Promise<PaginatedResponse<NetworkInterface>> {
     return fetchAPI(`/cis/${ciId}/interfaces${qs({ limit: API_MAX_LIMIT })}`);
   },
+  // ─── Network section of the CI detail (IPM-13, WP-919) ────────────────────
+  /** ciAddresses reads every address bound to a CI (GET /cis/{id}/addresses, IPM-13) page by page. */
+  ciAddresses(ciId: string): Promise<CIAddress[]> {
+    return fetchAllPages(`/cis/${ciId}/addresses`);
+  },
+  /** deleteIPAddress removes an address; the network section releases a failed assignment with it. */
+  deleteIPAddress(id: string): Promise<void> {
+    return fetchAPI(`/ips/${id}`, { method: 'DELETE' });
+  },
   getVRF(id: string): Promise<IPAMVRF> {
     return fetchAPI(`/vrfs/${id}`);
   },
@@ -1983,6 +1992,8 @@ export type IPAddressUpdate = components['schemas']['UpdateIPAddressRequest'];
 /** IPAMChange is one row of the IPAM change history (IPM-08). */
 export type IPAMChange = components['schemas']['IPAMChange'];
 export type NetworkInterface = components['schemas']['NetworkInterface'];
+/** CIAddress is an address of a CI with interface name and subnet CIDR (IPM-13). */
+export type CIAddress = components['schemas']['CIAddress'];
 /** IPAM_HISTORY_PAGE is the page size of the history list of an address or subnet. */
 export const IPAM_HISTORY_PAGE = 25;
 export type IPAllocate = components['schemas']['IPAllocateRequest'];

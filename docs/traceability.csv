@@ -1900,3 +1900,5 @@ SEC-02;[P3];F;backend/internal/vulnfeed/bundle_test.go;WP-1120
 SEC-02;[P3];F;backend/internal/security/matcher_integration_test.go;WP-1121
 SEC-02;[P3];F;backend/internal/security/version_test.go;WP-1121
 LCY-06;[P3];F;backend/internal/security/matcher_integration_test.go;WP-1121
+IPM-13;[P3];G3;frontend/src/components/cmdb/NetworkSection.test.tsx;WP-919
+UI-14;[P2–P4, A];G3;frontend/src/components/cmdb/NetworkSection.test.tsx;WP-919

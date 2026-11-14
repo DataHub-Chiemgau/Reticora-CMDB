@@ -8,6 +8,8 @@ import { AT, ORG_ID, expect, list, mockBackend, signIn, test } from './support/b
 // Requests and mocks are checked against api/openapi.yaml
 // (support/contract.ts). WP-917: an address of the list opens the address
 // dialog; it binds the address to a device and its interface and pins it.
+// IPM-13 (WP-919): the section "Netzwerk" of the CI detail assigns an
+// address from a free range; it appears under the chosen interface.
 
 test.use({ locale: 'de-DE' });
 
@@ -134,7 +136,14 @@ async function mockIpam(page: Page) {
     {
       path: '/subnets',
       reply: (_request, url) => ({
-        body: list(url.searchParams.get('parent_id') === 'root' ? [SUBNET] : []),
+        // The tree reads the root level, the address assignment of the CI
+        // detail (WP-919) searches with contains.
+        body: list(
+          url.searchParams.get('parent_id') === 'root' ||
+            url.searchParams.get('contains') === '10.91.6.0'
+            ? [SUBNET]
+            : [],
+        ),
       }),
     },
     { path: `/subnets/${NET}`, reply: () => ({ body: SUBNET }) },
@@ -305,5 +314,91 @@ test('binds an address to a device and its interface and pins it (WP-917)', asyn
   const patches = calls.filter((c) => c.method === 'PATCH').map((c) => [c.path, c.body]);
   expect(patches).toEqual([
     [`/ips/${address(1, '', 'static').id}`, { interface_id: NIC, ci_id: DEVICE, pinned: true }],
+  ]);
+});
+
+test('assigns an address from the CI detail; it appears under the interface (WP-919)', async ({
+  page,
+}) => {
+  const bound: (StoredAddress & { interface_name?: string; subnet_cidr?: string })[] = [];
+  const calls = await mockIpam(page);
+  await mockBackend(page, [
+    {
+      path: `/cis/${DEVICE}`,
+      reply: () => ({
+        body: {
+          id: DEVICE,
+          organization_id: ORG_ID,
+          ci_type_id: '5e1b0c3a-7d2f-4a10-9c01-000000000001',
+          name: 'sw-e2e-01',
+          status: 'active',
+          management_ip: '10.91.6.250',
+          attributes: {},
+          is_manual: true,
+          version: 1,
+          created_at: AT,
+          updated_at: AT,
+        },
+      }),
+    },
+    {
+      path: /^\/topology\/cis\/[^/]+\/neighbors$/,
+      reply: () => ({ body: { nodes: [], edges: [] } }),
+    },
+    { path: `/cis/${DEVICE}/relationships`, reply: () => ({ body: list([]) }) },
+    { path: `/cis/${DEVICE}/addresses`, reply: () => ({ body: list([...bound]) }) },
+    {
+      method: 'PATCH',
+      path: /^\/ips\/[^/]+$/,
+      reply: (request, url) => {
+        const body = request.postDataJSON() as { ci_id: string; role: 'primary' };
+        const id = url.pathname.split('/').pop();
+        const row = bound.find((a) => a.id === id);
+        if (row) Object.assign(row, body);
+        return { body: row };
+      },
+    },
+  ]);
+  // The allocation of mockIpam stores the address; bind it to the interface.
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith(`/subnets/${NET}/allocate`)) {
+      const body = request.postDataJSON() as { interface_id?: string };
+      bound.push({
+        ...address(2, '10.91.6.2', 'static'),
+        interface_id: body.interface_id,
+        interface_name: 'ge-0/0/7',
+        subnet_cidr: SUBNET.cidr,
+      });
+    }
+  });
+  await signIn(page);
+  await page.goto(`/cmdb/${DEVICE}`);
+
+  const section = page.getByRole('region', { name: 'Netzwerk' });
+  await expect(section.getByText('ge-0/0/7')).toBeVisible();
+  await expect(section.getByText('nicht in IPAM')).toBeVisible();
+
+  const open = section.getByRole('button', { name: 'Adresse zuweisen' });
+  await open.focus();
+  await open.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'Adresse zuweisen' });
+  await dialog.getByLabel('Subnetz suchen').fill('10.91.6.0');
+  const subnet = dialog.getByRole('combobox', { name: 'Subnetz', exact: true });
+  await expect(subnet.getByRole('option', { name: '10.91.6.0/24 – e2e-office' })).toBeAttached();
+  await subnet.selectOption({ label: '10.91.6.0/24 – e2e-office' });
+  await dialog.getByLabel('Interface').selectOption({ label: 'ge-0/0/7' });
+  const submit = dialog.getByRole('button', { name: 'Zuweisen' });
+  await submit.focus();
+  await submit.press('Enter');
+  await expect(dialog).toBeHidden();
+
+  const nic = section.getByTestId(`ci-interface-${NIC}`);
+  await expect(nic.getByText('10.91.6.2')).toBeVisible();
+  await expect(nic.getByRole('link', { name: '10.91.6.0/24' })).toBeVisible();
+
+  const writes = calls.filter((c) => c.method !== 'GET').map((c) => [c.method, c.path, c.body]);
+  expect(writes).toEqual([
+    ['POST', `/subnets/${NET}/allocate`, { type: 'static', interface_id: NIC }],
+    ['PATCH', `/ips/${address(2, '', 'static').id}`, { ci_id: DEVICE, role: 'primary' }],
   ]);
 });

@@ -7,7 +7,9 @@
  * allocation of the next free address and subnet, reservations and the
  * subnet form. WP-917 adds the address dialog: saving an address, the
  * interfaces of the chosen device, the change history of an address or a
- * subnet and the open review items of an address.
+ * subnet and the open review items of an address. WP-919 adds the network
+ * section of the CI detail: the addresses of a CI and the assignment of an
+ * address from a free range.
  */
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { sessionApi, vrfApi, type PaginatedResponse } from './client';
@@ -33,6 +35,7 @@ import {
   type IPAddress,
   type IPAddressCreate,
   type IPAddressUpdate,
+  type IPAddressRole,
 } from './cmdb';
 import { fetchAllReviewItems, type ReviewItem } from '../hooks/useReviews';
 
@@ -494,12 +497,89 @@ export function useSaveIPAddress() {
   });
 }
 
-/** useCIInterfaces reads the interfaces of the chosen device; nothing without a CI. */
-export function useCIInterfaces(ciId: string | undefined) {
+/**
+ * useCIInterfaces reads the interfaces of the chosen device; nothing without
+ * a CI or while enabled is false (the network section without ipam:read).
+ */
+export function useCIInterfaces(ciId: string | undefined, enabled = true) {
   return useQuery({
     queryKey: ['ipam', 'ci-interfaces', ciId ?? ''],
     queryFn: () => ipamApi.ciInterfaces(ciId ?? ''),
-    enabled: !!ciId,
+    enabled: enabled && !!ciId,
+  });
+}
+
+// ─── Network section of the CI detail (IPM-13, UI-14, WP-919) ───────────────
+
+/** useCIAddresses reads every address bound to a CI (GET /cis/{id}/addresses). */
+export function useCIAddresses(ciId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['ipam', 'ci-addresses', ciId],
+    queryFn: () => ipamApi.ciAddresses(ciId),
+    enabled: enabled && !!ciId,
+  });
+}
+
+/**
+ * CIAddressAssignFailed reports that the address was allocated but the
+ * binding to the CI (PATCH /ips/{id}) failed; cause is the error of the
+ * PATCH and released whether DELETE /ips/{id} gave the address back.
+ */
+export class CIAddressAssignFailed extends Error {
+  readonly cause: unknown;
+  readonly released: boolean;
+
+  constructor(cause: unknown, released: boolean) {
+    super('binding failed');
+    this.name = 'CIAddressAssignFailed';
+    this.cause = cause;
+    this.released = released;
+  }
+}
+
+export interface CIAddressAssign {
+  subnetId: string;
+  ciId: string;
+  role: IPAddressRole;
+  type: 'static' | 'reserved';
+  interfaceId?: string;
+  dnsName?: string;
+}
+
+/**
+ * useAssignCIAddress allocates the next free address of a subnet (POST
+ * /subnets/{id}/allocate with interface, type and DNS name) and binds it to
+ * the CI with its role (PATCH /ips/{id} with ci_id and role). A failed PATCH
+ * releases the allocated address again (DELETE /ips/{id}) and rejects with
+ * CIAddressAssignFailed. Interfaces, addresses and the IPAM views refresh
+ * either way.
+ */
+export function useAssignCIAddress() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: CIAddressAssign): Promise<IPAddress> => {
+      const data: IPAllocate = { type: input.type };
+      if (input.interfaceId) data.interface_id = input.interfaceId;
+      if (input.dnsName) data.dns_name = input.dnsName;
+      const allocated = await ipamApi.allocateAddress(input.subnetId, data);
+      try {
+        return await ipamApi.updateIPAddress(allocated.id, {
+          ci_id: input.ciId,
+          role: input.role,
+        });
+      } catch (err) {
+        let released = true;
+        try {
+          await ipamApi.deleteIPAddress(allocated.id);
+        } catch {
+          released = false;
+        }
+        throw new CIAddressAssignFailed(err, released);
+      }
+    },
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: ['ipam'] });
+    },
   });
 }
 

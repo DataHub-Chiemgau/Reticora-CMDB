@@ -39,6 +39,7 @@ import {
   useLocationNames,
 } from '../components/cmdb/CIDetailSections';
 import { CIRelationshipsCard } from '../components/cmdb/CIRelationshipsCard';
+import { NetworkSection } from '../components/cmdb/NetworkSection';
 import { ScopeBanner } from '../components/ScopeBanner';
 import { CITemplatesSection } from '../components/metamodel/CITemplatesSection';
 
@@ -367,6 +368,11 @@ export function CIDetailPage() {
           </Card>
         </div>
       </div>
+
+      {/* Network (IPM-13, UI-14, WP-919): interfaces with their addresses
+          and the management IP, after the neighbors and in full width;
+          only with ipam:read, otherwise neither shown nor read. */}
+      <NetworkSection ciId={ci.id} managementIp={ci.management_ip} />
 
       {/* Advanced sections (progressive disclosure, spec §18): instance
           fields, lifecycle, impact analysis, then provenance, metrics and
