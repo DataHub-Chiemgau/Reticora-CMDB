@@ -39,7 +39,7 @@ func newSuspendEnv(t *testing.T) *suspendEnv {
 	e := &suspendEnv{t: t, f: f}
 	e.group = e.scalar(`INSERT INTO collector_group (organization_id, name) VALUES ($1, 'wp942') RETURNING id::text`, f.OrgA)
 	e.collector = e.scalar(`INSERT INTO collector (organization_id, name, status) VALUES ($1, 'wp942', 'active') RETURNING id::text`, f.OrgA)
-	e.exec(`UPDATE collector_group_member SET group_id = $1 WHERE collector_id = $2`, e.group, e.collector)
+	e.exec(`UPDATE collector_group_member SET group_id = $1, last_alive_at = now() WHERE collector_id = $2`, e.group, e.collector)
 	e.plan(entitlement.FeatureMonitoring, entitlement.FeatureMonitoringNetwork) // pro
 	return e
 }

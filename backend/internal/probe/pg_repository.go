@@ -39,10 +39,13 @@ type PGRepository struct {
 func (r *PGRepository) SetAssignTrigger(t AssignTrigger) { r.assign = t }
 
 // groupCandidates loads the members of a collector group with the
-// capability report of their collector (WP-966): healthy is the COL-05
-// status active (until WP-963).
+// capability report of their collector (WP-966): healthy is the
+// monitoring liveness of the member, healthy or degraded (WP-963), not the
+// COL-05 status of the collector. A member that never sent a monitoring
+// alive message (last_alive_at NULL: not started yet, without the probe
+// engine) takes no probes; its first alive message assigns its group.
 func groupCandidates(ctx context.Context, tx pgx.Tx, orgID, groupID string) ([]Candidate, error) {
-	rows, err := tx.Query(ctx, `SELECT m.collector_id::text, m.priority, m.weight, c.status = 'active', c.probe_capabilities
+	rows, err := tx.Query(ctx, `SELECT m.collector_id::text, m.priority, m.weight, m.member_status IN ('healthy', 'degraded') AND m.last_alive_at IS NOT NULL, c.probe_capabilities
 		FROM collector_group_member m
 		JOIN collector c ON c.organization_id = m.organization_id AND c.id = m.collector_id
 		WHERE m.organization_id = $1 AND m.group_id = $2`, orgID, groupID)

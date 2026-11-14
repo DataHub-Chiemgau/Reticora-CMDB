@@ -33,7 +33,7 @@ func newAssignEnv(t *testing.T) *assignEnv {
 	for i := range 3 {
 		c := e.scalar(`INSERT INTO collector (organization_id, name, status) VALUES ($1, $2, 'active') RETURNING id::text`,
 			f.OrgA, fmt.Sprintf("wp941-%d", i))
-		e.exec(`UPDATE collector_group_member SET group_id = $1 WHERE collector_id = $2`, e.group, c)
+		e.exec(`UPDATE collector_group_member SET group_id = $1, last_alive_at = now() WHERE collector_id = $2`, e.group, c)
 		e.collectors = append(e.collectors, c)
 	}
 	return e
@@ -170,7 +170,7 @@ func TestAssignmentEpochIncrements(t *testing.T) {
 
 	// The third collector goes offline: only its probes move.
 	gone := e.collectors[2]
-	e.exec(`UPDATE collector SET status = 'offline' WHERE id = $1`, gone)
+	e.exec(`UPDATE collector_group_member SET member_status = 'down' WHERE collector_id = $1`, gone)
 	if _, err := a.RunGroup(ctx, e.f.OrgA, e.group); err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestAssignmentEpochIncrements(t *testing.T) {
 		}
 	}
 	// Epochs never go down: a probe that comes back gets epoch + 1 again.
-	e.exec(`UPDATE collector SET status = 'active' WHERE id = $1`, gone)
+	e.exec(`UPDATE collector_group_member SET member_status = 'healthy' WHERE collector_id = $1`, gone)
 	if _, err := a.RunGroup(ctx, e.f.OrgA, e.group); err != nil {
 		t.Fatal(err)
 	}
@@ -262,9 +262,12 @@ func TestAssignSingleRunnerTwoInstances(t *testing.T) {
 			t.Errorf("probe %s: epoch %d, want 1 (one run)", a.ProbeID, a.Epoch)
 		}
 	}
-	// The system job probe.assign runs every 10 s.
-	if s := first.Schedule(); s.Kind != AssignKind || s.Spec != "@every 10s" {
+	// The system job probe.assign runs every 5 s (WP-963), configurable.
+	if s := first.Schedule(); s.Kind != AssignKind || s.Spec != "@every 5s" {
 		t.Errorf("schedule %s %s", s.Kind, s.Spec)
+	}
+	if s := first.WithTick(2 * time.Second).Schedule(); s.Spec != "@every 2s" {
+		t.Errorf("schedule with tick 2 s: %s", s.Spec)
 	}
 }
 
@@ -394,7 +397,7 @@ func TestAssignmentEpochSurvivesRemoval(t *testing.T) {
 	e.run(a, e.group)
 	first := step("first run")
 	// A move to another member.
-	e.exec(`UPDATE collector SET status = 'offline' WHERE id = $1`, first.CollectorID)
+	e.exec(`UPDATE collector_group_member SET member_status = 'down' WHERE collector_id = $1`, first.CollectorID)
 	e.run(a, e.group)
 	step("move")
 	// Disable: the assignment goes; enable: it comes back higher.
@@ -410,7 +413,7 @@ func TestAssignmentEpochSurvivesRemoval(t *testing.T) {
 	// assignment both times).
 	other := e.scalar(`INSERT INTO collector_group (organization_id, name) VALUES ($1, 'wp941-other') RETURNING id::text`, e.f.OrgA)
 	c := e.scalar(`INSERT INTO collector (organization_id, name, status) VALUES ($1, 'wp941-other', 'active') RETURNING id::text`, e.f.OrgA)
-	e.exec(`UPDATE collector_group_member SET group_id = $1 WHERE collector_id = $2`, other, c)
+	e.exec(`UPDATE collector_group_member SET group_id = $1, last_alive_at = now() WHERE collector_id = $2`, other, c)
 	e.exec(`UPDATE probe SET collector_group_id = $1 WHERE id = $2`, other, id)
 	e.run(a, other)
 	step("group change")
@@ -418,7 +421,7 @@ func TestAssignmentEpochSurvivesRemoval(t *testing.T) {
 	e.run(a, e.group)
 	back := step("group change back")
 	// The member leaves the group: the trigger drops the assignment.
-	e.exec(`UPDATE collector_group_member SET group_id = $1 WHERE collector_id = $2`, other, back.CollectorID)
+	e.exec(`UPDATE collector_group_member SET group_id = $1, last_alive_at = now() WHERE collector_id = $2`, other, back.CollectorID)
 	e.run(a, e.group)
 	step("member left")
 	var hw int64
@@ -440,7 +443,7 @@ func TestAssignRunWaitsForProbeDelete(t *testing.T) {
 	a := NewAssigner(e.f.App)
 	e.run(a, e.group)
 	first, _ := e.epochOf(id)
-	e.exec(`UPDATE collector SET status = 'offline' WHERE id = $1`, first.CollectorID)
+	e.exec(`UPDATE collector_group_member SET member_status = 'down' WHERE collector_id = $1`, first.CollectorID)
 
 	bg := context.Background()
 	tx, err := e.f.Admin.Begin(bg)

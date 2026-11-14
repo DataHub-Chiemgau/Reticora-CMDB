@@ -79,7 +79,7 @@ func newProfileEnv946(t *testing.T, limits map[string]int64) *profileEnv946 {
 	e := &profileEnv946{probeEnv: &probeEnv{t: t, f: f, mux: mux}}
 	e.cgroup = e.scalar(`INSERT INTO collector_group (organization_id, name) VALUES ($1, 'wp946') RETURNING id::text`, f.OrgA)
 	e.collector = e.scalar(`INSERT INTO collector (organization_id, name, status) VALUES ($1, 'wp946', 'active') RETURNING id::text`, f.OrgA)
-	e.exec(`UPDATE collector_group_member SET group_id = $1 WHERE collector_id = $2`, e.cgroup, e.collector)
+	e.exec(`UPDATE collector_group_member SET group_id = $1, last_alive_at = now() WHERE collector_id = $2`, e.cgroup, e.collector)
 	e.ci1 = f.CI(t, f.OrgA, f.Client1, "wp946-ci1")
 	e.ci2 = f.CI(t, f.OrgA, f.Client2, "wp946-ci2")
 	return e

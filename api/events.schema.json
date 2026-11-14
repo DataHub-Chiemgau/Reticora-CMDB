@@ -3481,15 +3481,20 @@
       ]
     },
     "collector_group.failover": {
-      "description": "Data of collector_group.failover. entity_id: the collector group. Origin: EVT-03 [P3], E-161. Producer: WP-963. the group, its scope and the root event of a network outage.",
+      "description": "Data of collector_group.failover. entity_id: the collector group. Origin: EVT-03 [P3], E-161. Producer: WP-963. a member of the group stopped its monitoring alive messages; its probes moved to the remaining healthy members.",
       "type": "object",
-      "required": ["id"],
+      "required": ["id", "collector_group_id", "failed_collector_id", "moved_probes"],
       "additionalProperties": true,
       "properties": {
         "id": {
           "type": "string",
           "format": "uuid",
           "description": "The collector group."
+        },
+        "collector_group_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The collector group (same as id)."
         },
         "client_id": {
           "type": "string",
@@ -3501,18 +3506,25 @@
           "format": "uuid",
           "description": "Site of the object; absent without site."
         },
-        "root_event_id": {
+        "failed_collector_id": {
           "type": "string",
           "format": "uuid",
-          "description": "The root event of the network outage (collector_group.unreachable)."
+          "description": "The member set down after the liveness timeout of its group."
+        },
+        "moved_probes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of probes that moved from the failed member to the remaining healthy members."
         }
       },
       "examples": [
         {
           "id": "11111111-1111-4111-8111-111111111111",
+          "collector_group_id": "11111111-1111-4111-8111-111111111111",
           "client_id": "33333333-3333-4333-8333-333333333333",
           "site_id": "44444444-4444-4444-8444-444444444444",
-          "root_event_id": "99999999-9999-4999-8999-999999999999"
+          "failed_collector_id": "99999999-9999-4999-8999-999999999999",
+          "moved_probes": 1000
         }
       ]
     },

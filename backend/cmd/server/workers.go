@@ -754,17 +754,21 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 		// monitoring.
 		if d.modules.Enabled(server.ModuleMonitoring) {
 			systemJobs = append(systemJobs, alarm.NewRetention(pool).Schedule())
-			// Probe assignment (PRB-03, PRB-11, WP-941): every 10 s each
-			// collector group under its lock probe_assign:<group>, the
-			// worker probe_assign under RETICORA_WORKER_PROBE_ASSIGN_ENABLED;
-			// a committed probe write assigns its groups at once on the
+			// Probe assignment (PRB-03, PRB-11, WP-941): every 5 s
+			// (RETICORA_PROBE_ASSIGN_TICK) the liveness sweep of the group
+			// members (PRB-10, WP-963: a member without monitoring alive
+			// message within the liveness timeout is down, its probes move
+			// at once, collector_group.failover) and then each collector
+			// group under its lock probe_assign:<group>, the worker
+			// probe_assign under RETICORA_WORKER_PROBE_ASSIGN_ENABLED; a
+			// committed probe write assigns its groups at once on the
 			// instance that served it.
-			assigner := probe.NewAssigner(pool)
+			assigner := probe.NewAssigner(pool).WithTick(d.cfg.ProbeAssignTick)
 			var notifier probe.AssignmentNotifier = probe.LogNotifier{}
 			if d.coreNATS != nil {
 				notifier = probe.NewNATSAssignmentNotifier(d.coreNATS)
 			}
-			assigner.WithNotifier(notifier)
+			assigner.WithNotifier(notifier).WithLiveness(probe.NewLiveness(pool).WithNotifier(notifier))
 			if store, ok := d.repos.Probes.(*probe.PGRepository); ok {
 				store.SetAssignTrigger(assigner)
 			}

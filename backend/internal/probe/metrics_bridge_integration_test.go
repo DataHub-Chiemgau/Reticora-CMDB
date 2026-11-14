@@ -41,7 +41,7 @@ func newBridgeEnv(t *testing.T) *bridgeEnv {
 	e := &bridgeEnv{t: t, f: f, store: probe.NewPGIngestStore(f.App)}
 	group := e.scalar(`INSERT INTO collector_group (organization_id, name) VALUES ($1, 'wp976') RETURNING id::text`, f.OrgA)
 	e.collect = e.scalar(`INSERT INTO collector (organization_id, name, status) VALUES ($1, 'wp976', 'active') RETURNING id::text`, f.OrgA)
-	e.exec(`UPDATE collector_group_member SET group_id = $1 WHERE collector_id = $2`, group, e.collect)
+	e.exec(`UPDATE collector_group_member SET group_id = $1, last_alive_at = now() WHERE collector_id = $2`, group, e.collect)
 	e.ci = f.CI(t, f.OrgA, f.Client1, "wp976-ci")
 	e.probeID = e.scalar(`INSERT INTO probe (organization_id, ci_id, collector_group_id, type, target) VALUES ($1, $2, $3, 'icmp', '10.76.0.1')
 		RETURNING id::text`, f.OrgA, e.ci, group)

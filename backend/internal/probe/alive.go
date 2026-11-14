@@ -192,6 +192,9 @@ func (st *skewState) step(offsetMS int64, now time.Time) skewStep {
 type ClockSkew struct {
 	pool *pgxpool.Pool
 	now  func() time.Time
+	// returned learns after the commit that a down member became
+	// assignable again (WP-963): its group is assigned at once.
+	returned func(ctx context.Context, orgID, collectorID string)
 
 	mu    sync.Mutex
 	state map[string]*skewEntry // collector → state
@@ -210,6 +213,14 @@ func NewClockSkew(pool *pgxpool.Pool) *ClockSkew {
 // WithClock replaces the clock of the log throttling (tests).
 func (c *ClockSkew) WithClock(now func() time.Time) *ClockSkew {
 	c.now = now
+	return c
+}
+
+// OnMemberReturned calls f after the commit of the alive message that made
+// a down member assignable again (WP-963 AK2: a status change assigns the
+// group at once).
+func (c *ClockSkew) OnMemberReturned(f func(ctx context.Context, orgID, collectorID string)) *ClockSkew {
+	c.returned = f
 	return c
 }
 
@@ -256,15 +267,21 @@ func (c *ClockSkew) Observe(ctx context.Context, orgID, collectorID string, aliv
 	defer e.mu.Unlock()
 	var step skewStep
 	var m member
+	returned := false
 	scope := database.OrgWideScope(orgID, "")
 	err := database.WithTenant(ctx, c.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
 		var client, site *string
 		var calm, settle int16
+		var prevAlive *time.Time
+		var timeoutS float64
+		returned = false
 		st := e.st
-		err := tx.QueryRow(ctx, `SELECT group_id::text, client_id::text, site_id::text, member_status,
-				clock_skew_warned, clock_skew_calm, clock_skew_settle
-			  FROM collector_group_member WHERE organization_id = $1 AND collector_id = $2 FOR UPDATE`, orgID, collectorID).
-			Scan(&m.group, &client, &site, &m.status, &st.warned, &calm, &settle)
+		err := tx.QueryRow(ctx, `SELECT m.group_id::text, m.client_id::text, m.site_id::text, m.member_status,
+				m.clock_skew_warned, m.clock_skew_calm, m.clock_skew_settle, m.last_alive_at, extract(epoch FROM g.liveness_timeout)::float8
+			  FROM collector_group_member m
+			  JOIN collector_group g ON g.organization_id = m.organization_id AND g.id = m.group_id
+			 WHERE m.organization_id = $1 AND m.collector_id = $2 FOR UPDATE OF m`, orgID, collectorID).
+			Scan(&m.group, &client, &site, &m.status, &st.warned, &calm, &settle, &prevAlive, &timeoutS)
 		if errors.Is(err, pgx.ErrNoRows) {
 			// No member: only the gauge, no event (nothing to degrade).
 			st.warned, st.degraded, st.below2, st.below30 = false, false, 0, 0
@@ -285,13 +302,24 @@ func (c *ClockSkew) Observe(ctx context.Context, orgID, collectorID string, aliv
 		st.below2, st.below30 = int(calm), int(settle)
 		step = st.step(offset, c.now())
 		status := m.status
+		// A down member returns with the second alive message within one
+		// timeout of its group (WP-963 AK1): healthy, or degraded below
+		// when its clock still deviates by more than 60 s.
+		if status == MemberDown && MemberReturns(prevAlive, receivedAt, time.Duration(timeoutS*float64(time.Second))) {
+			status, returned = MemberHealthy, true
+		}
+		// The first alive message of a member makes it assignable
+		// (groupCandidates): its group is assigned at once as well.
+		if prevAlive == nil && status != MemberDown {
+			returned = true
+		}
 		switch {
-		case step.degrade && m.status == MemberHealthy:
+		case step.degrade && status == MemberHealthy:
 			status = MemberDegraded
 		case step.degrade:
 			// A member down (liveness) is not degraded for its clock.
 			step.degrade, step.next.degraded = false, false
-		case step.recover && m.status == MemberDegraded:
+		case step.recover && status == MemberDegraded:
 			status = MemberHealthy
 		}
 		if _, err := tx.Exec(ctx, `UPDATE collector_group_member
@@ -303,6 +331,10 @@ func (c *ClockSkew) Observe(ctx context.Context, orgID, collectorID string, aliv
 			orgID, collectorID, receivedAt.UTC(), int32(max(min(step.median, 1<<31-1), -(1<<31))), status, //nolint:gosec // clamped to int32
 			step.next.warned, int16(min(step.next.below2, ClockSkewWindow)), int16(min(step.next.below30, ClockSkewWindow))); err != nil { //nolint:gosec // at most ClockSkewWindow
 			return fmt.Errorf("write group member: %w", err)
+		}
+		if returned && c.returned != nil {
+			notify := c.returned
+			database.AfterCommit(database.ContextWithTx(ctx, tx), func(ctx context.Context) { notify(ctx, orgID, collectorID) })
 		}
 		var emit []events.CollectorClockSkewData
 		base := events.CollectorClockSkewData{ID: collectorID, CollectorID: collectorID, CollectorGroupID: m.group,
@@ -338,6 +370,10 @@ func (c *ClockSkew) Observe(ctx context.Context, orgID, collectorID string, aliv
 	}
 	e.st = step.next
 	clockOffset.WithLabelValues(collectorID).Set(float64(step.median) / 1000)
+	if returned {
+		slog.Info("collector group member assignable (first alive message or return)", "organization_id", orgID, "collector_id", collectorID,
+			"collector_group_id", m.group)
+	}
 	if step.log {
 		slog.Warn("collector clock deviates from the server; synchronize it with NTP or chrony",
 			"organization_id", orgID, "collector_id", collectorID, "offset_ms", step.median, "degraded", e.st.degraded)

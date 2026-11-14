@@ -42,7 +42,7 @@ func newStateEnv(t *testing.T) *stateEnv {
 	for i := range 2 {
 		c := e.scalar(`INSERT INTO collector (organization_id, name, status) VALUES ($1, $2, 'active') RETURNING id::text`, f.OrgA,
 			fmt.Sprintf("wp961-%d", i))
-		e.exec(`UPDATE collector_group_member SET group_id = $1, priority = $2 WHERE collector_id = $3`, e.group, 10-i, c)
+		e.exec(`UPDATE collector_group_member SET group_id = $1, priority = $2, last_alive_at = now() WHERE collector_id = $3`, e.group, 10-i, c)
 		e.collectors = append(e.collectors, c)
 	}
 	e.applier = probe.NewStateApplier(js, cfg, f.App)

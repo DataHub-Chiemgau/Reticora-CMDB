@@ -491,6 +491,20 @@ type CollectorGroupData struct {
 	RootEventID string `json:"root_event_id,omitempty"`
 }
 
+// CollectorGroupFailoverData is the data of collector_group.failover
+// (PRB-03, PRB-10, WP-963): a member of the group stopped its monitoring
+// alive messages and its probes moved to the remaining healthy members.
+// ID and CollectorGroupID are the group, FailedCollectorID the member set
+// down, MovedProbes the number of probes assigned anew.
+type CollectorGroupFailoverData struct {
+	ID                string `json:"id"`
+	CollectorGroupID  string `json:"collector_group_id"`
+	ClientID          string `json:"client_id,omitempty"`
+	SiteID            string `json:"site_id,omitempty"`
+	FailedCollectorID string `json:"failed_collector_id"`
+	MovedProbes       int    `json:"moved_probes"`
+}
+
 // CollectorClockSkewData is the data of collector.clock_skew: a collector
 // whose clock deviates from the server (PRB-09, WP-962). SkewMS is the
 // median offset collector − server, OffsetMS the same under the name of
@@ -790,7 +804,7 @@ var Payloads = map[string]any{
 	IncidentResolved:            IncidentData{},
 	CollectorGroupUnreachable:   CollectorGroupData{},
 	CollectorGroupReachable:     CollectorGroupData{},
-	CollectorGroupFailover:      CollectorGroupData{},
+	CollectorGroupFailover:      CollectorGroupFailoverData{},
 	CollectorClockSkew:          CollectorClockSkewData{},
 	ProbeConfigChanged:          ProbeConfigChangedData{},
 	CIConfigChanged:             CIConfigChangedData{},

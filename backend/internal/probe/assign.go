@@ -31,9 +31,9 @@ import (
 // member with the highest priority (on a tie the smaller collector id).
 // A suspended probe (suspended_reason, WP-942) is treated like a disabled
 // one: it loses its assignment. Without a healthy member the assignments
-// stay as they are (network down,
-// WP-964). Until the monitoring liveness of WP-963 a member is healthy when
-// its collector has the status active (COL-05).
+// stay as they are (network down, WP-964). A member is healthy by its
+// monitoring liveness (member_status healthy or degraded, WP-963), not by
+// the COL-05 status of its collector.
 //
 // Every changed assignment gets epoch + 1, the fencing token of PRB-11,
 // and assigned_at; an unchanged one keeps its epoch. The epoch is counted
@@ -50,8 +50,10 @@ import (
 // AssignKind is the system job of the worker probe_assign.
 const AssignKind = "probe.assign"
 
-// AssignSpec runs the assignment of every group every 10 seconds.
-const AssignSpec = "@every 10s"
+// DefaultAssignTick is the default interval of the system job probe.assign
+// (RETICORA_PROBE_ASSIGN_TICK, WP-963 AK2): every tick sweeps the silent
+// members (Liveness.Sweep) and then assigns every group.
+const DefaultAssignTick = 5 * time.Second
 
 // assignTimeout bounds an assignment run after a probe write.
 const assignTimeout = 30 * time.Second
@@ -307,13 +309,34 @@ type AssignTrigger interface {
 type Assigner struct {
 	pool     *pgxpool.Pool
 	notifier AssignmentNotifier
+	// liveness sweeps the silent members before every run (WP-963); nil
+	// leaves the member status as it is.
+	liveness *Liveness
+	tick     time.Duration
+	now      func() time.Time
 	// locked runs after the group lock is held (tests).
 	locked func(groupID string)
 }
 
 // NewAssigner returns the engine on pool with the logging notifier.
 func NewAssigner(pool *pgxpool.Pool) *Assigner {
-	return &Assigner{pool: pool, notifier: LogNotifier{}}
+	return &Assigner{pool: pool, notifier: LogNotifier{}, tick: DefaultAssignTick, now: time.Now}
+}
+
+// WithLiveness sweeps the members of every group with l before each run of
+// the system job (WP-963 AK2).
+func (a *Assigner) WithLiveness(l *Liveness) *Assigner {
+	a.liveness = l
+	return a
+}
+
+// WithTick sets the interval of the system job; a value of at most zero
+// keeps DefaultAssignTick.
+func (a *Assigner) WithTick(d time.Duration) *Assigner {
+	if d > 0 {
+		a.tick = d
+	}
+	return a
 }
 
 // WithNotifier sets the notifier of the changed collectors.
@@ -322,12 +345,24 @@ func (a *Assigner) WithNotifier(n AssignmentNotifier) *Assigner {
 	return a
 }
 
-// Schedule is the system job probe.assign (@every 10s).
+// Schedule is the system job probe.assign (every tick, default 5 s).
 func (a *Assigner) Schedule() jobs.Schedule {
-	return jobs.Schedule{Kind: AssignKind, Spec: AssignSpec, MaxCatchUp: 1, Run: func(ctx context.Context) error {
-		_, err := a.Run(ctx)
+	return jobs.Schedule{Kind: AssignKind, Spec: "@every " + a.tick.String(), MaxCatchUp: 1, Run: func(ctx context.Context) error {
+		_, err := a.Tick(ctx, a.now())
 		return err
 	}}
+}
+
+// Tick is one run of the system job at now: the liveness sweep (it assigns
+// the groups of the members it sets down at once) and then the assignment
+// of every group. A failed sweep does not stop the assignment.
+func (a *Assigner) Tick(ctx context.Context, now time.Time) (int, error) {
+	var serr error
+	if a.liveness != nil {
+		_, serr = a.liveness.Sweep(ctx, now)
+	}
+	n, err := a.Run(ctx)
+	return n, errors.Join(serr, err)
 }
 
 // Run assigns every collector group of every organization. A failing

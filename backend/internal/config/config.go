@@ -219,6 +219,12 @@ type Config struct {
 	EventsMaxAge   time.Duration
 	EventsMaxBytes int64
 
+	// ProbeAssignTick is the interval of the system job probe.assign
+	// (RETICORA_PROBE_ASSIGN_TICK, default 5 s, 1–30 s; PRB-03, PRB-10,
+	// WP-963): every tick sweeps the members without monitoring alive
+	// message and assigns the collector groups.
+	ProbeAssignTick time.Duration
+
 	// ADMPCacheTTLDays is the TTL of a fetched ADMP entry (ADM-03, E-243,
 	// WP-929): admp.expire removes it with its personal surrogates after
 	// it (RETICORA_ADMP_CACHE_TTL_DAYS, 1 to 3650, default 30).
@@ -368,6 +374,7 @@ func Load() *Config {
 		RetentionWorkflowRunDays: l.integer("RETICORA_RETENTION_WORKFLOW_RUN_DAYS", DefaultRetentionWorkflowRunDays),
 		EventsMaxAge:             l.duration("RETICORA_EVENTS_MAX_AGE", DefaultEventsMaxAge),
 		EventsMaxBytes:           l.int64("RETICORA_EVENTS_MAX_BYTES", DefaultEventsMaxBytes),
+		ProbeAssignTick:          l.duration("RETICORA_PROBE_ASSIGN_TICK", DefaultProbeAssignTick),
 		ADMPCacheTTLDays:         l.integer("RETICORA_ADMP_CACHE_TTL_DAYS", DefaultADMPCacheTTLDays),
 		VulnfeedCSAFProviders:    splitList(l.str("RETICORA_VULNFEED_CSAF_PROVIDERS", "")),
 		VulnfeedCSAFInterval:     l.duration("RETICORA_VULNFEED_CSAF_INTERVAL", DefaultVulnfeedCSAFInterval),
@@ -509,9 +516,15 @@ const (
 // Retention of the event stream RETICORA_EVENTS (EVT-01): 30 days and
 // 10 GB by default; the events are kept at least 30 days (NFR-06).
 const (
-	DefaultEventsMaxAge   = 30 * 24 * time.Hour
-	MinEventsMaxAge       = 30 * 24 * time.Hour
-	DefaultEventsMaxBytes = int64(10) << 30
+	DefaultEventsMaxAge = 30 * 24 * time.Hour
+	// DefaultProbeAssignTick, MinProbeAssignTick and MaxProbeAssignTick
+	// bound RETICORA_PROBE_ASSIGN_TICK (WP-963): above 30 s the failover
+	// of a member could exceed 60 s (PRB-03).
+	DefaultProbeAssignTick = 5 * time.Second
+	MinProbeAssignTick     = time.Second
+	MaxProbeAssignTick     = 30 * time.Second
+	MinEventsMaxAge        = 30 * 24 * time.Hour
+	DefaultEventsMaxBytes  = int64(10) << 30
 )
 
 // Ingest lanes per organization (RETICORA_INGEST_LANES, WP-334): the
@@ -562,8 +575,9 @@ const (
 	WorkerComputedRefresh = "computed_refresh"
 	// WorkerProbeAssign runs as the system job probe.assign of the
 	// scheduler: the assignment of the probes to the members of their
-	// collector group every 10 s (PRB-03, PRB-11, WP-941; module
-	// monitoring).
+	// collector group every 5 s (RETICORA_PROBE_ASSIGN_TICK), after the
+	// liveness sweep of the members (PRB-03, PRB-10, PRB-11, WP-941,
+	// WP-963; module monitoring).
 	WorkerProbeAssign = "probe_assign"
 	// WorkerProbeIngest consumes the probe result batches of the stream
 	// RETICORA_PROBE and writes them to probe_result (NFR-11, PRB-07,
@@ -797,6 +811,9 @@ func (c *Config) Validate(noDB bool) error {
 		if r.value < r.min {
 			errs = append(errs, fmt.Errorf("%s must be at least %d (NFR-06), got %d", r.key, r.min, r.value))
 		}
+	}
+	if c.ProbeAssignTick < MinProbeAssignTick || c.ProbeAssignTick > MaxProbeAssignTick {
+		errs = append(errs, fmt.Errorf("RETICORA_PROBE_ASSIGN_TICK must be between %s and %s, got %s", MinProbeAssignTick, MaxProbeAssignTick, c.ProbeAssignTick))
 	}
 	if c.EventsMaxAge < MinEventsMaxAge {
 		errs = append(errs, fmt.Errorf("RETICORA_EVENTS_MAX_AGE must be at least 30d (NFR-06), got %s", c.EventsMaxAge))

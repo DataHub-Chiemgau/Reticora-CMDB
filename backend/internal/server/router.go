@@ -929,9 +929,14 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			probeEdge.WithFeatures(opts.Entitlements)
 		}
 		// Every alive message writes last_alive_at and the clock offset of
-		// the group member (PRB-09, WP-962).
+		// the group member (PRB-09, WP-962); a down member that is alive
+		// again assigns its group at once (PRB-10, WP-963).
 		if opts.AuditPool != nil {
-			probeEdge.OnAlive(probe.NewClockSkew(opts.AuditPool).Hook())
+			skew := probe.NewClockSkew(opts.AuditPool)
+			if pg, ok := repos.Probes.(*probe.PGRepository); ok {
+				skew.OnMemberReturned(pg.CollectorChanged)
+			}
+			probeEdge.OnAlive(skew.Hook())
 		}
 		// The capability report of an alive message is stored like the
 		// one of the heartbeat (PRT-18, WP-966).

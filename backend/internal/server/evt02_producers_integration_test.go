@@ -276,6 +276,7 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 		probeGroup                         string
 		stateCollector, stateProbe         string
 		skewCollector                      string
+		failGroup, failCollector           string
 		admpSync                           *admp.Sync
 		alarms                             = alarm.NewPGService(f.App)
 		ackAlarm, sevAlarm, resAlarm       *alarm.Alarm
@@ -784,7 +785,7 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 				group := scalar(t, `INSERT INTO collector_group (organization_id, name) VALUES ($1, 'evt02-state') RETURNING id::text`, f.OrgA)
 				stateCollector = scalar(t, `INSERT INTO collector (organization_id, name, status) VALUES ($1, 'evt02-state', 'active')
 					RETURNING id::text`, f.OrgA)
-				exec(t, `UPDATE collector_group_member SET group_id = $1 WHERE collector_id = $2`, group, stateCollector)
+				exec(t, `UPDATE collector_group_member SET group_id = $1, last_alive_at = now() WHERE collector_id = $2`, group, stateCollector)
 				stateProbe = scalar(t, `INSERT INTO probe (organization_id, client_id, collector_group_id, type, target)
 					VALUES ($1, $2, $3, 'icmp', '10.250.2.1') RETURNING id::text`, f.OrgA, f.Client1, group)
 				exec(t, `INSERT INTO probe_assignment (probe_id, organization_id, collector_id, epoch) VALUES ($1, $2, $3, 1)`,
@@ -831,6 +832,42 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 				if data["id"] != entity || data["collector_id"] != entity || data["skew_ms"] != float64(5000) ||
 					data["offset_ms"] != float64(5000) || data["degraded"] != false || data["collector_group_id"] == nil {
 					t.Errorf("collector.clock_skew data %v", data)
+				}
+			}},
+		{typ: events.CollectorGroupFailover,
+			// The liveness sweep of probe.assign (WP-963): A's last alive
+			// message is a minute old, B is alive; A's probe moves to B.
+			setup: func(t *testing.T) {
+				failGroup = scalar(t, `INSERT INTO collector_group (organization_id, client_id, name)
+					VALUES ($1, $2, 'evt02-failover') RETURNING id::text`, f.OrgA, f.Client1)
+				for i := range 2 {
+					c := scalar(t, `INSERT INTO collector (organization_id, client_id, name, status) VALUES ($1, $2, $3, 'active')
+						RETURNING id::text`, f.OrgA, f.Client1, fmt.Sprintf("evt02-failover-%d", i))
+					exec(t, `UPDATE collector_group_member SET group_id = $1, last_alive_at = now() WHERE collector_id = $2`, failGroup, c)
+				}
+				exec(t, `INSERT INTO probe (organization_id, client_id, collector_group_id, type, target)
+					VALUES ($1, $2, $3, 'icmp', '10.250.4.1')`, f.OrgA, f.Client1, failGroup)
+				if _, err := probe.NewAssigner(f.App).RunGroup(context.Background(), f.OrgA, failGroup); err != nil {
+					t.Fatal(err)
+				}
+				failCollector = scalar(t, `SELECT a.collector_id::text FROM probe_assignment a JOIN probe p ON p.id = a.probe_id
+					WHERE p.collector_group_id = $1`, failGroup)
+				exec(t, `UPDATE collector_group_member SET last_alive_at = now() - interval '1 minute' WHERE collector_id = $1`, failCollector)
+			},
+			act: func(t *testing.T, refused bool) string {
+				_, err := probe.NewLiveness(f.App).SweepOrg(context.Background(), f.OrgA, time.Now().Add(time.Second))
+				failed(t, "collector liveness sweep", err, refused)
+				if refused {
+					unchanged(t, "member status", scalar(t, `SELECT member_status FROM collector_group_member WHERE collector_id = $1`,
+						failCollector), "healthy")
+					return ""
+				}
+				return failGroup
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["collector_group_id"] != entity || data["client_id"] != f.Client1 ||
+					data["failed_collector_id"] != failCollector || data["moved_probes"] != float64(1) {
+					t.Errorf("collector_group.failover data %v", data)
 				}
 			}},
 		{typ: events.MonitoringSuspensionChanged,
@@ -2011,7 +2048,6 @@ var plannedProducers = map[string]string{
 	"incident.resolved":           "WP-1028",
 	"collector_group.unreachable": "WP-964",
 	"collector_group.reachable":   "WP-964",
-	"collector_group.failover":    "WP-963",
 	"ci.config_changed":           "WP-1054",
 	"capacity.forecast_exceeded":  "WP-1060",
 	"sla.violated":                "WP-1049",
