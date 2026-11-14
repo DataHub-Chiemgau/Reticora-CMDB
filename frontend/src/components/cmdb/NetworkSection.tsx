@@ -31,7 +31,7 @@ import {
   type NetworkInterface,
 } from '../../api/cmdb';
 import { useHasPermission } from '../../api/hooks';
-import { useEntitlements } from '../../hooks/useEntitlements';
+import { useEntitlements, useModules } from '../../hooks/useEntitlements';
 import {
   CIAddressAssignFailed,
   useAddressReviews,
@@ -71,13 +71,21 @@ function bareIP(value: string | undefined): string {
 /**
  * NetworkSection renders nothing without ipam:read, without the feature
  * ipam in the plan of the organization (the server refuses the reads with
- * 403 there) and while either loads, so the CI detail sends no IPAM
- * request for such a session.
+ * 403 there), when the release switches the module ipam off (then
+ * /cis/{id}/addresses does not exist: 404) and while any of them loads, so
+ * the CI detail sends no IPAM request for such a session.
  */
 export function NetworkSection(props: NetworkSectionProps) {
   const canRead = useHasPermission('ipam:read');
   const entitlements = useEntitlements();
-  if (canRead !== true || entitlements.isLoading || !entitlements.isEnabled('ipam')) return null;
+  const modules = useModules();
+  const on =
+    canRead === true &&
+    !entitlements.isLoading &&
+    entitlements.isEnabled('ipam') &&
+    !modules.isLoading &&
+    modules.isModuleEnabled('ipam');
+  if (!on) return null;
   return <NetworkSectionBody {...props} />;
 }
 

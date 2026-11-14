@@ -97,6 +97,8 @@ interface Options {
   reviews?: Json[];
   /** Whether the plan of the organization holds the feature ipam. */
   ipam?: boolean;
+  /** Whether the release serves the module ipam. */
+  ipamModule?: boolean;
   onWrite?: (method: string, path: string, body: Json) => Response | undefined;
 }
 
@@ -109,6 +111,7 @@ function stubApi({
   ],
   reviews = [],
   ipam = true,
+  ipamModule = true,
   onWrite,
 }: Options = {}) {
   const calls: { method: string; path: string; params: URLSearchParams; body?: Json }[] = [];
@@ -126,6 +129,9 @@ function stubApi({
       return json(addr(IP_NEW, '10.9.0.7', body ?? {}));
     }
     if (path === '/me/permissions') return json({ user_id: 'u', permissions });
+    if (path === '/modules') {
+      return json({ data: [{ key: 'ipam', phase: 'P3', enabled: ipamModule, nav: [] }] });
+    }
     if (path === '/entitlements') {
       return json(page([{ feature_key: 'ipam', enabled: ipam, plan: 'pro' }]));
     }
@@ -322,6 +328,7 @@ describe('NetworkSection', () => {
         calls.push({ method: 'GET', path, params: new URLSearchParams() });
         if (path.endsWith('/me/permissions'))
           return json({ user_id: 'u', permissions: ['ipam:read'] });
+        if (path.endsWith('/modules')) return json({ data: [] });
         if (path.endsWith('/entitlements'))
           return json(page([{ feature_key: 'ipam', enabled: true, plan: 'pro' }]));
         return json({ type: 'about:blank', title: 'Internal', status: 500 }, 500);
@@ -447,9 +454,9 @@ describe('NetworkSection', () => {
     await waitFor(() => expect(calls.some((c) => c.path === '/me/permissions')).toBe(true));
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(container).toBeEmptyDOMElement();
-    expect(calls.filter((c) => c.path !== '/me/permissions' && c.path !== '/entitlements')).toEqual(
-      [],
-    );
+    expect(
+      calls.filter((c) => !['/me/permissions', '/entitlements', '/modules'].includes(c.path)),
+    ).toEqual([]);
   });
 
   it('sends no IPAM request when the plan lacks the feature ipam', async () => {
@@ -459,9 +466,21 @@ describe('NetworkSection', () => {
     await waitFor(() => expect(calls.some((c) => c.path === '/entitlements')).toBe(true));
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(container).toBeEmptyDOMElement();
-    expect(calls.filter((c) => c.path !== '/me/permissions' && c.path !== '/entitlements')).toEqual(
-      [],
-    );
+    expect(
+      calls.filter((c) => !['/me/permissions', '/entitlements', '/modules'].includes(c.path)),
+    ).toEqual([]);
+  });
+
+  it('sends no IPAM request when the release switches the module ipam off', async () => {
+    const calls = stubApi({ ipamModule: false });
+    const { container } = renderSection();
+
+    await waitFor(() => expect(calls.some((c) => c.path === '/modules')).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(container).toBeEmptyDOMElement();
+    expect(
+      calls.filter((c) => !['/me/permissions', '/entitlements', '/modules'].includes(c.path)),
+    ).toEqual([]);
   });
 
   it('has no axe findings', async () => {
