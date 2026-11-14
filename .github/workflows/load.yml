@@ -81,6 +81,15 @@
 # takes over unchanged (tests/load/archive-run.sh, tests/load/README.md).
 # The evidence of three runs is evaluated from their archives by the median
 # rule of E-58 (tests/load/evaluate-runs.sh, self-test in the job prepare).
+#
+# Collector capacity (WP-958, NFR-11, PRB-04): the job collector-capacity
+# runs the capacity test of the collector module (go test -tags load
+# ./probe/...): the complete probe engine with 5,000 ping probes every 30 s
+# against a fake ICMP socket (10 % timeouts) and a fake edge for
+# collector_capacity_duration (default 3 min). It needs neither the server
+# nor a database, is independent of scenarios and uploads the measured
+# values as collector-capacity-<run id> (docs/ops/sizing.md derives the
+# collector sizes from them). collector_capacity = false leaves it out.
 name: Load test
 
 on:
@@ -114,6 +123,13 @@ on:
           - G2
           - G1
         default: G2
+      collector_capacity:
+        description: "Run the capacity test of the collector (WP-958: 5,000 ping probes every 30 s)"
+        type: boolean
+        default: true
+      collector_capacity_duration:
+        description: "Real run time of the collector capacity test (at least 70s)"
+        default: "3m"
   schedule:
     - cron: "17 2 * * *"
 
@@ -702,6 +718,47 @@ jobs:
         with:
           name: load-results-${{ matrix.scenario }}
           path: load-results/
+
+  # WP-958 (NFR-11, PRB-04): capacity of the collector's probe engine. The
+  # test fails above its budgets (drift p99 < 500 ms, heap < 256 MiB, no
+  # goroutine leak, at most 2 spool files/s, no overrun or skipped check, no
+  # second above 1.5 × the mean starts); the measured values are uploaded
+  # also when it fails.
+  collector-capacity:
+    name: Collector capacity
+    if: github.event_name != 'workflow_dispatch' || inputs.collector_capacity
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.11"
+          cache-dependency-path: collector/go.sum
+
+      - name: Run the capacity test
+        working-directory: collector
+        env:
+          RETICORA_CAPACITY_DURATION: ${{ inputs.collector_capacity_duration || '3m' }}
+          RETICORA_CAPACITY_OUT: ${{ runner.temp }}/collector-capacity/capacity.json
+        run: |
+          mkdir -p "$(dirname "$RETICORA_CAPACITY_OUT")"
+          go test -tags load -count=1 -run 'TestCollectorCapacity' -timeout 25m -v ./probe/... \
+            | tee "$(dirname "$RETICORA_CAPACITY_OUT")/go-test.txt"
+          test "${PIPESTATUS[0]}" -eq 0
+          {
+            echo '### Collector capacity (WP-958)'
+            echo '```json'
+            cat "$RETICORA_CAPACITY_OUT"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: collector-capacity-${{ github.run_id }}
+          path: ${{ runner.temp }}/collector-capacity/
 
   # WP-439 (E-58, NFR-10): one artifact per run, load-archive-<run id>, with
   # the k6 summaries, run records and outcomes of every selected job and

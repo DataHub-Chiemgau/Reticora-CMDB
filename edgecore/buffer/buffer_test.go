@@ -1120,3 +1120,72 @@ func TestPeekAfterContinuesBehindCursor(t *testing.T) {
 		}
 	}
 }
+
+// TestEnqueueSizeEstimateKeepsTheLimit: the size estimate that spares the
+// scan of the spool on every Enqueue (WP-958) never admits a message beyond
+// MaxBytes, and room freed by an Ack is found again by the next scan.
+func TestEnqueueSizeEstimateKeepsTheLimit(t *testing.T) {
+	ctx := testCtx(t)
+	probe := &DiskBuffer{Dir: t.TempDir()}
+	id, err := probe.Enqueue(ctx, &Message{ID: "m0", Topic: "t", Payload: []byte("aaaa")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(filepath.Join(probe.Dir, id+".json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	size := info.Size()
+
+	b := &DiskBuffer{Dir: t.TempDir(), MaxBytes: 3 * size, MinRetention: time.Hour}
+	var ids []string
+	for i := range 3 {
+		id, err := b.Enqueue(ctx, &Message{ID: fmt.Sprintf("m%d", i), Topic: "t", Payload: []byte("aaaa")})
+		if err != nil {
+			t.Fatalf("message %d: %v", i, err)
+		}
+		ids = append(ids, id)
+	}
+	if _, err := b.Enqueue(ctx, &Message{ID: "m3", Topic: "t", Payload: []byte("aaaa")}); !errors.Is(err, ErrSpoolFull) {
+		t.Fatalf("fourth message: %v, want ErrSpoolFull", err)
+	}
+	if err := b.Ack(ctx, ids[:1]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Enqueue(ctx, &Message{ID: "m4", Topic: "t", Payload: []byte("aaaa")}); err != nil {
+		t.Fatalf("after an Ack: %v, want room for one message", err)
+	}
+	if n, err := b.Len(ctx); err != nil || n != 3 {
+		t.Fatalf("Len = %d, %v; want 3", n, err)
+	}
+}
+
+// TestWritesCountsSpoolFiles: Writes counts every file written into the
+// spool and nothing else (WP-958 derives the spool write rate from it).
+func TestWritesCountsSpoolFiles(t *testing.T) {
+	b := &DiskBuffer{Dir: t.TempDir()}
+	ctx := testCtx(t)
+	if got := b.Writes(); got != 0 {
+		t.Fatalf("Writes() = %d before any write, want 0", got)
+	}
+	var ids []string
+	for i := range 3 {
+		id, err := b.Enqueue(ctx, &Message{Topic: "metrics", Payload: fmt.Appendf(nil, "m%d", i)})
+		if err != nil {
+			t.Fatalf("Enqueue: %v", err)
+		}
+		ids = append(ids, id)
+	}
+	if got := b.Writes(); got != 3 {
+		t.Fatalf("Writes() = %d after three messages, want 3", got)
+	}
+	if _, err := b.PeekBatch(ctx, 10); err != nil {
+		t.Fatalf("PeekBatch: %v", err)
+	}
+	if err := b.Ack(ctx, ids); err != nil {
+		t.Fatalf("Ack: %v", err)
+	}
+	if got := b.Writes(); got != 3 {
+		t.Fatalf("Writes() = %d after reading and acknowledging, want 3", got)
+	}
+}

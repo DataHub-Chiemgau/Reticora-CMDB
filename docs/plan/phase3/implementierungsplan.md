@@ -6587,6 +6587,10 @@ NFR-11;[P3];E;collector/probe/capacity_test.go;WP-958
 PRB-04;[P3];E;collector/probe/capacity_test.go;WP-958
 ```
 
+**Abweichung (Umsetzung):**
+- AK2: Die Spool-Schreibrate ≤ 2 Dateien/s gilt für den Ergebnis-Spool über den ganzen Lauf und für den ganzen Spool im eingeschwungenen Zustand, nicht für den Kaltstart der State-Queue. Die erste Zuweisung schreibt je Probe eine fsync-Datei (unknown → up), damit kein Zustandswechsel bei einem Absturz verloren geht (`docs/ops/sizing.md`, „Cold start“).
+- AK3/PRB-04: Der Nachweis gilt für 5.000 Probes. Mit „Phase = Hash(probe_id) mod Intervall“ verteilen sich die Starts zufällig; bei wenigen hundert Probes liegt die Spitze über 1,5 × Mittelwert (500 Probes ≈ 1,56 ×). `TestCollectorCapacitySpreadsStarts` überspringt deshalb verkürzte Läufe unter 5.000 Probes. PRB-04 („ab 100 Probes“) ist damit nur für 5.000 Probes belegt; offener Befund zu PRB-04/WP-951.
+
 **Entscheidungsbedarf:** keiner
 
 **Nicht Bestandteil:**
