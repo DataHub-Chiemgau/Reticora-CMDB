@@ -1844,7 +1844,7 @@
       }
     },
     "rpki_roa": {
-      "status": "planned",
+      "status": "available",
       "min_interval_s": 60,
       "default_interval_s": 300,
       "max_interval_s": 86400,
@@ -1858,35 +1858,67 @@
       "max_rate_per_collector": 100,
       "max_probes_per_target": 100,
       "max_payload_bytes": 65536,
-      "max_rows": 100,
+      "max_rows": 1000,
       "credential_namespaces": [],
       "capabilities": [],
       "params": {
         "type": "object",
         "additionalProperties": false,
+        "required": [
+          "routes"
+        ],
         "properties": {
-          "pairs": {
+          "validator": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "The validator of the shared RTR session (as of an rpki_rtr probe); without host the target of the probe.",
+            "properties": {
+              "host": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 253,
+                "description": "Address or name of the validator."
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535,
+                "default": 323,
+                "description": "RTR port of the validator."
+              }
+            }
+          },
+          "routes": {
             "type": "array",
+            "maxItems": 1000,
+            "description": "Prefix/origin AS pairs validated after RFC 6811.",
             "items": {
               "type": "object",
               "additionalProperties": false,
-              "properties": {
-                "prefix": {
-                  "type": "string",
-                  "maxLength": 43
-                },
-                "origin_as": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "maximum": 4294967295
-                }
-              },
               "required": [
                 "prefix",
                 "origin_as"
-              ]
-            },
-            "maxItems": 100
+              ],
+              "properties": {
+                "prefix": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 43,
+                  "description": "IPv4 or IPv6 prefix without host bits."
+                },
+                "origin_as": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 4294967295,
+                  "description": "Origin AS of the route."
+                }
+              }
+            }
+          },
+          "notfound_degraded": {
+            "type": "boolean",
+            "default": true,
+            "description": "A route without covering VRP is degraded (ok with rpki_notfound); false: up."
           }
         }
       }

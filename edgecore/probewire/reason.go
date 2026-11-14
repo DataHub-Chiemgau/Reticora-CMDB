@@ -68,6 +68,9 @@ const (
 	// ReasonPayloadLimit: an answer exceeded the message limit of the type
 	// (gnmi: 4 MiB, WP-1016); an error (→ unknown), the target answered.
 	ReasonPayloadLimit = "payload_limit"
+	// ReasonRPKIInvalid: a route is RPKI invalid after RFC 6811 (covering
+	// VRPs, none matched; rpki_roa, WP-1021); a failed check (→ down).
+	ReasonRPKIInvalid = "rpki_invalid"
 
 	// WarnThresholdExceeded: the check succeeded but a threshold (RTT,
 	// loss, value) was violated.
@@ -111,6 +114,9 @@ const (
 	// evaluates and was cut (gnmi: 10,000 updates, WP-1016); ok → degraded
 	// at least, label truncated=true.
 	WarnTruncated = "truncated"
+	// WarnRPKINotFound: a route has no covering VRP (rpki_roa with
+	// notfound_degraded, WP-1021); ok → degraded.
+	WarnRPKINotFound = "rpki_notfound"
 )
 
 // WarnCodes are the codes of a successful check with a warning; a result
@@ -128,6 +134,7 @@ var WarnCodes = map[string]bool{
 	WarnSubnetMismatch:    true,
 	WarnPathMissing:       true,
 	WarnTruncated:         true,
+	WarnRPKINotFound:      true,
 }
 
 // reasons lists every valid reason code apart from the warn codes.
@@ -153,6 +160,7 @@ var reasons = map[string]bool{
 	ReasonLOS:                  true,
 	ReasonVRPLimit:             true,
 	ReasonPayloadLimit:         true,
+	ReasonRPKIInvalid:          true,
 }
 
 // ValidReason reports whether code is a known reason or warn code.

@@ -21,7 +21,7 @@ var registerKeys = []string{
 
 // availableKeys are the types whose work package has set them available.
 var availableKeys = []string{
-	"icmp", "tcp", "dns", "http", "snmp_status", "snmp_if", "snmp_custom", "bgp", "bng", "pon", "bfd", "optical", "redfish", "ospf", "isis", "tr069", "rpki_rtr", "dhcp", "stamp", "gnmi",
+	"icmp", "tcp", "dns", "http", "snmp_status", "snmp_if", "snmp_custom", "bgp", "bng", "pon", "bfd", "optical", "redfish", "ospf", "isis", "tr069", "rpki_rtr", "dhcp", "stamp", "gnmi", "rpki_roa",
 }
 
 func repoFile(t *testing.T, rel string) []byte {
@@ -681,7 +681,7 @@ func TestHTTPLimits(t *testing.T) {
 func TestTypesDeclareMetricNames(t *testing.T) {
 	for typ, name := range map[string]string{"icmp": "jitter_ms", "http": "ttfb_ms", "dns": "probe_dns_rcode",
 		"redfish": "probe_redfish_temperature_celsius", "ospf": "probe_ospf_neighbor_state", "isis": "probe_isis_adjacency_state",
-		"tr069": "probe_tr069_last_inform_age_seconds", "rpki_rtr": "probe_rpki_vrps", "stamp": "probe_stamp_loss_ratio", "dhcp": "probe_dhcp_response_seconds",
+		"tr069": "probe_tr069_last_inform_age_seconds", "rpki_rtr": "probe_rpki_vrps", "rpki_roa": "probe_rpki_roa_state", "stamp": "probe_stamp_loss_ratio", "dhcp": "probe_dhcp_response_seconds",
 		"bfd": "probe_bfd_session_state", "optical": "probe_optical_rx_dbm", "snmp_status": "probe_snmp_reboot",
 		"snmp_if": "probe_if_in_bps", "snmp_custom": "probe_snmp_custom",
 		"bgp": "probe_bgp_peer_state", "bng": "probe_bng_sessions",

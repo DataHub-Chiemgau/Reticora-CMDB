@@ -266,6 +266,7 @@ var typeMetrics = map[string][]string{
 		"probe_tr069_parameter", "probe_tr069_truncated"},
 	"rpki_rtr": {"probe_rpki_rtr_up", "probe_rpki_serial", "probe_rpki_vrps", "probe_rpki_data_age_seconds",
 		"probe_rpki_protocol_version"},
+	"rpki_roa": {"probe_rpki_roa_state", "probe_rpki_roa_routes"},
 	"bfd": {"probe_bfd_session_state", "probe_bfd_diag", "probe_bfd_truncated", "probe_bfd_sessions",
 		"probe_bfd_sessions_down", "probe_bfd_sessions_unseen"},
 	"optical": {"probe_optical_rx_dbm", "probe_optical_tx_dbm", "probe_optical_temperature_celsius",
@@ -412,6 +413,7 @@ var paramChecks = map[string]func(spec *ProbeSpec, params map[string]any) []Fiel
 	"dhcp":        func(_ *ProbeSpec, params map[string]any) []FieldError { return checkDHCPParams(params) },
 	"stamp":       checkSTAMPParams,
 	"gnmi":        func(_ *ProbeSpec, params map[string]any) []FieldError { return checkGNMIParams(params) },
+	"rpki_roa":    func(_ *ProbeSpec, params map[string]any) []FieldError { return checkROAParams(params) },
 	"http":        func(_ *ProbeSpec, params map[string]any) []FieldError { return checkHTTPParams(params) },
 }
 
@@ -977,6 +979,26 @@ func ValidDNSName(name string) bool {
 		}
 	}
 	return true
+}
+
+// checkROAParams checks the routes of the rpki_roa type (PRT-17, WP-1021
+// AK1): every prefix an IPv4 or IPv6 prefix without host bits.
+func checkROAParams(params map[string]any) []FieldError {
+	var errs []FieldError
+	routes, _ := params["routes"].([]any)
+	for i, item := range routes {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if text, ok := entry["prefix"].(string); ok {
+			p, err := netip.ParsePrefix(strings.TrimSpace(text))
+			if err != nil || p != p.Masked() || p.Addr().Is4In6() {
+				errs = append(errs, FieldError{Field: fmt.Sprintf("params.routes[%d].prefix", i), Message: "must be a prefix without host bits"})
+			}
+		}
+	}
+	return errs
 }
 
 // gnmiTemplateNames are the value names of the paths each gnmi template

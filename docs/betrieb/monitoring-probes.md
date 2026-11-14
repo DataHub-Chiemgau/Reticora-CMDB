@@ -866,6 +866,39 @@ mit den Labels `error_code` (Zahl) und `error` (z. B.
 `probe_rpki_vrps{af=ipv4|ipv6}`, `probe_rpki_data_age_seconds` (seit dem
 letzten End of Data) und `probe_rpki_protocol_version`.
 
+## RPKI-ROA-Validierung (`rpki_roa`)
+
+Standard nach PRT-17 und E-154: Intervall 300 s (60 s–24 h), Timeout 1 s
+(1–5 s), 100 Prüfungen/s je Collector, höchstens 1.000 Routen je Probe.
+Parameter: `validator` mit `host` (ohne Angabe das Ziel der Probe) und
+`port` (Standard 323), `routes[]` mit `prefix` (IPv4 oder IPv6 ohne
+Host-Bits) und `origin_as` (1–4294967295) sowie `notfound_degraded`
+(Standard `true`). Die VRP-Tabelle stammt aus der gemeinsamen RTR-Session
+des Validators (siehe `rpki_rtr`); ohne Session öffnet die erste Prüfung
+sie und wartet bis zum Timeout auf das erste End of Data.
+
+Bewertung je Route nach RFC 6811 Abschnitt 2: Ein VRP deckt die Route
+ab, wenn sein Präfix das Routenpräfix enthält; er passt, wenn er sie
+abdeckt, die Routenlänge höchstens seine maxLength ist und sein AS dem
+Origin-AS entspricht und nicht 0 ist. `valid` mit mindestens einem
+passenden VRP, `invalid` mit abdeckenden VRPs ohne Treffer, `notfound`
+ohne abdeckenden VRP. Die Suche nutzt die Präfixstruktur der sortierten
+Tabelle (je Präfixlänge eine binäre Suche): 1.000 Routen gegen 2 Mio. VRPs
+in weniger als 50 ms.
+
+| Ergebnis | Bedeutung | Zustand |
+|---|---|---|
+| `ok` | alle Routen `valid` (bzw. `notfound` ohne `notfound_degraded`) | `up` |
+| `ok`/`rpki_notfound` | mindestens eine Route `notfound` mit `notfound_degraded` | `degraded` |
+| `fail`/`rpki_invalid` | mindestens eine Route `invalid` | zählt auf `down` |
+| `error`/`rpki_stale` | kein End of Data bis zum Timeout oder Daten älter als Expire | `unknown` |
+| `error`/`config` | ungültige Parameter (Feld im Label `field`) | `unknown` |
+
+Die betroffenen Routen nennen die Labels `invalid` und `notfound`
+(`<Präfix> AS<n>`, höchstens 50, weitere als `+n`). Werte:
+`probe_rpki_roa_state{origin_as,prefix}` (0 valid, 1 notfound, 2 invalid)
+und `probe_rpki_roa_routes{state=valid|notfound|invalid}`.
+
 ## Typtabelle
 
 Zeiten in Sekunden, Rate in Prüfungen je Sekunde. Die Werte sind Startwerte
@@ -896,7 +929,7 @@ nach E-154; WP-1023 misst die Raten nach.
 | `tr069` | available | 900 / 300 / 86400 | 30 / 1 / 60 | 3 / 1 | 1 | 4 | 5 | 1 | 1048576 | 10000 | acs | – |
 | `usp` | planned | 900 / 300 / 86400 | 30 / 1 / 60 | 3 / 1 | 1 | 4 | 5 | 1 | 1048576 | 256 | acs | – |
 | `rpki_rtr` | available | 300 / 60 / 86400 | 30 / 1 / 120 | 3 / 1 | 1 | 4 | 1 | 1 | 67108864 | 2000000 | – | – |
-| `rpki_roa` | planned | 300 / 60 / 86400 | 1 / 1 / 5 | 3 / 1 | 1 | 64 | 100 | 100 | 65536 | 100 | – | – |
+| `rpki_roa` | available | 300 / 60 / 86400 | 1 / 1 / 5 | 3 / 1 | 1 | 64 | 100 | 100 | 65536 | 1000 | – | – |
 <!-- probe-types:end -->
 
 Payload- und Zeilengrenzen (`max_payload_bytes`, `max_rows`) stehen in den
