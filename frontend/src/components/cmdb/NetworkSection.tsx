@@ -31,6 +31,7 @@ import {
   type NetworkInterface,
 } from '../../api/cmdb';
 import { useHasPermission } from '../../api/hooks';
+import { useEntitlements } from '../../hooks/useEntitlements';
 import {
   CIAddressAssignFailed,
   useAddressReviews,
@@ -68,12 +69,15 @@ function bareIP(value: string | undefined): string {
 }
 
 /**
- * NetworkSection renders nothing without ipam:read (and while the rights
- * load), so the CI detail sends no IPAM request for such a session.
+ * NetworkSection renders nothing without ipam:read, without the feature
+ * ipam in the plan of the organization (the server refuses the reads with
+ * 403 there) and while either loads, so the CI detail sends no IPAM
+ * request for such a session.
  */
 export function NetworkSection(props: NetworkSectionProps) {
   const canRead = useHasPermission('ipam:read');
-  if (canRead !== true) return null;
+  const entitlements = useEntitlements();
+  if (canRead !== true || entitlements.isLoading || !entitlements.isEnabled('ipam')) return null;
   return <NetworkSectionBody {...props} />;
 }
 

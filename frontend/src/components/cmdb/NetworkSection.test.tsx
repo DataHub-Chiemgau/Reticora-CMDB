@@ -14,6 +14,7 @@
 import axe from 'axe-core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { useAuthStore } from '../../auth/authStore';
 import { renderWithProviders } from '../../test/utils';
 import i18n from '../../i18n';
 import { NetworkSection } from './NetworkSection';
@@ -94,6 +95,8 @@ interface Options {
   addresses?: Json[];
   interfaces?: Json[];
   reviews?: Json[];
+  /** Whether the plan of the organization holds the feature ipam. */
+  ipam?: boolean;
   onWrite?: (method: string, path: string, body: Json) => Response | undefined;
 }
 
@@ -105,6 +108,7 @@ function stubApi({
     nic(IF_B, 'mgmt0', { is_management: true, is_uplink: true }),
   ],
   reviews = [],
+  ipam = true,
   onWrite,
 }: Options = {}) {
   const calls: { method: string; path: string; params: URLSearchParams; body?: Json }[] = [];
@@ -122,6 +126,9 @@ function stubApi({
       return json(addr(IP_NEW, '10.9.0.7', body ?? {}));
     }
     if (path === '/me/permissions') return json({ user_id: 'u', permissions });
+    if (path === '/entitlements') {
+      return json(page([{ feature_key: 'ipam', enabled: ipam, plan: 'pro' }]));
+    }
     if (path === '/vrfs') {
       return json(page([{ id: VRF, organization_id: ORG, name: 'global', is_default: true }]));
     }
@@ -176,12 +183,19 @@ async function openAssign() {
 }
 
 beforeEach(async () => {
+  // Signed in, so the plan (GET /entitlements) is read as in the app.
+  useAuthStore.setState({
+    token: 'header.payload.signature',
+    expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+    user: { sub: 'user-1' },
+  });
   await i18n.changeLanguage('de-DE');
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  useAuthStore.setState({ token: null, expiresAt: null, user: null });
 });
 
 describe('NetworkSection', () => {
@@ -308,6 +322,8 @@ describe('NetworkSection', () => {
         calls.push({ method: 'GET', path, params: new URLSearchParams() });
         if (path.endsWith('/me/permissions'))
           return json({ user_id: 'u', permissions: ['ipam:read'] });
+        if (path.endsWith('/entitlements'))
+          return json(page([{ feature_key: 'ipam', enabled: true, plan: 'pro' }]));
         return json({ type: 'about:blank', title: 'Internal', status: 500 }, 500);
       }),
     );
@@ -431,7 +447,21 @@ describe('NetworkSection', () => {
     await waitFor(() => expect(calls.some((c) => c.path === '/me/permissions')).toBe(true));
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(container).toBeEmptyDOMElement();
-    expect(calls.filter((c) => c.path !== '/me/permissions')).toEqual([]);
+    expect(calls.filter((c) => c.path !== '/me/permissions' && c.path !== '/entitlements')).toEqual(
+      [],
+    );
+  });
+
+  it('sends no IPAM request when the plan lacks the feature ipam', async () => {
+    const calls = stubApi({ ipam: false });
+    const { container } = renderSection();
+
+    await waitFor(() => expect(calls.some((c) => c.path === '/entitlements')).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(container).toBeEmptyDOMElement();
+    expect(calls.filter((c) => c.path !== '/me/permissions' && c.path !== '/entitlements')).toEqual(
+      [],
+    );
   });
 
   it('has no axe findings', async () => {
