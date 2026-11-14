@@ -1294,6 +1294,12 @@ const ROUTES: A11yRoute[] = [
     ready: (page) => page.locator('#main-content td', { hasText: 'a11y-import-srv' }),
   },
   { path: '/monitoring', url: '/monitoring', ready: text(M.alert) },
+  // WP-1157: the organization data (full export and deletion).
+  {
+    path: '/org-data',
+    url: '/org-data',
+    ready: (page) => page.locator('#main-content h1').first(),
+  },
   // WP-1080: the monitoring settings (profiles, groups, auto_ping).
   {
     path: '/monitoring/settings',

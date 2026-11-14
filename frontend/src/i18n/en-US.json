@@ -57,7 +57,8 @@
     "clients": "Customers",
     "plan": "Plan and add-ons",
     "alarms": "Alarms",
-    "incidents": "Incidents"
+    "incidents": "Incidents",
+    "org-data": "Organization data"
   },
   "common": {
     "save": "Save",
@@ -128,7 +129,8 @@
       "suppliers": "Open suppliers",
       "plan": "Open plan and add-ons",
       "alarms": "Open alarms",
-      "incidents": "Open incidents"
+      "incidents": "Open incidents",
+      "orgData": "Open organization data"
     },
     "contact": {
       "label": "Contact",
@@ -6283,6 +6285,64 @@
         "bindFailed": "The credential could not be bound. {{reason}}",
         "unbindFailed": "The binding could not be removed. {{reason}}"
       }
+    }
+  },
+  "orgData": {
+    "title": "Organization data",
+    "description": "Full export of all data of the organization and deletion of the organization.",
+    "noRights": "This page needs the right org:export or org:delete.",
+    "mfaHint": "Sign in with a second factor: this action needs a session opened with a second factor (MFA). Sign out and sign in again with MFA.",
+    "readOnly": "Organization is being deleted – read-only until {{date}}",
+    "readOnlyNoDate": "Organization is being deleted – read-only",
+    "states": {
+      "none": "no deletion requested",
+      "requested": "deletion requested",
+      "purging": "deletion running",
+      "purged": "deleted"
+    },
+    "exportStatuses": {
+      "queued": "queued",
+      "running": "running",
+      "completed": "completed",
+      "expired": "expired",
+      "failed": "failed",
+      "cancelled": "cancelled"
+    },
+    "export": {
+      "title": "Data export",
+      "intro": "The full export holds every table of the organization including the personal data, and the documents. It can be downloaded for 24 hours after it completed.",
+      "start": "Start export",
+      "failed": "The export could not be started.",
+      "loadFailed": "The exports could not be loaded.",
+      "none": "No full export yet.",
+      "columns": {
+        "created": "Started",
+        "status": "Status",
+        "progress": "Progress",
+        "expires": "Download until"
+      },
+      "objects": "Show objects",
+      "objectsTitle": "Objects of the export",
+      "until": "(available until {{date}})",
+      "objectMeta": "{{bytes}} bytes · link valid until {{date}}"
+    },
+    "delete": {
+      "title": "Delete organization",
+      "state": "State: {{state}}",
+      "exportFirst": "Export the data before the request: after the deletion it cannot be restored.",
+      "grace": "After the request the organization is read-only for 30 days and the collectors pause; then every piece of data is deleted for good. Until then you can withdraw the request.",
+      "mfaNote": "The request and the withdrawal need a session with a second factor (MFA).",
+      "confirmLabel": "Type the short name of the organization to confirm: {{slug}}",
+      "request": "Request deletion",
+      "due": "Final deletion on {{date}}",
+      "remaining": "Left: {{days}} days, {{hours}} hours",
+      "cancel": "Withdraw deletion",
+      "failed": "The action failed."
+    },
+    "banner": {
+      "label": "Deletion of the organization",
+      "text": "The deletion of the organization is requested: it is read-only until {{date}} and is deleted for good afterwards.",
+      "cancel": "Withdraw deletion"
     }
   }
 }

@@ -20900,7 +20900,7 @@ TLC-06;[P3];F;backend/internal/tenantapi/purge_protocol_test.go;WP-1156
 - [ ] **AK4:** `ApiError` mit Status 423 und Typ `org-pending-deletion` zeigt in allen Formularen die Meldung „Organisation wird gelöscht – nur Lesen bis <Datum>“ statt der allgemeinen Fehlermeldung.
 - [ ] **AK5:** Alle Texte stehen in `de-DE.json` und `en-US.json` (Enum-Werte von `deletion_state` und Exportstatus über den Katalog, GLO-10).
 
-**Dateien (11 Einträge):**
+**Dateien (18 Einträge):**
 
 - frontend/src/pages/OrgDataPage.tsx (neu)
 - frontend/src/pages/OrgDataPage.test.tsx (neu)
@@ -20913,6 +20913,7 @@ TLC-06;[P3];F;backend/internal/tenantapi/purge_protocol_test.go;WP-1156
 - frontend/src/i18n/de-DE.json
 - frontend/src/i18n/en-US.json
 - docs/traceability.csv
+- frontend/src/pages/MonitoringSettingsPage.tsx, frontend/src/pages/MonitoringSettingsPage.test.tsx, frontend/src/components/monitoring/GroupCredentialsPanel.tsx, frontend/src/components/monitoring/ProfileEditor.tsx (aus WP-1080), frontend/src/components/ipam/ScanTab.tsx (aus WP-1065), frontend/src/pages/SubnetDetailPage.tsx (aus WP-916): Formulare mit festem Fehlertext fragen zuerst `orgReadOnlyMessage` (AK4); weitere Formulare zeigen die Meldung über `err.message`/`err.detail`, das Banner erscheint nach dem ersten 423 einer Sitzung ohne Neuladen.
 
 **Migration/RLS:** keine.
 

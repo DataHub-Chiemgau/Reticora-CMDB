@@ -328,6 +328,30 @@ describe('MonitoringSettingsPage', () => {
     );
   });
 
+  it('auto_ping shows the read-only message on 423 org-pending-deletion', async () => {
+    stubApi({
+      onWrite: (method, path) =>
+        method === 'PATCH' && path === '/org'
+          ? json(
+              {
+                type: 'urn:reticora:problem:org-pending-deletion',
+                title: 'Organization pending deletion',
+                status: 423,
+                due_at: '2026-12-14T08:00:00Z',
+              },
+              423,
+            )
+          : undefined,
+    });
+    renderWithProviders(<MonitoringSettingsPage />);
+    const toggle = await screen.findByLabelText('Ping-Probes automatisch anlegen');
+    await waitFor(() => expect(toggle).toBeEnabled());
+    fireEvent.click(toggle);
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Organisation wird gelöscht – nur Lesen bis 14. Dezember 2026',
+    );
+  });
+
   it('schreibgeschützt ohne monitoring:write', async () => {
     const calls = stubApi({ permissions: ['monitoring:read'] });
     renderWithProviders(<MonitoringSettingsPage />);

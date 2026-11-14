@@ -57,7 +57,8 @@
     "clients": "Kunden",
     "plan": "Paket und Add-ons",
     "alarms": "Alarme",
-    "incidents": "Störungen"
+    "incidents": "Störungen",
+    "org-data": "Organisationsdaten"
   },
   "common": {
     "save": "Speichern",
@@ -128,7 +129,8 @@
       "suppliers": "Lieferanten öffnen",
       "plan": "Paket und Add-ons öffnen",
       "alarms": "Alarme öffnen",
-      "incidents": "Störungen öffnen"
+      "incidents": "Störungen öffnen",
+      "orgData": "Organisationsdaten öffnen"
     },
     "contact": {
       "label": "Kontakt",
@@ -6283,6 +6285,64 @@
         "bindFailed": "Die Zugangsart konnte nicht gebunden werden. {{reason}}",
         "unbindFailed": "Die Bindung konnte nicht entfernt werden. {{reason}}"
       }
+    }
+  },
+  "orgData": {
+    "title": "Organisationsdaten",
+    "description": "Vollexport aller Daten der Organisation und Löschung der Organisation.",
+    "noRights": "Für diese Seite brauchen Sie das Recht org:export oder org:delete.",
+    "mfaHint": "Mit zweitem Faktor anmelden: Diese Aktion verlangt eine Sitzung, die mit einem zweiten Faktor (MFA) geöffnet wurde. Melden Sie sich ab und mit MFA wieder an.",
+    "readOnly": "Organisation wird gelöscht – nur Lesen bis {{date}}",
+    "readOnlyNoDate": "Organisation wird gelöscht – nur Lesen",
+    "states": {
+      "none": "keine Löschung beantragt",
+      "requested": "Löschung beantragt",
+      "purging": "Löschung läuft",
+      "purged": "gelöscht"
+    },
+    "exportStatuses": {
+      "queued": "in Warteschlange",
+      "running": "läuft",
+      "completed": "abgeschlossen",
+      "expired": "abgelaufen",
+      "failed": "fehlgeschlagen",
+      "cancelled": "abgebrochen"
+    },
+    "export": {
+      "title": "Datenexport",
+      "intro": "Der Vollexport enthält alle Tabellen der Organisation einschließlich der personenbezogenen Daten sowie die Dokumente. Er kann 24 Stunden nach Abschluss heruntergeladen werden.",
+      "start": "Export starten",
+      "failed": "Der Export konnte nicht gestartet werden.",
+      "loadFailed": "Die Exporte konnten nicht geladen werden.",
+      "none": "Noch kein Vollexport.",
+      "columns": {
+        "created": "Gestartet",
+        "status": "Status",
+        "progress": "Fortschritt",
+        "expires": "Download bis"
+      },
+      "objects": "Objekte anzeigen",
+      "objectsTitle": "Objekte des Exports",
+      "until": "(abrufbar bis {{date}})",
+      "objectMeta": "{{bytes}} Byte · Link gültig bis {{date}}"
+    },
+    "delete": {
+      "title": "Organisation löschen",
+      "state": "Stand: {{state}}",
+      "exportFirst": "Exportieren Sie die Daten vor dem Antrag: Nach der Löschung lassen sie sich nicht wiederherstellen.",
+      "grace": "Nach dem Antrag ist die Organisation 30 Tage nur lesbar, die Collector pausieren; danach werden alle Daten endgültig gelöscht. Bis dahin können Sie den Antrag widerrufen.",
+      "mfaNote": "Antrag und Widerruf verlangen eine Sitzung mit zweitem Faktor (MFA).",
+      "confirmLabel": "Zur Bestätigung den Kurznamen der Organisation eingeben: {{slug}}",
+      "request": "Löschung beantragen",
+      "due": "Endgültige Löschung am {{date}}",
+      "remaining": "Verbleibend: {{days}} Tage, {{hours}} Stunden",
+      "cancel": "Löschung widerrufen",
+      "failed": "Die Aktion ist fehlgeschlagen."
+    },
+    "banner": {
+      "label": "Löschung der Organisation",
+      "text": "Die Löschung der Organisation ist beantragt: Sie ist bis zum {{date}} nur lesbar und wird danach endgültig gelöscht.",
+      "cancel": "Löschung widerrufen"
     }
   }
 }

@@ -214,6 +214,8 @@ export const navFeatureFor: Record<string, string | undefined> = {
   clients: undefined,
   // Plan and add-ons (WP-886) belong to every plan.
   plan: undefined,
+  // Organization data (WP-1157): the module org_lifecycle, no feature gate.
+  'org-data': undefined,
 };
 
 /**
@@ -223,7 +225,9 @@ export const navFeatureFor: Record<string, string | undefined> = {
  * administration needs citype:manage (WP-363, migration 000147, replaces
  * ci_type:manage); later metamodel pages add their permission here.
  */
-export const navPermissionFor: Record<string, string | undefined> = {
+export const navPermissionFor: Record<string, string | readonly string[] | undefined> = {
+  // Organization data (TLC-05, TLC-06, WP-1157): org:export or org:delete.
+  'org-data': ['org:export', 'org:delete'],
   'ci-types': 'citype:manage',
   // Plan and add-ons (PKG-06, WP-886): no feature gate, entitlement:read.
   plan: 'entitlement:read',
@@ -267,7 +271,11 @@ export function useNavAccess() {
         isPageEnabled: (page) => isPageServed(modules, page),
         isPermitted: (page) => {
           const required = navPermissionFor[page];
-          return !required || hasPermission(permissions, required);
+          if (!required) return true;
+          // A list asks for any one of its permissions.
+          return typeof required === 'string'
+            ? hasPermission(permissions, required)
+            : required.some((key) => hasPermission(permissions, key));
         },
       }),
     [entitlements, modules, permissions],

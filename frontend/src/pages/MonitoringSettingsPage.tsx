@@ -31,6 +31,7 @@ import {
   type MonitoringProfileLevel,
   type ProbeType,
   type SessionClaims,
+  orgReadOnlyMessage,
   sessionApi,
 } from '../api/client';
 import { useClients } from '../api/cmdbHooks';
@@ -283,7 +284,7 @@ function AutoPingSwitch() {
                   setFailure(
                     err instanceof ApiError && err.status === 403
                       ? t('monitoring.settings.autoPing.needsUserManage')
-                      : t('monitoring.settings.autoPing.failed'),
+                      : (orgReadOnlyMessage(err) ?? t('monitoring.settings.autoPing.failed')),
                   ),
               },
             );
@@ -466,7 +467,10 @@ function GroupsCard({ readOnly }: { readOnly: boolean }) {
                   );
                   if (opened === target.id) setOpened(undefined);
                 },
-                onError: () => setNotice(t('monitoring.settings.groups.deleteFailed')),
+                onError: (err) =>
+                  setNotice(
+                    orgReadOnlyMessage(err) ?? t('monitoring.settings.groups.deleteFailed'),
+                  ),
                 onSettled: () => setDeleting(null),
               });
             }}
@@ -507,7 +511,7 @@ function GroupForm({
       setErrors({ [err.field]: err.detail || t('monitoring.settings.groups.invalid') });
       return;
     }
-    setFailure(t('monitoring.settings.groups.saveFailed'));
+    setFailure(orgReadOnlyMessage(err) ?? t('monitoring.settings.groups.saveFailed'));
   };
 
   const submit = (event: FormEvent) => {
@@ -611,7 +615,7 @@ function GroupDetail({ group, readOnly }: { group: MonitoringGroup; readOnly: bo
             ? t('monitoring.settings.members.otherClient', { detail: err.detail ?? '' }).trim()
             : err instanceof ApiError && err.status === 404
               ? t('monitoring.settings.members.notFound')
-              : t('monitoring.settings.members.addFailed'),
+              : (orgReadOnlyMessage(err) ?? t('monitoring.settings.members.addFailed')),
         ),
     });
   };

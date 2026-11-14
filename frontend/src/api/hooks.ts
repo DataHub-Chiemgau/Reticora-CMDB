@@ -56,6 +56,8 @@ import {
   type FormDefinitionWrite,
   bffQueryPartial,
   ApiError,
+  orgLifecycleApi,
+  type OrganizationDeletion,
 } from '../api/client';
 import type {
   ComplianceReportRequest,
@@ -2493,4 +2495,66 @@ export function useReplaceSourceRanks() {
     mutationFn: (entries: SourceRankEntry[]) => sourceRankApi.replace(entries),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['source-ranks'] }),
   });
+}
+
+// ─── Organization data: full export and deletion (TLC-05, TLC-06, WP-1157) ───
+
+/** The full exports of the organization (org:export); enabled holds the request back. */
+export function useOrgExports(enabled = true) {
+  return useQuery({
+    queryKey: ['org-data', 'exports'],
+    queryFn: () => orgLifecycleApi.exports(),
+    enabled,
+    retry: false,
+    // A running export moves on: poll while one is queued or running.
+    refetchInterval: (query) =>
+      (query.state.data?.data ?? []).some((e) => e.status === 'queued' || e.status === 'running')
+        ? 5_000
+        : false,
+  });
+}
+
+/** Starting a full export (org:export with a second factor). */
+export function useStartOrgExport() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => orgLifecycleApi.startExport(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['org-data', 'exports'] }),
+  });
+}
+
+/** The objects of a completed export with their signed URLs. */
+export function useOrgExportDownload() {
+  return useMutation({ mutationFn: (id: string) => orgLifecycleApi.download(id) });
+}
+
+/**
+ * The deletion state of the organization (every user); enabled holds the
+ * request back (module org_lifecycle off).
+ */
+export function useOrgDeletion(enabled = true) {
+  return useQuery({
+    queryKey: ['org-data', 'deletion'],
+    queryFn: () => orgLifecycleApi.deletion(),
+    enabled,
+    retry: false,
+    staleTime: 60_000,
+  });
+}
+
+/** Requesting and withdrawing the deletion (org:delete with a second factor). */
+export function useOrgDeletionMutations() {
+  const queryClient = useQueryClient();
+  const settle = (state: OrganizationDeletion) =>
+    queryClient.setQueryData(['org-data', 'deletion'], state);
+  return {
+    request: useMutation({
+      mutationFn: (slug: string) => orgLifecycleApi.requestDeletion(slug),
+      onSuccess: settle,
+    }),
+    cancel: useMutation({
+      mutationFn: () => orgLifecycleApi.cancelDeletion(),
+      onSuccess: settle,
+    }),
+  };
 }

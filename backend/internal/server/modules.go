@@ -132,8 +132,9 @@ var LateModules = []Module{
 		"/api/v1/escalation-policies", "/api/v1/notification-escalations", "/api/v1/notification-callbacks",
 	}, Nav: []string{}},
 	// Full export and deletion of an organization (TLC-05, TLC-06).
+	// The page Organisationsdaten (WP-1157).
 	{Key: "org_lifecycle", Phase: "P3", Prefixes: []string{"/api/v1/org/exports", "/api/v1/org/deletion"},
-		Nav: []string{}},
+		Nav: []string{"org-data"}},
 	{Key: "keys", Phase: "P4", Prefixes: []string{"/api/v1/keys"}, Nav: []string{"keys"}},
 	{Key: "trainings", Phase: "P4", Prefixes: []string{"/api/v1/trainings", "/api/v1/training-assignments"},
 		Nav: []string{"trainings"}},

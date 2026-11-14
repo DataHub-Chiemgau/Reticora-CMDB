@@ -13,7 +13,12 @@
 import { Trash2 } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ApiError, type CredentialKind, type MonitoringGroup } from '../../api/client';
+import {
+  ApiError,
+  orgReadOnlyMessage,
+  type CredentialKind,
+  type MonitoringGroup,
+} from '../../api/client';
 import type { CredentialBinding, CredentialNamespace } from '../../api/cmdb';
 import { useCredentials, useHasPermission } from '../../api/hooks';
 import {
@@ -78,7 +83,7 @@ function GroupCredentialsBody({ group }: { group: MonitoringGroup }) {
     setFailure(
       err instanceof ApiError && err.status === 403
         ? t('monitoring.settings.credentials.forbidden')
-        : t('monitoring.settings.credentials.saveFailed'),
+        : (orgReadOnlyMessage(err) ?? t('monitoring.settings.credentials.saveFailed')),
     );
   };
 
@@ -168,7 +173,11 @@ function GroupCredentialsBody({ group }: { group: MonitoringGroup }) {
                   onUpdate={(data, onError) => update.mutate({ id: binding.id, data }, { onError })}
                   onRemove={() =>
                     remove.mutate(binding.id, {
-                      onError: () => setFailure(t('monitoring.settings.credentials.saveFailed')),
+                      onError: (err) =>
+                        setFailure(
+                          orgReadOnlyMessage(err) ??
+                            t('monitoring.settings.credentials.saveFailed'),
+                        ),
                     })
                   }
                 />

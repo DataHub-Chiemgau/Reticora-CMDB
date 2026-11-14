@@ -20,7 +20,7 @@
 import { Lock } from 'lucide-react';
 import { useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ApiError } from '../../api/client';
+import { ApiError, orgReadOnlyMessage } from '../../api/client';
 import { SCAN_TARGET_STATES, type Subnet, type SubnetScan } from '../../api/cmdb';
 import { useAllCollectors } from '../../api/hooks';
 import {
@@ -190,7 +190,7 @@ function ScanForm({
           setFailure(
             err instanceof ApiError && err.status === 403
               ? t('ipam.scan.forbidden')
-              : t('ipam.scan.saveFailed'),
+              : (orgReadOnlyMessage(err) ?? t('ipam.scan.saveFailed')),
           );
         },
       },
@@ -420,7 +420,8 @@ function NewHosts({ subnetId, canWrite }: { subnetId: string; canWrite: boolean 
                         onClick={() => {
                           setFailure(undefined);
                           adopt.mutate(row.id, {
-                            onError: () => setFailure(t('ipam.scan.adoptFailed')),
+                            onError: (err) =>
+                              setFailure(orgReadOnlyMessage(err) ?? t('ipam.scan.adoptFailed')),
                           });
                         }}
                       >

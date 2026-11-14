@@ -2,6 +2,7 @@ import { clearSession, getSessionToken, refreshSession } from '../auth/session';
 import { useScopeStore } from '../stores/scope';
 import { useMetamodelDraftStore } from '../stores/metamodelDraft';
 import type { components } from './generated/schema';
+import i18n from '../i18n';
 import type { Condition } from '../rules/rules';
 
 const API_BASE = '/api/v1';
@@ -578,6 +579,19 @@ export class ApiError extends Error {
         )
       : [];
 
+    // A write of the grace period of a deletion (423, WP-1153) says so in
+    // every form, with the end of the grace period (WP-1157).
+    if (status === 423 && type === PROBLEM_ORG_PENDING_DELETION) {
+      const message = orgPendingDeletionMessage((body as { due_at?: unknown }).due_at);
+      return new ApiError(status, message, {
+        title,
+        detail: message,
+        traceId,
+        problem: body as Record<string, unknown>,
+        type,
+      });
+    }
+
     return new ApiError(status, detail || title || statusText, {
       title,
       detail,
@@ -599,6 +613,44 @@ export class ApiError extends Error {
 export const PROBLEM_FEATURE_NOT_ENTITLED = 'https://reticora.io/problems/feature-not-entitled';
 /** The problem type of a 403 for a reached limit of the plan (ENT-06, E-44). */
 export const PROBLEM_ENTITLEMENT_LIMIT = 'https://reticora.io/problems/entitlement-limit';
+/**
+ * The problem type of a write during the grace period of a deletion of the
+ * organization (423, TLC-06, WP-1153): read-only until due_at.
+ */
+export const PROBLEM_ORG_PENDING_DELETION = 'urn:reticora:problem:org-pending-deletion';
+/**
+ * orgReadOnlyMessage is the message of a write refused during the grace
+ * period of a deletion (423 org-pending-deletion: "Organisation wird
+ * gelöscht – nur Lesen bis <Datum>"), undefined for any other error. A form
+ * with a fixed failure text asks it first (WP-1157 AK4).
+ */
+export function orgReadOnlyMessage(error: unknown): string | undefined {
+  return error instanceof ApiError &&
+    error.status === 423 &&
+    error.type === PROBLEM_ORG_PENDING_DELETION
+    ? error.message
+    : undefined;
+}
+
+/** The problem type of a write that needs a session with a second factor (403, WP-1151, WP-1152). */
+export const PROBLEM_MFA_REQUIRED = 'urn:reticora:problem:mfa-required';
+
+/** isMfaRequired tells a refusal for a session without a second factor (403 mfa-required). */
+export function isMfaRequired(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 403 && error.type === PROBLEM_MFA_REQUIRED;
+}
+
+/**
+ * orgPendingDeletionMessage is the text of a 423 org-pending-deletion:
+ * "Organisation wird gelöscht – nur Lesen bis <Datum>" (WP-1157).
+ */
+export function orgPendingDeletionMessage(dueAt: unknown): string {
+  const due = typeof dueAt === 'string' ? new Date(dueAt) : undefined;
+  if (!due || Number.isNaN(due.getTime())) return i18n.t('orgData.readOnlyNoDate');
+  const date = new Intl.DateTimeFormat(i18n.language || 'de-DE', { dateStyle: 'long' }).format(due);
+  return i18n.t('orgData.readOnly', { date });
+}
+
 /** The problem type of a 422 for a deactivated CI type (MET-05, WP-249, WP-317). */
 export const PROBLEM_TYPE_INACTIVE = 'https://reticora.io/problems/type-inactive';
 /** The violation text of POST /cis on ci_type_id for a deactivated type (WP-249). */
@@ -4223,5 +4275,60 @@ export const sourceRankApi = {
       method: 'PUT',
       body: JSON.stringify({ entries }),
     });
+  },
+};
+
+// --- Organization data: full export and deletion (TLC-05, TLC-06, WP-1157) ---
+
+export type OrganizationExport = components['schemas']['OrganizationExport'];
+export type OrganizationExportDownload = components['schemas']['OrganizationExportDownload'];
+export type OrganizationDeletion = components['schemas']['OrganizationDeletion'];
+export type OrganizationDeletionState = OrganizationDeletion['state'];
+export type OrganizationExportStatus = OrganizationExport['status'];
+
+/** The states of an organization's deletion (labels orgData.states.*). */
+export const ORG_DELETION_STATES = [
+  'none',
+  'requested',
+  'purging',
+  'purged',
+] as const satisfies readonly OrganizationDeletionState[];
+/** The statuses of a full export (labels orgData.exportStatuses.*). */
+export const ORG_EXPORT_STATUSES = [
+  'queued',
+  'running',
+  'completed',
+  'expired',
+  'failed',
+  'cancelled',
+] as const satisfies readonly OrganizationExportStatus[];
+
+export const orgLifecycleApi = {
+  /** The full exports of the organization, newest first (one page, org:export). */
+  exports(): Promise<PaginatedResponse<OrganizationExport>> {
+    return fetchAPI('/org/exports?limit=50');
+  },
+  /** Starts a full export (org:export with a second factor; 403 mfa-required without). */
+  startExport(): Promise<OrganizationExport> {
+    return fetchAPI('/org/exports', { method: 'POST' });
+  },
+  /** The objects of a completed export with signed URLs (org:export, second factor). */
+  download(id: string): Promise<OrganizationExportDownload> {
+    return fetchAPI(`/org/exports/${encodeURIComponent(id)}/download`);
+  },
+  /** The deletion state of the organization (every user, location:read). */
+  deletion(): Promise<OrganizationDeletion> {
+    return fetchAPI('/org/deletion');
+  },
+  /** Requests the deletion with the slug as confirmation (org:delete, second factor). */
+  requestDeletion(confirmSlug: string): Promise<OrganizationDeletion> {
+    return fetchAPI('/org/deletion', {
+      method: 'POST',
+      body: JSON.stringify({ confirm_slug: confirmSlug }),
+    });
+  },
+  /** Withdraws the request during the grace period (org:delete, second factor). */
+  cancelDeletion(): Promise<OrganizationDeletion> {
+    return fetchAPI('/org/deletion', { method: 'DELETE' });
   },
 };

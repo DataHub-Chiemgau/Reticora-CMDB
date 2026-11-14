@@ -25,7 +25,7 @@ const readmePath = "../../../docs/README.md"
 
 // modulesWithoutPages are the late modules without a navigation page: the
 // GPS history (LOC-09) has no UI of its own (WP-706).
-var modulesWithoutPages = []string{"gps", "ipam", "admp", "escalation", "org_lifecycle"}
+var modulesWithoutPages = []string{"gps", "ipam", "admp", "escalation"}
 
 // TestG2DefaultEnablesP2ModulesOnly covers API-06 and RBA-05 (WP-830,
 // E-03, SEQ-01): without RETICORA_MODULES the release default G2 switches

@@ -71,7 +71,9 @@ export type AppPage =
   // Client administration (UI-14, WP-855).
   | 'clients'
   // Plan and add-ons of the organization (PKG-06, WP-886).
-  | 'plan';
+  | 'plan'
+  // Organization data: full export and deletion (TLC-05, TLC-06, WP-1157).
+  | 'org-data';
 
 export const pageToPath: Record<AppPage, string> = {
   dashboard: '/dashboard',
@@ -126,6 +128,7 @@ export const pageToPath: Record<AppPage, string> = {
   suppliers: '/suppliers',
   clients: '/clients',
   plan: '/plan',
+  'org-data': '/org-data',
 };
 
 interface CommandPaletteProps {
@@ -413,6 +416,12 @@ export function CommandPalette({
         label: t('commandPalette.commands.plan'),
         keywords: ['plan paket add-ons limits verbrauch usage quota'],
         action: () => onNavigate('plan'),
+      },
+      {
+        id: 'nav-org-data',
+        label: t('commandPalette.commands.orgData'),
+        keywords: ['organisation export löschung deletion daten data dsgvo gdpr'],
+        action: () => onNavigate('org-data'),
       },
       {
         id: 'nav-permissions',

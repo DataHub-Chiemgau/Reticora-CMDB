@@ -4,6 +4,7 @@ import { Routes, Route, useNavigate, useLocation, Navigate, Outlet } from 'react
 import { useTranslation } from 'react-i18next';
 import { CommandPalette } from './components/CommandPalette';
 import { EntitlementExpiryBanner } from './components/EntitlementExpiryBanner';
+import { OrgDeletionBanner } from './components/OrgDeletionBanner';
 import { DraftBanner } from './components/metamodel/DraftBanner';
 import { pageToPath } from './components/CommandPalette';
 import type { AppPage } from './components/CommandPalette';
@@ -84,6 +85,7 @@ const StocktakeDetailPage = lazyPage(
 );
 const TicketListPage = lazyPage(() => import('./pages/TicketListPage'), 'TicketListPage');
 const TicketDetailPage = lazyPage(() => import('./pages/TicketDetailPage'), 'TicketDetailPage');
+const OrgDataPage = lazyPage(() => import('./pages/OrgDataPage'), 'OrgDataPage');
 const UserManagementPage = lazyPage(
   () => import('./pages/UserManagementPage'),
   'UserManagementPage',
@@ -309,6 +311,7 @@ function App() {
           <Route path="/tickets" element={<TicketListPage />} />
           <Route path="/tickets/:id" element={<TicketDetailPage />} />
           <Route path="/users" element={<UserManagementPage />} />
+          <Route path="/org-data" element={<OrgDataPage />} />
           <Route path="/permissions" element={<PermissionsPage />} />
           <Route path="/slas" element={<SLAPage />} />
           <Route path="/forms" element={<FormsPage />} />
@@ -437,6 +440,8 @@ function SignedInShell({
         counts={counts}
         banners={
           <>
+            {/* The grace period of a deletion of the organization (TLC-06, WP-1157). */}
+            <OrgDeletionBanner />
             {/* Expiring entitlements (ENT-07, WP-464). */}
             <EntitlementExpiryBanner />
             {/* The active metamodel draft above every page (MET-53, WP-798). */}

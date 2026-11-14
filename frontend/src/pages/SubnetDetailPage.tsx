@@ -21,7 +21,7 @@ import { History, Pencil, Plus, Sparkles } from 'lucide-react';
 import { useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
-import { API_MAX_LIMIT, ApiError } from '../api/client';
+import { API_MAX_LIMIT, ApiError, orgReadOnlyMessage } from '../api/client';
 import {
   IP_ADDRESS_STATES,
   IP_ADDRESS_TYPES,
@@ -540,7 +540,8 @@ function Addresses({
   const onRelease = (ip: IPAddress) => {
     setReleaseError(undefined);
     release.mutate(ip.id, {
-      onError: () => setReleaseError(t('ipam.addresses.releaseFailed')),
+      onError: (err) =>
+        setReleaseError(orgReadOnlyMessage(err) ?? t('ipam.addresses.releaseFailed')),
     });
   };
 

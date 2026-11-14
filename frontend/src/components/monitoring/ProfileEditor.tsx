@@ -18,6 +18,7 @@ import { useId, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ApiError,
+  orgReadOnlyMessage,
   type MonitoringProfile,
   type MonitoringProfileLevel,
   type ProbeOverrides,
@@ -289,7 +290,7 @@ export function ProfileEditor({
     setFailure(
       err instanceof ApiError && err.status === 403
         ? t('monitoring.settings.profile.forbidden')
-        : t('monitoring.settings.profile.saveFailed'),
+        : (orgReadOnlyMessage(err) ?? t('monitoring.settings.profile.saveFailed')),
     );
   };
 
