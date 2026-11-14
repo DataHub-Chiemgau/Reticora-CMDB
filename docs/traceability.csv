@@ -1916,3 +1916,4 @@ PRT-07;[P3];E;collector/probe/routing/ospf_isis_test.go;WP-1002
 PRT-15;[P3];E;collector/probe/tr069/readonly_test.go;WP-1018
 PRT-17;[P3];E;collector/probe/rpki/rtr_test.go;WP-1020
 PRT-21;[P3];E;collector/internal/fakertr/fakertr_test.go;WP-1020
+ALR-07;[P3];E;collector/plugins/config/mask_test.go;WP-1053

@@ -349,6 +349,52 @@ Request (Typ 8) und zurück Echo Reply (Typ 0) erlaubt sein, für IPv6
 ICMPv6 Echo Request (Typ 128) und Echo Reply (Typ 129). Diese Pakete
 verlassen das Kundennetz nicht ([Firewall-Matrix](firewall-matrix.md)).
 
+## Konfigurationen per SSH (`.config`, WP-1053)
+
+Der Collector liest die Running-Config der Geräte, für die das Bundle einen
+Zieleintrag mit Namespace `ssh` führt (Zugangsdaten je Gerät oder aus dem
+Tresor über `credentialsForTarget`), und meldet geänderte Stände auf
+`collector.<org>.<id>.config` (ALR-07, E-207). Speicher und Ereignis
+`ci.config_changed` sind Sache des Servers (WP-1052, WP-1054).
+
+- Zeitplan: `RETICORA_CONFIG_INTERVAL` (Standard `24h`, mindestens `1h`,
+  `0` schaltet ab), höchstens `RETICORA_CONFIG_PARALLEL` (Standard 4)
+  Abrufe gleichzeitig. Der Startzeitpunkt je CI liegt fest über das
+  Intervall verteilt (Hash der CI-ID) und bleibt über Neustarts gleich.
+- Plattformen: `cisco_ios` (IOS/IOS-XE), `cisco_nxos`, `junos`,
+  `routeros` und `huawei_vrp`. Erkannt wird über das SSH-Banner (`ROSSSH`,
+  `HUAWEI`), sonst über `show version` (`NX-OS`, `Cisco IOS`, `JUNOS`).
+  Gelesen wird mit `show running-config`,
+  `show configuration | display set | no-more`, `/export terse` bzw.
+  `display current-configuration`. Die Befehle stehen fest im Code
+  (`ConfigCommands` des SSH-Plugins), höchstens 2 MiB Ausgabe, gepinnte
+  Host-Keys wie bei der Inventarisierung. Andere Plattformen ergeben
+  `unsupported_platform` ohne weiteren Befehl. Die erkannte Plattform wird
+  je CI gespeichert; schlägt ein Abruf mit ihr fehl, wird sie verworfen und
+  beim nächsten Lauf neu erkannt (getauschtes Gerät).
+- Vor dem Hash normalisiert der Collector Zeilenenden und entfernt
+  flüchtige Zeilen (Zeitstempel, `Building configuration...`,
+  `ntp clock-period` u. a.), dann ersetzt er jedes Geheimnis durch
+  `<masked>`: Passwörter und Secrets, SNMP-Communities (auch von Trap- und
+  Inform-Zielen) und -Schlüssel, TACACS+-/RADIUS-Schlüssel (auch
+  `server-private`), Pre-Shared-Keys (auch in Keyrings), Key-Strings,
+  Authentifizierungsschlüssel (auch NTP unter Junos, BGP `tcp-md5-key` und
+  OSPF `auth-key` unter RouterOS) und private Schlüsselblöcke. SHA-256 über den
+  maskierten Text; `masked_count` zählt die Ersetzungen.
+- Gesendet wird `probewire.ConfigSnapshot` (Inhalt gzip) nur, wenn sich der
+  Hash gegenüber dem zuletzt vom Server bestätigten Stand des CIs geändert
+  hat. Bestätigter Hash und Plattform je CI stehen in
+  `<RETICORA_SPOOL_DIR>/config/state.json`; ohne Verbindung wartet je CI der
+  jüngste Stand in `<RETICORA_SPOOL_DIR>/config/pending/` (Rechte 0600)
+  und geht nach der Verbindung zuerst. Ein neuerer Stand ersetzt einen
+  wartenden (`config_superseded`). Über 2 MiB oder über der
+  Nachrichtengröße des Edge (1 MiB): kein Versand (`config_too_large`).
+- Antwortet der Server mit 403 „feature not entitled“, pausieren Abruf und
+  Versand eine Stunde; 404 (CI unbekannt oder außerhalb des Scopes) und
+  andere dauerhafte Ablehnungen (4xx außer 403, 408 und 429) verwerfen den
+  Stand mit Warnung, damit er die Stände anderer CIs nicht blockiert. Logs nennen CI-ID, Plattform,
+  Hash-Präfix und `masked_count`, nie Inhalt oder Geheimnis.
+
 ## Log-Ereignisse
 
 | Ereignis | Stufe | Bedeutung | Abhilfe |
@@ -369,6 +415,12 @@ verlassen das Kundennetz nicht ([Firewall-Matrix](firewall-matrix.md)).
 | `collector.spool.split` | INFO | Zu großer gespoolter Batch in Teile zerlegt | – |
 | `collector.metrics.not_licensed` | WARN, einmal | Monitoring nicht im Plan; keine Messwerte | Plan erweitern (optional) |
 | `collector.metrics.resumed` | INFO | Monitoring lizenziert, Messwerte laufen wieder | – |
+| `collector.config.changed`, `collector.config.sent` | INFO | Geänderte Konfiguration gepuffert bzw. vom Server bestätigt (CI, Plattform, Hash-Präfix, `masked_count`) | – |
+| `collector.config.unsupported_platform` | WARN | Gerät keiner der fünf Plattformen | – (nicht unterstützt) |
+| `collector.config.too_large` | WARN | Konfiguration über 2 MiB bzw. über der Nachrichtengröße | – |
+| `collector.config.not_licensed` | WARN, einmal | Konfigurationserkennung nicht im Plan; Abruf pausiert eine Stunde | Plan erweitern (optional) |
+| `collector.config.discarded` | WARN | Server kennt das CI nicht oder es liegt außerhalb des Scopes; Stand verworfen | Bundle-Ziel bzw. CI prüfen |
+| `collector.config.failed` | WARN | Abruf fehlgeschlagen (Verbindung, Anmeldung, Host-Key) | Zugangsdaten, `RETICORA_SSH_KNOWN_HOSTS` prüfen |
 
 Erfolg zeigt `collector NATS endpoint connected over mTLS` und
 `heartbeat completed` mit `transport` `edge`.

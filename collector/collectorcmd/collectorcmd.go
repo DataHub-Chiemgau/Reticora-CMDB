@@ -105,6 +105,12 @@ type collectorConfig struct {
 	// uplink sends, also while it synchronizes a backlog
 	// (RETICORA_PROBE_SYNC_RATE, default 5; PRB-07, WP-955).
 	ProbeSyncRate int
+	// ConfigInterval is the schedule of the running-configuration reads
+	// over SSH (RETICORA_CONFIG_INTERVAL, default 24 h, at least 1 h, 0
+	// off; ALR-07, WP-1053); ConfigParallel bounds the concurrent reads
+	// (RETICORA_CONFIG_PARALLEL, default 4).
+	ConfigInterval time.Duration
+	ConfigParallel int
 	// TrapListenAddr enables the SNMP trap receiver when set (e.g. ":162").
 	// Traps are normalized into metric events and sent to the monitoring
 	// ingest so existing alert rules can fire on them (spec §9).
@@ -283,6 +289,8 @@ func Main() {
 	if collectorCfg.MetricsInterval > 0 {
 		go runMetricsLoop(ctx, collectorCfg, uploader)
 	}
+	// The running configurations over SSH (ALR-07, WP-1053).
+	startConfigReads(ctx, &collectorCfg)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -2046,6 +2054,8 @@ func loadCollectorConfig() collectorConfig {
 		SpoolMaxAge:        durationEnvOrDefault("RETICORA_SPOOL_MAX_AGE", 72*time.Hour),
 		ProbeSpoolMaxBytes: int64EnvOrDefault("RETICORA_PROBE_SPOOL_MAX_BYTES", probe.DefaultOutboxMaxBytes),
 		ProbeSyncRate:      int(int64EnvOrDefault("RETICORA_PROBE_SYNC_RATE", probe.DefaultSyncRate)),
+		ConfigInterval:     configIntervalFromEnv(os.Getenv("RETICORA_CONFIG_INTERVAL")),
+		ConfigParallel:     configParallelFromEnv(os.Getenv("RETICORA_CONFIG_PARALLEL")),
 		TrapListenAddr:     os.Getenv("RETICORA_SNMP_TRAP_LISTEN"),
 		MetricsInterval:    durationEnvOrDefault("RETICORA_METRICS_INTERVAL", defaultMetricsInterval),
 		PollMetrics:        pollMetricsFromEnv(os.Getenv("RETICORA_SNMP_POLL_METRICS")),

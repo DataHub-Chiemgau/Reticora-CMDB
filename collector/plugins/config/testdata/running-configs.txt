@@ -1,0 +1,151 @@
+=== cisco_ios masked=20 ===
+Building configuration...
+
+Current configuration : 4321 bytes
+!
+! Last configuration change at 08:00:00 UTC Thu Nov 14 2026 by admin
+! NVRAM config last updated at 08:00:01 UTC Thu Nov 14 2026 by admin
+!
+version 17.9
+service password-encryption
+hostname edge-r1
+!
+enable secret 9 $9$CANARYenable01$abc
+!
+username admin privilege 15 secret 9 $9$CANARYuser01$def
+username ops password 7 CANARY0702
+!
+aaa new-model
+!
+tacacs server TAC1
+ address ipv4 192.0.2.10
+ key 7 CANARYtac01
+!
+radius-server host 192.0.2.11 key CANARYrad01
+aaa group server tacacs+ TG1
+ server-private 192.0.2.12 key 7 CANARYsrvpriv01
+crypto keyring KR1
+ pre-shared-key address 10.0.0.1 key CANARYkeyring01
+!
+key chain OSPF-KC
+ key 1
+  key-string 7 CANARYkeystr01
+!
+crypto isakmp key 6 CANARYisakmp01 address 0.0.0.0
+crypto ikev2 keyring KR
+ peer P1
+  pre-shared-key local CANARYpskl01
+!
+interface GigabitEthernet0/0
+ description uplink to core
+ ip address 192.0.2.1 255.255.255.0
+ ip ospf authentication-key 7 CANARYospf01
+ ip ospf message-digest-key 1 md5 7 CANARYmd501
+!
+router bgp 64500
+ neighbor 198.51.100.1 password 7 CANARYbgp01
+!
+snmp-server community CANARYcomm01 RO 10
+snmp-server host 192.0.2.50 traps version 2c CANARYtrap01
+snmp-server user mon grp v3 auth sha CANARYauth01 priv aes 128 CANARYpriv01
+!
+ntp authentication-key 1 md5 CANARYntp01 7
+ntp clock-period 17179812
+!
+crypto pki certificate chain TP
+ certificate self-signed 01
+  3082024F 30820238
+  quit
+-----BEGIN RSA PRIVATE KEY-----
+MIIEowIBAAKCAQEACANARYpemline1
+CANARYpemline2
+-----END RSA PRIVATE KEY-----
+line vty 0 4
+ password 7 CANARYvty01
+ transport input ssh
+!
+end
+=== cisco_nxos masked=8 ===
+!Command: show running-config
+!Running configuration last done at: Thu Nov 14 08:00:00 2026
+!Time: Thu Nov 14 08:05:00 2026
+
+version 9.3(10) Bios:version 05.47
+hostname nx-core1
+feature tacacs+
+username admin password 5 $5$CANARYnx01$xyz  role network-admin
+tacacs-server key 7 "CANARYnxtac01"
+radius-server host 192.0.2.20 key 7 "CANARYnxrad01" authentication accounting
+snmp-server user mon network-admin auth md5 0xCANARYnxauth01 priv 0xCANARYnxpriv01 localizedkey
+snmp-server community CANARYnxcomm01 group network-operator
+interface Ethernet1/1
+  ip router ospf 1 area 0.0.0.0
+  ip ospf authentication-key 3 CANARYnxospf01
+router bgp 64500
+  neighbor 198.51.100.2
+    password 3 CANARYnxbgp01
+=== junos masked=11 ===
+## Last commit: 2026-11-14 08:00:00 UTC by admin
+set version 22.4R3
+set system host-name mx-edge1
+set system root-authentication encrypted-password "$6$CANARYroot01$abc"
+set system login user ops class super-user
+set system login user ops authentication encrypted-password "$6$CANARYops01$def"
+set system radius-server 192.0.2.30 secret "$9$CANARYjrad01"
+set system tacplus-server 192.0.2.31 secret "$9$CANARYjtac01"
+set snmp community CANARYjcomm01 authorization read-only
+set snmp v3 usm local-engine user mon authentication-sha authentication-key "$9$CANARYjauth01"
+set snmp v3 usm local-engine user mon privacy-aes128 privacy-key "$9$CANARYjpriv01"
+set security ike policy IKE-P pre-shared-key ascii-text "$9$CANARYjpsk01"
+set protocols bgp group EBGP authentication-key "$9$CANARYjbgp01"
+set system ntp authentication-key 1 type md5 value "$9$CANARYjntp01"
+set protocols ospf area 0.0.0.0 interface ge-0/0/0.0 authentication md5 1 key "$9$CANARYjospf01"
+set interfaces ge-0/0/0 description "uplink"
+=== routeros masked=11 ===
+# 2026-11-14 08:00:00 by RouterOS 7.16
+# software id = AB12-CD34
+/interface wireless security-profiles add authentication-types=wpa2-psk mode=dynamic-keys name=office wpa2-pre-shared-key=CANARYwpa01
+/ip ipsec peer add address=203.0.113.5/32 name=peer1
+/ip ipsec identity add peer=peer1 secret=CANARYipsec01
+/ppp secret add name=vpnuser password=CANARYppp01 profile=default-encryption
+/snmp community set [ find default=yes ] name=CANARYcomm01
+/snmp community add authentication-password=CANARYsnmpauth01 encryption-password=CANARYsnmpenc01 name=CANARYcomm02
+/system identity set name=rb-branch1
+/user add group=full name=ops password=CANARYuser01
+/routing bgp connection add name=peer1 remote.address=192.0.2.1 tcp-md5-key=CANARYrosmd501
+/routing ospf interface-template add area=backbone auth=md5 auth-key=CANARYrosospf01
+/ppp secret add name=u2 password="ab\"c CANARYrosesc01"
+=== huawei_vrp masked=11 ===
+!Software Version V800R021C10SPC100
+!Last configuration was updated at 2026-11-14 08:00:00+00:00 by admin
+!Last configuration was saved at 2026-11-14 07:00:00+00:00 by admin
+#
+sysname HW-PE1
+#
+aaa
+ local-user admin password irreversible-cipher $1c$CANARYhwadmin01$
+ local-user admin service-type ssh
+#
+super password level 15 cipher %^%#CANARYhwsuper01%^%#
+#
+hwtacacs-server template TAC
+ hwtacacs-server shared-key cipher %^%#CANARYhwtac01%^%#
+#
+radius-server template RAD
+ radius-server shared-key cipher %^%#CANARYhwrad01%^%#
+#
+snmp-agent community read cipher %^%#CANARYhwcomm01%^%#
+snmp-agent target-host trap address udp-domain 192.0.2.60 params securityname cipher %^%#CANARYhwtrap01%^%# v2c
+snmp-agent usm-user v3 mon authentication-mode sha cipher %^%#CANARYhwauth01%^%# privacy-mode aes128 cipher %^%#CANARYhwpriv01%^%#
+#
+ike peer P1
+ pre-shared-key cipher %^%#CANARYhwpsk01%^%#
+#
+ospf 1
+ area 0.0.0.0
+  authentication-mode md5 1 cipher %^%#CANARYhwospf01%^%#
+#
+bgp 64500
+ peer 198.51.100.3 password cipher %^%#CANARYhwbgp01%^%#
+#
+return

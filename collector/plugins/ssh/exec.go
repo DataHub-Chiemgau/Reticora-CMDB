@@ -43,6 +43,26 @@ var AllowedCommands = map[string]string{
 // maxOutput caps what one command may return.
 const maxOutput = 64 << 10
 
+// ConfigCommands are the only commands FetchConfig executes (ALR-07,
+// WP-1053): the platform detection and the read of the running
+// configuration of the fixed platforms of collector/plugins/config. Like
+// AllowedCommands they never come from the target, a profile or the
+// server; run does not execute them.
+var ConfigCommands = map[string]string{
+	"show_version":    "show version",
+	"running_config":  "show running-config",
+	"junos_config":    "show configuration | display set | no-more",
+	"mikrotik_export": "/export terse",
+	"huawei_current":  "display current-configuration",
+}
+
+// MaxConfigOutput caps the output of a configuration command; a larger
+// output is refused with ErrConfigTooLarge, never cut.
+const MaxConfigOutput = 2 << 20
+
+// ErrConfigTooLarge refuses a configuration above MaxConfigOutput.
+var ErrConfigTooLarge = errors.New("ssh: configuration output exceeds 2 MiB")
+
 // ErrNotAllowed refuses a command outside AllowedCommands.
 var ErrNotAllowed = errors.New("ssh: command is not on the allowlist")
 
@@ -149,9 +169,9 @@ func (s *hostKeyStore) callback(hostname string, remote net.Addr, key ssh.Public
 	return err
 }
 
-// runAllowed logs in and runs the allowlisted commands; it returns their
-// output by name (commands that fail are left out).
-func (p *Plugin) runAllowed(ctx context.Context, target string, cfg *ssh.ClientConfig) (map[string]string, error) {
+// login connects to target and logs in with cfg; the host key is checked
+// against the pinned one in the handshake, before any credential is sent.
+func (p *Plugin) login(ctx context.Context, target string, cfg *ssh.ClientConfig) (*ssh.Client, error) {
 	addr := net.JoinHostPort(target, strconv.Itoa(p.port()))
 	d := net.Dialer{Timeout: p.timeout()}
 	conn, err := d.DialContext(ctx, "tcp", addr)
@@ -163,7 +183,118 @@ func (p *Plugin) runAllowed(ctx context.Context, target string, cfg *ssh.ClientC
 		conn.Close()
 		return nil, fmt.Errorf("ssh: login %s: %w", target, err)
 	}
-	client := ssh.NewClient(c, chans, reqs)
+	return ssh.NewClient(c, chans, reqs), nil
+}
+
+// loginWith builds the login from creds and logs in.
+func (p *Plugin) loginWith(ctx context.Context, target string, creds map[string]string) (*ssh.Client, error) {
+	cfg, ok, err := p.clientConfig(creds)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("ssh: a username is required")
+	}
+	return p.login(ctx, target, cfg)
+}
+
+// ServerVersion logs in to target and returns the identification string of
+// its SSH server (e.g. SSH-2.0-ROSSSH), without running a command. The
+// platform detection of the configuration read uses it (WP-1053 AK1).
+func (p *Plugin) ServerVersion(ctx context.Context, target string, creds map[string]string) (string, error) {
+	client, err := p.loginWith(ctx, target, creds)
+	if err != nil {
+		return "", err
+	}
+	defer client.Close()
+	return string(client.ServerVersion()), nil
+}
+
+// FetchConfig logs in to target and runs one command of ConfigCommands
+// (WP-1053 AK2): another command text is ErrNotAllowed before any
+// connection, an output above MaxConfigOutput ErrConfigTooLarge. Host keys
+// are pinned and the plugin timeout applies as for the inventory commands.
+func (p *Plugin) FetchConfig(ctx context.Context, target string, creds map[string]string, command string) (string, error) {
+	if !isConfigCommand(command) {
+		return "", ErrNotAllowed
+	}
+	client, err := p.loginWith(ctx, target, creds)
+	if err != nil {
+		return "", err
+	}
+	defer client.Close()
+	return runConfig(client, command, p.timeout())
+}
+
+func isConfigCommand(command string) bool {
+	for _, allowed := range ConfigCommands {
+		if command == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+// runConfig executes one configuration command with the 2 MiB limit.
+func runConfig(client *ssh.Client, command string, timeout time.Duration) (string, error) {
+	if !isConfigCommand(command) {
+		return "", ErrNotAllowed
+	}
+	session, err := client.NewSession()
+	if err != nil {
+		return "", err
+	}
+	defer session.Close()
+	stdout := &cappedBuffer{limit: MaxConfigOutput}
+	session.Stdout = stdout
+	done := make(chan error, 1)
+	go func() { done <- session.Run(command) }()
+	select {
+	case err = <-done:
+	case <-time.After(timeout):
+		_ = session.Signal(ssh.SIGKILL)
+		return "", fmt.Errorf("ssh: %q timed out", command)
+	}
+	if stdout.over {
+		return "", ErrConfigTooLarge
+	}
+	if err != nil {
+		return "", err
+	}
+	return stdout.String(), nil
+}
+
+// cappedBuffer keeps at most limit bytes and records an overflow. It
+// holds the buffer in a field instead of embedding it: io.Copy would take
+// the ReadFrom of an embedded bytes.Buffer and bypass the limit.
+type cappedBuffer struct {
+	buf   bytes.Buffer
+	limit int
+	over  bool
+}
+
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	room := b.limit - b.buf.Len()
+	if len(p) > room {
+		b.over = true
+		if room > 0 {
+			b.buf.Write(p[:room])
+		}
+		return len(p), nil
+	}
+	b.buf.Write(p)
+	return len(p), nil
+}
+
+func (b *cappedBuffer) String() string { return b.buf.String() }
+
+// runAllowed logs in and runs the allowlisted commands; it returns their
+// output by name (commands that fail are left out).
+func (p *Plugin) runAllowed(ctx context.Context, target string, cfg *ssh.ClientConfig) (map[string]string, error) {
+	client, err := p.login(ctx, target, cfg)
+	if err != nil {
+		return nil, err
+	}
 	defer client.Close()
 
 	names := make([]string, 0, len(AllowedCommands))

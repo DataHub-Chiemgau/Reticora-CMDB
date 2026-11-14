@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -23,6 +24,8 @@ type sshServer struct {
 	ln       net.Listener
 	mu       sync.Mutex
 	executed []string
+	// outputs answers further commands (the configuration commands).
+	outputs map[string]string
 }
 
 var linuxFixture = map[string]string{
@@ -103,8 +106,13 @@ func (s *sshServer) serve(conn net.Conn, cfg *ssh.ServerConfig) {
 				s.mu.Unlock()
 				_ = req.Reply(true, nil)
 				status := uint32(0)
+				s.mu.Lock()
+				extra, hasExtra := s.outputs[payload.Command]
+				s.mu.Unlock()
 				if out, ok := linuxFixture[payload.Command]; ok {
 					fmt.Fprint(channel, out)
+				} else if hasExtra {
+					_, _ = io.WriteString(channel, extra)
 				} else {
 					status = 127
 				}
@@ -233,5 +241,86 @@ func TestClientConfigNeedsASecret(t *testing.T) {
 	}
 	if _, _, err := p.clientConfig(map[string]string{"username": "u", "private_key": "garbage"}); err == nil {
 		t.Error("an unparsable key must fail")
+	}
+}
+
+// TestFetchConfigRefusesUnlistedCommand covers WP-1053 AK2: FetchConfig
+// runs only the commands of ConfigCommands; an inventory command or any
+// other text is refused before a connection, and run does not take the
+// configuration commands.
+func TestFetchConfigRefusesUnlistedCommand(t *testing.T) {
+	srv := startSSHServer(t, "netops", "s3cret")
+	srv.outputs = map[string]string{"show running-config": "hostname r1\n"}
+	p := &Plugin{Timeout: 2 * time.Second, Port: srv.port(), KnownHostsFile: filepath.Join(t.TempDir(), "known_hosts")}
+	creds := map[string]string{"username": "netops", "password": "s3cret"}
+	for _, cmd := range []string{"show running-config; reload", "reload", "hostname -f", "show running-config ", "configure terminal"} {
+		if _, err := p.FetchConfig(context.Background(), "127.0.0.1", creds, cmd); !errors.Is(err, ErrNotAllowed) {
+			t.Fatalf("%q: err = %v, want ErrNotAllowed", cmd, err)
+		}
+	}
+	srv.mu.Lock()
+	ran := len(srv.executed)
+	srv.mu.Unlock()
+	if ran != 0 {
+		t.Fatalf("%d commands reached the server", ran)
+	}
+	out, err := p.FetchConfig(context.Background(), "127.0.0.1", creds, "show running-config")
+	if err != nil || out != "hostname r1\n" {
+		t.Fatalf("FetchConfig = %q, %v", out, err)
+	}
+	if _, err := run(nil, "show running-config", time.Second); !errors.Is(err, ErrNotAllowed) {
+		t.Fatalf("run took a configuration command: %v", err)
+	}
+	if v, err := p.ServerVersion(context.Background(), "127.0.0.1", creds); err != nil || !strings.HasPrefix(v, "SSH-2.0-") {
+		t.Fatalf("ServerVersion = %q, %v", v, err)
+	}
+}
+
+// TestFetchConfigLimit2MiB covers WP-1053 AK2: 2 MiB pass, one byte more
+// is ErrConfigTooLarge.
+func TestFetchConfigLimit2MiB(t *testing.T) {
+	srv := startSSHServer(t, "netops", "s3cret")
+	srv.outputs = map[string]string{
+		"show running-config":           strings.Repeat("x", MaxConfigOutput),
+		"display current-configuration": strings.Repeat("y", MaxConfigOutput+1),
+	}
+	p := &Plugin{Timeout: 5 * time.Second, Port: srv.port(), KnownHostsFile: filepath.Join(t.TempDir(), "known_hosts")}
+	creds := map[string]string{"username": "netops", "password": "s3cret"}
+	out, err := p.FetchConfig(context.Background(), "127.0.0.1", creds, "show running-config")
+	if err != nil || len(out) != MaxConfigOutput {
+		t.Fatalf("2 MiB: %d bytes, %v", len(out), err)
+	}
+	if _, err := p.FetchConfig(context.Background(), "127.0.0.1", creds, "display current-configuration"); !errors.Is(err, ErrConfigTooLarge) {
+		t.Fatalf("2 MiB + 1: err = %v, want ErrConfigTooLarge", err)
+	}
+}
+
+// TestFetchConfigPinsHostKey covers WP-1053 AK2: FetchConfig pins the host
+// key like the inventory; another key on the same address is refused
+// before any command.
+func TestFetchConfigPinsHostKey(t *testing.T) {
+	known := filepath.Join(t.TempDir(), "known_hosts")
+	first := startSSHServer(t, "netops", "s3cret")
+	first.outputs = map[string]string{"show running-config": "hostname r1\n"}
+	p := &Plugin{Timeout: 2 * time.Second, Port: first.port(), KnownHostsFile: known}
+	creds := map[string]string{"username": "netops", "password": "s3cret"}
+	if _, err := p.FetchConfig(context.Background(), "127.0.0.1", creds, "show running-config"); err != nil {
+		t.Fatal(err)
+	}
+	if pinned, err := os.ReadFile(known); err != nil || !strings.Contains(string(pinned), "ssh-ed25519") {
+		t.Fatalf("known_hosts = %q, %v", pinned, err)
+	}
+	first.ln.Close()
+	second := startSSHServerOn(t, first.port())
+	second.outputs = map[string]string{"show running-config": "hostname impostor\n"}
+	p2 := &Plugin{Timeout: 2 * time.Second, Port: first.port(), KnownHostsFile: known}
+	if _, err := p2.FetchConfig(context.Background(), "127.0.0.1", creds, "show running-config"); err == nil ||
+		!strings.Contains(err.Error(), ErrHostKeyChanged.Error()) {
+		t.Fatalf("changed host key: %v", err)
+	}
+	second.mu.Lock()
+	defer second.mu.Unlock()
+	if len(second.executed) != 0 {
+		t.Fatalf("commands ran on the impostor: %v", second.executed)
 	}
 }
