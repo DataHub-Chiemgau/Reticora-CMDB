@@ -1294,6 +1294,12 @@ const ROUTES: A11yRoute[] = [
     ready: (page) => page.locator('#main-content td', { hasText: 'a11y-import-srv' }),
   },
   { path: '/monitoring', url: '/monitoring', ready: text(M.alert) },
+  // WP-1080: the monitoring settings (profiles, groups, auto_ping).
+  {
+    path: '/monitoring/settings',
+    url: '/monitoring/settings',
+    ready: (page) => page.locator('#main-content h1').first(),
+  },
   { path: '/alarms', url: '/alarms', ready: text(M.alarm) },
   { path: '/incidents', url: '/incidents', ready: text(M.incident) },
   { path: '/audit', url: '/audit', ready: text(M.audit) },

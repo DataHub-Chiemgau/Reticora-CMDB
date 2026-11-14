@@ -38,6 +38,15 @@ import { SkeletonList } from '../ui/Skeleton';
 import { ImpactPanel } from '../graph/ImpactPanel';
 import { useEntitlements } from '../../hooks/useEntitlements';
 import { ErrorState } from '../ui/ErrorState';
+import type { EffectiveProbeField, Probe } from '../../api/client';
+import {
+  useCIGroupProfiles,
+  useCIProbes,
+  useMonitoringProfiles,
+  useProbeEffective,
+  useProbeTypes,
+} from '../../api/monitoringSettingsHooks';
+import { ProfileEditor, type InheritedLayer } from '../monitoring/ProfileEditor';
 
 /** One fact of a definition list: a fixed label column, the value beside it. */
 export function DetailRow({
@@ -799,6 +808,209 @@ export function CIMetricsSection({ ciId }: { ciId: string }) {
         </ul>
       )}
     </Section>
+  );
+}
+
+// ─── Monitoring (PRB-01, WP-1080) ────────────────────────────────────────────
+
+/**
+ * CIMonitoringSection is the section "Monitoring" of the CI detail
+ * (PRB-01, WP-1080). It loads only when opened: per probe type the profile
+ * of the level ci (the override of the device, ProfileEditor with the
+ * organization, the client and the monitoring groups of the CI as levels
+ * above) and per probe of
+ * the CI (GET /monitoring/probes?ci_id=) the effective values of
+ * …/effective with the origin of each field. Without the feature
+ * monitoring the API answers 403 and the section says so like
+ * CIMetricsSection.
+ */
+export function CIMonitoringSection({ ciId, clientId }: { ciId: string; clientId?: string }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  return (
+    <details
+      className="group rounded-xl border border-line bg-panel"
+      onToggle={(event) => setOpen((event.currentTarget as HTMLDetailsElement).open)}
+      data-testid="ci-monitoring-section"
+    >
+      <summary className="flex min-h-11 cursor-pointer select-none list-none items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-fg outline-none transition-colors hover:bg-fg/[0.03] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent group-open:rounded-b-none [&::-webkit-details-marker]:hidden">
+        <ChevronRight
+          aria-hidden="true"
+          className="h-4 w-4 shrink-0 text-fg-subtle transition-transform group-open:rotate-90"
+        />
+        {t('monitoring.settings.ci.title')}
+      </summary>
+      <div className="border-t border-line px-4 py-4">
+        {open ? <CIMonitoringBody ciId={ciId} clientId={clientId} /> : null}
+      </div>
+    </details>
+  );
+}
+
+function CIMonitoringBody({ ciId, clientId }: { ciId: string; clientId?: string }) {
+  const { t } = useTranslation();
+  const canWrite = useHasPermission('monitoring:write') === true;
+  const types = useProbeTypes();
+  const probes = useCIProbes(ciId, true);
+  const [typeKey, setTypeKey] = useState('');
+  const available = (types.data ?? []).filter((x) => x.status === 'available');
+  const type = available.find((x) => x.key === typeKey) ?? available[0];
+  const ciProfiles = useMonitoringProfiles(
+    { level: 'ci', level_id: ciId, probe_type: type?.key },
+    !!type,
+  );
+  const orgProfiles = useMonitoringProfiles({ level: 'org', probe_type: type?.key }, !!type);
+  const clientProfiles = useMonitoringProfiles(
+    { level: 'client', level_id: clientId, probe_type: type?.key },
+    !!type && !!clientId,
+  );
+  const groupProfiles = useCIGroupProfiles(ciId, clientId, type?.key);
+  const forbidden = [types.error, probes.error].some(
+    (e) => e instanceof ApiError && e.status === 403,
+  );
+  if (forbidden) {
+    return (
+      <p className="text-sm text-fg-muted">
+        {t(
+          'monitoring.ciNotLicensed',
+          'Monitoring ist für diese Organisation nicht freigeschaltet.',
+        )}
+      </p>
+    );
+  }
+  if (types.isError || probes.isError) {
+    return <p className="text-sm text-danger">{t('monitoring.settings.ci.loadFailed')}</p>;
+  }
+  if (types.isPending || !type) return <SkeletonList rows={2} label={t('app.loading')} />;
+  const inherited: InheritedLayer[] = [];
+  const org = orgProfiles.data?.[0];
+  const client = clientProfiles.data?.[0];
+  if (org) inherited.push({ source: 'org', params: org.params });
+  if (client) inherited.push({ source: 'client', params: client.params });
+  // The groups of the CI lie between the client and the device (PRB-01,
+  // E-178), lowest rank first so the deciding group comes last.
+  for (const g of groupProfiles.data) inherited.push({ source: 'group', params: g.params });
+  const own = ciProfiles.data?.[0];
+  const loadingProfiles = ciProfiles.isPending || orgProfiles.isPending || groupProfiles.isPending;
+
+  return (
+    <div className="space-y-6">
+      <section aria-label={t('monitoring.settings.ci.override')} className="space-y-3">
+        <h4 className="text-sm font-semibold text-fg">{t('monitoring.settings.ci.override')}</h4>
+        <Select
+          label={t('monitoring.settings.type')}
+          value={type.key}
+          onChange={(event) => setTypeKey(event.target.value)}
+          options={available.map((x) => ({ value: x.key, label: x.key }))}
+        />
+        {loadingProfiles ? (
+          <SkeletonList rows={2} label={t('app.loading')} />
+        ) : (
+          <ProfileEditor
+            key={`${type.key}|${own?.id ?? 'new'}`}
+            probeType={type}
+            level="ci"
+            levelId={ciId}
+            profile={own}
+            inherited={inherited}
+            readOnly={!canWrite}
+            onChanged={() => void ciProfiles.refetch()}
+          />
+        )}
+      </section>
+      <section aria-label={t('monitoring.settings.ci.probes')} className="space-y-3">
+        <h4 className="text-sm font-semibold text-fg">{t('monitoring.settings.ci.probes')}</h4>
+        {probes.isPending ? (
+          <SkeletonList rows={2} label={t('app.loading')} />
+        ) : (probes.data ?? []).length === 0 ? (
+          <p className="text-sm text-fg-muted">{t('monitoring.settings.ci.noProbes')}</p>
+        ) : (
+          (probes.data ?? []).map((probe) => <ProbeEffectiveTable key={probe.id} probe={probe} />)
+        )}
+      </section>
+    </div>
+  );
+}
+
+/**
+ * effectiveValueText shows an effective probe value: numbers, strings and
+ * flags as text, lists and objects (interfaces, headers) as JSON; none is "–".
+ */
+export function effectiveValueText(field: EffectiveProbeField): string {
+  const { value } = field;
+  if (value === null || value === undefined) return '–';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+
+/** ProbeEffectiveTable lists the effective values of a probe with the origin per field. */
+function ProbeEffectiveTable({ probe }: { probe: Probe }) {
+  const { t } = useTranslation();
+  const effective = useProbeEffective(probe.id);
+  const data = effective.data;
+  const rows: [string, EffectiveProbeField][] = data
+    ? [
+        ['interval_s', data.interval_s],
+        ['timeout_s', data.timeout_s],
+        ['down_count', data.down_count],
+        ['up_count', data.up_count],
+        ...Object.entries(data.thresholds ?? {}).map(
+          ([k, v]) => [`thresholds.${k}`, v] as [string, EffectiveProbeField],
+        ),
+        ...Object.entries(data.params ?? {}).map(
+          ([k, v]) => [`params.${k}`, v] as [string, EffectiveProbeField],
+        ),
+      ]
+    : [];
+  const label = (key: string) =>
+    key.includes('.') ? key.split('.')[1] : t(`monitoring.settings.fields.${key}`);
+  return (
+    <div className="rounded-lg border border-line" data-testid={`ci-probe-${probe.id}`}>
+      <p className="border-b border-line px-3 py-2 text-sm font-medium text-fg">
+        {probe.type} · {probe.target}
+      </p>
+      {effective.isError ? (
+        <p className="px-3 py-2 text-sm text-danger">{t('monitoring.settings.ci.loadFailed')}</p>
+      ) : !data ? (
+        <p className="px-3 py-2 text-sm text-fg-muted">{t('app.loading')}</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-fg-muted">
+                <th scope="col" className="px-3 py-1.5 font-medium">
+                  {t('monitoring.settings.ci.field')}
+                </th>
+                <th scope="col" className="px-3 py-1.5 font-medium">
+                  {t('monitoring.settings.ci.value')}
+                </th>
+                <th scope="col" className="px-3 py-1.5 font-medium">
+                  {t('monitoring.settings.ci.origin')}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(([key, field]) => (
+                <tr key={key} className="border-t border-line" data-testid={`effective-${key}`}>
+                  <td className="px-3 py-1.5 text-fg">{label(key)}</td>
+                  <td className="break-all px-3 py-1.5 tabular-nums text-fg">
+                    {effectiveValueText(field)}
+                    {field.clamped ? (
+                      <Badge variant="warning" className="ml-2">
+                        {t('monitoring.settings.ci.clamped')}
+                      </Badge>
+                    ) : null}
+                  </td>
+                  <td className="px-3 py-1.5 text-fg-muted">
+                    {t(`monitoring.settings.origins.${field.origin}`)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -32,6 +32,7 @@ import {
   LifecycleSection,
   ImpactSection,
   CIMetricsSection,
+  CIMonitoringSection,
   CIHistorySection,
   DetailRow,
   formatDate,
@@ -400,6 +401,7 @@ export function CIDetailPage() {
         <LifecycleSection entityType="cis" entityId={ci.id} currentState={ci.lifecycle_state} />
         <ImpactSection ciId={ci.id} />
         <ProvenanceSection ciId={ci.id} />
+        <CIMonitoringSection ciId={ci.id} clientId={ci.client_id} />
         <CIMetricsSection ciId={ci.id} />
         {/* Findings, compliance and automations (WP-1137): one BFF query on
             the first expand, each section only with its module. */}

@@ -21,11 +21,12 @@
  * Retest:
  *   cd frontend && npx vitest run src/components/cmdb/CIDetailSections.test.tsx
  */
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderWithProviders, stubFetchRoutes } from '../../test/utils';
-import { InstanceFieldsSection, LifecycleSection } from './CIDetailSections';
+import i18n from '../../i18n';
+import { CIMonitoringSection, InstanceFieldsSection, LifecycleSection } from './CIDetailSections';
 
 const CI_ID = 'ci-1';
 
@@ -317,5 +318,215 @@ describe('LifecycleSection of an asset: guard messages (WP-809)', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Übergang nicht erlaubt.');
     expect(screen.queryByText(/no transition from/)).not.toBeInTheDocument();
+  });
+});
+
+// WP-1080 (PRB-01): the section "Monitoring" of the CI detail loads only
+// when opened, shows the origin ci after the override is saved and the
+// hint without the feature monitoring (403).
+describe('CIMonitoringSection', () => {
+  const CI = 'd0000000-0000-4000-8000-000000000001';
+  const PROBE = 'p0000000-0000-4000-8000-000000000001';
+  const ICMP = {
+    key: 'icmp',
+    status: 'available',
+    min_interval_s: 10,
+    default_interval_s: 30,
+    max_interval_s: 3600,
+    min_timeout_s: 1,
+    default_timeout_s: 10,
+    max_timeout_s: 10,
+    default_down_count: 5,
+    default_up_count: 1,
+    params: { type: 'object', properties: {} },
+  };
+  const field = (value: unknown, origin: string) => ({ value, origin, clamped: false });
+
+  const GROUP = 'f0000000-0000-4000-8000-0000000000a1';
+  const GROUP_LOW = 'f0000000-0000-4000-8000-0000000000a2';
+  const GROUP_OUT = 'f0000000-0000-4000-8000-0000000000a3';
+
+  function stubMonitoring({ forbidden = false, groups = false } = {}) {
+    let override: Record<string, unknown> | undefined;
+    const calls: { method: string; path: string; body?: Record<string, unknown> }[] = [];
+    const answer = (body: unknown, status = 200) =>
+      new Response(status === 204 ? null : JSON.stringify(body), {
+        status,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = new URL(String(input), 'http://localhost');
+        const method = init?.method ?? 'GET';
+        const path = url.pathname.replace(/^\/api\/v1/, '');
+        const body = init?.body
+          ? (JSON.parse(String(init.body)) as Record<string, unknown>)
+          : undefined;
+        calls.push({ method, path, body });
+        if (path === '/me/permissions') {
+          return answer({ user_id: 'u', permissions: ['monitoring:read', 'monitoring:write'] });
+        }
+        if (forbidden && path.startsWith('/monitoring/')) {
+          return answer({ type: 'about:blank', title: 'Forbidden', status: 403 }, 403);
+        }
+        if (method === 'POST' && path === '/monitoring/profiles') {
+          override = body?.params as Record<string, unknown>;
+          return answer({ id: 'prof-1', organization_id: 'o', updated_at: 'x', ...body }, 201);
+        }
+        const list = (data: unknown[]) =>
+          answer({ data, total: data.length, limit: 200, offset: 0, has_more: false });
+        if (path === '/monitoring/probe-types') return list([ICMP]);
+        const groupProfile = (id: string, params: Record<string, unknown>) => ({
+          id: `prof-${id}`,
+          organization_id: 'o',
+          level: 'group',
+          level_id: id,
+          probe_type: 'icmp',
+          params,
+          updated_at: 'x',
+        });
+        const group = (id: string, name: string, priority: number) => ({
+          id,
+          organization_id: 'o',
+          name,
+          priority,
+          created_at: 'x',
+          updated_at: 'x',
+        });
+        if (groups && path === '/monitoring/groups') {
+          return list([
+            group(GROUP, 'Kern', 10),
+            group(GROUP_LOW, 'Rand', 1),
+            group(GROUP_OUT, 'Fremd', 99),
+          ]);
+        }
+        if (groups && path.startsWith('/monitoring/groups/') && path.endsWith('/members')) {
+          const id = path.split('/')[3];
+          return list(id === GROUP_OUT ? [] : [{ group_id: id, ci_id: CI }]);
+        }
+        if (path === '/monitoring/profiles') {
+          const level = url.searchParams.get('level');
+          if (groups && level === 'group') {
+            return list([
+              groupProfile(GROUP, { interval_s: 120 }),
+              groupProfile(GROUP_LOW, { interval_s: 90, timeout_s: 5 }),
+              groupProfile(GROUP_OUT, { interval_s: 300 }),
+            ]);
+          }
+          return list(
+            level === 'ci' && override
+              ? [
+                  {
+                    id: 'prof-1',
+                    organization_id: 'o',
+                    level: 'ci',
+                    level_id: CI,
+                    probe_type: 'icmp',
+                    params: override,
+                    updated_at: 'x',
+                  },
+                ]
+              : [],
+          );
+        }
+        if (path === '/monitoring/probes') {
+          return list([
+            {
+              id: PROBE,
+              organization_id: 'o',
+              ci_id: CI,
+              collector_group_id: 'g',
+              type: 'icmp',
+              target: '10.0.0.1',
+              params: {},
+              enabled: true,
+              created_at: 'x',
+              updated_at: 'x',
+            },
+          ]);
+        }
+        if (path === `/monitoring/probes/${PROBE}/effective`) {
+          return answer({
+            probe_id: PROBE,
+            type: 'icmp',
+            target: '10.0.0.1',
+            interval_s: override ? field(override.interval_s, 'ci') : field(30, 'default'),
+            timeout_s: field(10, 'default'),
+            down_count: field(5, 'default'),
+            up_count: field(1, 'default'),
+            thresholds: {},
+            params: groups ? { interfaces: field([{ name: 'xe-0/0/1' }], 'default') } : {},
+          });
+        }
+        return list([]);
+      }),
+    );
+    return calls;
+  }
+
+  it('loads only when opened and shows the origin ci after saving the override', async () => {
+    await i18n.changeLanguage('de-DE');
+    const calls = stubMonitoring();
+    renderWithProviders(<CIMonitoringSection ciId={CI} />);
+
+    const section = screen.getByTestId('ci-monitoring-section');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(calls).toEqual([]);
+
+    fireEvent.click(within(section).getByText('Monitoring'));
+    (section as HTMLDetailsElement).open = true;
+    fireEvent(section, new Event('toggle'));
+    const interval = await within(section).findByLabelText('Intervall (s)');
+    const row = await within(section).findByTestId('effective-interval_s');
+    expect(row).toHaveTextContent('Standard');
+
+    fireEvent.change(interval, { target: { value: '60' } });
+    fireEvent.click(within(section).getByRole('button', { name: 'Profil speichern' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
+    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({
+      level: 'ci',
+      level_id: CI,
+      probe_type: 'icmp',
+      params: { interval_s: 60 },
+    });
+    await waitFor(() =>
+      expect(within(section).getByTestId('effective-interval_s')).toHaveTextContent('60CI'),
+    );
+  });
+
+  it('inherits from the monitoring groups of the CI and shows lists as JSON', async () => {
+    await i18n.changeLanguage('de-DE');
+    stubMonitoring({ groups: true });
+    renderWithProviders(<CIMonitoringSection ciId={CI} />);
+    const section = screen.getByTestId('ci-monitoring-section');
+    (section as HTMLDetailsElement).open = true;
+    fireEvent(section, new Event('toggle'));
+
+    // The group of the higher priority decides the interval, the other
+    // member group still gives the timeout; a group without the CI counts not.
+    const interval = await within(section).findByLabelText('Intervall (s)');
+    await waitFor(() => expect(interval).toHaveAttribute('placeholder', '120'));
+    expect(within(section).getByTestId('hint-interval_s')).toHaveTextContent(
+      'Geerbt: 120 s (Gruppe)',
+    );
+    expect(within(section).getByTestId('hint-timeout_s')).toHaveTextContent('Geerbt: 5 s (Gruppe)');
+    expect(await within(section).findByTestId('effective-params.interfaces')).toHaveTextContent(
+      '[{"name":"xe-0/0/1"}]',
+    );
+  });
+
+  it('shows the hint on 403 without the feature monitoring', async () => {
+    await i18n.changeLanguage('de-DE');
+    stubMonitoring({ forbidden: true });
+    renderWithProviders(<CIMonitoringSection ciId={CI} />);
+    const section = screen.getByTestId('ci-monitoring-section');
+    (section as HTMLDetailsElement).open = true;
+    fireEvent(section, new Event('toggle'));
+    expect(
+      await within(section).findByText(
+        'Monitoring ist für diese Organisation nicht freigeschaltet.',
+      ),
+    ).toBeInTheDocument();
   });
 });

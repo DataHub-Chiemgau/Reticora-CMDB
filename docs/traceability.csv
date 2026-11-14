@@ -1979,3 +1979,4 @@ UI-14;[P2–P4, A];G3;frontend/src/components/cmdb/CredentialBindingSection.test
 IPM-11;[P3];G3;frontend/src/components/ipam/ScanTab.test.tsx;WP-1065
 IPM-12;[P3];G3;frontend/src/components/ipam/ScanTab.test.tsx;WP-1065
 UI-14;[P2–P4, A];G3;frontend/src/components/ipam/ScanTab.test.tsx;WP-1065
+PRB-01;[P3];E;frontend/src/components/monitoring/ProfileEditor.test.tsx;WP-1080

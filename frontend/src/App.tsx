@@ -60,6 +60,10 @@ const DocumentDetailPage = lazyPage(
 const ExportPage = lazyPage(() => import('./pages/ExportPage'), 'ExportPage');
 const ImportPage = lazyPage(() => import('./pages/ImportPage'), 'ImportPage');
 const MonitoringPage = lazyPage(() => import('./pages/MonitoringPage'), 'MonitoringPage');
+const MonitoringSettingsPage = lazyPage(
+  () => import('./pages/MonitoringSettingsPage'),
+  'MonitoringSettingsPage',
+);
 const AlarmsPage = lazyPage(() => import('./pages/AlarmsPage'), 'AlarmsPage');
 const IncidentsPage = lazyPage(() => import('./pages/IncidentsPage'), 'IncidentsPage');
 const PermissionsPage = lazyPage(() => import('./pages/PermissionsPage'), 'PermissionsPage');
@@ -318,6 +322,7 @@ function App() {
           <Route path="/imports" element={<ImportPage />} />
           <Route path="/export" element={<ExportPage />} />
           <Route path="/monitoring" element={<MonitoringPage />} />
+          <Route path="/monitoring/settings" element={<MonitoringSettingsPage />} />
           <Route path="/alarms" element={<AlarmsPage />} />
           <Route path="/incidents" element={<IncidentsPage />} />
           <Route path="/audit" element={<AuditPage />} />

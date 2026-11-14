@@ -1,4 +1,5 @@
-import { BellRing, Pencil, Play, Plus } from 'lucide-react';
+import { BellRing, Pencil, Play, Plus, Settings2 } from 'lucide-react';
+import { Link } from 'react-router';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -115,9 +116,17 @@ export function MonitoringPage() {
       title={t('monitoring.title')}
       description={t('monitoring.subtitle')}
       actions={
-        <Button icon={<Plus />} onClick={() => setEditing(null)}>
-          {t('monitoring.createAlert')}
-        </Button>
+        <>
+          <Button asChild variant="secondary">
+            <Link to="/monitoring/settings">
+              <Settings2 aria-hidden="true" className="mr-1.5" />
+              {t('monitoring.settings.action')}
+            </Link>
+          </Button>
+          <Button icon={<Plus />} onClick={() => setEditing(null)}>
+            {t('monitoring.createAlert')}
+          </Button>
+        </>
       }
     />
   );

@@ -3327,7 +3327,98 @@ export const monitoringApi = {
   deleteAlert(id: string): Promise<void> {
     return fetchAPI(`/monitoring/alerts/${id}`, { method: 'DELETE' });
   },
+
+  // ─── Settings: probe types, profiles, groups (PRB-01, WP-946, WP-1080) ───
+  /** Every entry of the probe type register (monitoring:read). */
+  probeTypes(): Promise<ProbeType[]> {
+    return fetchAllPages<ProbeType>('/monitoring/probe-types');
+  },
+  /** The profiles of a filter, every page (monitoring:read). */
+  profiles(params: MonitoringProfileQuery = {}): Promise<MonitoringProfile[]> {
+    return fetchAllPages<MonitoringProfile>('/monitoring/profiles', params);
+  },
+  createProfile(data: MonitoringProfileCreate): Promise<MonitoringProfile> {
+    return fetchAPI('/monitoring/profiles', { method: 'POST', body: JSON.stringify(data) });
+  },
+  updateProfile(id: string, params: ProbeOverrides): Promise<MonitoringProfile> {
+    return fetchAPI(`/monitoring/profiles/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ params }),
+    });
+  },
+  deleteProfile(id: string): Promise<void> {
+    return fetchAPI(`/monitoring/profiles/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+  /** Every monitoring group in the caller's scope (monitoring:read). */
+  groups(): Promise<MonitoringGroup[]> {
+    return fetchAllPages<MonitoringGroup>('/monitoring/groups');
+  },
+  createGroup(data: MonitoringGroupCreate): Promise<MonitoringGroup> {
+    return fetchAPI('/monitoring/groups', { method: 'POST', body: JSON.stringify(data) });
+  },
+  updateGroup(id: string, data: MonitoringGroupUpdate): Promise<MonitoringGroup> {
+    return fetchAPI(`/monitoring/groups/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+  /** Deletes the group with its memberships and profiles; names the deleted profiles. */
+  deleteGroup(id: string): Promise<MonitoringGroupDeleteResult> {
+    return fetchAPI(`/monitoring/groups/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+  groupMembers(id: string): Promise<MonitoringGroupMember[]> {
+    return fetchAllPages<MonitoringGroupMember>(
+      `/monitoring/groups/${encodeURIComponent(id)}/members`,
+    );
+  },
+  /** Adds up to MONITORING_GROUP_MAX_MEMBERS CIs per call (422 ci_ids for another client). */
+  addGroupMembers(id: string, ciIds: string[]): Promise<{ data: MonitoringGroupMember[] }> {
+    return fetchAPI(`/monitoring/groups/${encodeURIComponent(id)}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ ci_ids: ciIds }),
+    });
+  },
+  removeGroupMember(id: string, ciId: string): Promise<void> {
+    return fetchAPI(
+      `/monitoring/groups/${encodeURIComponent(id)}/members/${encodeURIComponent(ciId)}`,
+      { method: 'DELETE' },
+    );
+  },
+  /** The probes of a CI (monitoring:read). */
+  ciProbes(ciId: string): Promise<Probe[]> {
+    return fetchAllPages<Probe>('/monitoring/probes', { ci_id: ciId });
+  },
+  /** The effective values of a probe with their origin per field (PRB-01). */
+  probeEffective(id: string): Promise<EffectiveProbe> {
+    return fetchAPI(`/monitoring/probes/${encodeURIComponent(id)}/effective`);
+  },
 };
+
+// The types of the monitoring settings (api/openapi.yaml, WP-946).
+export type ProbeType = components['schemas']['ProbeType'];
+export type ProbeOverrides = components['schemas']['ProbeOverrides'];
+export type MonitoringProfile = components['schemas']['MonitoringProfile'];
+export type MonitoringProfileLevel = components['schemas']['MonitoringProfileLevel'];
+export type MonitoringProfileCreate = components['schemas']['MonitoringProfileCreateRequest'];
+export type MonitoringGroup = components['schemas']['MonitoringGroup'];
+export type MonitoringGroupCreate = components['schemas']['MonitoringGroupCreateRequest'];
+export type MonitoringGroupUpdate = components['schemas']['MonitoringGroupUpdateRequest'];
+export type MonitoringGroupDeleteResult = components['schemas']['MonitoringGroupDeleteResult'];
+export type MonitoringGroupMember = components['schemas']['MonitoringGroupMember'];
+export type Probe = components['schemas']['Probe'];
+export type EffectiveProbe = components['schemas']['EffectiveProbe'];
+export type EffectiveProbeField = components['schemas']['EffectiveProbeField'];
+export type ProbeValueOrigin = components['schemas']['ProbeValueOrigin'];
+
+/** The filters of GET /monitoring/profiles. */
+export interface MonitoringProfileQuery {
+  level?: MonitoringProfileLevel;
+  level_id?: string;
+  probe_type?: string;
+}
+
+/** The most CIs one POST /monitoring/groups/{id}/members takes. */
+export const MONITORING_GROUP_MAX_MEMBERS = 500;
 
 // --- Alarms (ALR-01, WP-983, WP-991) ---
 
