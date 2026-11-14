@@ -139,6 +139,46 @@ Messwerte in `values`: `probe_dns_response_seconds`, `probe_dns_rcode`,
 `probe_dns_answer_count` und bei SOA `probe_dns_soa_serial`. Fehlende
 erwartete Inhalte (und `AD`) nennt das Label `missing`.
 
+## DHCPv4 (`dhcp`)
+
+Standard nach PRT-13, E-190 und A-64: Intervall 300 s (60 s–24 h), Timeout
+5 s (1–10 s), höchstens eine Prüfung je Sekunde und Collector, Down-Count 3,
+Up-Count 1. Der Test verbraucht kein Lease: In keinem Modus sendet der
+Collector DHCPREQUEST oder DHCPRELEASE. DHCPv6 ist nicht Teil des Typs.
+Parameter: `server` (IPv4-Adresse oder Name; ohne Angabe das Ziel der
+Probe), `mode` (Standard `inform`), `interface` (Pflicht bei `discover`),
+`client_id` (Option 61 vom Typ 0; ohne Angabe Typ 1 mit der MAC-Adresse),
+`mac` (ohne Angabe eine lokal verwaltete Adresse, stabil aus der Probe-ID
+abgeleitet) und `expect_subnet` (IPv4-Präfix).
+
+| Modus | Anfrage | Port | Antwort |
+|---|---|---|---|
+| `inform` | DHCPINFORM per Unicast an `server`, `ciaddr` = Adresse des Collectors in Richtung Server | 68 | ACK |
+| `discover` | DHCPDISCOVER per Broadcast auf `interface` (nur lokales Segment, Linux), `server` optional als erwartete Server-ID | 68 | erstes OFFER |
+| `relay` | DHCPDISCOVER per Unicast an `server` mit `giaddr` = Adresse des Collectors (entferntes Segment) | 67 (Senden und Empfang) | OFFER an `giaddr` |
+
+Je Port-Bindung und Interface läuft höchstens eine Transaktion, weitere
+warten bis zum Timeout. Antworten werden über `xid` und `chaddr`
+zugeordnet; fremde Antworten verwirft der Collector. Die Ports 67 und 68
+sind privilegiert: Der Collector meldet ihre Bindbarkeit in der
+Fähigkeitsmeldung (`udp_67`, `udp_68`, WP-966). Die nötigen Rechte
+(`CAP_NET_BIND_SERVICE`, `net.ipv4.ip_unprivileged_port_start`, Host-Netz
+für `discover`) beschreibt die Betriebsdoku der Probetypen (WP-1024).
+
+| Ergebnis | Bedeutung | Zustand |
+|---|---|---|
+| `ok` | ACK bzw. OFFER erhalten | `up` |
+| `ok`/`subnet_mismatch` | angebotene Adresse außerhalb `expect_subnet` | `degraded` |
+| `fail`/`timeout` | keine passende Antwort bis zum Timeout | zählt auf `down` |
+| `fail`/`refused` | DHCPNAK oder ICMP Port unreachable | zählt auf `down` |
+| `error`/`unsupported` | Port-Fähigkeit fehlt oder Binden scheitert | `unknown` |
+| `error`/`limit_exceeded` | die Port-Bindung war bis zum Timeout belegt | `unknown` |
+| `error`/`config` | ungültige Parameter (Feld im Label `field`) | `unknown` |
+
+Messwert in `values`: `probe_dhcp_response_seconds` mit den Labels
+`offered_ip` (angebotene Adresse, nur bei OFFER) und `server_id`
+(Option 54).
+
 ## HTTP/HTTPS (`http`)
 
 Standard nach PRT-04: Intervall 60 s (30 s–24 h), Timeout 10 s (1–60 s, je
@@ -765,7 +805,7 @@ nach E-154; WP-1023 misst die Raten nach.
 | `bng` | available | 60 / 60 / 86400 | 10 / 1 / 30 | 3 / 1 | 1 | 8 | 20 | 2 | 1048576 | 256 | snmp | – |
 | `pon` | available | 300 / 300 / 86400 | 60 / 1 / 60 | 3 / 1 | 1 | 4 | 5 | 2 | 4194304 | 8192 | snmp | – |
 | `dns` | available | 60 / 10 / 86400 | 5 / 1 / 10 | 3 / 1 | 4 | 64 | 200 | 16 | 65535 | 1 | – | – |
-| `dhcp` | planned | 300 / 60 / 86400 | 10 / 1 / 30 | 3 / 1 | 1 | 1 | 1 | 1 | 4096 | 1 | – | privileged_udp_ports |
+| `dhcp` | available | 300 / 60 / 86400 | 5 / 1 / 10 | 3 / 1 | 1 | 1 | 1 | 1 | 1500 | 1 | – | privileged_udp_ports |
 | `stamp` | planned | 60 / 10 / 86400 | 5 / 1 / 30 | 3 / 1 | 1 | 16 | 20 | 4 | 1472 | 1 | – | – |
 | `twamp_control` | planned | 60 / 10 / 86400 | 5 / 1 / 30 | 3 / 1 | 1 | 16 | 20 | 4 | 1472 | 1 | – | – |
 | `gnmi` | planned | 60 / 10 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 50 | 4 | 4194304 | 10000 | gnmi | – |

@@ -275,7 +275,9 @@ func Main() {
 	// assignment set and takes the sets of the NATS session (WP-956), so
 	// it is attached before the session starts.
 	// The capability report (PRT-18, WP-966): at the start and every
-	// 15 min, sent with every heartbeat and alive message.
+	// 15 min, sent with every heartbeat and alive message. The executors
+	// consult the same report (dhcp ports, stamp time synchronization).
+	probe.UseCapabilities(&uploader.capabilities)
 	go probe.RunCapabilityRefresh(ctx, &probe.CapabilityDetector{}, func(r probewire.ProbeCapabilities) {
 		uploader.capabilities.Set(&r)
 	})

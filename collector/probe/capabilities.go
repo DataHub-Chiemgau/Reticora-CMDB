@@ -9,6 +9,7 @@ import (
 	"net"
 	"strconv"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
@@ -99,7 +100,9 @@ func (d *CapabilityDetector) Detect() probewire.ProbeCapabilities {
 	bindable := func(port int) bool {
 		c, err := listenUDP(port)
 		if err != nil {
-			return false
+			// A dhcp check of this process holds the port: the right to
+			// bind it is proven (otherwise the assignment would flap).
+			return errors.Is(err, syscall.EADDRINUSE) && dhcpPortHeld(port)
 		}
 		_ = c.Close()
 		return true
@@ -169,6 +172,25 @@ func (c *Capabilities) Require(typ string) error {
 		}
 	}
 	return nil
+}
+
+// current is the report of the collector process that executors consult
+// at execution (dhcp: bindable ports, stamp: time synchronization); the
+// collector sets it once with UseCapabilities.
+var current atomic.Pointer[Capabilities]
+
+// UseCapabilities makes c the report executors consult (nil: none, every
+// capability is assumed).
+func UseCapabilities(c *Capabilities) { current.Store(c) }
+
+// CurrentReport returns a copy of the report set with UseCapabilities; nil
+// before the first detection or without a report.
+func CurrentReport() *probewire.ProbeCapabilities {
+	c := current.Load()
+	if c == nil {
+		return nil
+	}
+	return c.Report()
 }
 
 // CapabilityResult is the result of a check that Require refused: error

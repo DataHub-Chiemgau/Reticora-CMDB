@@ -1302,20 +1302,20 @@
       }
     },
     "dhcp": {
-      "status": "planned",
+      "status": "available",
       "min_interval_s": 60,
       "default_interval_s": 300,
       "max_interval_s": 86400,
       "min_timeout_s": 1,
-      "default_timeout_s": 10,
-      "max_timeout_s": 30,
+      "default_timeout_s": 5,
+      "max_timeout_s": 10,
       "default_down_count": 3,
       "default_up_count": 1,
       "max_parallel_per_target": 1,
       "max_parallel_per_collector": 1,
       "max_rate_per_collector": 1,
       "max_probes_per_target": 1,
-      "max_payload_bytes": 4096,
+      "max_payload_bytes": 1500,
       "max_rows": 1,
       "credential_namespaces": [],
       "capabilities": [
@@ -1325,21 +1325,45 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "server": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 253,
+            "description": "DHCP server (IPv4 address or name); without it the target of the probe. In mode discover optional: the expected server identifier (option 54)."
+          },
           "mode": {
             "type": "string",
             "enum": [
               "inform",
-              "discover"
+              "discover",
+              "relay"
             ],
-            "default": "discover"
-          },
-          "giaddr": {
-            "type": "string",
-            "maxLength": 45
+            "default": "inform",
+            "description": "inform: DHCPINFORM by unicast (port 68); discover: DHCPDISCOVER by broadcast on interface (port 68); relay: DHCPDISCOVER by unicast with giaddr the collector address (port 67). No mode sends DHCPREQUEST or DHCPRELEASE."
           },
           "interface": {
             "type": "string",
-            "maxLength": 64
+            "minLength": 1,
+            "maxLength": 15,
+            "description": "Network interface of the broadcast (required in mode discover)."
+          },
+          "client_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Client identifier (option 61, type 0); without it type 1 with the MAC address."
+          },
+          "mac": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 17,
+            "description": "Client hardware address (chaddr); without it a locally administered address derived from the probe ID."
+          },
+          "expect_subnet": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 18,
+            "description": "IPv4 prefix the offered address must lie in; otherwise ok with warn code subnet_mismatch."
           }
         }
       }

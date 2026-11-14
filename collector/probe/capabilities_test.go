@@ -4,8 +4,10 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
 	"slices"
 	"strconv"
+	"syscall"
 	"testing"
 	"time"
 
@@ -155,5 +157,26 @@ func TestCapabilitiesDetectBusyUDPPort(t *testing.T) {
 	}
 	if res := CapabilityResult(caps.Require("dhcp")); res.Code != probewire.ReasonUnsupported {
 		t.Fatalf("code %s, want unsupported", res.Code)
+	}
+}
+
+// TestCapabilitiesBusyByOwnDHCPCheck covers AK1 together with the dhcp
+// executor: a DHCP port held by a running dhcp check of this process is
+// bindable (the right is proven), so the detection does not take the
+// capability away while a check waits for its answer.
+func TestCapabilitiesBusyByOwnDHCPCheck(t *testing.T) {
+	inUse := func(int) (io.Closer, error) {
+		return nil, &net.OpError{Op: "listen", Net: "udp", Err: os.NewSyscallError("bind", syscall.EADDRINUSE)}
+	}
+	d := CapabilityDetector{ListenICMP: fixedICMP(probewire.CapabilityNone, probewire.CapabilityNone), ListenUDP: inUse,
+		Types: func() []string { return []string{"dhcp"} }}
+	if r := d.Detect(); r.UDP67 || r.UDP68 {
+		t.Fatalf("a port taken by another process must not count: %+v", r)
+	}
+	h := dhcpHolders(68)
+	h.Add(1)
+	defer h.Add(-1)
+	if r := d.Detect(); !r.UDP68 || r.UDP67 {
+		t.Fatalf("udp_67 %v, udp_68 %v; want false and true (held by a dhcp check)", r.UDP67, r.UDP68)
 	}
 }

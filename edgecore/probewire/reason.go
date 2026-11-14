@@ -98,6 +98,9 @@ const (
 	// WarnRPKIStale: the VRP data of an RPKI validator is older than its
 	// Expire interval (rpki_rtr, WP-1020); ok → degraded.
 	WarnRPKIStale = "rpki_stale"
+	// WarnSubnetMismatch: the DHCP server offered an address outside
+	// expect_subnet (dhcp, WP-1012); ok → degraded.
+	WarnSubnetMismatch = "subnet_mismatch"
 )
 
 // WarnCodes are the codes of a successful check with a warning; a result
@@ -112,6 +115,7 @@ var WarnCodes = map[string]bool{
 	WarnInformStale:       true,
 	WarnNoDevices:         true,
 	WarnRPKIStale:         true,
+	WarnSubnetMismatch:    true,
 }
 
 // reasons lists every valid reason code apart from the warn codes.

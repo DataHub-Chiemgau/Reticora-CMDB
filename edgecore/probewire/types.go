@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net"
 	"net/netip"
 	"net/url"
 	"regexp"
@@ -241,6 +242,7 @@ var typeMetrics = map[string][]string{
 	"icmp": {"rtt_min_ms", "rtt_max_ms", "jitter_ms"},
 	"http": {"dns_ms", "connect_ms", "tls_ms", "ttfb_ms", "status_code", "cert_expiry_s"},
 	"dns":  {"probe_dns_response_seconds", "probe_dns_rcode", "probe_dns_answer_count", "probe_dns_soa_serial"},
+	"dhcp": {"probe_dhcp_response_seconds"},
 	"redfish": {"probe_redfish_health", "probe_redfish_temperature_celsius", "probe_redfish_fan_rpm",
 		"probe_redfish_psu_input_watts", "probe_redfish_psu_state", "probe_redfish_truncated"},
 	"snmp_status": {"probe_snmp_reboot", "probe_snmp_uptime_seconds", "probe_snmp_response_seconds"},
@@ -378,6 +380,7 @@ var paramChecks = map[string]func(spec *ProbeSpec, params map[string]any) []Fiel
 	"tr069":       func(_ *ProbeSpec, params map[string]any) []FieldError { return checkTR069Params(params) },
 	"tcp":         func(_ *ProbeSpec, params map[string]any) []FieldError { return checkTCPParams(params) },
 	"dns":         func(_ *ProbeSpec, params map[string]any) []FieldError { return checkDNSParams(params) },
+	"dhcp":        func(_ *ProbeSpec, params map[string]any) []FieldError { return checkDHCPParams(params) },
 	"http":        func(_ *ProbeSpec, params map[string]any) []FieldError { return checkHTTPParams(params) },
 }
 
@@ -943,6 +946,40 @@ func ValidDNSName(name string) bool {
 		}
 	}
 	return true
+}
+
+// checkDHCPParams checks the parameters of the dhcp type (PRT-13,
+// WP-1012 AK2): interface is required in mode discover, server is an IPv4
+// address or a DNS name, mac a MAC address of six octets and expect_subnet
+// an IPv4 prefix.
+func checkDHCPParams(params map[string]any) []FieldError {
+	var errs []FieldError
+	if mode, _ := params["mode"].(string); mode == "discover" {
+		if iface, _ := params["interface"].(string); strings.TrimSpace(iface) == "" {
+			errs = append(errs, FieldError{Field: "params.interface", Message: "is required in mode discover"})
+		}
+	}
+	if server, ok := params["server"].(string); ok {
+		server = strings.TrimSpace(server)
+		if a, err := netip.ParseAddr(server); err == nil {
+			if !a.Unmap().Is4() {
+				errs = append(errs, FieldError{Field: "params.server", Message: "must be an IPv4 address or a DNS name"})
+			}
+		} else if server == "" || !ValidDNSName(server) {
+			errs = append(errs, FieldError{Field: "params.server", Message: "must be an IPv4 address or a DNS name"})
+		}
+	}
+	if mac, ok := params["mac"].(string); ok {
+		if hw, err := net.ParseMAC(strings.TrimSpace(mac)); err != nil || len(hw) != 6 {
+			errs = append(errs, FieldError{Field: "params.mac", Message: "must be a MAC address of six octets"})
+		}
+	}
+	if subnet, ok := params["expect_subnet"].(string); ok {
+		if p, err := netip.ParsePrefix(strings.TrimSpace(subnet)); err != nil || !p.Addr().Is4() {
+			errs = append(errs, FieldError{Field: "params.expect_subnet", Message: "must be an IPv4 prefix (CIDR)"})
+		}
+	}
+	return errs
 }
 
 // MaxTCPSend is the largest send string of the tcp type in bytes (PRT-03).
