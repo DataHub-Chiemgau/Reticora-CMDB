@@ -183,7 +183,10 @@ func applicationJobKinds(ciService *ci.Service, bulkRevert *ci.BulkRevert, histo
 		// The full compliance evaluation (WP-1126, SEC-03, E-237): pages
 		// of 500 CIs with one upsert each; a retry evaluates again, a
 		// running evaluation can be cancelled between two pages.
-		{kind: compliance.EvaluateJobKindConfig, handler: complianceJobs.RunJob}}
+		{kind: compliance.EvaluateJobKindConfig, handler: complianceJobs.RunJob},
+		// The reports of a standard as PDF or CSV, stored as documents
+		// (SEC-04, WP-1129, E-239); cancellable between two sections.
+		{kind: compliance.ReportJobKindConfig, handler: complianceJobs.RunReportJob}}
 	// The version match CI → findings (SEC-02, WP-1121); without the
 	// database there is none.
 	if matcher != nil {

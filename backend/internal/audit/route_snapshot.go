@@ -426,6 +426,9 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	// The inactive rule a template creates (WP-1130); its description
 	// names template and version.
 	m["POST "+v1+"compliance/rule-templates/{key}/instantiate"] = created("compliance_rule")
+	// The report job (SEC-04, WP-1129): the job row; the stored report
+	// writes compliance.report.generated in its own transaction.
+	m["POST "+v1+"compliance/reports"] = created("job")
 	m["PUT "+v1+"compliance/settings"] = RouteSnapshot{Table: "compliance_settings",
 		Keys: []SnapshotKey{{"organization_id", "$org"}}}
 	m["PUT "+v1+"monitoring/alarm-settings"] = RouteSnapshot{Table: "alarm_settings",

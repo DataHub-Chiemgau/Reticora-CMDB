@@ -4271,7 +4271,8 @@ paths:
         '409':
           description: >-
             The document is a signature document (category `signature`,
-            WP-748); it is locked against changes (type
+            WP-748) or a compliance report (category `compliance_report`,
+            WP-1129); it is locked against changes (type
             https://reticora.io/problems/409).
           content:
             application/problem+json:
@@ -4279,8 +4280,9 @@ paths:
                 $ref: '#/components/schemas/ProblemDetail'
         '422':
           description: >-
-            `category` is `signature`; only a signed assignment, return or
-            transfer sets it (WP-276, WP-748).
+            `category` is `signature` or `compliance_report`; only a signed
+            assignment, return or transfer (WP-276, WP-748) or the job
+            compliance.report (WP-1129) sets it.
           content:
             application/problem+json:
               schema:
@@ -4307,7 +4309,8 @@ paths:
         '409':
           description: >-
             The document is a signature document (category `signature`,
-            WP-748); it is locked against changes (type
+            WP-748) or a compliance report (category `compliance_report`,
+            WP-1129); it is locked against changes (type
             https://reticora.io/problems/409).
           content:
             application/problem+json:
@@ -12044,7 +12047,8 @@ paths:
         '409':
           description: >-
             The document is a signature document (category `signature`,
-            WP-748); it is locked against changes (type
+            WP-748) or a compliance report (category `compliance_report`,
+            WP-1129); it is locked against changes (type
             https://reticora.io/problems/409).
           content:
             application/problem+json:
@@ -12220,8 +12224,10 @@ paths:
             https://reticora.io/problems/document-quarantined); a document
             whose scan is pending (type
             https://reticora.io/problems/document-pending-scan) is linked
-            normally. A signature document (category `signature`) takes no
-            further link (type https://reticora.io/problems/409, WP-748).
+            normally. A signature document (category `signature`) or a
+            compliance report (category `compliance_report`) takes no
+            further link (type https://reticora.io/problems/409, WP-748,
+            WP-1129).
           content:
             application/problem+json:
               schema:
@@ -14689,13 +14695,16 @@ paths:
     get:
       operationId: getSecurityReport
       tags: [Compliance]
-      summary: Generate the tenant security & compliance report (ISO 27001 / NIS2)
+      summary: Preview of the security & compliance report (ISO 27001 / NIS2 / KRITIS)
       description: >-
-        Aggregates the tenant's security posture into one evidence document:
-        audit hash-chain integrity, the rule-based compliance score, failing
-        checks grouped per rule (with remediation hints and affected CIs) and
-        the enabled security-relevant capabilities. The `standard` query
-        parameter selects the framing label (`iso27001`, `nis2`, …).
+        Preview of a report as JSON, computed in the request (the answer form
+        is unchanged): audit hash-chain integrity, the rule-based compliance
+        score, failing checks grouped per rule (with remediation hints and
+        affected CIs, at most 1,000 results) and the enabled
+        security-relevant capabilities. The `standard` query parameter
+        selects the framing label (`iso27001`, `nis2`, `kritis`). The
+        complete report as PDF or CSV is a job: POST
+        /api/v1/compliance/reports (SEC-04, WP-1129).
       parameters:
         - name: standard
           in: query
@@ -14710,6 +14719,78 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '500': { $ref: '#/components/responses/InternalServerError' }
         '503': { description: Reporting not configured, content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
+
+  /api/v1/compliance/reports:
+    x-phase: P3
+    x-feature: compliance_findings
+    post:
+      operationId: createComplianceReport
+      tags: [Compliance]
+      summary: Generate a compliance report as PDF or CSV (job)
+      description: >-
+        Queues the job compliance.report (SEC-04, WP-1129, E-239; three
+        attempts of 30 minutes, cancellable with compliance:read) and answers
+        202 with the job (Location /api/v1/jobs/{id}). Needs compliance:read.
+        Without client_id the report covers the organization and needs an
+        org-wide principal (403 otherwise, E-09); with client_id it covers
+        that client and reads only its data; a client that is not visible is
+        404. Content in this order: audit chain verification, score of the
+        scope with its trend over 400 days, coverage per control of the
+        standard with the assigned rules, the failing rules with every
+        affected CI (no upper bound), the open findings by severity with the
+        share in CISA KEV and the active capabilities. The PDF carries a head
+        (organization, client, standard, generation time), page numbers and a
+        table of contents; the CSV (UTF-8) one row per control × rule × CI
+        with the columns standard, control_id, control_title, rule_id,
+        rule_name, severity, ci_id, ci_name, status, evaluated_at (a control
+        without rule with empty rule and CI columns). The report is stored as
+        a document of the category compliance_report with the tags
+        standard:<standard>, format:<format> and job:<job id>, linked to the
+        organization or the client; the job result names document_id. It is
+        downloaded with GET /api/v1/documents/{id}/content after the malware
+        scan like every document (E-42). The audit entry
+        compliance.report.generated records standard, format, scope and the
+        document.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ComplianceReportRequest' }
+      responses:
+        '202':
+          description: The report job
+          headers:
+            Location: { description: 'The job, /api/v1/jobs/{id}.', schema: { type: string } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/Job' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    get:
+      operationId: listComplianceReports
+      tags: [Compliance]
+      summary: List the stored compliance reports
+      description: >-
+        The report documents (category compliance_report) visible in the
+        caller's scope, newest first, with standard, format, scope
+        (organization or client), scan status and the status of their job
+        (SEC-04, WP-1129). Needs compliance:read. Offset-paged over at most
+        1,000 reports (total_capped beyond).
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Stored reports
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ComplianceReportListResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
 
   /api/v1/iga/connectors:
     x-phase: A
@@ -23353,7 +23434,8 @@ paths:
         '409':
           description: >-
             The document is a signature document (category `signature`,
-            WP-748); it is locked against changes (type
+            WP-748) or a compliance report (category `compliance_report`,
+            WP-1129); it is locked against changes (type
             https://reticora.io/problems/409).
           content:
             application/problem+json:
@@ -23430,7 +23512,8 @@ paths:
         '409':
           description: >-
             The document is a signature document (category `signature`,
-            WP-748); it is locked against changes (type
+            WP-748) or a compliance report (category `compliance_report`,
+            WP-1129); it is locked against changes (type
             https://reticora.io/problems/409).
           content:
             application/problem+json:
@@ -39841,6 +39924,40 @@ components:
               type: array
               items: { $ref: '#/components/schemas/Agent' }
 
+    ComplianceReportRequest:
+      type: object
+      required: [standard, format]
+      properties:
+        standard: { type: string, enum: [iso27001, nis2, kritis] }
+        format: { type: string, enum: [pdf, csv] }
+        client_id:
+          type: string
+          format: uuid
+          description: The client of a client report; absent for the organization.
+    ComplianceReportEntry:
+      type: object
+      required: [document_id, title, file_name, standard, format, scope, scan_status, created_at]
+      properties:
+        document_id: { type: string, format: uuid }
+        title: { type: string }
+        file_name: { type: string }
+        standard: { type: string, enum: [iso27001, nis2, kritis] }
+        format: { type: string, enum: [pdf, csv] }
+        scope: { type: string, enum: [organization, client] }
+        client_id: { type: string, format: uuid }
+        scan_status: { type: string, description: 'Malware scan of the content (pending_scan, clean, infected, scan_failed).' }
+        job_id: { type: string, format: uuid }
+        job_status: { type: string }
+        created_at: { type: string, format: date-time }
+    ComplianceReportListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/ComplianceReportEntry' }
     CPEMapping:
       type: object
       required: [id, match_kind, vendor, products, version_field, version_scheme, priority, created_at, updated_at]

@@ -67,6 +67,9 @@ type Jobs struct {
 	evaluator *Evaluator
 	svc       JobService
 	queue     JobQueue
+	// reports generates the report jobs compliance.report (WithReports,
+	// WP-1129); nil without the database and the object storage.
+	reports *ReportGenerator
 }
 
 // NewJobs returns the evaluation jobs of evaluator.

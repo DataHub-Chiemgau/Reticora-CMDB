@@ -6398,12 +6398,36 @@ export interface paths {
       cookie?: never;
     };
     /**
-     * Generate the tenant security & compliance report (ISO 27001 / NIS2)
-     * @description Aggregates the tenant's security posture into one evidence document: audit hash-chain integrity, the rule-based compliance score, failing checks grouped per rule (with remediation hints and affected CIs) and the enabled security-relevant capabilities. The `standard` query parameter selects the framing label (`iso27001`, `nis2`, …).
+     * Preview of the security & compliance report (ISO 27001 / NIS2 / KRITIS)
+     * @description Preview of a report as JSON, computed in the request (the answer form is unchanged): audit hash-chain integrity, the rule-based compliance score, failing checks grouped per rule (with remediation hints and affected CIs, at most 1,000 results) and the enabled security-relevant capabilities. The `standard` query parameter selects the framing label (`iso27001`, `nis2`, `kritis`). The complete report as PDF or CSV is a job: POST /api/v1/compliance/reports (SEC-04, WP-1129).
      */
     get: operations['getSecurityReport'];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/compliance/reports': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the stored compliance reports
+     * @description The report documents (category compliance_report) visible in the caller's scope, newest first, with standard, format, scope (organization or client), scan status and the status of their job (SEC-04, WP-1129). Needs compliance:read. Offset-paged over at most 1,000 reports (total_capped beyond).
+     */
+    get: operations['listComplianceReports'];
+    put?: never;
+    /**
+     * Generate a compliance report as PDF or CSV (job)
+     * @description Queues the job compliance.report (SEC-04, WP-1129, E-239; three attempts of 30 minutes, cancellable with compliance:read) and answers 202 with the job (Location /api/v1/jobs/{id}). Needs compliance:read. Without client_id the report covers the organization and needs an org-wide principal (403 otherwise, E-09); with client_id it covers that client and reads only its data; a client that is not visible is 404. Content in this order: audit chain verification, score of the scope with its trend over 400 days, coverage per control of the standard with the assigned rules, the failing rules with every affected CI (no upper bound), the open findings by severity with the share in CISA KEV and the active capabilities. The PDF carries a head (organization, client, standard, generation time), page numbers and a table of contents; the CSV (UTF-8) one row per control × rule × CI with the columns standard, control_id, control_title, rule_id, rule_name, severity, ci_id, ci_name, status, evaluated_at (a control without rule with empty rule and CI columns). The report is stored as a document of the category compliance_report with the tags standard:<standard>, format:<format> and job:<job id>, linked to the organization or the client; the job result names document_id. It is downloaded with GET /api/v1/documents/{id}/content after the malware scan like every document (E-42). The audit entry compliance.report.generated records standard, format, scope and the document.
+     */
+    post: operations['createComplianceReport'];
     delete?: never;
     options?: never;
     head?: never;
@@ -19231,6 +19255,41 @@ export interface components {
     AgentListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Agent'][];
     };
+    ComplianceReportRequest: {
+      /** @enum {string} */
+      standard: 'iso27001' | 'nis2' | 'kritis';
+      /** @enum {string} */
+      format: 'pdf' | 'csv';
+      /**
+       * Format: uuid
+       * @description The client of a client report; absent for the organization.
+       */
+      client_id?: string;
+    };
+    ComplianceReportEntry: {
+      /** Format: uuid */
+      document_id: string;
+      title: string;
+      file_name: string;
+      /** @enum {string} */
+      standard: 'iso27001' | 'nis2' | 'kritis';
+      /** @enum {string} */
+      format: 'pdf' | 'csv';
+      /** @enum {string} */
+      scope: 'organization' | 'client';
+      /** Format: uuid */
+      client_id?: string;
+      /** @description Malware scan of the content (pending_scan, clean, infected, scan_failed). */
+      scan_status: string;
+      /** Format: uuid */
+      job_id?: string;
+      job_status?: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    ComplianceReportListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['ComplianceReportEntry'][];
+    };
     CPEMapping: {
       /** Format: uuid */
       id: string;
@@ -27943,7 +28002,7 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
-      /** @description The document is a signature document (category `signature`, WP-748); it is locked against changes (type https://reticora.io/problems/409). */
+      /** @description The document is a signature document (category `signature`, WP-748) or a compliance report (category `compliance_report`, WP-1129); it is locked against changes (type https://reticora.io/problems/409). */
       409: {
         headers: {
           [name: string]: unknown;
@@ -27992,7 +28051,7 @@ export interface operations {
         };
       };
       404: components['responses']['NotFound'];
-      /** @description The document is a signature document (category `signature`, WP-748); it is locked against changes (type https://reticora.io/problems/409). */
+      /** @description The document is a signature document (category `signature`, WP-748) or a compliance report (category `compliance_report`, WP-1129); it is locked against changes (type https://reticora.io/problems/409). */
       409: {
         headers: {
           [name: string]: unknown;
@@ -28001,7 +28060,7 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
-      /** @description `category` is `signature`; only a signed assignment, return or transfer sets it (WP-276, WP-748). */
+      /** @description `category` is `signature` or `compliance_report`; only a signed assignment, return or transfer (WP-276, WP-748) or the job compliance.report (WP-1129) sets it. */
       422: {
         headers: {
           [name: string]: unknown;
@@ -36414,7 +36473,7 @@ export interface operations {
         };
       };
       404: components['responses']['NotFound'];
-      /** @description The document is a signature document (category `signature`, WP-748); it is locked against changes (type https://reticora.io/problems/409). */
+      /** @description The document is a signature document (category `signature`, WP-748) or a compliance report (category `compliance_report`, WP-1129); it is locked against changes (type https://reticora.io/problems/409). */
       409: {
         headers: {
           [name: string]: unknown;
@@ -36534,7 +36593,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      /** @description The document is quarantined (type https://reticora.io/problems/document-quarantined); a document whose scan is pending (type https://reticora.io/problems/document-pending-scan) is linked normally. A signature document (category `signature`) takes no further link (type https://reticora.io/problems/409, WP-748). */
+      /** @description The document is quarantined (type https://reticora.io/problems/document-quarantined); a document whose scan is pending (type https://reticora.io/problems/document-pending-scan) is linked normally. A signature document (category `signature`) or a compliance report (category `compliance_report`) takes no further link (type https://reticora.io/problems/409, WP-748, WP-1129). */
       409: {
         headers: {
           [name: string]: unknown;
@@ -39642,6 +39701,77 @@ export interface operations {
           'application/problem+json': components['schemas']['ProblemDetail'];
         };
       };
+    };
+  };
+  listComplianceReports: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Stored reports */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ComplianceReportListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  createComplianceReport: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ComplianceReportRequest'];
+      };
+    };
+    responses: {
+      /** @description The report job */
+      202: {
+        headers: {
+          /** @description The job, /api/v1/jobs/{id}. */
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Job'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   listIGAConnectors: {
@@ -49299,7 +49429,7 @@ export interface operations {
         };
       };
       404: components['responses']['NotFound'];
-      /** @description The document is a signature document (category `signature`, WP-748); it is locked against changes (type https://reticora.io/problems/409). */
+      /** @description The document is a signature document (category `signature`, WP-748) or a compliance report (category `compliance_report`, WP-1129); it is locked against changes (type https://reticora.io/problems/409). */
       409: {
         headers: {
           [name: string]: unknown;
@@ -49372,7 +49502,7 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      /** @description The document is a signature document (category `signature`, WP-748); it is locked against changes (type https://reticora.io/problems/409). */
+      /** @description The document is a signature document (category `signature`, WP-748) or a compliance report (category `compliance_report`, WP-1129); it is locked against changes (type https://reticora.io/problems/409). */
       409: {
         headers: {
           [name: string]: unknown;

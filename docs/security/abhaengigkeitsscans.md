@@ -27,7 +27,7 @@ Ganzes prüfen (Stand WP-329):
 |---|---|---|---|
 | `github.com/xuri/excelize/v2` v2.11.1 | E-49, WP-301 | ja (Server) | `govulncheck` (`backend`) |
 | `github.com/boombuler/barcode` v1.1.0 | E-52, WP-763 | ja (Server) | `govulncheck` (`backend`) |
-| `github.com/go-pdf/fpdf` v0.9.0 | E-52, WP-763 | ja (Server) | `govulncheck` (`backend`) |
+| `codeberg.org/go-pdf/fpdf` v0.12.0 (gepflegte Heimat von `github.com/go-pdf/fpdf`, dessen GitHub-Stand v0.9.0 von 2023 nicht mehr fortgeführt wird; Wechsel mit WP-1129, auch für die Compliance-Reports) | E-52, WP-763, WP-1129 | ja (Server) | `govulncheck` (`backend`) |
 | `github.com/makiuchi-d/gozxing` v0.1.1 | E-52, WP-763 | nein, nur in `backend/internal/labels/render_test.go` | nicht: `govulncheck` läuft ohne `-test`; geführt wie die nicht ausgelieferten Entwicklungsabhängigkeiten von npm |
 | `@zxing/browser` | E-52, WP-807 | ja (Bundle) | `npm-audit` (Produktion, blockierend) |
 | `@dnd-kit/core`, `@dnd-kit/sortable` | E-54, WP-797 | ja (Bundle) | `npm-audit` (Produktion, blockierend) |

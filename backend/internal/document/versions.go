@@ -391,6 +391,11 @@ func (h *Handler) Usage(w http.ResponseWriter, r *http.Request) {
 // only the signature path of the assignment service sets it.
 const CategorySignature = "signature"
 
+// CategoryComplianceReport is the category of the compliance reports the
+// job compliance.report stores (SEC-04, WP-1129); the document API neither
+// sets it nor changes such a document (refuseSignatureChange).
+const CategoryComplianceReport = "compliance_report"
+
 // ErrMimeMismatch is the refusal of content that does not match its
 // declared type (VerifyContent; 422 mime-mismatch).
 var ErrMimeMismatch = errors.New("content does not match its type")

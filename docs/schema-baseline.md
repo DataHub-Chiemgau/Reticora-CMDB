@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000368_collector_group_trap_config
+Stand: Migration 000369_document_link_report
 
 ## Prüfung
 
@@ -370,6 +370,23 @@ das Team-Prädikat wie `ticket`; ein team-beschränkter Prinzipal gilt für
 `document` (Policies, `require_visible_parent`, `require_linked_row`)
 nicht mehr als org-weit. `app_scope_widen`/`app_scope_restore` leeren
 bzw. setzen auch `app.team_scope`.
+
+Compliance-Reports als Dokumente (SEC-04, E-239, WP-1129, Migration 000369):
+`doc_link_entity_type_check` erlaubt zusätzlich `organization` und
+`client`; die Registry in `backend/internal/document/links.go` führt beide
+(`organization` nur für org-weite Prinzipale, `client` für einen im Scope
+sichtbaren Client). `derive_document_link_scope` erhält zwei Zweige:
+`client` prüft, dass der Client zur Organisation des Links gehört (sonst
+`foreign_key_violation`), und setzt `client_id := entity_id`;
+`organization` verlangt `entity_id = organization_id` (sonst
+`foreign_key_violation`) und bleibt organisationsweit (`client_id`,
+`site_id`, `team_id` NULL). Die Policy `document_link_tenant_isolation`
+(Fassung aus 000217) zeigt Links der Art `organization` zusätzlich nur
+org-weiten Prinzipalen (keine Client-, Standort- oder Team-Beschränkung);
+über die EXISTS-Unterabfrage von `document_tenant_isolation` (000281) gilt
+das auch für das Dokument. Down löscht die Links beider Arten, setzt die
+Report-Dokumente auf `other` und stellt Liste, Funktion (000266) und
+Policy (000217) wieder her.
 
 Seit Migration 000275 (WP-827, ABN-03) überlebt kein Link sein Ziel: Die
 AFTER-DELETE-Trigger `<tabelle>_document_links` auf `ci`, `asset`,
@@ -2069,7 +2086,10 @@ WITH CHECK mit dem Schreibprädikat aus 000142) und die restriktiven
 `relationship_change_scoped_update` und `relationship_change_scoped_delete`.
 Digitale Unterschrift an Bewegungen (AST-02, E-51, E-124, WP-276, Migration
 000262): `document_category_check` erlaubt neben den acht Werten aus 000011
-die Kategorie `signature`. `stock_movement` erhält `signer_user_id` und
+die Kategorie `signature`, seit Migration 000369 (SEC-04, WP-1129) auch
+`compliance_report` (vom Job `compliance.report` erzeugte Reports; die
+Dokument-API setzt keine der beiden Kategorien und sperrt solche Dokumente
+gegen Änderungen). `stock_movement` erhält `signer_user_id` und
 `signer_surrogate` (beide `uuid`, ohne Fremdschlüssel wie `actor_id`, damit
 Crypto-Shredding möglich bleibt) mit `stock_movement_signer_check`
 (`num_nonnulls(signer_user_id, signer_surrogate) <= 1`) und

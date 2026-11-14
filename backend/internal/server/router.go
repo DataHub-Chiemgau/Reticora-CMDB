@@ -553,6 +553,21 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// answers 503.
 	complianceEvaluator := compliance.NewEvaluator(repos.Compliance, repos.CI)
 	complianceJobs := compliance.NewJobs(complianceEvaluator)
+	// The reports of a standard (SEC-04, WP-1129): with the database and
+	// the object storage; the malware scan of a report goes to the job
+	// queue (E-42), without it the scan sweep takes it up.
+	if opts.AuditPool != nil && opts.Blobs != nil {
+		reports := compliance.NewReportGenerator(opts.AuditPool, repos.Compliance, reportAuditVerifier(&opts),
+			entitlementLister{svc: opts.Entitlements}, opts.Blobs)
+		// A report counts against max_storage_mb (E-239).
+		if opts.Entitlements != nil {
+			reports.WithStorageLimit(opts.Entitlements)
+		}
+		if opts.JobQueue != nil {
+			reports.WithScans(opts.JobQueue)
+		}
+		complianceJobs.WithReports(reports)
+	}
 	var bffJobs graphqlbff.JobSource
 	// The CI history projects the field values with the policy of the
 	// caller, a queued snapshot with that of its creator (WP-727).
@@ -763,6 +778,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			// A running compliance evaluation is cancelled with
 			// compliance:write like its start (WP-1126).
 			WithKind(compliance.EvaluateJobKind, identity.PermComplianceWrite, nil).
+			// A running report is cancelled with compliance:read like its
+			// start (WP-1129).
+			WithKind(compliance.ReportJobKind, identity.PermComplianceRead, nil).
 			// A running template migration is cancelled with citype:manage
 			// like its start; it has no revert (E-25).
 			WithKind(ci.TemplateMigrateJobKind, identity.PermCITypeManage, nil).

@@ -314,6 +314,10 @@ var routeRules = []routeRule{
 	// of the session. Reading the state stays location:read through the
 	// segment org, so the banner of the grace period reaches every user.
 	{http.MethodPost, "org/deletion", identity.PermOrgDelete},
+	// A compliance report is a read of the compliance data: its job is
+	// started with compliance:read (SEC-04, WP-1129), not the
+	// compliance:write the segment derives for POST.
+	{http.MethodPost, "compliance/reports", identity.PermComplianceRead},
 	{http.MethodDelete, "org/deletion", identity.PermOrgDelete},
 	// The full export of the organization holds every row of it, the
 	// personal data unsealed (TLC-05, E-165, WP-1151): every method needs

@@ -9,13 +9,13 @@ replace github.com/DataHub-Chiemgau/Reticora-CMDB/collector => ../collector
 replace github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore => ../edgecore
 
 require (
+	codeberg.org/go-pdf/fpdf v0.12.0
 	github.com/99designs/gqlgen v0.17.93
 	github.com/DataHub-Chiemgau/Reticora-CMDB/collector v0.0.0-00010101000000-000000000000
 	github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore v0.0.0-00010101000000-000000000000
 	github.com/ProtonMail/go-crypto v1.5.2
 	github.com/boombuler/barcode v1.1.0
 	github.com/go-chi/chi/v5 v5.5.0
-	github.com/go-pdf/fpdf v0.9.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.13.0
 	github.com/makiuchi-d/gozxing v0.1.1
