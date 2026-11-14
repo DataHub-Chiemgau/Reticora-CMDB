@@ -119,6 +119,9 @@ type Agent struct {
 	// lookup, next and bulk read it (WP-992).
 	mibMu sync.RWMutex
 	mib   []gosnmp.SnmpPDU // sorted by OID, each OID once
+	// getError is the error-status GET responses carry (SetGetError);
+	// gosnmp.NoError answers normally.
+	getError gosnmp.SNMPError
 	// usm holds the keys of the V3 user; nil without the SNMPv3 mode.
 	usm *gosnmp.UsmSecurityParameters
 
@@ -193,6 +196,17 @@ func (a *Agent) Set(pdus ...gosnmp.SnmpPDU) {
 	a.mibMu.Lock()
 	defer a.mibMu.Unlock()
 	a.mib = upsert(a.mib, pdus...)
+}
+
+// SetGetError makes the agent answer every GET with the error-status
+// status (RFC 3416 4.2.1), e.g. gosnmp.TooBig with an empty variable list
+// or gosnmp.GenErr with the requested variables as Null and error-index 1;
+// gosnmp.NoError restores normal answers. GETNEXT and GETBULK stay
+// unaffected.
+func (a *Agent) SetGetError(status gosnmp.SNMPError) {
+	a.mibMu.Lock()
+	defer a.mibMu.Unlock()
+	a.getError = status
 }
 
 // Delete removes the variable oid; a later GET answers noSuchObject.
@@ -393,6 +407,7 @@ func (a *Agent) handle(raw []byte) ([]byte, Request) {
 		Version: gosnmp.Version2c, Community: pkt.Community, PDUType: gosnmp.GetResponse,
 		RequestID: pkt.RequestID, Variables: vars, Logger: gosnmp.NewLogger(nil),
 	}
+	a.applyGetError(pkt, resp)
 	out, err := resp.MarshalMsg()
 	if err != nil {
 		return nil, req
@@ -418,6 +433,28 @@ func (a *Agent) answer(pkt *gosnmp.SnmpPacket) (vars []gosnmp.SnmpPDU, ok bool) 
 		return nil, false
 	}
 	return vars, true
+}
+
+// applyGetError sets the error-status of SetGetError on the response to a
+// GET: tooBig with an empty variable list, any other status with the
+// requested variables as Null and error-index 1.
+func (a *Agent) applyGetError(req, resp *gosnmp.SnmpPacket) {
+	a.mibMu.RLock()
+	status := a.getError
+	a.mibMu.RUnlock()
+	if status == gosnmp.NoError || req.PDUType != gosnmp.GetRequest {
+		return
+	}
+	resp.Error = status
+	if status == gosnmp.TooBig {
+		resp.Variables = nil
+		return
+	}
+	resp.ErrorIndex = 1
+	resp.Variables = make([]gosnmp.SnmpPDU, len(req.Variables))
+	for i, v := range req.Variables {
+		resp.Variables[i] = gosnmp.SnmpPDU{Name: v.Name, Type: gosnmp.Null}
+	}
 }
 
 // handleV3 answers an SNMPv3 message after RFC 3414 3.2: the engine
@@ -465,6 +502,7 @@ func (a *Agent) handleV3(raw []byte, req *Request) []byte {
 		PDUType: gosnmp.GetResponse, ContextEngineID: engineID, ContextName: pkt.ContextName, Variables: vars,
 		Logger: gosnmp.NewLogger(nil),
 	}
+	a.applyGetError(pkt, resp)
 	if err = sp.InitPacket(resp); err != nil {
 		return nil
 	}

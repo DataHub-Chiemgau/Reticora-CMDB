@@ -221,8 +221,22 @@ func (s *Session) attempt(do func(g *gosnmp.GoSNMP) error) error {
 	return nil
 }
 
+// ErrorStatusError is a response whose error-status is not noError (RFC
+// 3416 4.2.1, e.g. tooBig or genErr): the agent answered, but without the
+// requested values. gosnmp hands the status out only in the packet.
+type ErrorStatusError struct {
+	Status gosnmp.SNMPError
+	Index  uint8
+}
+
+func (e *ErrorStatusError) Error() string {
+	return "snmp: the agent answered with error-status " + e.Status.String()
+}
+
 // Get reads the variables oids (at most MaxOids per request). An SNMPv3
-// Report PDU instead of a response is an error.
+// Report PDU instead of a response is an error, and so is a response with
+// an error-status (*ErrorStatusError; sessions speak SNMPv2c or v3, where
+// a missing variable is a noSuchObject value, never an error-status).
 func (s *Session) Get(oids []string) ([]gosnmp.SnmpPDU, error) {
 	var out []gosnmp.SnmpPDU
 	err := s.run(func(g *gosnmp.GoSNMP) error {
@@ -234,6 +248,9 @@ func (s *Session) Get(oids []string) ([]gosnmp.SnmpPDU, error) {
 			}
 			if err != nil {
 				return err
+			}
+			if pkt.Error != gosnmp.NoError {
+				return &ErrorStatusError{Status: pkt.Error, Index: pkt.ErrorIndex}
 			}
 			out = append(out, pkt.Variables...)
 		}

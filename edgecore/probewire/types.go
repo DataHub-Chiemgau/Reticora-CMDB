@@ -240,6 +240,7 @@ var typeMetrics = map[string][]string{
 	"dns":  {"probe_dns_response_seconds", "probe_dns_rcode", "probe_dns_answer_count", "probe_dns_soa_serial"},
 	"redfish": {"probe_redfish_health", "probe_redfish_temperature_celsius", "probe_redfish_fan_rpm",
 		"probe_redfish_psu_input_watts", "probe_redfish_psu_state", "probe_redfish_truncated"},
+	"snmp_status": {"probe_snmp_reboot", "probe_snmp_uptime_seconds", "probe_snmp_response_seconds"},
 	"ospf": {"probe_ospf_neighbor_state", "probe_ospf_neighbor_events_total", "probe_ospf_neighbors",
 		"probe_ospf_neighbors_full", "probe_ospf_truncated", "probe_ospf_neighbors_unseen"},
 	"isis": {"probe_isis_adjacency_state", "probe_isis_adjacencies", "probe_isis_adjacencies_up",
@@ -350,16 +351,61 @@ func Validate(spec *ProbeSpec) []FieldError {
 // family against the target). They run on decodable params and report
 // field errors.
 var paramChecks = map[string]func(spec *ProbeSpec, params map[string]any) []FieldError{
-	"icmp":    checkICMPParams,
-	"bfd":     checkBFDParams,
-	"optical": checkOpticalParams,
-	"redfish": checkRedfishParams,
-	"ospf":    func(_ *ProbeSpec, params map[string]any) []FieldError { return checkOSPFParams(params) },
-	"isis":    func(_ *ProbeSpec, params map[string]any) []FieldError { return checkISISParams(params) },
-	"tr069":   func(_ *ProbeSpec, params map[string]any) []FieldError { return checkTR069Params(params) },
-	"tcp":     func(_ *ProbeSpec, params map[string]any) []FieldError { return checkTCPParams(params) },
-	"dns":     func(_ *ProbeSpec, params map[string]any) []FieldError { return checkDNSParams(params) },
-	"http":    func(_ *ProbeSpec, params map[string]any) []FieldError { return checkHTTPParams(params) },
+	"icmp":        checkICMPParams,
+	"snmp_status": func(_ *ProbeSpec, params map[string]any) []FieldError { return checkSNMPStatusParams(params) },
+	"bfd":         checkBFDParams,
+	"optical":     checkOpticalParams,
+	"redfish":     checkRedfishParams,
+	"ospf":        func(_ *ProbeSpec, params map[string]any) []FieldError { return checkOSPFParams(params) },
+	"isis":        func(_ *ProbeSpec, params map[string]any) []FieldError { return checkISISParams(params) },
+	"tr069":       func(_ *ProbeSpec, params map[string]any) []FieldError { return checkTR069Params(params) },
+	"tcp":         func(_ *ProbeSpec, params map[string]any) []FieldError { return checkTCPParams(params) },
+	"dns":         func(_ *ProbeSpec, params map[string]any) []FieldError { return checkDNSParams(params) },
+	"http":        func(_ *ProbeSpec, params map[string]any) []FieldError { return checkHTTPParams(params) },
+}
+
+// MaxSNMPRegex is the longest regex of an snmp_status check (PRT-05).
+const MaxSNMPRegex = 256
+
+// snmpOID is an OID in dotted form with at least two arcs, optionally
+// with a leading dot.
+var snmpOID = regexp.MustCompile(`^\.?[0-9]+(\.[0-9]+)+$`)
+
+// checkSNMPStatusParams checks the OID checks of the snmp_status type
+// (PRT-05, WP-995 AK3): every oid is an OID in dotted form, lt and gt take
+// a number, in a non-empty comma-separated list and regex an RE2
+// expression of at most 256 characters.
+func checkSNMPStatusParams(params map[string]any) []FieldError {
+	items, _ := params["checks"].([]any)
+	var errs []FieldError
+	for i, item := range items {
+		obj, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		prefix := fmt.Sprintf("params.checks[%d]", i)
+		if oid, ok := obj["oid"].(string); ok && !snmpOID.MatchString(strings.TrimSpace(oid)) {
+			errs = append(errs, FieldError{Field: prefix + ".oid", Message: "must be an OID in dotted form"})
+		}
+		value, _ := obj["value"].(string)
+		switch obj["op"] {
+		case "lt", "gt":
+			if _, err := strconv.ParseFloat(strings.TrimSpace(value), 64); err != nil {
+				errs = append(errs, FieldError{Field: prefix + ".value", Message: "must be a number for lt and gt"})
+			}
+		case "in":
+			if strings.Trim(value, " ,") == "" {
+				errs = append(errs, FieldError{Field: prefix + ".value", Message: "must list at least one value (comma separated)"})
+			}
+		case "regex":
+			if len([]rune(value)) > MaxSNMPRegex {
+				errs = append(errs, FieldError{Field: prefix + ".value", Message: fmt.Sprintf("regex must be at most %d characters", MaxSNMPRegex)})
+			} else if _, err := regexp.Compile(value); err != nil {
+				errs = append(errs, FieldError{Field: prefix + ".value", Message: "must be a valid RE2 regular expression"})
+			}
+		}
+	}
+	return errs
 }
 
 // checkBFDParams checks the selection of the bfd type (PRT-08, WP-1003

@@ -104,7 +104,7 @@ func TestCreateProbeValidation(t *testing.T) {
 		name, body, field string
 	}{
 		{"unknown type", `{"type":"nope","target":"10.0.0.1","client_id":"` + hClient + `"}`, "type"},
-		{"planned type", `{"type":"snmp_status","target":"192.0.2.10","client_id":"` + hClient + `"}`, "type"},
+		{"planned type", `{"type":"twamp_control","target":"192.0.2.10","client_id":"` + hClient + `"}`, "type"},
 		{"timeout = interval", `{"type":"icmp","target":"10.0.0.1","client_id":"` + hClient + `","params":{"interval_s":10,"timeout_s":10}}`, "timeout_s"},
 		{"interval below minimum", `{"type":"icmp","target":"10.0.0.1","client_id":"` + hClient + `","params":{"interval_s":5}}`, "interval_s"},
 		{"interval above maximum", `{"type":"icmp","target":"10.0.0.1","client_id":"` + hClient + `","params":{"interval_s":3601}}`, "interval_s"},

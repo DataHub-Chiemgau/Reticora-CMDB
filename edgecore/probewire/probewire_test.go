@@ -459,7 +459,7 @@ func TestReasonCodes(t *testing.T) {
 			t.Fatalf("%q accepted", code)
 		}
 	}
-	for _, code := range []string{"threshold_exceeded", "cert_expiring", "answer_mismatch", "check_failed", "inform_stale", "no_devices", "rpki_stale"} {
+	for _, code := range []string{"threshold_exceeded", "cert_expiring", "answer_mismatch", "check_failed", "no_such_object", "inform_stale", "no_devices", "rpki_stale"} {
 		if !WarnCodes[code] || !IsWarnCode(code) {
 			t.Fatalf("WarnCodes lacks %q", code)
 		}

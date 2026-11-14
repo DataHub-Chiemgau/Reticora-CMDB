@@ -59,11 +59,54 @@ func openSNMP(ctx context.Context, spec *probewire.ProbeSpec, creds map[string]s
 	return snmp.Open(ctx, host, creds, snmp.Options{Port: port, Timeout: timeout, Retries: &retries})
 }
 
+// SNMPSession are session parameters of a probe beyond its target and
+// timeout (snmp_status, WP-995 AK6): the agent port (used when the target
+// names none), the timeout of one request (0: the probe timeout divided by
+// the attempts) and the retries of an unanswered request (0–2).
+type SNMPSession struct {
+	Port    int
+	Timeout time.Duration
+	Retries int
+}
+
+// OpenSNMPWith opens the SNMP session of a probe like OpenSNMP with the
+// session parameters p. A request waits at most p.Timeout (without it the
+// probe timeout divided by the attempts), within the session limits 1-15 s
+// and the deadline of ctx; the check as a whole stays bounded by ctx.
+func OpenSNMPWith(ctx context.Context, spec *probewire.ProbeSpec, creds map[string]string, p SNMPSession) (*snmp.Session, error) {
+	host, port := snmpHostPort(spec.Target)
+	if port == 0 {
+		port = p.Port
+	}
+	retries := min(max(p.Retries, 0), snmp.MaxRetries)
+	timeout := p.Timeout
+	if timeout <= 0 {
+		timeout = time.Duration(spec.TimeoutMS) * time.Millisecond / time.Duration(retries+1)
+	}
+	if d, ok := ctx.Deadline(); ok {
+		timeout = min(timeout, time.Until(d)/time.Duration(retries+1))
+	}
+	timeout = min(max(timeout, snmp.MinTimeout), snmp.MaxTimeout)
+	return snmp.Open(ctx, host, creds, snmp.Options{Port: port, Timeout: timeout, Retries: &retries})
+}
+
+// LabelSNMPErrorStatus names the error-status of an SNMP response the
+// check failed on (snmpFailure).
+const LabelSNMPErrorStatus = "error_status"
+
 // snmpFailure maps an SNMP failure to a result: a refused SNMPv3
 // credential (usmStats report) is error/auth_failed, an incomplete or
-// invalid credential error/config, anything else (no answer within the
-// timeout, unreachable target) fail/timeout.
+// invalid credential error/config, a response with an error-status
+// (tooBig, genErr, …: the agent answered without the values)
+// fail/check_failed with the status in the label error_status, anything
+// else (no answer within the timeout, unreachable target) fail/timeout.
 func snmpFailure(err error) probewire.Result {
+	var status *snmp.ErrorStatusError
+	if errors.As(err, &status) {
+		r := failResult(probewire.StatusFail, probewire.WarnCheckFailed)
+		r.Labels = map[string]string{LabelSNMPErrorStatus: status.Status.String()}
+		return r
+	}
 	switch {
 	case errors.Is(err, plugins.ErrAuthFailed):
 		return failResult(probewire.StatusError, probewire.ReasonAuthFailed)

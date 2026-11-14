@@ -19,6 +19,11 @@ var registerKeys = []string{
 	"rpki_rtr", "rpki_roa",
 }
 
+// availableKeys are the types whose work package has set them available.
+var availableKeys = []string{
+	"icmp", "tcp", "dns", "http", "snmp_status", "bfd", "optical", "redfish", "ospf", "isis", "tr069", "rpki_rtr",
+}
+
 func repoFile(t *testing.T, rel string) []byte {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("..", "..", rel))
@@ -61,7 +66,7 @@ func TestRegistryComplete(t *testing.T) {
 			t.Errorf("%s params schema: %v", key, err)
 		}
 		wantStatus := TypePlanned
-		if key == "icmp" || key == "tcp" || key == "dns" || key == "http" || key == "bfd" || key == "optical" || key == "redfish" || key == "ospf" || key == "isis" || key == "tr069" || key == "rpki_rtr" {
+		if slices.Contains(availableKeys, key) {
 			wantStatus = TypeAvailable
 		}
 		if typ.Status != wantStatus {
@@ -584,7 +589,7 @@ func TestTypesDeclareMetricNames(t *testing.T) {
 	for typ, name := range map[string]string{"icmp": "jitter_ms", "http": "ttfb_ms", "dns": "probe_dns_rcode",
 		"redfish": "probe_redfish_temperature_celsius", "ospf": "probe_ospf_neighbor_state", "isis": "probe_isis_adjacency_state",
 		"tr069": "probe_tr069_last_inform_age_seconds", "rpki_rtr": "probe_rpki_vrps",
-		"bfd": "probe_bfd_session_state", "optical": "probe_optical_rx_dbm"} {
+		"bfd": "probe_bfd_session_state", "optical": "probe_optical_rx_dbm", "snmp_status": "probe_snmp_reboot"} {
 		if !DeclaresMetric(typ, name) || !slices.Contains(MetricNames(typ), name) {
 			t.Errorf("%s does not declare %s", typ, name)
 		}

@@ -147,7 +147,7 @@ func TestProfileRejectsOutOfBounds(t *testing.T) {
 		{"down count above 20", `{"level":"org","probe_type":"icmp","params":{"down_count":21}}`, "down_count"},
 		{"unknown parameter", `{"level":"org","probe_type":"icmp","params":{"bogus":1}}`, "params.bogus"},
 		{"unknown type", `{"level":"org","probe_type":"nope","params":{}}`, "probe_type"},
-		{"planned type", `{"level":"org","probe_type":"snmp_status","params":{}}`, "probe_type"},
+		{"planned type", `{"level":"org","probe_type":"twamp_control","params":{}}`, "probe_type"},
 		{"params no object", `{"level":"org","probe_type":"icmp","params":[1]}`, "params"},
 	} {
 		e.wantField(c.name, http.StatusUnprocessableEntity, c.field, http.MethodPost, "/api/v1/monitoring/profiles", c.body)

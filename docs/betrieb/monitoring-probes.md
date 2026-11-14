@@ -274,6 +274,43 @@ Werte mit Labels tragen die Labels im Schlüssel von `Result.values` in der
 Form des Prometheus-Formats (`name{label="wert",…}`, Labels sortiert;
 `probewire.ValueKey`/`ParseValueKey`).
 
+## SNMP-Status (`snmp_status`)
+
+Standard nach PRT-05: Intervall 60 s (30 s–24 h), Timeout 5 s (1–15 s),
+Down-Count 3, Up-Count 1, Zugangsdaten aus dem Namespace `snmp` (SNMPv2c
+mit Community oder SNMPv3 authPriv). Der Typ liegt im Unterpaket
+`collector/probe/snmpstatus`. Parameter: `checks` (höchstens 20 Einträge
+`{oid, op, value, severity}`), `port` (161; ein Port im Ziel hat Vorrang),
+`timeout_s` (Timeout einer Anfrage, 1–15 s; ohne Angabe der
+Probe-Timeout geteilt durch die Versuche) und `retries` (0–2, Standard 0;
+alle Versuche liegen im Probe-Timeout).
+
+Ein GET von `sysUpTime.0` und den OIDs der Prüfungen bestimmt die
+Erreichbarkeit. Ist `sysUpTime` kleiner als der Vorwert derselben Probe
+(Vorwertspeicher `collector/probe/rate`, WP-994), meldet die Probe
+`probe_snmp_reboot` = 1; ein Reboot allein ändert den Zustand nicht und
+gilt zugleich als Discontinuity für die Zählerraten der Probe. Werte:
+`probe_snmp_reboot` (0/1), `probe_snmp_uptime_seconds` und
+`probe_snmp_response_seconds`.
+
+Operatoren einer Prüfung: `eq` und `ne` (numerisch, wenn beide Seiten
+Zahlen sind, sonst als Text), `lt` und `gt` (nur Zahlen; `value` muss eine
+Zahl sein, eine Textantwort verletzt die Prüfung), `in` (kommagetrennte
+Liste) und `regex` (RE2, höchstens 256 Zeichen). `severity` ist `down`
+(Standard) oder `degraded`. Eine verletzte Prüfung mit `down` ergibt
+`fail` mit `check_failed`, mit `degraded` `ok` mit `check_failed`
+(`degraded`); eine OID, die der Agent nicht kennt (noSuchObject,
+noSuchInstance), ergibt `ok` mit `no_such_object` (`degraded`). Das Label
+`oid` nennt die auslösende Prüfung. Ein abgewiesener SNMPv3-Zugang
+(usmStats-Report: unbekannter Nutzer, falscher Digest,
+Entschlüsselungsfehler) ergibt `error`/`auth_failed` (`unknown`, nie
+`down`, E-177); keine Antwort, auch bei falscher SNMPv2c-Community, ergibt
+`fail`/`timeout`. Antwortet der Agent mit einem error-status (etwa
+`tooBig` bei zu kleiner Nachrichtengröße oder `genErr`), fehlen sysUpTime
+und die Prüfwerte: Das ergibt `fail` mit `check_failed`, das Label
+`error_status` nennt den Status (gilt für alle SNMP-Probetypen). Der
+Collector sendet nur GET.
+
 ## Redfish (`redfish`)
 
 Standard nach MON-03: Intervall 300 s (60 s–24 h), Timeout 15 s (1–60 s),
@@ -477,7 +514,7 @@ nach E-154; WP-1023 misst die Raten nach.
 | `icmp` | available | 30 / 10 / 3600 | 10 / 1 / 10 | 5 / 1 | 1 | 256 | 1000 | 4 | 1472 | 1 | – | icmp |
 | `tcp` | available | 60 / 10 / 86400 | 5 / 1 / 30 | 3 / 1 | 2 | 128 | 500 | 32 | 1024 | 1 | – | – |
 | `http` | available | 60 / 30 / 86400 | 10 / 1 / 60 | 3 / 1 | 2 | 64 | 100 | 32 | 1048576 | 1 | http | – |
-| `snmp_status` | planned | 60 / 30 / 86400 | 5 / 1 / 15 | 3 / 1 | 1 | 32 | 200 | 4 | 65536 | 20 | snmp | – |
+| `snmp_status` | available | 60 / 30 / 86400 | 5 / 1 / 15 | 3 / 1 | 1 | 32 | 200 | 4 | 65536 | 20 | snmp | – |
 | `snmp_if` | planned | 300 / 60 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 50 | 4 | 1048576 | 1024 | snmp | – |
 | `snmp_custom` | planned | 300 / 60 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 100 | 8 | 65536 | 256 | snmp | – |
 | `redfish` | available | 300 / 60 / 86400 | 15 / 1 / 60 | 3 / 1 | 1 | 8 | 20 | 2 | 1048576 | 256 | redfish | – |

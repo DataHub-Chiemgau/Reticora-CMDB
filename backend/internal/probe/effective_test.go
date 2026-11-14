@@ -291,7 +291,7 @@ func TestValidateLayerRejectsOutOfRange(t *testing.T) {
 		{"threshold range", "icmp", `{"thresholds": {"loss_warn": 2}}`, []string{"thresholds.loss_warn"}},
 		{"no object", "icmp", `[1]`, []string{"params"}},
 		{"unknown type", "icmp_ping", `{}`, []string{"type"}},
-		{"planned type", "snmp_status", `{}`, []string{"type"}},
+		{"planned type", "twamp_control", `{}`, []string{"type"}},
 		{"required parameter left to another level", "tcp", `{"interval_s": 60}`, nil},
 	}
 	for _, tc := range cases {

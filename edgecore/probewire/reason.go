@@ -83,6 +83,10 @@ const (
 	// WP-996). With severity degraded it is a warn code (ok → degraded),
 	// with severity down the code of a failed check.
 	WarnCheckFailed = "check_failed"
+	// WarnNoSuchObject: the target answered, but a queried OID is not
+	// there (noSuchObject, noSuchInstance or endOfMibView; snmp_status and
+	// snmp_custom, WP-995, WP-997); ok → degraded.
+	WarnNoSuchObject = "no_such_object"
 	// WarnInformStale: the last inform of a TR-069 device is older than
 	// inform_interval_s x stale_factor (tr069, WP-1018). The code of a
 	// failed check when the only or every selected device is stale, a warn
@@ -104,6 +108,7 @@ var WarnCodes = map[string]bool{
 	WarnCertExpiring:      true,
 	WarnAnswerMismatch:    true,
 	WarnCheckFailed:       true,
+	WarnNoSuchObject:      true,
 	WarnInformStale:       true,
 	WarnNoDevices:         true,
 	WarnRPKIStale:         true,
