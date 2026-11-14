@@ -34,11 +34,6 @@ const (
 	MaxRows    = 256
 )
 
-// MaxSeries is the series limit of a probe's previous-value store
-// (probe.SeriesBounder): every metric may be a counter column of MaxRows
-// rows, plus the probe-wide series (sysUpTime).
-func (e *Executor) MaxSeries() int { return MaxMetrics*MaxRows + 16 }
-
 // Value names of an snmp_custom result. Every configured metric is the
 // value probe_snmp_custom with the label metric (its name), unit when set
 // and the index label of a column, so that the metric bridge stores the
@@ -71,7 +66,7 @@ var metricName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
 var indexLabel = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
 
 // oidForm is an OID in dotted form.
-var oidForm = regexp.MustCompile(`^[0-9]+(\.[0-9]+)+$`)
+var oidForm = regexp.MustCompile(`^\d+(\.\d+)+$`)
 
 // now is the clock of the executor (tests replace it).
 var now = time.Now
@@ -84,6 +79,11 @@ func init() { probe.Register(Type, &Executor{}) }
 // does not answer is ok with no_such_object, the other metrics are still
 // delivered.
 type Executor struct{}
+
+// MaxSeries is the series limit of a probe's previous-value store
+// (probe.SeriesBounder): every metric may be a counter column of MaxRows
+// rows, plus the probe-wide series (sysUpTime).
+func (e *Executor) MaxSeries() int { return MaxMetrics*MaxRows + 16 }
 
 // Metric is one configured metric of a probe.
 type Metric struct {

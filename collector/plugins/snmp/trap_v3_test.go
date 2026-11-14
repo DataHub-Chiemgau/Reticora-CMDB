@@ -233,8 +233,8 @@ func TestV3TrapReplayOutsideTimeWindow(t *testing.T) {
 	forged.authPass, forged.time = "forged-passphrase", 9_000_000
 	_, err = parseTrap(buildV3Trap(t, &forged), usm)
 	wantDrop(t, err, TrapDropAuth)
-	if _, err := parseTrap(buildV3Trap(t, &newer), usm); err != nil {
-		t.Fatalf("after a forged trap: %v", err)
+	if _, aerr := parseTrap(buildV3Trap(t, &newer), usm); aerr != nil {
+		t.Fatalf("after a forged trap: %v", aerr)
 	}
 	// Authentication comes before the time window (RFC 3414 3.2 steps 6
 	// and 7): a forged trap with old boots counts as auth.
@@ -264,8 +264,8 @@ func TestV3TrapSameUserNameTwoCredentials(t *testing.T) {
 		trapUserCreds("trapuser", "sha256", v3AuthPass, "aes", "other-priv-pass"),
 		trapUserCreds("trapuser", "sha256", v3AuthPass, "aes", v3PrivPass),
 	)
-	if _, err := parseTrap(buildV3Trap(t, &s), usm); err != nil {
-		t.Fatalf("trap of the second privacy key: %v", err)
+	if _, perr := parseTrap(buildV3Trap(t, &s), usm); perr != nil {
+		t.Fatalf("trap of the second privacy key: %v", perr)
 	}
 	other := s
 	other.authPass = "neither-auth-pass"

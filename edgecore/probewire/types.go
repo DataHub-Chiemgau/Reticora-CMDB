@@ -422,7 +422,7 @@ const MaxSNMPRegex = 256
 
 // snmpOID is an OID in dotted form with at least two arcs, optionally
 // with a leading dot.
-var snmpOID = regexp.MustCompile(`^\.?[0-9]+(\.[0-9]+)+$`)
+var snmpOID = regexp.MustCompile(`^\.?\d+(\.\d+)+$`)
 
 // checkSNMPStatusParams checks the OID checks of the snmp_status type
 // (PRT-05, WP-995 AK3): every oid is an OID in dotted form, lt and gt take

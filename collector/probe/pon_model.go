@@ -69,9 +69,9 @@ func ponRead(s *snmp.Session, m *profiles.MonitorSpec, maxRows int) (onus []ponO
 	names := map[uint32]string{}
 	if pt, ok := m.Tables[ponTablePorts]; ok {
 		if oid, ok := pt.ColumnOID(ponColName); ok && oid != "" {
-			rows, err := s.WalkColumns([]string{oid}, maxRows)
-			if err != nil {
-				return nil, false, 0, err
+			rows, werr := s.WalkColumns([]string{oid}, maxRows)
+			if werr != nil {
+				return nil, false, 0, werr
 			}
 			for _, row := range rows.Rows {
 				if v, ok := row.Value(oid); ok && len(row.Index) == 1 {

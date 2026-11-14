@@ -311,9 +311,9 @@ func joinBGP(s *snmp.Session, m *profiles.MonitorSpec, peers []*bgpPeer) (prefix
 		if len(walk) == 0 {
 			continue
 		}
-		rows, err := s.WalkColumns(walk, BGPMaxPeers)
-		if err != nil {
-			return false, err
+		rows, werr := s.WalkColumns(walk, BGPMaxPeers)
+		if werr != nil {
+			return false, werr
 		}
 		for _, row := range rows.Rows {
 			if pr, ok := byKey[indexString(row.Index)]; ok {
