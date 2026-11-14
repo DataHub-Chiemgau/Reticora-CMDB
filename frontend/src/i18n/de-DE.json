@@ -5952,5 +5952,101 @@
         "cancelled": "Abgebrochen"
       }
     }
+  },
+  "credentials": {
+    "binding": {
+      "title": "Zugangsdaten",
+      "intro": "Die wirksame Zugangsart je Protokoll mit ihrer Herkunft (Probe > CI > Gerätegruppe > Subnetz > Scope > Kunde > Organisation) und ihrer letzten Nutzung an diesem CI. Geheimnisse werden nie angezeigt.",
+      "listLabel": "Wirksame Zugangsdaten je Protokoll",
+      "loadFailed": "Die Zugangsdaten des CIs konnten nicht geladen werden.",
+      "none": "keine",
+      "unbind": "Bindung entfernen",
+      "unbindNamed": "Bindung für {{namespace}} entfernen",
+      "columns": {
+        "namespace": "Protokoll",
+        "credential": "Zugangsart",
+        "origin": "Herkunft",
+        "usage": "Nutzung"
+      },
+      "namespaces": {
+        "snmp": "SNMP",
+        "ssh": "SSH",
+        "redfish": "Redfish",
+        "ipmi": "IPMI",
+        "wmi": "WMI",
+        "api": "API",
+        "nut": "NUT",
+        "nas": "NAS",
+        "http": "HTTP",
+        "gnmi": "gNMI",
+        "acs": "ACS"
+      },
+      "sources": {
+        "stored": "gespeichert",
+        "vault_ref": "Tresor-Referenz"
+      },
+      "origins": {
+        "probe": "Probe",
+        "ci": "CI",
+        "device_group": "Gerätegruppe",
+        "subnet": "Subnetz",
+        "scope": "Scope",
+        "client": "Kunde",
+        "org": "Organisation"
+      },
+      "errorClasses": {
+        "auth_failed": "Anmeldung abgelehnt",
+        "timeout": "Zeitüberschreitung",
+        "unreachable": "nicht erreichbar",
+        "tls": "TLS-Fehler",
+        "vault_unreachable": "Tresor nicht erreichbar",
+        "vault_denied": "Tresor verweigert",
+        "vault_not_found": "Tresoreintrag fehlt",
+        "field_missing": "Feld im Tresor fehlt"
+      },
+      "usage": {
+        "lastSuccess": "Letzter Erfolg: {{at}}",
+        "noSuccess": "Noch kein Erfolg",
+        "lastFailure": "Letzter Fehler: {{at}} ({{errorClass}})",
+        "unknownClass": "unbekannt",
+        "never": "Noch nicht verwendet",
+        "unavailable": "Nutzung nicht verfügbar"
+      },
+      "set": {
+        "action": "Zugangsart setzen",
+        "actionNamed": "Zugangsart für {{namespace}} setzen",
+        "title": "Zugangsart für {{namespace}} setzen",
+        "way": "Weg",
+        "ways": {
+          "create": "gerätespezifisch neu anlegen",
+          "existing": "bestehende wählen",
+          "vault": "Tresor-Referenz"
+        },
+        "existing": "Bestehende Zugangsart",
+        "choose": "Bitte wählen",
+        "chooseRequired": "Wählen Sie eine Zugangsart.",
+        "noCandidates": "Es gibt keine passende Zugangsart dieses Protokolls für den Kunden des CIs.",
+        "bind": "Binden"
+      },
+      "vault": {
+        "sourceLegend": "Quelle",
+        "legend": "Tresor-Referenz",
+        "hint": "Reticora speichert nur den Verweis; den Wert liest der Collector bzw. Server zur Laufzeit aus dem Tresor.",
+        "connection": "Tresorverbindung",
+        "chooseConnection": "Bitte wählen",
+        "connectionRequired": "Wählen Sie eine Tresorverbindung.",
+        "noConnections": "Es gibt keine Tresorverbindung für diesen Kunden oder die Organisation.",
+        "path": "Pfad",
+        "pathRequired": "Geben Sie den Pfad des Eintrags an.",
+        "version": "Version",
+        "versionInvalid": "Die Version ist eine ganze Zahl ab 1.",
+        "fieldMap": "Feldzuordnung",
+        "mapField": "Tresorfeld für {{field}}"
+      },
+      "errors": {
+        "bindFailed": "Die Zugangsart konnte nicht gebunden werden. {{reason}}",
+        "unbindFailed": "Die Bindung konnte nicht entfernt werden. {{reason}}"
+      }
+    }
   }
 }

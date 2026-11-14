@@ -43,6 +43,7 @@ import { CIComplianceSection } from '../components/cmdb/CIComplianceSection';
 import { CIRunsSection } from '../components/cmdb/CIRunsSection';
 import { CIRelationshipsCard } from '../components/cmdb/CIRelationshipsCard';
 import { NetworkSection } from '../components/cmdb/NetworkSection';
+import { CredentialBindingSection } from '../components/cmdb/CredentialBindingSection';
 import { ScopeBanner } from '../components/ScopeBanner';
 import { CITemplatesSection } from '../components/metamodel/CITemplatesSection';
 
@@ -376,6 +377,11 @@ export function CIDetailPage() {
           and the management IP, after the neighbors and in full width;
           only with ipam:read, otherwise neither shown nor read. */}
       <NetworkSection ciId={ci.id} managementIp={ci.management_ip} />
+
+      {/* Credentials (CRD-07, UI-14, WP-923): the effective credential per
+          namespace with origin and usage, and binding one to the CI; only
+          with credential:read, otherwise neither shown nor read. */}
+      <CredentialBindingSection ciId={ci.id} clientId={ci.client_id} />
 
       {/* Advanced sections (progressive disclosure, spec §18): instance
           fields, lifecycle, impact analysis, then provenance, metrics and

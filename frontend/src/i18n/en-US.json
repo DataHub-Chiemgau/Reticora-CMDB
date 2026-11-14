@@ -5952,5 +5952,101 @@
         "cancelled": "Cancelled"
       }
     }
+  },
+  "credentials": {
+    "binding": {
+      "title": "Credentials",
+      "intro": "The effective credential per protocol with its origin (probe > CI > device group > subnet > scope > client > organization) and its last use at this CI. Secrets are never shown.",
+      "listLabel": "Effective credentials per protocol",
+      "loadFailed": "The credentials of the CI could not be loaded.",
+      "none": "none",
+      "unbind": "Remove binding",
+      "unbindNamed": "Remove binding for {{namespace}}",
+      "columns": {
+        "namespace": "Protocol",
+        "credential": "Credential",
+        "origin": "Origin",
+        "usage": "Usage"
+      },
+      "namespaces": {
+        "snmp": "SNMP",
+        "ssh": "SSH",
+        "redfish": "Redfish",
+        "ipmi": "IPMI",
+        "wmi": "WMI",
+        "api": "API",
+        "nut": "NUT",
+        "nas": "NAS",
+        "http": "HTTP",
+        "gnmi": "gNMI",
+        "acs": "ACS"
+      },
+      "sources": {
+        "stored": "stored",
+        "vault_ref": "vault reference"
+      },
+      "origins": {
+        "probe": "Probe",
+        "ci": "CI",
+        "device_group": "Device group",
+        "subnet": "Subnet",
+        "scope": "Scope",
+        "client": "Client",
+        "org": "Organization"
+      },
+      "errorClasses": {
+        "auth_failed": "authentication refused",
+        "timeout": "timeout",
+        "unreachable": "unreachable",
+        "tls": "TLS error",
+        "vault_unreachable": "vault unreachable",
+        "vault_denied": "vault denied",
+        "vault_not_found": "vault entry missing",
+        "field_missing": "vault field missing"
+      },
+      "usage": {
+        "lastSuccess": "Last success: {{at}}",
+        "noSuccess": "No success yet",
+        "lastFailure": "Last failure: {{at}} ({{errorClass}})",
+        "unknownClass": "unknown",
+        "never": "Not used yet",
+        "unavailable": "Usage unavailable"
+      },
+      "set": {
+        "action": "Set credential",
+        "actionNamed": "Set credential for {{namespace}}",
+        "title": "Set credential for {{namespace}}",
+        "way": "Way",
+        "ways": {
+          "create": "create device-specific",
+          "existing": "choose existing",
+          "vault": "vault reference"
+        },
+        "existing": "Existing credential",
+        "choose": "Please choose",
+        "chooseRequired": "Choose a credential.",
+        "noCandidates": "There is no matching credential of this protocol for the client of the CI.",
+        "bind": "Bind"
+      },
+      "vault": {
+        "sourceLegend": "Source",
+        "legend": "Vault reference",
+        "hint": "Reticora stores the reference only; the collector or server reads the value from the vault at run time.",
+        "connection": "Vault connection",
+        "chooseConnection": "Please choose",
+        "connectionRequired": "Choose a vault connection.",
+        "noConnections": "There is no vault connection for this client or the organization.",
+        "path": "Path",
+        "pathRequired": "Enter the path of the entry.",
+        "version": "Version",
+        "versionInvalid": "The version is a whole number from 1.",
+        "fieldMap": "Field mapping",
+        "mapField": "Vault field for {{field}}"
+      },
+      "errors": {
+        "bindFailed": "The credential could not be bound. {{reason}}",
+        "unbindFailed": "The binding could not be removed. {{reason}}"
+      }
+    }
   }
 }

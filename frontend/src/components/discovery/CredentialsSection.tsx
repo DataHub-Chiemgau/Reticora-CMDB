@@ -17,9 +17,14 @@ import { useQuery } from '@tanstack/react-query';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { ApiError } from '../../api/client';
-import type { Credential, CredentialKind } from '../../api/client';
+import type { Credential, CredentialInput, CredentialKind } from '../../api/client';
 import { clientApi } from '../../api/cmdb';
-import { useCredentialMutations, useCredentials, useHasPermission } from '../../api/hooks';
+import {
+  useCredentialMutations,
+  useCredentials,
+  useHasPermission,
+  useVaultConnections,
+} from '../../api/hooks';
 import { ScrollRegion } from '../ScrollRegion';
 import { Panel } from '../spatial/Panel';
 import { Button, IconButton } from '../ui/Button';
@@ -116,7 +121,7 @@ function readText(file: File): Promise<string> {
 }
 
 /** describeRefusal names why a write failed: a missing right or the server's reason. */
-function describeRefusal(error: unknown, t: TFunction): string {
+export function describeRefusal(error: unknown, t: TFunction): string {
   if (error instanceof ApiError) {
     if (error.status === 403) return t('discovery.credentials.errors.forbidden');
     if (error.status === 404) return t('discovery.credentials.errors.notFound');
@@ -137,7 +142,7 @@ function formatDate(value: string | undefined, language: string) {
 }
 
 /** The clients a credential can belong to; the same query as the scope banner. */
-function useClientOptions(enabled: boolean) {
+export function useClientOptions(enabled: boolean) {
   return useQuery({
     queryKey: ['scope', 'clients'],
     queryFn: () => clientApi.list(),
@@ -148,41 +153,111 @@ function useClientOptions(enabled: boolean) {
 }
 
 /**
- * CredentialForm creates a credential: name, kind, optional client and the
- * fields of the kind. The secret leaves the form state when it is sent; a
- * refusal asks to enter it again.
+ * VAULT_FIELDS are the fields a vault reference maps for each kind: the
+ * required fields of the kind (KindFields in
+ * backend/internal/credential/vault_ref.go, WP-894).
  */
-function CredentialForm({
-  clients,
-  onClose,
-}: {
+export const VAULT_FIELDS: Record<CredentialKind, string[]> = {
+  snmp_v2c: ['community'],
+  snmp_v3: ['username'],
+  ssh_password: ['username', 'password'],
+  ssh_key: ['username', 'private_key'],
+  redfish: ['username', 'password'],
+  ipmi: ['username', 'password'],
+  wmi: ['username', 'password'],
+  nut: ['username', 'password'],
+  nas: ['username', 'password'],
+  api_token: ['token'],
+};
+
+/** The source of a new credential: the encrypted secret or a vault reference (CRD-02). */
+export type CredentialSource = 'stored' | 'vault_ref';
+
+export interface CredentialFormProps {
   clients: { value: string; label: string }[];
   onClose: () => void;
-}) {
+  /** Called with the created credential (its ID) before onClose. */
+  onCreated?: (credential: Credential) => void;
+  /**
+   * Offers the choice stored | vault reference. Without it the source stays
+   * stored (Discovery page until WP-924).
+   */
+  allowVault?: boolean;
+  /** The source the form starts with (only with allowVault). */
+  initialSource?: CredentialSource;
+  /** The kinds offered (default all); the first is preselected. */
+  kinds?: readonly CredentialKind[];
+  /** The client preselected (the client of a CI). */
+  initialClientId?: string;
+}
+
+/**
+ * CredentialForm creates a credential: name, kind, optional client and
+ * either the fields of the kind or, with allowVault and the source vault
+ * reference, connection, path, version and the vault field of each
+ * required field. The secret leaves the form state when it is sent; a
+ * refusal asks to enter it again.
+ */
+export function CredentialForm({
+  clients,
+  onClose,
+  onCreated,
+  allowVault = false,
+  initialSource = 'stored',
+  kinds = CREDENTIAL_KINDS,
+  initialClientId = '',
+}: CredentialFormProps) {
   const { t } = useTranslation();
   const { create } = useCredentialMutations();
   const fileId = useId();
+  const firstKind = kinds[0] ?? 'snmp_v2c';
   const [name, setName] = useState('');
-  const [kind, setKind] = useState<CredentialKind>('snmp_v2c');
-  const [clientId, setClientId] = useState('');
-  const [secret, setSecret] = useState<Record<string, string>>(() => initialSecret('snmp_v2c'));
+  const [kind, setKind] = useState<CredentialKind>(firstKind);
+  const [clientId, setClientId] = useState(initialClientId);
+  const [source, setSource] = useState<CredentialSource>(allowVault ? initialSource : 'stored');
+  const [secret, setSecret] = useState<Record<string, string>>(() => initialSecret(firstKind));
+  const [vaultConnection, setVaultConnection] = useState('');
+  const [vaultPath, setVaultPath] = useState('');
+  const [vaultVersion, setVaultVersion] = useState('');
+  const [fieldMap, setFieldMap] = useState<Record<string, string>>({});
   // A new key for the file field empties it together with the secret.
   const [fileKey, setFileKey] = useState(0);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [refusal, setRefusal] = useState<string | null>(null);
+  const vault = source === 'vault_ref';
+  const connections = useVaultConnections(allowVault && vault);
 
   const fields = SECRET_FIELDS[kind];
+  const vaultFields = VAULT_FIELDS[kind];
   const label = (key: string) => t(`discovery.credentials.fields.${key}`);
   const setField = (key: string, value: string) => setSecret((s) => ({ ...s, [key]: value }));
   const clearSecret = (next: CredentialKind) => {
     setSecret(initialSecret(next));
     setFileKey((k) => k + 1);
   };
+  // A connection of the credential's client or an org-wide one (WP-894).
+  const connectionOptions = (connections.data ?? []).filter(
+    (c) => !c.client_id || c.client_id === clientId,
+  );
 
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
+  const validate = (): Record<string, string> => {
     const found: Record<string, string> = {};
     if (!name.trim()) found.name = t('discovery.credentials.form.nameRequired');
+    if (vault) {
+      if (!vaultConnection) found.connection = t('credentials.binding.vault.connectionRequired');
+      if (!vaultPath.trim()) found.path = t('credentials.binding.vault.pathRequired');
+      if (vaultVersion.trim() && !/^[1-9][0-9]*$/.test(vaultVersion.trim())) {
+        found.version = t('credentials.binding.vault.versionInvalid');
+      }
+      for (const key of vaultFields) {
+        if (!fieldMap[key]?.trim()) {
+          found[`map.${key}`] = t('discovery.credentials.form.fieldRequired', {
+            field: label(key),
+          });
+        }
+      }
+      return found;
+    }
     for (const field of fields) {
       const value = field.type === 'text' ? secret[field.key]?.trim() : secret[field.key];
       if (field.required && !value) {
@@ -191,28 +266,55 @@ function CredentialForm({
         });
       }
     }
-    setErrors(found);
-    if (Object.keys(found).length > 0) return;
+    return found;
+  };
+
+  const buildInput = (): CredentialInput => {
+    const base = { name: name.trim(), kind, ...(clientId ? { client_id: clientId } : {}) };
+    if (vault) {
+      const map: Record<string, string> = {};
+      for (const key of vaultFields) map[key] = (fieldMap[key] ?? '').trim();
+      const version = vaultVersion.trim();
+      return {
+        ...base,
+        source: 'vault_ref',
+        vault_ref: {
+          connection_id: vaultConnection,
+          path: vaultPath.trim(),
+          ...(version ? { version: Number(version) } : {}),
+          field_map: map,
+        },
+      };
+    }
     const payload: Record<string, string> = {};
     for (const field of fields) {
       const value = field.type === 'text' ? secret[field.key]?.trim() : secret[field.key];
       if (value) payload[field.key] = value;
     }
+    return { ...base, source: 'stored', secret: payload };
+  };
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    const found = validate();
+    setErrors(found);
+    if (Object.keys(found).length > 0) return;
+    const input = buildInput();
     setRefusal(null);
     // The secret is sent once and leaves the form state right away.
     clearSecret(kind);
-    create.mutate(
-      {
-        name: name.trim(),
-        kind,
-        ...(clientId ? { client_id: clientId } : {}),
-        secret: payload,
+    create.mutate(input, {
+      onSuccess: (created) => {
+        onCreated?.(created);
+        onClose();
       },
-      {
-        onSuccess: onClose,
-        onError: (err) => setRefusal(describeRefusal(err, t)),
+      onError: (err) => {
+        if (err instanceof ApiError && err.status === 422 && err.field) {
+          setErrors({ [formField(err.field)]: err.detail || err.message });
+        }
+        setRefusal(describeRefusal(err, t));
       },
-    );
+    });
   };
 
   return (
@@ -233,8 +335,9 @@ function CredentialForm({
             setKind(next);
             setErrors({});
             clearSecret(next);
+            setFieldMap({});
           }}
-          options={CREDENTIAL_KINDS.map((k) => ({
+          options={kinds.map((k) => ({
             value: k,
             label: t(`discovery.credentials.kinds.${k}`),
           }))}
@@ -242,84 +345,167 @@ function CredentialForm({
         <Select
           label={t('discovery.credentials.columns.client')}
           value={clientId}
-          onChange={(e) => setClientId(e.target.value)}
+          onChange={(e) => {
+            setClientId(e.target.value);
+            setVaultConnection('');
+          }}
           options={[{ value: '', label: t('discovery.credentials.allClients') }, ...clients]}
         />
       </div>
-      <fieldset className="space-y-4 rounded-lg border border-line p-3">
-        <legend className="px-1 text-sm font-medium text-fg">
-          {t('discovery.credentials.form.secretLegend')}
-        </legend>
-        <p className="text-xs text-fg-muted">{t('discovery.credentials.form.secretHint')}</p>
-        {fields.map((field) => {
-          if (field.type === 'select') {
-            return (
-              <Select
-                key={`${kind}-${field.key}`}
-                label={label(field.key)}
-                value={secret[field.key] ?? ''}
-                onChange={(e) => setField(field.key, e.target.value)}
-                options={field.options ?? []}
-              />
-            );
-          }
-          if (field.type === 'file') {
-            const errorId = errors[field.key] ? `${fileId}-error` : undefined;
-            return (
-              <div key={`${kind}-${field.key}-${fileKey}`} className="space-y-1.5">
-                <label htmlFor={fileId} className={labelClasses}>
-                  {label(field.key)}
-                </label>
+      {allowVault ? (
+        <fieldset className="space-y-2">
+          <legend className={labelClasses}>{t('credentials.binding.vault.sourceLegend')}</legend>
+          <div className="flex flex-wrap gap-4 text-sm text-fg">
+            {(['stored', 'vault_ref'] as const).map((value) => (
+              <label key={value} className="inline-flex items-center gap-2">
                 <input
-                  id={fileId}
-                  type="file"
-                  autoComplete="off"
-                  aria-invalid={errors[field.key] ? true : undefined}
-                  aria-describedby={errorId}
-                  className="block w-full text-sm text-fg file:mr-3 file:rounded-lg file:border file:border-control file:bg-panel file:px-3 file:py-1.5 file:text-sm file:text-fg"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) {
-                      setField(field.key, '');
-                      return;
-                    }
-                    void readText(file).then(
-                      (text) => setField(field.key, text),
-                      () => setField(field.key, ''),
-                    );
+                  type="radio"
+                  name={`${fileId}-source`}
+                  value={value}
+                  checked={source === value}
+                  onChange={() => {
+                    setSource(value);
+                    setErrors({});
+                    clearSecret(kind);
                   }}
                 />
-                <p className="text-xs text-fg-muted">{t('discovery.credentials.form.keyHint')}</p>
-                {errors[field.key] ? (
-                  <p id={errorId} className="text-sm text-danger">
-                    {errors[field.key]}
-                  </p>
-                ) : null}
-              </div>
-            );
-          }
-          return (
+                {t(`credentials.binding.sources.${value}`)}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      ) : null}
+      {vault ? (
+        <fieldset className="space-y-4 rounded-lg border border-line p-3">
+          <legend className="px-1 text-sm font-medium text-fg">
+            {t('credentials.binding.vault.legend')}
+          </legend>
+          <p className="text-xs text-fg-muted">{t('credentials.binding.vault.hint')}</p>
+          <Select
+            label={t('credentials.binding.vault.connection')}
+            value={vaultConnection}
+            onChange={(e) => setVaultConnection(e.target.value)}
+            error={errors.connection}
+            options={[
+              { value: '', label: t('credentials.binding.vault.chooseConnection') },
+              ...connectionOptions.map((c) => ({ value: c.id, label: c.name })),
+            ]}
+          />
+          {connections.isSuccess && connectionOptions.length === 0 ? (
+            <p className="text-xs text-fg-muted">{t('credentials.binding.vault.noConnections')}</p>
+          ) : null}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Input
-              key={`${kind}-${field.key}`}
-              label={
-                field.required
-                  ? label(field.key)
-                  : t('discovery.credentials.form.optional', { field: label(field.key) })
-              }
-              type={field.type === 'secret' ? 'password' : 'text'}
+              label={t('credentials.binding.vault.path')}
+              value={vaultPath}
+              onChange={(e) => setVaultPath(e.target.value)}
+              error={errors.path}
               autoComplete="off"
               spellCheck={false}
-              value={secret[field.key] ?? ''}
-              onChange={(e) => setField(field.key, e.target.value)}
-              error={errors[field.key]}
             />
-          );
-        })}
-      </fieldset>
+            <Input
+              label={t('discovery.credentials.form.optional', {
+                field: t('credentials.binding.vault.version'),
+              })}
+              inputMode="numeric"
+              value={vaultVersion}
+              onChange={(e) => setVaultVersion(e.target.value)}
+              error={errors.version}
+              autoComplete="off"
+            />
+          </div>
+          <fieldset className="space-y-3">
+            <legend className={labelClasses}>{t('credentials.binding.vault.fieldMap')}</legend>
+            {errors.field_map ? <p className="text-sm text-danger">{errors.field_map}</p> : null}
+            {vaultFields.map((key) => (
+              <Input
+                key={`${kind}-map-${key}`}
+                label={t('credentials.binding.vault.mapField', { field: label(key) })}
+                value={fieldMap[key] ?? ''}
+                onChange={(e) => setFieldMap((m) => ({ ...m, [key]: e.target.value }))}
+                error={errors[`map.${key}`]}
+                autoComplete="off"
+                spellCheck={false}
+              />
+            ))}
+          </fieldset>
+        </fieldset>
+      ) : (
+        <fieldset className="space-y-4 rounded-lg border border-line p-3">
+          <legend className="px-1 text-sm font-medium text-fg">
+            {t('discovery.credentials.form.secretLegend')}
+          </legend>
+          <p className="text-xs text-fg-muted">{t('discovery.credentials.form.secretHint')}</p>
+          {fields.map((field) => {
+            if (field.type === 'select') {
+              return (
+                <Select
+                  key={`${kind}-${field.key}`}
+                  label={label(field.key)}
+                  value={secret[field.key] ?? ''}
+                  onChange={(e) => setField(field.key, e.target.value)}
+                  options={field.options ?? []}
+                />
+              );
+            }
+            if (field.type === 'file') {
+              const errorId = errors[field.key] ? `${fileId}-error` : undefined;
+              return (
+                <div key={`${kind}-${field.key}-${fileKey}`} className="space-y-1.5">
+                  <label htmlFor={fileId} className={labelClasses}>
+                    {label(field.key)}
+                  </label>
+                  <input
+                    id={fileId}
+                    type="file"
+                    autoComplete="off"
+                    aria-invalid={errors[field.key] ? true : undefined}
+                    aria-describedby={errorId}
+                    className="block w-full text-sm text-fg file:mr-3 file:rounded-lg file:border file:border-control file:bg-panel file:px-3 file:py-1.5 file:text-sm file:text-fg"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) {
+                        setField(field.key, '');
+                        return;
+                      }
+                      void readText(file).then(
+                        (text) => setField(field.key, text),
+                        () => setField(field.key, ''),
+                      );
+                    }}
+                  />
+                  <p className="text-xs text-fg-muted">{t('discovery.credentials.form.keyHint')}</p>
+                  {errors[field.key] ? (
+                    <p id={errorId} className="text-sm text-danger">
+                      {errors[field.key]}
+                    </p>
+                  ) : null}
+                </div>
+              );
+            }
+            return (
+              <Input
+                key={`${kind}-${field.key}`}
+                label={
+                  field.required
+                    ? label(field.key)
+                    : t('discovery.credentials.form.optional', { field: label(field.key) })
+                }
+                type={field.type === 'secret' ? 'password' : 'text'}
+                autoComplete="off"
+                spellCheck={false}
+                value={secret[field.key] ?? ''}
+                onChange={(e) => setField(field.key, e.target.value)}
+                error={errors[field.key]}
+              />
+            );
+          })}
+        </fieldset>
+      )}
       {refusal ? (
         <div role="alert" className="space-y-1 text-sm text-danger">
           <p>{refusal}</p>
-          <p>{t('discovery.credentials.form.reenter')}</p>
+          {vault ? null : <p>{t('discovery.credentials.form.reenter')}</p>}
         </div>
       ) : null}
       <div className="flex justify-end gap-2">
@@ -332,6 +518,16 @@ function CredentialForm({
       </div>
     </form>
   );
+}
+
+/** formField maps the field of a 422 to the input of the form that shows it. */
+function formField(field: string): string {
+  if (field.startsWith('vault_ref.connection')) return 'connection';
+  if (field.startsWith('vault_ref.path')) return 'path';
+  if (field.startsWith('vault_ref.version')) return 'version';
+  if (field.startsWith('vault_ref.field_map') || field === 'field_map') return 'field_map';
+  if (field.startsWith('secret.')) return field.slice('secret.'.length);
+  return field;
 }
 
 /** CredentialsSection lists the credentials and offers creating and deleting them. */

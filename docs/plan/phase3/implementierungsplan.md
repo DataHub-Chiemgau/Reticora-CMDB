@@ -4060,7 +4060,7 @@ UI-14;[P2–P4, A];G3;frontend/src/components/ipam/IpamImportDialog.test.tsx;WP-
 - [ ] **AK4:** Geheimnisfelder sind nur schreibbar: Kein Formular und keine Anzeige liest ein Geheimnis zurück, nach dem Senden leert das Formular sie (Verhalten aus WP-856). Binden und Lösen nur mit `credential:bind`, Anlegen nur mit `credential:manage`; der Abschnitt selbst nur mit `credential:read`.
 - [ ] **AK5:** Fetch-Funktionen (`credentialBindingApi`, `ciCredentials`, `ciEffectiveCredentials`, `credentialUsage`, `vaultConnectionApi.list`) in `frontend/src/api/cmdb.ts` (Konvention 27); `CredentialInput` in `frontend/src/api/client.ts` erhält `source` und `vault_ref`. Hooks in `frontend/src/api/hooks.ts` neben `useCredentials`. Texte unter `credentials.binding.*` in de und en, axe ohne Befunde.
 
-**Dateien (11 Einträge):**
+**Dateien (12 Einträge):**
 
 - frontend/src/components/cmdb/CredentialBindingSection.tsx (neu)
 - frontend/src/components/cmdb/CredentialBindingSection.test.tsx (neu)
@@ -4072,6 +4072,7 @@ UI-14;[P2–P4, A];G3;frontend/src/components/ipam/IpamImportDialog.test.tsx;WP-
 - frontend/src/i18n/de-DE.json
 - frontend/src/i18n/en-US.json
 - frontend/e2e/credentials.spec.ts
+- frontend/e2e/support/backend.ts (UNUSED-Eintrag `credentials.spec.ts` für die Panels der CI-Detailseite, Muster wie `ipam.spec.ts` aus WP-919)
 - docs/traceability.csv
 
 **Migration/RLS:** keine.

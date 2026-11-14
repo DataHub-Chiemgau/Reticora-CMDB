@@ -138,6 +138,14 @@ import type {
   AlarmListParams,
 } from '../api/client';
 import { isActive, type Job } from '../hooks/useJobs';
+import {
+  ciCredentials,
+  ciEffectiveCredentials,
+  credentialOriginTarget,
+  credentialUsage,
+  vaultConnectionApi,
+  type CICredentialBindingEntry,
+} from './cmdb';
 
 /**
  * ListQueryOptions switch a list query off, e.g. a picker until the user
@@ -335,6 +343,69 @@ export function useCredentialMutations() {
       onSuccess: invalidate,
     }),
   };
+}
+
+/** The effective credential per namespace of a CI (CRD-04); needs credential:read. */
+export function useCIEffectiveCredentials(ciId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['credentials', 'ci', ciId, 'effective'],
+    queryFn: () => ciEffectiveCredentials(ciId),
+    enabled,
+    retry: false,
+  });
+}
+
+/** The bindings with target ci of a CI (CRD-01); needs credential:read. */
+export function useCICredentialBindings(ciId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['credentials', 'ci', ciId, 'bindings'],
+    queryFn: () => ciCredentials.list(ciId),
+    enabled,
+    retry: false,
+  });
+}
+
+/** The usage of one credential at one CI (CRD-06); needs credential:read. */
+export function useCredentialUsage(credentialId: string | undefined, ciId: string) {
+  return useQuery({
+    queryKey: ['credentials', 'usage', credentialId, ciId],
+    queryFn: () => credentialUsage(credentialId ?? '', ciId),
+    enabled: !!credentialId,
+    retry: false,
+  });
+}
+
+/** The name of the group or the CIDR of the subnet a binding of the resolution targets. */
+export function useCredentialOriginTarget(bindingId: string | undefined) {
+  return useQuery({
+    queryKey: ['credentials', 'origin-target', bindingId],
+    queryFn: () => credentialOriginTarget(bindingId ?? ''),
+    enabled: !!bindingId,
+    retry: false,
+    staleTime: 60_000,
+  });
+}
+
+/** The vault connections a vault reference can use (credential:read). */
+export function useVaultConnections(enabled = true) {
+  return useQuery({
+    queryKey: ['vault-connections'],
+    queryFn: () => vaultConnectionApi.list(),
+    enabled,
+    retry: false,
+  });
+}
+
+/**
+ * Replacing the CI bindings (credential:bind); invalidates the bindings, the
+ * effective credentials and the usage of the CI.
+ */
+export function useReplaceCICredentials(ciId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (bindings: CICredentialBindingEntry[]) => ciCredentials.replace(ciId, bindings),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['credentials', 'ci', ciId] }),
+  });
 }
 
 export function useScopeSuggestions() {

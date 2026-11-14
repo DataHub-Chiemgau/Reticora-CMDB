@@ -2055,3 +2055,134 @@ export const IPAM_CHANGE_SOURCES = [
 
 /** PROBLEM_SUBNET_EXHAUSTED is the problem type of a full subnet (IPM-03). */
 export const PROBLEM_SUBNET_EXHAUSTED = 'urn:reticora:problem:subnet-exhausted';
+
+// ─── Credentials at the CI (CRD-01, CRD-04, CRD-06, CRD-07, WP-923) ─────────
+
+export type CredentialBinding = components['schemas']['CredentialBinding'];
+export type CredentialBindingCreate = components['schemas']['CredentialBindingCreate'];
+export type CredentialBindingUpdate = components['schemas']['CredentialBindingUpdate'];
+/** One entry of PUT /cis/{id}/credentials (replaces every CI binding). */
+export type CICredentialBindingEntry =
+  components['schemas']['CICredentialBindingsReplace']['bindings'][number];
+export type EffectiveCredential = components['schemas']['EffectiveCredential'];
+export type EffectiveCredentialSet = components['schemas']['EffectiveCredentialSet'];
+export type CredentialOrigin = components['schemas']['CredentialOrigin'];
+export type CredentialUsage = components['schemas']['CredentialUsage'];
+export type CredentialNamespace = CredentialBinding['namespace'];
+export type CredentialErrorClass = NonNullable<CredentialUsage['last_error_class']>;
+export type VaultConnection = components['schemas']['VaultConnection'];
+export type CredentialVaultRef = components['schemas']['CredentialVaultRef'];
+type MonitoringGroupRef = components['schemas']['MonitoringGroup'];
+
+/** CREDENTIAL_ORIGINS are the levels of CRD-04, labels credentials.binding.origins.*. */
+export const CREDENTIAL_ORIGINS = [
+  'probe',
+  'ci',
+  'device_group',
+  'subnet',
+  'scope',
+  'client',
+  'org',
+] as const satisfies readonly CredentialOrigin[];
+
+/** CREDENTIAL_ERROR_CLASSES are the error classes of CRD-06, labels credentials.binding.errorClasses.*. */
+export const CREDENTIAL_ERROR_CLASSES = [
+  'auth_failed',
+  'timeout',
+  'unreachable',
+  'tls',
+  'vault_unreachable',
+  'vault_denied',
+  'vault_not_found',
+  'field_missing',
+] as const satisfies readonly CredentialErrorClass[];
+
+/** The bindings of credentials to targets (/credential-bindings, WP-890). */
+export const credentialBindingApi = {
+  list(
+    params: {
+      credential_id?: string;
+      target_kind?: CredentialBinding['target_kind'];
+      target_id?: string;
+      limit?: number;
+      cursor?: string;
+    } = {},
+  ): Promise<PaginatedResponse<CredentialBinding>> {
+    return fetchAPI(`/credential-bindings${qs({ limit: API_MAX_LIMIT, ...params })}`);
+  },
+  get(id: string): Promise<CredentialBinding> {
+    return fetchAPI(`/credential-bindings/${encodeURIComponent(id)}`);
+  },
+  create(data: CredentialBindingCreate): Promise<CredentialBinding> {
+    return fetchAPI('/credential-bindings', { method: 'POST', body: JSON.stringify(data) });
+  },
+  update(id: string, data: CredentialBindingUpdate): Promise<CredentialBinding> {
+    return fetchAPI(`/credential-bindings/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+  remove(id: string): Promise<void> {
+    return fetchAPI(`/credential-bindings/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+};
+
+/** The bindings with target ci of a CI (GET/PUT /cis/{id}/credentials; writing needs credential:bind). */
+export const ciCredentials = {
+  list(ciId: string): Promise<{ data: CredentialBinding[] }> {
+    return fetchAPI(`/cis/${encodeURIComponent(ciId)}/credentials`);
+  },
+  /** replace sets every binding of the CI at once; a refused entry keeps the former ones. */
+  replace(
+    ciId: string,
+    bindings: CICredentialBindingEntry[],
+  ): Promise<{ data: CredentialBinding[] }> {
+    return fetchAPI(`/cis/${encodeURIComponent(ciId)}/credentials`, {
+      method: 'PUT',
+      body: JSON.stringify({ bindings }),
+    });
+  },
+};
+
+/** The effective credential per namespace with origin and overridden candidates (CRD-04, WP-891). */
+export function ciEffectiveCredentials(ciId: string): Promise<EffectiveCredentialSet> {
+  return fetchAPI(`/cis/${encodeURIComponent(ciId)}/credentials/effective`);
+}
+
+/** The usage of a credential at one CI per namespace (CRD-06, WP-898). */
+export function credentialUsage(
+  credentialId: string,
+  ciId: string,
+): Promise<PaginatedResponse<CredentialUsage>> {
+  return fetchAPI(
+    `/credentials/${encodeURIComponent(credentialId)}/usage${qs({ ci_id: ciId, limit: API_MAX_LIMIT })}`,
+  );
+}
+
+/** The vault connections a vault reference can use (credential:read, WP-893). */
+export const vaultConnectionApi = {
+  list(): Promise<VaultConnection[]> {
+    return fetchAllPages<VaultConnection>('/vault-connections');
+  },
+};
+
+/**
+ * credentialOriginTarget names the target of a binding the resolution
+ * reports: the group name of a device_group, the CIDR of a subnet.
+ */
+export async function credentialOriginTarget(bindingId: string): Promise<string | undefined> {
+  const binding = await credentialBindingApi.get(bindingId);
+  if (binding.target_kind === 'device_group') {
+    const group = await fetchAPI<MonitoringGroupRef>(
+      `/monitoring/groups/${encodeURIComponent(binding.target_id)}`,
+    );
+    return group.name;
+  }
+  if (binding.target_kind === 'subnet') {
+    const subnet = await fetchAPI<{ cidr: string }>(
+      `/subnets/${encodeURIComponent(binding.target_id)}`,
+    );
+    return subnet.cidr;
+  }
+  return undefined;
+}

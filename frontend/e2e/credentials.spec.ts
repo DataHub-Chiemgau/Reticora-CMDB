@@ -234,3 +234,229 @@ test('is read-only without credential:manage', async ({ page }) => {
   await expect(credentials.getByText('SNMP Organisation')).toBeVisible();
   await expect(credentials.getByRole('button')).toHaveCount(0);
 });
+
+// CRD-07, UI-14 (WP-923): the section "Zugangsdaten" of the CI detail shows
+// the effective credential per namespace with its origin; a device-specific
+// credential is created and bound, or an existing one is chosen and bound.
+
+const DEVICE = 'd0000000-0000-4000-8000-000000000923';
+
+interface StoredBinding {
+  id: string;
+  organization_id: string;
+  credential_id: string;
+  target_kind: 'ci';
+  target_id: string;
+  namespace: string;
+  priority: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** mockCIDetail answers the CI detail with the credential store, the CI bindings and their resolution. */
+async function mockCIDetail(page: Page, rights: string[]) {
+  const stored: StoredCredential[] = [
+    credential(CRED_ORG, 'SNMP Organisation', 'snmp_v2c'),
+    credential('ce000000-0000-4000-8000-000000000003', 'SSH Nord', 'ssh_password', CLIENT),
+  ];
+  let bindings: StoredBinding[] = [];
+  const calls = await mockBackend(page, [
+    {
+      path: '/me/permissions',
+      reply: () => ({ body: { user_id: USER, permissions: rights } }),
+    },
+    {
+      path: `/cis/${DEVICE}`,
+      reply: () => ({
+        body: {
+          id: DEVICE,
+          organization_id: ORG_ID,
+          client_id: CLIENT,
+          ci_type_id: '5e1b0c3a-7d2f-4a10-9c01-000000000002',
+          name: 'sw-cred-01',
+          status: 'active',
+          attributes: {},
+          is_manual: true,
+          version: 1,
+          created_at: AT,
+          updated_at: AT,
+        },
+      }),
+    },
+    {
+      path: /^\/topology\/cis\/[^/]+\/neighbors$/,
+      reply: () => ({ body: { nodes: [], edges: [] } }),
+    },
+    {
+      path: '/clients',
+      reply: () => ({
+        body: list([
+          {
+            id: CLIENT,
+            organization_id: ORG_ID,
+            name: 'Kunde Nord',
+            slug: 'kunde-nord',
+            external_ref: null,
+            timezone: null,
+            settings: {},
+            created_at: AT,
+            updated_at: AT,
+          },
+        ]),
+      }),
+    },
+    { path: '/credentials', reply: () => ({ body: list(stored) }) },
+    {
+      method: 'POST',
+      path: '/credentials',
+      reply: (request) => {
+        const body = request.postDataJSON() as { name: string; kind: string; client_id?: string };
+        const created = credential(CRED_NEW, body.name, body.kind, body.client_id);
+        stored.push(created);
+        return { status: 201, body: created };
+      },
+    },
+    { path: `/cis/${DEVICE}/credentials`, reply: () => ({ body: { data: bindings } }) },
+    {
+      method: 'PUT',
+      path: `/cis/${DEVICE}/credentials`,
+      reply: (request) => {
+        const body = request.postDataJSON() as {
+          bindings: { credential_id: string; namespace: string; priority: number }[];
+        };
+        bindings = body.bindings.map((b, i) => ({
+          id: `b0000000-0000-4000-8000-00000000092${i}`,
+          organization_id: ORG_ID,
+          credential_id: b.credential_id,
+          target_kind: 'ci',
+          target_id: DEVICE,
+          namespace: b.namespace,
+          priority: b.priority,
+          created_at: AT,
+          updated_at: AT,
+        }));
+        return { body: { data: bindings } };
+      },
+    },
+    {
+      path: `/cis/${DEVICE}/credentials/effective`,
+      reply: () => {
+        // CI bindings win over the organization-wide credential (CRD-04).
+        const data = new Map<string, unknown>();
+        data.set('snmp', {
+          namespace: 'snmp',
+          credential: { id: CRED_ORG, name: 'SNMP Organisation', kind: 'snmp_v2c' },
+          origin: 'org',
+          overridden: [],
+        });
+        for (const b of bindings) {
+          const c = stored.find((s) => s.id === b.credential_id);
+          if (!c) continue;
+          data.set(b.namespace, {
+            namespace: b.namespace,
+            credential: { id: c.id, name: c.name, kind: c.kind },
+            origin: 'ci',
+            source_id: b.id,
+            priority: b.priority,
+            overridden: [],
+          });
+        }
+        return {
+          body: {
+            ci_id: DEVICE,
+            data: [...data.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([, v]) => v),
+          },
+        };
+      },
+    },
+    {
+      path: /^\/credentials\/[0-9a-f-]{36}\/usage$/,
+      reply: () => ({ body: list([]) }),
+    },
+  ]);
+  return { calls };
+}
+
+function credentialRegion(page: Page) {
+  return page.getByRole('region', { name: 'Zugangsdaten', exact: true });
+}
+
+test('creates a device-specific credential at a CI and binds it; the origin is CI (WP-923)', async ({
+  page,
+}) => {
+  const { calls } = await mockCIDetail(page, [
+    'ci:read',
+    'credential:read',
+    'credential:bind',
+    'credential:manage',
+  ]);
+  await signIn(page);
+  await page.goto(`/cmdb/${DEVICE}`);
+
+  const region = credentialRegion(page);
+  const ssh = region.getByTestId('credential-namespace-ssh');
+  await expect(ssh).toContainText('keine');
+  await expect(region.getByTestId('credential-namespace-snmp')).toContainText('Organisation');
+
+  await ssh.getByRole('button', { name: 'Zugangsart für SSH setzen' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Zugangsart für SSH setzen' });
+  await dialog.getByLabel('Name', { exact: true }).fill('SSH sw-cred-01');
+  await expect(dialog.getByLabel('Kunde', { exact: true })).toHaveValue(CLIENT);
+  await dialog.getByLabel('Benutzer', { exact: true }).fill('admin');
+  const password = dialog.getByLabel('Passwort', { exact: true });
+  await expect(password).toHaveAttribute('type', 'password');
+  await password.fill(SECRET);
+  await expectNoAxeViolations(page, '[role="dialog"]');
+  await dialog.getByRole('button', { name: 'Speichern' }).click();
+  await expect(dialog).toBeHidden();
+
+  await expect(ssh).toContainText('SSH sw-cred-01');
+  await expect(ssh.getByTestId('credential-origin')).toHaveText('CI');
+  await expect(page.getByText(SECRET)).toHaveCount(0);
+  expect(calls.filter((c) => c.method !== 'GET').map((c) => [c.method, c.path, c.body])).toEqual([
+    [
+      'POST',
+      '/credentials',
+      {
+        name: 'SSH sw-cred-01',
+        kind: 'ssh_password',
+        client_id: CLIENT,
+        secret: { username: 'admin', password: SECRET },
+      },
+    ],
+    [
+      'PUT',
+      `/cis/${DEVICE}/credentials`,
+      { bindings: [{ credential_id: CRED_NEW, namespace: 'ssh', priority: 100 }] },
+    ],
+  ]);
+  await expectNoAxeViolations(page, '[aria-label="Zugangsdaten"]');
+});
+
+test('chooses an existing credential at a CI and binds it (WP-923)', async ({ page }) => {
+  const { calls } = await mockCIDetail(page, ['ci:read', 'credential:read', 'credential:bind']);
+  await signIn(page);
+  await page.goto(`/cmdb/${DEVICE}`);
+
+  const region = credentialRegion(page);
+  const snmp = region.getByTestId('credential-namespace-snmp');
+  await expect(snmp.getByTestId('credential-origin')).toHaveText('Organisation');
+  await snmp.getByRole('button', { name: 'Zugangsart für SNMP setzen' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Zugangsart für SNMP setzen' });
+  // Without credential:manage only the existing credentials are offered.
+  await expect(dialog.getByLabel('gerätespezifisch neu anlegen')).toHaveCount(0);
+  await dialog
+    .getByLabel('Bestehende Zugangsart', { exact: true })
+    .selectOption({ label: 'SNMP Organisation (SNMP v2c)' });
+  await dialog.getByRole('button', { name: 'Binden' }).click();
+  await expect(dialog).toBeHidden();
+
+  await expect(snmp.getByTestId('credential-origin')).toHaveText('CI');
+  expect(calls.filter((c) => c.method !== 'GET').map((c) => [c.method, c.path, c.body])).toEqual([
+    [
+      'PUT',
+      `/cis/${DEVICE}/credentials`,
+      { bindings: [{ credential_id: CRED_ORG, namespace: 'snmp', priority: 100 }] },
+    ],
+  ]);
+});

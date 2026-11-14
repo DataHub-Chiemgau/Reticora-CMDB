@@ -2884,6 +2884,8 @@ export interface Credential {
   kind: string;
   scope?: string;
   key_version: number;
+  /** stored keeps the encrypted secret, vault_ref a reference into a vault (WP-894). */
+  source?: 'stored' | 'vault_ref';
   created_at: string;
   updated_at: string;
 }
@@ -2910,7 +2912,19 @@ export interface CredentialInput {
   name: string;
   kind: CredentialKind;
   client_id?: string;
-  secret: Record<string, string>;
+  /**
+   * stored (default) sends secret; vault_ref sends vault_ref instead and no
+   * secret (CRD-02, WP-894). The server takes the source from which of the
+   * two is present, so source itself is not sent.
+   */
+  source?: 'stored' | 'vault_ref';
+  secret?: Record<string, string>;
+  vault_ref?: {
+    connection_id: string;
+    path: string;
+    version?: number;
+    field_map: Record<string, string>;
+  };
 }
 
 export const credentialApi = {
@@ -2918,7 +2932,11 @@ export const credentialApi = {
     return fetchAPI(`/credentials${buildQuery(params)}`);
   },
   create(input: CredentialInput): Promise<Credential> {
-    return fetchAPI('/credentials', { method: 'POST', body: JSON.stringify(input) });
+    // source only picks the member; the request carries secret or vault_ref.
+    const { source, ...body } = input;
+    if (source === 'vault_ref') delete body.secret;
+    else delete body.vault_ref;
+    return fetchAPI('/credentials', { method: 'POST', body: JSON.stringify(body) });
   },
   remove(id: string): Promise<void> {
     return fetchAPI(`/credentials/${encodeURIComponent(id)}`, { method: 'DELETE' });
