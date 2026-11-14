@@ -114,7 +114,7 @@ var LateModules = []Module{
 		"/api/v1/monitoring/alarm-playbooks", "/api/v1/collector-groups",
 		"/api/v1/cis/{id}/availability", "/api/v1/cis/{id}/configs",
 		"/api/v1/credential-bindings", "/api/v1/vault-connections", "/api/v1/cis/{id}/credentials",
-	}, Workers: []string{config.WorkerMonitoring, config.WorkerProbeAssign, config.WorkerProbeIngest}, Nav: []string{"monitoring", "alarms", "incidents"}},
+	}, Workers: []string{config.WorkerMonitoring, config.WorkerProbeAssign, config.WorkerProbeIngest, config.WorkerAlarmCheck}, Nav: []string{"monitoring", "alarms", "incidents"}},
 	// IPAM/ASN in the style of phpIPAM (IPM-01 ff., E-160). The base objects
 	// of NET-05 (/api/v1/vrfs, /vlans, /subnets, /ips) stay core.
 	{Key: "ipam", Phase: "P3", Prefixes: []string{

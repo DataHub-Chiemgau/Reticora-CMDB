@@ -163,6 +163,33 @@ func (d *workerDeps) workflowWorker() server.Worker {
 	})}
 }
 
+// alarmCheckWorker is the worker alarm_check: the check consumer on the
+// event stream and the database; without either every cycle fails its
+// check.
+func (d *workerDeps) alarmCheckWorker() server.Worker {
+	cycles := observability.NewCycles(config.WorkerAlarmCheck)
+	var consumer *alarm.CheckConsumer
+	if d.pool != nil && d.eventStream != nil {
+		consumer = alarm.NewCheckConsumer(alarm.NewPGService(d.pool), alarm.PGCheckReader{Pool: d.pool}, d.eventStream)
+		cycles.Check("database", d.pool.Ping)
+	} else {
+		cycles.Check("alarm-check", func(context.Context) error {
+			return errors.New("the alarm check consumer needs the database and the event stream")
+		})
+	}
+	w := server.Worker{Name: config.WorkerAlarmCheck, Run: serving(cycles, d.every(serviceCycle), func(ctx context.Context) {
+		if consumer == nil {
+			<-ctx.Done()
+			return
+		}
+		consumer.Run(ctx)
+	})}
+	if consumer != nil {
+		w.Backlog = consumer.Backlog
+	}
+	return w
+}
+
 // probeIngester is the worker probe_ingest: the one main built for /readyz,
 // else one on the ingest queue's JetStream and the database; nil without
 // either.
@@ -391,6 +418,10 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 	// the instances where this worker is on (server.Options.
 	// WorkflowWorkerOff). Module workflows.
 	workers = append(workers, d.workflowWorker())
+	// Alarms from the probe states (ALR-02, MON-04, WP-986; module
+	// monitoring): the durable consumer reticora-alarm-check on
+	// RETICORA_EVENTS, serial per probe.
+	workers = append(workers, d.alarmCheckWorker())
 	// Consume ingest.> (REC-01).
 	if d.ingestQueue != nil {
 		workers = append(workers, server.Worker{Name: config.WorkerIngest, Run: d.ingestQueue.Run, Backlog: d.ingestQueue.Backlog})

@@ -162,6 +162,10 @@ spec:
               value: "true"
             - name: RETICORA_WORKER_IPAM_SCAN_APPLY_ENABLED
               value: "true"
+            # The alarms of the probe states run in reticora-monitoring
+            # (WP-986).
+            - name: RETICORA_WORKER_ALARM_CHECK_ENABLED
+              value: "false"
           volumeMounts:
             - name: session-key
               mountPath: /etc/reticora/session

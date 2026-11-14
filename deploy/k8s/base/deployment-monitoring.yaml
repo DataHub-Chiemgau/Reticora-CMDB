@@ -170,6 +170,8 @@ spec:
               value: "false"
             - name: RETICORA_WORKER_IPAM_SCAN_APPLY_ENABLED
               value: "false"
+            - name: RETICORA_WORKER_ALARM_CHECK_ENABLED
+              value: "true"
           volumeMounts:
             - name: session-key
               mountPath: /etc/reticora/session

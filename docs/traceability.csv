@@ -1954,3 +1954,5 @@ PRB-10;[P3];E;backend/internal/probe/liveness_integration_test.go;WP-963
 PRB-11;[P3];E;backend/internal/probe/liveness_integration_test.go;WP-963
 PRB-03;[P3];E;backend/internal/probe/dependency_integration_test.go;WP-965
 PRB-05;[P3];E;backend/internal/probe/dependency_integration_test.go;WP-965
+ALR-02;[P3];E;backend/internal/alarm/check_consumer_integration_test.go;WP-986
+MON-04;[P3];E;backend/internal/alarm/check_consumer_test.go;WP-986

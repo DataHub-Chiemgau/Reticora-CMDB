@@ -594,6 +594,11 @@ const (
 	// address states, last_seen_at and new hosts (IPM-11, WP-1063; module
 	// ipam).
 	WorkerIPAMScanApply = "ipam_scan_apply"
+	// WorkerAlarmCheck consumes probe.state_changed of the stream
+	// RETICORA_EVENTS (durable consumer reticora-alarm-check) and opens or
+	// resolves the alarms of the probe states (ALR-02, MON-04, WP-986;
+	// module monitoring).
+	WorkerAlarmCheck = "alarm_check"
 )
 
 // WorkerNames lists every registered worker.
@@ -616,6 +621,7 @@ var WorkerNames = []string{
 	WorkerProbeIngest,
 	WorkerWorkflow,
 	WorkerIPAMScanApply,
+	WorkerAlarmCheck,
 }
 
 // OfflineDetectorAlias is the former switch of the offline detector (WP-157).

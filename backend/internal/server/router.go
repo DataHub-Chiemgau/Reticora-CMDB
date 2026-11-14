@@ -1588,6 +1588,8 @@ func metricsHandler(version string, includeTenantLabel bool) (handler http.Handl
 	discovery.RegisterMetrics(registry)
 	// The probe ingest (WP-960): rows, dropped results and dead letters.
 	probe.RegisterMetrics(registry)
+	// The alarms of the probe states (WP-986): lag and dead letters.
+	alarm.RegisterCheckMetrics(registry)
 	rack.RegisterMetrics(registry)
 	iga.RegisterMetrics(registry)
 	ipam.RegisterMetrics(registry)
