@@ -248,6 +248,12 @@ var typeMetrics = map[string][]string{
 		"probe_tr069_parameter", "probe_tr069_truncated"},
 	"rpki_rtr": {"probe_rpki_rtr_up", "probe_rpki_serial", "probe_rpki_vrps", "probe_rpki_data_age_seconds",
 		"probe_rpki_protocol_version"},
+	"bfd": {"probe_bfd_session_state", "probe_bfd_diag", "probe_bfd_truncated", "probe_bfd_sessions",
+		"probe_bfd_sessions_down", "probe_bfd_sessions_unseen"},
+	"optical": {"probe_optical_rx_dbm", "probe_optical_tx_dbm", "probe_optical_temperature_celsius",
+		"probe_optical_bias_ma", "probe_optical_voltage_volts", "probe_optical_los",
+		"probe_optical_sensors_unavailable", "probe_optical_sensors_unmapped", "probe_optical_truncated",
+		"probe_optical_interfaces", "probe_optical_interfaces_not_found"},
 }
 
 // MetricNames returns the value names the type declares (none for an
