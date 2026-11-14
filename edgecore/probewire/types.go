@@ -243,6 +243,8 @@ var typeMetrics = map[string][]string{
 	"http": {"dns_ms", "connect_ms", "tls_ms", "ttfb_ms", "status_code", "cert_expiry_s"},
 	"dns":  {"probe_dns_response_seconds", "probe_dns_rcode", "probe_dns_answer_count", "probe_dns_soa_serial"},
 	"dhcp": {"probe_dhcp_response_seconds"},
+	"stamp": {"probe_stamp_rtt_seconds", "probe_stamp_jitter_seconds", "probe_stamp_loss_ratio",
+		"probe_stamp_oneway_seconds", "probe_stamp_reordered", "probe_stamp_duplicates"},
 	"redfish": {"probe_redfish_health", "probe_redfish_temperature_celsius", "probe_redfish_fan_rpm",
 		"probe_redfish_psu_input_watts", "probe_redfish_psu_state", "probe_redfish_truncated"},
 	"snmp_status": {"probe_snmp_reboot", "probe_snmp_uptime_seconds", "probe_snmp_response_seconds"},
@@ -381,6 +383,7 @@ var paramChecks = map[string]func(spec *ProbeSpec, params map[string]any) []Fiel
 	"tcp":         func(_ *ProbeSpec, params map[string]any) []FieldError { return checkTCPParams(params) },
 	"dns":         func(_ *ProbeSpec, params map[string]any) []FieldError { return checkDNSParams(params) },
 	"dhcp":        func(_ *ProbeSpec, params map[string]any) []FieldError { return checkDHCPParams(params) },
+	"stamp":       checkSTAMPParams,
 	"http":        func(_ *ProbeSpec, params map[string]any) []FieldError { return checkHTTPParams(params) },
 }
 
@@ -946,6 +949,53 @@ func ValidDNSName(name string) bool {
 		}
 	}
 	return true
+}
+
+// Defaults of the stamp parameters count and spacing_ms
+// (api/probe-types.json) and the wait for answers after the last test
+// packet.
+const (
+	stampDefaultCount     = 10
+	stampDefaultSpacingMS = 100
+	stampReplyWaitMS      = 1000
+)
+
+// checkSTAMPParams checks the send window of the stamp type (PRT-14,
+// WP-1013 AK2): (count - 1) x spacing_ms + 1000 ms must be below the
+// timeout (field params.count), and every warn threshold must not exceed
+// its critical threshold.
+func checkSTAMPParams(spec *ProbeSpec, params map[string]any) []FieldError {
+	var errs []FieldError
+	count, spacing := float64(stampDefaultCount), float64(stampDefaultSpacingMS)
+	if v, ok := numberOf(params["count"]); ok {
+		count = v
+	}
+	if v, ok := numberOf(params["spacing_ms"]); ok {
+		spacing = v
+	}
+	if spec.TimeoutMS > 0 && (count-1)*spacing+stampReplyWaitMS >= float64(spec.TimeoutMS) {
+		errs = append(errs, FieldError{Field: "params.count", Message: "(count - 1) x spacing_ms + 1000 ms must be below the timeout"})
+	}
+	// The executor takes the levels from thresholds before params (E-186);
+	// warn and crit are compared as it will use them.
+	thresholds, _ := decodeObject(spec.Thresholds)
+	level := func(name string) (float64, string, bool) {
+		if v, ok := numberOf(thresholds[name]); ok {
+			return v, "thresholds." + name, true
+		}
+		if v, ok := numberOf(params[name]); ok {
+			return v, "params." + name, true
+		}
+		return 0, "", false
+	}
+	for _, pair := range [][2]string{{"loss_warn", "loss_crit"}, {"rtt_warn_ms", "rtt_crit_ms"}, {"jitter_warn_ms", "jitter_crit_ms"}} {
+		w, _, okW := level(pair[0])
+		c, critField, okC := level(pair[1])
+		if okW && okC && w > c {
+			errs = append(errs, FieldError{Field: critField, Message: "must not be below " + pair[0]})
+		}
+	}
+	return errs
 }
 
 // checkDHCPParams checks the parameters of the dhcp type (PRT-13,

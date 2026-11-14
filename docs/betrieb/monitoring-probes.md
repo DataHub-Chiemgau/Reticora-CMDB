@@ -179,6 +179,47 @@ Messwert in `values`: `probe_dhcp_response_seconds` mit den Labels
 `offered_ip` (angebotene Adresse, nur bei OFFER) und `server_id`
 (Option 54).
 
+## STAMP/TWAMP-Light (`stamp`)
+
+Standard nach PRT-14, E-191 und E-154: Intervall 60 s (30 s–24 h), Timeout
+5 s (1–10 s), Parallelität 1 je Ziel, Testpakete bis 1472 Byte. Der
+Collector ist Session-Sender nach RFC 8762 (unauthenticated) und arbeitet
+mit STAMP- und TWAMP-Light-Reflektoren; TWAMP-Control (RFC 5357) ist nicht
+Teil des Typs (WP-1014, bedingt nach A-62), ebenso authentisierte Modi und
+eine Reflektor-Funktion im Collector. Ziel ist der Reflektor.
+Parameter: `port` (Standard 862), `count` 1–100 (Standard 10),
+`spacing_ms` 10–1000 (Standard 100), `size` 44–1472 Byte (Standard 44),
+`dscp` 0–63 (Standard 0) sowie die Schwellen `loss_warn`/`loss_crit`
+(Anteil 0–1), `rtt_warn_ms`/`rtt_crit_ms` (mittlere RTT) und
+`jitter_warn_ms`/`jitter_crit_ms`; Schwellen dürfen auch unter
+`thresholds` stehen und haben dort Vorrang. Feldübergreifend gilt
+`(count − 1) × spacing_ms + 1000 ms` < Timeout (sonst Feldfehler
+`params.count`): Nach dem letzten Paket wartet der Collector eine Sekunde
+auf Antworten.
+
+Kennzahlen: RTT je Paket `(T4 − T1) − (T3 − T2)` (Verweilzeit im Reflektor
+abgezogen), Jitter als Mittel der Beträge aufeinanderfolgender
+RTT-Differenzen in Sequenzfolge, Verlust als Anteil unbeantworteter
+Pakete. Eine Antwort mit kleinerer Sequenznummer als die höchste bisher
+empfangene zählt als Reordering, eine doppelte Antwort als Duplikat
+(ohne Einfluss auf RTT und Verlust). Die Einwegverzögerung meldet der
+Collector nur, wenn seine Uhr laut Fähigkeitsmeldung synchronisiert ist
+(`time_sync`, WP-966) und der Reflektor im Error Estimate das S-Bit setzt.
+
+| Ergebnis | Bedeutung | Zustand |
+|---|---|---|
+| `ok` | Antworten erhalten, keine Schwelle verletzt | `up` |
+| `ok`/`threshold_exceeded` | Warnschwelle verletzt (Label `threshold`: `loss`, `rtt`, `jitter`) | `degraded` |
+| `fail`/`threshold_exceeded` | kritische Schwelle verletzt | zählt auf `down` |
+| `fail`/`timeout` | alle Pakete verloren | zählt auf `down` |
+| `fail`/`refused` | ICMP Port unreachable, keine Antwort | zählt auf `down` |
+| `error`/`config` | ungültige Parameter (Feld im Label `field`) | `unknown` |
+
+Messwerte in `values`: `probe_stamp_rtt_seconds{stat=min|avg|max}`,
+`probe_stamp_jitter_seconds`, `probe_stamp_loss_ratio`,
+`probe_stamp_reordered`, `probe_stamp_duplicates` und gegebenenfalls
+`probe_stamp_oneway_seconds{direction=forward|backward}`.
+
 ## HTTP/HTTPS (`http`)
 
 Standard nach PRT-04: Intervall 60 s (30 s–24 h), Timeout 10 s (1–60 s, je
@@ -806,7 +847,7 @@ nach E-154; WP-1023 misst die Raten nach.
 | `pon` | available | 300 / 300 / 86400 | 60 / 1 / 60 | 3 / 1 | 1 | 4 | 5 | 2 | 4194304 | 8192 | snmp | – |
 | `dns` | available | 60 / 10 / 86400 | 5 / 1 / 10 | 3 / 1 | 4 | 64 | 200 | 16 | 65535 | 1 | – | – |
 | `dhcp` | available | 300 / 60 / 86400 | 5 / 1 / 10 | 3 / 1 | 1 | 1 | 1 | 1 | 1500 | 1 | – | privileged_udp_ports |
-| `stamp` | planned | 60 / 10 / 86400 | 5 / 1 / 30 | 3 / 1 | 1 | 16 | 20 | 4 | 1472 | 1 | – | – |
+| `stamp` | available | 60 / 30 / 86400 | 5 / 1 / 10 | 3 / 1 | 1 | 16 | 20 | 4 | 1472 | 1 | – | – |
 | `twamp_control` | planned | 60 / 10 / 86400 | 5 / 1 / 30 | 3 / 1 | 1 | 16 | 20 | 4 | 1472 | 1 | – | – |
 | `gnmi` | planned | 60 / 10 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 50 | 4 | 4194304 | 10000 | gnmi | – |
 | `tr069` | available | 900 / 300 / 86400 | 30 / 1 / 60 | 3 / 1 | 1 | 4 | 5 | 1 | 1048576 | 10000 | acs | – |

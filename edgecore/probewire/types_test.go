@@ -21,7 +21,7 @@ var registerKeys = []string{
 
 // availableKeys are the types whose work package has set them available.
 var availableKeys = []string{
-	"icmp", "tcp", "dns", "http", "snmp_status", "snmp_if", "snmp_custom", "bgp", "bng", "pon", "bfd", "optical", "redfish", "ospf", "isis", "tr069", "rpki_rtr", "dhcp",
+	"icmp", "tcp", "dns", "http", "snmp_status", "snmp_if", "snmp_custom", "bgp", "bng", "pon", "bfd", "optical", "redfish", "ospf", "isis", "tr069", "rpki_rtr", "dhcp", "stamp",
 }
 
 func repoFile(t *testing.T, rel string) []byte {
@@ -681,7 +681,7 @@ func TestHTTPLimits(t *testing.T) {
 func TestTypesDeclareMetricNames(t *testing.T) {
 	for typ, name := range map[string]string{"icmp": "jitter_ms", "http": "ttfb_ms", "dns": "probe_dns_rcode",
 		"redfish": "probe_redfish_temperature_celsius", "ospf": "probe_ospf_neighbor_state", "isis": "probe_isis_adjacency_state",
-		"tr069": "probe_tr069_last_inform_age_seconds", "rpki_rtr": "probe_rpki_vrps", "dhcp": "probe_dhcp_response_seconds",
+		"tr069": "probe_tr069_last_inform_age_seconds", "rpki_rtr": "probe_rpki_vrps", "stamp": "probe_stamp_loss_ratio", "dhcp": "probe_dhcp_response_seconds",
 		"bfd": "probe_bfd_session_state", "optical": "probe_optical_rx_dbm", "snmp_status": "probe_snmp_reboot",
 		"snmp_if": "probe_if_in_bps", "snmp_custom": "probe_snmp_custom",
 		"bgp": "probe_bgp_peer_state", "bng": "probe_bng_sessions",
@@ -700,5 +700,48 @@ func TestTypesDeclareMetricNames(t *testing.T) {
 	names[0] = "changed"
 	if !DeclaresMetric("icmp", "rtt_min_ms") || MetricNames("icmp")[0] != "rtt_min_ms" {
 		t.Error("MetricNames shares the register")
+	}
+}
+
+// TestStampSendWindowWithinTimeout covers WP-1013 AK2: the send window
+// (count - 1) x spacing_ms plus the reply wait of 1000 ms must lie below
+// the timeout; the defaults fit the default timeout.
+func TestStampSendWindowWithinTimeout(t *testing.T) {
+	typ, ok := Lookup("stamp")
+	if !ok || !typ.Available() {
+		t.Fatal("stamp not available")
+	}
+	spec := validSpec(typ)
+	if errs := Validate(&spec); len(errs) > 0 {
+		t.Fatalf("defaults rejected: %v", errs)
+	}
+	spec.TimeoutMS = 10_000
+	spec.Params = json.RawMessage(`{"count":100,"spacing_ms":100}`)
+	if errs := Validate(&spec); !hasField(errs, "params.count") {
+		t.Fatalf("errs = %v, want params.count", errs)
+	}
+	spec.Params = json.RawMessage(`{"count":50,"spacing_ms":100}`)
+	if errs := Validate(&spec); len(errs) > 0 {
+		t.Fatalf("window 5.9 s below 10 s rejected: %v", errs)
+	}
+	spec.Params = json.RawMessage(`{"rtt_warn_ms":50,"rtt_crit_ms":20}`)
+	if errs := Validate(&spec); !hasField(errs, "params.rtt_crit_ms") {
+		t.Fatalf("errs = %v, want params.rtt_crit_ms", errs)
+	}
+	// Levels split over thresholds and params are compared as the
+	// executor uses them (thresholds before params).
+	spec.Params = json.RawMessage(`{"rtt_crit_ms":20}`)
+	spec.Thresholds = json.RawMessage(`{"rtt_warn_ms":50}`)
+	if errs := Validate(&spec); !hasField(errs, "params.rtt_crit_ms") {
+		t.Fatalf("errs = %v, want params.rtt_crit_ms", errs)
+	}
+	spec.Params = json.RawMessage(`{"rtt_warn_ms":10,"rtt_crit_ms":500}`)
+	spec.Thresholds = json.RawMessage(`{"rtt_crit_ms":5}`)
+	if errs := Validate(&spec); !hasField(errs, "thresholds.rtt_crit_ms") {
+		t.Fatalf("errs = %v, want thresholds.rtt_crit_ms", errs)
+	}
+	spec.Thresholds = json.RawMessage(`{"rtt_crit_ms":800}`)
+	if errs := Validate(&spec); len(errs) > 0 {
+		t.Fatalf("crit from thresholds above warn rejected: %v", errs)
 	}
 }

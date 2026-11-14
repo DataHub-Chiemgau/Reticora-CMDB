@@ -1943,3 +1943,5 @@ PRT-07;[P3];E;collector/probe/routing/bgp_test.go;WP-1001
 PRT-10;[P3];E;collector/probe/bng_test.go;WP-1006
 PRT-11;[P3];E;collector/probe/pon_test.go;WP-1007
 PRT-13;[P3];E;collector/probe/dhcp_test.go;WP-1012
+PRT-14;[P3];E;collector/probe/stamp_test.go;WP-1013
+PRT-21;[P3];E;collector/probe/stamp_test.go;WP-1013

@@ -1369,13 +1369,13 @@
       }
     },
     "stamp": {
-      "status": "planned",
-      "min_interval_s": 10,
+      "status": "available",
+      "min_interval_s": 30,
       "default_interval_s": 60,
       "max_interval_s": 86400,
       "min_timeout_s": 1,
       "default_timeout_s": 5,
-      "max_timeout_s": 30,
+      "max_timeout_s": 10,
       "default_down_count": 3,
       "default_up_count": 1,
       "max_parallel_per_target": 1,
@@ -1390,50 +1390,72 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "packets": {
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "default": 862,
+            "description": "UDP port of the reflector (RFC 8762: 862)."
+          },
+          "count": {
             "type": "integer",
             "minimum": 1,
             "maximum": 100,
             "default": 10,
-            "description": "Test packets per check."
+            "description": "Test packets per check; (count - 1) x spacing_ms + 1000 ms must be below the timeout."
           },
           "spacing_ms": {
             "type": "integer",
             "minimum": 10,
             "maximum": 1000,
-            "default": 10,
+            "default": 100,
             "description": "Gap between test packets."
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 44,
+            "maximum": 1472,
+            "default": 44,
+            "description": "Test packet size in bytes (44: unauthenticated packet without padding)."
           },
           "dscp": {
             "type": "integer",
             "minimum": 0,
             "maximum": 63,
-            "default": 0
-          },
-          "packet_size": {
-            "type": "integer",
-            "minimum": 44,
-            "maximum": 1472,
-            "default": 128,
-            "description": "Packet size in bytes."
-          },
-          "port": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 65535,
-            "default": 862
-          },
-          "rtt_warn_ms": {
-            "type": "number",
-            "minimum": 1,
-            "description": "RTT threshold for degraded."
+            "default": 0,
+            "description": "DSCP of the test packets."
           },
           "loss_warn": {
             "type": "number",
             "minimum": 0,
             "maximum": 1,
-            "default": 0.5,
-            "description": "Loss threshold for degraded (fraction)."
+            "description": "Loss (fraction) above which the check is ok with threshold_exceeded (degraded)."
+          },
+          "loss_crit": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Loss (fraction) above which the check fails with threshold_exceeded."
+          },
+          "rtt_warn_ms": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Average RTT above which the check is degraded."
+          },
+          "rtt_crit_ms": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Average RTT above which the check fails."
+          },
+          "jitter_warn_ms": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Jitter above which the check is degraded."
+          },
+          "jitter_crit_ms": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Jitter above which the check fails."
           }
         }
       }
