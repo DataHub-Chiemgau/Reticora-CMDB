@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/probe/rate"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 )
 
@@ -92,7 +93,9 @@ type SchedulerStats struct {
 //
 // The scheduler hands every result, including the limit_exceeded results
 // of checks it did not start, to Sink. It holds no probe state beyond the
-// running flag; the state machine (WP-952) evaluates the results.
+// running flag and the previous-value store of each probe (collector/probe/
+// rate, WP-994 AK7), which it puts into the context of every check; the
+// state machine (WP-952) evaluates the results.
 type Scheduler struct {
 	// Clock is the time source; nil uses the wall clock.
 	Clock Clock
@@ -114,6 +117,7 @@ type Scheduler struct {
 	ctx      context.Context
 	entries  map[string]*schedEntry
 	running  map[string]*runningCheck
+	stores   map[string]*rate.Store
 	slots    [wheelSlots][]wheelRef
 	lastTick int64
 	started  bool
@@ -152,6 +156,7 @@ func (s *Scheduler) init() {
 	if s.entries == nil {
 		s.entries = map[string]*schedEntry{}
 		s.running = map[string]*runningCheck{}
+		s.stores = map[string]*rate.Store{}
 	}
 	if s.Limits == nil {
 		s.Limits = NewLimits()
@@ -189,9 +194,25 @@ func (s *Scheduler) Upsert(spec probewire.ProbeSpec) { //nolint:gocritic // the 
 	s.init()
 	if spec.IntervalMS <= 0 {
 		delete(s.entries, spec.ID)
+		delete(s.stores, spec.ID)
 		return
 	}
+	// The previous-value store of the probe (WP-994 AK7): created with a
+	// new probe and kept with its previous values on an interval change,
+	// which only moves the staleness bound. A changed target or type is
+	// another device: its readings must not be compared with the previous
+	// values of the old one, so the store starts empty.
+	interval := time.Duration(spec.IntervalMS) * time.Millisecond
 	e, ok := s.entries[spec.ID]
+	st := s.stores[spec.ID]
+	if st != nil && ok && (e.spec.Target != spec.Target || e.spec.Type != spec.Type) {
+		st = nil
+	}
+	if st != nil {
+		st.SetInterval(interval)
+	} else {
+		s.stores[spec.ID] = rate.NewStore(maxSeriesOf(spec.Type), interval)
+	}
 	if ok && e.spec.IntervalMS == spec.IntervalMS {
 		e.spec = spec
 		return
@@ -204,12 +225,42 @@ func (s *Scheduler) Upsert(spec probewire.ProbeSpec) { //nolint:gocritic // the 
 	s.scheduleLocked(e, NextStart(spec.ID, spec.IntervalMS, s.now()))
 }
 
+// seriesPerRow is the number of series one row of a probe type may hold
+// in the previous-value store: an interface row has in/out octets, errors
+// and discards (WP-996) plus room for further counters and enum states.
+const seriesPerRow = 8
+
+// probeWideSeries is the room for series of the probe as a whole, such as
+// rate.UptimeSeries.
+const probeWideSeries = 16
+
+// maxSeriesOf returns the series limit of a probe's previous-value store
+// (WP-994 AK3): derived from max_rows of the type in the contract — a row
+// is not a series, so max_rows × seriesPerRow plus probe-wide series — or
+// the store default.
+func maxSeriesOf(typ string) int {
+	if t, ok := probewire.Lookup(typ); ok && t.MaxRows > 0 {
+		return int(t.MaxRows)*seriesPerRow + probeWideSeries
+	}
+	return rate.DefaultMaxSeries
+}
+
+// Store returns the previous-value store of a probe.
+func (s *Scheduler) Store(id string) (*rate.Store, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	st, ok := s.stores[id]
+	return st, ok
+}
+
 // Remove stops a probe; it is not started again. A check in progress is
 // cancelled (its context ends) and its result is not reported (WP-956 AK3).
+// The previous-value store of the probe is dropped (WP-994 AK7).
 func (s *Scheduler) Remove(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.entries, id)
+	delete(s.stores, id)
 	if rc := s.running[id]; rc != nil {
 		rc.removed = true
 		rc.cancel()
@@ -287,8 +338,9 @@ func (s *Scheduler) Wait() { s.inflight.Wait() }
 // dueCheck is a check to start, collected under the lock and started
 // after it.
 type dueCheck struct {
-	spec probewire.ProbeSpec
-	ctx  context.Context
+	spec  probewire.ProbeSpec
+	ctx   context.Context
+	store *rate.Store
 }
 
 // Advance serves every tick up to now: it starts the due checks and puts
@@ -334,7 +386,7 @@ func (s *Scheduler) Advance(now time.Time) {
 				keep = append(keep, ref) // due in a later revolution
 				continue
 			}
-			due = append(due, dueCheck{spec: e.spec})
+			due = append(due, dueCheck{spec: e.spec, store: s.stores[e.spec.ID]})
 			again = append(again, e)
 		}
 		s.slots[slot] = keep
@@ -374,7 +426,7 @@ func (s *Scheduler) Advance(now time.Time) {
 			})
 			continue
 		}
-		rctx, cancel := context.WithCancel(ctx)
+		rctx, cancel := context.WithCancel(rate.WithStore(ctx, d.store))
 		rc := &runningCheck{cancel: cancel}
 		s.running[d.spec.ID] = rc
 		d.ctx = rctx

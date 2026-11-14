@@ -1908,3 +1908,5 @@ IPM-11;[P3];G3;backend/internal/ipam/scan_results_integration_test.go;WP-1063
 IPM-12;[P3];G3;backend/internal/ipam/ptr_integration_test.go;WP-1064
 WFL-01;[P3];F;frontend/src/components/form/FormRenderer.test.tsx;WP-1133
 WFL-01;[P3];F;frontend/e2e/forms.spec.ts;WP-1133
+PRT-06;[P3];E;collector/probe/rate/rate_test.go;WP-994
+MON-03;[P3];E;collector/probe/rate/rate_test.go;WP-994

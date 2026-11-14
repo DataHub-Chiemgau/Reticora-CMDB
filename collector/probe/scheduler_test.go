@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/probe/rate"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 )
 
@@ -411,5 +412,185 @@ func TestNextStartIsAlignedToTheEpoch(t *testing.T) {
 	}
 	if exact := time.UnixMilli(30_000*1000 + phase); !NextStart(id, 30_000, exact).Equal(exact) {
 		t.Fatal("a due time equal to now must be now")
+	}
+}
+
+// storeRecorder records the previous-value store each check of a probe
+// finds in its context (WP-994 AK7).
+type storeRecorder struct {
+	mu     sync.Mutex
+	stores map[string][]*rate.Store
+}
+
+func (r *storeRecorder) run(ctx context.Context, spec *probewire.ProbeSpec, _ map[string]string) probewire.Result {
+	st := rate.FromContext(ctx)
+	r.mu.Lock()
+	r.stores[spec.ID] = append(r.stores[spec.ID], st)
+	r.mu.Unlock()
+	return probewire.Result{ProbeID: spec.ID, Epoch: spec.Epoch, Status: probewire.StatusOK}
+}
+
+func (r *storeRecorder) of(id string) []*rate.Store {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]*rate.Store(nil), r.stores[id]...)
+}
+
+func newStoreScheduler(clock *fakeClock) (*Scheduler, *storeRecorder) {
+	rec := &storeRecorder{stores: map[string][]*rate.Store{}}
+	return &Scheduler{Clock: clock, Run: rec.run, Go: inline, Limits: unlimited()}, rec
+}
+
+// TestSchedulerPutsRateStoreInContext covers WP-994 AK7: two checks of the
+// same probe find the same store in their context, and a value swapped in
+// the first run is the previous value of the second.
+func TestSchedulerPutsRateStoreInContext(t *testing.T) {
+	clock := newFakeClock(epochStart)
+	rec := &storeRecorder{stores: map[string][]*rate.Store{}}
+	var seen []rate.Value
+	run := func(ctx context.Context, spec *probewire.ProbeSpec, creds map[string]string) probewire.Result {
+		st := rate.FromContext(ctx)
+		prev, _, ok := st.Swap("sysUpTime", rate.Num(float64(len(rec.of(spec.ID)))), clock.Now())
+		if ok {
+			seen = append(seen, prev)
+		}
+		return rec.run(ctx, spec, creds)
+	}
+	s := &Scheduler{Clock: clock, Run: run, Go: inline, Limits: unlimited()}
+	id := "probe-rate"
+	s.Upsert(schedSpec(id, 10_000))
+	drive(s, clock, epochStart.Add(21*time.Second))
+	stores := rec.of(id)
+	if len(stores) < 2 {
+		t.Fatalf("checks = %d, want at least 2", len(stores))
+	}
+	if stores[0] == nil || stores[0] != stores[1] {
+		t.Fatalf("stores of two runs differ: %p %p", stores[0], stores[1])
+	}
+	if own, ok := s.Store(id); !ok || own != stores[0] {
+		t.Fatal("scheduler store differs from the store in the context")
+	}
+	if len(seen) == 0 || seen[0].Number != 0 {
+		t.Fatalf("second run did not see the value of the first: %v", seen)
+	}
+}
+
+// TestSchedulerRateStorePerProbe covers WP-994 AK7: two probes have
+// separate stores.
+func TestSchedulerRateStorePerProbe(t *testing.T) {
+	clock := newFakeClock(epochStart)
+	s, rec := newStoreScheduler(clock)
+	s.Upsert(schedSpec("probe-a", 10_000))
+	s.Upsert(schedSpec("probe-b", 10_000))
+	drive(s, clock, epochStart.Add(11*time.Second))
+	a, b := rec.of("probe-a"), rec.of("probe-b")
+	if len(a) == 0 || len(b) == 0 {
+		t.Fatalf("checks a=%d b=%d", len(a), len(b))
+	}
+	if a[0] == nil || b[0] == nil || a[0] == b[0] {
+		t.Fatal("two probes share a store")
+	}
+}
+
+// TestSchedulerRateStoreKeptOnIntervalChange covers WP-994 AK7: an
+// interval change keeps the store and its previous values.
+func TestSchedulerRateStoreKeptOnIntervalChange(t *testing.T) {
+	clock := newFakeClock(epochStart)
+	s, rec := newStoreScheduler(clock)
+	id := "probe-interval-rate"
+	s.Upsert(schedSpec(id, 10_000))
+	before, _ := s.Store(id)
+	before.Swap("g", rate.Num(1), epochStart)
+	s.Upsert(schedSpec(id, 30_000))
+	after, ok := s.Store(id)
+	if !ok || after != before {
+		t.Fatal("interval change replaced the store")
+	}
+	if _, _, ok := after.Previous("g"); !ok {
+		t.Fatal("interval change lost the previous value")
+	}
+	drive(s, clock, epochStart.Add(31*time.Second))
+	if got := rec.of(id); len(got) == 0 || got[0] != before {
+		t.Fatal("check after the interval change ran with another store")
+	}
+}
+
+// TestSchedulerRateStoreDroppedOnRemove covers WP-994 AK7: Remove drops
+// the store; a probe added again starts with an empty one.
+func TestSchedulerRateStoreDroppedOnRemove(t *testing.T) {
+	clock := newFakeClock(epochStart)
+	s, _ := newStoreScheduler(clock)
+	id := "probe-removed-rate"
+	s.Upsert(schedSpec(id, 10_000))
+	old, _ := s.Store(id)
+	old.Swap("g", rate.Num(1), epochStart)
+	s.Remove(id)
+	if _, ok := s.Store(id); ok {
+		t.Fatal("store kept after Remove")
+	}
+	s.Upsert(schedSpec(id, 10_000))
+	fresh, ok := s.Store(id)
+	if !ok || fresh == old {
+		t.Fatal("re-added probe reuses the removed store")
+	}
+	if _, _, ok := fresh.Previous("g"); ok {
+		t.Fatal("re-added probe sees a previous value of the removed one")
+	}
+}
+
+// TestSchedulerRateStoreResetOnTargetChange covers WP-994 AK7: a changed
+// target is another device, so its readings start with an empty store
+// instead of being compared with the old device's counters.
+func TestSchedulerRateStoreResetOnTargetChange(t *testing.T) {
+	clock := newFakeClock(epochStart)
+	s, _ := newStoreScheduler(clock)
+	id := "probe-target-rate"
+	s.Upsert(schedSpec(id, 10_000))
+	old, _ := s.Store(id)
+	old.Observe("in", 5_000_000, 64, epochStart, 0)
+	spec := schedSpec(id, 10_000)
+	spec.Target = "192.0.2.99"
+	s.Upsert(spec)
+	fresh, ok := s.Store(id)
+	if !ok || fresh == old {
+		t.Fatal("target change kept the store of the old device")
+	}
+	if r, ok := fresh.Observe("in", 1000, 64, epochStart.Add(10*time.Second), 0); ok {
+		t.Fatalf("first reading of the new device yielded rate %v", r)
+	}
+	// The same target again (e.g. a threshold change) keeps the store.
+	s.Upsert(spec)
+	if again, _ := s.Store(id); again != fresh {
+		t.Fatal("unchanged target replaced the store")
+	}
+}
+
+// TestSchedulerRateStoreLimitCoversCountersPerRow covers WP-994 AK3: the
+// series limit is derived from max_rows, but a row holds several counters;
+// max_rows rows with four counters each and sysUpTime all fit.
+func TestSchedulerRateStoreLimitCoversCountersPerRow(t *testing.T) {
+	var typ probewire.Type
+	for _, c := range probewire.Types() {
+		if c.MaxRows > typ.MaxRows {
+			typ = c
+		}
+	}
+	if typ.MaxRows <= 1 {
+		t.Skip("no probe type with max_rows > 1 in the contract")
+	}
+	clock := newFakeClock(epochStart)
+	s, _ := newStoreScheduler(clock)
+	spec := schedSpec("probe-rows", 10_000)
+	spec.Type = typ.Key
+	s.Upsert(spec)
+	st, _ := s.Store(spec.ID)
+	st.Uptime(100, epochStart)
+	for row := range int(typ.MaxRows) {
+		for _, c := range []string{"in", "out", "errors", "discards"} {
+			st.Observe(fmt.Sprintf("%d/%s", row, c), 1, 64, epochStart, 0)
+		}
+	}
+	if got := st.Stats(); got.Rejected != 0 {
+		t.Fatalf("%s: %d series rejected below max_rows × counters per row", typ.Key, got.Rejected)
 	}
 }
