@@ -491,7 +491,8 @@ func TestOrgPurgeOperatorAudit(t *testing.T) {
 			t.Errorf("purge_started details %s", details)
 		}
 	}
-	if !slices.Equal(actions, []string{"org.deletion.purge_started", "org.deletion.db_purged"}) {
+	// The deletion protocol org.purged is the last entry before purged (WP-1156).
+	if !slices.Equal(actions, []string{"org.deletion.purge_started", tenantapi.ActionOrgPurged, "org.deletion.db_purged"}) {
 		t.Fatalf("operator_audit actions %v", actions)
 	}
 	res, err := operator.NewAuditor(e.f.App).Verify(bg)

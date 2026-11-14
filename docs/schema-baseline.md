@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000373_user_mobile
+Stand: Migration 000374_org_deletion_notice
 
 ## Prüfung
 
@@ -576,6 +576,13 @@ kein UPDATE/DELETE, zusätzlich verhindern Trigger Änderungen
 `signup_request` (WP-111) geschützt: Ein Signup-Antrag existiert vor seiner
 Organisation und ist nur im Operator-Kontext (`database.WithOperator`,
 `database.WithOrganizationSetup`) erreichbar.
+Ebenso `org_deletion_notice` (Migration 000374, WP-1156, vorläufige Nummer):
+Die mit eigenem Datenschlüssel verschlüsselte Adresse (`recipient_enc`, DEK in
+`wrapped_dek` mit dem Master-Key gewrappt) und Sprache des Antragstellers einer
+Org-Löschung, Schlüssel `target_org` ohne Fremdschlüssel, damit die Zeile den
+Purge übersteht; Policy `org_deletion_notice_operator` (USING und WITH CHECK
+`app.operator`), Truncate-Guard, `rls.OperatorTables`. Versand, Widerruf oder
+drei Fehlversuche löschen die Zeile.
 
 `platform_secret` (Migration 000163, SEC-06, WP-459) ist eine Systemtabelle der
 Installation ohne Org-Spalte, eine weitere dokumentierte Ausnahme
@@ -2374,6 +2381,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `object_grant` | ja | ja | object_grant_isolation (ALL) |
 | `operator_audit` | ja | ja | operator_audit_operator (ALL) |
 | `org_dek` | ja | ja | org_dek_isolation (ALL) |
+| `org_deletion_notice` | ja | ja | org_deletion_notice_operator (ALL) |
 | `organization` | ja | ja | org_isolation (ALL), organization_system_select (SELECT) |
 | `organization_usage` | ja | ja | organization_usage_isolation (ALL) |
 | `permission` | nein | nein | – |

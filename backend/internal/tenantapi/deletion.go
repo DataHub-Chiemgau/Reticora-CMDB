@@ -135,7 +135,9 @@ func (h *DeletionHandler) Request(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out *OrganizationDeletion
-	err := database.WithRequestTenant(r.Context(), h.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	// The operator flag lets the transaction keep the requester's address
+	// in org_deletion_notice (WP-1156) together with the request.
+	err := database.WithOperatorTenant(r.Context(), h.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		var slug, state string
 		err := tx.QueryRow(ctx, `SELECT slug, deletion_state FROM organization WHERE id = $1 FOR UPDATE`, orgID).Scan(&slug, &state)
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -157,6 +159,9 @@ func (h *DeletionHandler) Request(w http.ResponseWriter, r *http.Request) {
 		}
 		if out, err = h.read(ctx, tx, orgID, false); err != nil {
 			return err
+		}
+		if serr := storeNoticeTx(ctx, tx, orgID, p.Subject); serr != nil {
+			return serr
 		}
 		data := events.OrgDeletionData{ID: orgID, DueAt: out.DueAt.UTC().Format(time.RFC3339)}
 		if out.RequestedBy != nil {
@@ -185,7 +190,7 @@ func (h *DeletionHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var out *OrganizationDeletion
-	err := database.WithRequestTenant(r.Context(), h.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+	err := database.WithOperatorTenant(r.Context(), h.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		before, err := h.read(ctx, tx, orgID, true)
 		if err != nil {
 			return err
@@ -202,6 +207,10 @@ func (h *DeletionHandler) Cancel(w http.ResponseWriter, r *http.Request) {
 		}
 		if out, err = h.read(ctx, tx, orgID, false); err != nil {
 			return err
+		}
+		// The address of the protocol goes with the request (WP-1156).
+		if derr := deleteNoticeTx(ctx, tx, orgID); derr != nil {
+			return derr
 		}
 		data := events.OrgDeletionData{ID: orgID, DueAt: before.DueAt.UTC().Format(time.RFC3339), CancelledBy: uuidString(p.Subject)}
 		if before.RequestedBy != nil {

@@ -883,6 +883,11 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 			// bucket, the search index, the event stream and the caches
 			// (TLC-06, SEC-05, WP-1155).
 			purger.WithExternal(externalPurge(d))
+			// The deletion protocol goes to the requester over the central
+			// SMTP server (TLC-06, WP-1156); the requester's address is kept
+			// encrypted under a data key the master key wraps.
+			tenantapi.SetNoticeEncryptor(d.encryptor)
+			purger.WithProtocolMailer(notify.OrgPurgeProtocolMailer{Sender: centralSMTP(d.cfg)})
 			systemJobs = append(systemJobs, purger.Schedule())
 		}
 		// SLA breaches: every minute each missed due time once as

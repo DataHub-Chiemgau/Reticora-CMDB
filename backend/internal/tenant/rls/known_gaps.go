@@ -143,9 +143,11 @@ var GlobalCatalogTables = []string{"permission", "compliance_control"}
 // before its organization (WP-111), and scheduler_run, the state of the
 // organization-spanning system job scheduler (JOB-02, WP-131), and
 // collector_ca, the internal CA of the collector certificates (COL-04,
-// WP-145). This is a documented exception to RuleOrgColumn, not a gap: the
+// WP-145), and org_deletion_notice, the encrypted address of the
+// deletion protocol that outlives the purge of its organization (TLC-06,
+// WP-1156). This is a documented exception to RuleOrgColumn, not a gap: the
 // catalog test checks RuleOperatorOnly for them instead.
-var OperatorTables = []string{"operator_audit", "signup_request", "scheduler_run", "collector_ca"}
+var OperatorTables = []string{"operator_audit", "signup_request", "scheduler_run", "collector_ca", "org_deletion_notice"}
 
 // SystemTables are tables of the installation without organization_id that
 // only the server itself reaches, through the system flag: platform_secret

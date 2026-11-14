@@ -114,6 +114,9 @@ type Purger struct {
 	// external are the stores outside the tables (WP-1155); nil keeps the
 	// vault and touches nothing outside PostgreSQL.
 	external *ExternalPurge
+	// mailer sends the deletion protocol to the requester (WP-1156); nil
+	// gives a stored address up (protocol_undelivered).
+	mailer ProtocolMailer
 }
 
 // NewPurger builds the purge on the application pool with the table
@@ -194,6 +197,15 @@ func (p *Purger) Run(ctx context.Context) error {
 		return fmt.Errorf("org purge: read due organizations: %w", err)
 	}
 	var first error
+	// The protocols of the organizations purged by an earlier run whose
+	// sending is still open (a failed attempt, a purge before the restart;
+	// WP-1156). They go first: an organization purged below tries its own
+	// protocol at once, and its retry belongs to the next run, so one run
+	// never spends two of the three attempts within seconds.
+	if err := p.deliverProtocols(ctx); err != nil {
+		slog.ErrorContext(ctx, "org purge: deletion protocols", "error", err)
+		first = err
+	}
 	for i := range due {
 		o := &due[i]
 		var err error
@@ -253,8 +265,17 @@ func (p *Purger) PurgeOrganization(ctx context.Context, orgID string) ([]PurgeTa
 			return nil, err
 		}
 	}
+	// The protocol is the last entry before purged (WP-1156).
+	if err := p.recordProtocol(ctx, orgID, results); err != nil {
+		return nil, err
+	}
 	if err := p.finish(ctx, orgID, results); err != nil {
 		return nil, err
+	}
+	// Sent once the organization is purged; a failure is retried by the
+	// next run (at most three attempts).
+	if err := p.DeliverProtocol(ctx, orgID); err != nil {
+		slog.ErrorContext(ctx, "org purge: deletion protocol", "organization_id", orgID, "error", err)
 	}
 	return results, nil
 }

@@ -83,7 +83,8 @@ var withSystemCallers = map[string]string{
 	// organizations whose grace period ended, whose purge runs or whose
 	// reminder is due (organization_system_select); each is purged and
 	// reminded in its tenant transaction.
-	"internal/tenantapi/purge.go": "organizations due for their purge or a deletion reminder",
+	"internal/tenantapi/purge.go":          "organizations due for their purge or a deletion reminder",
+	"internal/tenantapi/purge_protocol.go": "the deletion state of an organization whose protocol is still to be sent (WP-1156)",
 
 	// Collector enrollment: the code names its organization, so it is
 	// looked up before any tenant is known (system exception

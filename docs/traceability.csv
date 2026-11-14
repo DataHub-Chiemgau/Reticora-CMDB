@@ -1982,3 +1982,4 @@ UI-14;[P2–P4, A];G3;frontend/src/components/ipam/ScanTab.test.tsx;WP-1065
 PRB-01;[P3];E;frontend/src/components/monitoring/ProfileEditor.test.tsx;WP-1080
 NTF-03;[B];F;backend/internal/notify/recipients_integration_test.go;WP-1140
 NTF-02;[P3], Provider [V];F;backend/internal/user/mobile_integration_test.go;WP-1140
+TLC-06;[P3];F;backend/internal/tenantapi/purge_protocol_test.go;WP-1156
