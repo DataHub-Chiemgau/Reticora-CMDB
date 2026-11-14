@@ -353,9 +353,9 @@ func (r *PGRepository) NotifyClients(ctx context.Context, orgID, windowID string
 			return err
 		}
 		var title string
-		var startsAt, endsAt time.Time
-		if err := tx.QueryRow(ctx, `SELECT title, starts_at, ends_at FROM maintenance_window WHERE organization_id = $1 AND id = $2`,
-			orgID, windowID).Scan(&title, &startsAt, &endsAt); err != nil {
+		var startsAt, endsAt, updatedAt time.Time
+		if err := tx.QueryRow(ctx, `SELECT title, starts_at, ends_at, updated_at FROM maintenance_window WHERE organization_id = $1 AND id = $2`,
+			orgID, windowID).Scan(&title, &startsAt, &endsAt, &updatedAt); err != nil {
 			return err
 		}
 		targets, roles := []ClientImpact(nil), []string(nil)
@@ -374,7 +374,10 @@ func (r *PGRepository) NotifyClients(ctx context.Context, orgID, windowID string
 				WHERE n.organization_id = $1 AND n.maintenance_window_id = $2 AND n.client_id = $3::uuid AND n.channel = 'notify'`,
 				orgID, windowID, target.ClientID))
 			switch {
-			case err == nil && existing.Status != NotificationFailed:
+			case err == nil && existing.Status != NotificationFailed && !existing.CreatedAt.Before(updatedAt):
+				// Announced since the last change of the window; a window
+				// changed after its announcement is announced again with
+				// its new version (WP-1109).
 				out = append(out, existing)
 				continue
 			case err != nil && !errors.Is(err, pgx.ErrNoRows):
@@ -385,7 +388,7 @@ func (r *PGRepository) NotifyClients(ctx context.Context, orgID, windowID string
 					INSERT INTO maintenance_notification (organization_id, maintenance_window_id, client_id, channel, status)
 					VALUES ($1, $2, $3::uuid, 'notify', 'pending')
 					ON CONFLICT (maintenance_window_id, client_id, channel)
-						DO UPDATE SET id = gen_random_uuid(), status = 'pending', sent_at = NULL
+						DO UPDATE SET id = gen_random_uuid(), status = 'pending', sent_at = NULL, created_at = now()
 					RETURNING id, organization_id, maintenance_window_id, client_id, channel, created_at)
 				SELECT id::text, organization_id::text, maintenance_window_id::text, client_id::text, channel, 'pending', NULL::timestamptz, created_at
 				FROM up`, orgID, windowID, target.ClientID))
@@ -396,9 +399,9 @@ func (r *PGRepository) NotifyClients(ctx context.Context, orgID, windowID string
 			announce = append(announce, &events.Event{OrgID: orgID, Type: events.MaintenanceScheduled, EntityID: windowID,
 				Data: ScheduledData{
 					MaintenanceWindowData: events.MaintenanceWindowData{ID: windowID, ClientID: target.ClientID,
-						StartsAt: startsAt.UTC().Format(time.RFC3339), EndsAt: endsAt.UTC().Format(time.RFC3339)},
+						StartsAt: startsAt.UTC().Format(time.RFC3339Nano), EndsAt: endsAt.UTC().Format(time.RFC3339Nano)},
 					Title: title, MaintenanceNotificationID: n.ID, AffectedCIs: target.AffectedCIs(),
-					Services: target.Services, ContactRoles: roles}})
+					Services: target.Services, ContactRoles: roles, UpdatedAt: updatedAt.UTC().Format(time.RFC3339Nano)}})
 		}
 		if len(announce) == 0 {
 			return nil

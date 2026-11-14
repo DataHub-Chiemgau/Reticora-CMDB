@@ -76,6 +76,12 @@ type Executor struct {
 	assets AssetReader
 	// orders changes the orders of order_decision (WithOrders, WP-1108).
 	orders OrderStatusSetter
+	// maintenance reads the maintenance windows and their affected
+	// clients for send_notification (WithMaintenance, WP-1109).
+	maintenance MaintenanceRecipients
+	// clock is the time of wait_until and the window check (WithClock);
+	// nil: time.Now.
+	clock func() time.Time
 	// afterStep is a test hook called after each succeeded step; an error
 	// ends the attempt there like a worker that dies.
 	afterStep func(index int) error
@@ -381,12 +387,20 @@ func (e *Executor) resume(ctx context.Context, orgID string, run *Run, at attemp
 		}
 		var output JSONMap
 		var wait, completed bool
-		if typ == webhookActionType {
+		switch typ {
+		case webhookActionType:
 			// The step is stored succeeded together with its event
 			// (WP-1096).
 			output, err = e.sendWebhook(ctx, orgID, run, step, action)
 			completed = err == nil
-		} else {
+		case waitUntilActionType:
+			// A time not reached defers the run (WP-1109).
+			var deferred *Run
+			output, deferred, err = e.waitUntil(ctx, orgID, run, step, action)
+			if err == nil && deferred != nil {
+				return deferred, nil
+			}
+		default:
 			output, wait, err = e.executeAction(ctx, orgID, run, i, action)
 		}
 		if wait && err == nil && typ == requestFormActionType {
@@ -415,6 +429,17 @@ func (e *Executor) resume(ctx context.Context, orgID string, run *Run, at attemp
 				slog.Error("workflow: failed to mark step waiting for approval", "step_id", step.ID, "error", markErr)
 			}
 			return e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusWaitingApproval, nil, run.Context)
+		}
+		if errors.Is(err, errRunSuperseded) {
+			// The maintenance window changed or was cancelled (WP-1109):
+			// the run ends without sending, the run of the new event takes
+			// over.
+			if _, uerr := e.repo.UpdateStep(ctx, orgID, step.ID, StatusSucceeded, JSONMap{"superseded": true}, ""); uerr != nil {
+				return e.abort(ctx, orgID, run, at, fmt.Errorf("update workflow step: %w", uerr))
+			}
+			run.Context["superseded"] = true
+			now := time.Now().UTC()
+			return e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusSucceeded, &now, run.Context)
 		}
 		if err != nil {
 			text := stepErrorText(step.ID, err)

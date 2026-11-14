@@ -136,6 +136,10 @@ func validateWrite(trigger JSONMap, conditions, actions []JSONMap) error {
 	if err := validateOrderWrite(trigger, actions); err != nil {
 		return err
 	}
+	// wait_until (WP-1109).
+	if err := validateWaitActions(actions); err != nil {
+		return err
+	}
 	return validateApprovalActions(actions)
 }
 

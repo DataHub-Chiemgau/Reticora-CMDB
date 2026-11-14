@@ -728,6 +728,12 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	if repos.EventOutbox {
 		workflowRuns.WithEventOutbox()
 	}
+	// The recipient source maintenance_affected of send_notification:
+	// the clients a window affects over the graph (WP-1034, WP-1109).
+	if repos.Maintenance != nil {
+		workflowRuns.WithMaintenance(maintenanceRecipients{finder: maintenance.NewRecipientFinder(repos.Maintenance,
+			topology.NewAnalyzer(repos.CI, repos.Relationship).WithRelationshipTypes(repos.RelationshipType).WithCITypes(repos.CIType))})
+	}
 	// send_notification queues on the notifier of the application with
 	// the recipients of the database (WP-1095); without them (--no-db) its
 	// step fails with "notifications unavailable".
@@ -2053,6 +2059,29 @@ func exportDATEVGate(opts *Options) *export.DATEVGate {
 		entitlements = opts.Entitlements
 	}
 	return export.NewDATEVGate(entitlements, opts.Modules.Enabled(ModuleInventory))
+}
+
+// maintenanceRecipients adapts the recipients of maintenance windows to
+// the workflow source maintenance_affected (WP-1109).
+type maintenanceRecipients struct{ finder *maintenance.RecipientFinder }
+
+func (m maintenanceRecipients) Window(ctx context.Context, orgID, id string) (*workflow.MaintenanceWindow, error) {
+	w, err := m.finder.Window(ctx, orgID, id)
+	if errors.Is(err, api.ErrNotFound) {
+		return nil, workflow.ErrMaintenanceWindowNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &workflow.MaintenanceWindow{ID: w.ID, Status: w.Status, StartsAt: w.StartsAt, EndsAt: w.EndsAt, UpdatedAt: w.UpdatedAt}, nil
+}
+
+func (m maintenanceRecipients) AffectedClients(ctx context.Context, orgID, id string, includeHeuristic bool) ([]string, error) {
+	clients, err := m.finder.AffectedClients(ctx, orgID, id, includeHeuristic)
+	if errors.Is(err, api.ErrNotFound) {
+		return nil, workflow.ErrMaintenanceWindowNotFound
+	}
+	return clients, err
 }
 
 // orderHandler builds the order routes; with the module workflows the

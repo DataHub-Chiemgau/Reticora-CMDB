@@ -8,7 +8,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 )
@@ -231,6 +233,56 @@ func (e *Executor) sendNotification(ctx context.Context, orgID string, run *Run,
 		return nil, errNoRecipient
 	}
 	a.users = users
+	dedupKey := "workflow:" + run.ID + ":" + strconv.Itoa(index)
+	var recipients []notify.Recipient
+	if spec, isMaintenance := maintenanceAffected(action); isMaintenance {
+		// The recipients of a maintenance window (WP-1109).
+		recipients, dedupKey, err = e.maintenanceRecipients(ctx, orgID, run, index, spec)
+		if err != nil {
+			return nil, err
+		}
+		if len(recipients) == 0 {
+			return JSONMap{"queued": 0}, nil
+		}
+	} else if recipients, err = e.namedRecipients(ctx, orgID, run, a); err != nil {
+		return nil, err
+	}
+	var brand *notify.Branding
+	if source, ok := e.recipients.(notify.BrandingSource); ok {
+		if brand, err = source.Branding(ctx, orgID); err != nil {
+			return nil, fmt.Errorf("read the branding: %w", err)
+		}
+	}
+	orgLocale := ""
+	if brand != nil {
+		orgLocale = brand.Locale
+	}
+	orgTemplate := notify.TemplateLocale("", orgLocale)
+	name := ""
+	if def, derr := e.repo.GetDefinition(ctx, orgID, run.WorkflowID); derr == nil {
+		name = def.Name
+	}
+	values := EvaluationValues(run.Context)
+	texts := map[string]notify.Text{}
+	for _, locale := range []string{notify.LocaleDE, notify.LocaleEN} {
+		texts[locale] = notify.Render(notify.WorkflowNotification, locale, map[string]any{
+			"subject": oneLine(expand(textIn(a.subject, locale, orgTemplate), values)), "body": expand(textIn(a.body, locale, orgTemplate), values),
+			"workflow_name": name, "run_id": run.ID,
+		})
+	}
+	queued, err := e.notifier.Notify(ctx, orgID, &notify.Request{Category: notify.CategoryWorkflow, Critical: a.critical,
+		Subject: texts[orgTemplate].Subject, Body: texts[orgTemplate].Body, Texts: texts, Branding: brand,
+		Data:     map[string]any{"run_id": run.ID, "workflow_id": run.WorkflowID, "step_index": index},
+		DedupKey: dedupKey, Recipients: recipients, ChannelIDs: a.channelIDs})
+	if err != nil {
+		return nil, fmt.Errorf("queue the notification: %w", err)
+	}
+	return JSONMap{"queued": queued}, nil
+}
+
+// namedRecipients resolves the users, teams, roles and contacts a
+// send_notification action names (WP-1095).
+func (e *Executor) namedRecipients(ctx context.Context, orgID string, run *Run, a *notifyAction) ([]notify.Recipient, error) {
 	base := notify.Audience{Permission: identity.PermWorkflowRead}
 	if run.CIID != "" && e.cis != nil {
 		item, cerr := e.cis.GetByID(ctx, orgID, run.CIID)
@@ -274,35 +326,145 @@ func (e *Executor) sendNotification(ctx context.Context, orgID string, run *Run,
 	if len(recipients) == 0 {
 		return nil, errNoRecipient
 	}
-	var brand *notify.Branding
-	if source, ok := e.recipients.(notify.BrandingSource); ok {
-		if brand, err = source.Branding(ctx, orgID); err != nil {
-			return nil, fmt.Errorf("read the branding: %w", err)
-		}
+	return recipients, nil
+}
+
+// The recipient source maintenance_affected of send_notification (WFL-04,
+// MGT-04, WP-1109):
+//
+//	"recipients": {"maintenance_affected": {"window_id": "window.id",
+//	               "include_heuristic": false}}
+//
+// window_id is a path of the run context (default window.id) or the id
+// itself. A run of an announcement of POST /maintenance-windows/{id}/notify
+// (window.client_id in the context) reaches the contacts of that client in
+// the contact roles the operator chose (window.contact_roles; none: every
+// contact); a run without client the contacts of every client the window
+// affects over the graph (the recipients of WP-1034). Before each delivery
+// the window is read again: cancelled, or moved (updated_at newer than
+// window.updated_at of the context with another start or end), ends the
+// run succeeded with superseded = true and nothing is sent; the run of the
+// new announcement takes over. A change that does not move the window
+// (title, description, status in_progress) does not supersede the run,
+// differing from WP-1109 AK3: the start of the maintenance would otherwise
+// end every run before its completion. The delivery is deduplicated per
+// schedule and step (maintenance:<window_id>:<starts_at>:<ends_at>:
+// <step_index>), so the runs of the several clients of one announcement
+// and the run of a re-announcement after such a change send each text to
+// each contact once.
+
+// MaintenanceWindow is the state of a window the check reads.
+type MaintenanceWindow struct {
+	ID        string
+	Status    string
+	StartsAt  time.Time
+	EndsAt    time.Time
+	UpdatedAt time.Time
+}
+
+// MaintenanceRecipients reads windows and their affected clients
+// (maintenance.RecipientFinder; adapter in the router).
+type MaintenanceRecipients interface {
+	// Window returns the window; ErrMaintenanceWindowNotFound when it is
+	// unknown or not visible.
+	Window(ctx context.Context, orgID, id string) (*MaintenanceWindow, error)
+	// AffectedClients are the clients the window affects over the graph.
+	AffectedClients(ctx context.Context, orgID, id string, includeHeuristic bool) ([]string, error)
+}
+
+// WithMaintenance sets the source of maintenance_affected (WP-1109).
+func (e *Executor) WithMaintenance(m MaintenanceRecipients) *Executor {
+	e.maintenance = m
+	return e
+}
+
+var (
+	// ErrMaintenanceWindowNotFound is the fixed text of a step whose window
+	// is unknown or not visible (AK1).
+	ErrMaintenanceWindowNotFound = errors.New("maintenance window not found")
+	// errRunSuperseded ends a run whose window changed or was cancelled.
+	errRunSuperseded = errors.New("maintenance window superseded")
+)
+
+// maintenanceSpec is a parsed maintenance_affected.
+type maintenanceSpec struct {
+	windowPath       string
+	includeHeuristic bool
+}
+
+// maintenanceAffected reads recipients.maintenance_affected of an action.
+func maintenanceAffected(action JSONMap) (*maintenanceSpec, bool) {
+	rec, _ := action["recipients"].(map[string]any)
+	raw, ok := rec["maintenance_affected"].(map[string]any)
+	if !ok {
+		return nil, false
 	}
-	orgLocale := ""
-	if brand != nil {
-		orgLocale = brand.Locale
-	}
-	orgTemplate := notify.TemplateLocale("", orgLocale)
-	name := ""
-	if def, derr := e.repo.GetDefinition(ctx, orgID, run.WorkflowID); derr == nil {
-		name = def.Name
+	s := &maintenanceSpec{windowPath: str(raw, "window_id", "window.id")}
+	s.includeHeuristic, _ = raw["include_heuristic"].(bool)
+	return s, true
+}
+
+// sameInstant compares a context time (RFC 3339) with t to the
+// microsecond (the precision of PostgreSQL).
+func sameInstant(raw any, t time.Time) bool {
+	s, _ := raw.(string)
+	parsed, err := time.Parse(time.RFC3339Nano, s)
+	return err == nil && parsed.Truncate(time.Microsecond).Equal(t.Truncate(time.Microsecond))
+}
+
+// maintenanceRecipients resolves the contacts of the clients a window
+// affects for step index of run and its dedup key.
+func (e *Executor) maintenanceRecipients(ctx context.Context, orgID string, run *Run, index int, spec *maintenanceSpec) ([]notify.Recipient, string, error) {
+	if e.maintenance == nil {
+		return nil, "", ErrMaintenanceWindowNotFound
 	}
 	values := EvaluationValues(run.Context)
-	texts := map[string]notify.Text{}
-	for _, locale := range []string{notify.LocaleDE, notify.LocaleEN} {
-		texts[locale] = notify.Render(notify.WorkflowNotification, locale, map[string]any{
-			"subject": oneLine(expand(textIn(a.subject, locale, orgTemplate), values)), "body": expand(textIn(a.body, locale, orgTemplate), values),
-			"workflow_name": name, "run_id": run.ID,
-		})
+	windowID, _ := values[spec.windowPath].(string)
+	if windowID == "" && api.IsUUID(spec.windowPath) {
+		windowID = spec.windowPath
 	}
-	queued, err := e.notifier.Notify(ctx, orgID, &notify.Request{Category: notify.CategoryWorkflow, Critical: a.critical,
-		Subject: texts[orgTemplate].Subject, Body: texts[orgTemplate].Body, Texts: texts, Branding: brand,
-		Data:     map[string]any{"run_id": run.ID, "workflow_id": run.WorkflowID, "step_index": index},
-		DedupKey: "workflow:" + run.ID + ":" + strconv.Itoa(index), Recipients: recipients, ChannelIDs: a.channelIDs})
+	if !api.IsUUID(windowID) {
+		return nil, "", ErrMaintenanceWindowNotFound
+	}
+	win, err := e.maintenance.Window(ctx, orgID, windowID)
 	if err != nil {
-		return nil, fmt.Errorf("queue the notification: %w", err)
+		return nil, "", err
 	}
-	return JSONMap{"queued": queued}, nil
+	if win.Status == "cancelled" {
+		return nil, "", errRunSuperseded
+	}
+	if known, ok := values["window.updated_at"].(string); ok && known != "" && !sameInstant(known, win.UpdatedAt) {
+		known, _ := time.Parse(time.RFC3339Nano, known)
+		moved := !sameInstant(values["window.starts_at"], win.StartsAt) || !sameInstant(values["window.ends_at"], win.EndsAt)
+		if win.UpdatedAt.Truncate(time.Microsecond).After(known.Truncate(time.Microsecond)) && moved {
+			return nil, "", errRunSuperseded
+		}
+	}
+	var clients, roles []string
+	if client, _ := values["window.client_id"].(string); api.IsUUID(client) {
+		// The client the operator announced, in the chosen roles.
+		clients = []string{client}
+		if w, ok := run.Context["window"].(map[string]any); ok {
+			// A malformed list (not of an announcement) names no role.
+			roles, _ = stringList(w["contact_roles"])
+		}
+	} else if clients, err = e.maintenance.AffectedClients(ctx, orgID, windowID, spec.includeHeuristic); err != nil {
+		return nil, "", err
+	}
+	var out []notify.Recipient
+	seen := map[string]bool{}
+	for _, client := range clients {
+		got, rerr := e.recipients.Resolve(ctx, orgID, &notify.Audience{ClientID: client, ClientContacts: &notify.ClientContacts{ContactRoles: roles}})
+		if rerr != nil {
+			return nil, "", fmt.Errorf("resolve recipients: %w", rerr)
+		}
+		for _, r := range got {
+			if key := strings.ToLower(r.Email); key != "" && !seen[key] {
+				seen[key] = true
+				out = append(out, r)
+			}
+		}
+	}
+	schedule := win.StartsAt.UTC().Format(time.RFC3339Nano) + ":" + win.EndsAt.UTC().Format(time.RFC3339Nano)
+	return out, "maintenance:" + windowID + ":" + schedule + ":" + strconv.Itoa(index), nil
 }

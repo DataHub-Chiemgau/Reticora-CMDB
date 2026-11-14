@@ -82,7 +82,7 @@ func RegisterMetrics(reg prometheus.Registerer) {
 // of its object and writes history and audit (WP-1097), an interrupted step
 // of them fails with stepInterruptedText.
 var idempotentActions = map[string]bool{"noop": true, "require_approval": true, "send_notification": true,
-	"send_webhook": true, "request_form": true}
+	"send_webhook": true, "request_form": true, "wait_until": true}
 
 // stepInterruptedText is the error of a non-idempotent step an attempt left
 // running: whether its action took effect is unknown, it is not repeated.

@@ -105,4 +105,8 @@ type ScheduledData struct {
 	AffectedCIs               int      `json:"affected_cis"`
 	Services                  int      `json:"services"`
 	ContactRoles              []string `json:"contact_roles,omitempty"`
+	// UpdatedAt is the version of the window the announcement names
+	// (RFC 3339 with microseconds); a workflow run of the announcement
+	// compares it before each delivery (WP-1109).
+	UpdatedAt string `json:"updated_at"`
 }

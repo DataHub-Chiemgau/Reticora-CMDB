@@ -99,6 +99,28 @@ func NewRecipientFinder(repo Repository, analyzer ImpactAnalyzer) *RecipientFind
 	return &RecipientFinder{repo: repo, analyzer: analyzer}
 }
 
+// Window returns the window in the scope of the caller (the check of a
+// maintenance workflow before a delivery, WP-1109); an unknown or
+// invisible window is api.ErrNotFound.
+func (f *RecipientFinder) Window(ctx context.Context, orgID, windowID string) (*Window, error) {
+	return f.repo.GetByID(ctx, orgID, windowID)
+}
+
+// AffectedClients are the ids of the clients the window affects over the
+// graph (Recipients), for the recipient source maintenance_affected of the
+// workflows (WP-1109).
+func (f *RecipientFinder) AffectedClients(ctx context.Context, orgID, windowID string, includeHeuristic bool) ([]string, error) {
+	preview, err := f.Recipients(ctx, orgID, windowID, RecipientOptions{IncludeHeuristic: includeHeuristic})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(preview.Clients))
+	for i := range preview.Clients {
+		out = append(out, preview.Clients[i].ClientID)
+	}
+	return out, nil
+}
+
 // Recipients computes the clients, sites and services the window affects
 // in the scope of the caller. An unknown or invisible window is
 // api.ErrNotFound.

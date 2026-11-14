@@ -41926,12 +41926,28 @@ components:
             actions[i].type; a rejection continues the run, order_decision
             rejects the order with the rejecting approver and sets
             order_status in the run context for the "when" of the
-            notification of the requester), send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
+            notification of the requester), wait_until (WP-1109: {"type":
+            "wait_until", "at": "<context path> [+|- <duration>]", e.g.
+            "window.starts_at - 72h"} sets the run pending with
+            next_attempt_at at that time and continues it then; a time in the
+            past continues at once; the run context of a maintenance.* event
+            holds window.id, title, starts_at, ends_at and updated_at), send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
             "recipients": {"users": [<user id>], "teams": [<team id>],
             "roles": [<role name>], "contact_roles": [owner | escalation |
             operator | responsible | vendor of the run's CI],
             "client_contacts": {"roles": [<contact role>], "organization":
-            <boolean>}}, "subject": <text or {"de": ..., "en": ...}>, "body":
+            <boolean>}, "maintenance_affected": {"window_id": <context path,
+            default window.id>, "include_heuristic": <boolean, default
+            false>} (WP-1109: a run of an announcement of
+            POST /maintenance-windows/{id}/notify reaches the contacts of its
+            client in the chosen contact_roles, a run without client the
+            contacts of every client the maintenance window affects over the
+            graph; an unknown or invisible window fails the step with
+            "maintenance window not found"; a window cancelled, or moved (other
+            start or end) since window.updated_at of the context, ends the run
+            succeeded with superseded true and sends nothing, a change that
+            does not move it (title, status) does not; one delivery per
+            contact, window schedule and step)}, "subject": <text or {"de": ..., "en": ...}>, "body":
             <text or {"de": ..., "en": ...}>, "critical": <boolean, default
             false>, "channel_ids": [<channel id>]}. Texts may name values of
             the run context as {{path}}. The notification has the category
@@ -42032,12 +42048,28 @@ components:
             actions[i].type; a rejection continues the run, order_decision
             rejects the order with the rejecting approver and sets
             order_status in the run context for the "when" of the
-            notification of the requester), send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
+            notification of the requester), wait_until (WP-1109: {"type":
+            "wait_until", "at": "<context path> [+|- <duration>]", e.g.
+            "window.starts_at - 72h"} sets the run pending with
+            next_attempt_at at that time and continues it then; a time in the
+            past continues at once; the run context of a maintenance.* event
+            holds window.id, title, starts_at, ends_at and updated_at), send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
             "recipients": {"users": [<user id>], "teams": [<team id>],
             "roles": [<role name>], "contact_roles": [owner | escalation |
             operator | responsible | vendor of the run's CI],
             "client_contacts": {"roles": [<contact role>], "organization":
-            <boolean>}}, "subject": <text or {"de": ..., "en": ...}>, "body":
+            <boolean>}, "maintenance_affected": {"window_id": <context path,
+            default window.id>, "include_heuristic": <boolean, default
+            false>} (WP-1109: a run of an announcement of
+            POST /maintenance-windows/{id}/notify reaches the contacts of its
+            client in the chosen contact_roles, a run without client the
+            contacts of every client the maintenance window affects over the
+            graph; an unknown or invisible window fails the step with
+            "maintenance window not found"; a window cancelled, or moved (other
+            start or end) since window.updated_at of the context, ends the run
+            succeeded with superseded true and sends nothing, a change that
+            does not move it (title, status) does not; one delivery per
+            contact, window schedule and step)}, "subject": <text or {"de": ..., "en": ...}>, "body":
             <text or {"de": ..., "en": ...}>, "critical": <boolean, default
             false>, "channel_ids": [<channel id>]}. Texts may name values of
             the run context as {{path}}. The notification has the category
@@ -42186,12 +42218,28 @@ components:
             actions[i].type; a rejection continues the run, order_decision
             rejects the order with the rejecting approver and sets
             order_status in the run context for the "when" of the
-            notification of the requester), send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
+            notification of the requester), wait_until (WP-1109: {"type":
+            "wait_until", "at": "<context path> [+|- <duration>]", e.g.
+            "window.starts_at - 72h"} sets the run pending with
+            next_attempt_at at that time and continues it then; a time in the
+            past continues at once; the run context of a maintenance.* event
+            holds window.id, title, starts_at, ends_at and updated_at), send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
             "recipients": {"users": [<user id>], "teams": [<team id>],
             "roles": [<role name>], "contact_roles": [owner | escalation |
             operator | responsible | vendor of the run's CI],
             "client_contacts": {"roles": [<contact role>], "organization":
-            <boolean>}}, "subject": <text or {"de": ..., "en": ...}>, "body":
+            <boolean>}, "maintenance_affected": {"window_id": <context path,
+            default window.id>, "include_heuristic": <boolean, default
+            false>} (WP-1109: a run of an announcement of
+            POST /maintenance-windows/{id}/notify reaches the contacts of its
+            client in the chosen contact_roles, a run without client the
+            contacts of every client the maintenance window affects over the
+            graph; an unknown or invisible window fails the step with
+            "maintenance window not found"; a window cancelled, or moved (other
+            start or end) since window.updated_at of the context, ends the run
+            succeeded with superseded true and sends nothing, a change that
+            does not move it (title, status) does not; one delivery per
+            contact, window schedule and step)}, "subject": <text or {"de": ..., "en": ...}>, "body":
             <text or {"de": ..., "en": ...}>, "critical": <boolean, default
             false>, "channel_ids": [<channel id>]}. Texts may name values of
             the run context as {{path}}. The notification has the category
@@ -42333,12 +42381,28 @@ components:
             actions[i].type; a rejection continues the run, order_decision
             rejects the order with the rejecting approver and sets
             order_status in the run context for the "when" of the
-            notification of the requester), send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
+            notification of the requester), wait_until (WP-1109: {"type":
+            "wait_until", "at": "<context path> [+|- <duration>]", e.g.
+            "window.starts_at - 72h"} sets the run pending with
+            next_attempt_at at that time and continues it then; a time in the
+            past continues at once; the run context of a maintenance.* event
+            holds window.id, title, starts_at, ends_at and updated_at), send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
             "recipients": {"users": [<user id>], "teams": [<team id>],
             "roles": [<role name>], "contact_roles": [owner | escalation |
             operator | responsible | vendor of the run's CI],
             "client_contacts": {"roles": [<contact role>], "organization":
-            <boolean>}}, "subject": <text or {"de": ..., "en": ...}>, "body":
+            <boolean>}, "maintenance_affected": {"window_id": <context path,
+            default window.id>, "include_heuristic": <boolean, default
+            false>} (WP-1109: a run of an announcement of
+            POST /maintenance-windows/{id}/notify reaches the contacts of its
+            client in the chosen contact_roles, a run without client the
+            contacts of every client the maintenance window affects over the
+            graph; an unknown or invisible window fails the step with
+            "maintenance window not found"; a window cancelled, or moved (other
+            start or end) since window.updated_at of the context, ends the run
+            succeeded with superseded true and sends nothing, a change that
+            does not move it (title, status) does not; one delivery per
+            contact, window schedule and step)}, "subject": <text or {"de": ..., "en": ...}>, "body":
             <text or {"de": ..., "en": ...}>, "critical": <boolean, default
             false>, "channel_ids": [<channel id>]}. Texts may name values of
             the run context as {{path}}. The notification has the category

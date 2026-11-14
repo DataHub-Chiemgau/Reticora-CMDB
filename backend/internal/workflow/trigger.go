@@ -329,6 +329,18 @@ func (c *TriggerConsumer) runContext(ctx context.Context, env *events.Envelope) 
 		}
 	case strings.HasPrefix(env.Type, "ci."):
 		candidate = env.EntityID
+	case strings.HasPrefix(env.Type, "maintenance."):
+		// The window at the top of the context (WP-1109 AK4): id, time
+		// span, the version (updated_at) the event announced and, of an
+		// announcement of POST /maintenance-windows/{id}/notify, the client
+		// and the contact roles the operator chose.
+		window := map[string]any{}
+		for _, key := range []string{"id", "client_id", "title", "starts_at", "ends_at", "updated_at", "contact_roles"} {
+			if v, ok := data[key]; ok {
+				window[key] = v
+			}
+		}
+		payload["window"] = window
 	default:
 		if s, ok := data["ci_id"].(string); ok {
 			candidate = s
