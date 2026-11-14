@@ -129,6 +129,7 @@ import type {
   ExportJobCreateRequest,
   MetricQueryParams,
   AlertRuleCreateRequest,
+  AlertRuleUpdateRequest,
   AlarmListPage,
   AlarmListParams,
 } from '../api/client';
@@ -400,10 +401,11 @@ export function useImpactMany(ids: string[], relType?: string, include?: string)
   });
 }
 
-export function useSites(clientId?: string) {
+export function useSites(clientId?: string, options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: ['sites', 'options', clientId],
     queryFn: () => siteApi.list({ limit: 200, ...(clientId ? { client_id: clientId } : {}) }),
+    ...options,
   });
 }
 
@@ -2109,6 +2111,16 @@ export function useCreateAlertRule() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: AlertRuleCreateRequest) => monitoringApi.createAlert(data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['alert-rules'] }),
+  });
+}
+
+/** PATCH /monitoring/alerts/{id} (WP-990). */
+export function useUpdateAlertRule() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: AlertRuleUpdateRequest }) =>
+      monitoringApi.updateAlert(id, data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['alert-rules'] }),
   });
 }

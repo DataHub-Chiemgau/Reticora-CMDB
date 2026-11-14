@@ -3146,14 +3146,25 @@ export interface AlertRule {
   info_condition: AlertRuleCondition;
   clear_condition: AlertRuleCondition;
   eval_window: string;
-  scope?: {
-    ci_ids?: string[];
-    ci_type_ids?: string[];
-    client_id?: string;
-    site_id?: string;
-    labels?: Record<string, string>;
-  };
+  scope?: AlertRuleScope;
   group_by?: string[];
+  /** The follow-up actions of the rule (WP-988). */
+  actions?: AlertRuleActions;
+}
+
+/** The scope of an alert rule (ALR-05): CIs, CI types with subtypes, client, site, labels. */
+export interface AlertRuleScope {
+  ci_ids?: string[];
+  ci_type_ids?: string[];
+  client_id?: string;
+  site_id?: string;
+  labels?: Record<string, string>;
+}
+
+/** The follow-up actions of an alert rule (WP-988): notification and webhook on or off. */
+export interface AlertRuleActions {
+  notify?: { enabled: boolean };
+  webhook?: { enabled: boolean };
 }
 
 export interface AlertRuleCreateRequest {
@@ -3172,7 +3183,13 @@ export interface AlertRuleCreateRequest {
   info_condition?: AlertRuleCondition;
   clear_condition?: AlertRuleCondition;
   eval_window?: string;
+  scope?: AlertRuleScope;
+  group_by?: string[];
+  actions?: AlertRuleActions | null;
 }
+
+/** PATCH /monitoring/alerts/{id} (WP-990): every field of the rule but its metric. */
+export type AlertRuleUpdateRequest = Partial<Omit<AlertRuleCreateRequest, 'metric_name'>>;
 
 export interface CIMetricSeries {
   name: string;
@@ -3200,6 +3217,9 @@ export const monitoringApi = {
   },
   createAlert(data: AlertRuleCreateRequest): Promise<AlertRule> {
     return fetchAPI('/monitoring/alerts', { method: 'POST', body: JSON.stringify(data) });
+  },
+  updateAlert(id: string, data: AlertRuleUpdateRequest): Promise<AlertRule> {
+    return fetchAPI(`/monitoring/alerts/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
   },
   deleteAlert(id: string): Promise<void> {
     return fetchAPI(`/monitoring/alerts/${id}`, { method: 'DELETE' });
