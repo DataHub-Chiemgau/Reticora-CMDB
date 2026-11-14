@@ -77,7 +77,8 @@ var (
 // RegisterMetrics registers the metrics of the probe ingest and the clock
 // offset of the collectors (WP-962).
 func RegisterMetrics(reg prometheus.Registerer) {
-	reg.MustRegister(ingestDiscarded, ingestDeadLetters, ingestRows, stateDropped, stateDeadLetters, bridgeDiscarded, clockOffset)
+	reg.MustRegister(ingestDiscarded, ingestDeadLetters, ingestRows, stateDropped, stateDeadLetters, bridgeDiscarded, clockOffset,
+		dependencyDepthExceeded, dependencyCacheStale)
 }
 
 // ResultsMessage is one result batch of a collector as the stream holds it.

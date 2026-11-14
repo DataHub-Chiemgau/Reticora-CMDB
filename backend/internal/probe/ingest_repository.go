@@ -193,6 +193,9 @@ func (s *PGIngestStore) WriteResults(ctx context.Context, orgID string, msgs []R
 			result   SinkResult
 		}
 		var toSinks []sunk
+		// The youngest ok result per probe of the assigned collector: it
+		// can end an unknown/parent_down (WP-965 AK3).
+		okAt := map[string]time.Time{}
 		sinkTypes := map[string]bool{}
 		for _, t := range resultsink.Types() {
 			sinkTypes[t] = true
@@ -251,6 +254,9 @@ func (s *PGIngestStore) WriteResults(ctx context.Context, orgID string, msgs []R
 					toSinks = append(toSinks, sunk{key: resultKey(r.ProbeID, m.CollectorID, seq, r.ObservedAt), typ: p.typ,
 						result: SinkResult{ProbeID: r.ProbeID, CIID: p.ciID, ManagedBy: p.managedBy, ManagedKey: p.managedKey,
 							ObservedAt: r.ObservedAt.UTC(), Status: string(r.Status), Code: r.Code, Values: r.Values, Labels: r.Labels}})
+				}
+				if !stale && r.Status == probewire.StatusOK && r.ObservedAt.After(okAt[r.ProbeID]) {
+					okAt[r.ProbeID] = r.ObservedAt
 				}
 				if c, seen := cursor[m.CollectorID]; !seen || seq > c[0] {
 					cursor[m.CollectorID] = [2]int64{seq, r.Epoch}
@@ -356,6 +362,9 @@ func (s *PGIngestStore) WriteResults(ctx context.Context, orgID string, msgs []R
 			return werr
 		}
 		out.Events = nEvents
+		if err := resyncParentDown(ctx, tx, orgID, okAt); err != nil {
+			return err
+		}
 		if err := advanceCursors(ctx, tx, orgID, cursor); err != nil {
 			return err
 		}

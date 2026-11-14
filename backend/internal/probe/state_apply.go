@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -193,6 +194,8 @@ type StateApplier struct {
 	now    func() time.Time
 	// write applies one change (apply; replaced in tests).
 	write func(ctx context.Context, m *stateMessage) error
+	// deps caches the parent chains and anchors per lane (WP-965 AK4).
+	deps [stateLanes]*DependencyCache
 
 	mu       sync.Mutex
 	consumer jetstream.Consumer
@@ -203,6 +206,9 @@ type StateApplier struct {
 func NewStateApplier(js jetstream.JetStream, cfg StreamConfig, pool *pgxpool.Pool) *StateApplier {
 	a := &StateApplier{js: js, stream: cfg, pool: pool, now: time.Now}
 	a.write = a.apply
+	for i := range a.deps {
+		a.deps[i] = NewDependencyCache(nil)
+	}
 	return a
 }
 
@@ -399,6 +405,18 @@ type stateChangedData struct {
 	ObservedAt  time.Time `json:"observed_at"`
 	Late        bool      `json:"late"`
 	Notify      bool      `json:"notify"`
+	// SuppressedBy is the parent or anchor probe whose down or unknown
+	// made a down of this probe unknown/parent_down (WP-965).
+	SuppressedBy string `json:"suppressed_by,omitempty"`
+}
+
+// InvalidateDependencies drops the cached parents of the probes and anchors
+// of the groups in every lane (a change of parent_probe_id or
+// anchor_probe_id); without arguments everything.
+func (a *StateApplier) InvalidateDependencies(probes, groups []string) {
+	for _, c := range a.deps {
+		c.Invalidate(probes, groups)
+	}
 }
 
 // Apply writes one state change of the collector as the consumer does,
@@ -410,6 +428,26 @@ func (a *StateApplier) Apply(ctx context.Context, orgID, collectorID string, c *
 // apply writes one change in a tenant transaction (see the package
 // comment).
 func (a *StateApplier) apply(ctx context.Context, m *stateMessage) error {
+	for attempt := 0; ; attempt++ {
+		err := a.applyOnce(ctx, m)
+		if attempt < applyDeadlockRetries && isDeadlock(err) {
+			continue
+		}
+		return err
+	}
+}
+
+// applyDeadlockRetries is how often apply repeats a change at once after a
+// deadlock (40P01) of two blockers of one chain that fail together (see
+// suppressDownChildren), instead of spending a delivery.
+const applyDeadlockRetries = 2
+
+func isDeadlock(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "40P01"
+}
+
+func (a *StateApplier) applyOnce(ctx context.Context, m *stateMessage) error {
 	scope := database.OrgWideScope(m.org, "")
 	c := &m.change
 	seq := int64(c.Seq) //nolint:gosec // sequence numbers stay below 2^63
@@ -437,8 +475,9 @@ func (a *StateApplier) apply(ctx context.Context, m *stateMessage) error {
 		case !errors.Is(err, pgx.ErrNoRows):
 			return fmt.Errorf("read assignment: %w", err)
 		}
-		err = tx.QueryRow(ctx, `SELECT epoch, last_seq FROM probe_state WHERE organization_id = $1 AND probe_id = $2 FOR UPDATE`,
-			m.org, c.ProbeID).Scan(&in.StateEpoch, &in.StateSeq)
+		var prevState string
+		err = tx.QueryRow(ctx, `SELECT epoch, last_seq, state FROM probe_state WHERE organization_id = $1 AND probe_id = $2 FOR UPDATE`,
+			m.org, c.ProbeID).Scan(&in.StateEpoch, &in.StateSeq, &prevState)
 		switch {
 		case err == nil:
 			in.HasState = true
@@ -466,11 +505,23 @@ func (a *StateApplier) apply(ctx context.Context, m *stateMessage) error {
 		interval := time.Duration(Resolve(&p, layers).IntervalS.Int()) * time.Second
 		late := Late(observedAt, m.receivedAt, interval)
 		notify := decision != DecisionStale && Notify(late, followedBy(m.followers, &in))
+		// A down behind a blocking parent or anchor probe is applied as
+		// unknown/parent_down without notification (WP-965 AK1).
+		to, reason, suppressedBy := c.To, c.Reason, ""
+		deps := &dependencies{tx: tx, org: m.org, cache: a.deps[lane(c.ProbeID)]}
+		if decision == DecisionApply && c.To == probewire.StateDown {
+			if suppressedBy, err = deps.blocker(ctx, p.ID, DepNode{Parent: p.ParentProbeID, Group: p.CollectorGroupID}); err != nil {
+				return err
+			}
+			if suppressedBy != "" {
+				to, reason, notify = probewire.StateUnknown, probewire.ReasonParentDown, false
+			}
+		}
 		tag, err := tx.Exec(ctx, `INSERT INTO probe_state_change (organization_id, probe_id, from_state, to_state, reason,
 				observed_at, received_at, epoch, seq, collector_id, late, notify, stale, clock_offset_ms)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 			ON CONFLICT ON CONSTRAINT probe_state_change_idempotency_key DO NOTHING`,
-			m.org, c.ProbeID, string(c.From), string(c.To), c.Reason, observedAt, m.receivedAt, c.Epoch, seq, m.collector,
+			m.org, c.ProbeID, string(c.From), string(to), reason, observedAt, m.receivedAt, c.Epoch, seq, m.collector,
 			late, notify, decision == DecisionStale, offset)
 		if err != nil {
 			return fmt.Errorf("write state change: %w", err)
@@ -496,7 +547,7 @@ func (a *StateApplier) apply(ctx context.Context, m *stateMessage) error {
 			ON CONFLICT (probe_id) DO UPDATE SET state = EXCLUDED.state, reason = EXCLUDED.reason, since = EXCLUDED.since,
 				last_seq = EXCLUDED.last_seq, epoch = EXCLUDED.epoch, collector_id = EXCLUDED.collector_id
 			WHERE EXCLUDED.epoch > s.epoch OR (EXCLUDED.epoch = s.epoch AND EXCLUDED.last_seq > s.last_seq)`,
-			c.ProbeID, m.org, string(c.To), c.Reason, observedAt, seq, c.Epoch, m.collector)
+			c.ProbeID, m.org, string(to), reason, observedAt, seq, c.Epoch, m.collector)
 		if err != nil {
 			return fmt.Errorf("write probe state: %w", err)
 		}
@@ -505,12 +556,22 @@ func (a *StateApplier) apply(ctx context.Context, m *stateMessage) error {
 		}
 		data := stateChangedData{
 			ProbeStateChangedData: events.ProbeStateChangedData{ID: p.ID, CIID: p.CIID, ClientID: p.ClientID, SiteID: p.SiteID,
-				From: string(c.From), To: string(c.To), Reason: c.Reason},
-			ProbeID: p.ID, CollectorID: m.collector, ObservedAt: observedAt.UTC(), Late: late, Notify: notify,
+				From: string(c.From), To: string(to), Reason: reason},
+			ProbeID: p.ID, CollectorID: m.collector, ObservedAt: observedAt.UTC(), Late: late, Notify: notify, SuppressedBy: suppressedBy,
 		}
-		return database.BeforeCommit(database.ContextWithTx(ctx, tx), func() error {
+		if err := database.BeforeCommit(database.ContextWithTx(ctx, tx), func() error {
 			_, aerr := events.NewOutbox().Append(ctx, tx, &events.Event{OrgID: m.org, Type: events.ProbeStateChanged, EntityID: p.ID, Data: data})
 			return aerr
-		})
+		}); err != nil {
+			return err
+		}
+		// The probe became down or unknown: the down probes behind it
+		// become unknown/parent_down in this transaction (WP-965 AK2).
+		if Blocking(string(to)) && (!in.HasState || !Blocking(prevState)) {
+			if _, err := deps.suppressDownChildren(ctx, p.ID, observedAt); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
