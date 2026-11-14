@@ -160,8 +160,9 @@ func (e *Edge) ProbeResults(ctx context.Context, orgID, collectorID string, data
 }
 
 // ProbeAlive validates the monitoring alive message of the collector, hands
-// it to the hooks and answers with the server time (AliveReply); nothing is
-// stored.
+// it to the hooks and answers with the server time (AliveReply); the edge
+// itself stores nothing. The hook of ClockSkew (WP-962) writes
+// last_alive_at and the clock offset of the group member.
 func (e *Edge) ProbeAlive(ctx context.Context, orgID, collectorID string, data []byte) any {
 	received := e.now().UTC()
 	if r, ok := e.admit(ctx, orgID, collectorID, data); !ok {

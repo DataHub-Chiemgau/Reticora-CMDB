@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000365_ip_address_ptr
+Stand: Migration 000366_probe_clock_offset
 
 ## Prüfung
 
@@ -588,6 +588,23 @@ gilt als Standard. `ticket` (WP-1040) und `workflow` (WP-1110) sind
 reserviert und werden von der API abgewiesen; beim Lesen gelten unbekannte
 Schlüssel als Standard. Keine neue Tabelle; RLS und die Policies
 `alert_rule_isolation` und `alert_rule_system_select` bleiben unverändert.
+
+### Uhrabweichung je Collector (WP-962)
+
+Migration `probe_clock_offset` (WP-962, PRB-09, E-175, vorläufige Nummer
+000366) ergänzt `probe_state_change.clock_offset_ms` und
+`probe_result.clock_offset_ms` (`integer NULL`: die Abweichung, um die
+`observed_at` bzw. `time` eines wegen Uhrabweichung degradierten Collectors
+korrigiert wurde; NULL = unkorrigiert). Auf der komprimierten Hypertable
+`probe_result` ohne Default; `probe_result_v` trägt die Spalte am Ende,
+`security_barrier`, `CASCADED CHECK OPTION` und die Grants der App-Rolle
+bleiben. An `collector_group_member` kommen der geteilte Zustand der
+Auswertung (`clock_skew_warned boolean NOT NULL DEFAULT false`,
+`clock_skew_calm` und `clock_skew_settle` `smallint NOT NULL DEFAULT 0`, je
+CHECK 0–6) und `clock_corrected_at timestamptz NULL` (letztes Lebenszeichen
+als `degraded`; bis 24 h danach prüft der Ingest erneute Zustellungen auf
+eine andere Korrektur). Keine neue Tabelle, RLS und Policies unverändert.
+Down entfernt die Spalten und stellt die View aus 000325 wieder her.
 
 ## Indizes unter RLS (SR-04, K22, WP-836)
 

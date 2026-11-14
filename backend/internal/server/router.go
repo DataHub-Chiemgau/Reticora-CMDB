@@ -887,6 +887,11 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		if opts.Entitlements != nil {
 			probeEdge.WithFeatures(opts.Entitlements)
 		}
+		// Every alive message writes last_alive_at and the clock offset of
+		// the group member (PRB-09, WP-962).
+		if opts.AuditPool != nil {
+			probeEdge.OnAlive(probe.NewClockSkew(opts.AuditPool).Hook())
+		}
 		discoveryHandler.WithEdgeProbes(probeEdge)
 	}
 	// The location tree is core; its rack nodes are written only with

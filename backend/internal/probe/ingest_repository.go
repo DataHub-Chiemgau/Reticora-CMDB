@@ -144,6 +144,12 @@ type resultRows struct {
 	rtts, losses       []*float32
 	values             []*float64
 	stale              []bool
+	offsets            []*int32
+	// raws and repeats: the observed_at of the collector before the
+	// correction and whether the row is checked for a repeated delivery
+	// stored under another correction (WP-962).
+	raws    []time.Time
+	repeats []bool
 }
 
 func f32(v *float64) *float32 {
@@ -192,9 +198,19 @@ func (s *PGIngestStore) WriteResults(ctx context.Context, orgID string, msgs []R
 			sinkTypes[t] = true
 		}
 		for _, m := range msgs {
-			collectorClient, known := collectorClients[m.CollectorID]
+			collector, known := collectorClients[m.CollectorID]
+			collectorClient := collector.client
 			for i := range m.Results {
 				r := &m.Results[i]
+				raw := r.ObservedAt.UTC()
+				if collector.offsetMS != nil {
+					// A collector degraded for its clock: observed_at
+					// corrected by −offset (PRB-09, WP-962); the order
+					// stays (epoch, seq).
+					corrected := *r
+					corrected.ObservedAt = CorrectObservedAt(r.ObservedAt, collector.offsetMS)
+					r = &corrected
+				}
 				p, ok := probes[r.ProbeID]
 				status, valid := ResultStatusCode(r.Status)
 				if !ok || !valid {
@@ -221,6 +237,9 @@ func (s *PGIngestStore) WriteResults(ctx context.Context, orgID string, msgs []R
 				rows.losses = append(rows.losses, f32(r.Loss))
 				rows.values = append(rows.values, r.Value)
 				rows.stale = append(rows.stale, stale)
+				rows.offsets = append(rows.offsets, collector.offsetMS)
+				rows.raws = append(rows.raws, raw)
+				rows.repeats = append(rows.repeats, collector.repeatCheck)
 				if len(r.Values) > 0 {
 					withValues = append(withValues, bridged{key: resultKey(r.ProbeID, m.CollectorID, seq, r.ObservedAt),
 						probe: BridgeProbe{ID: r.ProbeID, Type: p.typ, CIID: p.ciID}, result: r, stale: stale})
@@ -244,15 +263,27 @@ func (s *PGIngestStore) WriteResults(ctx context.Context, orgID string, msgs []R
 		}
 		if len(rows.times) > 0 {
 			inserted, err := tx.Query(ctx, `INSERT INTO probe_result_v (time, organization_id, probe_id, collector_id, seq, epoch,
-					status, code, rtt_ms, loss, value, stale_epoch)
-				SELECT u.time, $1, u.probe_id, u.collector_id, u.seq, u.epoch, u.status, u.code, u.rtt_ms, u.loss, u.value, u.stale
+					status, code, rtt_ms, loss, value, stale_epoch, clock_offset_ms)
+				SELECT u.time, $1, u.probe_id, u.collector_id, u.seq, u.epoch, u.status, u.code, u.rtt_ms, u.loss, u.value, u.stale, u.clock_offset_ms
 				  FROM unnest($2::timestamptz[], $3::uuid[], $4::uuid[], $5::bigint[], $6::bigint[], $7::smallint[],
-					$8::smallint[], $9::real[], $10::real[], $11::double precision[], $12::boolean[])
-					AS u (time, probe_id, collector_id, seq, epoch, status, code, rtt_ms, loss, value, stale)
+					$8::smallint[], $9::real[], $10::real[], $11::double precision[], $12::boolean[], $13::integer[],
+					$14::timestamptz[], $15::boolean[])
+					AS u (time, probe_id, collector_id, seq, epoch, status, code, rtt_ms, loss, value, stale, clock_offset_ms,
+						raw, repeat_check)
+				 -- A collector corrected for its clock (WP-962): the key holds
+				 -- the corrected time, so a repeated delivery under another
+				 -- correction is found by probe, collector, epoch, seq and the
+				 -- uncorrected time (time + clock_offset_ms).
+				 WHERE NOT (u.repeat_check AND EXISTS (SELECT 1 FROM probe_result_v x
+					WHERE x.organization_id = $1 AND x.probe_id = u.probe_id AND x.collector_id = u.collector_id
+					  AND x.seq = u.seq AND x.epoch = u.epoch
+					  AND x.time BETWEEN u.raw - make_interval(secs => $16) AND u.raw + make_interval(secs => $16)
+					  AND x.time + COALESCE(x.clock_offset_ms, 0) * interval '1 millisecond' = u.raw))
 				ON CONFLICT DO NOTHING
 				RETURNING probe_id::text, collector_id::text, seq, time`,
 				orgID, rows.times, rows.probes, rows.collectors, rows.seqs, rows.epochs, rows.statuses, rows.codes,
-				rows.rtts, rows.losses, rows.values, rows.stale)
+				rows.rtts, rows.losses, rows.values, rows.stale, rows.offsets, rows.raws, rows.repeats,
+				clockCorrectionWindow.Seconds())
 			if err != nil {
 				return fmt.Errorf("write probe results: %w", err)
 			}
@@ -367,10 +398,22 @@ func ingestProbes(ctx context.Context, tx pgx.Tx, orgID string, msgs []ResultsMe
 	return out, rows.Err()
 }
 
-// ingestCollectors reads the client of every collector of the batch
-// (empty for an org-wide collector); a collector missing from the map is
-// not in the organization.
-func ingestCollectors(ctx context.Context, tx pgx.Tx, orgID string, msgs []ResultsMessage) (map[string]string, error) {
+// ingestCollector is a collector of a batch: its client (empty for an
+// org-wide collector) and, while its group member is degraded for its clock
+// (WP-962), the clock offset its timestamps are corrected by.
+type ingestCollector struct {
+	client   string
+	offsetMS *int32
+	// repeatCheck: the member is degraded for its clock or was within
+	// ClockCorrectionHorizon; a repeated delivery may meet another
+	// correction than the stored row.
+	repeatCheck bool
+}
+
+// ingestCollectors reads the client and the clock correction of every
+// collector of the batch; a collector missing from the map is not in the
+// organization.
+func ingestCollectors(ctx context.Context, tx pgx.Tx, orgID string, msgs []ResultsMessage) (map[string]ingestCollector, error) {
 	seen := map[string]bool{}
 	var ids []string
 	for _, m := range msgs {
@@ -379,22 +422,25 @@ func ingestCollectors(ctx context.Context, tx pgx.Tx, orgID string, msgs []Resul
 			ids = append(ids, m.CollectorID)
 		}
 	}
-	out := make(map[string]string, len(ids))
+	out := make(map[string]ingestCollector, len(ids))
 	if len(ids) == 0 {
 		return out, nil
 	}
-	rows, err := tx.Query(ctx, `SELECT c.id::text, COALESCE(c.client_id::text, '') FROM collector c
-		WHERE c.organization_id = $1 AND c.id = ANY ($2::uuid[])`, orgID, ids)
+	rows, err := tx.Query(ctx, `SELECT c.id::text, COALESCE(c.client_id::text, ''), `+clockCorrectionSQL+`,
+			COALESCE(m.member_status = 'degraded' OR m.clock_corrected_at > now() - make_interval(secs => $3), false)
+		  FROM collector c LEFT JOIN collector_group_member m ON m.collector_id = c.id AND m.organization_id = c.organization_id
+		 WHERE c.organization_id = $1 AND c.id = ANY ($2::uuid[])`, orgID, ids, ClockCorrectionHorizon.Seconds())
 	if err != nil {
 		return nil, fmt.Errorf("read collectors of the results: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var id, client string
-		if err := rows.Scan(&id, &client); err != nil {
+		var id string
+		var c ingestCollector
+		if err := rows.Scan(&id, &c.client, &c.offsetMS, &c.repeatCheck); err != nil {
 			return nil, fmt.Errorf("read collectors of the results: %w", err)
 		}
-		out[id] = client
+		out[id] = c
 	}
 	return out, rows.Err()
 }

@@ -3519,13 +3519,18 @@
     "collector.clock_skew": {
       "description": "Data of collector.clock_skew. entity_id: the collector. Origin: EVT-03 [P3], E-161. Producer: WP-962. a collector whose clock deviates from the server.",
       "type": "object",
-      "required": ["id", "skew_ms"],
+      "required": ["id", "collector_id", "skew_ms", "offset_ms", "degraded"],
       "additionalProperties": true,
       "properties": {
         "id": {
           "type": "string",
           "format": "uuid",
           "description": "The collector."
+        },
+        "collector_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The collector (same as id, the name of WP-962 AK3)."
         },
         "collector_group_id": {
           "type": "string",
@@ -3544,16 +3549,31 @@
         },
         "skew_ms": {
           "type": "integer",
-          "description": "Deviation of the collector clock in milliseconds."
+          "description": "Deviation of the collector clock in milliseconds (collector − server, median of the last six alive messages)."
+        },
+        "offset_ms": {
+          "type": "integer",
+          "description": "Same as skew_ms (the name of WP-962 AK3): collector − server in milliseconds."
+        },
+        "degraded": {
+          "type": "boolean",
+          "description": "true when the deviation crossed 60 s: the member is degraded and its timestamps are corrected; false for the warning from 2 s."
+        },
+        "resolved": {
+          "type": "boolean",
+          "description": "true when the deviation stayed below 2 s for six alive messages; absent otherwise."
         }
       },
       "examples": [
         {
           "id": "11111111-1111-4111-8111-111111111111",
+          "collector_id": "11111111-1111-4111-8111-111111111111",
           "collector_group_id": "99999999-9999-4999-8999-999999999999",
           "client_id": "33333333-3333-4333-8333-333333333333",
           "site_id": "44444444-4444-4444-8444-444444444444",
-          "skew_ms": 2500
+          "skew_ms": 2500,
+          "offset_ms": 2500,
+          "degraded": false
         }
       ]
     },

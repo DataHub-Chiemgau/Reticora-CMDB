@@ -6871,6 +6871,11 @@ PRB-11;[P3];E;backend/internal/probe/state_apply_integration_test.go;WP-961
 PRB-09;[P3];E;backend/internal/probe/alive_integration_test.go;WP-962
 ```
 
+**Abweichung (Umsetzung):**
+- Migration: Neben den Spalten `clock_offset_ms` erhält `collector_group_member` die Spalten `clock_skew_warned`, `clock_skew_calm`, `clock_skew_settle` und `clock_corrected_at`. Offene Warnung und Rückkehrzähler liegen damit in der Mitgliedszeile, nicht im Speicher. `.probe.alive` wird per Queue-Gruppe auf alle Server-Instanzen verteilt; nur unter der Zeilensperre entsteht jedes Ereignis aus AK3 genau einmal. Im Speicher der Instanz liegt weiter nur der Puffer des Medians (AK2).
+- AK4: Eine erneut zugestellte Ergebnis-Nachricht trifft womöglich auf eine geänderte Korrektur und damit auf ein anderes `time` im Schlüssel `probe_result_key`. Deshalb prüft der Ingest bis 24 h nach dem letzten Lebenszeichen als `degraded` (`clock_corrected_at`) auf dieselbe Probe, denselben Collector, dieselbe Epoche und Sequenz sowie dieselbe unkorrigierte Messzeit (`time + clock_offset_ms`, Fenster ±24 h).
+- AK3: Das Ereignis trägt `collector_id` und `offset_ms`. Daneben bleiben `id` und `skew_ms` aus dem Vertrag von E-161 mit denselben Werten. `resolved` entsteht erst, wenn das Mitglied wieder `healthy` ist.
+
 **Entscheidungsbedarf:** [E-175](entscheidungen.md#e-175) Uhrzeit und Reihenfolge (entschieden 2026-11-09, Option 1)
 
 **Nicht Bestandteil:**

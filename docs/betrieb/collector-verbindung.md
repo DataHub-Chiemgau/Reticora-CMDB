@@ -234,7 +234,7 @@ Subject-Baum des Collectors (`collector.<org>.<id>.>`):
 |---|---|---|
 | `collector.<org>.<id>.probe.state` | ein `StateChange` | `{"status":202,"seq":<seq>}` nach dem PubAck des Streams |
 | `collector.<org>.<id>.probe.results` | ein `ResultBatch` (1 bis 1.000 Ergebnisse) | `{"status":202,"seq":<höchste seq des Bündels>}` nach dem PubAck |
-| `collector.<org>.<id>.probe.alive` | ein `Alive` | `{"status":200,"server_time":"…"}` (`AliveReply`); gespeichert wird nichts |
+| `collector.<org>.<id>.probe.alive` | ein `Alive` | `{"status":200,"server_time":"…"}` (`AliveReply`); gespeichert werden `last_alive_at` und die Uhrabweichung des Gruppenmitglieds (siehe unten) |
 
 - **Identität.** Organisation und Collector stammen aus dem Subject, also
   aus der authentifizierten Edge-Identität. Ein unbekannter Collector
@@ -265,6 +265,50 @@ Subject-Baum des Collectors (`collector.<org>.<id>.>`):
   wiederholt mit Backoff, nichts geht verloren.
 
 Stream, Grenzen und Handler-Pool: [`docs/ops/workers.md`](../ops/workers.md#probe-edge-and-stream-reticora_probe-wp-959).
+
+## Uhrzeit des Collectors (PRB-09, WP-962)
+
+**Der Collector-Host braucht eine synchronisierte Uhr: NTP oder chrony
+(`timedatectl` zeigt `System clock synchronized: yes`).** Zeitstempel von
+Messungen sind die UTC-Zeit am Collector (`observed_at`); die Reihenfolge
+der Daten eines Collectors ergibt sich aus Epoche und Sequenz, nicht aus der
+Uhrzeit (E-175).
+
+- **Messung.** Jedes Lebenszeichen (`.probe.alive`, alle 10 s) ergibt
+  `Abweichung = collector_time − Empfangszeit am Server` (positiv: die Uhr
+  des Collectors geht vor). Der Fehler ist die Einweglaufzeit der Nachricht
+  (typisch unter 100 ms). Gespeichert wird der Median der letzten sechs Werte
+  als `collector_group_member.clock_offset_ms`, dazu `last_alive_at`. Die
+  sechs Werte liegen im Speicher der Server-Instanz; nach einem Neustart
+  oder Instanzwechsel beginnt die Glättung neu. Offene Warnung, `degraded`
+  und die Zähler der Rückkehr stehen dagegen in der Mitgliedszeile
+  (`clock_skew_warned`, `clock_skew_calm`, `clock_skew_settle`,
+  `member_status`) und werden unter deren Zeilensperre gelesen: Bei mehreren
+  Server-Instanzen entsteht jedes Ereignis genau einmal, ein Neustart
+  verliert keine offene Warnung.
+- **Metrik.** `reticora_collector_clock_offset_seconds{collector_id}` zeigt
+  den Median in Sekunden.
+- **Warnung ab 2 s.** Eine Log-Warnung (höchstens alle 5 min je Collector)
+  und beim Überschreiten genau ein Ereignis `collector.clock_skew` mit
+  `collector_id`, `collector_group_id`, `client_id`, `site_id`, `offset_ms`
+  (Median) und `degraded: false`; `id` und `skew_ms` tragen dieselben Werte
+  (Vertrag aus E-161).
+- **Ab 60 s `degraded`.** Das Gruppenmitglied wird `degraded`, bleibt aber
+  zuweisbar; beim Überschreiten entsteht genau ein weiteres Ereignis mit
+  `degraded: true`. Solange es `degraded` ist, korrigieren Ingest und
+  Zustandsanwendung die Zeitstempel seiner Ergebnisse und Zustandswechsel
+  um die gemessene Abweichung (`observed_at − Abweichung`) und vermerken den
+  angewandten Wert in `clock_offset_ms` der Zeile (`probe_result`,
+  `probe_state_change`; ohne Korrektur NULL). Eine erneut zugestellte
+  Ergebnis-Nachricht (Redelivery, erneuter Upload) wird auch dann nur einmal
+  geschrieben, wenn sich die Korrektur dazwischen geändert hat: Bis 24 h nach
+  dem letzten Lebenszeichen als `degraded` (`clock_corrected_at`) prüft der
+  Ingest Ergebnisse dieses Collectors auf dieselbe Probe, Epoche, Sequenz und
+  unkorrigierte Messzeit (Korrekturen bis 24 h).
+- **Rückkehr.** Bleibt der Median sechs Lebenszeichen lang unter 30 s, wird
+  das Mitglied wieder `healthy` (keine Korrektur mehr); bleibt er sechs
+  Lebenszeichen lang unter 2 s, nachdem es wieder `healthy` ist, meldet ein
+  Ereignis `collector.clock_skew` mit `resolved: true` das Ende der Warnung.
 
 ## Zuweisungssatz: `.probes.request` und `.probes.changed` (WP-948)
 

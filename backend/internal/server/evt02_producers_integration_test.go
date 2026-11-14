@@ -275,6 +275,7 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 		admpAccount                        string
 		probeGroup                         string
 		stateCollector, stateProbe         string
+		skewCollector                      string
 		admpSync                           *admp.Sync
 		alarms                             = alarm.NewPGService(f.App)
 		ackAlarm, sevAlarm, resAlarm       *alarm.Alarm
@@ -804,6 +805,32 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 				if data["id"] != entity || data["probe_id"] != entity || data["client_id"] != f.Client1 || data["from"] != "unknown" ||
 					data["to"] != "down" || data["collector_id"] != stateCollector || data["late"] != false || data["notify"] != true {
 					t.Errorf("probe.state_changed data %v", data)
+				}
+			}},
+		{typ: events.CollectorClockSkew,
+			// The clock evaluation of the monitoring alive messages
+			// (WP-962): a collector 5 s ahead of the server crosses 2 s.
+			setup: func(t *testing.T) {
+				skewCollector = scalar(t, `INSERT INTO collector (organization_id, name, status) VALUES ($1, 'evt02-skew', 'active')
+					RETURNING id::text`, f.OrgA)
+			},
+			act: func(t *testing.T, refused bool) string {
+				now := time.Now()
+				err := probe.NewClockSkew(f.App).Observe(context.Background(), f.OrgA, skewCollector, &probewire.Alive{
+					CollectorTime: now.Add(5 * time.Second), QueueState: probewire.QueueOK,
+					ICMPCapability: probewire.ICMPUnprivileged, ICMPCapabilityV6: probewire.ICMPUnprivileged}, now)
+				failed(t, "collector clock skew", err, refused)
+				if refused {
+					unchanged(t, "clock offset", scalar(t, `SELECT COALESCE(clock_offset_ms::text, 'null') FROM collector_group_member
+						WHERE collector_id = $1`, skewCollector), "null")
+					return ""
+				}
+				return skewCollector
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["collector_id"] != entity || data["skew_ms"] != float64(5000) ||
+					data["offset_ms"] != float64(5000) || data["degraded"] != false || data["collector_group_id"] == nil {
+					t.Errorf("collector.clock_skew data %v", data)
 				}
 			}},
 		{typ: events.MonitoringSuspensionChanged,
@@ -1985,7 +2012,6 @@ var plannedProducers = map[string]string{
 	"collector_group.unreachable": "WP-964",
 	"collector_group.reachable":   "WP-964",
 	"collector_group.failover":    "WP-963",
-	"collector.clock_skew":        "WP-962",
 	"ci.config_changed":           "WP-1054",
 	"capacity.forecast_exceeded":  "WP-1060",
 	"sla.violated":                "WP-1049",

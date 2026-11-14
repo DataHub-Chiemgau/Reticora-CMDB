@@ -492,13 +492,22 @@ type CollectorGroupData struct {
 }
 
 // CollectorClockSkewData is the data of collector.clock_skew: a collector
-// whose clock deviates from the server.
+// whose clock deviates from the server (PRB-09, WP-962). SkewMS is the
+// median offset collector − server, OffsetMS the same under the name of
+// WP-962 AK3, CollectorID the same as ID (id and skew_ms stay for the
+// consumers of E-161); Degraded marks the crossing of 60 s
+// (the member is degraded and its timestamps are corrected), Resolved the
+// end of the warning (below 2 s for six alive messages).
 type CollectorClockSkewData struct {
 	ID               string `json:"id"`
+	CollectorID      string `json:"collector_id"`
 	CollectorGroupID string `json:"collector_group_id,omitempty"`
 	ClientID         string `json:"client_id,omitempty"`
 	SiteID           string `json:"site_id,omitempty"`
 	SkewMS           int64  `json:"skew_ms"`
+	OffsetMS         int64  `json:"offset_ms"`
+	Degraded         bool   `json:"degraded"`
+	Resolved         bool   `json:"resolved,omitempty"`
 }
 
 // ProbeConfigChangedData is the data of config.changed: a change of the

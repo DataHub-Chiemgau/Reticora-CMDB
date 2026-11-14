@@ -450,19 +450,28 @@ func (a *StateApplier) apply(ctx context.Context, m *stateMessage) error {
 			stateDropped.WithLabelValues(StateFutureEpoch).Inc()
 			return nil
 		}
+		// A collector degraded for its clock: observed_at corrected by
+		// −offset (PRB-09, WP-962); the order stays (epoch, seq).
+		var offset *int32
+		err = tx.QueryRow(ctx, `SELECT `+clockCorrectionSQL+` FROM collector_group_member m
+			WHERE m.organization_id = $1 AND m.collector_id = $2`, m.org, m.collector).Scan(&offset)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("read clock offset: %w", err)
+		}
+		observedAt := CorrectObservedAt(c.ObservedAt, offset)
 		layers, err := (&pgWriteTx{tx: tx, orgID: m.org}).Layers(ctx, &p)
 		if err != nil {
 			return err
 		}
 		interval := time.Duration(Resolve(&p, layers).IntervalS.Int()) * time.Second
-		late := Late(c.ObservedAt, m.receivedAt, interval)
+		late := Late(observedAt, m.receivedAt, interval)
 		notify := decision != DecisionStale && Notify(late, followedBy(m.followers, &in))
 		tag, err := tx.Exec(ctx, `INSERT INTO probe_state_change (organization_id, probe_id, from_state, to_state, reason,
-				observed_at, received_at, epoch, seq, collector_id, late, notify, stale)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+				observed_at, received_at, epoch, seq, collector_id, late, notify, stale, clock_offset_ms)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 			ON CONFLICT ON CONSTRAINT probe_state_change_idempotency_key DO NOTHING`,
-			m.org, c.ProbeID, string(c.From), string(c.To), c.Reason, c.ObservedAt, m.receivedAt, c.Epoch, seq, m.collector,
-			late, notify, decision == DecisionStale)
+			m.org, c.ProbeID, string(c.From), string(c.To), c.Reason, observedAt, m.receivedAt, c.Epoch, seq, m.collector,
+			late, notify, decision == DecisionStale, offset)
 		if err != nil {
 			return fmt.Errorf("write state change: %w", err)
 		}
@@ -487,7 +496,7 @@ func (a *StateApplier) apply(ctx context.Context, m *stateMessage) error {
 			ON CONFLICT (probe_id) DO UPDATE SET state = EXCLUDED.state, reason = EXCLUDED.reason, since = EXCLUDED.since,
 				last_seq = EXCLUDED.last_seq, epoch = EXCLUDED.epoch, collector_id = EXCLUDED.collector_id
 			WHERE EXCLUDED.epoch > s.epoch OR (EXCLUDED.epoch = s.epoch AND EXCLUDED.last_seq > s.last_seq)`,
-			c.ProbeID, m.org, string(c.To), c.Reason, c.ObservedAt, seq, c.Epoch, m.collector)
+			c.ProbeID, m.org, string(c.To), c.Reason, observedAt, seq, c.Epoch, m.collector)
 		if err != nil {
 			return fmt.Errorf("write probe state: %w", err)
 		}
@@ -497,7 +506,7 @@ func (a *StateApplier) apply(ctx context.Context, m *stateMessage) error {
 		data := stateChangedData{
 			ProbeStateChangedData: events.ProbeStateChangedData{ID: p.ID, CIID: p.CIID, ClientID: p.ClientID, SiteID: p.SiteID,
 				From: string(c.From), To: string(c.To), Reason: c.Reason},
-			ProbeID: p.ID, CollectorID: m.collector, ObservedAt: c.ObservedAt.UTC(), Late: late, Notify: notify,
+			ProbeID: p.ID, CollectorID: m.collector, ObservedAt: observedAt.UTC(), Late: late, Notify: notify,
 		}
 		return database.BeforeCommit(database.ContextWithTx(ctx, tx), func() error {
 			_, aerr := events.NewOutbox().Append(ctx, tx, &events.Event{OrgID: m.org, Type: events.ProbeStateChanged, EntityID: p.ID, Data: data})
