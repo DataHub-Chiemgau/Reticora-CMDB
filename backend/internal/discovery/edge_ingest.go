@@ -18,6 +18,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 )
 
 // The collectors' data path over the edge (COL-08): an enrolled collector
@@ -38,6 +39,10 @@ const (
 	ProbeStateSuffix   = ".probe.state"
 	ProbeResultsSuffix = ".probe.results"
 	ProbeAliveSuffix   = ".probe.alive"
+	// ConfigSuffix carries the running configuration of a device
+	// (probewire.ConfigSnapshot, ALR-07, WP-1053/WP-1054); served once
+	// WithEdgeConfig set an ingest.
+	ConfigSuffix = ".config"
 	// edgeDataQueue spreads the requests over the server instances: each
 	// is processed once.
 	edgeDataQueue = "reticora-edge-data"
@@ -78,6 +83,95 @@ type EdgeReply struct {
 	// with their CI and those without a CI (POST /monitoring/metrics).
 	Ingested   *int `json:"ingested,omitempty"`
 	Unassigned *int `json:"unassigned,omitempty"`
+	// Outcome and SnapshotID answer a configuration (.config, WP-1054):
+	// stored (202) or unchanged (200) and the version.
+	Outcome    string `json:"outcome,omitempty"`
+	SnapshotID string `json:"snapshot_id,omitempty"`
+}
+
+// ConfigOutcome is what the configuration ingest did with a snapshot:
+// Status is the HTTP status of the answer (202 stored, 200 unchanged, 404
+// for a CI outside the collector's scope or with another management
+// address, 409 for a version older than the latest one).
+type ConfigOutcome struct {
+	Status     int
+	Outcome    string
+	SnapshotID string
+	Error      string
+}
+
+// ConfigIngester stores a checked configuration snapshot of a collector in
+// the scope of ctx (configsnap.Ingester, WP-1054); text is its decompressed
+// content.
+type ConfigIngester interface {
+	IngestConfig(ctx context.Context, orgID, collectorID string, snap *probewire.ConfigSnapshot, text string) (ConfigOutcome, error)
+}
+
+// WithEdgeConfig serves .config with configs (ALR-07, WP-1054); features
+// checks the feature monitoring_network (nil: every organization is
+// entitled). Without it the subject is not served and the collectors keep
+// the configurations they did not deliver.
+func (h *Handler) WithEdgeConfig(configs ConfigIngester, features FeatureStatus) *Handler {
+	h.configs, h.configFeatures = configs, features
+	return h
+}
+
+// EdgeConfig stores a configuration snapshot a collector sent over the
+// edge (.config, ALR-07, WP-1054); the snapshots of an unknown or disabled
+// collector are refused. It runs in the system context of the edge
+// dispatcher (the organization of the subject).
+func (h *Handler) EdgeConfig(ctx context.Context, orgID, collectorID string, data []byte) EdgeReply {
+	ctx = systemContext(ctx, orgID)
+	if err := h.checkCollector(ctx, orgID, collectorID); err != nil {
+		return edgeRefusal(err)
+	}
+	return h.edgeConfig(ctx, orgID, collectorID, data)
+}
+
+// edgeConfig answers a configuration snapshot of a collector the caller
+// checked: 403 with the problem type without monitoring_network, 400 for a
+// message whose schema version, fields, size (2 MiB) or SHA-256 of the
+// decompressed content do not hold (nothing stored), then the ingest in the
+// collector's scope. Neither the content nor a secret goes into a log.
+func (h *Handler) edgeConfig(ctx context.Context, orgID, collectorID string, data []byte) EdgeReply {
+	if h.configs == nil {
+		return EdgeReply{Status: http.StatusServiceUnavailable, Error: "configuration ingest unavailable"}
+	}
+	if h.configFeatures != nil {
+		_, status, err := h.configFeatures.Status(ctx, orgID, entitlement.FeatureMonitoringNetwork)
+		if err != nil {
+			return EdgeReply{Status: http.StatusInternalServerError, Error: "entitlement lookup failed"}
+		}
+		if status == entitlement.StatusNotEntitled {
+			refusal := &entitlement.FeatureNotEntitledError{FeatureKey: entitlement.FeatureMonitoringNetwork}
+			slog.Warn("edge configuration refused", "organization_id", orgID, "collector_id", collectorID, "feature", refusal.FeatureKey)
+			return EdgeReply{Status: http.StatusForbidden, Type: refusal.ProblemType(), Error: refusal.Error()}
+		}
+	}
+	var snap probewire.ConfigSnapshot
+	if err := probewire.Decode(data, &snap); err != nil {
+		return EdgeReply{Status: http.StatusBadRequest, Error: "invalid configuration snapshot"}
+	}
+	if err := snap.Validate(); err != nil {
+		return EdgeReply{Status: http.StatusBadRequest, Error: "invalid configuration snapshot: " + strings.TrimPrefix(err.Error(), probewire.ErrInvalidConfig.Error()+": ")}
+	}
+	if !api.IsUUID(snap.CIID) {
+		return EdgeReply{Status: http.StatusBadRequest, Error: "invalid configuration snapshot: ci_id is no uuid"}
+	}
+	text, err := snap.Text()
+	if err != nil {
+		return EdgeReply{Status: http.StatusBadRequest, Error: "invalid configuration snapshot: " + strings.TrimPrefix(err.Error(), probewire.ErrInvalidConfig.Error()+": ")}
+	}
+	ctx, err = h.collectorScopeContext(ctx, orgID, collectorID)
+	if err != nil {
+		return edgeRefusal(err)
+	}
+	out, err := h.configs.IngestConfig(ctx, orgID, collectorID, &snap, text)
+	if err != nil {
+		slog.Error("edge configuration ingest failed", "organization_id", orgID, "collector_id", collectorID, "ci_id", snap.CIID, "error", err)
+		return EdgeReply{Status: http.StatusInternalServerError, Error: "configuration ingest failed"}
+	}
+	return EdgeReply{Status: out.Status, Outcome: out.Outcome, SnapshotID: out.SnapshotID, Error: out.Error}
 }
 
 // MetricsIngester stores the metric samples of an organization like
@@ -545,6 +639,9 @@ func (h *Handler) edgeHandlers() map[string]edgeHandler {
 	}
 	if h.metrics != nil {
 		handlers[MetricsSuffix] = edgeReplying(h.edgeMetrics)
+	}
+	if h.configs != nil {
+		handlers[ConfigSuffix] = edgeReplying(h.edgeConfig)
 	}
 	if h.probes != nil {
 		handlers[ProbeStateSuffix] = h.probes.ProbeState

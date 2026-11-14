@@ -33,7 +33,9 @@ package server_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -53,6 +55,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/admp"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm/configsnap"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
@@ -284,6 +287,7 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 		updIncident                        *alarm.Incident
 		maintWindow, maintCI               string
 		startedWindow, endedWindow         string
+		configCI, configCollector          string
 		allocParent                        string
 		hookServer                         *httptest.Server
 		hookSubscription, hookDelivery     string
@@ -1338,6 +1342,36 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 					t.Errorf("maintenance.scheduled data %v", data)
 				}
 			}},
+		{typ: events.CIConfigChanged,
+			// The ingest of the device configurations (WP-1054): a second
+			// version of the running configuration of a router.
+			setup: func(t *testing.T) {
+				configCI = f.CI(t, f.OrgA, f.Client1, "evt02-config-router")
+				exec(t, `UPDATE ci SET management_ip = '10.250.5.1' WHERE id = $1`, configCI)
+				configCollector = scalar(t, `INSERT INTO collector (organization_id, name, status) VALUES ($1, 'evt02-config', 'active')
+					RETURNING id::text`, f.OrgA)
+				if _, err := evt02ConfigIngest(t, configsnap.NewIngester(f.App, configsnap.NewPGStore(f.App), alarms), f.OrgCtx(f.OrgA), f.OrgA, configCollector, configCI, "hostname evt02\n",
+					time.Now().Add(-time.Hour)); err != nil {
+					t.Fatal(err)
+				}
+			},
+			act: func(t *testing.T, refused bool) string {
+				_, err := evt02ConfigIngest(t, configsnap.NewIngester(f.App, configsnap.NewPGStore(f.App), alarms), f.OrgCtx(f.OrgA), f.OrgA, configCollector, configCI, "hostname evt02-changed\n",
+					time.Now().Add(-time.Minute))
+				failed(t, "configuration ingest", err, refused)
+				if refused {
+					unchanged(t, "configuration versions", count(t, `config_snapshot WHERE ci_id = $1`, configCI), "1")
+					return ""
+				}
+				return configCI
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] == nil || data["id"] != data["snapshot_id"] || data["ci_id"] != entity || data["client_id"] != f.Client1 || data["hash"] == nil ||
+					data["sha256"] != data["hash"] || data["previous_sha256"] == nil || data["snapshot_id"] == nil ||
+					data["previous_snapshot_id"] == nil || data["platform"] != "ios" || data["content"] != nil {
+					t.Errorf("ci.config_changed data %v", data)
+				}
+			}},
 		{typ: events.MaintenanceStarted,
 			// The system job maintenance.boundaries (WP-1033): a window
 			// that began ten minutes ago.
@@ -2087,11 +2121,26 @@ var plannedProducers = map[string]string{
 	"incident.resolved":           "WP-1028",
 	"collector_group.unreachable": "WP-964",
 	"collector_group.reachable":   "WP-964",
-	"ci.config_changed":           "WP-1054",
 	"capacity.forecast_exceeded":  "WP-1060",
 	"sla.violated":                "WP-1049",
 	"notification.escalated":      "WP-1146",
 	"notification.acknowledged":   "WP-1146",
+}
+
+// evt02ConfigIngest stores a configuration version of ciID collected at at
+// through the configuration ingest (WP-1054).
+func evt02ConfigIngest(t *testing.T, g *configsnap.Ingester, ctx context.Context, orgID, collectorID, ciID, text string,
+	at time.Time) (configsnap.IngestResult, error) {
+	t.Helper()
+	content, err := probewire.GzipConfig(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(text))
+	snap := &probewire.ConfigSnapshot{CIID: ciID, ManagementIP: "10.250.5.1", CollectedAt: at.UTC(), Source: probewire.ConfigSourceSSH,
+		Trigger: probewire.ConfigTriggerSchedule, Platform: "ios", SHA256: hex.EncodeToString(sum[:]), SizeBytes: int64(len(text)),
+		Content: content}
+	return g.Ingest(ctx, orgID, collectorID, snap, text)
 }
 
 // evt02AlarmSource is the rule of the alarm cases.

@@ -14,6 +14,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/admp"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm/configsnap"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
@@ -696,7 +697,10 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 		if days := d.cfg.RetentionWorkflowRunDays; days > 0 {
 			retention.WorkflowRuns = time.Duration(days) * 24 * time.Hour
 		}
-		systemJobs = append(systemJobs, jobs.NewRetention(pool, retention).WithBlobs(d.blobs).Schedules()...)
+		// retention.config_snapshot also resolves the configuration alarms
+		// unchanged for 24 h (ALR-07, WP-1054).
+		systemJobs = append(systemJobs, jobs.NewRetention(pool, retention).WithBlobs(d.blobs).
+			WithConfigAlarms(configsnap.StableAlarms{Alarms: d.repos.Alarms}).Schedules()...)
 		// Collector status: offline after five minutes without heartbeat,
 		// paused while the discovery license is not active (COL-01, COL-05).
 		collectorStatus := discovery.NewStatusMonitor(pool)

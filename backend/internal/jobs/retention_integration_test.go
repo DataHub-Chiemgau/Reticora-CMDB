@@ -13,6 +13,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm/configsnap"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -954,5 +956,59 @@ func TestRetentionDeletesOldWorkflowRuns(t *testing.T) {
 	if n := count(`SELECT count(*) FROM audit_log WHERE organization_id = $1 AND action = $2 AND changes->>'deleted' = '1'`,
 		f.OrgA, jobs.RetentionWorkflowRuns); n != 1 {
 		t.Errorf("audit entries of the run: %d; want one with deleted 1", n)
+	}
+}
+
+// TestRetentionClearsStableConfigAlarms covers WP-1054 AK4: the daily
+// retention.config_snapshot resolves the configuration alarms whose last
+// change (last_seen_at) is more than 24 h ago with reason config_stable;
+// one changed 23 h ago stays open, as does an alarm of another source.
+func TestRetentionClearsStableConfigAlarms(t *testing.T) {
+	f := scopetest.Seed(t, "e9")
+	bg := context.Background()
+	now := time.Now().UTC()
+	svc := alarm.NewPGService(f.App)
+	raise := func(kind, series, ciID string, age time.Duration) string {
+		t.Helper()
+		ci := ciID
+		a, err := svc.Raise(f.OrgCtx(f.OrgA), f.OrgA, &alarm.RaiseInput{SourceKind: kind, SourceID: ciID, SeriesKey: series, CIID: &ci,
+			Severity: alarm.SeverityInfo, Summary: "configuration changed"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Admin.Exec(bg, `UPDATE alarm SET last_seen_at = $2 WHERE id = $1`, a.ID, now.Add(-age)); err != nil {
+			t.Fatal(err)
+		}
+		return a.ID
+	}
+	stable := raise(alarm.SourceConfig, configsnap.ConfigSeries, f.CI(t, f.OrgA, f.Client1, "cfg-alarm-stable"), 25*time.Hour)
+	recent := raise(alarm.SourceConfig, configsnap.ConfigSeries, f.CI(t, f.OrgA, f.Client1, "cfg-alarm-recent"), 23*time.Hour)
+	check := raise(alarm.SourceCheck, "state", f.CI(t, f.OrgA, f.Client1, "cfg-alarm-check"), 48*time.Hour)
+	r := jobs.NewRetention(f.App, jobs.RetentionFromDays(10, 3*365, 90, 365)).WithClock(func() time.Time { return now }).
+		WithConfigAlarms(configsnap.StableAlarms{Alarms: svc})
+	if err := r.RunConfigSnapshot(bg); err != nil {
+		t.Fatal(err)
+	}
+	state := func(id string) string {
+		t.Helper()
+		var s string
+		if err := f.Admin.QueryRow(bg, `SELECT state FROM alarm WHERE id = $1`, id).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	if s := state(stable); s != alarm.StateResolved {
+		t.Errorf("config alarm unchanged for 25 h: %s, want resolved", s)
+	}
+	var reason string
+	if err := f.Admin.QueryRow(bg, `SELECT reason FROM alarm_transition WHERE alarm_id = $1 AND to_state = 'resolved'`, stable).
+		Scan(&reason); err != nil || reason != configsnap.ReasonConfigStable {
+		t.Errorf("resolution reason %q (%v), want %s", reason, err, configsnap.ReasonConfigStable)
+	}
+	if s := state(recent); s != alarm.StateOpen {
+		t.Errorf("config alarm changed 23 h ago: %s, want open", s)
+	}
+	if s := state(check); s != alarm.StateOpen {
+		t.Errorf("check alarm: %s, want open (only config alarms end)", s)
 	}
 }

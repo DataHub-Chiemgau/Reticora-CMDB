@@ -570,6 +570,10 @@ type Handler struct {
 	// probes takes the monitoring probe messages on the edge
 	// (WithEdgeProbes, PRB-05, WP-959).
 	probes EdgeProbes
+	// configs and configFeatures take the device configurations on the
+	// edge (WithEdgeConfig, ALR-07, WP-1054).
+	configs        ConfigIngester
+	configFeatures FeatureStatus
 	// scopeCycles counts the scope requests that failed on the server's
 	// side (worker discovery_scopes, OPS-05); nil counts none.
 	scopeCycles *observability.Cycles

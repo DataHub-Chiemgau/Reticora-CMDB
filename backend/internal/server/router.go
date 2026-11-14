@@ -18,6 +18,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm/configsnap"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
@@ -914,6 +915,14 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		monitoringFeatures = opts.Entitlements
 	}
 	discoveryHandler.WithEdgeMetrics(monitoringHandler, monitoringFeatures)
+	// The running configurations of the devices arrive on the edge
+	// (.config, ALR-07, WP-1054) with the feature monitoring_network; a
+	// new version with a predecessor raises the configuration alarm and
+	// writes ci.config_changed.
+	if opts.AuditPool != nil {
+		discoveryHandler.WithEdgeConfig(configsnap.NewIngester(opts.AuditPool, configsnap.NewPGStore(opts.AuditPool), alarmService(&repos)),
+			monitoringFeatures)
+	}
 	// A changed capability report assigns the collector's group again
 	// (PRT-18, WP-966 AK5).
 	if pg, ok := repos.Probes.(*probe.PGRepository); ok {

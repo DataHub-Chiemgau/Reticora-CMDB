@@ -91,6 +91,28 @@ type Retention struct {
 	// blobs holds the document content (WithBlobs); nil keeps every
 	// soft-deleted document with stored content.
 	blobs blob.Store
+	// configAlarms resolves the configuration alarms without a further
+	// change in retention.config_snapshot (WP-1054); nil resolves none.
+	configAlarms ConfigAlarms
+}
+
+// ConfigAlarms resolves the configuration alarms (source config) of an
+// organization whose last change lies before before, in the transaction
+// of ctx (configsnap.StableAlarms, WP-1054); it returns their number.
+type ConfigAlarms interface {
+	ClearStable(ctx context.Context, orgID string, before time.Time) (int, error)
+}
+
+// ConfigAlarmStable is how long a configuration alarm stays open without a
+// further change before retention.config_snapshot resolves it (ALR-07,
+// WP-1054).
+const ConfigAlarmStable = 24 * time.Hour
+
+// WithConfigAlarms makes retention.config_snapshot resolve the stable
+// configuration alarms with c.
+func (r *Retention) WithConfigAlarms(c ConfigAlarms) *Retention {
+	r.configAlarms = c
+	return r
 }
 
 // documentBucket is the bucket of the document content (document.Handler).
@@ -461,11 +483,21 @@ func (r *Retention) RunWorkflowRuns(ctx context.Context) error {
 // RunConfigSnapshot deletes the configuration versions (config_snapshot,
 // WP-1052) collected more than ConfigSnapshotRetention ago, in portions of
 // at most ConfigSnapshotBatch, except the latest version of each CI, which
-// a later collection compares against (ALR-07).
+// a later collection compares against (ALR-07). With WithConfigAlarms it
+// first resolves the configuration alarms without change for 24 h
+// (WP-1054).
 func (r *Retention) RunConfigSnapshot(ctx context.Context) error {
-	cutoff := r.now().Add(-ConfigSnapshotRetention)
+	now := r.now()
+	cutoff := now.Add(-ConfigSnapshotRetention)
 	return r.eachOrganization(ctx, RetentionConfigSnapshot, true, func(ctx context.Context, tx pgx.Tx, orgID string) (int, error) {
 		total := 0
+		// The configuration alarms unchanged for 24 h end (config_stable,
+		// WP-1054); they are no deleted rows.
+		if r.configAlarms != nil {
+			if _, err := r.configAlarms.ClearStable(database.ContextWithTx(ctx, tx), orgID, now.Add(-ConfigAlarmStable)); err != nil {
+				return total, fmt.Errorf("resolve stable configuration alarms: %w", err)
+			}
+		}
 		for {
 			tag, err := tx.Exec(ctx, `DELETE FROM config_snapshot WHERE id IN (
 				SELECT s.id FROM config_snapshot s
