@@ -251,6 +251,7 @@ var typeMetrics = map[string][]string{
 	"bgp": {"probe_bgp_peer_state", "probe_bgp_established_seconds", "probe_bgp_prefixes_received",
 		"probe_bgp_updates_in_total", "probe_bgp_updates_out_total", "probe_bgp_truncated", "probe_bgp_peers", "probe_bgp_peers_established",
 		"probe_bgp_peers_unseen", "probe_bgp_session_resets"},
+	"bng": {"probe_bng_sessions", "probe_bng_truncated"},
 	"ospf": {"probe_ospf_neighbor_state", "probe_ospf_neighbor_events_total", "probe_ospf_neighbors",
 		"probe_ospf_neighbors_full", "probe_ospf_truncated", "probe_ospf_neighbors_unseen"},
 	"isis": {"probe_isis_adjacency_state", "probe_isis_adjacencies", "probe_isis_adjacencies_up",
@@ -369,6 +370,7 @@ var paramChecks = map[string]func(spec *ProbeSpec, params map[string]any) []Fiel
 	"optical":     checkOpticalParams,
 	"redfish":     checkRedfishParams,
 	"bgp":         func(_ *ProbeSpec, params map[string]any) []FieldError { return checkBGPParams(params) },
+	"bng":         func(_ *ProbeSpec, params map[string]any) []FieldError { return checkBNGParams(params) },
 	"ospf":        func(_ *ProbeSpec, params map[string]any) []FieldError { return checkOSPFParams(params) },
 	"isis":        func(_ *ProbeSpec, params map[string]any) []FieldError { return checkISISParams(params) },
 	"tr069":       func(_ *ProbeSpec, params map[string]any) []FieldError { return checkTR069Params(params) },
@@ -605,6 +607,34 @@ func checkBGPParams(params map[string]any) []FieldError {
 		}
 	}
 	return errs
+}
+
+// Defaults of the bng drop ratios (PRT-10, api/probe-types.json).
+const (
+	bngDefaultDropWarn = 0.2
+	bngDefaultDropCrit = 0.5
+)
+
+// checkBNGParams checks the drop ratios of the bng type (PRT-10, WP-1006
+// AK3): drop_warn_ratio does not exceed drop_crit_ratio (absent ones take
+// their defaults).
+func checkBNGParams(params map[string]any) []FieldError {
+	warn, hasWarn := numberOf(params["drop_warn_ratio"])
+	crit, hasCrit := numberOf(params["drop_crit_ratio"])
+	if !hasWarn {
+		warn = bngDefaultDropWarn
+	}
+	if !hasCrit {
+		crit = bngDefaultDropCrit
+	}
+	if (hasWarn || hasCrit) && warn > crit {
+		field := "params.drop_warn_ratio"
+		if !hasWarn {
+			field = "params.drop_crit_ratio"
+		}
+		return []FieldError{{Field: field, Message: "drop_warn_ratio must not exceed drop_crit_ratio"}}
+	}
+	return nil
 }
 
 // checkOSPFParams checks the ospf parameters (PRT-07, WP-1002 AK1): every

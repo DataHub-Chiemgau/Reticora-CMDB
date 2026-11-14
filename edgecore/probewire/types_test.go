@@ -21,7 +21,7 @@ var registerKeys = []string{
 
 // availableKeys are the types whose work package has set them available.
 var availableKeys = []string{
-	"icmp", "tcp", "dns", "http", "snmp_status", "snmp_if", "snmp_custom", "bgp", "bfd", "optical", "redfish", "ospf", "isis", "tr069", "rpki_rtr",
+	"icmp", "tcp", "dns", "http", "snmp_status", "snmp_if", "snmp_custom", "bgp", "bng", "bfd", "optical", "redfish", "ospf", "isis", "tr069", "rpki_rtr",
 }
 
 func repoFile(t *testing.T, rel string) []byte {
@@ -684,7 +684,7 @@ func TestTypesDeclareMetricNames(t *testing.T) {
 		"tr069": "probe_tr069_last_inform_age_seconds", "rpki_rtr": "probe_rpki_vrps",
 		"bfd": "probe_bfd_session_state", "optical": "probe_optical_rx_dbm", "snmp_status": "probe_snmp_reboot",
 		"snmp_if": "probe_if_in_bps", "snmp_custom": "probe_snmp_custom",
-		"bgp": "probe_bgp_peer_state"} {
+		"bgp": "probe_bgp_peer_state", "bng": "probe_bng_sessions"} {
 		if !DeclaresMetric(typ, name) || !slices.Contains(MetricNames(typ), name) {
 			t.Errorf("%s does not declare %s", typ, name)
 		}

@@ -1084,8 +1084,8 @@
       }
     },
     "bng": {
-      "status": "planned",
-      "min_interval_s": 30,
+      "status": "available",
+      "min_interval_s": 60,
       "default_interval_s": 60,
       "max_interval_s": 86400,
       "min_timeout_s": 1,
@@ -1098,7 +1098,7 @@
       "max_rate_per_collector": 20,
       "max_probes_per_target": 2,
       "max_payload_bytes": 1048576,
-      "max_rows": 1024,
+      "max_rows": 256,
       "credential_namespaces": [
         "snmp"
       ],
@@ -1107,18 +1107,24 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "drop_warn": {
+          "drop_warn_ratio": {
             "type": "number",
             "minimum": 0,
             "maximum": 1,
             "default": 0.2,
-            "description": "Drop against the previous value for degraded."
+            "description": "Drop against the previous value of a series for degraded."
           },
-          "drop_down": {
+          "drop_crit_ratio": {
             "type": "number",
             "minimum": 0,
             "maximum": 1,
-            "description": "Drop against the previous value for down."
+            "default": 0.5,
+            "description": "Drop against the previous value of a series for down; not below drop_warn_ratio."
+          },
+          "min_sessions": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Fewer sessions in total is down."
           }
         }
       }

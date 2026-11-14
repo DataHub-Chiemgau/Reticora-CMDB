@@ -563,6 +563,49 @@ Herstellerabweichungen beschreibt der Profilabschnitt `monitor.ospf`
 SNMP-Timeout ergibt `fail`/`timeout`, ein abgewiesener SNMPv3-Zugang
 `error`/`auth_failed`.
 
+## Subscriber-Sessions (`bng`)
+
+Standard nach PRT-10: Intervall 60 s (60 s–24 h), Timeout 10 s (1–30 s),
+Down-Count 3, Up-Count 1, höchstens 256 Interfaces je Prüfung,
+Zugangsdaten aus dem Namespace `snmp`. Der Typ liegt flach in
+`collector/probe/bng.go`. Eine Standard-MIB gibt es nicht; die Quelle ist
+allein der Profilabschnitt `monitor.bng`. Ohne Profiltreffer (oder wenn
+keine Tabelle des Profils antwortet) ist das Ergebnis
+`error`/`unsupported` (`unknown`, nie `down`). Logische Tabellen:
+`sessions` (Spalten `total`, `pppoe`, `ipoe`, über die Zeilen summiert;
+ein Skalar ist eine Zeile), `by_type` (Spalte `sessions` je Sitzungs- bzw.
+Client-Typ; das Enum der Spalte bildet den letzten Indexteil auf
+`pppoe`, `ipoe` oder `total` ab, die Zeile `total` ersetzt die Summe;
+die Indexteile davor bezeichnen einen Aggregationspunkt, und nur der
+erste Punkt in Walk-Reihenfolge zählt – bei Cisco der physische Punkt
+des Chassis vor Linecards und Interface-Punkten –, nie eine Summe über
+Punkte; eine leere Tabelle liefert keine Serie) und
+`interfaces` (Spalten `total`, `pppoe`, `ipoe`, optional `name`, je Zeile
+ein Interface). Mitgeliefert sind die vorläufig angenommenen Plattformen
+Cisco ASR 9000 (`cisco-isr-asr-snmp`: CISCO-SUBSCRIBER-SESSION-MIB
+`csubAggStatsUpSessions` je Sitzungstyp) und Juniper MX
+(`juniper-junos-snmp`: JUNIPER-SUBSCRIBER-MIB `jnxSubscriberTotalCount`
+und `jnxSubscriberClientTypeCount`); nennt der Auftraggeber andere
+Plattformen, ersetzen deren Profile diese Annahme ohne Änderung am
+Executor. Ein aktiver PPPoE-Logintest ist nach E-189 nicht Bestandteil.
+
+Parameter: `drop_warn_ratio` (Standard 0,2), `drop_crit_ratio` (Standard
+0,5, nicht unter `drop_warn_ratio`), `min_sessions` (optional). Der
+Einbruch ist `(Vorwert − Wert) / Vorwert` je Serie (gesamt, je Typ, je
+Interface und Typ); der Vorwert liegt im Vorwertspeicher der Probe. Ein
+Einbruch ab `drop_warn_ratio` ergibt `ok` mit `threshold_exceeded`
+(`degraded`), ab `drop_crit_ratio` oder eine Gesamtzahl unter
+`min_sessions` `fail` mit `threshold_exceeded`; die Labels `type` und
+`interface` nennen die Serie. Der erste Lauf nach einem Neustart hat keinen
+Vorwert und bewertet nur `min_sessions`. Werte:
+`probe_bng_sessions{type}` (`total`, `pppoe`, `ipoe`) und je Interface
+zusätzlich mit Label `interface`. Mehr als 256 Interfaces →
+`probe_bng_truncated` = 1, ohne Zustand aus fehlenden Zeilen. Bricht
+eine Sitzungstabelle (`sessions`, `by_type`) innerhalb der gezählten
+Zeilen am Limit von 1024 Zeilen ab, ist die Summe keine Messung: Das
+Ergebnis ist `error`/`response_too_large` (`unknown`), kein Einbruch. Ein
+SNMP-Timeout ergibt `fail`/`timeout`.
+
 ## TR-069 über den ACS (`tr069`)
 
 Standard nach PRT-15 und E-154: Intervall 900 s (300 s–24 h), Timeout 30 s
@@ -679,7 +722,7 @@ nach E-154; WP-1023 misst die Raten nach.
 | `isis` | available | 60 / 60 / 86400 | 10 / 1 / 30 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 1000 | snmp | – |
 | `bfd` | available | 60 / 30 / 86400 | 5 / 1 / 30 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 1000 | snmp | – |
 | `optical` | available | 300 / 60 / 86400 | 15 / 1 / 60 | 3 / 1 | 1 | 8 | 20 | 2 | 1048576 | 512 | snmp | – |
-| `bng` | planned | 60 / 30 / 86400 | 10 / 1 / 30 | 3 / 1 | 1 | 8 | 20 | 2 | 1048576 | 1024 | snmp | – |
+| `bng` | available | 60 / 60 / 86400 | 10 / 1 / 30 | 3 / 1 | 1 | 8 | 20 | 2 | 1048576 | 256 | snmp | – |
 | `pon` | planned | 300 / 120 / 86400 | 60 / 1 / 120 | 3 / 1 | 1 | 4 | 5 | 2 | 4194304 | 8192 | snmp | – |
 | `dns` | available | 60 / 10 / 86400 | 5 / 1 / 10 | 3 / 1 | 4 | 64 | 200 | 16 | 65535 | 1 | – | – |
 | `dhcp` | planned | 300 / 60 / 86400 | 10 / 1 / 30 | 3 / 1 | 1 | 1 | 1 | 1 | 4096 | 1 | – | privileged_udp_ports |
