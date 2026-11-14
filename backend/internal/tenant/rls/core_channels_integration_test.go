@@ -167,11 +167,22 @@ func TestCoreChannelsCollectorManagement(t *testing.T) {
 			t.Errorf("PATCH of the client-2 collector as client 1 discloses it: %s", trim(body))
 		}
 	}
-	// The router offers no detail and no DELETE route for collectors
-	// (api/openapi.yaml lists PATCH only). Both answer the client-2
-	// collector exactly like the own collector and an unknown id, never
-	// 2xx: no read, no deletion, no existence oracle.
-	for _, method := range []string{http.MethodGet, http.MethodDelete} {
+	// GET /collectors/{id} (WP-966) shows the own collector; a client-2
+	// collector answers 404 exactly like an unknown id.
+	code, body = w.do(client1, http.MethodGet, "/api/v1/collectors/"+foreign, nil)
+	ocode, _ := w.do(client1, http.MethodGet, "/api/v1/collectors/"+own, nil)
+	ucode, ubody := w.do(client1, http.MethodGet, "/api/v1/collectors/"+unknown, nil)
+	if code != http.StatusNotFound || ucode != code || ocode != http.StatusOK || !sameProblem(body, ubody) {
+		t.Errorf("GET client-2 collector as client 1: %d %s; own %d; unknown %d %s; want 404 alike and 200 for the own",
+			code, trim(body), ocode, ucode, trim(ubody))
+	}
+	if strings.Contains(body, "core-col-c2") {
+		t.Errorf("GET client-2 collector as client 1 discloses it: %s", trim(body))
+	}
+	// The router offers no DELETE route for collectors. It answers the
+	// client-2 collector exactly like the own collector and an unknown id,
+	// never 2xx: no deletion, no existence oracle.
+	for _, method := range []string{http.MethodDelete} {
 		code, body = w.do(client1, method, "/api/v1/collectors/"+foreign, nil)
 		ocode, obody := w.do(client1, method, "/api/v1/collectors/"+own, nil)
 		ucode, ubody := w.do(client1, method, "/api/v1/collectors/"+unknown, nil)

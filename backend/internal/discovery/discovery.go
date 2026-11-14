@@ -1019,6 +1019,10 @@ func (h *Handler) GetCollector(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c, err := repo.ScopeCollector(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	if isNotFound(err) {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "collector not found")
+		return
+	}
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
