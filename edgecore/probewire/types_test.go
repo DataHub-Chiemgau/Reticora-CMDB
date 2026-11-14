@@ -21,7 +21,7 @@ var registerKeys = []string{
 
 // availableKeys are the types whose work package has set them available.
 var availableKeys = []string{
-	"icmp", "tcp", "dns", "http", "snmp_status", "snmp_if", "bfd", "optical", "redfish", "ospf", "isis", "tr069", "rpki_rtr",
+	"icmp", "tcp", "dns", "http", "snmp_status", "snmp_if", "snmp_custom", "bfd", "optical", "redfish", "ospf", "isis", "tr069", "rpki_rtr",
 }
 
 func repoFile(t *testing.T, rel string) []byte {
@@ -244,8 +244,44 @@ func TestValidateLimits(t *testing.T) {
 	typeLimitCases(t)
 }
 
+// customMetrics returns snmp_custom params with n distinct scalar metrics.
+func customMetrics(n int) string {
+	items := make([]string, n)
+	for i := range items {
+		items[i] = fmt.Sprintf(`{"name":"m%d","oid":"1.3.6.1.4.1.9999.%d.0"}`, i, i+1)
+	}
+	return `{"metrics":[` + strings.Join(items, ",") + `]}`
+}
+
+// TestTemplatesMatchSchema covers WP-997 AK4: every template of a type is
+// a valid params object of its type; snmp_custom carries ups_rfc1628 and
+// pdu_apc_rpdu2.
+func TestTemplatesMatchSchema(t *testing.T) {
+	n := 0
+	for _, typ := range Types() {
+		for name, raw := range typ.Templates {
+			n++
+			s := validSpec(typ)
+			s.Params = raw
+			if errs := Validate(&s); len(errs) > 0 {
+				t.Errorf("%s template %s: %v", typ.Key, name, errs)
+			}
+		}
+	}
+	custom, _ := Lookup("snmp_custom")
+	for _, name := range []string{"ups_rfc1628", "pdu_apc_rpdu2"} {
+		if _, ok := custom.Templates[name]; !ok {
+			t.Errorf("snmp_custom lacks template %s", name)
+		}
+	}
+	if n < 2 {
+		t.Fatalf("%d templates", n)
+	}
+}
+
 // typeLimitCases are the type-specific limits of TestValidateLimits: the
-// rows and thresholds of snmp_if (WP-996 AK2, AK6).
+// rows and thresholds of snmp_if (WP-996 AK2, AK6) and the metrics of
+// snmp_custom (WP-997 AK1, AK5).
 func typeLimitCases(t *testing.T) {
 	t.Helper()
 	for name, c := range map[string]struct {
@@ -258,7 +294,18 @@ func typeLimitCases(t *testing.T) {
 		"snmp_if util_warn 1.5":       {typ: "snmp_if", params: `{"util_warn":1.5}`, field: "params.util_warn"},
 		"snmp_if util_crit below warn": {typ: "snmp_if", params: `{"util_warn":0.8}`, thresholds: `{"util_crit":0.7}`,
 			field: "thresholds.util_crit"},
-		"snmp_if bad regex": {typ: "snmp_if", params: `{"name_regex":"(Gi"}`, field: "params.name_regex"},
+		"snmp_if bad regex":         {typ: "snmp_if", params: `{"name_regex":"(Gi"}`, field: "params.name_regex"},
+		"snmp_custom 65 metrics":    {typ: "snmp_custom", params: customMetrics(65), field: "params.metrics"},
+		"snmp_custom interval 29 s": {typ: "snmp_custom", intervalMS: 29_000, field: "interval_s"},
+		"snmp_custom timeout 16 s":  {typ: "snmp_custom", timeoutMS: 16_000, field: "timeout_s"},
+		"snmp_custom duplicate name": {typ: "snmp_custom",
+			params: `{"metrics":[{"name":"a","oid":"1.3.6.1.2.1.1.7.0"},{"name":"a","oid":"1.3.6.1.2.1.1.3.0"}]}`,
+			field:  "params.metrics[1].name"},
+		"snmp_custom oid and column": {typ: "snmp_custom",
+			params: `{"metrics":[{"name":"a","oid":"1.3.6.1.2.1.1.7.0","column":"1.3.6.1.2.1.2.2.1.10"}]}`,
+			field:  "params.metrics[0].oid"},
+		"snmp_custom scale 0": {typ: "snmp_custom", params: `{"metrics":[{"name":"a","oid":"1.3.6.1.2.1.1.7.0","scale":0}]}`,
+			field: "params.metrics[0].scale"},
 	} {
 		typ, _ := Lookup(c.typ)
 		s := validSpec(typ)
@@ -636,7 +683,7 @@ func TestTypesDeclareMetricNames(t *testing.T) {
 		"redfish": "probe_redfish_temperature_celsius", "ospf": "probe_ospf_neighbor_state", "isis": "probe_isis_adjacency_state",
 		"tr069": "probe_tr069_last_inform_age_seconds", "rpki_rtr": "probe_rpki_vrps",
 		"bfd": "probe_bfd_session_state", "optical": "probe_optical_rx_dbm", "snmp_status": "probe_snmp_reboot",
-		"snmp_if": "probe_if_in_bps"} {
+		"snmp_if": "probe_if_in_bps", "snmp_custom": "probe_snmp_custom"} {
 		if !DeclaresMetric(typ, name) || !slices.Contains(MetricNames(typ), name) {
 			t.Errorf("%s does not declare %s", typ, name)
 		}

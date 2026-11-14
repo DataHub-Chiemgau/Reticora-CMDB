@@ -62,6 +62,9 @@ type Type struct {
 	CredentialNamespaces    []string        `json:"credential_namespaces"`
 	Capabilities            []string        `json:"capabilities"`
 	Params                  json.RawMessage `json:"params"`
+	// Templates are preset parameter sets by name (snmp_custom, WP-997);
+	// each satisfies Params.
+	Templates map[string]json.RawMessage `json:"templates,omitempty"`
 }
 
 // Available reports whether probes of the type may be created.
@@ -244,6 +247,7 @@ var typeMetrics = map[string][]string{
 	"snmp_if": {"probe_if_oper_status", "probe_if_admin_status", "probe_if_in_bps", "probe_if_out_bps",
 		"probe_if_util_ratio", "probe_if_errors_per_s", "probe_if_discards_per_s", "probe_if_truncated",
 		"probe_if_interfaces", "probe_if_critical_unseen"},
+	"snmp_custom": {"probe_snmp_custom", "probe_snmp_custom_truncated"},
 	"ospf": {"probe_ospf_neighbor_state", "probe_ospf_neighbor_events_total", "probe_ospf_neighbors",
 		"probe_ospf_neighbors_full", "probe_ospf_truncated", "probe_ospf_neighbors_unseen"},
 	"isis": {"probe_isis_adjacency_state", "probe_isis_adjacencies", "probe_isis_adjacencies_up",
@@ -357,6 +361,7 @@ var paramChecks = map[string]func(spec *ProbeSpec, params map[string]any) []Fiel
 	"icmp":        checkICMPParams,
 	"snmp_status": func(_ *ProbeSpec, params map[string]any) []FieldError { return checkSNMPStatusParams(params) },
 	"snmp_if":     checkSNMPIfParams,
+	"snmp_custom": func(_ *ProbeSpec, params map[string]any) []FieldError { return checkSNMPCustomParams(params) },
 	"bfd":         checkBFDParams,
 	"optical":     checkOpticalParams,
 	"redfish":     checkRedfishParams,
@@ -442,6 +447,65 @@ func checkSNMPIfParams(spec *ProbeSpec, params map[string]any) []FieldError {
 	crit, critField, hasCrit := level("util_crit")
 	if hasWarn && hasCrit && crit <= warn {
 		errs = append(errs, FieldError{Field: critField, Message: "util_crit must be above util_warn"})
+	}
+	return errs
+}
+
+// snmpMetricName and snmpIndexLabel are the rules for the name and the
+// index label of an snmp_custom metric (MON-03, WP-997 AK1).
+var (
+	snmpMetricName = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
+	snmpIndexLabel = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
+)
+
+// checkSNMPCustomParams checks the metrics of the snmp_custom type
+// (MON-03, WP-997 AK1): a unique name after its rule, exactly one of oid
+// and column in dotted form, an index label after its rule (not metric or
+// unit) and only with a column, and crit beyond warn in the direction.
+func checkSNMPCustomParams(params map[string]any) []FieldError {
+	items, _ := params["metrics"].([]any)
+	var errs []FieldError
+	seen := map[string]bool{}
+	for i, item := range items {
+		obj, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		prefix := fmt.Sprintf("params.metrics[%d]", i)
+		add := func(field, msg string) { errs = append(errs, FieldError{Field: prefix + field, Message: msg}) }
+		if name, ok := obj["name"].(string); ok {
+			switch {
+			case !snmpMetricName.MatchString(name):
+				add(".name", "must match ^[a-z][a-z0-9_]{0,62}$")
+			case seen[name]:
+				add(".name", "is used twice")
+			}
+			seen[name] = true
+		}
+		oid, hasOID := obj["oid"].(string)
+		column, hasColumn := obj["column"].(string)
+		switch {
+		case hasOID == hasColumn:
+			add(".oid", "set exactly one of oid and column")
+		case hasOID && !snmpOID.MatchString(strings.TrimSpace(oid)):
+			add(".oid", "must be an OID in dotted form")
+		case hasColumn && !snmpOID.MatchString(strings.TrimSpace(column)):
+			add(".column", "must be an OID in dotted form")
+		}
+		if label, ok := obj["index_label"].(string); ok {
+			switch {
+			case !hasColumn:
+				add(".index_label", "is allowed with column only")
+			case !snmpIndexLabel.MatchString(label) || label == "metric" || label == "unit":
+				add(".index_label", "must match ^[a-z][a-z0-9_]{0,31}$ and not be metric or unit")
+			}
+		}
+		warn, hasWarn := numberOf(obj["warn"])
+		crit, hasCrit := numberOf(obj["crit"])
+		below := obj["direction"] == "below"
+		if hasWarn && hasCrit && ((below && crit > warn) || (!below && crit < warn)) {
+			add(".crit", "must not lie before warn in the direction of the metric")
+		}
 	}
 	return errs
 }

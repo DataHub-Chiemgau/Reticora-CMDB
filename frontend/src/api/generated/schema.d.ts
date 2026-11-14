@@ -15255,6 +15255,12 @@ export interface components {
       params: {
         [key: string]: unknown;
       };
+      /** @description Preset parameter sets of the type by name (snmp_custom: ups_rfc1628, pdu_apc_rpdu2; WP-997); each is a valid params object. Absent for types without templates. */
+      templates?: {
+        [key: string]: {
+          [key: string]: unknown;
+        };
+      };
     };
     ProbeTypeListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['ProbeType'][];

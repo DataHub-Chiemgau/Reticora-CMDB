@@ -1938,3 +1938,4 @@ PRT-05;[P3];E;collector/probe/snmpstatus/snmpstatus_test.go;WP-995
 PRT-06;[P3];E;collector/probe/snmpif/snmpif_test.go;WP-996
 MON-03;[P3];E;collector/probe/snmpif/snmpif_test.go;WP-996
 MON-04;[P3];E;collector/probe/snmpif/snmpif_test.go;WP-996
+MON-03;[P3];E;collector/probe/snmpcustom/snmpcustom_test.go;WP-997

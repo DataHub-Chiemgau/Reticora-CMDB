@@ -132,6 +132,10 @@
         "params": {
           "type": "object",
           "description": "JSON Schema of the type parameters."
+        },
+        "templates": {
+          "type": "object",
+          "description": "Preset parameter sets of the type by name (snmp_custom, WP-997); each satisfies params."
         }
       }
     }
@@ -556,13 +560,13 @@
       }
     },
     "snmp_custom": {
-      "status": "planned",
-      "min_interval_s": 60,
+      "status": "available",
+      "min_interval_s": 30,
       "default_interval_s": 300,
       "max_interval_s": 86400,
       "min_timeout_s": 1,
       "default_timeout_s": 10,
-      "max_timeout_s": 60,
+      "max_timeout_s": 15,
       "default_down_count": 3,
       "default_up_count": 1,
       "max_parallel_per_target": 1,
@@ -579,20 +583,141 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "oids": {
+          "metrics": {
             "type": "array",
+            "maxItems": 64,
+            "description": "Configured metrics (at most 64); exactly one of oid and column per metric.",
             "items": {
-              "type": "string",
-              "maxLength": 256
-            },
-            "maxItems": 32
-          },
-          "warn": {
-            "type": "number"
-          },
-          "crit": {
-            "type": "number"
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 63,
+                  "description": "Name of the metric, ^[a-z][a-z0-9_]{0,62}$, unique within the probe."
+                },
+                "oid": {
+                  "type": "string",
+                  "maxLength": 128,
+                  "description": "OID of a scalar in dotted form."
+                },
+                "column": {
+                  "type": "string",
+                  "maxLength": 128,
+                  "description": "OID of a table column; one value per row (at most 256)."
+                },
+                "index_label": {
+                  "type": "string",
+                  "maxLength": 32,
+                  "default": "index",
+                  "description": "Label carrying the row index of a column."
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "gauge",
+                    "counter"
+                  ],
+                  "default": "gauge",
+                  "description": "counter becomes a rate per second."
+                },
+                "unit": {
+                  "type": "string",
+                  "maxLength": 16,
+                  "description": "Unit after scaling (label unit)."
+                },
+                "scale": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "default": 1,
+                  "description": "Factor applied to the value or rate."
+                },
+                "warn": {
+                  "type": "number",
+                  "description": "Threshold for degraded."
+                },
+                "crit": {
+                  "type": "number",
+                  "description": "Threshold for down."
+                },
+                "direction": {
+                  "type": "string",
+                  "enum": [
+                    "above",
+                    "below"
+                  ],
+                  "default": "above",
+                  "description": "Side of the thresholds that is violated."
+                }
+              }
+            }
           }
+        }
+      },
+      "templates": {
+        "ups_rfc1628": {
+          "metrics": [
+            {
+              "name": "ups_battery_status",
+              "oid": "1.3.6.1.2.1.33.1.2.1.0",
+              "kind": "gauge",
+              "warn": 2,
+              "crit": 3,
+              "direction": "above"
+            },
+            {
+              "name": "ups_battery_runtime_seconds",
+              "oid": "1.3.6.1.2.1.33.1.2.3.0",
+              "kind": "gauge",
+              "scale": 60,
+              "unit": "s",
+              "warn": 600,
+              "crit": 300,
+              "direction": "below"
+            },
+            {
+              "name": "ups_battery_charge_percent",
+              "oid": "1.3.6.1.2.1.33.1.2.4.0",
+              "kind": "gauge",
+              "unit": "%",
+              "warn": 50,
+              "crit": 20,
+              "direction": "below"
+            },
+            {
+              "name": "ups_output_load_percent",
+              "oid": "1.3.6.1.2.1.33.1.4.4.1.5.1",
+              "kind": "gauge",
+              "unit": "%",
+              "warn": 80,
+              "crit": 95,
+              "direction": "above"
+            }
+          ]
+        },
+        "pdu_apc_rpdu2": {
+          "metrics": [
+            {
+              "name": "pdu_current_amps",
+              "column": "1.3.6.1.4.1.318.1.1.26.6.3.1.5",
+              "index_label": "phase",
+              "kind": "gauge",
+              "scale": 0.1,
+              "unit": "A"
+            },
+            {
+              "name": "pdu_active_power_watts",
+              "column": "1.3.6.1.4.1.318.1.1.26.6.3.1.7",
+              "index_label": "phase",
+              "kind": "gauge",
+              "scale": 10,
+              "unit": "W"
+            }
+          ]
         }
       }
     },

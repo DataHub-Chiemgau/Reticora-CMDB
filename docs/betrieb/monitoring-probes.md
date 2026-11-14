@@ -361,6 +361,52 @@ ebenfalls `probe_if_truncated` = 1, bewertet den Zustand aber weiter über
 alle gelesenen Zeilen. SNMP-Timeout → `fail`/`timeout`,
 abgewiesener SNMPv3-Zugang → `error`/`auth_failed`.
 
+## Eigene SNMP-OIDs (`snmp_custom`)
+
+Standard nach MON-03: Intervall 300 s (30 s–24 h), Timeout 10 s (1–15 s),
+Down-Count 3, Up-Count 1, Zugangsdaten aus dem Namespace `snmp`. Der Typ
+liegt im Unterpaket `collector/probe/snmpcustom`. Parameter `metrics`:
+höchstens 64 Einträge `{name, oid | column, index_label, kind, unit,
+scale, warn, crit, direction}`. `name` folgt `^[a-z][a-z0-9_]{0,62}$` und
+ist je Probe eindeutig; genau eines von `oid` (Skalar) und `column`
+(Tabellenspalte, je Spalte höchstens 256 Zeilen, darüber
+`probe_snmp_custom_truncated{metric}` = 1) ist gesetzt. `index_label` (nur mit
+`column`, Standard `index`, nicht `metric` oder `unit`) trägt den
+Zeilenindex. `kind` ist `gauge` (Standard; Wert × `scale`) oder `counter`
+(Rate je Sekunde über den Vorwertspeicher, × `scale`; der erste Lauf und
+ein Lauf nach einem Reboot liefern keine Rate). `scale` ist größer 0
+(Standard 1), `unit` beschreibt den Wert nach der Skalierung.
+
+Werte: `probe_snmp_custom` mit den Labels `metric` (Name), `unit` (falls
+gesetzt) und dem Indexlabel einer Spalte; so übernimmt die Metrik-Brücke
+(WP-976) alle Metriken unter einem deklarierten Namen. Zustand aus den
+Schwellen (E-186): über `crit` → `fail` mit `threshold_exceeded`, über
+`warn` → `ok` mit `threshold_exceeded` (`degraded`); `direction` `above`
+(Standard) oder `below` bestimmt die Seite, `crit` liegt jenseits von
+`warn`. Eine nicht beantwortete OID oder leere Spalte ergibt `ok` mit
+`no_such_object`; die übrigen Metriken werden geliefert. Das Label
+`metric` am Ergebnis nennt die auslösende Metrik.
+
+Der Vorwertspeicher einer Probe fasst 64 × 256 Zählerserien plus
+sysUpTime (`Executor.MaxSeries`), also jede gültige Konfiguration. Ein
+Ergebnis muss in eine Uplink-Nachricht (256 KiB) passen: Die Werte enden
+bei 192 KiB (`probe.MaxResultValueBytes`). Fehlen einer Metrik Werte –
+Walk abgeschnitten, kein Platz mehr im Ergebnis oder Zählerserie vom
+vollen Speicher abgewiesen –, meldet die Probe
+`probe_snmp_custom_truncated` mit dem Label `metric` dieser Metrik; das
+Label bleibt stabil, unabhängig davon, welche Metrik gerade die
+schlechteste ist. Die Schwellen werden weiter über alle gelesenen Werte
+bewertet.
+
+Vorlagen stehen im Vertrag unter `templates` des Eintrags (die API liefert
+sie mit `GET /api/v1/monitoring/probe-types/snmp_custom`):
+`ups_rfc1628` (UPS-MIB: `upsBatteryStatus` mit warn 2/crit 3,
+`upsEstimatedMinutesRemaining` mit `scale` 60 und `unit` s, warn 600 s/crit
+300 s unten, `upsEstimatedChargeRemaining`, `upsOutputPercentLoad`) und
+`pdu_apc_rpdu2` (rPDU2PhaseStatusTable: Strom mit `scale` 0,1 in A,
+Leistung mit `scale` 10 in W, `index_label` `phase`). Die Werte stimmen
+mit der festen Power-Abfrage des Collectors überein, die WP-999 ablöst.
+
 ## Redfish (`redfish`)
 
 Standard nach MON-03: Intervall 300 s (60 s–24 h), Timeout 15 s (1–60 s),
@@ -566,7 +612,7 @@ nach E-154; WP-1023 misst die Raten nach.
 | `http` | available | 60 / 30 / 86400 | 10 / 1 / 60 | 3 / 1 | 2 | 64 | 100 | 32 | 1048576 | 1 | http | – |
 | `snmp_status` | available | 60 / 30 / 86400 | 5 / 1 / 15 | 3 / 1 | 1 | 32 | 200 | 4 | 65536 | 20 | snmp | – |
 | `snmp_if` | available | 300 / 60 / 86400 | 10 / 1 / 30 | 3 / 1 | 1 | 16 | 50 | 4 | 1048576 | 1024 | snmp | – |
-| `snmp_custom` | planned | 300 / 60 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 100 | 8 | 65536 | 256 | snmp | – |
+| `snmp_custom` | available | 300 / 30 / 86400 | 10 / 1 / 15 | 3 / 1 | 1 | 16 | 100 | 8 | 65536 | 256 | snmp | – |
 | `redfish` | available | 300 / 60 / 86400 | 15 / 1 / 60 | 3 / 1 | 1 | 8 | 20 | 2 | 1048576 | 256 | redfish | – |
 | `bgp` | planned | 60 / 30 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 4096 | snmp, gnmi | – |
 | `ospf` | available | 60 / 60 / 86400 | 10 / 1 / 30 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 1000 | snmp | – |

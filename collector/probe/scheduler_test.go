@@ -594,3 +594,40 @@ func TestSchedulerRateStoreLimitCoversCountersPerRow(t *testing.T) {
 		t.Fatalf("%s: %d series rejected below max_rows × counters per row", typ.Key, got.Rejected)
 	}
 }
+
+// boundedExecutor declares its own series limit (SeriesBounder).
+type boundedExecutor struct {
+	ExecutorFunc
+	series int
+}
+
+func (b boundedExecutor) MaxSeries() int { return b.series }
+
+// TestSchedulerRateStoreLimitFromExecutor covers WP-997: an executor that
+// declares MaxSeries (snmp_custom: 64 counter columns × max_rows) sizes
+// the store of its probes beyond max_rows × seriesPerRow.
+func TestSchedulerRateStoreLimitFromExecutor(t *testing.T) {
+	const typ = "snmp_custom"
+	const series = 64*256 + 16
+	swapExecutor(t, typ, boundedExecutor{ExecutorFunc: func(context.Context, probewire.ProbeSpec, map[string]string) probewire.Result {
+		return probewire.Result{Status: probewire.StatusOK}
+	}, series: series})
+	if got := maxSeriesOf(typ); got != series {
+		t.Fatalf("maxSeriesOf = %d, want %d", got, series)
+	}
+	clock := newFakeClock(epochStart)
+	s, _ := newStoreScheduler(clock)
+	spec := schedSpec("probe-custom", 10_000)
+	spec.Type = typ
+	s.Upsert(spec)
+	st, _ := s.Store(spec.ID)
+	for i := range series {
+		st.Observe(fmt.Sprintf("c%d:%d", i/256, i%256), 1, 64, epochStart, 0)
+	}
+	if got := st.Stats(); got.Rejected != 0 || got.Series != series {
+		t.Fatalf("stats = %+v, want %d series without rejections", got, series)
+	}
+	if _, ok := st.Observe("one-more", 1, 64, epochStart, 0); ok || st.Stats().Rejected != 1 {
+		t.Fatalf("series beyond the limit admitted: %+v", st.Stats())
+	}
+}

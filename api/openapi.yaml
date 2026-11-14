@@ -33681,6 +33681,15 @@ components:
           type: object
           description: JSON Schema (subset of 2020-12) of the type parameters.
           additionalProperties: true
+        templates:
+          type: object
+          description: >-
+            Preset parameter sets of the type by name (snmp_custom: ups_rfc1628,
+            pdu_apc_rpdu2; WP-997); each is a valid params object. Absent for
+            types without templates.
+          additionalProperties:
+            type: object
+            additionalProperties: true
     ProbeTypeListResponse:
       allOf:
         - $ref: '#/components/schemas/PaginationEnvelope'

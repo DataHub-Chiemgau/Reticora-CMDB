@@ -234,11 +234,24 @@ const seriesPerRow = 8
 // rate.UptimeSeries.
 const probeWideSeries = 16
 
+// SeriesBounder is implemented by an executor whose probes may hold more
+// series than max_rows × seriesPerRow, e.g. snmp_custom with up to 64
+// counter columns of max_rows rows each (WP-997); MaxSeries is the series
+// limit of one probe's previous-value store.
+type SeriesBounder interface {
+	MaxSeries() int
+}
+
 // maxSeriesOf returns the series limit of a probe's previous-value store
-// (WP-994 AK3): derived from max_rows of the type in the contract — a row
-// is not a series, so max_rows × seriesPerRow plus probe-wide series — or
-// the store default.
+// (WP-994 AK3): the bound of the executor (SeriesBounder), else derived
+// from max_rows of the type in the contract — a row is not a series, so
+// max_rows × seriesPerRow plus probe-wide series — or the store default.
 func maxSeriesOf(typ string) int {
+	if e, ok := Lookup(typ); ok {
+		if b, ok := e.(SeriesBounder); ok && b.MaxSeries() > 0 {
+			return b.MaxSeries()
+		}
+	}
 	if t, ok := probewire.Lookup(typ); ok && t.MaxRows > 0 {
 		return int(t.MaxRows)*seriesPerRow + probeWideSeries
 	}
