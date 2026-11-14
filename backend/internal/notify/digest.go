@@ -137,7 +137,7 @@ func (n *Notifier) RunDigest(ctx context.Context) (int, error) {
 // bundled reports, for an e-mail row of req, the window its recipient
 // bundles the category in (empty: deliver now). prefs caches the
 // preferences of the request's recipients.
-func (n *Notifier) bundled(ctx context.Context, orgID string, req *Request, kind string, r Recipient,
+func (n *Notifier) bundled(ctx context.Context, orgID string, req *Request, kind string, r *Recipient,
 	prefs map[string]*Preference) (window, timeZone string, err error) {
 	if n.digest == nil || req.Critical || kind != KindEmail || r.UserID == "" || r.Email == "" {
 		return "", "", nil

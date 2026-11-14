@@ -19535,6 +19535,7 @@ Gemeinsamer Ist-Stand für die Blöcke dieses Abschnitts (main 6d019370):
   - Beide schreiben die Nummer als Vault-Subjekt der Art `user` (`pii.Vault.CreateTx`/`UpdateTx`) in derselben Transaktion wie die Nutzerzeile. Ein Leerwert löscht das Subjekt (`pii.DeleteTx`).
 - [ ] **AK4:** Antworten von `GET /api/v1/users`, `GET /api/v1/users/{id}`, `PATCH /api/v1/users/{id}` und `PATCH /api/v1/me` enthalten `mobile_masked` (`+49151*****89`: Ländervorwahl, drei Ziffern, letzte zwei). `PATCH /api/v1/me` mit leerem Körper `{}` ändert nichts und liefert den eigenen Stand (Lesen der eigenen Nummer ohne `user:read`). `GET /api/v1/me` (`identity.Handler.Me`) bleibt unverändert. Den Klartext gibt es nur in `GET /api/v1/users/{id}/data-export` (Feld `mobile`).
 - [ ] **AK5:** Der Audit-Eintrag des Schreibwegs enthält `mobile` als Surrogat-Referenz (`{"$pii": …}` über `pii.SealTx`, Anker über `pii.WithAnchor` am Nutzer-Subjekt), nie den Klartext.
+  Umsetzung (Abweichung, begründet): Der Route-Snapshot von `PATCH /users/{id}` und `PATCH /me` ist reines SQL und sieht den Klartext nie. Er schreibt deshalb unter `mobile` direkt die Referenz `{"$pii": <Mobil-Subjekt>}` auf das Nutzer-Subjekt selbst (`audit.mobileReferenceSelect`, `referenceColumns`), statt über `pii.SealTx`/`pii.WithAnchor` ein eigenes, am Nutzer-Subjekt verankertes Wert-Subjekt anzulegen. Die Wirkung ist dieselbe: Jede Änderung legt ein neues Subjekt an und löscht das alte, die Anonymisierung löscht das aktuelle, danach ist die Referenz nicht mehr auflösbar. Die Audit-Lese-API zeigt den Wert als `null` (das Subjekt trägt den Schlüssel `mobile`, nicht `v`), der Klartext bleibt dem Datenexport vorbehalten (AK4).
 - [ ] **AK6:** `AnonymizeUserTx` löscht das Mobil-Subjekt (Crypto-Shredding). Danach ist die Nummer weder über die API noch über Audit-Referenzen auflösbar.
 - [ ] **AK7:** Empfängerauflösung:
   - `Recipient` erhält `Phone string` (`json:"phone,omitempty"`).
@@ -19542,7 +19543,7 @@ Gemeinsamer Ist-Stand für die Blöcke dieses Abschnitts (main 6d019370):
   - `revealContacts` übernimmt `phone` aus dem Kontakt-Subjekt.
   - Ohne Vault (`pii.Default() == nil`) bleibt `Phone` leer.
 
-**Dateien (15 Einträge, Migration = 2):**
+**Dateien (18 Einträge, Migration = 2):**
 
 - backend/migrations/<nächste Nr.>_user_mobile.up.sql (neu)
 - backend/migrations/<nächste Nr.>_user_mobile.down.sql (neu)
@@ -19554,6 +19555,9 @@ Gemeinsamer Ist-Stand für die Blöcke dieses Abschnitts (main 6d019370):
 - backend/internal/notify/channel.go
 - backend/internal/notify/recipients.go
 - backend/internal/notify/recipients_integration_test.go
+- backend/internal/notify/pg_notification.go (gespeicherte Zustellungen ohne `phone`: `notification_delivery.recipients`, Zustellungsliste und Webhook-Körper tragen die Nummer nicht)
+- backend/internal/audit/route_snapshot.go (Snapshot mit `mobile` als `$pii`-Referenz, AK5)
+- backend/internal/audit/scope.go (Scope-Regel für `PATCH /me`)
 - backend/internal/server/audit_coverage_test.go
 - backend/internal/server/testdata/route_permissions.txt
 - api/openapi.yaml

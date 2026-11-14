@@ -197,6 +197,9 @@ var resourceTables = map[string][]string{
 	// erasures name no row a scope could place.
 	"notifications": nil,
 	"privacy":       nil,
+	// The own account (PATCH /me, WP-1140) names no row a scope could
+	// place; restricted principals do not see the entries.
+	"me": nil,
 	// The field permissions (WP-726) are the organization's configuration
 	// of who sees which field; only a holder of field_permission:manage
 	// for the whole organization reads them, and an object grant names an

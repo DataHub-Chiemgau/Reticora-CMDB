@@ -505,6 +505,7 @@ PATCH /api/v1/layouts/{id} citype:manage
 PATCH /api/v1/lifecycle-models/{id} lifecycle:manage
 PATCH /api/v1/locations/{id} location:write
 PATCH /api/v1/maintenance-windows/{id} maintenance:write
+PATCH /api/v1/me authenticated
 PATCH /api/v1/metamodel/drafts/{id} citype:manage
 PATCH /api/v1/monitoring/alerts/{id} monitoring:write
 PATCH /api/v1/monitoring/groups/{id} monitoring:write

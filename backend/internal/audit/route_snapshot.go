@@ -145,6 +145,11 @@ func excluded(table, column string) bool {
 	return false
 }
 
+// referenceColumns are personal fields whose snapshot value is already a
+// vault reference {"$pii": <subject>} built by the select of the register
+// (app_user.mobile, WP-1140); they keep it instead of the row surrogate.
+var referenceColumns = map[string]bool{"app_user.mobile": true}
+
 // personal reports whether column of table holds personal data.
 func personal(table, column string) bool {
 	if pii.IsPersonalKey(column) {
@@ -200,7 +205,7 @@ func (s *RouteSnapshot) ValueChanges(table string, before, after map[string]any)
 		if reflect.DeepEqual(oldV, newV) {
 			continue
 		}
-		if personal(table, c) {
+		if personal(table, c) && !referenceColumns[table+"."+c] {
 			oldV, newV = surrogate(oldV, rowID), surrogate(newV, rowID)
 		}
 		out = append(out, map[string]any{"field": c, "old": bounded(oldV), "new": bounded(newV)})
@@ -347,6 +352,17 @@ func crud(m map[string]RouteSnapshot, collection, table string, methods ...strin
 	}
 }
 
+// mobileReferenceSelect is the row of app_user with the mobile number as
+// field mobile holding the PII reference {"$pii": <subject>} instead of the
+// column mobile_pii_subject_id (WP-1140 AK5). The reference names the
+// user's own mobile subject, which is its anchor: a change (new subject,
+// former one deleted) or the anonymization shreds it, so the reference
+// resolves nothing after that. The snapshot is SQL and never sees the
+// plaintext, so no separate value subject is sealed.
+const mobileReferenceSelect = `(to_jsonb(t) - 'mobile_pii_subject_id') || jsonb_build_object('mobile',
+	CASE WHEN t.mobile_pii_subject_id IS NULL THEN NULL
+	ELSE jsonb_build_object('$pii', t.mobile_pii_subject_id::text) END)`
+
 // routeSnapshots is the register: every audited write route without a
 // domain recorder (server.domainRecordedRoutes) has an entry
 // (TestEveryWriteRouteHasASnapshotEntry).
@@ -377,6 +393,13 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	crud(m, v1+"documents", "document", "POST", "PATCH")
 	// DELETE /users/{id} records user.deleted in its transaction (F-393).
 	crud(m, v1+"users", "app_user", "POST", "PATCH")
+	// The mobile number of a user (WP-1140) is a vault subject: the entry
+	// shows its surrogate as reference {"$pii": <subject>} (a new subject per
+	// change, the former one deleted), never the number. PATCH /me changes
+	// the own account (only mobile).
+	userWithMobile := RouteSnapshot{Table: "app_user", Keys: []SnapshotKey{{"id", "id"}}, Select: mobileReferenceSelect}
+	m["PATCH "+v1+"users/{id}"] = userWithMobile
+	m["PATCH "+v1+"me"] = RouteSnapshot{Table: "app_user", Keys: []SnapshotKey{{"id", "$user"}}, Select: mobileReferenceSelect}
 	crud(m, v1+"collectors", "collector", "POST", "PATCH")
 	// PATCH changes name and max_age_days; PUT .../secret replaces the
 	// secret (WP-889): the entry shows secret_version and rotated_at, the

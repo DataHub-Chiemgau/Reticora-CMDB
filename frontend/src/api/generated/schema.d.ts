@@ -557,7 +557,11 @@ export interface paths {
     delete?: never;
     options?: never;
     head?: never;
-    patch?: never;
+    /**
+     * Change the mobile number of the own account
+     * @description WP-1140 (NTF-02, NTF-03, E-164): the signed-in user sets or clears the mobile number of the own account; no permission beyond the session is needed. Only mobile is accepted (any other member 422 with its field), an invalid number is 422 field mobile. The number is stored as PII vault subject in the transaction of the user row; the audit entry names it only as surrogate reference. An empty body {} changes nothing and answers the own account with mobile_masked (no user:read needed). A principal without a user account (service account, API key without owner) is 403; without a PII vault a number cannot be stored (503).
+     */
+    patch: operations['updateCurrentUser'];
     trace?: never;
   };
   '/api/v1/cis': {
@@ -3155,7 +3159,7 @@ export interface paths {
     head?: never;
     /**
      * Update a user
-     * @description A non-active status deactivates the user (TLC-04): in the same transaction the user's sessions and refresh cookies are revoked and every active API key the user created for themself is revoked. Keys the user created for service accounts belong to the service account and stay valid (decision E-64, option 2): the audit entry of the deactivation lists them (id, prefix, name, service account; never the secret), and the org_admins of the organization receive a notification to rotate them. The sessions are revoked only after the user was found in the caller's organization; an unknown user or a user of another organization answers 404 without any effect. If the sessions cannot be revoked, nothing is changed and the answer is 503. The caller cannot deactivate their own account: a non-active status for the caller's own user answers 400 ("you cannot deactivate your own account") before anything is written, revoked or audited (F-377). Other fields of the own account (e.g. display_name) and status active stay allowed.
+     * @description A non-active status deactivates the user (TLC-04): in the same transaction the user's sessions and refresh cookies are revoked and every active API key the user created for themself is revoked. Keys the user created for service accounts belong to the service account and stay valid (decision E-64, option 2): the audit entry of the deactivation lists them (id, prefix, name, service account; never the secret), and the org_admins of the organization receive a notification to rotate them. The sessions are revoked only after the user was found in the caller's organization; an unknown user or a user of another organization answers 404 without any effect. If the sessions cannot be revoked, nothing is changed and the answer is 503. The caller cannot deactivate their own account: a non-active status for the caller's own user answers 400 ("you cannot deactivate your own account") before anything is written, revoked or audited (F-377). Other fields of the own account (e.g. display_name) and status active stay allowed. WP-1140: mobile sets or clears the mobile number (E.164, else 422 field mobile) as PII vault subject in the same transaction; the answer carries mobile_masked, without a PII vault a number is 503.
      */
     patch: operations['updateUser'];
     trace?: never;
@@ -21127,6 +21131,8 @@ export interface components {
       external_id?: string;
       /** Format: date-time */
       last_login_at?: string;
+      /** @description The mobile number of the user (WP-1140) masked to country code, three digits and the last two (+49151******89); absent without a number. The number itself is a PII vault subject; its plaintext appears only in GET /users/{id}/data-export (field mobile). */
+      mobile_masked?: string;
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -21144,6 +21150,13 @@ export interface components {
       status?: string;
       /** Format: uri */
       avatar_url?: string;
+      /** @description Mobile number in E.164 (^\+[1-9][0-9]{6,14}$ after removing blanks and hyphens, WP-1140); an empty value clears it. Stored as PII vault subject; an invalid number is 422 with field mobile. */
+      mobile?: string;
+    };
+    /** @description The members the signed-in user may change on the own account (WP-1140): only mobile; any other member is 422 with its field. */
+    UpdateMeRequest: {
+      /** @description Mobile number in E.164; empty or null clears it. */
+      mobile?: string | null;
     };
     UserListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['User'][];
@@ -25283,6 +25296,36 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       500: components['responses']['InternalServerError'];
+    };
+  };
+  updateCurrentUser: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UpdateMeRequest'];
+      };
+    };
+    responses: {
+      /** @description The own account */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['User'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
+      500: components['responses']['InternalServerError'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   listCIs: {
@@ -31374,6 +31417,7 @@ export interface operations {
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
       503: components['responses']['ServiceUnavailable'];
     };
   };
@@ -37635,7 +37679,10 @@ export interface operations {
         };
         content: {
           'application/json': {
-            user: components['schemas']['User'];
+            user: components['schemas']['User'] & {
+              /** @description The plaintext of the mobile number in E.164 (WP-1140), only here. */
+              mobile?: string;
+            };
             contacts: components['schemas']['Contact'][];
             roles: components['schemas']['RoleAssignment'][];
             tickets: {

@@ -523,13 +523,15 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	"PUT /api/v1/cis/{id}/fields/{name}/override":            {"/api/v1/cis/<id:/api/v1/cis>/fields/description/override", `{"value":"a5","reason":"a5 override"}`},
 	"DELETE /api/v1/cis/{id}/fields/{name}/override":         {"/api/v1/cis/<id:/api/v1/cis>/fields/description/override", ""},
 	"DELETE /api/v1/users/{id}":                              {"/api/v1/users/<user3>", ""},
-	"POST /api/v1/teams/{id}/members":                        {"", `{"user_id":"<id:/api/v1/users>"}`},
-	"POST /api/v1/tickets/{id}/comments":                     {"", `{"content":"a5 comment"}`},
-	"POST /api/v1/orders/{id}/items":                         {"", `{"description":"a5 item","quantity":1}`},
-	"POST /api/v1/consumables/{id}/movements":                {"", `{"direction":"in","quantity":1}`},
-	"POST /api/v1/documents/{id}/links":                      {"", `{"entity_type":"ci","entity_id":"<id:/api/v1/cis>"}`},
-	"POST /api/v1/stocktakes/{id}/scans":                     {"", `{"scan_result":"found","asset_id":"<id:/api/v1/assets>"}`},
-	"POST /api/v1/agents/{id}/site":                          {"", `{"site_id":"<id:/api/v1/sites>"}`},
+	// The own mobile number (WP-1140): the entry names only its surrogate.
+	"PATCH /api/v1/me":                        {"", `{"mobile":"+49 151 1234 5689"}`},
+	"POST /api/v1/teams/{id}/members":         {"", `{"user_id":"<id:/api/v1/users>"}`},
+	"POST /api/v1/tickets/{id}/comments":      {"", `{"content":"a5 comment"}`},
+	"POST /api/v1/orders/{id}/items":          {"", `{"description":"a5 item","quantity":1}`},
+	"POST /api/v1/consumables/{id}/movements": {"", `{"direction":"in","quantity":1}`},
+	"POST /api/v1/documents/{id}/links":       {"", `{"entity_type":"ci","entity_id":"<id:/api/v1/cis>"}`},
+	"POST /api/v1/stocktakes/{id}/scans":      {"", `{"scan_result":"found","asset_id":"<id:/api/v1/assets>"}`},
+	"POST /api/v1/agents/{id}/site":           {"", `{"site_id":"<id:/api/v1/sites>"}`},
 	// Assignment through the asset (WP-746): <asset3> is assigned and
 	// returned, <asset4> held by <user> is transferred.
 	"POST /api/v1/assets/{id}/assign":   {"/api/v1/assets/<asset3>/assign", `{"assigned_user_id":"<user2>"}`},
@@ -982,7 +984,7 @@ func TestEveryWriteRouteAuditedOnPostgreSQL(t *testing.T) {
 	// (CH16, WP-505): the webhook secret, the credential, the e-mail
 	// addresses of the contact, the user and the invitation.
 	for _, plain := range []string{"a5-secret-a5-secret-a5", `"community"`, "a5-contact@example.com", "a5-user@example.com",
-		"a5-invite@example.com", "a5-scim@example.com"} {
+		"a5-invite@example.com", "a5-scim@example.com", "4915112345689"} {
 		if n := countRows(t, f, `SELECT count(*) FROM audit_log WHERE organization_id = $1 AND changes ? 'route'
 			AND strpos(changes::text, $2) > 0`, f.OrgA, plain); n != 0 {
 			t.Errorf("%d route entries hold %s", n, plain)

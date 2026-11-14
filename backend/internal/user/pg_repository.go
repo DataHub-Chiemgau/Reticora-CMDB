@@ -33,7 +33,8 @@ const userSelectColumns = `
 	COALESCE(oidc_subject, ''),
 	last_login,
 	created_at,
-	updated_at
+	updated_at,
+	COALESCE(mobile_pii_subject_id::text, '')
 `
 
 const teamSelectColumns = `
@@ -171,7 +172,12 @@ func (r *PGRepository) ListUsers(ctx context.Context, orgID, search string, page
 		if err := rows.Err(); err != nil {
 			return fmt.Errorf("iterate users: %w", err)
 		}
-		return nil
+		rows.Close()
+		ptrs := make([]*User, len(items))
+		for i := range items {
+			ptrs[i] = &items[i]
+		}
+		return fillMobileTx(ctx, tx, orgID, ptrs, false)
 	})
 	return items, total, err
 }
@@ -188,7 +194,7 @@ func (r *PGRepository) GetUser(ctx context.Context, orgID, id string) (*User, er
 			}
 			return fmt.Errorf("get user: %w", err)
 		}
-		return nil
+		return fillMobileTx(ctx, tx, orgID, []*User{item}, true)
 	})
 	if err != nil {
 		return nil, err
@@ -249,6 +255,11 @@ func (r *PGRepository) UpdateUserTx(ctx context.Context, orgID, id string, req U
 		}
 		addStringField("display_name", req.DisplayName)
 		addStringField("avatar_url", req.AvatarURL)
+		if req.Mobile != nil {
+			if _, err := setMobileTx(ctx, tx, orgID, id, *req.Mobile); err != nil {
+				return err
+			}
+		}
 		wasActive := false
 		if req.Status != nil {
 			if err := tx.QueryRow(ctx, `SELECT is_active FROM app_user WHERE id = $1 AND organization_id = $2 FOR UPDATE`, id, orgID).Scan(&wasActive); err != nil {
@@ -277,7 +288,7 @@ func (r *PGRepository) UpdateUserTx(ctx context.Context, orgID, id string, req U
 				}
 				return fmt.Errorf("get user for update: %w", err)
 			}
-			return nil
+			return fillMobileTx(ctx, tx, orgID, []*User{item}, false)
 		}
 
 		setClauses = append(setClauses, "updated_at = NOW()")
@@ -293,6 +304,9 @@ func (r *PGRepository) UpdateUserTx(ctx context.Context, orgID, id string, req U
 				return fmt.Errorf("user not found")
 			}
 			return fmt.Errorf("update user: %w", err)
+		}
+		if ferr := fillMobileTx(ctx, tx, orgID, []*User{item}, false); ferr != nil {
+			return ferr
 		}
 		if req.Status == nil || wasActive == statusIsActive(*req.Status) {
 			return nil
@@ -459,6 +473,11 @@ func (r *PGRepository) AnonymizeUserTx(ctx context.Context, orgID, id string, on
 			if err := onDeactivate(ctx, tx); err != nil {
 				return err
 			}
+		}
+		// Crypto-shredding of the mobile number (WP-1140): the subject goes,
+		// the foreign key clears the column.
+		if _, err := setMobileTx(ctx, tx, orgID, id, ""); err != nil {
+			return err
 		}
 		row := tx.QueryRow(ctx, `
 			UPDATE app_user
@@ -1330,6 +1349,7 @@ func scanUser(scanner userScanner) (*User, error) {
 		&lastLogin,
 		&item.CreatedAt,
 		&item.UpdatedAt,
+		&item.MobileSubjectID,
 	); err != nil {
 		return nil, err
 	}

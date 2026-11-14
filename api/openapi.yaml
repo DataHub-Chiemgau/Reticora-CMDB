@@ -1153,6 +1153,48 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '500':
           $ref: '#/components/responses/InternalServerError'
+    patch:
+      operationId: updateCurrentUser
+      tags: [Users]
+      security:
+        - BearerAuth: []
+      summary: Change the mobile number of the own account
+      description: >-
+        WP-1140 (NTF-02, NTF-03, E-164): the signed-in user sets or clears
+        the mobile number of the own account; no permission beyond the
+        session is needed. Only mobile is accepted (any other member 422
+        with its field), an invalid number is 422 field mobile. The number
+        is stored as PII vault subject in the transaction of the user row;
+        the audit entry names it only as surrogate reference. An empty body
+        {} changes nothing and answers the own account with mobile_masked
+        (no user:read needed). A principal without a user account (service
+        account, API key without owner) is 403; without a PII vault a number
+        cannot be stored (503).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMeRequest'
+      responses:
+        '200':
+          description: The own account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 
   /api/v1/cis:
     get:
@@ -7069,6 +7111,9 @@ paths:
         account") before anything is written, revoked or audited (F-377).
         Other fields of the own account (e.g. display_name) and status
         active stay allowed.
+        WP-1140: mobile sets or clears the mobile number (E.164, else 422
+        field mobile) as PII vault subject in the same transaction; the
+        answer carries mobile_masked, without a PII vault a number is 503.
       requestBody:
         required: true
         content:
@@ -7088,6 +7133,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
     delete:
@@ -13161,7 +13208,13 @@ paths:
                 type: object
                 properties:
                   user:
-                    $ref: '#/components/schemas/User'
+                    allOf:
+                      - $ref: '#/components/schemas/User'
+                      - type: object
+                        properties:
+                          mobile:
+                            type: string
+                            description: The plaintext of the mobile number in E.164 (WP-1140), only here.
                   contacts:
                     type: array
                     items:
@@ -43355,6 +43408,13 @@ components:
         last_login_at:
           type: string
           format: date-time
+        mobile_masked:
+          type: string
+          description: >-
+            The mobile number of the user (WP-1140) masked to country code,
+            three digits and the last two (+49151******89); absent without a
+            number. The number itself is a PII vault subject; its plaintext
+            appears only in GET /users/{id}/data-export (field mobile).
         created_at:
           type: string
           format: date-time
@@ -43386,6 +43446,23 @@ components:
         avatar_url:
           type: string
           format: uri
+        mobile:
+          type: string
+          description: >-
+            Mobile number in E.164 (^\+[1-9][0-9]{6,14}$ after removing blanks
+            and hyphens, WP-1140); an empty value clears it. Stored as PII
+            vault subject; an invalid number is 422 with field mobile.
+
+    UpdateMeRequest:
+      type: object
+      additionalProperties: false
+      description: >-
+        The members the signed-in user may change on the own account
+        (WP-1140): only mobile; any other member is 422 with its field.
+      properties:
+        mobile:
+          type: [string, 'null']
+          description: Mobile number in E.164; empty or null clears it.
 
     UserListResponse:
       allOf:

@@ -142,7 +142,42 @@ func (r *PGResolver) Branding(ctx context.Context, orgID string) (*Branding, err
 }
 
 type candidate struct {
-	id, email, name, locale string
+	id, email, name, locale, mobile string
+}
+
+// userCandidates reads the rows of app_user (id, e-mail, name, locale and
+// the vault subject of the mobile number) and resolves the numbers in one
+// vault read (WP-1140); without a vault they stay empty.
+func userCandidates(ctx context.Context, tx pgx.Tx, orgID string, rows pgx.Rows) ([]candidate, error) {
+	found, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (candidate, error) {
+		var c candidate
+		scanErr := row.Scan(&c.id, &c.email, &c.name, &c.locale, &c.mobile)
+		return c, scanErr
+	})
+	if err != nil {
+		return nil, err
+	}
+	vault := pii.Default()
+	ids := make([]string, 0, len(found))
+	for _, c := range found {
+		if c.mobile != "" {
+			ids = append(ids, c.mobile)
+		}
+	}
+	var subjects map[string]*pii.Subject
+	if vault != nil && len(ids) > 0 {
+		if subjects, err = vault.ResolveTx(ctx, tx, orgID, ids); err != nil {
+			return nil, err
+		}
+	}
+	for i := range found {
+		subject := found[i].mobile
+		found[i].mobile = ""
+		if s := subjects[subject]; s != nil {
+			found[i].mobile = s.Data["mobile"]
+		}
+	}
+	return found, nil
 }
 
 // Resolve implements Resolver: active users among the candidates who hold
@@ -158,7 +193,8 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
 		if len(a.Roles) > 0 || len(a.TeamIDs) > 0 || len(a.UserIDs) > 0 || a.AllWithPermission {
 			rows, err := tx.Query(ctx, `
-				SELECT u.id::text, COALESCE(u.email, ''), COALESCE(u.display_name, ''), u.locale
+				SELECT u.id::text, COALESCE(u.email, ''), COALESCE(u.display_name, ''), u.locale,
+					COALESCE(u.mobile_pii_subject_id::text, '')
 				FROM app_user u
 				WHERE u.organization_id = $1 AND u.is_active AND (
 					$5
@@ -171,26 +207,19 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 			if err != nil {
 				return fmt.Errorf("resolve users: %w", err)
 			}
-			users, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (candidate, error) {
-				var c candidate
-				scanErr := row.Scan(&c.id, &c.email, &c.name, &c.locale)
-				return c, scanErr
-			})
+			users, err = userCandidates(ctx, tx, orgID, rows)
 			if err != nil {
 				return fmt.Errorf("resolve users: %w", err)
 			}
 		}
 		if len(a.DirectUserIDs) > 0 {
-			rows, err := tx.Query(ctx, `SELECT id::text, COALESCE(email, ''), COALESCE(display_name, ''), locale FROM app_user
+			rows, err := tx.Query(ctx, `SELECT id::text, COALESCE(email, ''), COALESCE(display_name, ''), locale,
+				COALESCE(mobile_pii_subject_id::text, '') FROM app_user
 				WHERE organization_id = $1 AND is_active AND id::text = ANY($2) ORDER BY display_name, id`, orgID, a.DirectUserIDs)
 			if err != nil {
 				return fmt.Errorf("resolve direct users: %w", err)
 			}
-			direct, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (candidate, error) {
-				var c candidate
-				scanErr := row.Scan(&c.id, &c.email, &c.name, &c.locale)
-				return c, scanErr
-			})
+			direct, err = userCandidates(ctx, tx, orgID, rows)
 			if err != nil {
 				return fmt.Errorf("resolve direct users: %w", err)
 			}
@@ -276,7 +305,7 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 		out = append(out, r)
 	}
 	for _, u := range direct {
-		add(Recipient{UserID: u.id, Email: u.email, Name: u.name, Locale: u.locale})
+		add(Recipient{UserID: u.id, Email: u.email, Name: u.name, Phone: u.mobile, Locale: u.locale})
 	}
 	for _, u := range users {
 		grants, err := r.grants.AccessGrants(ctx, orgID, u.id)
@@ -286,7 +315,7 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 		if !permission.Covers(grants, a.Permission, a.ClientID, a.SiteID) {
 			continue
 		}
-		add(Recipient{UserID: u.id, Email: u.email, Name: u.name, Locale: u.locale})
+		add(Recipient{UserID: u.id, Email: u.email, Name: u.name, Phone: u.mobile, Locale: u.locale})
 	}
 	for _, c := range contacts {
 		add(c)
@@ -324,11 +353,14 @@ func revealContacts(ctx context.Context, tx pgx.Tx, orgID string, rows pgx.Rows)
 	}
 	var out []Recipient
 	for _, c := range found {
+		phone := ""
 		if s := subjects[c.subject]; s != nil {
-			c.email, c.name = s.Data["email"], s.Data["name"]
+			c.email, c.name, phone = s.Data["email"], s.Data["name"], s.Data["phone"]
 		}
-		if c.email != "" {
-			out = append(out, Recipient{Email: c.email, Name: c.name})
+		// A contact is an addressee with an e-mail address or a phone
+		// number (SMS, WP-1140).
+		if c.email != "" || phone != "" {
+			out = append(out, Recipient{Email: c.email, Name: c.name, Phone: phone})
 		}
 	}
 	return out, nil

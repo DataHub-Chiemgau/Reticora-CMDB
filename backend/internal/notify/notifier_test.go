@@ -549,11 +549,11 @@ func TestDigestWindowsAndCategories(t *testing.T) {
 		{"webhook", Request{Category: "review"}, KindWebhook, user},
 		{"address without a user", Request{Category: "review"}, KindEmail, Recipient{Email: "a@x.example"}},
 	} {
-		if window, _, err := n.bundled(ctx, "org-1", &tc.req, tc.kind, tc.r, map[string]*Preference{}); err != nil || window != "" {
+		if window, _, err := n.bundled(ctx, "org-1", &tc.req, tc.kind, &tc.r, map[string]*Preference{}); err != nil || window != "" {
 			t.Errorf("%s: bundled %q (%v), want delivered on its own", tc.name, window, err)
 		}
 	}
-	if window, _, _ := n.bundled(ctx, "org-1", &Request{Category: "review"}, KindEmail, user, map[string]*Preference{}); window != DigestHourly {
+	if window, _, _ := n.bundled(ctx, "org-1", &Request{Category: "review"}, KindEmail, &user, map[string]*Preference{}); window != DigestHourly {
 		t.Errorf("review e-mail with the default preference: %q, want hourly", window)
 	}
 }

@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000372_order_approval_run
+Stand: Migration 000373_user_mobile
 
 ## Prüfung
 
@@ -808,6 +808,18 @@ Feldzeile `core.tags` (`source = 'trigger'`, Key und alle Sprachwerte von
 des Assets (`source_id` = Asset); `search_index_asset` und sein Trigger
 (zusätzlich `UPDATE OF owner_user_id, assigned_user_id`) sowie
 `search_identifier_rows` sind entsprechend erweitert.
+
+Migration 000373 (WP-1140, vorläufige Nummer) gibt `app_user` die Spalte
+`mobile_pii_subject_id` (UUID, nullbar, kein Klartext): Die Mobilnummer steht
+nur im PII-Vault (`pii_subject`, Art `user`, Daten `mobile`). Der
+zusammengesetzte Fremdschlüssel `app_user_mobile_pii_subject_id_fkey`
+(`mobile_pii_subject_id`, `organization_id`) → `pii_subject` (`surrogate_id`,
+`organization_id`) mit `ON DELETE SET NULL (mobile_pii_subject_id)` hält das
+Subjekt in der Organisation des Nutzers (Konvention 19); der dafür nötige
+eindeutige Schlüssel ist `pii_subject_surrogate_id_organization_key` (000287),
+fehlt er, legt der DO-Block `pii_subject_id_organization_key` an. Index
+`idx_app_user_mobile_pii_subject` (partiell). RLS und Policies von `app_user`
+bleiben unverändert.
 
 <!-- rls-leaky-indexes:begin -->
 
