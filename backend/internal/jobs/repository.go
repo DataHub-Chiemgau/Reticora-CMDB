@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 )
 
 // Update describes a status change: the new status and the fields it sets.
@@ -28,6 +29,11 @@ type Update struct {
 	// the transaction of the change (WP-550); the memory repository has
 	// no outbox and records nothing.
 	ReportFailed bool
+	// Events returns the events of a change to succeeded, appended to the
+	// outbox in the transaction of the change with the changed job (the
+	// result of a job implementing SuccessEvents, WP-1151); the memory
+	// repository has no outbox and records nothing.
+	Events func(j *Job) []*events.Event
 }
 
 // Repository stores jobs; every method works within one organization.
@@ -135,7 +141,7 @@ func (r *MemoryRepository) List(_ context.Context, orgID string, filter Filter, 
 	var out []Job
 	for _, j := range r.jobs {
 		if j.OrganizationID == orgID && (filter.Kind == "" || j.Kind == filter.Kind) &&
-			(filter.Status == "" || j.Status == filter.Status) {
+			(filter.Status == "" || j.Status == filter.Status) && !slices.Contains(filter.ExcludeKinds, j.Kind) {
 			out = append(out, *j)
 		}
 	}

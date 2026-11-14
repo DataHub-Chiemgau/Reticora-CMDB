@@ -1,9 +1,10 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import type { ComponentProps } from 'react';
-import { Routes, Route, useNavigate, useLocation, Navigate, Outlet } from 'react-router-dom';
+import { Routes, Route, useNavigate, useLocation, Navigate, Outlet } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { CommandPalette } from './components/CommandPalette';
 import { EntitlementExpiryBanner } from './components/EntitlementExpiryBanner';
+import { OrgDeletionBanner } from './components/OrgDeletionBanner';
 import { DraftBanner } from './components/metamodel/DraftBanner';
 import { pageToPath } from './components/CommandPalette';
 import type { AppPage } from './components/CommandPalette';
@@ -60,11 +61,20 @@ const DocumentDetailPage = lazyPage(
 const ExportPage = lazyPage(() => import('./pages/ExportPage'), 'ExportPage');
 const ImportPage = lazyPage(() => import('./pages/ImportPage'), 'ImportPage');
 const MonitoringPage = lazyPage(() => import('./pages/MonitoringPage'), 'MonitoringPage');
+const MonitoringSettingsPage = lazyPage(
+  () => import('./pages/MonitoringSettingsPage'),
+  'MonitoringSettingsPage',
+);
+const AlarmsPage = lazyPage(() => import('./pages/AlarmsPage'), 'AlarmsPage');
+const IncidentsPage = lazyPage(() => import('./pages/IncidentsPage'), 'IncidentsPage');
 const PermissionsPage = lazyPage(() => import('./pages/PermissionsPage'), 'PermissionsPage');
 const RackPage = lazyPage(() => import('./pages/RackPage'), 'RackPage');
 const TopologyPage = lazyPage(() => import('./pages/TopologyPage'), 'TopologyPage');
+const IpamPage = lazyPage(() => import('./pages/IpamPage'), 'IpamPage');
+const SubnetDetailPage = lazyPage(() => import('./pages/SubnetDetailPage'), 'SubnetDetailPage');
 const SLAPage = lazyPage(() => import('./pages/SLAPage'), 'SLAPage');
 const FormsPage = lazyPage(() => import('./pages/FormsPage'), 'FormsPage');
+const FormEditorPage = lazyPage(() => import('./pages/FormEditorPage'), 'FormEditorPage');
 const WorkflowPage = lazyPage(() => import('./pages/WorkflowPage'), 'WorkflowPage');
 const CompliancePage = lazyPage(() => import('./pages/CompliancePage'), 'CompliancePage');
 const IGAPage = lazyPage(() => import('./pages/IGAPage'), 'IGAPage');
@@ -75,6 +85,7 @@ const StocktakeDetailPage = lazyPage(
 );
 const TicketListPage = lazyPage(() => import('./pages/TicketListPage'), 'TicketListPage');
 const TicketDetailPage = lazyPage(() => import('./pages/TicketDetailPage'), 'TicketDetailPage');
+const OrgDataPage = lazyPage(() => import('./pages/OrgDataPage'), 'OrgDataPage');
 const UserManagementPage = lazyPage(
   () => import('./pages/UserManagementPage'),
   'UserManagementPage',
@@ -100,6 +111,7 @@ const RelationshipTypesPage = lazyPage(
 );
 const TemplatesPage = lazyPage(() => import('./pages/TemplatesPage'), 'TemplatesPage');
 const RulesPage = lazyPage(() => import('./pages/RulesPage'), 'RulesPage');
+const SourceRanksPage = lazyPage(() => import('./pages/SourceRanksPage'), 'SourceRanksPage');
 const FormBuilderPage = lazyPage(() => import('./pages/FormBuilderPage'), 'FormBuilderPage');
 const MetamodelDraftsPage = lazyPage(
   () => import('./pages/MetamodelDraftsPage'),
@@ -107,6 +119,8 @@ const MetamodelDraftsPage = lazyPage(
 );
 const LocationTreePage = lazyPage(() => import('./pages/LocationTreePage'), 'LocationTreePage');
 const ClientsPage = lazyPage(() => import('./pages/ClientsPage'), 'ClientsPage');
+const OperatorApp = lazyPage(() => import('./operator/OperatorApp'), 'OperatorApp');
+const PlanPage = lazyPage(() => import('./pages/PlanPage'), 'PlanPage');
 const InventoryPage = lazyPage(() => import('./pages/InventoryPage'), 'InventoryPage');
 const SavedViewsPage = lazyPage(() => import('./pages/SavedViewsPage'), 'SavedViewsPage');
 const TagsPage = lazyPage(() => import('./pages/TagsPage'), 'TagsPage');
@@ -211,6 +225,15 @@ function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/auth/callback" element={<CallbackPage />} />
+      {/* The operator area has its own session, outside the tenant login (WP-887). */}
+      <Route
+        path="/operator/*"
+        element={
+          <Suspense fallback={<PageFallback />}>
+            <OperatorApp />
+          </Suspense>
+        }
+      />
       {/* Signup and verification run without a session (UI-17). */}
       <Route
         path="/onboarding"
@@ -242,6 +265,8 @@ function App() {
           <Route path="/cmdb" element={<CIListPage onCreateCI={openCreateCI} />} />
           <Route path="/cmdb/:id" element={<CIDetailPage />} />
           <Route path="/topology" element={<TopologyPage />} />
+          <Route path="/ipam" element={<IpamPage />} />
+          <Route path="/ipam/subnets/:id" element={<SubnetDetailPage />} />
           <Route path="/map" element={<MapPage />} />
           <Route path="/roomplan" element={<RoomPlanPage />} />
           <Route path="/racks" element={<RackPage />} />
@@ -251,6 +276,7 @@ function App() {
           <Route path="/inventory" element={<InventoryPage />} />
           <Route path="/locations" element={<LocationTreePage />} />
           <Route path="/clients" element={<ClientsPage />} />
+          <Route path="/plan" element={<PlanPage />} />
           <Route path="/saved-views" element={<SavedViewsPage />} />
           <Route path="/tags" element={<TagsPage />} />
           <Route path="/ci-types" element={<CITypeAdminPage />} />
@@ -260,6 +286,7 @@ function App() {
           <Route path="/ci-types/drafts/:id" element={<MetamodelDraftsPage />} />
           <Route path="/ci-types/:id/form-builder" element={<FormBuilderPage />} />
           <Route path="/rules" element={<RulesPage />} />
+          <Route path="/source-ranks" element={<SourceRanksPage />} />
           <Route path="/relationship-types" element={<RelationshipTypesPage />} />
           <Route path="/assignments" element={<AssignmentListPage />} />
           <Route path="/contracts" element={<ContractsPage />} />
@@ -284,9 +311,12 @@ function App() {
           <Route path="/tickets" element={<TicketListPage />} />
           <Route path="/tickets/:id" element={<TicketDetailPage />} />
           <Route path="/users" element={<UserManagementPage />} />
+          <Route path="/org-data" element={<OrgDataPage />} />
           <Route path="/permissions" element={<PermissionsPage />} />
           <Route path="/slas" element={<SLAPage />} />
           <Route path="/forms" element={<FormsPage />} />
+          <Route path="/forms/new" element={<FormEditorPage />} />
+          <Route path="/forms/:id/edit" element={<FormEditorPage />} />
           <Route path="/workflows" element={<WorkflowPage />} />
           <Route path="/compliance" element={<CompliancePage />} />
           <Route path="/iga" element={<IGAPage />} />
@@ -295,6 +325,9 @@ function App() {
           <Route path="/imports" element={<ImportPage />} />
           <Route path="/export" element={<ExportPage />} />
           <Route path="/monitoring" element={<MonitoringPage />} />
+          <Route path="/monitoring/settings" element={<MonitoringSettingsPage />} />
+          <Route path="/alarms" element={<AlarmsPage />} />
+          <Route path="/incidents" element={<IncidentsPage />} />
           <Route path="/audit" element={<AuditPage />} />
           <Route path="/security" element={<SecurityPage />} />
           <Route path="*" element={<CIListPage onCreateCI={openCreateCI} />} />
@@ -407,6 +440,8 @@ function SignedInShell({
         counts={counts}
         banners={
           <>
+            {/* The grace period of a deletion of the organization (TLC-06, WP-1157). */}
+            <OrgDeletionBanner />
             {/* Expiring entitlements (ENT-07, WP-464). */}
             <EntitlementExpiryBanner />
             {/* The active metamodel draft above every page (MET-53, WP-798). */}

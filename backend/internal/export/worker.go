@@ -40,14 +40,20 @@ var exportExtensions = map[string]string{
 	"json":  "json",
 }
 
-// ObjectKey returns the blob key the rendered job is stored under.
+// ObjectKey returns the blob key the rendered job is stored under (below
+// JobPrefix of its organization).
 func ObjectKey(job *Job) string {
 	ext := exportExtensions[job.Format]
 	if ext == "" {
 		ext = "bin"
 	}
-	return fmt.Sprintf("%s/%s.%s", job.OrganizationID, job.ID, ext)
+	return fmt.Sprintf("%s%s.%s", JobPrefix(job.OrganizationID), job.ID, ext)
 }
+
+// JobPrefix is the prefix of the keys of the CI exports of an organization
+// in ExportBucket (file, manifest, DATEV error report): outside org/<id>/,
+// so the purge of a deleted organization removes it separately (WP-1155).
+func JobPrefix(orgID string) string { return orgID + "/" }
 
 // JobWorker processes pending export jobs: it renders the CI set into blob
 // storage and marks the job completed with the object key and expiry. All
@@ -98,6 +104,10 @@ type JobWorker struct {
 	// ErrAssetExportUnavailable (fail closed). Separate from Assets, the
 	// source of DATEV.
 	AssetRows AssetRows
+	// IPAMRows reads the subnets and addresses of a csv job with entity
+	// subnet or ip_address (WP-921, ipam.PGRepository); without it (memory
+	// profile) such a job fails with ErrIPAMExportUnavailable.
+	IPAMRows IPAMRows
 }
 
 // ManifestKey returns the blob key of the manifest of a rendered job, next
@@ -317,6 +327,8 @@ func (w *JobWorker) process(ctx context.Context, job *Job) {
 		rowCount, manifest, err = w.renderDATEV(renderCtx, job, policy, &buf, report)
 	case job.Filters.IsAsset():
 		rowCount, manifest, err = w.renderAssets(renderCtx, job, policy, &buf)
+	case job.Filters.IsIPAM():
+		rowCount, manifest, err = RenderIPAM(renderCtx, w.IPAMRows, job, policy, &buf)
 	default:
 		rowCount, manifest, err = RenderProjected(renderCtx, w.CIs, job.OrganizationID, job.Format, job.Filters, policy, &buf)
 	}

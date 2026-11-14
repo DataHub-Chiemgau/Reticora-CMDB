@@ -44,12 +44,13 @@ export function useEntitlements() {
     queryFn: async () => {
       const res = await entitlementApi.list({ limit: 200 });
       const map: EntitlementMap = {};
-      let plan: string | undefined;
+      // The leading plan of the organization (organization.plan, WP-880);
+      // a server before WP-880 answers without it, then the plan of the
+      // cmdb_core row applies (WP-857).
+      let plan: string | undefined = res.plan || undefined;
       for (const e of res.data ?? []) {
         map[e.feature_key] = e.enabled;
-        // Every row carries the plan of the organization; cmdb_core is
-        // always there and wins over the others (WP-857).
-        if (e.plan && (!plan || e.feature_key === 'cmdb_core')) {
+        if (!res.plan && e.plan && (!plan || e.feature_key === 'cmdb_core')) {
           plan = e.plan;
         }
       }
@@ -90,6 +91,38 @@ function isPageServed(modules: ModuleList | undefined, page: string): boolean {
 }
 
 /**
+ * usePlanOverview reads what the page "Paket und Add-ons" shows (PKG-06,
+ * WP-886): the rows with plan and plan_changed_at, the usage of every
+ * quota and the plan matrix. All three need entitlement:read; a 403 is not
+ * retried (entitlementReadOptions).
+ */
+export function usePlanOverview() {
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated());
+  const rows = useQuery({
+    queryKey: ['entitlements', 'rows'],
+    queryFn: () => entitlementApi.list({ limit: 200 }),
+    enabled: isAuthenticated,
+    staleTime: 60_000,
+    ...entitlementReadOptions,
+  });
+  const usage = useQuery({
+    queryKey: ['entitlements', 'usage'],
+    queryFn: () => entitlementApi.usage(),
+    enabled: isAuthenticated,
+    staleTime: 60_000,
+    ...entitlementReadOptions,
+  });
+  const plans = useQuery({
+    queryKey: ['entitlements', 'plans'],
+    queryFn: () => entitlementApi.plans(),
+    enabled: isAuthenticated,
+    staleTime: 5 * 60_000,
+    ...entitlementReadOptions,
+  });
+  return { rows, usage, plans };
+}
+
+/**
  * useModules resolves which late modules (phase P2 and later, add-ons) this
  * release serves (WP-214, E-03). The pages of a switched-off module are
  * hidden whatever the plan says: their routes do not exist on the server.
@@ -119,12 +152,15 @@ export function useModules() {
  * Every value is a feature key the server knows (entitlement.FeatureKeys):
  * isEnabled reports an unknown key as not entitled, which would hide the
  * page for every organization. The phase-2 pages use the keys of ENT-06
- * (E-44, E-39).
+ * (E-44, E-39), the phase-3 pages those of E-151 (WP-862): workflows and
+ * compliance_findings replace workflow_forms and compliance.
  */
 export const navFeatureFor: Record<string, string | undefined> = {
   dashboard: undefined,
   cmdb: undefined,
   topology: 'topology',
+  // IPAM (IPM-19, WP-915): the feature ipam of WP-862 (E-151 option 2).
+  ipam: 'ipam',
   map: undefined,
   roomplan: 'rack_view',
   racks: 'rack_view',
@@ -140,20 +176,20 @@ export const navFeatureFor: Record<string, string | undefined> = {
   orders: 'internal_orders',
   maintenance: 'monitoring',
   disposal: 'assets_basic',
-  keys: 'compliance',
-  trainings: 'workflow_forms',
+  keys: 'compliance_findings',
+  trainings: 'workflows',
   desks: 'workplace',
   agents: 'endpoint_agent',
-  findings: 'compliance',
+  findings: 'compliance_findings',
   reviews: undefined,
   jobs: undefined,
   tickets: 'ticketing_essential',
   users: undefined,
   permissions: undefined,
   slas: 'ticketing_standard',
-  forms: 'workflow_forms',
-  workflows: 'workflow_forms',
-  compliance: 'compliance',
+  forms: 'workflows',
+  workflows: 'workflows',
+  compliance: 'compliance_findings',
   iga: 'iga',
   assistant: 'ai',
   webhooks: 'webhooks',
@@ -161,6 +197,10 @@ export const navFeatureFor: Record<string, string | undefined> = {
   // The import assistant (WP-322, E-44).
   import: 'import',
   monitoring: 'monitoring',
+  // The alarm list (ALR-01, WP-991) belongs to the module monitoring.
+  alarms: 'monitoring',
+  // The incident list (ALR-10, WP-1045) belongs to the module monitoring.
+  incidents: 'monitoring',
   audit: undefined,
   security: undefined,
   // Enterprise CMDB + asset/inventory extension. ci-types, saved-views and
@@ -172,6 +212,10 @@ export const navFeatureFor: Record<string, string | undefined> = {
   'saved-views': undefined,
   // The client administration (WP-855) is core like the location tree.
   clients: undefined,
+  // Plan and add-ons (WP-886) belong to every plan.
+  plan: undefined,
+  // Organization data (WP-1157): the module org_lifecycle, no feature gate.
+  'org-data': undefined,
 };
 
 /**
@@ -181,10 +225,17 @@ export const navFeatureFor: Record<string, string | undefined> = {
  * administration needs citype:manage (WP-363, migration 000147, replaces
  * ci_type:manage); later metamodel pages add their permission here.
  */
-export const navPermissionFor: Record<string, string | undefined> = {
+export const navPermissionFor: Record<string, string | readonly string[] | undefined> = {
+  // Organization data (TLC-05, TLC-06, WP-1157): org:export or org:delete.
+  'org-data': ['org:export', 'org:delete'],
   'ci-types': 'citype:manage',
+  // Plan and add-ons (PKG-06, WP-886): no feature gate, entitlement:read.
+  plan: 'entitlement:read',
   // The client list reads with location:read; writing needs user:manage (WP-855).
   clients: 'location:read',
+  // The source ranks per attribute (REC-04, WP-1115) read with discovery:read;
+  // editing needs reconciliation:manage. Core page: no feature gate.
+  'source-ranks': 'discovery:read',
 };
 
 /**
@@ -220,7 +271,11 @@ export function useNavAccess() {
         isPageEnabled: (page) => isPageServed(modules, page),
         isPermitted: (page) => {
           const required = navPermissionFor[page];
-          return !required || hasPermission(permissions, required);
+          if (!required) return true;
+          // A list asks for any one of its permissions.
+          return typeof required === 'string'
+            ? hasPermission(permissions, required)
+            : required.some((key) => hasPermission(permissions, key));
         },
       }),
     [entitlements, modules, permissions],

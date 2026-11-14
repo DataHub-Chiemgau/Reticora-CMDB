@@ -27,6 +27,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
@@ -70,6 +71,10 @@ func newChannelEnvWithBlobs(t *testing.T, f *scopetest.Fixture, blobs blob.Store
 	if err != nil {
 		t.Fatal(err)
 	}
+	// As in cmd/server: personal data (e.g. the performer of a disposal,
+	// SR-63) lies in the PII vault with the master key.
+	pii.SetDefault(pii.NewVault(f.App, encryptor))
+	t.Cleanup(func() { pii.SetDefault(nil) })
 	repos := server.PostgresRepositories(f.App, audit.NewPGRecorder())
 	// As in cmd/server: CI writes keep the search index in sync.
 	repos.CI = ci.NewIndexingRepository(repos.CI, search.NewCIIndexer(repos.Search))
@@ -369,8 +374,10 @@ type channelMatrix struct {
 	seq                     int
 
 	// p2 is the scenario of the phase-2 channels
-	// (channel_matrix_p2_integration_test.go, WP-828).
-	p2 *p2Scenario
+	// (channel_matrix_p2_integration_test.go, WP-828), sr63 that of the
+	// rows of SR-63 (channel_matrix_sr63_integration_test.go, WP-875).
+	p2   *p2Scenario
+	sr63 *sr63Scenario
 }
 
 func newChannelMatrix(t *testing.T) *channelMatrix {
@@ -594,6 +601,7 @@ func newChannelMatrix(t *testing.T) *channelMatrix {
 
 	// The objects of the phase-2 channels (WP-828).
 	m.p2 = newP2Scenario(t, m, blobs)
+	m.sr63 = newSR63Scenario(t, m)
 	return m
 }
 
@@ -1591,6 +1599,7 @@ func (m *channelMatrix) rows() map[string]matrixRow {
 	// The rows of the phase-2 channels and their objects in the channels
 	// review, notification and job (WP-828).
 	m.p2Rows(rows)
+	m.sr63Rows(rows)
 	return rows
 }
 

@@ -111,10 +111,6 @@ func (h *Handler) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
 		api.WriteFieldError(w, err)
 		return
 	}
-	at := time.Now().UTC()
-	if req.At != nil {
-		at = req.At.UTC()
-	}
 	orgID := t.OrganizationID
 	visible, err := h.repo.Visible(r.Context(), orgID, req.EntityType, req.EntityID)
 	if err != nil {
@@ -123,6 +119,17 @@ func (h *Handler) CreateSnapshot(w http.ResponseWriter, r *http.Request) {
 	}
 	if !visible {
 		api.WriteRepoError(w, api.ErrNotFound)
+		return
+	}
+	// Without at the snapshot is the state of the request at the database
+	// time (Repository.Now), not at the clock of the process: a change
+	// written just before is part of it, a later run or retry of the job
+	// yields the same state, and the parameters carry at as before.
+	var at time.Time
+	if req.At != nil {
+		at = req.At.UTC()
+	} else if at, err = h.repo.Now(r.Context(), orgID); err != nil {
+		api.WriteRepoError(w, err)
 		return
 	}
 	params := SnapshotRequest{EntityType: req.EntityType, EntityID: req.EntityID, At: &at}
@@ -176,12 +183,21 @@ type stateOptions struct {
 // (F-164). The state names the fields it does not hold (not_historized,
 // AUD-03).
 func (h *Handler) snapshot(ctx context.Context, orgID string, req *SnapshotRequest, opts stateOptions) (*StateSnapshot, error) {
-	snapshot, err := h.repo.StateAt(ctx, orgID, &StateRequest{EntityType: req.EntityType, EntityID: req.EntityID, At: *req.At,
+	// No at is now: the repository replays the whole trail and names the
+	// database time of the read (StateRequest).
+	var at time.Time
+	if req.At != nil {
+		at = *req.At
+	}
+	snapshot, err := h.repo.StateAt(ctx, orgID, &StateRequest{EntityType: req.EntityType, EntityID: req.EntityID, At: at,
 		Reveal: opts.reveal, Relationships: opts.relationships && req.EntityType == "ci"})
 	if err != nil {
 		return nil, err
 	}
-	snapshot.EntityType, snapshot.EntityID, snapshot.At = req.EntityType, req.EntityID, *req.At
+	snapshot.EntityType, snapshot.EntityID = req.EntityType, req.EntityID
+	if req.At != nil {
+		snapshot.At = *req.At
+	}
 	snapshot.NotHistorized = NotHistorizedCIFields
 	if req.EntityType == "asset" {
 		snapshot.NotHistorized = NotHistorizedAssetFields
@@ -238,7 +254,7 @@ func (h *Handler) RunSnapshotJob(ctx context.Context, job *jobs.Job) (any, error
 	if err := json.Unmarshal(job.Params, &req); err != nil {
 		return nil, fmt.Errorf("decode snapshot job parameters: %w", err)
 	}
-	if (req.EntityType != "ci" && req.EntityType != "asset") || req.EntityID == "" || req.At == nil {
+	if (req.EntityType != "ci" && req.EntityType != "asset") || req.EntityID == "" {
 		return nil, fmt.Errorf("invalid snapshot job parameters: %s/%s", req.EntityType, req.EntityID)
 	}
 	ctx = jobs.CreatorContext(ctx, job)
@@ -390,14 +406,17 @@ func (h *Handler) state(w http.ResponseWriter, r *http.Request, entityType strin
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-	at := time.Now().UTC()
+	// Without at the state is the current one: the whole trail, named at
+	// the database time of the read, not at the clock of the process (a
+	// change just written stays visible despite a clock skew).
+	var at *time.Time
 	if raw := r.URL.Query().Get("at"); raw != "" {
 		parsed, err := time.Parse(time.RFC3339, raw)
 		if err != nil {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid at timestamp (RFC3339 expected)")
 			return
 		}
-		at = parsed
+		at = &parsed
 	}
 	// The state carries only the fields the principal may read (WP-727,
 	// WP-794).
@@ -411,7 +430,7 @@ func (h *Handler) state(w http.ResponseWriter, r *http.Request, entityType strin
 		opts.relationships = principal.Has(identity.PermRelationshipRead)
 	}
 	snapshot, err := h.projectedSnapshot(r.Context(), t.OrganizationID,
-		&SnapshotRequest{EntityType: entityType, EntityID: chi.URLParam(r, "id"), At: &at}, policy, opts)
+		&SnapshotRequest{EntityType: entityType, EntityID: chi.URLParam(r, "id"), At: at}, policy, opts)
 	if err != nil {
 		writeSnapshotError(w, err)
 		return

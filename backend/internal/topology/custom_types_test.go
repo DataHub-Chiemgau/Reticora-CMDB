@@ -30,7 +30,7 @@ func TestImpactOfCustomRelationshipTypes(t *testing.T) {
 			t.Fatalf("%s: %v", typ.Key, err)
 		}
 	}
-	rules := (&Handler{types: types}).impactRules(bg, "org-1")
+	rules := (&Analyzer{types: types}).impactRules(bg, "org-1")
 
 	// Matrix: the edge src → dst of each type; the failure of src or dst.
 	type reach struct {

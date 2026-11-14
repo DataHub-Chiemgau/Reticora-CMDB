@@ -5,14 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"regexp"
-	"strings"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/form"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
@@ -35,13 +37,67 @@ var (
 )
 
 type Executor struct {
-	repo       Repository
-	tickets    ticket.Repository
-	cis        ci.Repository
-	forms      form.Repository
+	repo    Repository
+	tickets ticket.Repository
+	cis     ci.Repository
+	forms   form.Repository
+	// formDocs reads the signature documents of submit_form (WP-1101);
+	// nil without the module documents (WithFormDocuments).
+	formDocs   form.DocumentReader
 	dispatcher *webhook.Dispatcher
 	guard      *override.Guard
 	conflicts  ConflictReviews
+	queue      RunQueue
+	// notifier and recipients send the notifications of
+	// send_notification (WithNotifier, WP-1095).
+	notifier   *notify.Notifier
+	recipients notify.Resolver
+	// approvers resolves the approver circles of require_approval
+	// (WithApprovers, WP-1098); nil: everyone the route admits.
+	approvers notify.Resolver
+	// eventOutbox makes send_webhook write workflow.webhook to the event
+	// outbox of the step's transaction (WithEventOutbox, WP-1096);
+	// without it the event goes to the dispatcher after the step.
+	eventOutbox bool
+	// policies resolves the action and field rights of the initiator of
+	// set_ci_field and transition_lifecycle from the initiator's current
+	// role assignments, users whether the initiator is active
+	// (WithPolicies, WP-1097); lifecycle moves the entity of
+	// transition_lifecycle (WithLifecycle).
+	policies  InitiatorPolicies
+	users     permission.CreatorStatus
+	lifecycle LifecycleTransitioner
+	// ciWriter writes the CIs of set_ci_field (WithCIService).
+	ciWriter CIWriter
+	// runQuota is max_workflow_runs_per_hour (WithRunQuota, WP-1112).
+	runQuota RunQuota
+	// assets reads the asset of a lifecycle.changed for the run context of
+	// the event triggers (WithAssets, WP-1104).
+	assets AssetReader
+	// orders changes the orders of order_decision (WithOrders, WP-1108).
+	orders OrderStatusSetter
+	// maintenance reads the maintenance windows and their affected
+	// clients for send_notification (WithMaintenance, WP-1109).
+	maintenance MaintenanceRecipients
+	// clock is the time of wait_until and the window check (WithClock);
+	// nil: time.Now.
+	clock func() time.Time
+	// afterStep is a test hook called after each succeeded step; an error
+	// ends the attempt there like a worker that dies.
+	afterStep func(index int) error
+}
+
+// RunQueue submits the job workflow.run (jobs.Queue).
+type RunQueue interface {
+	Submit(ctx context.Context, orgID, kind string, params any, opts jobs.EnqueueOptions) (*jobs.Job, bool, error)
+}
+
+// WithQueue makes Execute submit the run as the job workflow.run instead
+// of executing it in the request (WFL-02, WP-1088, E-226): Execute
+// returns the run pending, the worker executes it with retries.
+func (e *Executor) WithQueue(q RunQueue) *Executor {
+	e.queue = q
+	return e
 }
 
 // ConflictReviews opens the override_conflict review of a field
@@ -56,6 +112,13 @@ func NewExecutor(repo Repository, tickets ticket.Repository, cis ci.Repository, 
 
 // WithFieldGuard sets the central write decision for set_ci_field
 // (OVR-02). Without one the rank table alone decides.
+// WithFormDocuments sets the reader of the signature documents submit_form
+// checks (WP-1101 AK5); the router sets it with the module documents only.
+func (e *Executor) WithFormDocuments(docs form.DocumentReader) *Executor {
+	e.formDocs = docs
+	return e
+}
+
 func (e *Executor) WithFieldGuard(g *override.Guard) *Executor {
 	e.guard = g
 	return e
@@ -83,23 +146,72 @@ func (e *Executor) Trigger(ctx context.Context, orgID string, def *Definition, t
 // rows in one transaction (database.ContextWithTx) executes it with Execute
 // after the commit, so a failing action never rolls back the run that
 // records the failure (WFL-04).
+//
+// A context that names a CI (ci_id, or id in ci) binds the run to it: the
+// CI is read in the scope of ctx, the trigger's, and one that is unknown,
+// of another organization or outside that scope is ErrCINotFound (404,
+// TEN-04). The runs of one CI are executed one after the other (EVT-01,
+// WP-1089).
 func (e *Executor) Start(ctx context.Context, orgID string, def *Definition, trigger string, payload JSONMap) (*Run, error) {
+	return e.start(ctx, orgID, def, trigger, payload, nil)
+}
+
+// StartSequenced is Start for a run started by the event with sequence
+// number entitySeq of its object (Envelope.EntitySeq): the runs of a CI
+// are executed in the order of these numbers (EVT-01, WP-1090).
+func (e *Executor) StartSequenced(ctx context.Context, orgID string, def *Definition, trigger string, payload JSONMap, entitySeq int64) (*Run, error) {
+	return e.start(ctx, orgID, def, trigger, payload, &entitySeq)
+}
+
+func (e *Executor) start(ctx context.Context, orgID string, def *Definition, trigger string, payload JSONMap, entitySeq *int64) (*Run, error) {
 	if def == nil {
 		return nil, fmt.Errorf("workflow definition is required")
 	}
 	if !triggerMatches(def.Trigger, trigger) {
 		return nil, ErrTriggerMismatch
 	}
-	run := &Run{OrganizationID: orgID, WorkflowID: def.ID, Status: StatusPending, Trigger: trigger, Context: payload, StartedAt: time.Now().UTC()}
+	versionID := def.CurrentVersionID
+	if versionID == "" {
+		// A definition the caller built without its stored state: the run
+		// binds the current version (WFL-02).
+		stored, err := e.repo.GetDefinition(ctx, orgID, def.ID)
+		if err != nil {
+			return nil, err
+		}
+		versionID = stored.CurrentVersionID
+	}
+	ciID, err := e.runCI(ctx, orgID, payload)
+	if err != nil {
+		return nil, err
+	}
+	run := &Run{OrganizationID: orgID, WorkflowID: def.ID, DefinitionVersionID: versionID, Status: StatusPending, Trigger: trigger, Context: payload,
+		InitiatedBy: tenant.FromContext(ctx).UserID, CIID: ciID, EntitySeq: entitySeq}
+	// A run executed in the request starts now; a queued one with the
+	// first claim of its job (WP-1112).
+	if e.queue == nil {
+		run.StartedAt = time.Now().UTC()
+	}
 	if err := e.repo.CreateRun(ctx, run); err != nil {
 		return nil, err
 	}
 	return run, nil
 }
 
-// Execute runs the actions of a run that Start stored.
-func (e *Executor) Execute(ctx context.Context, orgID string, def *Definition, run *Run) (*Run, error) {
-	return e.resume(ctx, orgID, def, run, "")
+// Execute runs the actions of a run that Start stored: the conditions and
+// actions of the version the run is bound to, not those of def, which may
+// have changed since (WFL-02, E-228).
+func (e *Executor) Execute(ctx context.Context, orgID string, _ *Definition, run *Run) (*Run, error) {
+	if e.queue == nil {
+		// Without a job queue (--no-db, tests without NATS) the run is
+		// executed in the request, as before (parity).
+		return e.resume(ctx, orgID, run, attempt{})
+	}
+	if _, _, err := e.queue.Submit(ctx, orgID, RunJobKind, RunJobParams{RunID: run.ID, Enqueue: run.Enqueues},
+		jobs.EnqueueOptions{IdempotencyKey: RunJobKey(run.ID, run.Enqueues), CreatedBy: run.InitiatedBy}); err != nil {
+		e.failRun(ctx, orgID, run, err)
+		return nil, fmt.Errorf("queue workflow run: %w", err)
+	}
+	return run, nil
 }
 
 // TriggerMatches reports whether event starts runs of def under the rule of
@@ -109,95 +221,328 @@ func TriggerMatches(def *Definition, event string) bool {
 	return def != nil && triggerMatches(def.Trigger, event)
 }
 
+// Approve records decision of the calling user on the approval step of a
+// waiting run and returns the run (Decide, WP-1098): the decision and the
+// change of the run happen in one transaction under the row locks of run and
+// step, so a run cancelled meanwhile stays cancelled and the decision is
+// ErrNotWaiting (WP-1092 AK1).
 func (e *Executor) Approve(ctx context.Context, orgID, runID, decision, comment string) (*Run, error) {
-	run, err := e.repo.GetRun(ctx, orgID, runID)
+	res, err := e.Decide(ctx, orgID, runID, decision, comment)
 	if err != nil {
 		return nil, err
 	}
-	def, err := e.repo.GetDefinition(ctx, orgID, run.WorkflowID)
-	if err != nil {
-		return nil, err
-	}
-	if run.Status != StatusWaitingApproval {
-		return nil, ErrNotWaiting
-	}
-	steps, err := e.repo.ListSteps(ctx, orgID, runID)
-	if err != nil {
-		return nil, fmt.Errorf("list workflow steps: %w", err)
-	}
-	var waiting *Step
-	for i := range steps {
-		if steps[i].Status == StatusWaitingApproval {
-			waiting = &steps[i]
-			break
-		}
-	}
-	if waiting == nil {
-		return nil, fmt.Errorf("approval step not found: %w", ErrNotWaiting)
-	}
-	out := JSONMap{"decision": decision, "comment": comment}
-	if decision == "rejected" {
-		if _, err := e.repo.UpdateStep(ctx, orgID, waiting.ID, StatusCancelled, out, "approval rejected"); err != nil {
-			return nil, fmt.Errorf("cancel approval step: %w", err)
-		}
-		now := time.Now().UTC()
-		return e.repo.UpdateRunStatus(ctx, orgID, runID, StatusCancelled, &now, run.Context)
-	}
-	if decision != "approved" {
-		return nil, ErrInvalidDecision
-	}
-	if _, err := e.repo.UpdateStep(ctx, orgID, waiting.ID, StatusSucceeded, out, ""); err != nil {
-		return nil, fmt.Errorf("complete approval step: %w", err)
-	}
-	return e.resume(ctx, orgID, def, run, waiting.ID)
+	return res.Run, nil
 }
 
-func (e *Executor) resume(ctx context.Context, orgID string, def *Definition, run *Run, _ string) (*Run, error) {
-	if !conditionsMet(def.Conditions, run.Context) {
+// Cancel ends a pending or waiting run as cancelled (WP-1092 AK1): its open
+// step is cancelled with it, a job still queued for it finds it ended and
+// ends without effect. A running or ended run is ErrRunNotCancellable. The
+// serial key of the run is released, so the next run of its CI does not
+// wait for the sweep.
+func (e *Executor) Cancel(ctx context.Context, orgID, runID string) (*Run, error) {
+	run, err := e.repo.CancelRun(ctx, orgID, runID)
+	if err != nil {
+		return nil, err
+	}
+	e.releaseKey(ctx, orgID, run.SerialKey)
+	return run, nil
+}
+
+// Retry continues a failed run at its failed step (WP-1092 AK2): the run
+// is pending again with attempts 0 and is queued like after an approval,
+// under the scope snapshot of its first job (TEN-09); without one, or
+// without a queue, as Execute does. Any other run is ErrRunNotRetryable.
+func (e *Executor) Retry(ctx context.Context, orgID, runID string) (*Run, error) {
+	run, err := e.repo.RetryRun(ctx, orgID, runID)
+	if err != nil {
+		return nil, err
+	}
+	if e.queue == nil {
+		return e.resume(ctx, orgID, run, attempt{})
+	}
+	origin, err := e.repo.RunJobOrigin(ctx, orgID, run.ID)
+	if err != nil {
+		return nil, fmt.Errorf("read the first job of the run: %w", err)
+	}
+	if origin == nil {
+		return e.Execute(ctx, orgID, nil, run)
+	}
+	if err := e.submitRun(ctx, orgID, run, origin, time.Time{}); err != nil {
+		// No job runs the pending run: it is failed again, retryable, and
+		// the route answers 500 instead of a run nobody executes.
+		e.failRun(ctx, orgID, run, err)
+		return nil, fmt.Errorf("queue workflow run: %w", err)
+	}
+	return e.repo.GetRun(ctx, orgID, run.ID)
+}
+
+// continueApproved queues an approved run, which DecideApproval set
+// pending with its enqueues raised, with the job queue like a new run
+// (WP-1089 AK3): it waits for the runs ahead of it on its CI.
+func (e *Executor) continueApproved(ctx context.Context, orgID string, run *Run) (*Run, error) {
+	e.requeue(ctx, orgID, run)
+	return e.repo.GetRun(ctx, orgID, run.ID)
+}
+
+// runCI returns the CI a run's context names (ci_id, or id in ci), read in
+// the scope of ctx; empty without one (WP-1089 AK1).
+func (e *Executor) runCI(ctx context.Context, orgID string, payload JSONMap) (string, error) {
+	id := str(payload, "ci_id", "")
+	if id == "" {
+		switch c := payload["ci"].(type) {
+		case map[string]any:
+			id = str(c, "id", "")
+		case JSONMap:
+			id = str(c, "id", "")
+		}
+	}
+	if id == "" {
+		return "", nil
+	}
+	if !api.IsUUID(id) {
+		return "", ErrCINotFound
+	}
+	if e.cis == nil {
+		return "", fmt.Errorf("ci repository unavailable")
+	}
+	item, err := e.cis.GetByID(ctx, orgID, id)
+	if errors.Is(err, ci.ErrNotFound) {
+		return "", ErrCINotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("read the CI of the run: %w", err)
+	}
+	return item.ID, nil
+}
+
+// resume executes the actions of the run's definition version (WFL-02): a
+// waiting run keeps the version it started with, whatever the definition
+// says now. Steps are idempotent by (run_id, step_index) (WP-1088): a
+// succeeded step is never executed again; a step still running from an
+// interrupted attempt is repeated only when its action is idempotent
+// (idempotentActions), otherwise it fails with stepInterruptedText and so
+// does the run; a step that failed in an earlier attempt of the job is set
+// back to running and executed again. at is the job attempt that executes
+// the run; its zero value is the run in the request, which is not retried.
+func (e *Executor) resume(ctx context.Context, orgID string, run *Run, at attempt) (*Run, error) {
+	// The events the run writes name it as their origin (WP-1090): they
+	// start runs only of definitions that allow it, up to a depth.
+	ctx = events.WithOrigin(ctx, events.Origin{Kind: events.OriginWorkflowRun, RunID: run.ID, Depth: run.TriggerDepth})
+	def, err := e.repo.GetVersionByID(ctx, orgID, run.DefinitionVersionID)
+	if err != nil {
+		return e.abort(ctx, orgID, run, at, fmt.Errorf("load workflow definition version: %w", err))
+	}
+	hold, err := conditionsHold(def.Conditions, run.Context)
+	if err != nil {
+		return e.abort(ctx, orgID, run, at, err)
+	}
+	if !hold {
 		now := time.Now().UTC()
 		return e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusCancelled, &now, run.Context)
 	}
-	if _, err := e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusRunning, nil, run.Context); err != nil {
-		slog.Error("workflow: failed to mark run running", "run_id", run.ID, "error", err)
+	if _, err = e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusRunning, nil, run.Context); err != nil {
+		// The start writes its audit entry and workflow.run_started with
+		// it (WP-1092); a run that could not start executes no step.
+		return e.abort(ctx, orgID, run, at, fmt.Errorf("mark the run running: %w", err))
 	}
 	steps, err := e.repo.ListSteps(ctx, orgID, run.ID)
 	if err != nil {
-		e.failRun(ctx, orgID, run, fmt.Errorf("list workflow steps: %w", err))
-		return nil, fmt.Errorf("list workflow steps: %w", err)
+		return e.abort(ctx, orgID, run, at, fmt.Errorf("list workflow steps: %w", err))
 	}
-	start := len(steps)
-	for i := start; i < len(def.Actions); i++ {
+	stored := make(map[int]Step, len(steps))
+	for i := range steps {
+		stored[steps[i].StepIndex] = steps[i]
+	}
+	for i := range def.Actions {
 		action := def.Actions[i]
 		typ, err := actionType(action)
 		if err != nil {
-			e.failRun(ctx, orgID, run, err)
-			return nil, err
+			return e.abort(ctx, orgID, run, at, err)
 		}
-		step := &Step{OrganizationID: orgID, RunID: run.ID, StepIndex: i, ActionType: typ, Status: StatusRunning, Input: action, Output: JSONMap{}}
-		if appendErr := e.repo.AppendStep(ctx, step); appendErr != nil {
-			return nil, appendErr
+		if prev, ok := stored[i]; ok && prev.Status == StatusSucceeded {
+			if typ == orderDecisionActionType {
+				rememberOrderStatus(run, prev.Output)
+			}
+			continue
 		}
-		out, wait, err := e.executeAction(ctx, orgID, run, action)
+		skip, err := actionSkipped(action, run.Context)
+		if err != nil {
+			return e.abort(ctx, orgID, run, at, err)
+		}
+		if typ == approvalActionType && rejectedBefore(stored, i) {
+			// An earlier approval rejected the order (WP-1108): no further
+			// approval, order_decision rejects it.
+			skip = true
+		}
+		step, end, out, err := e.prepareStep(ctx, orgID, run, at, i, typ, action, stored)
+		if err != nil || end {
+			return out, err
+		}
+		if skip {
+			// The "when" of the action does not hold (WP-1108).
+			if _, uerr := e.repo.UpdateStep(ctx, orgID, step.ID, StatusSucceeded, JSONMap{"skipped": true}, ""); uerr != nil {
+				return e.abort(ctx, orgID, run, at, fmt.Errorf("update workflow step: %w", uerr))
+			}
+			continue
+		}
+		var output JSONMap
+		var wait, completed bool
+		switch typ {
+		case webhookActionType:
+			// The step is stored succeeded together with its event
+			// (WP-1096).
+			output, err = e.sendWebhook(ctx, orgID, run, step, action)
+			completed = err == nil
+		case waitUntilActionType:
+			// A time not reached defers the run (WP-1109).
+			var deferred *Run
+			output, deferred, err = e.waitUntil(ctx, orgID, run, step, action)
+			if err == nil && deferred != nil {
+				return deferred, nil
+			}
+		default:
+			output, wait, err = e.executeAction(ctx, orgID, run, i, action)
+		}
+		if wait && err == nil && typ == requestFormActionType {
+			// The form is requested from its recipient (WP-1102); a request
+			// that cannot be stored fails the step.
+			waiting, rerr := e.requestInput(ctx, orgID, run, step, action)
+			if rerr == nil {
+				return waiting, nil
+			}
+			output, err = nil, rerr
+			wait = false
+		}
+		if wait && err == nil && typ == approvalActionType {
+			// The approval is requested with its circle, quorum and
+			// deadline (WP-1098); a request that cannot be stored fails
+			// the step like a failed action.
+			waiting, rerr := e.requestApproval(ctx, orgID, run, step, action)
+			if rerr == nil {
+				return waiting, nil
+			}
+			output, err = nil, rerr
+			wait = false
+		}
 		if wait {
-			if _, markErr := e.repo.UpdateStep(ctx, orgID, step.ID, StatusWaitingApproval, out, ""); markErr != nil {
+			if _, markErr := e.repo.UpdateStep(ctx, orgID, step.ID, StatusWaitingApproval, output, ""); markErr != nil {
 				slog.Error("workflow: failed to mark step waiting for approval", "step_id", step.ID, "error", markErr)
 			}
 			return e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusWaitingApproval, nil, run.Context)
 		}
+		if errors.Is(err, errRunSuperseded) {
+			// The maintenance window changed or was cancelled (WP-1109):
+			// the run ends without sending, the run of the new event takes
+			// over.
+			if _, uerr := e.repo.UpdateStep(ctx, orgID, step.ID, StatusSucceeded, JSONMap{"superseded": true}, ""); uerr != nil {
+				return e.abort(ctx, orgID, run, at, fmt.Errorf("update workflow step: %w", uerr))
+			}
+			run.Context["superseded"] = true
+			now := time.Now().UTC()
+			return e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusSucceeded, &now, run.Context)
+		}
 		if err != nil {
-			if _, uerr := e.repo.UpdateStep(ctx, orgID, step.ID, StatusFailed, out, stepErrorText(step.ID, err)); uerr != nil {
+			text := stepErrorText(step.ID, err)
+			if _, uerr := e.repo.UpdateStep(ctx, orgID, step.ID, StatusFailed, output, text); uerr != nil {
 				slog.Error("workflow: failed to mark step failed", "step_id", step.ID, "error", uerr)
 			}
-			now := time.Now().UTC()
-			return e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusFailed, &now, run.Context)
+			return e.failAttempt(ctx, orgID, run, at, text)
 		}
-		if _, err := e.repo.UpdateStep(ctx, orgID, step.ID, StatusSucceeded, out, ""); err != nil {
-			e.failRun(ctx, orgID, run, fmt.Errorf("update step %s: %w", step.ID, err))
-			return nil, fmt.Errorf("update workflow step: %w", err)
+		if !completed {
+			if _, err := e.repo.UpdateStep(ctx, orgID, step.ID, StatusSucceeded, output, ""); err != nil {
+				return e.abort(ctx, orgID, run, at, fmt.Errorf("update workflow step: %w", err))
+			}
+		}
+		if typ == orderDecisionActionType {
+			rememberOrderStatus(run, output)
+		}
+		if e.afterStep != nil {
+			// Test hook: the attempt ends after step i like a worker that
+			// dies (WP-1088).
+			if herr := e.afterStep(i); herr != nil {
+				return nil, herr
+			}
 		}
 	}
 	now := time.Now().UTC()
 	return e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusSucceeded, &now, run.Context)
+}
+
+// prepareStep returns the step that executes action i, which has not
+// succeeded: a new one, or the stored one of an earlier attempt set back
+// to running. end reports that resume ends here with out and err: the
+// step still waits for its approval, was cancelled or was interrupted.
+func (e *Executor) prepareStep(ctx context.Context, orgID string, run *Run, at attempt, i int, typ string, action JSONMap, stored map[int]Step) (*Step, bool, *Run, error) {
+	prev, ok := stored[i]
+	if !ok {
+		step := &Step{OrganizationID: orgID, RunID: run.ID, StepIndex: i, ActionType: typ, Status: StatusRunning, Input: action, Output: JSONMap{}}
+		if err := e.repo.AppendStep(ctx, step); err != nil {
+			return nil, true, nil, err
+		}
+		return step, false, nil, nil
+	}
+	switch prev.Status {
+	case StatusWaitingApproval:
+		r, err := e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusWaitingApproval, nil, run.Context)
+		return nil, true, r, err
+	case StatusWaitingInput:
+		// The step still waits for its form (WP-1102).
+		r, err := e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusWaitingInput, nil, run.Context)
+		return nil, true, r, err
+	case StatusCancelled:
+		now := time.Now().UTC()
+		r, err := e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusCancelled, &now, run.Context)
+		return nil, true, r, err
+	case StatusRunning:
+		if !idempotentActions[prev.ActionType] {
+			// Whether the action took effect before the interruption is
+			// unknown: it is not repeated, the run fails for good.
+			if _, err := e.repo.UpdateStep(ctx, orgID, prev.ID, StatusFailed, prev.Output, stepInterruptedText); err != nil {
+				slog.Error("workflow: failed to mark interrupted step failed", "step_id", prev.ID, "error", err)
+			}
+			r, err := e.finishFailed(ctx, orgID, run, at, stepInterruptedText)
+			return nil, true, r, err
+		}
+	default:
+		// failed in an earlier attempt of the job: executed again.
+		if _, err := e.repo.UpdateStep(ctx, orgID, prev.ID, StatusRunning, JSONMap{}, ""); err != nil {
+			return nil, true, nil, fmt.Errorf("reset workflow step: %w", err)
+		}
+	}
+	step := prev
+	step.Status = StatusRunning
+	return &step, false, nil, nil
+}
+
+// failAttempt ends an attempt whose step failed with text: the job retries
+// it while attempts remain (the run stays running, last_error and
+// next_attempt_at are recorded, RunRetryError tells the job), otherwise
+// the run fails for good (in a job with RunFailedError).
+func (e *Executor) failAttempt(ctx context.Context, orgID string, run *Run, at attempt, text string) (*Run, error) {
+	if at.retries() {
+		next := time.Now().UTC().Add(at.backoff(at.number))
+		if err := e.repo.RecordAttempt(ctx, orgID, run.ID, RunAttempt{Attempts: at.number, NextAttemptAt: &next, LastError: text}); err != nil {
+			slog.Error("workflow: failed to record the attempt", "run_id", run.ID, "error", err)
+		}
+		return nil, &RunRetryError{Text: text}
+	}
+	r, err := e.finishFailed(ctx, orgID, run, at, text)
+	if err != nil || !at.job {
+		return r, err
+	}
+	// The last attempt of the job: the job fails as well.
+	return r, &RunFailedError{Text: text}
+}
+
+// finishFailed marks the run failed for good with last_error text.
+func (e *Executor) finishFailed(ctx context.Context, orgID string, run *Run, at attempt, text string) (*Run, error) {
+	if at.job {
+		if err := e.repo.RecordAttempt(ctx, orgID, run.ID, RunAttempt{Attempts: at.number, LastError: text}); err != nil {
+			slog.Error("workflow: failed to record the attempt", "run_id", run.ID, "error", err)
+		}
+	}
+	now := time.Now().UTC()
+	return e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusFailed, &now, run.Context)
 }
 
 // stepErrorText is the error text a failed step stores, which the run API
@@ -214,6 +559,85 @@ func stepErrorText(stepID string, err error) string {
 		return detail
 	}
 	return "the action could not be completed"
+}
+
+// abort ends resume on an error that is not a failed step. In the request
+// (no job) the run fails at once, as before. In a job the run is left as it
+// is: Worker.Run decides with endAttempt whether the job retries the run or
+// it fails for good, so a passing database error does not end a run that
+// has attempts left.
+func (e *Executor) abort(ctx context.Context, orgID string, run *Run, at attempt, cause error) (*Run, error) {
+	if !at.job {
+		e.failRun(ctx, orgID, run, cause)
+	}
+	return nil, cause
+}
+
+// runInterruptedText is the last_error of an attempt that ended with an
+// error that is neither a failed step nor one of the workflow's own: its
+// text (network, database, timeout) is logged, not shown.
+const runInterruptedText = "the run could not be continued"
+
+// runLostText is the last_error of a run whose job failed for good without
+// the worker closing the run (the worker of the last attempt was lost or
+// timed out).
+const runLostText = "the run was interrupted on its last attempt"
+
+// permanentRunError reports whether err fails the run whatever attempts
+// remain: a stored condition or action that is invalid, or a version that
+// is gone, do not heal by a retry.
+func permanentRunError(err error) bool {
+	return errors.Is(err, errConditionInvalid) || errors.Is(err, ErrInvalidAction) || errors.Is(err, ErrVersionNotFound)
+}
+
+// runErrorText is the sanitized last_error of an attempt that ended with
+// err outside a step (AK5): the workflow's own errors keep their fixed
+// text, a database error its classification (stepErrorText), any other
+// error the fixed runInterruptedText.
+func runErrorText(err error) string {
+	for _, known := range []error{errConditionInvalid, ErrInvalidAction, ErrVersionNotFound} {
+		if errors.Is(err, known) {
+			return known.Error()
+		}
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return stepErrorText("", err)
+	}
+	slog.Warn("workflow: attempt ended with an error", "error", err)
+	return runInterruptedText
+}
+
+// endAttempt decides about a job attempt that ended with err (WP-1088
+// AK3/AK5). RunRetryError and RunFailedError were decided by failAttempt.
+// Any other error is no failed step: a database or worker error, also the
+// timeout of the attempt, is retried while attempts remain with the
+// sanitized text in last_error; a permanent error (permanentRunError) and
+// the last attempt fail the run for good (RunFailedError). The writes use
+// a context without the attempt's deadline, so a timed-out attempt still
+// closes its run.
+func (e *Executor) endAttempt(ctx context.Context, orgID string, run *Run, at attempt, err error) error {
+	var retry *RunRetryError
+	var failed *RunFailedError
+	if errors.As(err, &retry) || errors.As(err, &failed) {
+		return err
+	}
+	text := runErrorText(err)
+	ctx = context.WithoutCancel(ctx)
+	if at.retries() && !permanentRunError(err) {
+		next := time.Now().UTC().Add(at.backoff(at.number))
+		if rerr := e.repo.RecordAttempt(ctx, orgID, run.ID, RunAttempt{Attempts: at.number, NextAttemptAt: &next, LastError: text}); rerr != nil {
+			slog.Error("workflow: failed to record the attempt", "run_id", run.ID, "error", rerr)
+		}
+		return &RunRetryError{Text: text}
+	}
+	if _, ferr := e.finishFailed(ctx, orgID, run, at, text); ferr != nil {
+		// The run stays open; the job fails or retries with this error,
+		// and Worker.JobFailed closes the run once the job failed for good.
+		slog.Error("workflow: failed to mark run failed", "run_id", run.ID, "error", ferr)
+		return &RunRetryError{Text: text}
+	}
+	return &RunFailedError{Text: text}
 }
 
 // failRun best-effort marks the run failed; the original error is returned to
@@ -241,7 +665,7 @@ func actionType(action JSONMap) (string, error) {
 	return typ, nil
 }
 
-func (e *Executor) executeAction(ctx context.Context, orgID string, run *Run, action JSONMap) (JSONMap, bool, error) {
+func (e *Executor) executeAction(ctx context.Context, orgID string, run *Run, index int, action JSONMap) (JSONMap, bool, error) {
 	typ, err := actionType(action)
 	if err != nil {
 		return nil, false, err
@@ -269,19 +693,21 @@ func (e *Executor) executeAction(ctx context.Context, orgID string, run *Run, ac
 			return nil, false, err
 		}
 		return JSONMap{"ticket_id": t.ID}, false, nil
-	case "send_webhook":
-		event := str(action, "event", "workflow.event")
-		if e.dispatcher != nil {
-			e.dispatcher.Dispatch(ctx, orgID, event, map[string]any{"run_id": run.ID, "context": run.Context})
-		}
-		return JSONMap{"event": event}, false, nil
 	case "set_ci_field":
-		if e.cis == nil {
-			return nil, false, fmt.Errorf("ci repository unavailable")
-		}
-		return e.setCIField(ctx, orgID, action)
-	case "require_approval":
+		return e.setCIFields(ctx, orgID, run, action)
+	case "transition_lifecycle":
+		return e.transitionLifecycle(ctx, orgID, run, action)
+	case approvalActionType:
 		return JSONMap{"message": str(action, "message", "Approval required")}, true, nil
+	case requestFormActionType:
+		// Waits for the submission of the form (requestInput, WP-1102).
+		return JSONMap{}, true, nil
+	case orderDecisionActionType:
+		out, err := e.orderDecision(ctx, orgID, run, index, action)
+		return out, false, err
+	case "send_notification":
+		out, err := e.sendNotification(ctx, orgID, run, index, action)
+		return out, false, err
 	case "submit_form":
 		if e.forms == nil {
 			return nil, false, fmt.Errorf("form repository unavailable")
@@ -326,14 +752,25 @@ func (e *Executor) submitForm(ctx context.Context, orgID string, action JSONMap)
 	if !def.Active {
 		return nil, false, errFormInactive
 	}
-	if err := form.Validate(def.Schema, values); err != nil {
+	// Schema and conditional logic of the current version like POST
+	// /forms/{id}/submissions (WP-1101 AK2, AK3, AK5): hidden fields are
+	// dropped, required_when and readonly_when hold, a signature names a
+	// readable PNG or JPEG document; the repository binds that version.
+	checked, err := form.ValidateSubmission(ctx, &form.SubmissionCheck{OrganizationID: orgID, Schema: def.Schema, UIHints: def.UIHints,
+		Values: values, Documents: e.formDocs})
+	if err != nil {
 		var ve form.ValidationError
 		if errors.As(err, &ve) {
 			return JSONMap{"fields": ve.Fields}, false, err
 		}
+		var fe *api.FieldError
+		if errors.As(err, &fe) {
+			return JSONMap{"fields": []form.FieldError{{Field: fe.Field, Message: fe.Message}}}, false, err
+		}
 		return nil, false, err
 	}
-	sub := &form.Submission{OrganizationID: orgID, FormID: def.ID, Values: values, SubmittedBy: tenant.FromContext(ctx).UserID, Status: "submitted"}
+	sub := &form.Submission{OrganizationID: orgID, FormID: def.ID, Values: checked, SubmittedBy: tenant.FromContext(ctx).UserID, Status: "submitted",
+		ExpectedVersionID: def.CurrentVersionID}
 	if err := e.forms.CreateSubmission(ctx, sub); err != nil {
 		return nil, false, err
 	}
@@ -345,116 +782,41 @@ func triggerMatches(trigger JSONMap, event string) bool {
 	if typ == "manual" || typ == "schedule" {
 		return event == typ || event == "manual"
 	}
-	return str(trigger, "event", "") == event
+	if typ == TriggerFormSubmitted || typ == TriggerOrderSubmitted {
+		// Started by a submission of its form (WP-1102) or of an order
+		// (WP-1108) only.
+		return event == typ
+	}
+	return eventMatches(trigger, event)
 }
-func conditionsMet(conditions []JSONMap, ctx JSONMap) bool {
-	for _, c := range conditions {
-		if !eval(c, ctx) {
-			return false
+
+// eventMatches reports whether the trigger names event in trigger.event: a
+// type name or a list of type names (WP-1090).
+func eventMatches(trigger JSONMap, event string) bool {
+	switch v := trigger["event"].(type) {
+	case string:
+		return v != "" && v == event
+	case []any:
+		for _, item := range v {
+			if s, ok := item.(string); ok && s == event {
+				return true
+			}
+		}
+	case []string:
+		for _, s := range v {
+			if s == event {
+				return true
+			}
 		}
 	}
-	return true
+	return false
 }
-func eval(cond, ctx JSONMap) bool {
-	field := str(cond, "field", "")
-	op := str(cond, "op", "eq")
-	want := cond["value"]
-	got := lookup(ctx, field)
-	switch op {
-	case "eq":
-		return fmt.Sprint(got) == fmt.Sprint(want)
-	case "ne":
-		return fmt.Sprint(got) != fmt.Sprint(want)
-	case "exists":
-		return got != nil
-	case "not_empty":
-		return fmt.Sprint(got) != ""
-	case "contains":
-		return strings.Contains(fmt.Sprint(got), fmt.Sprint(want))
-	case "matches":
-		re, err := regexp.Compile(fmt.Sprint(want))
-		return err == nil && re.MatchString(fmt.Sprint(got))
-	default:
-		return false
-	}
-}
-func lookup(m map[string]any, path string) any {
-	cur := any(m)
-	for _, p := range strings.Split(path, ".") {
-		mm, ok := cur.(map[string]any)
-		if !ok {
-			return nil
-		}
-		cur = mm[p]
-	}
-	return cur
-}
+
 func str(m map[string]any, key, fallback string) string {
 	if v, ok := m[key].(string); ok && v != "" {
 		return v
 	}
 	return fallback
-}
-
-// setCIField writes one CI field as source workflow (rank 92) through the
-// central decision (OVR-02, WFL-02): a manual override is never replaced,
-// a refused write is reported in the action output, and an unreadable
-// override state fails the action.
-func (e *Executor) setCIField(ctx context.Context, orgID string, action JSONMap) (JSONMap, bool, error) {
-	ciID := str(action, "ci_id", "")
-	field := str(action, "field", "")
-	value := action["value"]
-	if field == "" {
-		return nil, false, fmt.Errorf("set_ci_field needs a field")
-	}
-	item, err := e.cis.GetByID(ctx, orgID, ciID)
-	if err != nil {
-		return nil, false, err
-	}
-	// Workflow writes rank 92 and raise the CI version (API-07).
-	req := ci.UpdateRequest{Authoritative: true}
-	var current any
-	switch field {
-	case "status":
-		v := fmt.Sprint(value)
-		value, current, req.Status = v, item.Status, &v
-	case "name":
-		v := fmt.Sprint(value)
-		value, current, req.Name = v, item.Name, &v
-	default:
-		current = item.Attributes[field]
-		req.Attributes = map[string]any{field: value}
-	}
-	w := &override.Write{
-		OrganizationID: orgID, CIID: item.ID, Field: field, Value: value, Source: sourceWorkflow,
-		ObservedAt: time.Now().UTC(), Current: current, FallbackSource: item.DiscoverySource,
-	}
-	d := e.guard.Decide(ctx, w)
-	if d.Reason == override.ReasonError {
-		return nil, false, fmt.Errorf("set_ci_field %s: override state unreadable, nothing written", field)
-	}
-	if d.Write {
-		if _, err = e.cis.Update(ctx, orgID, item.ID, req); err != nil {
-			return nil, false, err
-		}
-	}
-	if d.Write || d.Conflict || d.Reason == override.ReasonOverride {
-		if err = e.guard.Record(ctx, w); err != nil {
-			return nil, false, fmt.Errorf("record provenance: %w", err)
-		}
-	}
-	if d.Conflict && e.conflicts != nil {
-		// The override stays; the value goes to the review queue like a
-		// discovered one (REC-12). A failed review does not fail the step.
-		previous, hasPrevious := item.ObservedUnderOverride(field)
-		if _, err = e.conflicts.OpenOverrideConflict(ctx, &reviews.OverrideConflict{
-			OrganizationID: orgID, CIID: item.ID, Field: field, Value: value, Source: sourceWorkflow,
-			Rank: override.SourceRank(sourceWorkflow), Previous: previous, HasPrevious: hasPrevious,
-		}); err != nil {
-			slog.WarnContext(ctx, "override conflict review not created", "ci_id", item.ID, "field", field, "error", err)
-		}
-	}
-	return JSONMap{"ci_id": item.ID, "field": field, "written": d.Write, "reason": d.Reason}, false, nil
 }
 
 // sourceWorkflow is the automation source of workflow writes (REC-03 rank 92).

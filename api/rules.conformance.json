@@ -1,5 +1,5 @@
 {
-  "description": "Conformance cases of the rule AST (MET-45, api/rules.schema.json). backend/internal/rules/rules_test.go and frontend/src/rules/rules.test.ts both run every case. cases: rule must be a valid value rule and evaluate to exactly the listed violation codes; invalid_rules must be rejected. absent: true means the field has no value at all. condition_cases (WP-715): condition must be a valid condition and evaluate to result for the record values (a field missing from values is absent); the cases named reference: and reference list: compare reference attributes (WP-254: user, location, reference and the other alias types hold the id of the target as text, multi_value a list of ids, finding F-2 of WP-326); backend/internal/fieldmeta/fieldmeta_test.go also evaluates the cases of comparisons and all of comparisons through fieldmeta.Evaluate. invalid_conditions must be rejected, the error message starting with path and a colon. expressions (WP-258): expr must be a valid expression ($defs/expr) and evaluate to result (null: empty) for inputs (attributes by key, asset fields as asset.<field>; a key missing from inputs is absent), now (RFC 3339) and timezone (IANA); invalid_expressions must be rejected, the error message starting with path and a colon. backend/internal/rules/rules_test.go (rules.ParseExpr, rules.EvalExpr) and, as the second evaluation, frontend/src/rules/rules.test.ts (parseExpr, evalExpr in frontend/src/rules/expr.ts, WP-802) run every expression case. filter_cases (WP-789): filter must be a valid filter AST ($defs/filter) for entity_kind; invalid_filters must be rejected naming path (where.<path>) before a colon. backend/internal/savedview/filter_test.go runs both through Expr.Validate, frontend/src/rules/filter.test.ts through parseFilter; the cases check structure, operators, value forms, limits and related, while the field whitelist, attribute definitions, tags and relationship types stay in the Go tests.",
+  "description": "Conformance cases of the rule AST (MET-45, api/rules.schema.json). backend/internal/rules/rules_test.go and frontend/src/rules/rules.test.ts both run every case. cases: rule must be a valid value rule and evaluate to exactly the listed violation codes; invalid_rules must be rejected. absent: true means the field has no value at all. condition_cases (WP-715): condition must be a valid condition and evaluate to result for the record values (a field missing from values is absent); the cases named reference: and reference list: compare reference attributes (WP-254: user, location, reference and the other alias types hold the id of the target as text, multi_value a list of ids, finding F-2 of WP-326); the cases named form: hold the values of a form submission as backend/internal/form/conditions.go evaluates them, nested objects flattened to dot paths besides their keys (form.EvaluationValues, WP-1101); backend/internal/fieldmeta/fieldmeta_test.go also evaluates the cases of comparisons and all of comparisons through fieldmeta.Evaluate. invalid_conditions must be rejected, the error message starting with path and a colon. expressions (WP-258): expr must be a valid expression ($defs/expr) and evaluate to result (null: empty) for inputs (attributes by key, asset fields as asset.<field>; a key missing from inputs is absent), now (RFC 3339) and timezone (IANA); invalid_expressions must be rejected, the error message starting with path and a colon. backend/internal/rules/rules_test.go (rules.ParseExpr, rules.EvalExpr) and, as the second evaluation, frontend/src/rules/rules.test.ts (parseExpr, evalExpr in frontend/src/rules/expr.ts, WP-802) run every expression case. filter_cases (WP-789): filter must be a valid filter AST ($defs/filter) for entity_kind; invalid_filters must be rejected naming path (where.<path>) before a colon. backend/internal/savedview/filter_test.go runs both through Expr.Validate, frontend/src/rules/filter.test.ts through parseFilter; the cases check structure, operators, value forms, limits and related, while the field whitelist, attribute definitions, tags and relationship types stay in the Go tests.",
   "version": 1,
   "cases": [
     {
@@ -1537,6 +1537,344 @@
       },
       "values": {
         "location": "a0b1c2d3-e4f5-4a6b-8c7d-9e0f1a2b3c4d"
+      },
+      "result": true
+    },
+    {
+      "name": "metric: value gt above the threshold",
+      "condition": {
+        "op": "gt",
+        "field": "value",
+        "value": 90
+      },
+      "values": {
+        "value": 91,
+        "avg": 80,
+        "max": 91,
+        "min": 70,
+        "delta": 21,
+        "rate": 0.5
+      },
+      "result": true
+    },
+    {
+      "name": "metric: value gt at the threshold",
+      "condition": {
+        "op": "gt",
+        "field": "value",
+        "value": 90
+      },
+      "values": {
+        "value": 90,
+        "avg": 90,
+        "max": 90,
+        "min": 90,
+        "delta": 0
+      },
+      "result": false
+    },
+    {
+      "name": "metric: value lt below the clear threshold",
+      "condition": {
+        "op": "lt",
+        "field": "value",
+        "value": 85
+      },
+      "values": {
+        "value": 84,
+        "avg": 88
+      },
+      "result": true
+    },
+    {
+      "name": "metric: value eq the threshold",
+      "condition": {
+        "op": "eq",
+        "field": "value",
+        "value": 10
+      },
+      "values": {
+        "value": 10
+      },
+      "result": true
+    },
+    {
+      "name": "metric: avg gte over the window",
+      "condition": {
+        "op": "gte",
+        "field": "avg",
+        "value": 75.5
+      },
+      "values": {
+        "value": 60,
+        "avg": 75.5,
+        "max": 91,
+        "min": 60
+      },
+      "result": true
+    },
+    {
+      "name": "metric: rate gt per second",
+      "condition": {
+        "op": "gt",
+        "field": "rate",
+        "value": 1000
+      },
+      "values": {
+        "value": 100,
+        "rate": 10,
+        "delta": -4294967100
+      },
+      "result": false
+    },
+    {
+      "name": "metric: delta lt a drop",
+      "condition": {
+        "op": "lt",
+        "field": "delta",
+        "value": 0
+      },
+      "values": {
+        "value": 100,
+        "delta": -4294967100,
+        "rate": 10
+      },
+      "result": true
+    },
+    {
+      "name": "metric: all of avg and rate",
+      "condition": {
+        "op": "all",
+        "rules": [
+          {
+            "op": "gt",
+            "field": "avg",
+            "value": 50
+          },
+          {
+            "op": "lte",
+            "field": "rate",
+            "value": 5
+          }
+        ]
+      },
+      "values": {
+        "value": 70,
+        "avg": 60,
+        "rate": 2.5
+      },
+      "result": true
+    },
+    {
+      "name": "metric: all fails on one",
+      "condition": {
+        "op": "all",
+        "rules": [
+          {
+            "op": "gt",
+            "field": "avg",
+            "value": 50
+          },
+          {
+            "op": "lte",
+            "field": "rate",
+            "value": 5
+          }
+        ]
+      },
+      "values": {
+        "value": 70,
+        "avg": 60,
+        "rate": 7
+      },
+      "result": false
+    },
+    {
+      "name": "metric: any of value and delta",
+      "condition": {
+        "op": "any",
+        "rules": [
+          {
+            "op": "gt",
+            "field": "value",
+            "value": 90
+          },
+          {
+            "op": "gt",
+            "field": "delta",
+            "value": 20
+          }
+        ]
+      },
+      "values": {
+        "value": 80,
+        "delta": 25
+      },
+      "result": true
+    },
+    {
+      "name": "metric: not of rate",
+      "condition": {
+        "op": "not",
+        "rules": [
+          {
+            "op": "lt",
+            "field": "rate",
+            "value": 1
+          }
+        ]
+      },
+      "values": {
+        "value": 5,
+        "rate": 3
+      },
+      "result": true
+    },
+    {
+      "name": "metric: rate absent for one sample",
+      "condition": {
+        "op": "gte",
+        "field": "rate",
+        "value": 0
+      },
+      "values": {
+        "value": 5,
+        "avg": 5,
+        "max": 5,
+        "min": 5,
+        "delta": 0
+      },
+      "result": false
+    },
+    {
+      "name": "metric: not of an absent rate",
+      "condition": {
+        "op": "not",
+        "rules": [
+          {
+            "op": "gt",
+            "field": "rate",
+            "value": 0
+          }
+        ]
+      },
+      "values": {
+        "value": 5,
+        "delta": 0
+      },
+      "result": true
+    },
+    {
+      "name": "form: nested path device.kind holds",
+      "condition": {
+        "op": "eq",
+        "field": "device.kind",
+        "value": "router"
+      },
+      "values": {
+        "device": {
+          "kind": "router"
+        },
+        "device.kind": "router",
+        "serial": "SN-1"
+      },
+      "result": true
+    },
+    {
+      "name": "form: nested path device.kind of another kind",
+      "condition": {
+        "op": "eq",
+        "field": "device.kind",
+        "value": "router"
+      },
+      "values": {
+        "device": {
+          "kind": "switch"
+        },
+        "device.kind": "switch"
+      },
+      "result": false
+    },
+    {
+      "name": "form: empty on a field the submission lacks",
+      "condition": {
+        "op": "empty",
+        "field": "serial"
+      },
+      "values": {
+        "device": {
+          "kind": "router"
+        },
+        "device.kind": "router"
+      },
+      "result": true
+    },
+    {
+      "name": "form: in with a list of kinds",
+      "condition": {
+        "op": "in",
+        "field": "device.kind",
+        "value": [
+          "router",
+          "firewall"
+        ]
+      },
+      "values": {
+        "device": {
+          "kind": "firewall"
+        },
+        "device.kind": "firewall"
+      },
+      "result": true
+    },
+    {
+      "name": "form: all over two fields, one fails",
+      "condition": {
+        "op": "all",
+        "rules": [
+          {
+            "op": "eq",
+            "field": "device.kind",
+            "value": "router"
+          },
+          {
+            "op": "gt",
+            "field": "count",
+            "value": 0
+          }
+        ]
+      },
+      "values": {
+        "device": {
+          "kind": "router"
+        },
+        "device.kind": "router",
+        "count": 0
+      },
+      "result": false
+    },
+    {
+      "name": "form: any over two fields, one holds",
+      "condition": {
+        "op": "any",
+        "rules": [
+          {
+            "op": "eq",
+            "field": "device.kind",
+            "value": "router"
+          },
+          {
+            "op": "not_empty",
+            "field": "serial"
+          }
+        ]
+      },
+      "values": {
+        "device": {
+          "kind": "switch"
+        },
+        "device.kind": "switch",
+        "serial": "SN-2"
       },
       "result": true
     }

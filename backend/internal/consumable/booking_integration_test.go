@@ -182,8 +182,8 @@ func TestStockBookingThroughMovementService(t *testing.T) {
 				t.Errorf("%s: %d %v, want 422 on %s", name, code, body, tc.field)
 			}
 		}
-		if code, body := a.post(map[string]any{"movement_type": "receipt", "consumable_id": f.ID(), "to_location_id": b1.bin, "quantity": 1}); code != http.StatusNotFound {
-			t.Errorf("unknown consumable: %d %v, want 404", code, body)
+		if code, body := a.post(map[string]any{"movement_type": "receipt", "consumable_id": f.ID(), "to_location_id": b1.bin, "quantity": 1}); code != http.StatusUnprocessableEntity || body["field"] != "consumable_id" {
+			t.Errorf("unknown consumable: %d %v, want 422 on consumable_id (SR-50)", code, body)
 		}
 		if n := ledgerCount(t, f, cons); n != before {
 			t.Errorf("ledger rows after the refusals: %d, want %d", n, before)

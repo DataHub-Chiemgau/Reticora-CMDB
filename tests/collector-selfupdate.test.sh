@@ -22,7 +22,10 @@
 #   c) beta release while subscribed to stable: no swap, cosign not run;
 #   d) the new version does not start (its heartbeats are refused, every
 #      start ends unconfirmed): after three starts the fourth rolls back to
-#      v0.0.1, which runs and does not install v0.0.2 again.
+#      v0.0.1, which runs and does not install v0.0.2 again;
+#   e) E-258: the cosign on PATH is v2.4.1 (older than MinCosignVersion,
+#      GHSA-fx35-mq7g-6g98): the start warns, the signed v0.0.2 is refused
+#      without running verify-blob, no swap, the collector keeps running.
 #
 # Tools: go, python3, sha256sum, cmp. Runs in the job installer-script-tests
 # of install-smoke.yml.
@@ -89,12 +92,17 @@ cp "$WWW/artifacts/reticora-collector-v0.0.2.sigstore.json" "$FIXTURE_BUNDLE"
 
 STUBS="$TMP_ROOT/stubs"
 COSIGN_LOG="$TMP_ROOT/cosign.log"
+# The release the stub reports for 'cosign version' (case e: v2.4.1).
+COSIGN_STUB_VERSION="$TMP_ROOT/cosign.version"
 mkdir -p "$STUBS"
 : > "$COSIGN_LOG"
+echo v3.1.4 > "$COSIGN_STUB_VERSION"
 cat > "$STUBS/cosign" <<STUB
 #!/usr/bin/env bash
-# cosign stub: verify-blob accepts only the fixture bundle, for the artifact
-# it was made for, with the pinned release identity and issuer.
+# cosign stub: 'version' reports the release of $COSIGN_STUB_VERSION (not
+# logged); verify-blob accepts only the fixture bundle, for the artifact it
+# was made for, with the pinned release identity and issuer.
+if [ "\${1:-}" = version ]; then printf 'GitVersion:    %s\n' "\$(cat '$COSIGN_STUB_VERSION')"; exit 0; fi
 printf '%s\n' "\$*" >> '$COSIGN_LOG'
 [ "\${1:-}" = verify-blob ] || { echo "cosign stub: unsupported command \${1:-}" >&2; exit 2; }
 shift
@@ -397,6 +405,31 @@ else
     fail "d: the restored v0.0.1 sends a heartbeat" "$(cat "$LOG")"
 fi
 stop_collector
+
+# ─── e) cosign v2.4.1 on PATH: the update is refused ────────────────────────
+install_v1 e
+write_manifest stable stable reticora-collector-v0.0.2.sigstore.json
+echo v2.4.1 > "$COSIGN_STUB_VERSION"
+: > "$COSIGN_LOG"
+LOG="$TMP_ROOT/e.log"
+start_collector "$LOG"
+if wait_log "$LOG" '"msg":"collector update refused","version":"v0.0.2"' 60; then
+    ok "e (cosign v2.4.1): log 'collector update refused'"
+else
+    fail "e (cosign v2.4.1): log 'collector update refused'" "$(cat "$LOG")"
+fi
+DETAIL="$(cat "$LOG")"
+check "e (cosign v2.4.1): the start warns that cosign is outdated" \
+    grep -q '"event":"collector.update.cosign_outdated".*"version":"v2.4.1"' "$LOG"
+check "e (cosign v2.4.1): refused for the cosign version" grep -q 'cosign is older than v3.1.3' "$LOG"
+DETAIL="$(cat "$COSIGN_LOG")"
+check "e (cosign v2.4.1): verify-blob not run" test ! -s "$COSIGN_LOG"
+sleep 1.5
+DETAIL="$(ls -la "$INSTALL")"
+check "e (cosign v2.4.1): no swap, v0.0.1 still installed" untouched
+check "e (cosign v2.4.1): the collector keeps running" running
+stop_collector
+echo v3.1.4 > "$COSIGN_STUB_VERSION"
 
 echo
 echo "collector-selfupdate: $PASS passed, $FAIL failed"

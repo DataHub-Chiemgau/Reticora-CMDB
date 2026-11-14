@@ -1,34 +1,55 @@
-import { FileText } from 'lucide-react';
+/**
+ * FormsPage lists the active form definitions (WFL-01), renders the chosen
+ * one for a submission (FormFill over FormRenderer: conditions after
+ * MET-45, signatures) and shows its submissions grouped by schema version,
+ * each with the schema of its own version (WP-1133). "Neu" and
+ * "Bearbeiten" lead into the form editor, only with form:write.
+ */
+import { FileText, Pencil, Plus } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useFormDefinitions, useSubmitForm } from '../api/hooks';
-import type { FormDefinition } from '../api/client';
+import { useNavigate } from 'react-router';
+import {
+  useAllFormSubmissions,
+  useFormDefinitions,
+  useFormVersions,
+  useHasPermission,
+  useSubmitForm,
+} from '../api/hooks';
+import type { FormDefinition, FormSubmission } from '../api/client';
+import { FormFill, SubmissionView, parseForm } from '../components/form/FormRenderer';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
 import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorState } from '../components/ui/ErrorState';
-import { Input } from '../components/ui/Input';
 import { PageHeader } from '../components/ui/PageHeader';
 import { SkeletonList } from '../components/ui/Skeleton';
 import { cn } from '../components/ui/utils';
 
-type JsonSchema = {
-  properties?: Record<string, { type?: string; title?: string; enum?: string[] }>;
-  required?: string[];
-};
-
 export function FormsPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const canWrite = useHasPermission('form:write') === true;
   const forms = useFormDefinitions();
-  const submit = useSubmitForm();
   const [selectedId, setSelectedId] = useState('');
-  const [values, setValues] = useState<Record<string, unknown>>({});
   const selected = useMemo(
     () => forms.data?.data.find((form) => form.id === selectedId) ?? forms.data?.data[0],
     [forms.data, selectedId],
   );
 
-  const header = <PageHeader title={t('forms.title')} description={t('forms.subtitle')} />;
+  const header = (
+    <PageHeader
+      title={t('forms.title')}
+      description={t('forms.subtitle')}
+      actions={
+        canWrite ? (
+          <Button icon={<Plus />} onClick={() => void navigate('/forms/new')}>
+            {t('forms.new')}
+          </Button>
+        ) : null
+      }
+    />
+  );
 
   if (forms.isLoading)
     return (
@@ -85,19 +106,7 @@ export function FormsPage() {
               </ul>
             </Card>
           </section>
-          {selected ? (
-            <Card title={`${t('forms.render')} · ${selected.name}`}>
-              <FormRenderer
-                form={selected}
-                values={values}
-                setValues={setValues}
-                onSubmit={() =>
-                  submit.mutate({ id: selected.id, values }, { onSuccess: () => setValues({}) })
-                }
-                submitting={submit.isPending}
-              />
-            </Card>
-          ) : null}
+          {selected ? <SelectedForm key={selected.id} form={selected} canWrite={canWrite} /> : null}
         </div>
       ) : (
         <EmptyState
@@ -110,45 +119,105 @@ export function FormsPage() {
   );
 }
 
-function FormRenderer({
-  form,
-  values,
-  setValues,
-  onSubmit,
-  submitting,
-}: {
-  form: FormDefinition;
-  values: Record<string, unknown>;
-  setValues: (v: Record<string, unknown>) => void;
-  onSubmit: () => void;
-  submitting: boolean;
-}) {
+function SelectedForm({ form, canWrite }: { form: FormDefinition; canWrite: boolean }) {
   const { t } = useTranslation();
-  const schema = form.schema as JsonSchema;
-  const properties = Object.entries(schema.properties ?? {});
+  const navigate = useNavigate();
+  const submit = useSubmitForm();
+  const fields = useMemo(() => parseForm(form.schema, form.ui_hints), [form]);
   return (
-    <div className="max-w-md space-y-4">
-      {properties.map(([name, prop]) => (
-        <Input
-          key={name}
-          label={prop.title || name}
-          type={prop.type === 'number' || prop.type === 'integer' ? 'number' : 'text'}
-          required={schema.required?.includes(name)}
-          value={String(values[name] ?? '')}
-          onChange={(event) =>
-            setValues({
-              ...values,
-              [name]:
-                prop.type === 'number' || prop.type === 'integer'
-                  ? Number(event.target.value)
-                  : event.target.value,
-            })
-          }
+    <div className="min-w-0 space-y-4">
+      <Card
+        title={`${t('forms.render')} · ${form.name}`}
+        actions={
+          canWrite ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={<Pencil />}
+              onClick={() => void navigate(`/forms/${form.id}/edit`)}
+            >
+              {t('forms.edit')}
+            </Button>
+          ) : null
+        }
+      >
+        <FormFill
+          key={form.current_version_id ?? form.id}
+          fields={fields}
+          submitting={submit.isPending}
+          // A client form has no link target here: an unlinked signature
+          // document would be visible organization-wide.
+          signatureUnavailable={!!form.client_id}
+          onSubmit={(values) => submit.mutateAsync({ id: form.id, values })}
         />
-      ))}
-      <Button onClick={onSubmit} loading={submitting}>
-        {t('forms.submit')}
-      </Button>
+      </Card>
+      <Submissions form={form} />
     </div>
+  );
+}
+
+/** Submissions lists the submissions of a form grouped by schema version, newest first. */
+function Submissions({ form }: { form: FormDefinition }) {
+  const { t, i18n } = useTranslation();
+  const submissions = useAllFormSubmissions(form.id);
+  const versions = useFormVersions(form.id);
+  const fieldsOf = useMemo(() => {
+    const byVersion = new Map<number, ReturnType<typeof parseForm>>();
+    for (const v of versions.data ?? []) byVersion.set(v.version, parseForm(v.schema, v.ui_hints));
+    return byVersion;
+  }, [versions.data]);
+  const groups = useMemo(() => {
+    const map = new Map<number, FormSubmission[]>();
+    for (const s of submissions.data ?? []) {
+      const n = s.form_version ?? 0;
+      map.set(n, [...(map.get(n) ?? []), s]);
+    }
+    return [...map.entries()].sort((a, b) => b[0] - a[0]);
+  }, [submissions.data]);
+  const current = parseForm(form.schema, form.ui_hints);
+
+  return (
+    <Card title={t('forms.submissions.title')}>
+      {submissions.isLoading || versions.isLoading ? (
+        <SkeletonList rows={2} label={t('forms.loading')} />
+      ) : submissions.isError || versions.isError ? (
+        <ErrorState
+          title={t('forms.submissions.loadFailed')}
+          retryLabel={t('common.retry')}
+          onRetry={() => {
+            void submissions.refetch();
+            void versions.refetch();
+          }}
+        />
+      ) : groups.length === 0 ? (
+        <EmptyState title={t('forms.submissions.empty')} icon={<FileText />} className="py-6" />
+      ) : (
+        <div className="space-y-4">
+          {groups.map(([version, rows]) => (
+            <section
+              key={version}
+              aria-label={t('forms.submissions.version', { version })}
+              data-testid={`submissions-v${version}`}
+            >
+              <h3 className="mb-2 text-sm font-semibold text-fg">
+                {version
+                  ? t('forms.submissions.version', { version })
+                  : t('forms.submissions.noVersion')}
+              </h3>
+              <ul className="space-y-3">
+                {rows.map((s) => (
+                  <li key={s.id} className="rounded-lg border border-line p-3">
+                    <p className="mb-1 text-xs text-fg-muted">
+                      {new Date(s.created_at).toLocaleString(i18n.language)}
+                    </p>
+                    <SubmissionView fields={fieldsOf.get(version) ?? current} values={s.values} />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
+      )}
+    </Card>
   );
 }

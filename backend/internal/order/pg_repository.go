@@ -14,7 +14,7 @@ import (
 
 // orderCols reads an order with the name of its supplier; the subquery
 // also works in RETURNING.
-const orderCols = `id::text, organization_id::text, COALESCE(client_id::text,''), order_number, title, status, COALESCE(requested_by::text,''), COALESCE(approved_by::text,''), COALESCE(supplier_id::text,''), COALESCE((SELECT s.name FROM supplier s WHERE s.id = internal_order.supplier_id), ''), COALESCE(target_location_id::text,''), COALESCE(total_cost,0), COALESCE(currency,''), COALESCE(notes,''), created_at, updated_at`
+const orderCols = `id::text, organization_id::text, COALESCE(client_id::text,''), order_number, title, status, COALESCE(requested_by::text,''), COALESCE(approved_by::text,''), COALESCE(supplier_id::text,''), COALESCE((SELECT s.name FROM supplier s WHERE s.id = internal_order.supplier_id), ''), COALESCE(target_location_id::text,''), COALESCE(total_cost,0), COALESCE(currency,''), COALESCE(notes,''), created_at, updated_at, COALESCE(approval_run_id::text,'')`
 
 const itemCols = `id::text, organization_id::text, order_id::text, description, quantity, received_quantity, COALESCE(unit_price,0), COALESCE(consumable_id::text,''), COALESCE(asset_id::text,''), created_at`
 
@@ -31,7 +31,7 @@ func NewPGRepository(pool *pgxpool.Pool) *PGRepository {
 func scanOrder(s pgx.Row) (*Order, error) {
 	o := &Order{}
 	if err := s.Scan(&o.ID, &o.OrganizationID, &o.ClientID, &o.OrderNumber, &o.Title, &o.Status, &o.RequestedBy, &o.ApprovedBy,
-		&o.SupplierID, &o.SupplierName, &o.TargetLocationID, &o.TotalCost, &o.Currency, &o.Notes, &o.CreatedAt, &o.UpdatedAt); err != nil {
+		&o.SupplierID, &o.SupplierName, &o.TargetLocationID, &o.TotalCost, &o.Currency, &o.Notes, &o.CreatedAt, &o.UpdatedAt, &o.ApprovalRunID); err != nil {
 		return nil, err
 	}
 	// The deprecated alias carries the name until WP-320.
@@ -483,6 +483,22 @@ func (r *PGRepository) SetStatus(ctx context.Context, orgID, id, status, actorID
 		return err
 	})
 	return o, err
+}
+
+// SetApprovalRun implements Repository: the approval run the submit of the
+// order started (WP-1108), in the transaction of ctx.
+func (r *PGRepository) SetApprovalRun(ctx context.Context, orgID, id, runID string) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `UPDATE internal_order SET approval_run_id = NULLIF($3, '')::uuid, updated_at = now()
+			WHERE organization_id = $1 AND id = $2`, orgID, id, runID)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		return nil
+	})
 }
 
 // AddItem adds a position to an order in draft. The consumable must be

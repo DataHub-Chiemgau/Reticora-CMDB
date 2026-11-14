@@ -2,6 +2,8 @@ package credential
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -10,6 +12,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -21,9 +24,17 @@ const credentialSelectColumns = `
 	kind,
 	COALESCE(scope, ''),
 	key_version,
+	secret_version,
+	rotated_at,
+	max_age_days,
 	created_at,
 	updated_at,
-	ciphertext
+	ciphertext,
+	source,
+	COALESCE(vault_connection_id::text, ''),
+	COALESCE(vault_path, ''),
+	vault_version,
+	field_map
 `
 
 const orgDEKSelectColumns = `
@@ -98,10 +109,17 @@ func (r *PGRepository) Create(ctx context.Context, cred *StoredCredential) error
 				kind,
 				ciphertext,
 				key_version,
-				scope
-			) VALUES ($1, $2, $3, $4, $5, $6, $7)
-			RETURNING id::text, created_at, updated_at
+				scope,
+				max_age_days,
+				source,
+				vault_connection_id,
+				vault_path,
+				vault_version,
+				field_map
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+			RETURNING id::text, secret_version, created_at, updated_at
 		`
+		source, connection, path, version, fieldMap := vaultColumns(cred)
 		if err := tx.QueryRow(ctx, query,
 			cred.OrganizationID,
 			nilIfEmpty(cred.ClientID),
@@ -110,8 +128,10 @@ func (r *PGRepository) Create(ctx context.Context, cred *StoredCredential) error
 			cred.Ciphertext,
 			cred.KeyVersion,
 			nilIfEmpty(cred.Scope),
-		).Scan(&cred.ID, &cred.CreatedAt, &cred.UpdatedAt); err != nil {
-			return fmt.Errorf("create credential: %w", err)
+			cred.MaxAgeDays,
+			source, connection, path, version, fieldMap,
+		).Scan(&cred.ID, &cred.SecretVersion, &cred.CreatedAt, &cred.UpdatedAt); err != nil {
+			return fmt.Errorf("create credential: %w", vaultRefError(err))
 		}
 		return nil
 	})
@@ -278,6 +298,9 @@ type credentialScanner interface {
 
 func scanStoredCredential(scanner credentialScanner) (*StoredCredential, error) {
 	item := &StoredCredential{}
+	var connection, path string
+	var version *int
+	var fieldMap []byte
 	if err := scanner.Scan(
 		&item.ID,
 		&item.OrganizationID,
@@ -286,13 +309,51 @@ func scanStoredCredential(scanner credentialScanner) (*StoredCredential, error) 
 		&item.Kind,
 		&item.Scope,
 		&item.KeyVersion,
+		&item.SecretVersion,
+		&item.RotatedAt,
+		&item.MaxAgeDays,
 		&item.CreatedAt,
 		&item.UpdatedAt,
 		&item.Ciphertext,
+		&item.Source,
+		&connection,
+		&path,
+		&version,
+		&fieldMap,
 	); err != nil {
 		return nil, err
 	}
+	if item.Source == SourceVaultRef {
+		item.VaultRef = &VaultRef{ConnectionID: connection, Path: path, Version: version, FieldMap: map[string]string{}}
+		if err := json.Unmarshal(fieldMap, &item.VaultRef.FieldMap); err != nil {
+			return nil, fmt.Errorf("field_map: %w", err)
+		}
+	}
 	return item, nil
+}
+
+// vaultColumns returns source, vault_connection_id, vault_path,
+// vault_version and field_map of a credential.
+func vaultColumns(cred *StoredCredential) (source string, connection, path, version, fieldMap any) {
+	if cred.Source != SourceVaultRef || cred.VaultRef == nil {
+		return SourceStored, nil, nil, nil, nil
+	}
+	raw, _ := json.Marshal(cred.VaultRef.FieldMap)
+	return SourceVaultRef, cred.VaultRef.ConnectionID, cred.VaultRef.Path, cred.VaultRef.Version, raw
+}
+
+// vaultRefError maps the refusals of a vault reference by the database
+// (a connection of another client, an unknown connection) to 422.
+func vaultRefError(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.ConstraintName {
+		case "credential_vault_connection_rule", "credential_vault_connection_fkey":
+			return refFieldError("vault_ref.connection_id",
+				"connection_id must name a vault connection of the credential's client or an org-wide one")
+		}
+	}
+	return err
 }
 
 func scanOrgDEK(scanner credentialScanner) (*OrgDEK, error) {
@@ -350,7 +411,7 @@ func (r *PGRepository) RotateOrgDEK(ctx context.Context, orgID string, enc *cryp
 		if err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT id::text, ciphertext FROM credential WHERE organization_id = $1 FOR UPDATE`, orgID)
+		rows, err := tx.Query(ctx, `SELECT id::text, ciphertext FROM credential WHERE organization_id = $1 AND source = 'stored' FOR UPDATE`, orgID)
 		if err != nil {
 			return fmt.Errorf("lock credentials: %w", err)
 		}
@@ -429,4 +490,94 @@ func (r *PGRepository) RewrapOrgDEK(ctx context.Context, orgID string, enc *cryp
 		return nil
 	})
 	return changed, err
+}
+
+// ReplaceSecret implements SecretReplacer: the DEK row is locked FOR SHARE,
+// so a key rotation (RotateOrgDEK locks it FOR UPDATE) cannot re-encrypt
+// the credentials in between and leave this ciphertext under the old DEK.
+func (r *PGRepository) ReplaceSecret(ctx context.Context, orgID, id string, plaintext []byte, enc *crypto.EnvelopeEncryptor,
+	inTx func(ctx context.Context, cred *Credential) error) (*Credential, error) {
+	if !api.IsUUID(id) {
+		return nil, ErrNotFound
+	}
+	var out *Credential
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var wrapped []byte
+		if err := tx.QueryRow(ctx, `SELECT encrypted_dek FROM org_dek WHERE organization_id = $1 FOR SHARE`, orgID).
+			Scan(&wrapped); err != nil {
+			if err == pgx.ErrNoRows {
+				return ErrNotFound
+			}
+			return fmt.Errorf("lock org dek: %w", err)
+		}
+		dek, err := enc.UnwrapDEK(wrapped)
+		if err != nil {
+			return fmt.Errorf("unwrap org dek: %w", err)
+		}
+		ciphertext, err := crypto.Encrypt(dek, plaintext)
+		if err != nil {
+			return fmt.Errorf("encrypt secret: %w", err)
+		}
+		query := fmt.Sprintf(`UPDATE credential SET ciphertext = $3, secret_version = secret_version + 1,
+			rotated_at = now(), updated_at = now() WHERE id = $1 AND organization_id = $2 AND source = 'stored'
+			RETURNING %s`, credentialSelectColumns)
+		stored, err := scanStoredCredential(tx.QueryRow(ctx, query, id, orgID, ciphertext))
+		if err != nil {
+			if err == pgx.ErrNoRows {
+				var source string
+				if tx.QueryRow(ctx, `SELECT source FROM credential WHERE id = $1`, id).Scan(&source) == nil && source == SourceVaultRef {
+					return ErrVaultRefHasNoSecret
+				}
+				return ErrNotFound
+			}
+			return fmt.Errorf("replace secret: %w", err)
+		}
+		out = &stored.Credential
+		if inTx != nil {
+			return inTx(ctx, out)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// UpdateMetadata implements MetadataUpdater.
+func (r *PGRepository) UpdateMetadata(ctx context.Context, orgID, id string, u MetadataUpdate) (*Credential, error) {
+	if !api.IsUUID(id) {
+		return nil, ErrNotFound
+	}
+	var out *Credential
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		// A change of the reference raises secret_version (WP-894); the
+		// row must still be a reference.
+		var fieldMap []byte
+		if u.Ref.FieldMap != nil {
+			fieldMap, _ = json.Marshal(u.Ref.FieldMap)
+		}
+		query := fmt.Sprintf(`UPDATE credential SET name = COALESCE($3, name),
+			max_age_days = CASE WHEN $4 THEN $5::integer ELSE max_age_days END,
+			vault_path = COALESCE($7, vault_path),
+			vault_version = CASE WHEN $8 THEN $9::integer ELSE vault_version END,
+			field_map = COALESCE($10::jsonb, field_map),
+			secret_version = secret_version + CASE WHEN $6 THEN 1 ELSE 0 END,
+			updated_at = now()
+			WHERE id = $1 AND organization_id = $2 AND (NOT $6 OR source = 'vault_ref') RETURNING %s`, credentialSelectColumns)
+		stored, err := scanStoredCredential(tx.QueryRow(ctx, query, id, orgID, u.Name, u.SetMaxAge, u.MaxAgeDays,
+			u.Ref.Changes(), u.Ref.Path, u.Ref.SetVersion, u.Ref.Version, fieldMap))
+		if err != nil {
+			if err == pgx.ErrNoRows {
+				return ErrNotFound
+			}
+			return fmt.Errorf("update credential: %w", err)
+		}
+		out = &stored.Credential
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }

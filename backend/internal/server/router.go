@@ -14,8 +14,11 @@ import (
 	"slices"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/admp"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm/configsnap"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
@@ -64,6 +67,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/privacy"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/probe"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
@@ -81,6 +85,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/topology"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/training"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/vulnfeed"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
 	"github.com/go-chi/chi/v5"
@@ -121,13 +126,27 @@ type Repositories struct {
 	Ticket            ticket.Repository
 	User              user.Repository
 	Credential        credential.Repository
-	Entitlement       entitlement.Repository
-	TenantHierarchy   tenantapi.Repository
-	Rack              rack.Repository
-	Contact           contact.Repository
-	IPAM              ipam.Repository
-	Metrics           monitoring.MetricStore
-	Permission        permission.Repository
+	// ADMPAccounts are the ADMP accounts (ADM-01, WP-925).
+	ADMPAccounts admp.AccountRepository
+	// ADMP is the read-only cache of ADMP data (ADM-03, WP-928); the
+	// refresh (WP-929) and the read API (WP-930) use it.
+	ADMP            admp.Repository
+	Entitlement     entitlement.Repository
+	TenantHierarchy tenantapi.Repository
+	Rack            rack.Repository
+	Contact         contact.Repository
+	IPAM            ipam.Repository
+	// IPAMManagement keeps ci.management_ip and the address with role
+	// management consistent (IPM-13, WP-913): the PostgreSQL CI repository
+	// calls it; nil without a database.
+	IPAMManagement *ipam.ManagementSync
+	Metrics        monitoring.MetricStore
+	// Probes are the probe definitions of monitoring P3 (PRB-01, WP-939).
+	Probes probe.Store
+	// Alarms is the lifecycle of the alarm instances (ALR-01, WP-982); the
+	// REST routes of WP-983 serve it. nil uses a memory store.
+	Alarms     *alarm.Service
+	Permission permission.Repository
 	// FieldGrants stores the field permissions (RBA-07, WP-264).
 	FieldGrants permission.FieldGrantRepository
 	// APIKeys identifies and manages API keys (AUT-04).
@@ -137,13 +156,15 @@ type Repositories struct {
 	// Invitations are the user invitations (TLC-03); nil answers 503.
 	Invitations user.InvitationRepository
 	SLA         sla.Repository
-	Form        form.Repository
-	Workflow    workflow.Repository
-	Compliance  compliance.Repository
-	IGA         iga.Repository
-	Search      search.Backend
-	AI          ai.Repository
-	ExportJobs  export.JobRepository
+	// Availability holds the availability targets (ALR-06, WP-1048).
+	AvailabilityTargets sla.AvailabilityRepository
+	Form                form.Repository
+	Workflow            workflow.Repository
+	Compliance          compliance.Repository
+	IGA                 iga.Repository
+	Search              search.Backend
+	AI                  ai.Repository
+	ExportJobs          export.JobRepository
 	// Jobs is the generic job model (JOB-01).
 	Jobs    jobs.Repository
 	Privacy privacy.Repository
@@ -190,6 +211,11 @@ type Options struct {
 	CIService *ci.Service
 	// Credentials is the credential service (envelope encryption).
 	Credentials *credential.Service
+	// ADMPSync refreshes the ADMP cache (WP-929): cmd/server shares it with
+	// the system jobs admp.refresh_linked and admp.expire; nil builds one
+	// on the repositories with Credentials as secret source and Egress
+	// (NewADMPSync). The router queues its job admp.refresh.
+	ADMPSync *admp.Sync
 	// OIDC and Sessions power the authentication endpoints.
 	OIDC     *identity.OIDCProvider
 	Sessions *identity.SessionIssuer
@@ -201,6 +227,12 @@ type Options struct {
 	// audit fails and is logged, tests and --no-db).
 	Operator     operator.Config
 	OperatorPool *pgxpool.Pool
+	// VulnfeedBundlePublicKey checks the offline bundles of the
+	// vulnerability catalog (RETICORA_VULNFEED_BUNDLE_PUBLIC_KEY; empty:
+	// the embedded key, WP-1120); VulnfeedOnlineSync reports whether the
+	// online feeds run (shown by GET /api/v1/admin/vulnfeed/status).
+	VulnfeedBundlePublicKey string
+	VulnfeedOnlineSync      bool
 	// OpsAlerts configures the Alertmanager bridge of the operator path
 	// (OPS-05, E-75): without an operator organization it answers 404.
 	// Notifier queues its notifications on the channels of that
@@ -242,9 +274,18 @@ type Options struct {
 	// IngestQueue carries discovery records over ingest.> (REC-01); nil
 	// processes them in the request.
 	IngestQueue *discovery.NATSIngestQueue
+	// ProbeEdgeWorkers and ProbeStreamMaxBytes configure the probe edge
+	// subjects on the IngestQueue connection (RETICORA_PROBE_EDGE_WORKERS,
+	// RETICORA_PROBE_STREAM_MAX_BYTES, WP-959); 0 takes the defaults.
+	ProbeEdgeWorkers    int
+	ProbeStreamMaxBytes int64
 	// JobQueue runs the submitted job kinds on the JOBS work queue on NATS
 	// (TEC-14, jobkinds.go); nil runs them in the accepting process.
 	JobQueue *jobs.Queue
+	// WorkflowWorkerOff reports that the worker workflow does not run on
+	// this instance (switch or module off, OPS-02, WP-1114): the job kind
+	// workflow.run is declared on JobQueue, not consumed.
+	WorkflowWorkerOff bool
 	// Signup is the self-signup flow (TLC-01); nil answers 503.
 	Signup *signup.Service
 	// SignupProtection is the captcha, blocklist and per-IP limit of the
@@ -330,7 +371,17 @@ func agentHandler(repos *Repositories, sessions *identity.SessionIssuer, conflic
 // accounts through their role assignments, the snapshots are cached in
 // opts.FieldPolicyCache.
 func newFieldResolver(repos *Repositories, opts *Options) *permission.FieldResolver {
-	return NewFieldResolver(repos, opts.FieldPolicyCache)
+	return WithAssetsFeature(NewFieldResolver(repos, opts.FieldPolicyCache), opts.Entitlements)
+}
+
+// WithAssetsFeature makes the resolver close computed attributes with
+// asset sources for an organization without assets_basic (SR-58, WP-871);
+// without entitlements the feature counts as enabled.
+func WithAssetsFeature(r *permission.FieldResolver, svc *entitlement.Service) *permission.FieldResolver {
+	if svc != nil {
+		r.WithFeatureCheck(svc.IsEnabled)
+	}
+	return r
 }
 
 // NewFieldResolver builds the field permission resolver of the
@@ -345,6 +396,28 @@ func NewFieldResolver(repos *Repositories, store cache.Store) *permission.FieldR
 	return permission.NewFieldResolver(repos.Permission, serviceAccounts, repos.FieldGrants, store)
 }
 
+// versionMatcher is the version match CI → findings of the job kind
+// vulnfeed.match (SEC-02, WP-1121) on the application pool; without the
+// database its jobs fail (the kind stays registered, so no submit is
+// refused).
+func versionMatcher(opts *Options) *security.Matcher {
+	if opts.AuditPool == nil {
+		return security.NewMatcher(nil, nil, nil)
+	}
+	return security.NewMatcher(opts.AuditPool, vulnfeed.NewPGRepository(opts.AuditPool), security.NewPGRepository(opts.AuditPool))
+}
+
+// securityHandler serves the findings and, with the database, the product
+// mapping of the version match (WP-1122): its writes queue vulnfeed.match
+// on matcher.
+func securityHandler(repos *Repositories, opts *Options, matcher *security.Matcher) *security.Handler {
+	h := security.NewHandler(repos.Security)
+	if opts.AuditPool != nil {
+		h.WithMappings(security.NewMappingStore(opts.AuditPool), vulnfeed.NewPGRepository(opts.AuditPool), matcher)
+	}
+	return h
+}
+
 // operatorHandler builds the operator path; organizations are created with
 // the creation chain of the self-signup (TLC-02).
 func operatorHandler(opts *Options) *operator.Handler {
@@ -352,6 +425,17 @@ func operatorHandler(opts *Options) *operator.Handler {
 		WithEntitlements(opts.Entitlements)
 	if opts.Signup != nil {
 		h.WithOrgCreator(opts.Signup)
+	}
+	// The vulnerability catalog: import of the offline bundle and state of
+	// the feeds (WP-1120), written in the system context.
+	if opts.AuditPool != nil {
+		key := opts.VulnfeedBundlePublicKey
+		if key == "" {
+			key = vulnfeed.DefaultBundlePublicKey
+		}
+		pub, keyErr := vulnfeed.ParsePublicKey(key)
+		h.WithVulnfeed(&operator.VulnfeedConfig{Catalog: vulnfeed.NewPGRepository(opts.AuditPool), PublicKey: pub, KeyError: keyErr,
+			OnlineSync: opts.VulnfeedOnlineSync})
 	}
 	return h
 }
@@ -462,6 +546,29 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// unlicensed_ci and adopted once the limit is raised (ENT-03, CH21).
 	// Export and discovery jobs register in the generic job model (JOB-01).
 	var jobTracker jobs.Tracker
+	// orgExportJobs starts and reads the full exports (WP-1151); nil
+	// without a job repository.
+	var orgExportJobs *jobs.Service
+	// The compliance evaluation runs as the job compliance.evaluate
+	// (WP-1126); without the job service POST /compliance/evaluations
+	// answers 503.
+	complianceEvaluator := compliance.NewEvaluator(repos.Compliance, repos.CI)
+	complianceJobs := compliance.NewJobs(complianceEvaluator)
+	// The reports of a standard (SEC-04, WP-1129): with the database and
+	// the object storage; the malware scan of a report goes to the job
+	// queue (E-42), without it the scan sweep takes it up.
+	if opts.AuditPool != nil && opts.Blobs != nil {
+		reports := compliance.NewReportGenerator(opts.AuditPool, repos.Compliance, reportAuditVerifier(&opts),
+			entitlementLister{svc: opts.Entitlements}, opts.Blobs)
+		// A report counts against max_storage_mb (E-239).
+		if opts.Entitlements != nil {
+			reports.WithStorageLimit(opts.Entitlements)
+		}
+		if opts.JobQueue != nil {
+			reports.WithScans(opts.JobQueue)
+		}
+		complianceJobs.WithReports(reports)
+	}
 	var bffJobs graphqlbff.JobSource
 	// The CI history projects the field values with the policy of the
 	// caller, a queued snapshot with that of its creator (WP-727).
@@ -484,6 +591,18 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	labelSource, _ := repos.Labels.(labels.BatchSource)
 	labelBatch := labels.NewBatchHandler(labelSource, opts.Blobs).WithFeatures(opts.Entitlements).
 		WithCreatorPolicy(labels.CreatorPolicy(SnapshotCreatorPolicy(&repos, fieldResolver)))
+	// credential.rotated goes to the outbox of the application pool
+	// (WP-889); the test of a vault connection is the job vault.test
+	// (WP-896, jobkinds.go).
+	credentialHandler := credential.NewHandler(opts.Credentials).WithEvents(opts.AuditPool)
+	// The refresh of the ADMP cache (WP-929): readonly clients per account
+	// on the egress policy with the credential service as secret source;
+	// its job admp.refresh is registered with the job kinds.
+	admpSync := opts.ADMPSync
+	if admpSync == nil {
+		admpSync = NewADMPSync(&repos, opts.Credentials, opts.Egress, opts.AuditPool, 0)
+	}
+	admpAccounts := admp.NewAccountService(repos.ADMPAccounts, admp.CredentialsOf(opts.Credentials), opts.Egress)
 	// The draft handler (WP-260) runs the test run of a draft as a job
 	// (WP-721, metamodel.test) with the job service, like historyHandler.
 	draftHandler := metamodel.NewHandler(repos.MetamodelDraft)
@@ -495,7 +614,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	if opts.Dispatcher != nil {
 		draftDispatcher = opts.Dispatcher
 	}
-	draftHandler.WithPublish(repos.CIType, draftDispatcher)
+	draftHandler.WithPublish(repos.CIType, draftDispatcher).WithFieldPolicyInvalidator(fieldResolver)
 	// The generic job API (API-09) serves in both profiles; without a
 	// database it has an empty in-memory job table.
 	jobAPI := jobs.NewAPIHandler(jobs.NewService(jobs.NewMemoryRepository()))
@@ -558,10 +677,83 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		WithReservations(reservationLookup{repo: repos.Reservation}).
 		// Links write ci.asset_id through the CI service (WP-272).
 		WithCILinks(opts.CIService)
+	// The report and the erasure of a person (SEC-05 [P3], WP-1158) are the
+	// jobs privacy.subject_report and privacy.subject_erase on the
+	// application pool; an erased user is anonymized with its sessions
+	// revoked.
+	subjectService := privacy.NewSubjectService(opts.AuditPool, repos.User)
+	if revocations := opts.Sessions.Revocations(); revocations != nil {
+		subjectService.WithSessionRevoker(revocations)
+	}
+	// One executor runs the runs of the workflow API and the run an IGA
+	// access request starts (WFL-04); with the job queue as the job
+	// workflow.run (WP-1088, registerJobKinds).
+	// send_webhook writes workflow.webhook to the event outbox of its step
+	// (WP-1096); only without the outbox (--no-db) the executor hands the
+	// event to the dispatcher directly (pattern ciHandler).
+	workflowDispatcher := opts.Dispatcher
+	if repos.EventOutbox {
+		workflowDispatcher = nil
+	}
+	// set_ci_field writes through the CI service with the field rights of
+	// the initiator and the attribute and catalog rules (WP-1097); a
+	// profile without the service writes to the repository.
+	workflowRuns := workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, workflowDispatcher).
+		WithFieldGuard(override.NewGuard(repos.Override))
+	// The CI actions write with the rights the initiator holds now (role
+	// assignments, active user; WP-1097), as a queue job of its creator.
+	if users, ok := repos.User.(permission.CreatorStatus); ok {
+		workflowRuns.WithPolicies(fieldResolver, users)
+	}
+	if opts.CIService != nil {
+		workflowRuns.WithCIService(opts.CIService)
+	}
+	// The asset of a lifecycle.changed in the run context (LCY-04, WP-1104).
+	if repos.Asset != nil {
+		workflowRuns.WithAssets(repos.Asset)
+	}
+	// submit_form checks signature fields like the form routes: with the
+	// release module documents only (WP-1101).
+	if opts.Modules.Enabled(ModuleDocuments) && repos.Document != nil {
+		workflowRuns.WithFormDocuments(repos.Document)
+	}
+	// The package limits of the workflow engine (WFL-08, WP-1112): active
+	// definitions and form definitions on create and switch-on, runs per
+	// hour in the worker of workflow.run.
+	var workflowQuotas *workflow.Quotas
+	if opts.Entitlements != nil {
+		workflowQuotas = workflow.NewQuotas(opts.Entitlements, repos.Workflow, repos.Form)
+		workflowRuns.WithRunQuota(workflowQuotas)
+	}
+	if repos.EventOutbox {
+		workflowRuns.WithEventOutbox()
+	}
+	// The recipient source maintenance_affected of send_notification:
+	// the clients a window affects over the graph (WP-1034, WP-1109).
+	if repos.Maintenance != nil {
+		workflowRuns.WithMaintenance(maintenanceRecipients{finder: maintenance.NewRecipientFinder(repos.Maintenance,
+			topology.NewAnalyzer(repos.CI, repos.Relationship).WithRelationshipTypes(repos.RelationshipType).WithCITypes(repos.CIType))})
+	}
+	// send_notification queues on the notifier of the application with
+	// the recipients of the database (WP-1095); without them (--no-db) its
+	// step fails with "notifications unavailable".
+	if opts.Notifier != nil && opts.AuditPool != nil && repos.Permission != nil {
+		workflowRuns.WithNotifier(opts.Notifier, notify.NewPGResolver(opts.AuditPool, repos.Permission))
+	}
+	// The approver circles of require_approval: holders of
+	// workflow:approve in client and site of the run (WP-1098); without
+	// the database (--no-db) everyone the route admits.
+	if opts.AuditPool != nil && repos.Permission != nil {
+		workflowRuns.WithApprovers(notify.NewPGResolver(opts.AuditPool, repos.Permission))
+	}
+	// The version match (WP-1121): its job kind and the product mapping
+	// routes that queue it (WP-1122) share one matcher.
+	vulnMatcher := versionMatcher(&opts)
 	if repos.Jobs != nil {
 		jobService := jobs.NewService(repos.Jobs)
 		jobTracker = jobService
 		bffJobs = jobService
+		orgExportJobs = jobService
 		jobs.SetBacklogSource(repos.Jobs)
 		// A bulk job on CIs is reverted by the revert job bulk.revert
 		// within 24 hours, with ci:write also from its creator (BLK-02,
@@ -590,6 +782,12 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			WithBulkKind(asset.BulkJobKind).
 			WithKind(jobs.RevertKind, identity.PermCIWrite, nil).
 			WithKind("export", identity.PermExportRun, nil).
+			// A running compliance evaluation is cancelled with
+			// compliance:write like its start (WP-1126).
+			WithKind(compliance.EvaluateJobKind, identity.PermComplianceWrite, nil).
+			// A running report is cancelled with compliance:read like its
+			// start (WP-1129).
+			WithKind(compliance.ReportJobKind, identity.PermComplianceRead, nil).
 			// A running template migration is cancelled with citype:manage
 			// like its start; it has no revert (E-25).
 			WithKind(ci.TemplateMigrateJobKind, identity.PermCITypeManage, nil).
@@ -602,6 +800,26 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			// The rebuild of the search index is read with search:write
 			// like its start (WP-786).
 			WithKind(search.ReindexJobKind, identity.PermSearchWrite, nil).
+			// The test of a vault connection is read with vault:manage like
+			// its start (WP-896); it has no revert.
+			WithKind(credential.VaultTestJobKind, identity.PermVaultManage, nil).
+			// The backfill of the management addresses (WP-913) is queued by
+			// its migration; it is read and cancelled with ipam:write.
+			WithKind(ipam.MgmtBackfillJobKind, identity.PermIPAMWrite, nil).
+			// The report about a person holds its values unsealed, the
+			// erasure names the person in its parameters: both are seen
+			// and controlled only with user:manage like their start, job:read
+			// alone does not reveal them (WP-1158); neither has a revert.
+			WithKind(privacy.SubjectReportJobKind, identity.PermUserManage, nil).
+			WithReadKind(privacy.SubjectReportJobKind, identity.PermUserManage).
+			WithKind(privacy.SubjectEraseJobKind, identity.PermUserManage, nil).
+			WithReadKind(privacy.SubjectEraseJobKind, identity.PermUserManage).
+			// The full export holds every row of the organization, personal
+			// data unsealed (E-165): its job, manifest and result are seen
+			// and cancelled only with org:export like its start, job:read
+			// alone does not reveal them (WP-1151); it has no revert.
+			WithKind(export.OrgExportJobKind, identity.PermOrgExport, nil).
+			WithReadKind(export.OrgExportJobKind, identity.PermOrgExport).
 			// The merge is reverted by its unmerge within 30 days (CI-12, E-25).
 			// It answers 200 (no revert job).
 			WithKind(ci.MergeJobKind, identity.PermCIDelete, func(ctx context.Context, job *jobs.Job) (*jobs.Job, error) {
@@ -647,7 +865,14 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			assetHandler.WithCreatorPolicy(ci.CreatorPolicyOf(fieldResolver, users))
 		}
 		registerJobKinds(jobService, opts.JobQueue, opts.CIService, bulkRevert, historyHandler, templateJobs, draftHandler,
-			importHandler, documentScanner, searchHandler, labelBatch, assetHandler, assetRevert)
+			importHandler, documentScanner, searchHandler, labelBatch, assetHandler, assetRevert, credentialHandler, admpSync,
+			repos.IPAMManagement,
+			// The full export of an organization (WP-1149, TLC-05) reads on
+			// the application pool and writes to the object storage.
+			export.NewOrgExporter(opts.AuditPool, opts.Blobs, jobService), subjectService, workflowRuns,
+			// The automatic ping probes (WP-949) on the probe store of
+			// PostgreSQL.
+			probeAutocreator(&repos), complianceJobs, !opts.WorkflowWorkerOff, vulnMatcher)
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -663,6 +888,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// Asset jobs of POST /assets/bulk read the selection by id (WP-782);
 	// without the source they fail.
 	exportWorker.AssetRows, _ = repos.Asset.(export.AssetRows)
+	// Subnet and address jobs read IPAM under the job's scope (WP-921);
+	// the memory profile has no source and fails them.
+	exportWorker.IPAMRows, _ = repos.IPAM.(export.IPAMRows)
 	discoveryHandler := discovery.NewHandler(repos.Discovery, repos.CI, repos.Relationship).
 		WithProvenance(overrideProvenance{repo: repos.Override}).
 		WithInstanceFields(repos.CIType).
@@ -684,13 +912,53 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// The collectors' metric samples arrive on the edge (.metrics) and run
 	// through the ingest of POST /monitoring/metrics with the monitoring
 	// entitlement of that route (MON-02, F-046).
+	// Disabling or deleting a rule resolves its alarms (WP-984).
 	monitoringHandler := monitoring.NewHandler(repos.Metrics, alertStoreFor(repos.Metrics)).
-		WithCIResolver(monitoring.CIAddressResolver{CIs: repos.CI})
+		WithCIResolver(monitoring.CIAddressResolver{CIs: repos.CI}).
+		WithRuleAlarms(alarm.NewRuleSink(alarmService(&repos))).
+		WithTicketReporters(NewTicketReporters(repos.User, repos.Permission))
 	var monitoringFeatures discovery.FeatureStatus
 	if opts.Entitlements != nil {
 		monitoringFeatures = opts.Entitlements
 	}
 	discoveryHandler.WithEdgeMetrics(monitoringHandler, monitoringFeatures)
+	// The running configurations of the devices arrive on the edge
+	// (.config, ALR-07, WP-1054) with the feature monitoring_network; a
+	// new version with a predecessor raises the configuration alarm and
+	// writes ci.config_changed.
+	if opts.AuditPool != nil {
+		discoveryHandler.WithEdgeConfig(configsnap.NewIngester(opts.AuditPool, configsnap.NewPGStore(opts.AuditPool), alarmService(&repos)),
+			monitoringFeatures)
+	}
+	// A changed capability report assigns the collector's group again
+	// (PRT-18, WP-966 AK5).
+	if pg, ok := repos.Probes.(*probe.PGRepository); ok {
+		discoveryHandler.WithCapabilityChanged(pg.CollectorChanged)
+	}
+	// The probe state changes, results and alive messages arrive on the
+	// edge as well and go into the stream RETICORA_PROBE on the ingest
+	// queue's connection (E-173, WP-959); the stream is created at start.
+	if opts.IngestQueue != nil {
+		probeEdge := probe.NewEdge(opts.IngestQueue.JetStream(), probe.DefaultStream(opts.ProbeStreamMaxBytes)).
+			WithWorkers(opts.ProbeEdgeWorkers)
+		if opts.Entitlements != nil {
+			probeEdge.WithFeatures(opts.Entitlements)
+		}
+		// Every alive message writes last_alive_at and the clock offset of
+		// the group member (PRB-09, WP-962); a down member that is alive
+		// again assigns its group at once (PRB-10, WP-963).
+		if opts.AuditPool != nil {
+			skew := probe.NewClockSkew(opts.AuditPool)
+			if pg, ok := repos.Probes.(*probe.PGRepository); ok {
+				skew.OnMemberReturned(pg.CollectorChanged)
+			}
+			probeEdge.OnAlive(skew.Hook())
+		}
+		// The capability report of an alive message is stored like the
+		// one of the heartbeat (PRT-18, WP-966).
+		probeEdge.OnAlive(discoveryHandler.RecordAliveProbeCapabilities)
+		discoveryHandler.WithEdgeProbes(probeEdge)
+	}
 	// The location tree is core; its rack nodes are written only with
 	// rack_view, like /api/v1/racks (ENT-05, F-400).
 	locationsHandler := locations.NewHandler(repos.LocationTree)
@@ -799,10 +1067,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		discoveryHandler.WithReviewTickets(reviewTickets{svc: tickets, cis: repos.CI, features: opts.Entitlements})
 	}
 	conflictReviews := discoveryHandler.ReviewService()
-	// One executor runs the runs of the workflow API and the run an IGA
-	// access request starts (WFL-04).
-	workflowRuns := workflow.NewExecutor(repos.Workflow, repos.Ticket, repos.CI, repos.Form, opts.Dispatcher).
-		WithFieldGuard(override.NewGuard(repos.Override)).WithConflictReviews(conflictReviews)
+	// The review queue of set_ci_field conflicts (REC-12).
+	workflowRuns.WithConflictReviews(conflictReviews)
 	// The one writer of the ledger stock_movement (WP-274): the route and
 	// the disposal in its transaction (WP-278) lock, check and write
 	// stock.movement to the outbox; assignments book through
@@ -812,6 +1078,11 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// (WP-278), with the system guards of LCY-03 (WP-279).
 	lifecycleService := lifecycle.NewService(repos.Lifecycle, repos.LifecycleStates, lifecycle.NewHistoryRecorder(repos.History)).
 		WithGuards(repos.LifecycleGuards)
+	// transition_lifecycle of the workflows moves CIs and assets with the
+	// guards of their model (LCY-04, WP-1097).
+	if repos.LifecycleResolver != nil {
+		workflowRuns.WithLifecycle(workflow.NewLifecycleTransitioner(lifecycleService, repos.LifecycleResolver))
+	}
 	relationshipHandler := relationship.NewHandler(repos.Relationship, repos.RelationshipType)
 	exportJobHandler := export.NewJobHandler(repos.ExportJobs, exportWorker, opts.Blobs).WithDATEVGate(datevGate)
 	// The delegating actions of POST /cis/bulk reach the edges, the
@@ -825,6 +1096,21 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	assetDelegates := AssetBulkDelegates(movements, repos.AssignmentService, lifecycleService, repos.LifecycleResolver, opts.Entitlements)
 	assetDelegates.Exporter = AssetBulkExporter(exportJobHandler)
 	assetHandler.WithBulkDelegates(&assetDelegates)
+	// The duplicate check of the management addresses (WP-913) opens its
+	// items in the review queue of discovery, built once its jobs and
+	// tickets are attached.
+	if repos.IPAMManagement != nil {
+		repos.IPAMManagement.WithReviews(discoveryHandler.ReviewService())
+	}
+	// Subnets and addresses with phpIPAM columns (IPM-09, WP-920): the rows
+	// write through the IPAM repository, the duplicate check after a run
+	// opens duplicate_ip reviews in the review queue of discovery, built
+	// here once its jobs and tickets are attached (ReviewService is built
+	// on its first call).
+	if ipamStore, ok := repos.Import.(importer.IPAMStore); ok && repos.IPAM != nil {
+		importHandler.WithWriter(importer.NewSubnetWriter(repos.IPAM, ipamStore)).
+			WithWriter(importer.NewAddressWriter(repos.IPAM, ipamStore, discoveryHandler.ReviewService()))
+	}
 	registrars := []registrar{
 		identityHandler,
 		operatorHandler(&opts),
@@ -832,7 +1118,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		apiKeyHandler(&repos, &opts),
 		user.NewServiceAccountHandler(repos.ServiceAccounts),
 		invitationHandler(&repos, &opts),
-		entitlement.NewHandler(opts.Entitlements),
+		entitlement.NewHandler(withUsageCounters(opts.Entitlements, &repos)),
 		ciHandler(&repos, &opts),
 		jobAPI,
 		notifyHandler(&opts),
@@ -850,36 +1136,56 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		stocktake.NewHandler(repos.Stocktake).WithService(stocktake.NewService(repos.Stocktake, movements)),
 		consumable.NewHandler(repos.Consumable),
 		// The goods receipt books through the movement service (WP-760).
-		order.NewHandler(repos.Order).WithBookings(movements),
-		maintenance.NewHandler(repos.Maintenance),
+		orderHandler(repos.Order, opts.Modules, workflowRuns).WithBookings(movements),
+		// The recipients of a window follow the graph impact of its CIs
+		// (MGT-04, WP-1034).
+		maintenance.NewHandler(repos.Maintenance).WithAnalyzer(topology.NewAnalyzer(repos.CI, repos.Relationship).
+			WithRelationshipTypes(repos.RelationshipType).WithCITypes(repos.CIType)),
 		disposal.NewHandler(repos.Disposal).WithLifecycle(movements, lifecycleService, repos.LifecycleResolver, repos.Lifecycle),
 		keymgmt.NewHandler(repos.Key),
 		training.NewHandler(repos.Training),
 		desk.NewHandler(repos.Desk),
 		location.NewHandler(repos.Location),
 		agentHandler(&repos, opts.Sessions, conflictReviews),
-		security.NewHandler(repos.Security),
+		securityHandler(&repos, &opts, vulnMatcher),
 		// The attachments of a ticket are its linked documents (WP-765).
-		ticket.NewHandler(tickets).WithDocuments(repos.Document),
+		ticketHandler(tickets, &repos, &opts),
 		userHandler(&repos, &opts),
 		permission.NewHandler(repos.Permission),
 		searchHandler,
 		sla.NewHandler(repos.SLA, repos.Ticket),
-		form.NewHandler(repos.Form),
-		workflow.NewHandler(repos.Workflow, workflowRuns),
-		compliance.NewHandler(repos.Compliance, compliance.NewEvaluator(repos.Compliance, repos.CI)).
+		// The availability targets under /api/v1/monitoring/sla (WP-1048).
+		sla.NewAvailabilityHandler(repos.AvailabilityTargets),
+		formHandler(&repos, &opts, workflowQuotas, workflowRuns),
+		workflow.NewHandler(repos.Workflow, workflowRuns).WithQuota(workflowQuotas),
+		compliance.NewHandler(repos.Compliance, complianceEvaluator).WithJobs(complianceJobs).
 			WithReports(compliance.NewReportService(repos.Compliance, reportAuditVerifier(&opts), entitlementLister{svc: opts.Entitlements})),
 		iga.NewHandler(repos.IGA, repos.User, opts.Credentials, repos.Discovery, repos.Workflow).
 			WithWorkflowRuns(accessRequestRuns(opts.Modules, workflowRuns)).WithEgress(opts.Egress),
 		tenantapi.NewHandler(repos.TenantHierarchy),
+		// The deletion of the organization (TLC-06, WP-1152), module
+		// org_lifecycle; without a pool the state is none and writes 503.
+		tenantapi.NewDeletionHandler(opts.AuditPool),
+		// The full export of the organization (TLC-05, WP-1151), module
+		// org_lifecycle: start with MFA, status, manifest and the download
+		// for 24 hours.
+		export.NewOrgExportHandler(orgExportJobs, opts.AuditPool, opts.Blobs),
 		rack.NewHandler(repos.Rack),
 		contact.NewHandler(repos.Contact),
 		contract.NewHandler(repos.Supplier),
 		contract.NewContractHandler(repos.Contract),
 		// Duplicate addresses open duplicate_ip items in the review queue of
 		// discovery (NET-06, WP-300).
-		ipam.NewHandler(repos.IPAM).WithReviews(discoveryHandler.ReviewService()),
+		// The subnet scan writes managed probes of the probe engine
+		// (IPM-11, WP-1062).
+		ipam.NewHandler(repos.IPAM).WithReviews(discoveryHandler.ReviewService()).WithScanProbes(scanProbesOf(&repos)),
 		monitoringHandler,
+		// The probe definitions and the probe type register (PRB-01,
+		// PRT-01, WP-939).
+		probe.NewHandler(probeStore(&repos, opts.Entitlements)),
+		// The alarms with ack and un-ack (ALR-01, WP-983, E-160); the
+		// tickets of the incidents (WP-1039).
+		alarmHandler(&repos, tickets, &opts),
 		// The BFF gates the fields of late modules itself (WP-311): its
 		// route belongs to no module prefix.
 		graphqlbff.NewHandler(repos.CI, repos.Relationship).WithEntitlements(opts.Entitlements).
@@ -889,7 +1195,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			WithLifecycleModels(lifecycleModelExport{repo: repos.Lifecycle}).WithRoles(roleExport{repo: repos.User}).
 			WithGrantExporter(fieldGrantExport{repo: repos.FieldGrants}).
 			// The resolved forms follow the field permissions (WP-727).
-			WithFormPolicy(FormPolicyFactory(&repos, fieldResolver)),
+			WithFormPolicy(FormPolicyFactory(&repos, fieldResolver)).
+			// Computed asset sources are part of the policy (SR-58).
+			WithFieldPolicyInvalidator(fieldResolver),
 		// Administration of the field permissions (RBA-07, WP-726); a write
 		// drops the resolver's snapshot after the commit.
 		permission.NewFieldGrantHandler(repos.FieldGrants, fieldResolver),
@@ -915,11 +1223,17 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		// inventory and assets_basic (WP-309); the route stays ungated.
 		savedview.NewHandler(repos.SavedView).WithQueryEngine(repos.FilterQuery).WithPermissions(repos.Permission).
 			WithEntitlements(aiEntitlements).WithInventory(opts.Modules.Enabled(ModuleInventory)),
-		credential.NewHandler(opts.Credentials),
+		credentialHandler,
+		// ADMP accounts (ADM-01, WP-925): local configuration, the URLs
+		// checked against the egress policy of the router.
+		admp.NewHandler(admpAccounts),
+		// The read API of the ADMP cache (ADM-07, ADM-08, WP-930);
+		// refresh=true queues admp.refresh through admpSync.
+		admp.NewDataHandler(repos.ADMP, admpTargetsOf(&repos), admpAccounts, admpSync),
 		ai.NewHandler(repos.AI, opts.AIProvider,
 			ai.NewRetriever(repos.AI, repos.Search, repos.Permission, opts.AIProvider).WithConsent(aiConsent)).
 			WithConsent(aiConsent),
-		privacy.NewHandler(privacy.NewService(repos.Privacy, repos.Contact, repos.User)),
+		privacy.NewHandler(privacy.NewService(repos.Privacy, repos.Contact, repos.User)).WithSubjects(subjectService),
 		signup.NewHandler(opts.Signup).WithProtection(opts.SignupProtection),
 		modulesHandler{set: opts.Modules},
 	}
@@ -1087,6 +1401,224 @@ func (a reviewTickets) CIName(ctx context.Context, orgID, ciID string) (string, 
 	return item.Name, nil
 }
 
+// incidentTickets is the ticket side of the incidents (ALR-09 d, TKT-01
+// Monitoring [P3], WP-1039; alarm.TicketPort, pattern reviewTickets): the
+// tickets linked to incidents, alarms and CIs and the link of a ticket to
+// an incident with its system comment.
+type incidentTickets struct {
+	svc *ticket.Service
+	// features gates the tickets on ticketing_essential; nil checks none.
+	features *entitlement.Service
+}
+
+// NewIncidentTickets returns the ticket port of the incidents over svc
+// (tests of package alarm wire the router's adapter with it).
+func NewIncidentTickets(svc *ticket.Service, features *entitlement.Service) alarm.TicketPort {
+	return incidentTickets{svc: svc, features: features}
+}
+
+var _ alarm.TicketPort = incidentTickets{}
+
+// LinkedTickets names the tickets of the targets the caller sees, with one
+// query; none without ticket:read or without ticketing_essential.
+func (a incidentTickets) LinkedTickets(ctx context.Context, orgID, linkType string, ids []string) (map[string][]alarm.TicketRef, error) {
+	if p, ok := identity.PrincipalFromContext(ctx); !ok || !p.Has(identity.PermTicketRead) {
+		return nil, nil
+	}
+	if a.features != nil && !a.features.IsEnabled(ctx, orgID, entitlement.FeatureTicketingEssential) {
+		return nil, nil
+	}
+	linked, err := a.svc.LinkedTickets(ctx, orgID, linkType, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string][]alarm.TicketRef, len(linked))
+	for id, list := range linked {
+		refs := make([]alarm.TicketRef, len(list))
+		for i := range list {
+			refs[i] = alarm.TicketRef{TicketID: list[i].ID, TicketNumber: list[i].TicketNumber, Status: list[i].Status}
+		}
+		out[id] = refs
+	}
+	return out, nil
+}
+
+// LinkIncident links the visible ticket to the incident and writes the
+// internal system comment; with the transaction of ctx both commit
+// together. A ticket of a wider scope than the incident (org-wide, another
+// client or site) gets the comment without the root CI's name.
+func (a incidentTickets) LinkIncident(ctx context.Context, orgID, ticketID string, link *alarm.IncidentTicketLink) error {
+	t, err := a.svc.Repository().GetByID(ctx, orgID, ticketID)
+	switch {
+	case errors.Is(err, ticket.ErrNotFound):
+		return alarm.ErrTicketNotFound
+	case err != nil:
+		return err
+	}
+	err = a.svc.CreateLink(ctx, &ticket.Link{OrganizationID: orgID, TicketID: ticketID, EntityType: ticket.LinkIncident,
+		EntityID: link.Incident.ID})
+	switch {
+	case errors.Is(err, ticket.ErrLinkTargetNotFound):
+		return alarm.ErrIncidentNotFound
+	case errors.Is(err, ticket.ErrNotFound):
+		return alarm.ErrTicketNotFound
+	case errors.Is(err, ticket.ErrLinkExists):
+		return alarm.ErrTicketLinked
+	case err != nil:
+		return err
+	}
+	comment := link.NeutralComment
+	if link.WithinScope(t.ClientID, t.SiteID) {
+		comment = link.Comment
+	}
+	_, err = a.svc.AddSystemComment(ctx, orgID, ticketID, comment)
+	return err
+}
+
+// alarmTickets is the writing ticket side of the alarms and incidents
+// (TKT-01 Monitoring [P3], WFL-06, WP-1040): it opens, links, comments and
+// resolves tickets through ticket.Service in the tenant scope of the
+// context, without a principal (the rule's reporter or the caller is the
+// reporter of a new ticket).
+type alarmTickets struct {
+	svc      *ticket.Service
+	features *entitlement.Service
+}
+
+// NewAlarmTickets returns the ticket writer of the alarms over svc (tests
+// of package alarm wire the router's adapter with it).
+func NewAlarmTickets(svc *ticket.Service, features *entitlement.Service) alarm.TicketWriter {
+	return alarmTickets{svc: svc, features: features}
+}
+
+var _ alarm.TicketWriter = alarmTickets{}
+
+// Entitled implements alarm.TicketWriter: ticketing_essential.
+func (a alarmTickets) Entitled(ctx context.Context, orgID string) bool {
+	return a.features == nil || a.features.IsEnabled(ctx, orgID, entitlement.FeatureTicketingEssential)
+}
+
+// Linked implements alarm.TicketWriter.
+func (a alarmTickets) Linked(ctx context.Context, orgID, linkType string, ids []string) (map[string][]alarm.TicketRef, error) {
+	linked, err := a.svc.LinkedTickets(ctx, orgID, linkType, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string][]alarm.TicketRef, len(linked))
+	for id, list := range linked {
+		refs := make([]alarm.TicketRef, len(list))
+		for i := range list {
+			refs[i] = alarm.TicketRef{TicketID: list[i].ID, TicketNumber: list[i].TicketNumber, Status: list[i].Status}
+		}
+		out[id] = refs
+	}
+	return out, nil
+}
+
+// CreateTicket implements alarm.TicketWriter over ticket.Service.Create
+// with Exclusive and Origin.
+func (a alarmTickets) CreateTicket(ctx context.Context, orgID string, req *alarm.TicketRequest) (*alarm.TicketRef, error) {
+	// The manual ticket of an incident follows the field rights of the
+	// caller like reviewTickets.CreateTicket (WP-1040 AK4).
+	if req.CheckFieldRights {
+		policy, err := permission.PolicyFrom(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err := permission.CheckWrite(policy, permission.KindTicket, "", permission.ObjectRef{TeamID: req.TeamID},
+			req.RequestFields); err != nil {
+			return nil, err
+		}
+	}
+	t := &ticket.Ticket{OrganizationID: orgID, Title: req.Title, Description: req.Description, Priority: req.Priority,
+		Category: req.Category, ReporterID: req.ReporterID, TeamID: req.TeamID, AssigneeID: req.AssigneeID, RelatedCIID: req.RelatedCIID}
+	links := make([]ticket.Link, 0, len(req.Links))
+	for _, l := range req.Links {
+		links = append(links, ticket.Link{EntityType: l.Type, EntityID: l.ID})
+	}
+	var opts ticket.CreateOptions
+	if req.Exclusive != nil {
+		opts.Exclusive = &ticket.Target{EntityType: req.Exclusive.Type, EntityID: req.Exclusive.ID}
+	}
+	if req.Origin != nil {
+		opts.Origin = &ticket.Target{EntityType: req.Origin.Type, EntityID: req.Origin.ID}
+	}
+	err := a.svc.Create(ctx, t, links, opts)
+	var exists *ticket.ErrOpenTicketExists
+	switch {
+	case errors.As(err, &exists):
+		return nil, &alarm.TicketExistsError{TicketID: exists.ID, TicketNumber: exists.TicketNumber}
+	case err != nil:
+		return nil, err
+	}
+	return &alarm.TicketRef{TicketID: t.ID, TicketNumber: t.TicketNumber, Status: t.Status}, nil
+}
+
+// LinkAndComment implements alarm.TicketWriter: an existing link is kept.
+func (a alarmTickets) LinkAndComment(ctx context.Context, orgID, ticketID string, targets []alarm.TicketTarget, comment string) error {
+	for _, target := range targets {
+		err := a.svc.CreateLink(ctx, &ticket.Link{OrganizationID: orgID, TicketID: ticketID, EntityType: target.Type, EntityID: target.ID})
+		if err != nil && !errors.Is(err, ticket.ErrLinkExists) {
+			return err
+		}
+	}
+	_, err := a.svc.AddSystemComment(ctx, orgID, ticketID, comment)
+	return err
+}
+
+// ResolveTicket implements alarm.TicketWriter: the comment, then resolved
+// when the state machine allows it (a closed or resolved ticket keeps its
+// state).
+func (a alarmTickets) ResolveTicket(ctx context.Context, orgID, ticketID, comment string, resolve bool) error {
+	if _, err := a.svc.AddSystemComment(ctx, orgID, ticketID, comment); err != nil {
+		return err
+	}
+	if !resolve {
+		return nil
+	}
+	t, err := a.svc.Repository().GetByID(ctx, orgID, ticketID)
+	if err != nil {
+		return err
+	}
+	if !ticket.CanTransition(t.Status, ticket.StatusResolved) {
+		return nil
+	}
+	status := ticket.StatusResolved
+	_, err = a.svc.Update(ctx, orgID, ticketID, &ticket.UpdateRequest{Status: &status})
+	return err
+}
+
+// ticketReporters checks the reporter of the ticket action of an alert
+// rule (WP-1040 AK1): an active user of the organization with ticket:write.
+type ticketReporters struct {
+	users user.Repository
+	perms permission.Repository
+}
+
+// CheckTicketReporter implements monitoring.TicketReporterCheck.
+func (c ticketReporters) CheckTicketReporter(ctx context.Context, orgID, userID string) (bool, error) {
+	if c.users == nil || c.perms == nil {
+		return true, nil
+	}
+	u, err := c.users.GetUser(ctx, orgID, userID)
+	if err != nil {
+		if errors.Is(err, api.ErrNotFound) || errors.Is(err, user.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	if u.Status != "" && u.Status != "active" {
+		return false, nil
+	}
+	return c.perms.HasPermission(ctx, orgID, userID, string(identity.PermTicketWrite))
+}
+
+// NewTicketReporters returns the reporter check of the ticket action over
+// the users and their permissions (tests of package alarm wire it).
+func NewTicketReporters(users user.Repository, perms permission.Repository) monitoring.TicketReporterCheck {
+	return ticketReporters{users: users, perms: perms}
+}
+
 // accessRequestRuns is the executor that starts the workflow run of an IGA
 // access request (WFL-04): none while the workflows module is off (E-03),
 // so a switched-off module executes no workflow action.
@@ -1137,6 +1669,10 @@ func validate(repos *Repositories, opts *Options) error {
 		return fmt.Errorf("server: entitlement service is required")
 	case opts.Credentials == nil:
 		return fmt.Errorf("server: credential service is required")
+	case repos.ADMPAccounts == nil:
+		return fmt.Errorf("server: ADMP account repository is required")
+	case repos.ADMP == nil:
+		return fmt.Errorf("server: ADMP cache repository is required")
 	case repos.CIType == nil:
 		return fmt.Errorf("server: CI type repository is required")
 	case repos.RelationshipType == nil:
@@ -1210,9 +1746,23 @@ func metricsHandler(version string, includeTenantLabel bool) (handler http.Handl
 	operator.RegisterMetrics(registry)
 	entitlement.RegisterMetrics(registry)
 	discovery.RegisterMetrics(registry)
+	// The probe ingest (WP-960): rows, dropped results and dead letters.
+	probe.RegisterMetrics(registry)
+	// The alarms of the probe states (WP-986): lag and dead letters.
+	alarm.RegisterCheckMetrics(registry)
+	// The tickets of the alarms (WP-1040): errors and skipped actions.
+	alarm.RegisterTicketMetrics(registry)
 	rack.RegisterMetrics(registry)
 	iga.RegisterMetrics(registry)
 	ipam.RegisterMetrics(registry)
+	credential.RegisterMetrics(registry)
+	admp.RegisterMetrics(registry)
+	// The vulnerability feeds (SEC-02, WP-1118): documents, failed syncs
+	// and the age of the last sync per source.
+	vulnfeed.RegisterMetrics(registry)
+	// The version match (WP-1121): duration of vulnfeed.match.
+	security.RegisterMatchMetrics(registry)
+	workflow.RegisterMetrics(registry)
 
 	httpMetrics := middleware.RegisterHTTPMetrics(registry, includeTenantLabel)
 
@@ -1509,4 +2059,217 @@ func exportDATEVGate(opts *Options) *export.DATEVGate {
 		entitlements = opts.Entitlements
 	}
 	return export.NewDATEVGate(entitlements, opts.Modules.Enabled(ModuleInventory))
+}
+
+// maintenanceRecipients adapts the recipients of maintenance windows to
+// the workflow source maintenance_affected (WP-1109).
+type maintenanceRecipients struct{ finder *maintenance.RecipientFinder }
+
+func (m maintenanceRecipients) Window(ctx context.Context, orgID, id string) (*workflow.MaintenanceWindow, error) {
+	w, err := m.finder.Window(ctx, orgID, id)
+	if errors.Is(err, api.ErrNotFound) {
+		return nil, workflow.ErrMaintenanceWindowNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &workflow.MaintenanceWindow{ID: w.ID, Status: w.Status, StartsAt: w.StartsAt, EndsAt: w.EndsAt, UpdatedAt: w.UpdatedAt}, nil
+}
+
+func (m maintenanceRecipients) AffectedClients(ctx context.Context, orgID, id string, includeHeuristic bool) ([]string, error) {
+	clients, err := m.finder.AffectedClients(ctx, orgID, id, includeHeuristic)
+	if errors.Is(err, api.ErrNotFound) {
+		return nil, workflow.ErrMaintenanceWindowNotFound
+	}
+	return clients, err
+}
+
+// orderHandler builds the order routes; with the module workflows the
+// submit starts the approval workflow of the trigger order_submitted
+// (WFL-04, WP-1108) and order_decision changes the orders.
+func orderHandler(orders order.Repository, modules *ModuleSet, runs *workflow.Executor) *order.Handler {
+	h := order.NewHandler(orders)
+	if runs != nil && orders != nil && modules.Enabled("workflows") {
+		runs.WithOrders(orders)
+		h.WithRunStarter(workflow.NewOrderStarter(runs))
+	}
+	return h
+}
+
+// formHandler builds the form routes; signature fields (WP-1101) name
+// documents only with the release module documents, without it a form
+// definition with a signature field is refused with 422.
+func formHandler(repos *Repositories, opts *Options, quotas *workflow.Quotas, runs *workflow.Executor) *form.Handler {
+	h := form.NewHandler(repos.Form)
+	if quotas != nil {
+		h.WithQuota(quotas)
+	}
+	// A submission starts the runs of the trigger form_submitted and
+	// continues the run whose request_form step waits for it (WP-1102),
+	// in its transaction; never while the module workflows is off (E-03).
+	if runs != nil && opts.Modules.Enabled("workflows") {
+		var grants notify.GrantSource
+		if repos.Permission != nil {
+			grants = repos.Permission
+		}
+		h.WithSubmissionHook(workflow.NewFormHook(runs, grants))
+	}
+	if opts.Modules.Enabled(ModuleDocuments) && repos.Document != nil {
+		h.WithDocuments(repos.Document)
+	}
+	return h
+}
+
+// ticketHandler builds the ticket routes; the attachments (documents
+// linked to the ticket) exist only with the release module documents
+// (SR-61, WP-874): without it GET /tickets/{id}/attachments is not
+// registered and answers 404 like any unknown path.
+func ticketHandler(tickets *ticket.Service, repos *Repositories, opts *Options) *ticket.Handler {
+	h := ticket.NewHandler(tickets)
+	if opts.Modules.Enabled(ModuleDocuments) && repos.Document != nil {
+		h.WithDocuments(repos.Document)
+	}
+	return h
+}
+
+// withUsageCounters sets the counters of the usage report (UsageCounters)
+// on svc.
+func withUsageCounters(svc *entitlement.Service, repos *Repositories) *entitlement.Service {
+	if svc == nil {
+		return nil
+	}
+	return svc.WithUsageCounters(UsageCounters(repos))
+}
+
+// UsageCounters are the counters of the usage report (PKG-05, WP-885) from
+// the repositories, with the counting rules of the AllowCreate callers:
+// active CIs (ci.CountActive), collectors, active users, active API keys
+// and the stored document bytes in MiB (rounded up).
+func UsageCounters(repos *Repositories) entitlement.UsageCounters {
+	counters := entitlement.UsageCounters{}
+	if repos.CI != nil {
+		counters[entitlement.LimitMaxCIs] = func(ctx context.Context, orgID string) (int64, error) {
+			return ci.CountActive(ctx, repos.CI, orgID)
+		}
+	}
+	if repos.Discovery != nil {
+		counters[entitlement.LimitMaxCollectors] = repos.Discovery.CountCollectors
+	}
+	if repos.User != nil {
+		counters[entitlement.LimitMaxUsers] = repos.User.CountActiveUsers
+	}
+	if repos.APIKeys != nil {
+		counters[entitlement.LimitMaxAPIKeys] = func(ctx context.Context, orgID string) (int64, error) {
+			return identity.CountActiveAPIKeys(ctx, repos.APIKeys, orgID, time.Now())
+		}
+	}
+	if storage, ok := repos.Document.(interface {
+		StorageUsage(ctx context.Context, orgID string) (int64, error)
+	}); ok {
+		counters[entitlement.LimitMaxStorageMB] = func(ctx context.Context, orgID string) (int64, error) {
+			bytes, err := storage.StorageUsage(ctx, orgID)
+			const mib = 1 << 20
+			return (bytes + mib - 1) / mib, err
+		}
+	}
+	return counters
+}
+
+// alarmService returns the alarm lifecycle of the repositories; without one
+// a memory store (both profiles serve the same routes).
+// alarmHandler is the handler of the alarms and incidents. The incidents
+// name and link tickets only while the module ticketing is on (WP-1039,
+// like the review items); without it the port stays empty.
+func alarmHandler(repos *Repositories, tickets *ticket.Service, opts *Options) *alarm.Handler {
+	h := alarm.NewHandler(alarmService(repos))
+	if !opts.Modules.Enabled("ticketing") {
+		return h
+	}
+	var features entitlement.Checker
+	if opts.Entitlements != nil {
+		features = opts.Entitlements
+	}
+	// The ticket action of the rules and the manual ticket of an incident
+	// (WP-1040) open tickets through the same service.
+	writer := alarmTickets{svc: tickets, features: opts.Entitlements}
+	alarmService(repos).WithTicketWriter(writer)
+	return h.WithTickets(incidentTickets{svc: tickets, features: opts.Entitlements}, features).WithTicketWriter(writer)
+}
+
+func alarmService(repos *Repositories) *alarm.Service {
+	if repos.Alarms != nil {
+		return repos.Alarms
+	}
+	return alarm.NewService(alarm.NewMemoryStore(), nil, &alarm.LogSink{})
+}
+
+// probeAutocreator returns the job probe.autocreate on the PostgreSQL probe
+// store; without one (--no-db) its jobs fail.
+func probeAutocreator(repos *Repositories) *probe.Autocreator {
+	pg, _ := repos.Probes.(*probe.PGRepository)
+	return probe.NewAutocreator(pg)
+}
+
+// scanProbesOf returns the managed probes of the subnet scan on the
+// PostgreSQL probe store (nil without one: the scan routes answer 501).
+func scanProbesOf(repos *Repositories) ipam.ScanProbes {
+	pg, ok := repos.Probes.(*probe.PGRepository)
+	if !ok || pg == nil {
+		return nil
+	}
+	return probe.ScanProbes{Repo: pg}
+}
+
+// probeStore returns the probe store of repos, an empty memory store when
+// the repositories carry none (tests that build them partly).
+func probeStore(repos *Repositories, ents *entitlement.Service) probe.Store {
+	store := repos.Probes
+	if store == nil {
+		store = probe.NewMemoryRepository()
+	}
+	// Creates, changes and enables are admitted against the probe budget
+	// of the plan (PKG-04, WP-940).
+	if ents != nil {
+		store.SetBudget(ents)
+	}
+	return store
+}
+
+// admpTargetsOf resolves the interfaces and CIs of the ADMP read routes
+// (WP-930): the PostgreSQL cache reads them itself in one statement under
+// row level security; the memory cache of --no-db asks the IPAM and CI
+// stores.
+func admpTargetsOf(repos *Repositories) admp.Targets {
+	if t, ok := repos.ADMP.(admp.Targets); ok {
+		return t
+	}
+	ciTarget := func(ctx context.Context, orgID, id string) (*admp.Target, error) {
+		if repos.CI == nil {
+			return nil, admp.ErrTargetNotFound
+		}
+		item, err := repos.CI.GetByID(ctx, orgID, id)
+		if errors.Is(err, ci.ErrNotFound) {
+			return nil, admp.ErrTargetNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		return &admp.Target{CIID: item.ID, ClientID: item.ClientID}, nil
+	}
+	return admp.TargetFuncs{
+		CI: ciTarget,
+		Interface: func(ctx context.Context, orgID, id string) (*admp.Target, error) {
+			if repos.IPAM == nil {
+				return nil, admp.ErrTargetNotFound
+			}
+			ni, err := repos.IPAM.GetInterface(ctx, orgID, id)
+			if errors.Is(err, ipam.ErrNotFound) {
+				return nil, admp.ErrTargetNotFound
+			}
+			if err != nil {
+				return nil, err
+			}
+			return ciTarget(ctx, orgID, ni.CIID)
+		},
+	}
 }

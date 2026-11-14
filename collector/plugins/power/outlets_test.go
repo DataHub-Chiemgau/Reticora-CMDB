@@ -3,7 +3,6 @@ package power
 import (
 	"context"
 	"net"
-	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -13,6 +12,8 @@ import (
 	"time"
 
 	"github.com/gosnmp/gosnmp"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/internal/fakesnmp"
 )
 
 // startV2cAgent answers SNMPv2c GET, GETNEXT and GETBULK from mib.
@@ -142,38 +143,18 @@ func TestCollectReadsOutletMapping(t *testing.T) {
 	}
 }
 
-// loadWalk reads a fixture walk (snmpwalk -On: "OID = TYPE: value") from
-// testdata as the MIB of the SNMP fake; STRING and INTEGER values.
+// loadWalk reads a fixture walk (snmpwalk -On) from testdata as the MIB
+// of the SNMP test agent, keyed by OID without the leading dot; a thin
+// wrapper around fakesnmp.LoadWalkFile (WP-992).
 func loadWalk(t *testing.T, name string) map[string]gosnmp.SnmpPDU {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("testdata", name))
+	pdus, err := fakesnmp.LoadWalkFile(filepath.Join("testdata", name))
 	if err != nil {
 		t.Fatal(err)
 	}
-	mib := map[string]gosnmp.SnmpPDU{}
-	for n, line := range strings.Split(string(raw), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		oid, typed, ok := strings.Cut(line, " = ")
-		kind, value, ok2 := strings.Cut(typed, ": ")
-		if !ok || !ok2 {
-			t.Fatalf("%s:%d: %q is no walk line", name, n+1, line)
-		}
-		oid = strings.TrimPrefix(oid, ".")
-		switch kind {
-		case "STRING":
-			mib[oid] = gosnmp.SnmpPDU{Name: "." + oid, Type: gosnmp.OctetString, Value: []byte(strings.Trim(value, `"`))}
-		case "INTEGER":
-			v, err := strconv.Atoi(value)
-			if err != nil {
-				t.Fatalf("%s:%d: %v", name, n+1, err)
-			}
-			mib[oid] = gosnmp.SnmpPDU{Name: "." + oid, Type: gosnmp.Integer, Value: v}
-		default:
-			t.Fatalf("%s:%d: type %s not supported", name, n+1, kind)
-		}
+	mib := make(map[string]gosnmp.SnmpPDU, len(pdus))
+	for _, pdu := range pdus {
+		mib[strings.TrimPrefix(pdu.Name, ".")] = pdu
 	}
 	return mib
 }

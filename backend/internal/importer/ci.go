@@ -831,7 +831,13 @@ func (w *CIWriter) refusal(line int, err error) (RowResult, error) {
 	case errors.As(err, &validation):
 		res := RowResult{Outcome: OutcomeFailed}
 		for _, v := range validation.Violations {
-			res.Issues = append(res.Issues, Issue{Line: line, Field: v.Field, Code: CodeInvalidValue, Message: v.Detail})
+			// A field the lifecycle state locks is reported as read_only
+			// (LCY-04, WP-1103); every other violation is invalid_value.
+			code := CodeInvalidValue
+			if v.Code == ci.CodeReadOnly {
+				code = ci.CodeReadOnly
+			}
+			res.Issues = append(res.Issues, Issue{Line: line, Field: v.Field, Code: code, Message: v.Detail})
 		}
 		return res, nil
 	case errors.As(err, &unique):

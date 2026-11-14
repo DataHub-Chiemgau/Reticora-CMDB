@@ -113,6 +113,9 @@ var featureRules = []featureRule{
 	// Ticketing (TKT-01, E-39): SLAs and business calendars are standard.
 	gate("/api/v1/tickets", FeatureTicketingEssential),
 	{prefix: "/api/v1/tickets", suffix: "/sla", features: []string{FeatureTicketingStandard}},
+	// The attachments of a ticket are documents (SR-61, WP-874): both
+	// features, like /label (x-feature stays ticketing_essential).
+	{prefix: "/api/v1/tickets", suffix: "/attachments", features: []string{FeatureTicketingEssential, FeatureDocuments}},
 	gate("/api/v1/slas", FeatureTicketingStandard),
 	gate("/api/v1/business-calendars", FeatureTicketingStandard),
 	// Reading the review queue stays core; opening a ticket from an item
@@ -120,13 +123,13 @@ var featureRules = []featureRule{
 	{prefix: "/api/v1/review-items", suffix: "/ticket", features: []string{FeatureTicketingEssential}},
 
 	gate("/api/v1/maintenance-windows", FeatureMonitoring),
-	gate("/api/v1/keys", FeatureCompliance),
-	gate("/api/v1/trainings", FeatureWorkflowForms),
-	gate("/api/v1/training-assignments", FeatureWorkflowForms),
+	gate("/api/v1/keys", FeatureComplianceFindings),
+	gate("/api/v1/trainings", FeatureWorkflows),
+	gate("/api/v1/training-assignments", FeatureWorkflows),
 	gate("/api/v1/desks", FeatureWorkplace),
 	gate("/api/v1/desk-bookings", FeatureWorkplace),
 	gate("/api/v1/agents", FeatureEndpointAgent),
-	gate("/api/v1/security", FeatureCompliance),
+	gate("/api/v1/security", FeatureComplianceFindings),
 	gate("/api/v1/webhooks", FeatureWebhooks),
 	// Racks, their layout and the mounts are the rack_view feature (ENT-02,
 	// ENT-05, F-070).
@@ -145,13 +148,47 @@ var featureRules = []featureRule{
 	{prefix: "/api/v1/cis", suffix: "/dependencies", features: []string{FeatureTopology}},
 	{prefix: "/api/v1/cis", suffix: "/blast-radius", features: []string{FeatureTopology}},
 	{prefix: "/api/v1/cis", suffix: "/metrics", features: []string{FeatureMonitoring}},
+
+	// Phase 3 (WP-865, E-151, E-160, decision of the client of 2026-11-09).
+	// Every prefix and sub-path rule of the P3 modules stands here only;
+	// the domain work packages do not change this table (convention 31).
+	// SLA and forecasts are analytics and precede /api/v1/monitoring; the
+	// recommendation of an incident (ALR-09) is monitoring_network.
+	gate("/api/v1/monitoring/sla", FeatureMonitoringAnalytics),
+	gate("/api/v1/monitoring/forecasts", FeatureMonitoringAnalytics),
+	{prefix: "/api/v1/monitoring/incidents", suffix: "/recommendation", features: []string{FeatureMonitoringNetwork}},
+	gate("/api/v1/collector-groups", FeatureMonitoring),
+	{prefix: "/api/v1/cis", suffix: "/availability", features: []string{FeatureMonitoring}},
+	gate("/api/v1/credential-bindings", FeatureMonitoring),
+	{prefix: "/api/v1/cis", suffix: "/credentials", features: []string{FeatureMonitoring}},
+	gate("/api/v1/vault-connections", FeatureCredentialVault),
+	{prefix: "/api/v1/cis", suffix: "/configs", features: []string{FeatureMonitoringNetwork}},
+	gate("/api/v1/ipam", FeatureIPAM),
+	gate("/api/v1/ipam-sections", FeatureIPAM),
+	gate("/api/v1/asns", FeatureIPAM),
+	gate("/api/v1/asn-ranges", FeatureIPAM),
+	gate("/api/v1/bgp-peerings", FeatureIPAM),
+	gate("/api/v1/nat-translations", FeatureIPAM),
+	gate("/api/v1/nameserver-sets", FeatureIPAM),
+	gate("/api/v1/vlan-domains", FeatureIPAM),
+	{prefix: "/api/v1/cis", suffix: "/addresses", features: []string{FeatureIPAM}},
+	{prefix: "/api/v1/subnets", suffix: "/scan", features: []string{FeatureIPAM, FeatureMonitoring}},
+	{prefix: "/api/v1/subnets", suffix: "/rpki", features: []string{FeatureIPAM, FeatureMonitoringNetwork}},
+	gate("/api/v1/admp", FeatureADMP),
+	{prefix: "/api/v1/cis", suffix: "/admp-connections", features: []string{FeatureADMP}},
+	{prefix: "/api/v1/network-interfaces", suffix: "/admp", features: []string{FeatureADMP}},
+	gate("/api/v1/escalation-policies", FeatureNotificationsSMSPager),
+	gate("/api/v1/notification-escalations", FeatureNotificationsSMSPager),
+	// /api/v1/notification-callbacks (public provider callback, WP-1146)
+	// has no feature rule: the signature of the provider authenticates it.
 	gate("/api/v1/monitoring", FeatureMonitoring),
 	gate("/api/v1/metrics", FeatureMonitoring),
-	gate("/api/v1/forms", FeatureWorkflowForms),
-	gate("/api/v1/form-submissions", FeatureWorkflowForms),
-	gate("/api/v1/workflows", FeatureWorkflowForms),
-	gate("/api/v1/workflow-runs", FeatureWorkflowForms),
-	gate("/api/v1/compliance", FeatureCompliance),
+	gate("/api/v1/forms", FeatureWorkflows),
+	gate("/api/v1/form-submissions", FeatureWorkflows),
+	gate("/api/v1/workflows", FeatureWorkflows),
+	gate("/api/v1/workflow-runs", FeatureWorkflows),
+	gate("/api/v1/workflow-approvals", FeatureWorkflows),
+	gate("/api/v1/compliance", FeatureComplianceFindings),
 	gate("/api/v1/iga", FeatureIGA),
 	gate("/scim/v2", FeatureIGA),
 	gate("/api/v1/ai", FeatureAI),
@@ -162,7 +199,10 @@ var featureRules = []featureRule{
 // alias below /api/v1/discovery follows its successor /api/v1/review-items
 // and GraphQL reviewInbox (F-400). Resolving a scope_suggested item needs
 // the discovery feature in the discovery effect instead.
-var coreRoutes = []string{"/api/v1/discovery/review-items"}
+//
+// The full export and the deletion of an organization (TLC-05, TLC-06,
+// WP-865) are core as well: they need no paid feature.
+var coreRoutes = []string{"/api/v1/discovery/review-items", "/api/v1/org/exports", "/api/v1/org/deletion"}
 
 // ingestRoutes deliver discovery results or start scans; they are the only
 // requests stopped after the discovery license expired (CH21). Reading
@@ -349,9 +389,18 @@ func (s *Service) allow(w http.ResponseWriter, r *http.Request, orgID, feature s
 	return true
 }
 
+// planMismatchOrgs is the number of organizations whose rows of origin plan
+// deviate from organization.plan at the last startup check (WP-880).
+var planMismatchOrgs = prometheus.NewGauge(prometheus.GaugeOpts{
+	Namespace: "reticora",
+	Name:      "entitlement_plan_mismatch_organizations",
+	Help:      "Organizations whose entitlement rows of origin plan deviate from organization.plan (startup check, nothing is corrected).",
+})
+
 // RegisterMetrics registers reticora_ingest_refused_license_expired_total
-// (ENT-07).
+// (ENT-07) and reticora_entitlement_plan_mismatch_organizations (WP-880).
 func RegisterMetrics(reg prometheus.Registerer) {
+	reg.MustRegister(planMismatchOrgs)
 	reg.MustRegister(prometheus.NewCounterFunc(prometheus.CounterOpts{
 		Namespace: "reticora",
 		Name:      "ingest_refused_license_expired_total",

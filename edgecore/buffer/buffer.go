@@ -10,9 +10,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -116,7 +118,24 @@ type DiskBuffer struct {
 	lossLoaded   bool
 	droppedMsgs  int64
 	droppedBytes int64
+
+	// writes counts the files written into the spool (Writes).
+	writes atomic.Uint64
+
+	// sizedBytes is the size of the message files at sizedAt (the last
+	// scan of makeRoomLocked) plus every message enqueued since; a
+	// removal is not subtracted, so it never falls below the real size.
+	// It spares a buffer without MaxAge the scan of every file on each
+	// Enqueue while the spool is clearly below MaxBytes (sizeScanEvery).
+	sizedBytes int64
+	sizedAt    time.Time
 }
+
+// sizeScanEvery bounds how long makeRoomLocked trusts sizedBytes instead of
+// scanning the spool. Without it every Enqueue lists and stats every file:
+// a burst of thousands of state changes (the cold start of a collector with
+// 5,000 probes, WP-958) becomes quadratic.
+const sizeScanEvery = time.Second
 
 // lossState is the persisted form of the unacknowledged loss totals.
 type lossState struct {
@@ -197,6 +216,7 @@ func (b *DiskBuffer) writeFileAtomic(path string, data []byte) error {
 		_ = os.Remove(tmpName)
 		return err
 	}
+	b.writes.Add(1)
 	return syncDir(b.Dir)
 }
 
@@ -220,6 +240,13 @@ func (b *DiskBuffer) makeRoomLocked(size int64) error {
 	if b.MaxAge <= 0 && b.MaxBytes <= 0 {
 		return nil
 	}
+	// Without an age limit only the size matters: an estimate at or above
+	// the real size that still fits needs no scan.
+	if b.MaxAge <= 0 && !b.sizedAt.IsZero() && time.Since(b.sizedAt) < sizeScanEvery && b.sizedBytes+size <= b.MaxBytes {
+		b.sizedBytes += size
+		return nil
+	}
+	b.sizedAt = time.Time{}
 
 	kept, err := b.expireLocked()
 	if err != nil {
@@ -231,6 +258,7 @@ func (b *DiskBuffer) makeRoomLocked(size int64) error {
 	}
 
 	if b.MaxBytes <= 0 || total+size <= b.MaxBytes {
+		b.sizedBytes, b.sizedAt = total+size, time.Now()
 		return nil
 	}
 	// Over the cap: drop the oldest messages beyond the minimum retention.
@@ -259,6 +287,7 @@ func (b *DiskBuffer) makeRoomLocked(size int64) error {
 		}
 		return ErrSpoolFull
 	}
+	b.sizedBytes, b.sizedAt = total+size, time.Now()
 	return nil
 }
 
@@ -509,6 +538,15 @@ func (b *DiskBuffer) Saturated(ctx context.Context) (bool, error) {
 // it), is quarantined, counted as a LossCorrupt and skipped; the batch is
 // filled from the following entries in source-time order.
 func (b *DiskBuffer) PeekBatch(ctx context.Context, limit int) ([]Message, error) {
+	return b.PeekAfter(ctx, "", limit)
+}
+
+// PeekAfter is PeekBatch from the first message that sorts after the
+// message id after (in delivery order, the order of the file names; also
+// after the parts a Replace of after wrote); "" starts at the oldest. Only
+// the messages it returns are read, so a reader can walk the spool with a
+// cursor instead of reading its head again and again.
+func (b *DiskBuffer) PeekAfter(ctx context.Context, after string, limit int) ([]Message, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -522,6 +560,12 @@ func (b *DiskBuffer) PeekBatch(ctx context.Context, limit int) ([]Message, error
 	entries, err := b.expireLocked()
 	if err != nil {
 		return nil, err
+	}
+	if after != "" {
+		// The parts of after ("<after>.<n>.json") sort before
+		// "<after>.json" and are skipped with it.
+		bound := after + ".json"
+		entries = entries[sort.Search(len(entries), func(i int) bool { return entries[i].name > bound }):]
 	}
 
 	out := make([]Message, 0, min(len(entries), limit))
@@ -602,6 +646,9 @@ func (b *DiskBuffer) Replace(ctx context.Context, id string, parts []Message) ([
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	// The parts may take more space than the message: the next Enqueue
+	// scans the spool again.
+	b.sizedAt = time.Time{}
 
 	info, statErr := os.Stat(b.messagePath(id))
 	if statErr != nil {
@@ -676,6 +723,12 @@ func (b *DiskBuffer) Len(ctx context.Context) (int, error) {
 	}
 	return len(entries), nil
 }
+
+// Writes returns the number of files the buffer has written since it was
+// created: messages, replaced parts, quarantined entries and the loss
+// totals. The capacity test of the collector (WP-958) derives the write
+// rate of the probe spool from it.
+func (b *DiskBuffer) Writes() uint64 { return b.writes.Load() }
 
 // Stats summarizes the current spool state for operator visibility
 // (Epic D4: Metriken).

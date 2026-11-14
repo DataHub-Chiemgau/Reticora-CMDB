@@ -262,6 +262,10 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter Filter, pa
 			args = append(args, string(filter.Status))
 			where = append(where, fmt.Sprintf("status = $%d", len(args)))
 		}
+		if len(filter.ExcludeKinds) > 0 {
+			args = append(args, filter.ExcludeKinds)
+			where = append(where, fmt.Sprintf("kind <> ALL($%d::text[])", len(args)))
+		}
 		cond := strings.Join(where, " AND ") + own
 		if err := tx.QueryRow(ctx, `SELECT count(*) FROM job WHERE `+cond, args...).Scan(&total); err != nil {
 			return fmt.Errorf("count jobs: %w", err)
@@ -370,6 +374,16 @@ func (r *PGRepository) QueuedDue(ctx context.Context, now time.Time, limit int) 
 	return out, err
 }
 
+// DBNow returns the database clock, the clock of created_at and run_after
+// (backlog age, WP-550).
+func (r *PGRepository) DBNow(ctx context.Context) (time.Time, error) {
+	var now time.Time
+	err := database.WithSystem(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now)
+	})
+	return now, err
+}
+
 // Transition implements Repository; the status check and the change are
 // one statement. With u.ReportFailed a change to failed appends job.failed
 // to the outbox in its transaction (WP-550): a failed append rolls the
@@ -415,6 +429,13 @@ func (r *PGRepository) Transition(ctx context.Context, orgID, id string, from []
 		if u.ReportFailed && j.Status == StatusFailed {
 			if _, err := events.NewOutbox().Append(ctx, tx, failedEvent(j)); err != nil {
 				return fmt.Errorf("update job: %w", err)
+			}
+		}
+		if u.Events != nil && j.Status == StatusSucceeded {
+			if es := u.Events(j); len(es) > 0 {
+				if _, err := events.NewOutbox().AppendMany(ctx, tx, es); err != nil {
+					return fmt.Errorf("update job: %w", err)
+				}
 			}
 		}
 		out = j

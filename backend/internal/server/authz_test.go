@@ -118,11 +118,14 @@ func TestAuthorizationMiddlewareEnforcesPermissions(t *testing.T) {
 			}
 
 			// Principal with the required permission: anything but 401/403.
+			// The session has a second factor, which the deletion of the
+			// organization requires besides org:delete (WP-1152).
 			req = withPrincipal(httptest.NewRequest(op.Method, target, nil), identity.Principal{
 				Subject:        "user-1",
 				OrganizationID: "org-1",
 				Permissions:    []identity.Permission{required},
 				Type:           identity.PrincipalTypeUser,
+				MFA:            true,
 			})
 			w = httptest.NewRecorder()
 			handler.ServeHTTP(w, req)
@@ -250,6 +253,9 @@ func TestSpecialActionsRequireTheirOwnPermission(t *testing.T) {
 		{http.MethodPost, "/api/v1/lifecycle-definitions", identity.PermLifecycleManage},
 		{http.MethodDelete, "/api/v1/lifecycle-definitions/{id}", identity.PermLifecycleManage},
 		{http.MethodPost, "/api/v1/stocktakes/{id}/complete", identity.PermStocktakeComplete},
+		// The decision on a workflow approval (WP-1098): workflow:approve,
+		// not workflow:write.
+		{http.MethodPost, "/api/v1/workflow-runs/{id}/approval", identity.PermWorkflowApprove},
 	} {
 		got, access := PermissionForRoute(c.method, c.path)
 		if access != routeProtected || got != c.want {

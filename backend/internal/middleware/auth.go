@@ -46,6 +46,9 @@ type Claims struct {
 	// Groups are the IdP groups of the session (SessionClaims.Groups); they
 	// name the standard roles held through the IdP (RBA-07).
 	Groups []string `json:"groups,omitempty"`
+	// MFA is the claim mfa of a session token: its login used a second
+	// factor (identity.MFASatisfied, WP-1152).
+	MFA bool `json:"mfa,omitempty"`
 }
 
 // SessionVerifier verifies the signature of session tokens issued by the
@@ -195,6 +198,7 @@ func authenticateRequest(r *http.Request, verifier SessionVerifier, apiKeys APIK
 		Permissions:      claims.Permissions,
 		Type:             identity.PrincipalTypeUser,
 		Groups:           append([]string(nil), claims.Groups...),
+		MFA:              claims.MFA,
 	}
 	// The session budget of API-04 counts the session (sid), which every
 	// refresh keeps; tokens issued without sid (until they expire, at most
@@ -255,6 +259,7 @@ func authenticate(r *http.Request, verifier SessionVerifier) (Claims, error) {
 		TokenID:          sessionClaims.ID,
 		SessionID:        sessionClaims.SessionID,
 		Groups:           append([]string(nil), sessionClaims.Groups...),
+		MFA:              sessionClaims.MFA,
 	}, nil
 }
 
@@ -292,18 +297,26 @@ func TenantMiddleware(next http.Handler) http.Handler {
 // assignments (RBA-03, WP-009): it is taken over dimension by dimension, so a
 // user with client assignments only is never org-wide. Credentials without a
 // resolved scope (API keys, development tokens) are restricted by their client
-// scope only.
+// scope only. An API key carries its kind (database.PrincipalTypeAPIKey):
+// the rights per IPAM section count the teams of its team scope like team
+// memberships (WP-910, E-214).
 func TenantScopeFor(p *identity.Principal) database.TenantScope {
+	principalType := ""
+	if p.Type == identity.PrincipalTypeAPIKey {
+		principalType = database.PrincipalTypeAPIKey
+	}
 	if p.Scope != nil {
 		return database.TenantScope{
-			OrgID:   p.OrganizationID,
-			UserID:  p.Subject,
-			Clients: scopeSet(p.Scope.Clients),
-			Sites:   scopeSet(p.Scope.Sites),
-			Teams:   scopeSet(p.Scope.Teams),
+			OrgID:         p.OrganizationID,
+			UserID:        p.Subject,
+			Clients:       scopeSet(p.Scope.Clients),
+			Sites:         scopeSet(p.Scope.Sites),
+			Teams:         scopeSet(p.Scope.Teams),
+			PrincipalType: principalType,
 		}
 	}
 	scope := database.OrgWideScope(p.OrganizationID, p.Subject)
+	scope.PrincipalType = principalType
 	if clients := strings.TrimSpace(p.ClientScope); clients != "" {
 		var ids []string
 		for _, id := range strings.Split(clients, ",") {

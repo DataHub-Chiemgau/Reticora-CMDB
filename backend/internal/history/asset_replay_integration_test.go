@@ -176,7 +176,16 @@ func TestAssetAsOfAgainstPostgres(t *testing.T) {
 	t0 := clock()
 
 	// Without the module inventory the weekly job writes no asset_snapshot.
-	ahead := func() time.Time { return time.Now().Add(time.Hour) }
+	// The runs start an hour ahead of the database clock (not the clock of
+	// the process, which may lag behind it): their cut-off lies after every
+	// change written before.
+	ahead := func() time.Time {
+		var now time.Time
+		if qerr := f.Admin.QueryRow(bg, `SELECT clock_timestamp()`).Scan(&now); qerr != nil {
+			t.Fatal(qerr)
+		}
+		return now.Add(time.Hour)
+	}
 	if _, err = history.NewWeeklySnapshot(f.App).WithClock(ahead).RunOrg(bg, f.OrgA); err != nil {
 		t.Fatalf("weekly snapshot without inventory: %v", err)
 	}

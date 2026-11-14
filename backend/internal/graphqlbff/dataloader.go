@@ -38,6 +38,20 @@ type ciLoader struct {
 	assetCIs   map[string]*ciList
 	children   map[string]*ciList
 	childrenOf map[string][]ci.Item
+
+	// The P3 fields at the CI (WP-1136): siblings maps a CI to the CIs a
+	// list handed out with it (one level of the answer); batches holds one
+	// read per field, arguments and level.
+	siblings map[string][]string
+	batches  map[string]*levelBatch
+}
+
+// levelBatch is one batch read of a field for the CIs of a level: the value
+// per CI id.
+type levelBatch struct {
+	once   sync.Once
+	values map[string]any
+	err    error
 }
 
 // ciList is one CI list read once per request.
@@ -54,7 +68,8 @@ type loaderBatch struct {
 
 func withLoader(ctx context.Context, repo ci.Repository, orgID string) context.Context {
 	return context.WithValue(ctx, loaderKey{}, &ciLoader{repo: repo, orgID: orgID, cache: map[string]*ci.Item{},
-		assetCIs: map[string]*ciList{}, children: map[string]*ciList{}, childrenOf: map[string][]ci.Item{}})
+		assetCIs: map[string]*ciList{}, children: map[string]*ciList{}, childrenOf: map[string][]ci.Item{},
+		siblings: map[string][]string{}, batches: map[string]*levelBatch{}})
 }
 
 func loaderFrom(ctx context.Context) *ciLoader {
@@ -239,4 +254,60 @@ func (l *ciLoader) cachedChildren(ids []string) ([]ci.Item, bool) {
 		out = append(out, kids...)
 	}
 	return append([]ci.Item{}, out...), true
+}
+
+// registerSiblings records the CIs of items as one level of the answer: a
+// P3 field of one of them reads the field for all of them in one batch
+// (WP-1136 AK4/AK6). A CI already in a level keeps it.
+func (l *ciLoader) registerSiblings(items []*ci.Item) {
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if item != nil {
+			ids = append(ids, item.ID)
+		}
+	}
+	l.registerLevel(ids)
+}
+
+// registerLevel records the CI ids a list hands out (the ends of the
+// relationships, the nodes of a topology, the mounts of a rack, the
+// candidates of the review items) as one level, like registerSiblings.
+func (l *ciLoader) registerLevel(raw []string) {
+	ids := make([]string, 0, len(raw))
+	for _, id := range raw {
+		if id != "" && !slices.Contains(ids, id) {
+			ids = append(ids, id)
+		}
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, id := range ids {
+		if _, ok := l.siblings[id]; !ok {
+			l.siblings[id] = ids
+		}
+	}
+}
+
+// fieldBatch returns the value of ciID of the batch key over the level of ciID
+// (the CI alone without one): the first field resolver of the level reads
+// with fetch, the others wait for it.
+func (l *ciLoader) fieldBatch(key, ciID string, fetch func(ids []string) (map[string]any, error)) (any, error) {
+	l.mu.Lock()
+	level, ok := l.siblings[ciID]
+	if !ok {
+		level = []string{ciID}
+	}
+	sorted := slices.Sorted(slices.Values(level))
+	full := key + "|" + strings.Join(sorted, ",")
+	b := l.batches[full]
+	if b == nil {
+		b = &levelBatch{}
+		l.batches[full] = b
+	}
+	l.mu.Unlock()
+	b.once.Do(func() { b.values, b.err = fetch(sorted) })
+	if b.err != nil {
+		return nil, b.err
+	}
+	return b.values[ciID], nil
 }

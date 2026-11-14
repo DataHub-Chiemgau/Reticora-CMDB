@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/fieldmeta"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rules"
@@ -330,9 +331,19 @@ func buildModel(appliesTo string, stateSpecs []StateSpec, transitionSpecs []Tran
 			return nil, nil, unprocessable(fmt.Sprintf("states[%d].key", i), "the state key %q is taken", s.Key)
 		}
 		known[s.Key] = true
+		// Only the state of a CI locks fields (ci.Service, the catalog
+		// rules of citype): an asset model with locks would answer 200
+		// and protect nothing.
+		if appliesTo == "asset" && len(s.LockedFields) > 0 {
+			return nil, nil, unprocessable(fmt.Sprintf("states[%d].locked_fields", i), "only the states of a CI model lock fields")
+		}
+		if err := checkLockedFields(i, s.LockedFields); err != nil {
+			return nil, nil, err
+		}
 		states = append(states, State{
 			Key: s.Key, Label: s.Label, IsInitial: s.IsInitial,
 			IsTerminal: s.IsTerminal, SortOrder: s.SortOrder, RequiredFields: s.RequiredFields,
+			LockedFields: s.LockedFields,
 		})
 	}
 	if appliesTo == "asset" {
@@ -370,6 +381,36 @@ func buildModel(appliesTo string, stateSpecs []StateSpec, transitionSpecs []Tran
 		})
 	}
 	return states, transitions, nil
+}
+
+// lockedFieldOfState is the column of the state itself: a state never
+// locks it (a transition changes it, WP-1103).
+const lockedFieldOfState = "lifecycle_state"
+
+// checkLockedFields checks the locked fields of state i (WP-1103 AK1):
+// names are set and unique, no reserved attribute namespace (_overrides,
+// _observed, _provenance, _instance) and not lifecycle_state; a refusal is
+// 422 on states[i].locked_fields[j].
+func checkLockedFields(i int, fields []string) error {
+	seen := map[string]bool{}
+	for j, name := range fields {
+		path := fmt.Sprintf("states[%d].locked_fields[%d]", i, j)
+		refuse := func(message string) error {
+			return &api.FieldError{Field: path, Message: message, Status: http.StatusUnprocessableEntity}
+		}
+		switch {
+		case strings.TrimSpace(name) == "" || name != strings.TrimSpace(name):
+			return refuse("a locked field needs a name without surrounding spaces")
+		case fieldmeta.ReservedNames[name]:
+			return refuse("a reserved attribute namespace cannot be locked")
+		case name == lockedFieldOfState:
+			return refuse("lifecycle_state changes by transitions and cannot be locked")
+		case seen[name]:
+			return refuse("the field is locked twice")
+		}
+		seen[name] = true
+	}
+	return nil
 }
 
 // parseGuard checks every rule of a guard with rules.Parse; a refused rule
@@ -414,9 +455,10 @@ func parseRule(raw []byte) (rules.Rule, error) {
 // without states keeps them).
 func specsOfStates(states []State) []StateSpec {
 	out := make([]StateSpec, 0, len(states))
-	for _, s := range states {
+	for i := range states {
+		s := &states[i]
 		out = append(out, StateSpec{Key: s.Key, Label: s.Label, IsInitial: s.IsInitial,
-			IsTerminal: s.IsTerminal, SortOrder: s.SortOrder, RequiredFields: s.RequiredFields})
+			IsTerminal: s.IsTerminal, SortOrder: s.SortOrder, RequiredFields: s.RequiredFields, LockedFields: s.LockedFields})
 	}
 	return out
 }
@@ -498,8 +540,8 @@ func (h *Handler) options(w http.ResponseWriter, r *http.Request, entityType str
 // without a state may enter the initial state as well (Service.Transition).
 func transitionOptions(def *Definition, current string) TransitionOptions {
 	stateByKey := map[string]State{}
-	for _, st := range def.States {
-		stateByKey[st.Key] = st
+	for i := range def.States {
+		stateByKey[def.States[i].Key] = def.States[i]
 	}
 	out := TransitionOptions{
 		Model:        ModelRef{ID: def.ID, Key: def.Key, Name: def.Name},

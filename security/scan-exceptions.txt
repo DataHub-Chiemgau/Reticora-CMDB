@@ -14,3 +14,52 @@
 # scripts/ci/check-scan-exceptions.sh enforces this before every scan (an
 # entry without exp: would suppress its finding in Trivy forever). See
 # docs/security/abhaengigkeitsscans.md.
+
+# reticora-postgres (deploy/docker-compose/postgres, E-257): PostgreSQL 16.15
+# of the TimescaleDB base image (source build in /usr/local, server, psql,
+# pg_dump, libpq of pgBackRest). Trivy reports the same CVEs on the apk
+# packages postgresql16, postgresql16-client, postgresql16-plpython3 and libpq
+# of the image; fixed in PostgreSQL 16.16 (2026-11-12), for which no
+# timescale/timescaledb pg16 image exists yet (2.32.0-pg16 also ships 16.15;
+# PostgreSQL 16.16 needs TimescaleDB 2.32.1 first). The entries expire with the
+# SEC-11 limit for High; until then E-257 replaces the base image (or builds
+# PostgreSQL 16.16 from source) – an apk upgrade alone would hide the
+# findings without fixing the server.
+CVE-2026-6460 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-6467 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-14661 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-18447 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-116304 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-116306 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-116307 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-116309 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-116313 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-116314 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-116315 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-116316 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-116317 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-116318 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-116319 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-116320 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-116323 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-116325 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-116326 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-116328 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-116329 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-116330 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-116331 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-116332 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-116335 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-116336 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-120139 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-120141 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-120142 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-120143 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-120144 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-120145 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-120147 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-120148 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-120149 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-120150 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-120151 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)
+CVE-2026-120153 exp:2026-12-13 since:2026-11-13 sev:high # reticora-postgres: PostgreSQL 16.15 of the TimescaleDB base, fix 16.16 (E-257)

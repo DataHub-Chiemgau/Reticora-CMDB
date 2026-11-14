@@ -79,12 +79,14 @@ func (s *JobScope) TenantScope(orgID, userID string) database.TenantScope {
 
 // JobFilters narrows an export job to a subset of the tenant's CIs (csv,
 // json: status, ci_type_id, client_id, or a selection of ids), a selection
-// of assets (csv, json with entity asset: ids, WP-782) or assets (datev:
-// client_id, lifecycle_state, WP-310).
+// of assets (csv, json with entity asset: ids, WP-782), assets (datev:
+// client_id, lifecycle_state, WP-310) or subnets and addresses (csv with
+// entity subnet or ip_address: filters.ipam, WP-921).
 type JobFilters struct {
 	// Entity is what a csv or json export renders: EntityCI (the default,
-	// also empty) or EntityAsset, which only POST /api/v1/assets/bulk
-	// creates (WP-782); POST /api/v1/exports refuses it.
+	// also empty), EntityAsset, which only POST /api/v1/assets/bulk
+	// creates (WP-782); POST /api/v1/exports refuses it, or EntitySubnet
+	// and EntityIPAddress (csv only, WP-921).
 	Entity         string `json:"entity,omitempty"`
 	Status         string `json:"status,omitempty"`
 	CITypeID       string `json:"ci_type_id,omitempty"`
@@ -94,6 +96,8 @@ type JobFilters struct {
 	// MaxExportIDs): the visible, not deleted ones among them, sorted by
 	// created_at and id. It stands alone, without the other filters.
 	IDs []string `json:"ids,omitempty"`
+	// IPAM are the filters of an export of subnets or addresses (WP-921).
+	IPAM *IPAMFilters `json:"ipam,omitempty"`
 }
 
 // MaxExportIDs bounds filters.ids like a bulk request (API-08).
@@ -144,6 +148,12 @@ func (r *CreateJobRequest) Validate() error {
 	default:
 		return fmt.Errorf("format must be 'csv', 'datev' or 'json'")
 	}
+	if r.Filters.IsIPAM() {
+		return r.Filters.validateIPAM(r.Format)
+	}
+	if r.Filters.IPAM != nil {
+		return fmt.Errorf("filters.ipam applies to filters.entity subnet and ip_address only")
+	}
 	switch r.Filters.Entity {
 	case "", EntityCI:
 	case EntityAsset:
@@ -155,7 +165,7 @@ func (r *CreateJobRequest) Validate() error {
 			return fmt.Errorf("filters.entity asset takes filters.ids only")
 		}
 	default:
-		return fmt.Errorf("filters.entity must be 'ci' or 'asset'")
+		return fmt.Errorf("filters.entity must be 'ci', 'asset', 'subnet' or 'ip_address'")
 	}
 	// DATEV exports assets (WP-310): the CI filters do not apply to it,
 	// lifecycle_state applies to it only.

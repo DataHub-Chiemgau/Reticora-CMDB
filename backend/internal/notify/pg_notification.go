@@ -77,10 +77,29 @@ func (s *PGDeliveryStore) Enqueue(ctx context.Context, orgID string, rows []Queu
 	return created, err
 }
 
+// storedRecipients is the recipient list a queued delivery keeps: without
+// the phone numbers (WP-1140). A number lives only in the PII vault (the
+// user's or the contact's subject); a stored copy in
+// notification_delivery.recipients would leave the vault, appear in the
+// delivery list and the webhook body and outlive the crypto-shredding of
+// the anonymization. A channel that needs the number resolves it when it
+// sends.
+func storedRecipients(rs []Recipient) []Recipient {
+	if rs == nil {
+		return nil
+	}
+	out := make([]Recipient, len(rs))
+	for i := range rs {
+		out[i] = rs[i]
+		out[i].Phone = ""
+	}
+	return out
+}
+
 // insertDelivery queues r in tx and returns its id; empty when its dedup
 // key is taken.
 func insertDelivery(ctx context.Context, tx pgx.Tx, orgID string, r *QueuedDelivery) (string, error) {
-	recipients, err := json.Marshal(r.Recipients)
+	recipients, err := json.Marshal(storedRecipients(r.Recipients))
 	if err != nil {
 		return "", err
 	}
@@ -484,6 +503,7 @@ func (s *PGPreferences) Preference(ctx context.Context, orgID, userID string) (*
 		if start != nil {
 			p.QuietStart, p.QuietEnd = *start, *end
 		}
+		p.renameCategories()
 		out = &p
 		return nil
 	})

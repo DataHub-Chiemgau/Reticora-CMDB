@@ -30,6 +30,9 @@ type Handler struct {
 	// (WP-261); dispatcher sends their webhook events after the commit.
 	apply      Applier
 	dispatcher citype.EventDispatcher
+	// fieldPolicy drops the cached field policy after a publication
+	// (SR-58); nil: none.
+	fieldPolicy citype.FieldPolicyInvalidator
 }
 
 // TestJobs runs the test jobs in this process and reads a job;
@@ -71,6 +74,13 @@ func (h *Handler) WithPublish(catalog citype.Repository, dispatcher citype.Event
 		h.apply = newRouteApplier(catalog)
 	}
 	h.dispatcher = dispatcher
+	return h
+}
+
+// WithFieldPolicyInvalidator drops the cached field policy of the
+// organization after a publication (SR-58, WP-871).
+func (h *Handler) WithFieldPolicyInvalidator(inv citype.FieldPolicyInvalidator) *Handler {
+	h.fieldPolicy = inv
 	return h
 }
 
@@ -308,9 +318,11 @@ func (h *Handler) AddItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	perms, _ := identity.PermissionsFromContext(r.Context())
-	if need := ItemPermission(c.Kind, c.Op); !identity.HasPermission(perms, need) {
-		api.WriteError(w, http.StatusForbidden, "Forbidden", "the item needs the permission "+string(need))
-		return
+	for _, need := range ItemPermissions(c.Kind, c.Op, c.Payload) {
+		if !identity.HasPermission(perms, need) {
+			api.WriteError(w, http.StatusForbidden, "Forbidden", "the item needs the permission "+string(need))
+			return
+		}
 	}
 	d, it, err := repo.AddItem(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), c, match)
 	if err != nil {
@@ -472,6 +484,11 @@ func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	buffer.flush(r.Context(), t.OrganizationID, h.dispatcher)
+	// The published attribute definitions may carry computed asset
+	// sources (SR-58): drop the cached field policy after the commit.
+	if h.fieldPolicy != nil {
+		h.fieldPolicy.Invalidate(r.Context(), t.OrganizationID)
+	}
 	w.Header().Set("ETag", api.ETag(res.Draft.Version))
 	api.WriteJSON(w, http.StatusOK, res)
 }

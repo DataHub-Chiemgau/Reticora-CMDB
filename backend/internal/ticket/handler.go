@@ -51,7 +51,9 @@ func NewHandler(svc *Service) *Handler {
 }
 
 // WithDocuments gives the handler the document repository the attachments
-// of a ticket are read from (WP-765); without it the attachments answer 503.
+// of a ticket are read from (WP-765). Without it the route
+// GET /tickets/{id}/attachments is not registered (404, SR-61): the server
+// leaves it out while the release module documents is off.
 func (h *Handler) WithDocuments(docs AttachmentReader) *Handler {
 	h.docs = docs
 	return h
@@ -69,7 +71,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/tickets/{id}/links", h.ListLinks)
 	r.Post("/api/v1/tickets/{id}/links", h.CreateLink)
 	r.Delete("/api/v1/tickets/{id}/links/{link_id}", h.DeleteLink)
-	r.Get("/api/v1/tickets/{id}/attachments", h.ListAttachments)
+	if h.docs != nil {
+		r.Get("/api/v1/tickets/{id}/attachments", h.ListAttachments)
+	}
 }
 
 // parseTagFilter splits the filter tags (comma separated) into keys.
@@ -612,8 +616,9 @@ func (h *Handler) ListLinks(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateLink handles POST /api/v1/tickets/{id}/links (WP-764): an unknown
-// entity_type is 422, a ticket or target that does not exist or lies
-// outside the caller's scope 404, a second link of the same object 409.
+// entity_type is 422, a ticket that does not exist or lies outside the
+// caller's scope 404, such a target 422 on entity_id (SR-50), a second
+// link of the same object 409.
 func (h *Handler) CreateLink(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
@@ -638,12 +643,17 @@ func (h *Handler) CreateLink(w http.ResponseWriter, r *http.Request) {
 			Message: "must be one of " + strings.Join(LinkEntityTypes, ", ")})
 		return
 	}
+	targetRefused := &api.FieldError{Field: "entity_id", Message: "not found", Status: http.StatusUnprocessableEntity}
 	if !api.IsUUID(req.EntityID) {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "linked object not found")
+		api.WriteFieldError(w, targetRefused)
 		return
 	}
 	link := &Link{OrganizationID: t.OrganizationID, TicketID: ticketID, EntityType: req.EntityType, EntityID: req.EntityID}
 	if err := h.repo.CreateLink(r.Context(), link); err != nil {
+		if errors.Is(err, ErrLinkTargetNotFound) {
+			api.WriteFieldError(w, targetRefused)
+			return
+		}
 		writeTicketError(w, r, err)
 		return
 	}
@@ -703,7 +713,7 @@ func (h *Handler) ListAttachments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if h.docs == nil {
-		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", "ticket attachments are not available")
+		api.WriteError(w, http.StatusNotFound, "Not Found", "ticket attachments are not available")
 		return
 	}
 	policy, err := permission.PolicyFrom(r.Context())

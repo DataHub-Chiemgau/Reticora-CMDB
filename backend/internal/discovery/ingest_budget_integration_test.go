@@ -35,25 +35,36 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
 )
 
+// managementSyncStatements is what the synchronisation of the management
+// address (IPM-13, WP-913, ipam.ManagementSync as the server wires it)
+// adds to a transaction that writes new or changed management IPs, once
+// per transaction whatever the number of its CIs (set-based): the target
+// VRFs locked with the source of the history, SAVEPOINT, the address write,
+// RELEASE. Every device of these tests is created with a management IP (its
+// target IP); a write without change of the management IP adds nothing
+// (known devices, TestRediscoverStatementBudget).
+const managementSyncStatements = 4
+
 // ingestRecordBudget is the statement budget of the transaction of one new
 // record (WP-332, NFR-03), BEGIN to COMMIT: BEGIN with the GUCs, identity
 // candidates, deleted candidates, INSERT ci, ci_change, audit lock,
 // audit_log, event_outbox, search_document, provenance visibility check,
-// ci_field_value, COMMIT.
-const ingestRecordBudget = 12
+// ci_field_value, COMMIT; plus the management address.
+const ingestRecordBudget = 12 + managementSyncStatements
 
 // productionRecordBudget is the ceiling with the production extras: the
 // field resolution of the observed-value check (two reads per record, once
 // per batch from WP-333 on) and the AI chunk.
-const productionRecordBudget = 15
+const productionRecordBudget = 15 + managementSyncStatements
 
 // batchBudget is the statement budget of the transaction that creates the
 // new devices of a batch (WP-333, NFR-03), BEGIN to COMMIT, whatever their
 // number: BEGIN with the GUCs, identity hits, deleted identity hits, INSERT
 // ci, ci_change, audit_log (the chain lock is taken by its trigger),
 // event_outbox, search_document, ci_field_value, COMMIT; with the production
-// extras the field resolution (once per CI type) and the AI chunks.
-const batchBudget = 15
+// extras the field resolution (once per CI type) and the AI chunks; plus the
+// management addresses of all its devices.
+const batchBudget = 15 + managementSyncStatements
 
 // assetLinkLookup is what the automatic serial link (WP-741) adds to the
 // transaction of a record or a batch without a hit, with the module
@@ -253,7 +264,9 @@ func TestIngestStatementBudget(t *testing.T) {
 	computed := false
 	build := func(production, batch bool, lanes ...int) *discovery.Handler {
 		var indexer ci.Indexer = search.NewCIIndexer(search.NewPGRepository(pool))
-		base := ci.NewPGRepositoryWithAudit(pool, audit.NewPGRecorder()).WithEvents(events.NewOutbox())
+		// The management sync of the server (repositories.go, WP-913).
+		base := ci.NewPGRepositoryWithAudit(pool, audit.NewPGRecorder()).WithEvents(events.NewOutbox()).
+			WithManagementSync(ipam.NewManagementSync(ipam.NewPGRepository(pool), nil))
 		if computed {
 			base = base.WithComputed(citype.NewPGRepository(pool))
 		}
@@ -559,13 +572,18 @@ func TestIngestStatementBudget(t *testing.T) {
 		if b.resp.Updated != 20 || b.resp.Created != 0 {
 			t.Fatalf("ingest of 20 known devices: %+v", b.resp)
 		}
-		hits, single, updates := 0, 0, 0
+		hits, single, updates, mgmt := 0, 0, 0, 0
 		for _, tx := range append(append([][]string{}, b.frame...), b.records...) {
 			hits += count(tx, `ingest identity hits`)
 			single += count(tx, `order by created_at, id limit`)
 			if count(tx, `^update ci set`) > 0 {
 				updates++
 			}
+			// AK7 of WP-913: an unchanged management IP costs no statement.
+			mgmt += count(tx, `subnet_tree_lock|into ip_address`)
+		}
+		if mgmt != 0 {
+			t.Errorf("20 known devices with unchanged management IPs: %d management address statements, want 0", mgmt)
 		}
 		if hits != 1 || single != 0 || updates != 20 || len(b.records) != 0 {
 			t.Errorf("20 known devices: %d batch candidate queries, %d record candidate queries, %d update transactions, %d creating transactions; "+
@@ -887,7 +905,8 @@ func TestIngestBatchMatchesRecordPath(t *testing.T) {
 	f := scopetest.Seed(t, "e6")
 	bg := context.Background()
 	handler := func(batch bool) http.Handler {
-		cis := ci.NewIndexingRepository(ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder()).WithEvents(events.NewOutbox()),
+		cis := ci.NewIndexingRepository(ci.NewPGRepositoryWithAudit(f.App, audit.NewPGRecorder()).WithEvents(events.NewOutbox()).
+			WithManagementSync(ipam.NewManagementSync(ipam.NewPGRepository(f.App), nil)),
 			search.NewCIIndexer(search.NewPGRepository(f.App)))
 		cis = ci.NewIndexingRepository(cis, ai.NewCIChunkIndexer(ai.NewPGRepository(f.App), nil))
 		if !batch {
@@ -1049,15 +1068,16 @@ func withoutVarying(v any, ids ...string) any {
 // topology and the ledger), BEGIN with the tenant GUCs counted once. The
 // window updates the known devices under its identity locks: per device
 // the observed-value check (3), the row lock, the instance fields, the
-// update with its reads (4), history, interfaces and addresses (5) and
-// audit and outbox under their locks (3); the changed devices of a window
-// are indexed together after its commit (WP-489), a sighting is not
-// indexed. About 20.7 on the first re-discovery of the load test (eth1
-// new), 16.6 after it. Before
+// update with its reads (4), history, interfaces and addresses (5, plus the
+// one set-based lookup of pinned addresses of other devices, WP-914 AK4)
+// and audit and outbox under their locks (3); the changed devices of a
+// window are indexed together after its commit (WP-489), a sighting is not
+// indexed. About 21.7 on the first re-discovery of the load test (eth1
+// new), 17.6 after it. Before
 // WP-608 every known device had a transaction of its own that took its
 // identity locks and read its candidates again, and its neighbor and its
 // edge three transactions more: 36 statements per device.
-const rediscoverBudget = 22
+const rediscoverBudget = 23
 
 // TestRediscoverStatementBudget covers WP-608 (NFR-03, F-118) against
 // PostgreSQL with the write path of the server (audit, outbox, search index,
@@ -1144,7 +1164,8 @@ func TestRediscoverStatementBudget(t *testing.T) {
 	// The handler of the server (internal/server/router.go) with four lanes;
 	// without batch creation every record runs in a transaction of its own.
 	build := func(pool *pgxpool.Pool, batch bool) *discovery.Handler {
-		cis := ci.NewIndexingRepository(ci.NewPGRepositoryWithAudit(pool, audit.NewPGRecorder()).WithEvents(events.NewOutbox()),
+		cis := ci.NewIndexingRepository(ci.NewPGRepositoryWithAudit(pool, audit.NewPGRecorder()).WithEvents(events.NewOutbox()).
+			WithManagementSync(ipam.NewManagementSync(ipam.NewPGRepository(pool), nil)),
 			search.NewCIIndexer(search.NewPGRepository(pool)))
 		if !batch {
 			cis = noBatch{cis}

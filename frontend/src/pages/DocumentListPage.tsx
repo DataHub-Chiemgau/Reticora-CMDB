@@ -1,7 +1,7 @@
 import { AlertTriangle, FileText, Search, Upload } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { useDocumentList, useDeleteDocument, useDocumentUsage } from '../api/hooks';
 import type { DocumentUsage } from '../api/client';
 import { ScanStatusBadge } from '../components/documents/LinkedDocuments';

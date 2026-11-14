@@ -29,7 +29,50 @@ var matrixHiddenGlobalRows = map[string]string{
 // scoped principal reads them, its INSERT is refused and its UPDATE and
 // DELETE find no row.
 var matrixOrgWideWrites = map[string]string{
-	"vrf": "routing domains of the whole organization (TEN-10, WP-372, F-089)",
+	"vrf":                     "routing domains of the whole organization (TEN-10, WP-372, F-089)",
+	"nameserver_set":          "nameserver sets of the whole organization (IPM-05, WP-905): ipam.TestNameserverSetsOnPostgreSQL",
+	"vlan_domain":             "VLAN domains of the whole organization (IPM-06, WP-906): ipam.TestVLANDomainsOnPostgreSQL",
+	"vrf_section":             "IPAM sections of the VRFs (IPM-07, WP-907): ipam.TestVRFAttributesOnPostgreSQL",
+	"ipam_section_permission": "rights per IPAM section (IPM-10, WP-910): ipam.TestSectionACLReadWrite",
+}
+
+// matrixOrgWideDeletes lists the append-only tables whose rows only
+// principals without client and site restriction delete (the retention):
+// a scoped principal reads and writes them within its scope, its DELETE
+// finds no row.
+var matrixOrgWideDeletes = map[string]string{
+	"ipam_change": "IPAM history, migration 000302 (WP-908): ipam.TestIPAMHistoryOnPostgreSQL",
+}
+
+// matrixClientOnlyReads lists the tables whose organization-wide rows
+// (client NULL) only principals without client restriction read: a
+// principal restricted to clients reads only the rows of its clients, not
+// the shared ones (deviation from the TEN-05 read rule, pinned by the test
+// named here).
+var matrixClientOnlyReads = map[string]string{
+	"admp_account": "ADMP accounts: the organization-wide account is configuration of the organization, " +
+		"a principal restricted to clients sees only its clients' accounts (WP-925 AK6): admp.TestAdmpAccountClientScope",
+	"availability_target": "availability targets: a principal restricted to clients sees no organization-wide target " +
+		"(WP-1048 AK4): sla.TestAvailabilityTargetClientScope",
+	// Workflow runs and their steps without a client (no CI) are
+	// organization-wide, visible to org-wide principals only (WP-1093 AK1,
+	// E-09).
+	"workflow_run":  "workflow runs without CI, migration 000351 (WP-1093): workflow.TestRunWithoutCIOnlyForOrgWidePrincipal",
+	"workflow_step": "steps of workflow runs without CI, migration 000351 (WP-1093): workflow.TestWorkflowStepFollowsRunScope",
+	// Approval decisions follow their run (WP-1098, migration 000361).
+	"workflow_approval": "decisions on workflow runs without CI, migration 000361 (WP-1098): workflow.TestApprovalClientScope",
+}
+
+// matrixSiteWrites lists the tables with a client but without a site column
+// whose rows no principal with a site restriction writes (E-09, pattern
+// vlan_scoped_update/vlan_scoped_delete of migration 000091 with site_id
+// always NULL): such a principal reads them, its INSERT is refused and its
+// UPDATE and DELETE find no row.
+var matrixSiteWrites = map[string]string{
+	"ipam_section":     "IPAM sections, migration 000298 (WP-900): ipam.TestIPAMSectionsOnPostgreSQL",
+	"monitoring_group": "monitoring groups, migration 000307 (WP-935): probe.TestProbeTablesFollowClientScope",
+	"asn":              "AS numbers, migration 000316 (WP-1066): ipam.TestASNClientPrincipal",
+	"asn_range":        "AS number ranges, migration 000316 (WP-1066): ipam.TestASNClientPrincipal",
 }
 
 // matrixSnapshotScoped lists the tables that carry a scope snapshot of their
@@ -84,6 +127,9 @@ func (p *matrixPrincipal) read(tbl *matrixTable, r scopeRow) bool {
 	if _, snapshot := matrixSnapshotScoped[tbl.name]; snapshot && p.restricted() {
 		return false
 	}
+	if _, clientOnly := matrixClientOnlyReads[tbl.name]; clientOnly && !dimWrite(p.scope["client"], r.dims["client"]) {
+		return false
+	}
 	for _, dim := range scopeDimensions {
 		if len(tbl.scope[dim]) > 0 && !dimRead(p.scope[dim], r.dims[dim]) {
 			return false
@@ -97,6 +143,9 @@ func (p *matrixPrincipal) write(tbl *matrixTable, r scopeRow) bool {
 		return false
 	}
 	if _, orgWide := matrixOrgWideWrites[tbl.name]; orgWide && (p.scope["client"] != nil || p.scope["site"] != nil) {
+		return false
+	}
+	if _, siteless := matrixSiteWrites[tbl.name]; siteless && p.scope["site"] != nil {
 		return false
 	}
 	if _, snapshot := matrixSnapshotScoped[tbl.name]; snapshot && p.restricted() {
@@ -133,7 +182,8 @@ func scopeDenied(err error) bool {
 // principal's scope and to claim an org-wide row. Reads are pinned exactly
 // (TEN-05): org-wide rows are visible to scoped principals, global rows to
 // everyone except in matrixHiddenGlobalRows. The tables of
-// matrixOrgWideWrites are written by org-wide principals only (E-09); the
+// matrixOrgWideWrites are written by org-wide principals only (E-09), those
+// of matrixSiteWrites by no principal with a site restriction; the
 // rows of matrixSnapshotScoped, which carry no scope snapshot, are read and
 // written by principals without any scope restriction only.
 //
@@ -364,6 +414,10 @@ func (m *matrixRun) checkPrincipal(p *matrixPrincipal, all []scopeRow) {
 			m.checkUpdate(p, ctid, r, want, fail)
 		}
 		if tbl.privileges["DELETE"] {
+			want := want
+			if _, orgWide := matrixOrgWideDeletes[tbl.name]; orgWide && (p.scope["client"] != nil || p.scope["site"] != nil) {
+				want = false
+			}
 			n, err := m.attempt(func() (int64, error) {
 				tag, e := m.tx.Exec(m.ctx, `DELETE FROM `+ident+` WHERE ctid = $1::tid`, ctid)
 				return tag.RowsAffected(), e

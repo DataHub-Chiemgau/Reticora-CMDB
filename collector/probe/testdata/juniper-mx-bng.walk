@@ -1,0 +1,9 @@
+# Juniper MX for bng (WP-1006): JUNIPER-SUBSCRIBER-MIB
+# jnxSubscriberTotalCount (scalar, 2000) and jnxSubscriberClientTypeCount
+# (1.3.6.1.4.1.2636.3.64.1.1.1.5.1.3, index client type): dhcp(1) 600,
+# ppp(3) 50, pppoe(4) 1200, vlan(5) 150.
+.1.3.6.1.4.1.2636.3.64.1.1.1.2.0 = Gauge32: 2000
+.1.3.6.1.4.1.2636.3.64.1.1.1.5.1.3.1 = Gauge32: 600
+.1.3.6.1.4.1.2636.3.64.1.1.1.5.1.3.3 = Gauge32: 50
+.1.3.6.1.4.1.2636.3.64.1.1.1.5.1.3.4 = Gauge32: 1200
+.1.3.6.1.4.1.2636.3.64.1.1.1.5.1.3.5 = Gauge32: 150

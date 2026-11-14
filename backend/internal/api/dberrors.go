@@ -130,6 +130,10 @@ func WriteRepoError(w http.ResponseWriter, err error) {
 	if WriteDBError(w, err) {
 		return
 	}
+	if errors.Is(err, ErrOrgPendingDeletion) {
+		writeOrgPendingDeletion(w)
+		return
+	}
 	if IsUnavailable(err) {
 		WriteUnavailable(w, "a required service is temporarily unavailable, try again later")
 		return

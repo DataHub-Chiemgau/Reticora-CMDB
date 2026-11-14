@@ -2,11 +2,13 @@ package server
 
 import (
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
 	"testing"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api/speccheck"
 	"gopkg.in/yaml.v3"
 )
 
@@ -97,5 +99,44 @@ func TestOpenAPIErrorResponsesAreProblemJSON(t *testing.T) {
 	// responses declare a body.
 	if checked < 1000 {
 		t.Errorf("checked %d error responses with a body; the scan missed the contract", checked)
+	}
+}
+
+// TestADMPPathsAreReadOnly covers WP-864 (API-06, ADM-02, E-160): below
+// /api/v1/admp and at the ADMP sub-paths of CIs and ports the contract has
+// only GET operations; the only exception is the account management
+// /api/v1/admp/accounts, a configuration inside the CMDB that calls no ADMP.
+// Every scaffold of a P3 module carries x-phase P3. The read-only access to
+// ADMP itself is proven by WP-926 and WP-927.
+func TestADMPPathsAreReadOnly(t *testing.T) {
+	documented, err := speccheck.Load(filepath.Clean(specPath))
+	if err != nil {
+		t.Fatalf("load spec: %v", err)
+	}
+	phases, err := speccheck.Phases(filepath.Clean(specPath))
+	if err != nil {
+		t.Fatalf("load phases: %v", err)
+	}
+	planned, err := speccheck.Planned(filepath.Clean(specPath))
+	if err != nil {
+		t.Fatalf("load planned operations: %v", err)
+	}
+	admp := 0
+	for _, op := range documented {
+		isADMP := op.Path == "/api/v1/admp" || strings.HasPrefix(op.Path, "/api/v1/admp/") ||
+			strings.HasSuffix(op.Path, "/admp-connections") || strings.HasSuffix(op.Path, "/admp")
+		accounts := op.Path == "/api/v1/admp/accounts" || strings.HasPrefix(op.Path, "/api/v1/admp/accounts/")
+		if isADMP && !accounts {
+			admp++
+			if op.Method != "GET" {
+				t.Errorf("%s: ADMP paths are read-only (GET only)", op)
+			}
+		}
+		if m, late := ModuleForRoute(op.Path); late && m.Phase == PhaseP3 && planned[op] && phases[op.Path] != PhaseP3 {
+			t.Errorf("%s: scaffold of module %s without x-phase P3", op, m.Key)
+		}
+	}
+	if admp == 0 {
+		t.Fatal("no ADMP read path is documented")
 	}
 }

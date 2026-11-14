@@ -30,8 +30,10 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/snmp"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/probe"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/buffer"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/keystore"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/update"
 )
 
@@ -402,6 +404,56 @@ func TestUploadRecords_BacklogFirstAndUnboundedFlush(t *testing.T) {
 	}
 }
 
+// TestHeartbeatCarriesProbeCapabilities covers WP-966 AK2 (HTTP): the
+// heartbeat carries the capability report of the collector with its
+// detection time; before the first detection the field is left out, so an
+// older server sees the body it knows.
+func TestHeartbeatCarriesProbeCapabilities(t *testing.T) {
+	var bodies []map[string]json.RawMessage
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]json.RawMessage
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode heartbeat: %v", err)
+		}
+		bodies = append(bodies, body)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	cfg := testConfig(srv.URL, t.TempDir())
+	up, err := newUploader(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newUploader: %v", err)
+	}
+	if _, ok := up.heartbeat(context.Background(), cfg); !ok {
+		t.Fatal("heartbeat not accepted")
+	}
+	detected := time.Date(2026, 11, 14, 8, 0, 0, 0, time.UTC)
+	d := probe.CapabilityDetector{
+		ListenICMP: func(int) (probe.PacketConn, bool, error) { return nil, false, probe.ErrICMPUnavailable },
+		TimeSync:   func() string { return probewire.TimeSynchronized },
+		Now:        func() time.Time { return detected },
+	}
+	report := d.Detect()
+	up.capabilities.Set(&report)
+	if _, ok := up.heartbeat(context.Background(), cfg); !ok {
+		t.Fatal("heartbeat not accepted")
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("%d heartbeats, want 2", len(bodies))
+	}
+	if _, ok := bodies[0]["probe_capabilities"]; ok {
+		t.Fatalf("heartbeat before the detection carries %s", bodies[0]["probe_capabilities"])
+	}
+	var got probewire.ProbeCapabilities
+	if err := json.Unmarshal(bodies[1]["probe_capabilities"], &got); err != nil {
+		t.Fatalf("probe_capabilities %s: %v", bodies[1]["probe_capabilities"], err)
+	}
+	if !got.Equal(&report) || !got.DetectedAt.Equal(detected) || got.ICMP4 != probewire.CapabilityNone ||
+		got.TimeSync != probewire.TimeSynchronized || !got.Implements("icmp") {
+		t.Fatalf("probe_capabilities %+v, want %+v", got, report)
+	}
+}
+
 // NFR-04/OPS-06: a saturated spool pauses collection and the heartbeat reports
 // backlog, backpressure and losses to the server.
 func TestHeartbeatReportsSpoolBackpressureAndLoss(t *testing.T) {
@@ -432,7 +484,7 @@ func TestHeartbeatReportsSpoolBackpressureAndLoss(t *testing.T) {
 		t.Fatalf("expected ErrSpoolFull, got %v", err)
 	}
 
-	postHeartbeat(context.Background(), up.client, cfg, up.spoolReport(context.Background()))
+	postHeartbeat(context.Background(), up.client, cfg, &heartbeatBody{Spool: up.spoolReport(context.Background())})
 	if body.Spool == nil || body.Spool.Messages != 1 || !body.Spool.Backpressure || body.Spool.DroppedMessages != 1 {
 		t.Fatalf("heartbeat spool report = %+v", body.Spool)
 	}
@@ -509,11 +561,11 @@ func TestLicenseExpiryPausesDiscovery(t *testing.T) {
 	}
 
 	// The heartbeat keeps reporting the status; a renewed license resumes.
-	if status, ok := postHeartbeat(ctx, up.client, cfg, nil); status != "expired" || !ok {
+	if status, ok := postHeartbeat(ctx, up.client, cfg, &heartbeatBody{}); status != "expired" || !ok {
 		t.Fatalf("heartbeat license status %q, accepted %v", status, ok)
 	}
 	license.Store("active")
-	status, _ := postHeartbeat(ctx, up.client, cfg, nil)
+	status, _ := postHeartbeat(ctx, up.client, cfg, &heartbeatBody{})
 	up.setLicenseStatus(status)
 	if up.paused.Load() {
 		t.Fatal("collector still paused after the license was renewed")
@@ -661,13 +713,40 @@ func TestUpdateCheckerWarnsWithoutCosign(t *testing.T) {
 		t.Errorf("verifier = %#v, want CosignVerifier running cosign", c.Verifier)
 	}
 
-	if err := os.WriteFile(filepath.Join(dir, "cosign"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "cosign"), []byte("#!/bin/sh\necho 'GitVersion:    v3.1.4'\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	logs = captureLogs(t)
 	newUpdateChecker(&cfg)
-	if strings.Contains(logs.String(), "collector.update.cosign_missing") {
-		t.Errorf("warning although cosign is on PATH: %s", logs.String())
+	if strings.Contains(logs.String(), "collector.update.cosign_missing") || strings.Contains(logs.String(), "collector.update.cosign_outdated") {
+		t.Errorf("warning although cosign v3.1.4 is on PATH: %s", logs.String())
+	}
+}
+
+// E-258: with auto-updates on, the start warns when the cosign on PATH is
+// older than update.MinCosignVersion (v2.4.1 of earlier installations) or
+// reports no version, because the verifier refuses every update with it.
+func TestUpdateCheckerWarnsWithOutdatedCosign(t *testing.T) {
+	cfg := collectorConfig{UpdateURL: "https://updates.example.com", UpdateChannel: update.ChannelStable}
+	for name, script := range map[string]string{
+		"v2.4.1":     "echo 'GitVersion:    v2.4.1'",
+		"v3.1.2":     "echo 'GitVersion:    v3.1.2'",
+		"no version": "echo 'cosign: unknown'",
+		"failing":    "exit 1",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("PATH", dir)
+			if err := os.WriteFile(filepath.Join(dir, "cosign"), []byte("#!/bin/sh\n"+script+"\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			logs := captureLogs(t)
+			newUpdateChecker(&cfg)
+			warnings := logLines(t, logs, "auto-updates are enabled, but the cosign on PATH is older than "+update.MinCosignVersion+": every update is refused until it is replaced")
+			if len(warnings) != 1 || warnings[0]["level"] != "WARN" || warnings[0]["event"] != "collector.update.cosign_outdated" {
+				t.Errorf("start with cosign %s: warnings %v, log %s", name, warnings, logs.String())
+			}
+		})
 	}
 }
 

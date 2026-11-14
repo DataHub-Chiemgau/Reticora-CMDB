@@ -8,7 +8,8 @@
 //     accepted suggestion) uses the organization-wide credentials and those
 //     of its client, never another client's; a scope with credential_ids
 //     exactly those, without a credential of another client bound before the
-//     F-264 fix. The scope channel sends each scope its effective
+//     F-264 fix; never a vault login (WP-893), which a scope does not take
+//     as credential either. The scope channel sends each scope its effective
 //     credential_ids, whose union is the bundle. Over the collector endpoint
 //     the collector receives exactly these credentials, and the audit
 //     credential.bundle_delivered names them (an empty list for an empty
@@ -32,6 +33,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -39,6 +41,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 )
@@ -83,7 +86,12 @@ func TestAuditBundleCredentialSelection(t *testing.T) {
 	orgCred := mk("audit-org-snmp", "", credential.KindSNMPv2c, map[string]any{"community": "org-secret"})
 	scopeCred := mk("audit-scope-ssh", f.Client1, credential.KindSSHPassword, map[string]any{"username": "scope", "password": "scope-secret"})
 	c2Cred := mk("audit-c2-ssh", f.Client2, credential.KindSSHPassword, map[string]any{"username": "c2", "password": "c2-secret"})
-	secrets := []string{"org-secret", "scope-secret", "c2-secret"}
+	// The vault logins (WP-893) log vault connections in; no scope selects
+	// them, with or without credential_ids.
+	tokenLogin := mk("audit-org-vault-token", "", credential.KindVaultToken, map[string]any{"token": "vault-token-secret"})
+	approleLogin := mk("audit-c1-vault-approle", f.Client1, credential.KindVaultAppRole,
+		map[string]any{"role_id": "vault-role-id", "secret_id": "vault-secret-id"})
+	secrets := []string{"org-secret", "scope-secret", "c2-secret", "vault-token-secret", "vault-role-id", "vault-secret-id"}
 	off := false
 	cases := []struct {
 		name   string
@@ -108,6 +116,10 @@ func TestAuditBundleCredentialSelection(t *testing.T) {
 		{name: "scope of client 1 bound to a credential of client 2 before F-264", scopes: []bundleScope{{in: discovery.ScopeInput{Kind: "cidr",
 			Target: "10.231.5.0/24", ClientID: f.Client1, CredentialIDs: []string{c2Cred, scopeCred}}, raw: true, channel: []string{scopeCred}}},
 			want: []string{scopeCred}, reason: "F-264: an explicit credential of another client never reaches the scope's collector"},
+		{name: "scope of client 1 bound to vault logins past the check", scopes: []bundleScope{{in: discovery.ScopeInput{Kind: "cidr",
+			Target: "10.231.8.0/24", ClientID: f.Client1, CredentialIDs: []string{tokenLogin, approleLogin, scopeCred}}, raw: true,
+			channel: []string{scopeCred}}}, want: []string{scopeCred},
+			reason: "WP-893: a vault login reaches a collector only as the login of a vault reference it resolves"},
 		{name: "scopes of two clients and a disabled scope", scopes: []bundleScope{
 			{in: discovery.ScopeInput{Kind: "cidr", Target: "10.231.6.0/24", ClientID: f.Client1, CredentialIDs: []string{scopeCred}}, channel: []string{scopeCred}},
 			{in: discovery.ScopeInput{Kind: "host", Target: "10.231.7.1", ClientID: f.Client2}, channel: []string{orgCred, c2Cred}},
@@ -188,6 +200,19 @@ func TestAuditBundleCredentialSelection(t *testing.T) {
 		})
 	}
 
+	t.Run("a scope does not take a vault login as credential", func(t *testing.T) {
+		colID, _, _ := auditEnroll(t, e, "audit-bundle-login")
+		for _, login := range []string{tokenLogin, approleLogin} {
+			in := discovery.ScopeInput{CollectorID: colID, Kind: "cidr", Target: "10.231.9.0/24", ClientID: f.Client1,
+				CredentialIDs: []string{login}}
+			err := e.repo.CreateScope(org, discovery.NewScope(f.OrgA, &in))
+			var fe *api.FieldError
+			if !errors.As(err, &fe) || fe.Field != "credential_ids" || fe.Status != http.StatusUnprocessableEntity {
+				t.Errorf("WP-893: a scope with the vault login %s as credential: %v, want 422 credential_ids", login, err)
+			}
+		}
+	})
+
 	t.Run("delivery over the collector endpoint is audited with the delivered ids", func(t *testing.T) {
 		s := startRenewStack(t, e, enc)
 		ctx, cancel := context.WithCancel(bg)
@@ -264,5 +289,221 @@ func askBundle(t *testing.T, nc *nats.Conn, subject, certPEM string, secrets []s
 			t.Fatalf("bundle answer %s: %v", msg.Data, err)
 		}
 		return resp
+	}
+}
+
+// TestBundleGateDeliversClientTargets covers CRD-04 AK2 and AK3 (WP-891)
+// over the real path: BundleGate.VerifyBundleTarget resolves the targets
+// with the collector's client (id.ClientID) in its transaction, the bundle
+// carries them, and the audit credential.bundle_delivered names their
+// credentials. The collector of client 2 receives the CI binding of its CI
+// (cred2) in its targets and credential ids and never the one of client 1
+// (cred1); an organization-wide collector receives both, each for the CI
+// and scope of its client.
+func TestBundleGateDeliversClientTargets(t *testing.T) {
+	e, enc := auditEdge(t, "0f")
+	f := e.f
+	bg := context.Background()
+	org := f.OrgCtx(f.OrgA)
+	gate := discovery.NewBundleGate(f.App, e.ca)
+	csvc := credential.NewService(credential.NewPGRepository(f.App), enc)
+	mk := func(name, clientID string) string {
+		t.Helper()
+		c, err := csvc.Create(org, credential.CreateRequest{OrganizationID: f.OrgA, ClientID: clientID, Name: name,
+			Kind: credential.KindSNMPv2c, Secret: map[string]any{"community": name + "-secret"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c.ID
+	}
+	cred1, cred2 := mk("wp891-gate-c1", f.Client1), mk("wp891-gate-c2", f.Client2)
+	ci1 := f.CI(t, f.OrgA, f.Client1, "wp891-gate-ci1")
+	ci2 := f.CI(t, f.OrgA, f.Client2, "wp891-gate-ci2")
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := f.Admin.Exec(bg, sql, args...); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+	exec(`UPDATE ci SET management_ip = '10.94.1.10' WHERE id = $1`, ci1)
+	exec(`UPDATE ci SET management_ip = '10.94.2.10' WHERE id = $1`, ci2)
+	for ci, cred := range map[string]string{ci1: cred1, ci2: cred2} {
+		exec(`INSERT INTO credential_binding (organization_id, credential_id, target_kind, ci_id, namespace, priority)
+			VALUES ($1, $2, 'ci', $3, 'snmp', 100)`, f.OrgA, cred, ci)
+	}
+	scope := func(colID, clientID, cidr string) string {
+		t.Helper()
+		var client any
+		if clientID != "" {
+			client = clientID
+		}
+		var id string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO discovery_scope (organization_id, client_id, collector_id, name, kind, target, credential_ids)
+			VALUES ($1, $2, $3, $4, 'cidr', $4, '{}') RETURNING id::text`, f.OrgA, client, colID, cidr).Scan(&id); err != nil {
+			t.Fatalf("insert scope: %v", err)
+		}
+		return id
+	}
+
+	c2Col, _, c2Cert := auditEnroll(t, e, "wp891-gate-c2")
+	exec(`UPDATE collector SET client_id = $2 WHERE id = $1`, c2Col, f.Client2)
+	c2Scope := scope(c2Col, f.Client2, "10.94.0.0/16")
+	orgCol, _, orgCert := auditEnroll(t, e, "wp891-gate-org")
+	org1Scope := scope(orgCol, f.Client1, "10.94.1.0/24")
+	org2Scope := scope(orgCol, f.Client2, "10.94.2.0/24")
+
+	deliver := func(colID, certPEM string) (*credential.BundleTarget, []string) {
+		t.Helper()
+		tctx, target, err := gate.VerifyBundleTarget(bg, f.OrgA, colID, certPEM)
+		if err != nil {
+			t.Fatalf("bundle target: %v", err)
+		}
+		_, ids, err := csvc.Bundle(tctx, target)
+		if err != nil {
+			t.Fatalf("bundle: %v", err)
+		}
+		if err = gate.BundleDelivered(bg, target, ids); err != nil {
+			t.Fatalf("bundle delivered: %v", err)
+		}
+		var raw []byte
+		if err = f.Admin.QueryRow(bg, `SELECT changes->'credential_ids' FROM audit_log WHERE organization_id = $1
+			AND action = 'credential.bundle_delivered' AND resource_id = $2 ORDER BY created_at DESC LIMIT 1`, f.OrgA, colID).Scan(&raw); err != nil {
+			t.Fatalf("audit credential.bundle_delivered: %v", err)
+		}
+		var audited []string
+		if err = json.Unmarshal(raw, &audited); err != nil {
+			t.Fatal(err)
+		}
+		return target, audited
+	}
+
+	target, audited := deliver(c2Col, c2Cert.CertificatePEM)
+	if target.ClientID != f.Client2 {
+		t.Fatalf("bundle target of the client 2 collector has client %q, want %s", target.ClientID, f.Client2)
+	}
+	if !slices.Contains(target.CredentialIDs, cred2) || slices.Contains(target.CredentialIDs, cred1) {
+		t.Errorf("credential ids of the client 2 collector %v: want cred2, never cred1", target.CredentialIDs)
+	}
+	if len(target.Targets) != 1 || target.Targets[0].CIID != ci2 || target.Targets[0].CredentialID != cred2 || target.Targets[0].ScopeID != c2Scope {
+		t.Errorf("targets of the client 2 collector %+v, want only ci2 with cred2 in scope %s", target.Targets, c2Scope)
+	}
+	for _, x := range target.Targets {
+		if x.CredentialID == cred1 || x.CIID == ci1 {
+			t.Fatalf("the collector of client 2 receives %+v of client 1", x)
+		}
+	}
+	if !slices.Contains(audited, cred2) || slices.Contains(audited, cred1) {
+		t.Errorf("audit credential.bundle_delivered of the client 2 collector names %v, want cred2 (target), never cred1", audited)
+	}
+
+	target, audited = deliver(orgCol, orgCert.CertificatePEM)
+	want := map[string]credential.BundleTargetCredential{
+		ci1: {CIID: ci1, ScopeID: org1Scope, ManagementIP: "10.94.1.10", Namespace: "snmp", CredentialID: cred1, Origin: credential.OriginCI},
+		ci2: {CIID: ci2, ScopeID: org2Scope, ManagementIP: "10.94.2.10", Namespace: "snmp", CredentialID: cred2, Origin: credential.OriginCI},
+	}
+	if len(target.Targets) != 2 || want[target.Targets[0].CIID] != target.Targets[0] || want[target.Targets[1].CIID] != target.Targets[1] {
+		t.Errorf("targets of the org-wide collector %+v, want %+v", target.Targets, want)
+	}
+	for _, id := range []string{cred1, cred2} {
+		if !slices.Contains(audited, id) || !slices.Contains(target.CredentialIDs, id) {
+			t.Errorf("org-wide collector: credential ids %v, audited %v; want both target credentials", target.CredentialIDs, audited)
+		}
+	}
+}
+
+// TestBundleVaultReferencesOverScopes covers AK5 of WP-894 on the real path
+// of a bundle (scope -> VerifyBundleTarget -> Bundle): a scope without
+// credential_ids selects the organization's credentials, but a vault login
+// reaches the collector only as the login of a reference it resolves. A
+// reference of a connection with resolve_at server, of a disabled
+// connection or of one that does not name the collector yields no entry,
+// and neither does its login; a reference the collector resolves brings
+// itself and its login.
+//
+// Retest:
+//
+//	cd backend && go test -count=1 -p 1 -run TestBundleVaultReferencesOverScopes ./internal/discovery/
+func TestBundleVaultReferencesOverScopes(t *testing.T) {
+	e, enc := auditEdge(t, "0f")
+	f := e.f
+	bg := context.Background()
+	org := f.OrgCtx(f.OrgA)
+	gate := discovery.NewBundleGate(f.App, e.ca)
+	csvc := credential.NewService(credential.NewPGRepository(f.App), enc)
+	colID, key, issued := auditEnroll(t, e, "vault-ref-bundle")
+	otherCol, _, _ := auditEnroll(t, e, "vault-ref-other")
+
+	create := func(req credential.CreateRequest) string {
+		t.Helper()
+		req.OrganizationID = f.OrgA
+		c, err := csvc.Create(org, req)
+		if err != nil {
+			t.Fatalf("create credential %s: %v", req.Name, err)
+		}
+		return c.ID
+	}
+	stored := create(credential.CreateRequest{Name: "vr-stored", Kind: credential.KindSNMPv2c,
+		Secret: map[string]any{"community": "vr-stored-community"}})
+	login := create(credential.CreateRequest{Name: "vr-login", Kind: credential.KindVaultAppRole,
+		Secret: map[string]any{"role_id": "vr-role-id", "secret_id": "vr-secret-id"}})
+	connection := func(name, resolveAt string, enabled bool, collectors ...string) string {
+		t.Helper()
+		c, err := csvc.Vaults().Create(org, f.OrgA, &credential.VaultConnection{Name: name, Kind: "openbao_kv2",
+			Address: "https://vault.example.com:8200", Mount: "secret", AuthMethod: "approle", AuthCredentialID: login,
+			ResolveAt: resolveAt, Enabled: enabled, CollectorIDs: collectors})
+		if err != nil {
+			t.Fatalf("create connection %s: %v", name, err)
+		}
+		return c.ID
+	}
+	ref := func(name, conn string) string {
+		t.Helper()
+		return create(credential.CreateRequest{Name: name, Kind: credential.KindSNMPv2c, VaultRef: &credential.VaultRef{
+			ConnectionID: conn, Path: "network/" + name, FieldMap: map[string]string{"community": "snmp_ro"}}})
+	}
+	ref("vr-server", connection("vr-conn-server", credential.ResolveAtServer, true))
+	ref("vr-disabled", connection("vr-conn-disabled", credential.ResolveAtCollector, false, colID))
+	ref("vr-other", connection("vr-conn-other", credential.ResolveAtCollector, true, otherCol))
+
+	in := discovery.ScopeInput{CollectorID: colID, Kind: "cidr", Target: "10.232.0.0/24"}
+	if err := e.repo.CreateScope(org, discovery.NewScope(f.OrgA, &in)); err != nil {
+		t.Fatalf("create scope: %v", err)
+	}
+	bundle := func() (ids []string, content *credential.BundleContent) {
+		t.Helper()
+		tctx, target, err := gate.VerifyBundleTarget(bg, f.OrgA, colID, issued.CertificatePEM)
+		if err != nil {
+			t.Fatalf("bundle target: %v", err)
+		}
+		sealed, ids, err := csvc.Bundle(tctx, target)
+		if err != nil {
+			t.Fatalf("bundle: %v", err)
+		}
+		content, err = credential.OpenBundle(sealed, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		slices.Sort(ids)
+		return ids, content
+	}
+
+	ids, content := bundle()
+	if !slices.Equal(ids, []string{stored}) || len(content.Credentials) != 1 {
+		t.Errorf("bundle of a scope without credential_ids and only unresolvable references: %v, want only the stored %s (login %s)",
+			ids, stored, login)
+	}
+	for _, c := range content.Credentials {
+		if c.Secret["role_id"] != nil || c.Secret["secret_id"] != nil {
+			t.Errorf("the bundle carries the vault login %s", c.ID)
+		}
+	}
+
+	// A reference the collector resolves brings itself and its login.
+	resolved := ref("vr-collector", connection("vr-conn-collector", credential.ResolveAtCollector, true, colID))
+	ids, _ = bundle()
+	want := []string{stored, login, resolved}
+	slices.Sort(want)
+	if !slices.Equal(ids, want) {
+		t.Errorf("bundle with a reference the collector resolves: %v, want %v", ids, want)
 	}
 }

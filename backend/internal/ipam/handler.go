@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -20,6 +21,9 @@ type Handler struct {
 	// WP-300); without it, or with a repository that cannot find
 	// duplicates, nothing is checked.
 	reviews *reviews.Service
+	// scanProbes writes the managed probes of the subnet scan (IPM-11,
+	// WP-1062); without it the scan routes answer 501.
+	scanProbes ScanProbes
 }
 
 // NewHandler creates a new ipam handler.
@@ -60,6 +64,13 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Patch("/api/v1/subnets/{id}", h.UpdateSubnet)
 	r.Delete("/api/v1/subnets/{id}", h.DeleteSubnet)
 	r.Get("/api/v1/subnets/{id}/addresses", h.ListSubnetAddresses)
+	r.Get("/api/v1/subnets/{id}/children", h.ListSubnetChildren)
+	r.Get("/api/v1/subnets/{id}/usage", h.SubnetUsage)
+	r.Get("/api/v1/subnets/{id}/free-addresses", h.SubnetFreeAddresses)
+	r.Get("/api/v1/subnets/{id}/free-subnets", h.SubnetFreeSubnets)
+	r.Post("/api/v1/subnets/{id}/allocate", h.AllocateAddress)
+	r.Post("/api/v1/subnets/{id}/allocate-subnet", h.AllocateSubnet)
+	r.Get("/api/v1/subnets/{id}/history", h.SubnetHistory)
 	r.Get("/api/v1/subnets/{id}/reservations", h.ListReservations)
 	r.Post("/api/v1/subnets/{id}/reservations", h.CreateReservation)
 	r.Delete("/api/v1/subnets/{id}/reservations/{ip_id}", h.DeleteReservation)
@@ -72,9 +83,12 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 		r.Get(base+"/{id}", h.GetIPAddress)
 		r.Patch(base+"/{id}", h.UpdateIPAddress)
 		r.Delete(base+"/{id}", h.DeleteIPAddress)
+		r.Get(base+"/{id}/history", h.IPAddressHistory)
 	}
 
 	r.Get("/api/v1/cis/{id}/interfaces", h.ListInterfaces)
+	// The addresses of a device (IPM-13, WP-911).
+	r.Get("/api/v1/cis/{id}/addresses", h.ListCIAddresses)
 	r.Post("/api/v1/cis/{id}/interfaces", h.CreateInterface)
 	r.Get("/api/v1/network-interfaces/{id}", h.GetInterface)
 	r.Patch("/api/v1/network-interfaces/{id}", h.UpdateInterface)
@@ -91,6 +105,53 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/vrfs/{id}", h.GetVRF)
 	r.Patch("/api/v1/vrfs/{id}", h.UpdateVRF)
 	r.Delete("/api/v1/vrfs/{id}", h.DeleteVRF)
+
+	r.Get("/api/v1/ipam-sections", h.ListSections)
+	r.Post("/api/v1/ipam-sections", h.CreateSection)
+	r.Get("/api/v1/ipam-sections/{id}", h.GetSection)
+	r.Patch("/api/v1/ipam-sections/{id}", h.UpdateSection)
+	r.Delete("/api/v1/ipam-sections/{id}", h.DeleteSection)
+	// Rights per section (IPM-10, WP-910): only with PostgreSQL, else 501.
+	r.Get("/api/v1/ipam-sections/{id}/permissions", h.ListSectionPermissions)
+	r.Post("/api/v1/ipam-sections/{id}/permissions", h.CreateSectionPermission)
+	r.Patch("/api/v1/ipam-sections/{id}/permissions/{permission_id}", h.UpdateSectionPermission)
+	r.Delete("/api/v1/ipam-sections/{id}/permissions/{permission_id}", h.DeleteSectionPermission)
+
+	// Nameserver sets (IPM-05, nameserver.go): only with PostgreSQL, else
+	// 501.
+	r.Get("/api/v1/nameserver-sets", h.ListNameserverSets)
+	r.Post("/api/v1/nameserver-sets", h.CreateNameserverSet)
+	r.Get("/api/v1/nameserver-sets/{id}", h.GetNameserverSet)
+	r.Patch("/api/v1/nameserver-sets/{id}", h.UpdateNameserverSet)
+	r.Delete("/api/v1/nameserver-sets/{id}", h.DeleteNameserverSet)
+
+	// VLAN domains (IPM-06, vlan_domain.go): only with PostgreSQL, else 501.
+	r.Get("/api/v1/vlan-domains", h.ListVLANDomains)
+	r.Post("/api/v1/vlan-domains", h.CreateVLANDomain)
+	r.Get("/api/v1/vlan-domains/{id}", h.GetVLANDomain)
+	r.Patch("/api/v1/vlan-domains/{id}", h.UpdateVLANDomain)
+	r.Delete("/api/v1/vlan-domains/{id}", h.DeleteVLANDomain)
+	r.Get("/api/v1/vlan-domains/{id}/vlans", h.ListVLANDomainVLANs)
+
+	// AS numbers and ranges (IPM-16, asn_handler.go): only with
+	// PostgreSQL, else 501.
+	h.registerASNRoutes(r)
+
+	// NAT translations (IPM-15, nat_handler.go): only with PostgreSQL,
+	// else 501.
+	h.registerNATRoutes(r)
+
+	// The subnet scan (IPM-11, scan_handler.go): only with PostgreSQL and
+	// the probe engine, else 501.
+	h.registerScanRoutes(r)
+
+	// BGP peerings (IPM-17, bgp_handler.go): only with PostgreSQL, else
+	// 501.
+	h.registerBGPRoutes(r)
+
+	// The deviations of the DNS reverse check (IPM-12, ptr.go): only with
+	// PostgreSQL, else 501.
+	h.registerPTRRoutes(r)
 }
 
 func org(w http.ResponseWriter, r *http.Request) (string, bool) {
@@ -130,13 +191,15 @@ func (h *Handler) ListSubnets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := api.ParsePagination(r)
-	f := SubnetFilter{
-		ClientID: r.URL.Query().Get("client_id"),
-		SiteID:   r.URL.Query().Get("site_id"),
+	f, ok := subnetFilter(w, r)
+	if !ok {
+		return
 	}
-	items, total, err := h.repo.ListSubnets(r.Context(), orgID, f, page)
+	items, total, err := h.repo.ListSubnets(r.Context(), orgID, &f, page)
 	if err != nil {
-		api.WriteRepoError(w, err)
+		if !api.WriteFieldError(w, err) {
+			api.WriteRepoError(w, err)
+		}
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[Subnet]{
@@ -165,11 +228,19 @@ func (h *Handler) CreateSubnet(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
+	gateway := ""
 	if req.Gateway != "" {
-		if _, err := validateIP(req.Gateway); err != nil {
+		gw, err := validateIP(req.Gateway)
+		if err != nil {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 			return
 		}
+		gateway = gw
+	}
+	// The gateway lies inside the subnet (IPM-04).
+	if err := checkGateway(gateway, normalized); err != nil {
+		api.WriteFieldError(w, err)
+		return
 	}
 	for _, dns := range req.DNSServers {
 		if _, err := validateIP(dns); err != nil {
@@ -177,18 +248,26 @@ func (h *Handler) CreateSubnet(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if err := h.checkSubnetNameserverSet(&req.NameserverSetID); err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
 	s := &Subnet{
-		OrganizationID: orgID,
-		ClientID:       req.ClientID,
-		SiteID:         req.SiteID,
-		CIDR:           normalized,
-		VRFID:          req.VRFID,
-		Name:           req.Name,
-		VLANID:         req.VLANID,
-		Gateway:        req.Gateway,
-		DNSServers:     req.DNSServers,
-		Description:    req.Description,
-		IsManagement:   req.IsManagement,
+		OrganizationID:  orgID,
+		ClientID:        req.ClientID,
+		SiteID:          req.SiteID,
+		CIDR:            normalized,
+		VRFID:           req.VRFID,
+		SectionID:       req.SectionID,
+		Name:            req.Name,
+		VLANID:          req.VLANID,
+		Gateway:         gateway,
+		DNSServers:      req.DNSServers,
+		NameserverSetID: req.NameserverSetID,
+		Description:     req.Description,
+		IsManagement:    req.IsManagement,
+		IsPool:          req.IsPool,
+		OriginASNID:     req.OriginASNID,
 	}
 	if err := h.repo.CreateSubnet(r.Context(), s); err != nil {
 		writeRepoError(w, err, "subnet not found")
@@ -222,11 +301,21 @@ func (h *Handler) UpdateSubnet(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 		return
 	}
-	if req.Gateway != nil && *req.Gateway != "" {
-		if _, err := validateIP(*req.Gateway); err != nil {
+	if req.CIDR != nil {
+		normalized, err := validateCIDR(*req.CIDR)
+		if err != nil {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
 			return
 		}
+		req.CIDR = &normalized
+	}
+	if req.Gateway != nil && *req.Gateway != "" {
+		gw, err := validateIP(*req.Gateway)
+		if err != nil {
+			api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+			return
+		}
+		req.Gateway = &gw
 	}
 	for _, dns := range req.DNSServers {
 		if _, err := validateIP(dns); err != nil {
@@ -234,9 +323,38 @@ func (h *Handler) UpdateSubnet(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if err := h.checkSubnetNameserverSet(req.NameserverSetID); err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
+	// The gateway lies inside the subnet after the update, checked against
+	// the new prefix when it changes (IPM-04).
+	if req.CIDR != nil || (req.Gateway != nil && *req.Gateway != "") {
+		current, err := h.repo.GetSubnet(r.Context(), orgID, chi.URLParam(r, "id"))
+		if err != nil {
+			api.WriteError(w, http.StatusNotFound, "Not Found", "subnet not found")
+			return
+		}
+		cidr, gateway := current.CIDR, current.Gateway
+		if req.CIDR != nil {
+			cidr = *req.CIDR
+		}
+		if req.Gateway != nil {
+			gateway = *req.Gateway
+		}
+		if err := checkGateway(gateway, cidr); err != nil {
+			api.WriteFieldError(w, err)
+			return
+		}
+	}
 	s, err := h.repo.UpdateSubnet(r.Context(), orgID, chi.URLParam(r, "id"), &req)
 	if err != nil {
-		if !api.WriteFieldError(w, err) {
+		// A field rule is its field problem, a CIDR the VRF holds already
+		// (unique violation) 409; anything else, an unknown or malformed id
+		// included, is 404.
+		if status, _, _, isDB := api.ClassifyDBError(err); isDB && status == http.StatusConflict {
+			api.WriteRepoError(w, err)
+		} else if !api.WriteFieldError(w, err) {
 			api.WriteError(w, http.StatusNotFound, "Not Found", "subnet not found")
 		}
 		return
@@ -262,6 +380,32 @@ func (h *Handler) DeleteSubnet(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// ListSubnetChildren handles GET /api/v1/subnets/{id}/children: the
+// children of a visible subnet the caller sees (IPM-02).
+func (h *Handler) ListSubnetChildren(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := org(w, r)
+	if !ok {
+		return
+	}
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
+		return
+	}
+	subnetID := chi.URLParam(r, "id")
+	if _, err := h.repo.GetSubnet(r.Context(), orgID, subnetID); err != nil {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "subnet not found")
+		return
+	}
+	items, total, err := h.repo.ListSubnets(r.Context(), orgID, &SubnetFilter{ParentID: subnetID}, page)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[Subnet]{
+		Data: items, Total: total, Limit: page.Limit, Offset: page.Offset, HasMore: page.Offset+page.Limit < total,
+	})
+}
+
 // ListSubnetAddresses handles GET /api/v1/subnets/{id}/addresses
 func (h *Handler) ListSubnetAddresses(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := org(w, r)
@@ -273,10 +417,17 @@ func (h *Handler) ListSubnetAddresses(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "subnet not found")
 		return
 	}
+	f, ok := ipFilter(w, r)
+	if !ok {
+		return
+	}
+	f.SubnetID = subnetID
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListIPAddresses(r.Context(), orgID, subnetID, page)
+	items, total, err := h.repo.ListIPAddresses(r.Context(), orgID, &f, page)
 	if err != nil {
-		api.WriteRepoError(w, err)
+		if !api.WriteFieldError(w, err) {
+			api.WriteRepoError(w, err)
+		}
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[IPAddress]{
@@ -287,16 +438,51 @@ func (h *Handler) ListSubnetAddresses(w http.ResponseWriter, r *http.Request) {
 
 // --- IP Addresses ---
 
+// ipFilter reads the filters of the address lists: state and is_gateway
+// (IPM-04), type, client_id, vrf_id, ci_id and q (IPM-20, filter.go); an
+// unknown state or type or a gateway flag that is no boolean is 422.
+func ipFilter(w http.ResponseWriter, r *http.Request) (IPFilter, bool) {
+	var f IPFilter
+	q := r.URL.Query()
+	if v := q.Get("state"); v != "" {
+		if !ValidIPStates[v] {
+			api.WriteFieldError(w, errInvalidState)
+			return f, false
+		}
+		f.State = v
+	}
+	if v := q.Get("is_gateway"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			api.WriteFieldError(w, &api.FieldError{Field: "is_gateway", Message: "is_gateway must be true or false",
+				Status: http.StatusUnprocessableEntity})
+			return f, false
+		}
+		f.IsGateway = &b
+	}
+	if !ipListFilter(w, r, &f) {
+		return f, false
+	}
+	return f, true
+}
+
 // ListIPAddresses handles GET /api/v1/ip-addresses
 func (h *Handler) ListIPAddresses(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := org(w, r)
 	if !ok {
 		return
 	}
+	f, ok := ipFilter(w, r)
+	if !ok {
+		return
+	}
+	f.SubnetID = r.URL.Query().Get("subnet_id")
 	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListIPAddresses(r.Context(), orgID, r.URL.Query().Get("subnet_id"), page)
+	items, total, err := h.repo.ListIPAddresses(r.Context(), orgID, &f, page)
 	if err != nil {
-		api.WriteRepoError(w, err)
+		if !api.WriteFieldError(w, err) {
+			api.WriteRepoError(w, err)
+		}
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, api.ListResponse[IPAddress]{
@@ -333,6 +519,10 @@ func (h *Handler) CreateIPAddress(w http.ResponseWriter, r *http.Request) {
 		api.WriteFieldError(w, &api.FieldError{Field: "type", Message: "invalid ip address type"})
 		return
 	}
+	if req.Role != "" && !ValidIPRoles[req.Role] {
+		api.WriteFieldError(w, errInvalidRole)
+		return
+	}
 	if req.SubnetID != "" {
 		subnet, err := h.repo.GetSubnet(r.Context(), orgID, req.SubnetID)
 		if err != nil {
@@ -348,6 +538,12 @@ func (h *Handler) CreateIPAddress(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", "address does not belong to subnet "+subnet.CIDR)
 			return
 		}
+		// The subnet decides the VRF (IPM-14).
+		if req.VRFID != "" && req.VRFID != subnet.VRFID {
+			api.WriteFieldError(w, &api.FieldError{Field: "vrf_id", Message: "the VRF differs from the VRF of the subnet",
+				Status: http.StatusUnprocessableEntity})
+			return
+		}
 	}
 	a := &IPAddress{
 		OrganizationID: orgID,
@@ -357,6 +553,9 @@ func (h *Handler) CreateIPAddress(w http.ResponseWriter, r *http.Request) {
 		Type:           ipType,
 		DNSName:        req.DNSName,
 		Description:    req.Description,
+		CIID:           req.CIID,
+		Role:           req.Role,
+		VRFID:          req.VRFID,
 	}
 	if err := h.repo.CreateIPAddress(r.Context(), a); err != nil {
 		writeRepoError(w, err, "ip address not found")
@@ -377,7 +576,20 @@ func (h *Handler) GetIPAddress(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusNotFound, "Not Found", "ip address not found")
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, a)
+	// The NAT translations the address takes part in (IPM-15); none
+	// without a repository that keeps them.
+	detail := IPAddressDetail{IPAddress: *a, NATTranslations: []AddressNAT{}}
+	if nat, ok := h.repo.(NATRepository); ok {
+		if detail.NATTranslations, err = nat.ListAddressNAT(r.Context(), orgID, a.ID); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				api.WriteError(w, http.StatusNotFound, "Not Found", "ip address not found")
+				return
+			}
+			api.WriteRepoError(w, err)
+			return
+		}
+	}
+	api.WriteJSON(w, http.StatusOK, detail)
 }
 
 // UpdateIPAddress handles PATCH /api/v1/ip-addresses/{id}
@@ -393,6 +605,14 @@ func (h *Handler) UpdateIPAddress(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Type != nil && !ValidIPTypes[*req.Type] {
 		api.WriteFieldError(w, &api.FieldError{Field: "type", Message: "invalid ip address type"})
+		return
+	}
+	if req.State != nil && !ValidIPStates[*req.State] {
+		api.WriteFieldError(w, errInvalidState)
+		return
+	}
+	if req.Role != nil && !ValidIPRoles[*req.Role] {
+		api.WriteFieldError(w, errInvalidRole)
 		return
 	}
 	// Validate address still belongs to a newly-assigned subnet.
@@ -419,10 +639,15 @@ func (h *Handler) UpdateIPAddress(w http.ResponseWriter, r *http.Request) {
 	}
 	a, err := h.repo.UpdateIPAddress(r.Context(), orgID, chi.URLParam(r, "id"), req)
 	if err != nil {
+		// The gateway address keeps its subnet (422 subnet_id); anything
+		// else is an address the caller cannot see.
+		if api.WriteFieldError(w, err) {
+			return
+		}
 		api.WriteError(w, http.StatusNotFound, "Not Found", "ip address not found")
 		return
 	}
-	if req.InterfaceID != nil || req.SubnetID != nil || req.Type != nil {
+	if req.InterfaceID != nil || req.SubnetID != nil || req.Type != nil || req.CIID != nil {
 		h.checkDuplicates(r.Context(), orgID, DuplicateSource{IPIDs: []string{a.ID}})
 	}
 	api.WriteJSON(w, http.StatusOK, a)
@@ -435,10 +660,49 @@ func (h *Handler) DeleteIPAddress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.repo.DeleteIPAddress(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {
+		// The gateway address of a subnet stays (409 is_gateway).
+		if api.WriteFieldError(w, err) {
+			return
+		}
 		api.WriteError(w, http.StatusNotFound, "Not Found", "ip address not found")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// errInvalidRole refuses a role outside ValidIPRoles (IPM-13).
+var errInvalidRole = &api.FieldError{Field: "role", Message: "role must be primary, secondary, vip, anycast, loopback or management",
+	Status: http.StatusUnprocessableEntity}
+
+// CIAddressLister lists the addresses of a CI (IPM-13); both repositories
+// have it.
+type CIAddressLister interface {
+	ListCIAddresses(ctx context.Context, orgID, ciID string, page api.PaginationParams) ([]CIAddress, int, error)
+}
+
+// ListCIAddresses handles GET /api/v1/cis/{id}/addresses: the addresses the
+// caller sees of a CI it sees, with interface, subnet, VRF, state, type and
+// role; an unknown or invisible CI is 404.
+func (h *Handler) ListCIAddresses(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := org(w, r)
+	if !ok {
+		return
+	}
+	lister, ok := h.repo.(CIAddressLister)
+	if !ok {
+		api.WriteError(w, http.StatusNotImplemented, "Not Implemented", "the addresses of a CI are not available")
+		return
+	}
+	page := api.ParsePagination(r)
+	items, total, err := lister.ListCIAddresses(r.Context(), orgID, chi.URLParam(r, "id"), page)
+	if err != nil {
+		writeRepoError(w, err, "CI not found")
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, api.ListResponse[CIAddress]{
+		Data: items, Total: total, Limit: page.Limit, Offset: page.Offset,
+		HasMore: page.Offset+page.Limit < total,
+	})
 }
 
 // --- Network Interfaces ---

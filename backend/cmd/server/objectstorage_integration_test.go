@@ -20,7 +20,8 @@ package main
 // Retest:
 //   docker run -d --name minio544 -p 127.0.0.1:59544:9000 \
 //     -e MINIO_ROOT_USER=reticora -e MINIO_ROOT_PASSWORD=reticora_dev \
-//     pgsty/minio:RELEASE.2026-08-04T00-00-00Z server /data
+//     pgsty/silo:RELEASE.2026-11-12T00-00-00Z@sha256:c20d112390b9a9ce8c11b8af95ad35bcaa62f4759663c09c936cd8d2b511f329 \
+//     server /data
 //   cd backend && TEST_S3_ENDPOINT=http://127.0.0.1:59544 \
 //     go test -count=1 -v -run TestSetupObjectStorageEnablesVersioning ./cmd/server/
 

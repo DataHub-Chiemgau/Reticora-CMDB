@@ -65,6 +65,15 @@ var linkTargets = map[string]func(id string) string{
 	"stocktake": func(id string) string {
 		return "EXISTS (SELECT 1 FROM stocktake WHERE stocktake.id = " + id + ")"
 	},
+	// The compliance reports (SEC-04, WP-1129, migration 000369): an
+	// organization report is linked to the organization of the tenant
+	// (org-wide), a client report to a client visible in the scope.
+	"organization": func(id string) string {
+		return "(" + id + " = current_setting('app.org_id')::uuid AND " + orgWideDocumentSQL + ")"
+	},
+	"client": func(id string) string {
+		return "EXISTS (SELECT 1 FROM client WHERE client.id = " + id + ")"
+	},
 }
 
 // EntityTypes returns the entity types of the registry, sorted.
@@ -92,6 +101,13 @@ func checkEntityType(entityType string) error {
 // errInvalidEntityID answers a link whose entity id is no UUID with 400; the
 // id never reaches SQL.
 var errInvalidEntityID = &api.FieldError{Field: "entity_id", Message: "must be a UUID"}
+
+// ErrTargetNotFound is the link target of the body that is unknown, of
+// another organization or outside the tenant scope. It wraps
+// api.ErrNotFound for the callers of LinkTx; POST /documents/{id}/links
+// answers it 422 on entity_id, unlike the document of its path (404,
+// SR-50).
+var ErrTargetNotFound = fmt.Errorf("%w: link target", api.ErrNotFound)
 
 // linkVisible is the SQL condition "the row of document_link links a target
 // visible under the tenant scope". An entity type outside the registry is
@@ -132,7 +148,7 @@ func targetVisible(ctx context.Context, tx pgx.Tx, link *DocumentLink) error {
 		return err
 	}
 	if !ok {
-		return api.ErrNotFound
+		return ErrTargetNotFound
 	}
 	return nil
 }
@@ -160,20 +176,28 @@ func LinkTx(ctx context.Context, tx pgx.Tx, link *DocumentLink) error {
 }
 
 // refuseSignatureChange answers a change that would break the evidence of
-// a signature (AST-02, E-51, WP-748) and reports whether it answered: a
-// document of the category signature (d) takes no PATCH, content, new
+// a signature (AST-02, E-51, WP-748) or of a compliance report (SEC-04,
+// E-239, WP-1129) and reports whether it answered: a document of the
+// category signature or compliance_report (d) takes no PATCH, content, new
 // version, soft delete, new link and no removal of a link (409); no
-// creation or PATCH sets the category signature (category, 422), only the
-// signature path of WP-276 does (CreateWithFirstVersionTx). The signature
-// hash reveals an exchanged image, this lock prevents it. d or category
-// may be nil.
+// creation or PATCH sets either category (category, 422), only the
+// signature path of WP-276 and the job compliance.report do
+// (CreateWithFirstVersionTx). The signature hash reveals an exchanged
+// image, this lock prevents it; a report listed by GET
+// /api/v1/compliance/reports is always one the job generated. d or
+// category may be nil.
 func refuseSignatureChange(w http.ResponseWriter, d *Document, category *string) bool {
 	switch {
 	case d != nil && d.Category == CategorySignature:
 		api.WriteError(w, http.StatusConflict, "Conflict", "a signature document is locked and cannot be changed")
+	case d != nil && d.Category == CategoryComplianceReport:
+		api.WriteError(w, http.StatusConflict, "Conflict", "a compliance report is locked and cannot be changed")
 	case category != nil && *category == CategorySignature:
 		api.WriteFieldError(w, &api.FieldError{Field: "category", Status: http.StatusUnprocessableEntity,
 			Message: "the category signature is set only by a signed assignment, return or transfer"})
+	case category != nil && *category == CategoryComplianceReport:
+		api.WriteFieldError(w, &api.FieldError{Field: "category", Status: http.StatusUnprocessableEntity,
+			Message: "the category compliance_report is set only by the job compliance.report"})
 	default:
 		return false
 	}

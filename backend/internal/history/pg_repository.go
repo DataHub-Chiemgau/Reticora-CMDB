@@ -485,6 +485,15 @@ func RelationshipEntries(changes []relationship.Change) []Change {
 // Visible reports whether the entity of a state snapshot (ci or asset)
 // exists under the caller's tenant scope; an unknown one, one of another
 // organization, client or site, and an id that is no UUID are not.
+// Now implements Repository: clock_timestamp() of the database.
+func (r *PGRepository) Now(ctx context.Context, orgID string) (time.Time, error) {
+	var now time.Time
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now)
+	})
+	return now.UTC(), err
+}
+
 func (r *PGRepository) Visible(ctx context.Context, orgID, entityType, entityID string) (bool, error) {
 	query, ok := visibleSQL[entityType]
 	if !ok || !api.IsUUID(entityID) {
@@ -602,7 +611,7 @@ func (r *PGRepository) TrailUpTo(ctx context.Context, orgID, entityType, entityI
 			}
 		}
 		var err error
-		out, err = trailTx(ctx, tx, orgID, entityType, entityID, at, true)
+		out, err = trailTx(ctx, tx, orgID, entityType, entityID, upperBound(at), true)
 		return err
 	})
 	return out, err
@@ -671,7 +680,8 @@ var stateVisibleSQL = map[string]string{
 		OR EXISTS (SELECT 1 FROM entity_change WHERE entity_type = 'asset' AND entity_id = $1::uuid)`,
 }
 
-// StateAt implements Repository: the state of the entity at req.At from
+// StateAt implements Repository: the state of the entity at req.At (zero:
+// now, the database time of the read, also the bound of the replay) from
 // its trail (trailTx) in one tenant transaction, with the ci_snapshot or
 // asset_snapshot it started from and, for a CI with req.Relationships, its
 // edges (edgesAt).
@@ -689,14 +699,30 @@ func (r *PGRepository) StateAt(ctx context.Context, orgID string, req *StateRequ
 		if !visible {
 			return api.ErrNotFound
 		}
-		trail, err := trailTx(ctx, tx, orgID, req.EntityType, req.EntityID, req.At, req.Reveal)
+		// Now is the database time of the read (clock_timestamp(), not the
+		// start of the transaction) and the bound of trail and edges: a
+		// change committed before has created_at (or observed_at) no later
+		// than its commit and is part of the state even when the clock of
+		// the process lags behind the database; a change committed while
+		// the state is read lies after at, so GET ?at=<returned at>
+		// reproduces the state.
+		at := req.At
+		if at.IsZero() {
+			if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&at); err != nil {
+				return fmt.Errorf("read database time: %w", err)
+			}
+			at = at.UTC()
+		}
+		bound := at
+		trail, err := trailTx(ctx, tx, orgID, req.EntityType, req.EntityID, bound, req.Reveal)
 		if err != nil {
 			return err
 		}
 		if len(trail) == 0 {
-			return &NoRecordedStateError{At: req.At}
+			return &NoRecordedStateError{At: at}
 		}
 		s := Replay(trail)
+		s.At = at
 		var base *Change
 		if isSnapshot(&trail[0]) {
 			base = &trail[0]
@@ -704,7 +730,7 @@ func (r *PGRepository) StateAt(ctx context.Context, orgID string, req *StateRequ
 			s.BasedOnSnapshotAt = &takenAt
 		}
 		if req.Relationships && req.EntityType == "ci" {
-			edges, eerr := edgesAt(ctx, tx, orgID, req.EntityID, base, req.At)
+			edges, eerr := edgesAt(ctx, tx, orgID, req.EntityID, base, bound)
 			if eerr != nil {
 				return eerr
 			}

@@ -27,9 +27,9 @@ curl -fsSL https://raw.githubusercontent.com/DataHub-Chiemgau/Reticora-CMDB/main
 the signed release artifacts of the newest release, or of the one named with
 `--ref v<version>`: the source of the release tag (checked against the signed
 `SOURCE_COMMIT` or source tarball), the images `reticora-server`,
-`reticora-frontend` and `reticora-postgres` (`cosign verify`, pinned by
-digest) and the collector (`cosign verify-blob` of the binary, or the signed
-image in the Docker mode). `--build-from-source` (`RETICORA_BUILD_FROM_SOURCE=1`)
+`reticora-frontend`, `reticora-postgres` and `reticora-keycloak-db`
+(`cosign verify`, pinned by digest) and the collector (`cosign verify-blob`
+of the binary, or the signed image in the Docker mode). `--build-from-source` (`RETICORA_BUILD_FROM_SOURCE=1`)
 builds everything locally from the sources instead — **not
 signature-verified**, the installer warns at the start; only then is a ref
 that is no release tag (e.g. `main`) accepted. Without the switch such a ref
@@ -144,6 +144,17 @@ Non-interactive (CI) usage: `./install-cloud.sh --non-interactive` uses the
 existing `.env` values, generated defaults and never prompts. CI installs the
 checked-out, unpublished state with `--build-from-source`; the default path
 runs on release tags (job `release-mode` of `install-smoke.yml`).
+
+### Object storage (MinIO → Silo)
+
+The service `minio` runs Silo (`pgsty/silo`), the maintained fork of the
+MinIO server. `minio/minio` is archived, and the image name `pgsty/minio` has
+been frozen since its release of 2026-08-04. Service name, volume
+`miniodata`, `MINIO_*` variables and the S3 endpoint `minio:9000` stay the
+same. A re-run of `install-cloud.sh` (or `docker compose up -d`) starts Silo
+on the existing data, and buckets, versioning and object versions carry over
+(E-246). This is a single-node setup, so the multi-node upgrade checklist in
+the Silo release notes (quorum, batch jobs) does not apply.
 
 ### Container logs: 30 days (NFR-06)
 
@@ -374,12 +385,17 @@ Connection rules, log events and diagnosis:
 `docs/betrieb/collector-verbindung.md`.
 
 With `RETICORA_UPDATE_URL` (systemd mode) the installer also installs cosign
-`v2.4.1` — the version the release is signed with, checked against its
+`v3.1.4` — the version the release is signed with, checked against its
 published sha256 before it is installed — as `/usr/local/bin/cosign`, where
-the updater of the service finds it; another file there is replaced. Without
-an update URL nothing is installed, and the collector warns at start when
-auto-updates are on but cosign is missing. The Docker mode updates through the
-signed image (re-run with `--release v<version>`) and ignores the update URL.
+the updater of the service finds it; another file there (e.g. cosign v2.4.1
+of an earlier installation) is replaced. Without an update URL nothing is
+installed, and the collector warns at start when auto-updates are on but
+cosign is missing (`collector.update.cosign_missing`) or older than v3.1.3
+(`collector.update.cosign_outdated`, E-258); the updater then refuses every
+update until a re-run of the installer replaces it
+(`docs/betrieb/collector-updates.md`, "cosign v3"). The Docker mode updates
+through the signed image (re-run with `--release v<version>`) and ignores the
+update URL.
 
 ### Enrollment
 

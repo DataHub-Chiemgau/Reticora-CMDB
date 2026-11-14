@@ -28,6 +28,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nkeys"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -83,6 +84,9 @@ func CollectorInbox(collectorID string) string {
 var (
 	ErrNoClientCertificate = errors.New("no client certificate")
 	ErrCertificateRevoked  = errors.New("collector certificate revoked")
+	// ErrOrgPendingDeletion refuses the collectors of an organization whose
+	// deletion is requested or whose purge runs (TLC-06, WP-1153).
+	ErrOrgPendingDeletion = errors.New("the organization of the collector is pending deletion")
 )
 
 // EdgeIdentity is an authorized collector connection.
@@ -146,7 +150,8 @@ func (a *EdgeAuthorizer) Authorize(ctx context.Context, certs []string) (*EdgeId
 	sum := sha256.Sum256(leaf.Raw)
 	id := &EdgeIdentity{OrganizationID: leaf.Subject.Organization[0], CollectorID: leaf.Subject.CommonName,
 		NotBefore: leaf.NotBefore, NotAfter: leaf.NotAfter, PublicKey: leaf.PublicKey, Serial: serial, Fingerprint: hex.EncodeToString(sum[:])}
-	id.Status, id.ClientID, err = a.collector(ctx, id.OrganizationID, id.CollectorID)
+	var pending bool
+	id.Status, id.ClientID, pending, err = a.collectorAccess(ctx, id.OrganizationID, id.CollectorID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, errors.New("unknown collector")
 	}
@@ -156,7 +161,25 @@ func (a *EdgeAuthorizer) Authorize(ctx context.Context, certs []string) (*EdgeId
 	if id.Status == CollectorDisabled {
 		return nil, ErrCollectorDisabled
 	}
+	if pending {
+		return nil, ErrOrgPendingDeletion
+	}
 	return id, nil
+}
+
+// collectorAccess returns status and client of a collector of the
+// organization and whether the organization is in the grace period of its
+// deletion, in one query; an unknown collector fails with pgx.ErrNoRows.
+func (a *EdgeAuthorizer) collectorAccess(ctx context.Context, orgID, collectorID string) (status, clientID string, pending bool, err error) {
+	scope := database.OrgWideScope(orgID, "")
+	err = database.WithTenant(ctx, a.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT c.status, COALESCE(c.client_id::text, ''),
+				COALESCE(o.deletion_state IN ('requested', 'purging'), false)
+			FROM collector c LEFT JOIN organization o ON o.id = c.organization_id
+			WHERE c.id = $1 AND c.organization_id = $2`,
+			collectorID, orgID).Scan(&status, &clientID, &pending)
+	})
+	return status, clientID, pending, err
 }
 
 // collector returns the status and client of a collector of the
@@ -1357,11 +1380,75 @@ func sysRequestAll(nc *nats.Conn, subject string, data []byte) ([]edgeServerAnsw
 // records the delivery (COL-02).
 type BundleGate struct {
 	authorizer *EdgeAuthorizer
+	// groups is the device-group level of the resolution
+	// (monitoring_group_member, WP-935).
+	groups credential.DeviceGroupSource
 }
 
 // NewBundleGate creates the gate on the collector CA.
 func NewBundleGate(pool *pgxpool.Pool, ca *CA) *BundleGate {
-	return &BundleGate{authorizer: NewEdgeAuthorizer(pool, ca)}
+	return &BundleGate{authorizer: NewEdgeAuthorizer(pool, ca), groups: credential.NewPGDeviceGroupSource(pool)}
+}
+
+// WithDeviceGroups sets the membership source of the device-group level
+// (WP-935).
+func (g *BundleGate) WithDeviceGroups(groups credential.DeviceGroupSource) *BundleGate {
+	g.groups = groups
+	return g
+}
+
+// CollectorsWithCredentials implements credential.BundleCollectorSource
+// (WP-897): the collectors of the organization whose bundle
+// (BundleTarget.CredentialIDs, as VerifyBundleTarget computes it) holds one
+// of credentialIDs, in one organization-wide transaction. Only collectors
+// with an enabled scope or an assigned probe with a bound credential have a
+// bundle with credentials.
+func (g *BundleGate) CollectorsWithCredentials(ctx context.Context, orgID string, credentialIDs []string) ([]string, error) {
+	out := []string{}
+	if len(credentialIDs) == 0 {
+		return out, nil
+	}
+	scope := database.OrgWideScope(orgID, "")
+	err := database.WithTenant(ctx, g.authorizer.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT c.id::text, COALESCE(c.client_id::text, '') FROM collector c
+			WHERE c.organization_id = $1 AND (EXISTS (SELECT 1 FROM discovery_scope s
+				WHERE s.organization_id = c.organization_id AND s.collector_id = c.id AND s.enabled)
+			  OR EXISTS (SELECT 1 FROM probe_assignment a JOIN credential_binding b
+				ON b.organization_id = a.organization_id AND b.probe_id = a.probe_id
+				WHERE a.organization_id = c.organization_id AND a.collector_id = c.id))
+			ORDER BY c.id`, orgID)
+		if err != nil {
+			return err
+		}
+		type col struct{ id, client string }
+		var cols []col
+		for rows.Next() {
+			var c col
+			if err = rows.Scan(&c.id, &c.client); err != nil {
+				rows.Close()
+				return err
+			}
+			cols = append(cols, c)
+		}
+		rows.Close()
+		if rerr := rows.Err(); rerr != nil {
+			return rerr
+		}
+		for _, c := range cols {
+			target := &credential.BundleTarget{OrganizationID: orgID, CollectorID: c.id, ClientID: c.client}
+			if berr := g.collectorBundle(ctx, tx, target); berr != nil {
+				return berr
+			}
+			for _, id := range credentialIDs {
+				if slices.Contains(target.CredentialIDs, id) {
+					out = append(out, c.id)
+					break
+				}
+			}
+		}
+		return nil
+	})
+	return out, err
 }
 
 // VerifyBundleTarget implements credential.CollectorVerifier: the
@@ -1381,30 +1468,112 @@ func (g *BundleGate) VerifyBundleTarget(ctx context.Context, orgID, collectorID,
 	}
 	scope := database.OrgWideScope(orgID, "")
 	target := &credential.BundleTarget{OrganizationID: orgID, CollectorID: collectorID, ClientID: id.ClientID, PublicKey: pub}
-	// The bundle holds the union of the effective credentials of the
-	// collector's enabled scopes (DIS-09, COL-02, E-67); without an enabled
-	// scope it is empty.
 	err = database.WithTenant(ctx, g.authorizer.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
-		perScope, qerr := scopeCredentials(ctx, tx, orgID, collectorID)
-		if qerr != nil {
-			return qerr
-		}
-		ids := []string{}
-		for _, scoped := range perScope {
-			for _, cid := range scoped {
-				if !slices.Contains(ids, cid) {
-					ids = append(ids, cid)
-				}
-			}
-		}
-		slices.Sort(ids)
-		target.CredentialIDs = ids
-		return nil
+		return g.collectorBundle(ctx, tx, target)
 	})
 	if err != nil {
 		return nil, nil, err
 	}
 	return database.ContextWithTenantScope(ctx, &scope), target, nil
+}
+
+// collectorBundle fills CredentialIDs and Targets of the collector's bundle
+// in tx (the organization-wide system scope): the union of the effective
+// credentials of the collector's enabled scopes (DIS-09, COL-02, E-67), the
+// credentials bound to the probes assigned to it (target kind probe,
+// WP-948, ProbeBundleCredentials), the credentials of its group's trap
+// receiver (WP-977, TrapBundleCredentials) and, format 2 (CRD-04, WP-891), the
+// credentials of single CIs from a level above the scope; a client
+// credential only for CIs of its client. VerifyBundleTarget,
+// CollectorsWithCredentials and CredentialIDs compute the bundle with it,
+// so the assignment set (WP-948) checks against the same ids the bundle
+// holds.
+func (g *BundleGate) collectorBundle(ctx context.Context, tx pgx.Tx, target *credential.BundleTarget) error {
+	perScope, err := scopeCredentials(ctx, tx, target.OrganizationID, target.CollectorID)
+	if err != nil {
+		return err
+	}
+	ids := []string{}
+	for _, scoped := range perScope {
+		for _, cid := range scoped {
+			if !slices.Contains(ids, cid) {
+				ids = append(ids, cid)
+			}
+		}
+	}
+	probeIDs, err := ProbeBundleCredentials(ctx, tx, target.OrganizationID, target.CollectorID)
+	if err != nil {
+		return err
+	}
+	// The communities and USM users of the group's trap receiver (WP-977).
+	trapIDs, err := TrapBundleCredentials(ctx, tx, target.OrganizationID, target.CollectorID)
+	if err != nil {
+		return err
+	}
+	for _, cid := range append(probeIDs, trapIDs...) {
+		if !slices.Contains(ids, cid) {
+			ids = append(ids, cid)
+		}
+	}
+	slices.Sort(ids)
+	target.CredentialIDs = ids
+	targets, err := credential.ResolveCollector(ctx, tx, target.OrganizationID, target.CollectorID, target.ClientID, g.groups)
+	if err != nil {
+		return err
+	}
+	target.AddTargets(targets)
+	return nil
+}
+
+// ProbeCredentialInBundle is the SQL condition under which the credential
+// c bound to the probe p (target kind probe) enters the bundle of the
+// collector p is assigned to: no vault login (WP-893), a client credential
+// only for a probe of its client. ProbeBundleCredentials and the assignment
+// set (probe.Distributor, WP-948) use the same condition, so a credential
+// id the set reports as present is in the bundle.
+const ProbeCredentialInBundle = `c.kind NOT IN (` + vaultLoginKinds + `) AND (c.client_id IS NULL OR c.client_id = p.client_id)`
+
+// ProbeBundleCredentials returns the credentials of the collector's bundle
+// that come from its probes (WP-948): the credentials bound (target kind
+// probe) to a probe assigned to the collector (probe_assignment) under
+// ProbeCredentialInBundle; one statement in tx, sorted.
+func ProbeBundleCredentials(ctx context.Context, tx pgx.Tx, orgID, collectorID string) ([]string, error) {
+	rows, err := tx.Query(ctx, `SELECT DISTINCT b.credential_id::text FROM probe_assignment a
+		JOIN probe p ON p.organization_id = a.organization_id AND p.id = a.probe_id
+		JOIN credential_binding b ON b.organization_id = a.organization_id AND b.probe_id = a.probe_id
+		JOIN credential c ON c.organization_id = b.organization_id AND c.id = b.credential_id
+		WHERE a.organization_id = $1 AND a.collector_id = $2 AND `+ProbeCredentialInBundle+`
+		ORDER BY 1`, orgID, collectorID)
+	if err != nil {
+		return nil, fmt.Errorf("read probe bundle credentials: %w", err)
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
+// CredentialIDs returns the credential ids of the collector's current
+// bundle (credential.BundleTarget.CredentialIDs as VerifyBundleTarget
+// computes it) for the assignment set (probe.BundleCredentials, WP-948). It
+// joins the transaction of ctx, if any, else it reads in the
+// organization-wide system scope.
+func (g *BundleGate) CredentialIDs(ctx context.Context, orgID, collectorID string) ([]string, error) {
+	scope := database.OrgWideScope(orgID, "")
+	var ids []string
+	err := database.WithTenant(ctx, g.authorizer.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		target := &credential.BundleTarget{OrganizationID: orgID, CollectorID: collectorID}
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(client_id::text, '') FROM collector WHERE organization_id = $1 AND id = $2`,
+			orgID, collectorID).Scan(&target.ClientID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return api.ErrNotFound
+			}
+			return fmt.Errorf("read collector: %w", err)
+		}
+		if err := g.collectorBundle(ctx, tx, target); err != nil {
+			return err
+		}
+		ids = target.CredentialIDs
+		return nil
+	})
+	return ids, err
 }
 
 // BundleDelivered implements credential.BundleAuditor.

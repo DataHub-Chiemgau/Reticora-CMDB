@@ -15,10 +15,27 @@
 #     and digest and checks the pgBackRest tarball by sha256 (F-291); it
 #     replaces the Go helpers of the base image with ones rebuilt by the
 #     pinned repository toolchain at pinned module versions (E-96);
+#   - keycloak_db_image_pin: the reticora-keycloak-db Dockerfile pins the
+#     official postgres image and the repository toolchain by version and
+#     digest and replaces the vendor gosu with one rebuilt at a pinned module
+#     version (E-96, A-85), with a negative fixture;
 #   - timescale_image_refs: every TimescaleDB image reference of the
 #     repository (CI, deploy, compose, docs; not the historical records) is
 #     the TIMESCALE_IMAGE of that Dockerfile, version and digest (E-96), with
 #     a negative fixture;
+#   - objectstorage_image_refs: every MinIO/Silo image reference (dev and
+#     deploy compose, CI and load jobs, kind fixture, docs) is the pinned
+#     pgsty/silo image of the minio service, version and digest (E-246), with
+#     a negative fixture;
+#   - thirdparty_image_pins: every third-party image of the operation
+#     (deploy compose stack, Kubernetes components) is pinned by version and
+#     digest, in the image-scan-thirdparty matrix and documented (SR-60,
+#     WP-873), with a negative fixture;
+#   - workflow_npx_lockfile: every npx of the workflows runs a binary of a
+#     package in the frontend lockfiles (no --yes, no <pkg>@<version>), and
+#     the E2E jobs serve the build with vite preview on port 4173 (Upd-07:
+#     serve pins compression 1.8.1, GHSA-vc2v-76pw-4v95), with a negative
+#     fixture;
 #   - release_images_documented: docs/README.md and
 #     docs/security/abhaengigkeitsscans.md name every release image (F-294).
 #   - release_publish: release.yml refuses a tag whose GitHub release already
@@ -156,6 +173,7 @@ problems = []
 for name, job, scanner in [("ci.yml govulncheck", ci["jobs"]["govulncheck"], "govulncheck -format"),
                            ("ci.yml npm-audit", ci["jobs"]["npm-audit"], "npm audit"),
                            ("ci.yml image-scan", ci["jobs"]["image-scan"], "aquasec/trivy"),
+                           ("ci.yml image-scan-thirdparty", ci["jobs"]["image-scan-thirdparty"], "aquasec/trivy"),
                            ("release.yml images", rel["jobs"]["images"], "aquasec/trivy")]:
     runs = [st.get("run", "") for st in job["steps"]]
     c = next((i for i, r in enumerate(runs) if check in r), None)
@@ -226,6 +244,28 @@ if out="$("$CHECK" 2>&1)"; then
 else
     fail "scan_exceptions_repository: security/scan-exceptions.txt keeps the SLA" "$out"
 fi
+# The vendor findings of image-scan-thirdparty (E-246): the same SLA, and
+# only that job reads the file.
+if out="$("$CHECK" security/scan-exceptions-thirdparty.txt 2>&1)"; then
+    ok "scan_exceptions_thirdparty: security/scan-exceptions-thirdparty.txt keeps the SLA ($out)"
+else
+    fail "scan_exceptions_thirdparty: security/scan-exceptions-thirdparty.txt keeps the SLA" "$out"
+fi
+readers="$(grep -rl 'scan-exceptions-thirdparty.txt' .github/workflows)"
+if [ "$readers" = ".github/workflows/ci.yml" ] \
+    && python3 - "$CI" <<'PY'
+import sys, yaml
+job = yaml.safe_load(open(sys.argv[1]))["jobs"]["image-scan-thirdparty"]
+runs = "\n".join(st.get("run", "") for st in job["steps"])
+others = [n for n, j in yaml.safe_load(open(sys.argv[1]))["jobs"].items()
+          if n != "image-scan-thirdparty" and "scan-exceptions-thirdparty" in str(j)]
+sys.exit(0 if "scan-exceptions-thirdparty.txt" in runs and "--ignorefile /trivyignore" in runs and not others else 1)
+PY
+then
+    ok "scan_exceptions_thirdparty_scope: only image-scan-thirdparty reads the vendor exceptions"
+else
+    fail "scan_exceptions_thirdparty_scope: only image-scan-thirdparty reads the vendor exceptions" "$readers"
+fi
 
 # ─── F-291, E-96: reproducible database image ───────────────────────────────
 db_pin="$(python3 - "$DOCKERFILE" backend/Dockerfile <<'PY'
@@ -272,9 +312,12 @@ if not re.search(r'\[ "\$\(gosu postgres id -un\)" = postgres \]', df):
 if not re.search(r"^ARG PGBACKREST_SHA256=[0-9a-f]{64}$", df, re.M):
     problems.append("ARG PGBACKREST_SHA256=<sha256> missing")
 run = re.sub(r"\\\n\s*", " ", df)
-dl = re.search(r"curl [^\n]*?-o (\S+)[^\n]*?pgbackrest/archive[^\n]*", run)
+# pgBackRest 2.59.0 recommends the distribution tarball (release asset with
+# the generated sources) over the archive GitHub generates from the tag.
+dl = re.search(r"curl [^\n]*?-o (\S+)[^\n]*?/pgbackrest/pgbackrest/releases/download/release/"
+               r"\$\{PGBACKREST_VERSION\}/pgbackrest-\$\{PGBACKREST_VERSION\}\.tar\.gz\b[^\n]*", run)
 if not dl:
-    problems.append("the pgBackRest tarball is not downloaded to a file (curl -o)")
+    problems.append("the pgBackRest distribution tarball (release asset) is not downloaded to a file (curl -o)")
 else:
     tarball, rest = dl.group(1), dl.group(0)
     check = rest.find(f'echo "${{PGBACKREST_SHA256}}  {tarball}" | sha256sum -c -')
@@ -292,6 +335,69 @@ else
     fail "db_image_pin: the postgres Dockerfile pins TimescaleDB and the Go toolchain by version and digest, rebuilds gosu and timescaledb-tune, checks the pgBackRest sha256" "$db_pin"
 fi
 
+# ─── E-96, A-85: the own image of keycloak-db ───────────────────────────────
+# kcdb_pin <Dockerfile> <backend Dockerfile>: reticora-keycloak-db pins the
+# official postgres image and the Go toolchain of the repository by version
+# and digest, rebuilds gosu at a pinned module version (verified against
+# sum.golang.org) over the one of the vendor image and checks that it drops
+# to postgres (UID 70); one line per problem.
+kcdb_pin() {
+    python3 - "$1" "$2" <<'PY'
+import re, sys
+df = open(sys.argv[1]).read()
+backend = open(sys.argv[2]).read()
+problems = []
+m = re.search(r"^ARG POSTGRES_IMAGE=postgres:(\S+?)@sha256:[0-9a-f]{64}$", df, re.M)
+if not m:
+    problems.append("ARG POSTGRES_IMAGE is not postgres:<version>@sha256:<digest>")
+elif not re.fullmatch(r"[0-9]+\.[0-9]+-alpine", m.group(1)):
+    problems.append(f"POSTGRES_IMAGE uses a floating tag: {m.group(1)}")
+g = re.search(r"^ARG GO_IMAGE=golang:(\S+?)@sha256:[0-9a-f]{64}$", df, re.M)
+b = re.search(r"^FROM golang:(\S+)", backend, re.M)
+if not g:
+    problems.append("ARG GO_IMAGE is not golang:<version>@sha256:<digest>")
+elif not b or g.group(1) != b.group(1):
+    problems.append(f"GO_IMAGE golang:{g.group(1)} is not the toolchain of backend/Dockerfile ({b and b.group(1)})")
+froms = re.findall(r"^FROM\s+(\S+)", df, re.M)
+if froms != ["${GO_IMAGE}", "${POSTGRES_IMAGE}"]:
+    problems.append(f"FROM must be ${{GO_IMAGE}}, then ${{POSTGRES_IMAGE}}: {froms}")
+if not re.search(r"^ENV [^\n]*\bGOSUMDB=sum\.golang\.org\b", df, re.M) \
+        or re.search(r"GONOSUMDB|GONOSUMCHECK|GOINSECURE|GOPRIVATE|GOFLAGS=[^\n]*insecure|GOSUMDB=off", df):
+    problems.append("the Go stage does not verify modules against sum.golang.org (ENV GOSUMDB=sum.golang.org)")
+if not re.search(r"^ARG GOSU_VERSION=v[0-9]+\.[0-9]+\.[0-9]+(-[0-9]{14}-[0-9a-f]{12})?$", df, re.M):
+    problems.append("ARG GOSU_VERSION is not a module version or pseudo-version")
+if 'go install -trimpath -ldflags=\'-d -w\' "github.com/tianon/gosu@${GOSU_VERSION}"' not in df:
+    problems.append("gosu is not built with go install github.com/tianon/gosu@${GOSU_VERSION}")
+if "COPY --from=go-tools /go/bin/gosu /usr/local/bin/gosu" not in df:
+    problems.append("the final stage does not replace /usr/local/bin/gosu of the vendor image")
+if "@latest" in df:
+    problems.append("a go install uses @latest")
+if not re.search(r'\[ "\$\(gosu postgres id -un\)" = postgres \]', df) \
+        or not re.search(r'\[ "\$\(id -u postgres\):\$\(id -g postgres\)" = 70:70 \]', df):
+    problems.append("the build does not check that the rebuilt gosu drops to postgres (UID/GID 70)")
+print("\n".join(problems))
+PY
+}
+
+KCDB_DOCKERFILE=deploy/docker-compose/keycloak-db/Dockerfile
+kcdb="$(kcdb_pin "$KCDB_DOCKERFILE" backend/Dockerfile 2>&1)"
+if [ -z "$kcdb" ]; then
+    ok "keycloak_db_image_pin: the keycloak-db Dockerfile pins postgres and the Go toolchain by version and digest and rebuilds gosu"
+else
+    fail "keycloak_db_image_pin: the keycloak-db Dockerfile pins postgres and the Go toolchain by version and digest and rebuilds gosu" "$kcdb"
+fi
+# Negative fixture: the floating vendor tag and the vendor gosu are reported.
+sed -e 's#^ARG POSTGRES_IMAGE=.*#ARG POSTGRES_IMAGE=postgres:16-alpine#' \
+    -e '/^COPY --from=go-tools/d' "$KCDB_DOCKERFILE" > "$TMP_ROOT/kcdb.Dockerfile"
+kcdb="$(kcdb_pin "$TMP_ROOT/kcdb.Dockerfile" backend/Dockerfile 2>&1)"
+if [ "$(grep -c . <<<"$kcdb")" -eq 2 ] \
+    && grep -qx 'ARG POSTGRES_IMAGE is not postgres:<version>@sha256:<digest>' <<<"$kcdb" \
+    && grep -qx 'the final stage does not replace /usr/local/bin/gosu of the vendor image' <<<"$kcdb"; then
+    ok "keycloak_db_image_pin_negative: a floating postgres tag and the vendor gosu are reported"
+else
+    fail "keycloak_db_image_pin_negative: a floating postgres tag and the vendor gosu are reported" "$kcdb"
+fi
+
 # ─── E-96: one TimescaleDB reference everywhere ─────────────────────────────
 # timescale_refs <root>: every TimescaleDB image reference in the tracked
 # files of <root> must be the TIMESCALE_IMAGE of the postgres Dockerfile,
@@ -306,7 +412,7 @@ HISTORY = ("audit/", "docs/audit/", "docs/plan/", "docs/acceptance/")
 SELF = "tests/ci-config.test.sh"
 # Where the CI database, the deploy and dev stacks and the docs name the image.
 REQUIRED = {".github/workflows/ci.yml", ".github/workflows/load.yml",
-            ".github/workflows/restore-test.yml", "deploy/k8s/base/components/backup/cronjob.yaml",
+            ".github/workflows/restore-test.yml",
             "docker-compose.yml", "deploy/docker-compose/postgres/Dockerfile", "docs/README.md",
             "docs/security/abhaengigkeitsscans.md", "docs/decisions/0001-timescale-rls.md"}
 df = open(os.path.join(root, "deploy/docker-compose/postgres/Dockerfile")).read()
@@ -363,6 +469,264 @@ if [ "$(grep -c . <<<"$problems")" -eq 3 ] \
     ok "timescale_image_refs_negative: a floating tag, another digest and a missing reference are reported"
 else
     fail "timescale_image_refs_negative: a floating tag, another digest and a missing reference are reported" "$problems"
+fi
+
+# ─── E-246 (Update-Plan Upd-01): one object storage image everywhere ───────
+# objectstorage_refs <root>: every MinIO/Silo image reference in the tracked
+# files of <root> (pgsty/silo, the frozen pgsty/minio, the archived
+# minio/minio) must be the image of the minio service of
+# deploy/docker-compose/docker-compose.yml, version and digest: the dev
+# stack, the CI and load jobs, the kind fixture and the docs start the
+# image that the operation runs and image-scan-thirdparty scans.
+# Historical records keep the version they were made with. First output
+# line: "<refs> <files>", then one line per problem.
+objectstorage_refs() {
+    python3 - "$1" <<'PY'
+import os, re, subprocess, sys, yaml
+root = sys.argv[1]
+HISTORY = ("audit/", "docs/audit/", "docs/plan/", "docs/acceptance/")
+SELF = "tests/ci-config.test.sh"
+REQUIRED = {".github/workflows/ci.yml", ".github/workflows/load.yml", "docker-compose.yml",
+            "deploy/docker-compose/docker-compose.yml", "tests/k8s/fixtures/minio.yaml",
+            "docs/README.md", "docs/security/abhaengigkeitsscans.md"}
+image = yaml.safe_load(open(os.path.join(root, "deploy/docker-compose/docker-compose.yml")))["services"]["minio"]["image"]
+problems = []
+if not re.fullmatch(r"pgsty/silo:RELEASE\.[0-9TZ-]+@sha256:[0-9a-f]{64}", image):
+    problems.append(f"deploy/docker-compose/docker-compose.yml minio: {image} is not pgsty/silo pinned by release and digest")
+ref = re.compile(r"(?:pgsty/(?:silo|minio)|minio/minio):[\w.-]+(?:@sha256:[0-9a-f]*)?")
+files = subprocess.run(["git", "-C", root, "ls-files", "-z"], capture_output=True, check=True).stdout.decode().split("\0")
+refs, where = 0, set()
+for f in files:
+    if not f or f == SELF or f.startswith(HISTORY):
+        continue
+    try:
+        text = open(os.path.join(root, f), encoding="utf-8").read()
+    except (OSError, UnicodeDecodeError):
+        continue
+    for i, line in enumerate(text.splitlines(), 1):
+        for r in ref.findall(line):
+            refs += 1
+            where.add(f)
+            if r != image:
+                problems.append(f"{f}:{i}: {r} is not {image}")
+for f in sorted(REQUIRED - where):
+    problems.append(f"{f}: names no object storage image")
+print(refs, len(where))
+print("\n".join(problems))
+PY
+}
+
+out="$(objectstorage_refs . 2>&1)"
+problems="$(sed 1d <<<"$out")"
+if [ -z "$problems" ]; then
+    ok "objectstorage_image_refs: every MinIO/Silo image reference is the pinned image of the minio service ($(head -n1 <<<"$out" | awk '{print $1" references in "$2" files"}'))"
+else
+    fail "objectstorage_image_refs: every MinIO/Silo image reference is the pinned image of the minio service" "$problems"
+fi
+
+# Negative fixture (copies of the files that name the image): the dev stack
+# back on the frozen pgsty/minio, the load job with another digest and the
+# kind fixture without the image are reported, nothing else.
+fx="$TMP_ROOT/objectstorage-fixture"
+mkdir -p "$fx"
+while IFS= read -r -d '' f; do
+    mkdir -p "$fx/$(dirname "$f")" && cp "$f" "$fx/$f"
+done < <(git ls-files -z | xargs -0 grep -lZ -E 'pgsty/(silo|minio):' --)
+sed -i -E 's#pgsty/silo:[^ ]+#pgsty/minio:RELEASE.2026-08-04T00-00-00Z#' "$fx/docker-compose.yml"
+sed -i -E 's#(pgsty/silo:[^@ ]+)@sha256:[0-9a-f]{64}#\1@sha256:0000000000000000000000000000000000000000000000000000000000000000#' "$fx/.github/workflows/load.yml"
+sed -i '/pgsty\/silo:/d' "$fx/tests/k8s/fixtures/minio.yaml"
+git -C "$fx" init -q && git -C "$fx" add -A
+problems="$(objectstorage_refs "$fx" 2>&1 | sed 1d)"
+if [ "$(grep -c . <<<"$problems")" -eq 3 ] \
+    && grep -q '^docker-compose\.yml:[0-9]*: pgsty/minio:RELEASE\.2026-08-04T00-00-00Z is not pgsty/silo:' <<<"$problems" \
+    && grep -q '^\.github/workflows/load\.yml:[0-9]*: pgsty/silo:[^ ]*@sha256:0\{64\} is not ' <<<"$problems" \
+    && grep -qx 'tests/k8s/fixtures/minio\.yaml: names no object storage image' <<<"$problems"; then
+    ok "objectstorage_image_refs_negative: the frozen image name, another digest and a missing reference are reported"
+else
+    fail "objectstorage_image_refs_negative: the frozen image name, another digest and a missing reference are reported" "$problems"
+fi
+
+# ─── SR-60 (WP-873): third-party images of the operation ───────────────────
+# thirdparty_pins <root>: every image reference of
+# deploy/docker-compose/docker-compose.yml and of the workloads of
+# deploy/k8s/base/components/** (Deployment, StatefulSet, DaemonSet,
+# CronJob, Job) except the own images (${RETICORA_*}, reticora-cmdb/*)
+# must carry version and digest, be scanned by an entry of the
+# image-scan-thirdparty matrix of ci.yml (its compose service or its
+# manifest) and be named in docs/security/abhaengigkeitsscans.md. First
+# output line: the number of references, then one line per problem.
+thirdparty_pins() {
+    python3 - "$1" <<'PY'
+import glob, os, re, sys, yaml
+root = sys.argv[1]
+pin = re.compile(r"^[^\s@]+:[^\s@]+@sha256:[0-9a-f]{64}$")
+own = lambda ref: ref.startswith("${RETICORA_") or ref.startswith("reticora-cmdb/")
+compose = yaml.safe_load(open(os.path.join(root, "deploy/docker-compose/docker-compose.yml")))["services"]
+def workload_images(path):
+    out = []
+    for d in yaml.safe_load_all(open(path)):
+        if not d or d.get("kind") not in ("Deployment", "StatefulSet", "DaemonSet", "CronJob", "Job"):
+            continue
+        spec = d["spec"]
+        if d["kind"] == "CronJob":
+            spec = spec["jobTemplate"]["spec"]
+        pod = spec["template"]["spec"]
+        out += [c["image"] for c in pod.get("initContainers", []) + pod["containers"]]
+    return out
+refs = {}  # reference -> where
+for name, svc in compose.items():
+    if "image" in svc and not own(svc["image"]):
+        refs.setdefault(svc["image"], []).append("docker-compose.yml " + name)
+manifests = sorted(glob.glob(os.path.join(root, "deploy/k8s/base/components/**/*.yaml"), recursive=True))
+for m in manifests:
+    for ref in workload_images(m):
+        if not own(ref):
+            refs.setdefault(ref, []).append(os.path.relpath(m, root))
+ci = yaml.safe_load(open(os.path.join(root, ".github/workflows/ci.yml")))
+scanned = set()
+for e in ci["jobs"]["image-scan-thirdparty"]["strategy"]["matrix"]["include"]:
+    if e.get("compose_service"):
+        scanned.add(compose.get(e["compose_service"], {}).get("image", ""))
+    if e.get("manifest"):
+        scanned.update(workload_images(os.path.join(root, e["manifest"])))
+doc = open(os.path.join(root, "docs/security/abhaengigkeitsscans.md")).read()
+problems = []
+for ref, where in sorted(refs.items()):
+    if not pin.match(ref):
+        problems.append(f"{ref} ({', '.join(where)}): not pinned by version and digest")
+    if ref not in scanned:
+        problems.append(f"{ref} ({', '.join(where)}): not in the image-scan-thirdparty matrix")
+    if ref not in doc:
+        problems.append(f"{ref}: not named in docs/security/abhaengigkeitsscans.md")
+print(len(refs))
+print("\n".join(problems))
+PY
+}
+
+out="$(thirdparty_pins . 2>&1)"
+problems="$(sed 1d <<<"$out")"
+if [ -z "$problems" ]; then
+    ok "thirdparty_image_pins: every third-party image of the operation is pinned, scanned and documented ($(head -n1 <<<"$out") references)"
+else
+    fail "thirdparty_image_pins: every third-party image of the operation is pinned, scanned and documented" "$problems"
+fi
+
+# Negative fixture (the state before WP-873 for two images): nats back on
+# the floating tag in compose and redis without its matrix entry are
+# reported, nothing else.
+fx="$TMP_ROOT/thirdparty-fixture"
+mkdir -p "$fx/deploy" "$fx/.github/workflows" "$fx/docs/security"
+cp -R deploy/docker-compose deploy/k8s "$fx/deploy/"
+cp "$CI" "$fx/.github/workflows/ci.yml"
+cp docs/security/abhaengigkeitsscans.md "$fx/docs/security/"
+python3 - "$fx" <<'PY'
+import re, sys
+root = sys.argv[1]
+p = root + "/deploy/docker-compose/docker-compose.yml"
+s = open(p).read()
+s = re.sub(r"image: nats:\S+", "image: nats:2.10-alpine", s, count=1)
+open(p, "w").write(s)
+p = root + "/.github/workflows/ci.yml"
+s = open(p).read()
+s = re.sub(r"\n          - image: redis\n            compose_service: redis\n            manifest: \"\"", "", s)
+open(p, "w").write(s)
+PY
+problems="$(thirdparty_pins "$fx" 2>&1 | sed 1d)"
+# (The matrix entry nats follows its compose service, so the floating tag
+# counts as scanned; the scan job refuses it as unpinned.)
+if [ "$(grep -c . <<<"$problems")" -eq 3 ] \
+    && grep -q '^nats:2\.10-alpine (docker-compose\.yml nats): not pinned by version and digest$' <<<"$problems" \
+    && grep -q '^nats:2\.10-alpine: not named in docs/security/abhaengigkeitsscans\.md$' <<<"$problems" \
+    && grep -q '^redis:[^ ]* (docker-compose\.yml redis): not in the image-scan-thirdparty matrix$' <<<"$problems"; then
+    ok "thirdparty_image_pins_negative: a floating tag and an image without scan entry are reported"
+else
+    fail "thirdparty_image_pins_negative: a floating tag and an image without scan entry are reported" "$problems"
+fi
+
+# ─── Upd-07: no npm package outside the lockfiles in the workflows ──────────
+# workflow_npx <root>: every npx of the workflows of <root> runs a binary of a
+# package in frontend/package-lock.json or frontend/e2e-prev/package-lock.json
+# (no --yes/-p, no <pkg>@<version>, nothing the lockfiles do not hold: npx
+# would fetch it unaudited, as serve with compression 1.8.1,
+# GHSA-vc2v-76pw-4v95), and the E2E jobs serve the build with vite preview on
+# the port of their BASE_URL. One line per problem.
+workflow_npx() {
+    python3 - "$1" <<'PY'
+import glob, json, os, re, shlex, sys, yaml
+root = sys.argv[1]
+bins = set()
+for lock in ("frontend/package-lock.json", "frontend/e2e-prev/package-lock.json"):
+    for pkg in json.load(open(os.path.join(root, lock)))["packages"].values():
+        bins.update((pkg.get("bin") or {}).keys())
+problems = []
+wfs = {}
+for path in sorted(glob.glob(os.path.join(root, ".github/workflows/*.yml"))):
+    name = os.path.basename(path)
+    wfs[name] = yaml.safe_load(open(path))
+    for job, spec in (wfs[name].get("jobs") or {}).items():
+        for step in spec.get("steps") or []:
+            run = re.sub(r"\\\n\s*", " ", step.get("run") or "")
+            for m in re.finditer(r"(?:^|[;&|(\s])npx\s+([^\n;&|)]*)", run):
+                args = shlex.split(m.group(1).replace("${{", "").replace("}}", ""))
+                opts = [a for a in args if a.startswith("-")]
+                cmd = next((a for a in args if not a.startswith("-")), "")
+                where = f"{name} {job}: npx {m.group(1).strip()}"
+                if set(opts) & {"--yes", "-y", "-p", "--package"}:
+                    problems.append(f"{where}: installs outside the lockfiles")
+                elif "@" in cmd.lstrip("@"):
+                    problems.append(f"{where}: versioned package outside the lockfiles")
+                elif cmd not in bins:
+                    problems.append(f"{where}: {cmd} is no binary of a lockfile package")
+def step(wf, job, name):
+    return next((s for s in wfs.get(wf, {}).get("jobs", {}).get(job, {}).get("steps", []) if s.get("name") == name), None)
+for wf, job, name in (("ci.yml", "e2e", "Run E2E tests"),
+                      ("e2e-prev.yml", "e2e-prev", "Run E2E tests (previous versions)")):
+    s = step(wf, job, name)
+    if not s:
+        problems.append(f"{wf} {job}: no step '{name}'")
+        continue
+    if "run preview -- --port 4173 --strictPort &" not in s["run"]:
+        problems.append(f"{wf} {job}: the build is not served by vite preview on port 4173 (--strictPort)")
+    if (s.get("env") or {}).get("BASE_URL") != "http://localhost:4173":
+        problems.append(f"{wf} {job}: BASE_URL is not http://localhost:4173")
+print("\n".join(problems))
+PY
+}
+npx_problems="$(workflow_npx .)"
+if [ -z "$npx_problems" ]; then
+    ok "workflow_npx_lockfile: every npx of the workflows runs a lockfile package; the E2E jobs serve the build with vite preview on 4173"
+else
+    fail "workflow_npx_lockfile: every npx of the workflows runs a lockfile package; the E2E jobs serve the build with vite preview on 4173" "$npx_problems"
+fi
+# Negative fixture (the state before Upd-07): unversioned serve and wait-on in
+# ci.yml, serve@14.2.6 and wait-on@9.5.1 with --yes in e2e-prev.yml.
+fx="$TMP_ROOT/npx-fixture"
+mkdir -p "$fx/.github/workflows" "$fx/frontend/e2e-prev"
+cp .github/workflows/*.yml "$fx/.github/workflows/"
+cp frontend/package-lock.json "$fx/frontend/"
+cp frontend/e2e-prev/package-lock.json "$fx/frontend/e2e-prev/"
+python3 - "$fx" <<'PY'
+import re, sys
+root = sys.argv[1] + "/.github/workflows/"
+for name, server, wait in (
+        ("ci.yml", "npx serve -s dist -l 4173 &", "npx wait-on http://localhost:4173 --timeout 10000"),
+        ("e2e-prev.yml", "npx --yes serve@14.2.6 -s ../dist -l 4173 &", "npx --yes wait-on@9.5.1 http://localhost:4173 --timeout 10000")):
+    s = open(root + name).read()
+    s, n = re.subn(r"(?m)^(\s*)\S.*run preview -- --port 4173 --strictPort &$", lambda m: m.group(1) + server + "\n" + m.group(1) + wait, s)
+    assert n == 1, name
+    open(root + name, "w").write(s)
+PY
+problems="$(workflow_npx "$fx")"
+if [ "$(grep -c . <<<"$problems")" -eq 6 ] \
+    && grep -q '^ci\.yml e2e: npx serve -s dist -l 4173: serve is no binary of a lockfile package$' <<<"$problems" \
+    && grep -q '^ci\.yml e2e: npx wait-on .*: wait-on is no binary of a lockfile package$' <<<"$problems" \
+    && grep -q '^e2e-prev\.yml e2e-prev: npx --yes serve@14\.2\.6 .*: installs outside the lockfiles$' <<<"$problems" \
+    && grep -q '^e2e-prev\.yml e2e-prev: npx --yes wait-on@9\.5\.1 .*: installs outside the lockfiles$' <<<"$problems" \
+    && grep -q '^ci\.yml e2e: the build is not served by vite preview' <<<"$problems" \
+    && grep -q '^e2e-prev\.yml e2e-prev: the build is not served by vite preview' <<<"$problems"; then
+    ok "workflow_npx_lockfile_negative: serve and wait-on fetched by npx are reported"
+else
+    fail "workflow_npx_lockfile_negative: serve and wait-on fetched by npx are reported" "$problems"
 fi
 
 # ─── F-294: documentation of the release images ─────────────────────────────

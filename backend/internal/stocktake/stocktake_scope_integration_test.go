@@ -1015,6 +1015,12 @@ func TestStocktakeSnapshotMigration(t *testing.T) {
 		}
 		return s
 	}
+	// 000288 (WP-877) made stock_scan.stocktake_id composite; it goes back
+	// to its simple form before the down drops the key.
+	if _, err = tx.Exec(ctx, `ALTER TABLE stock_scan DROP CONSTRAINT stock_scan_stocktake_id_fkey,
+		ADD CONSTRAINT stock_scan_stocktake_id_fkey FOREIGN KEY (stocktake_id) REFERENCES stocktake (id) ON DELETE CASCADE`); err != nil {
+		t.Fatalf("later fk 000288: %v", err)
+	}
 	if _, err = tx.Exec(ctx, string(scanDown)); err != nil {
 		t.Fatalf("down of 000265: %v", err)
 	}

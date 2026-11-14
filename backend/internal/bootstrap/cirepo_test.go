@@ -157,8 +157,10 @@ type ciRestorer interface {
 // decorator chain does not offer, with the reason. Every other method must
 // reach the callers through the chain.
 var chainExceptions = map[string]string{
-	"WithEvents":   "builder used while wiring the repositories (server.PostgresRepositories), before the chain is built",
-	"WithComputed": "builder used while wiring the repositories (server.PostgresRepositories, WP-717), before the chain is built",
+	"WithEvents":         "builder used while wiring the repositories (server.PostgresRepositories), before the chain is built",
+	"WithComputed":       "builder used while wiring the repositories (server.PostgresRepositories, WP-717), before the chain is built",
+	"WithFeatureCheck":   "builder used by cmd/server on the plain repository before the chain is built (SR-58, WP-871)",
+	"WithManagementSync": "builder used while wiring the repositories (server.PostgresRepositories, WP-913), before the chain is built",
 }
 
 // TestCIRepositoryChainForwardsOptionalInterfaces is the regression guard of

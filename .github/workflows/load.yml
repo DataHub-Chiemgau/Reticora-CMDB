@@ -81,6 +81,15 @@
 # takes over unchanged (tests/load/archive-run.sh, tests/load/README.md).
 # The evidence of three runs is evaluated from their archives by the median
 # rule of E-58 (tests/load/evaluate-runs.sh, self-test in the job prepare).
+#
+# Collector capacity (WP-958, NFR-11, PRB-04): the job collector-capacity
+# runs the capacity test of the collector module (go test -tags load
+# ./probe/...): the complete probe engine with 5,000 ping probes every 30 s
+# against a fake ICMP socket (10 % timeouts) and a fake edge for
+# collector_capacity_duration (default 3 min). It needs neither the server
+# nor a database, is independent of scenarios and uploads the measured
+# values as collector-capacity-<run id> (docs/ops/sizing.md derives the
+# collector sizes from them). collector_capacity = false leaves it out.
 name: Load test
 
 on:
@@ -114,6 +123,13 @@ on:
           - G2
           - G1
         default: G2
+      collector_capacity:
+        description: "Run the capacity test of the collector (WP-958: 5,000 ping probes every 30 s)"
+        type: boolean
+        default: true
+      collector_capacity_duration:
+        description: "Real run time of the collector capacity test (at least 70s)"
+        default: "3m"
   schedule:
     - cron: "17 2 * * *"
 
@@ -218,7 +234,7 @@ jobs:
         include: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     services:
       redis:
-        image: redis:7-alpine
+        image: redis:7.4.12-alpine@sha256:7b1753b4c5ad8458906c272a8132b8c15f5557b000379eb115fb239706a384b7
         ports:
           - 6379:6379
     env:
@@ -261,7 +277,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
           cache-dependency-path: server-src/backend/go.sum
 
       # A service container takes no server options; pg_stat_statements
@@ -272,7 +288,7 @@ jobs:
         run: |
           docker run -d --name postgres -p 5432:5432 \
             -e POSTGRES_USER=reticora -e POSTGRES_PASSWORD=reticora -e POSTGRES_DB=reticora \
-            timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731 \
+            timescale/timescaledb:2.32.0-pg16@sha256:2f87efeaec6fbdd3ba4a6993b921c05d069cd8e980792cb23c7c5f32a6fe68a7 \
             postgres -c shared_preload_libraries=timescaledb,pg_stat_statements,auto_explain
           for _ in $(seq 1 90); do
             psql "$DATABASE_URL" -Atc 'SELECT 1' >/dev/null 2>&1 && exit 0
@@ -282,7 +298,7 @@ jobs:
           exit 1
 
       - name: Start NATS with JetStream
-        run: docker run -d --name nats -p 4222:4222 nats:2.10-alpine -js
+        run: docker run -d --name nats -p 4222:4222 nats:2.14.10-alpine@sha256:311da47e2f31c26e99c623cd78d486a1e8ab039c49b32652770bb91a4f70512e -js
 
       # writes.js (WP-823): the import over JSON rows stages them in the
       # object storage (WP-303; without it POST /imports is 503). The image
@@ -293,7 +309,7 @@ jobs:
         run: |
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=reticora -e MINIO_ROOT_PASSWORD=reticora_dev \
-            pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372 \
+            pgsty/silo:RELEASE.2026-11-12T00-00-00Z@sha256:c20d112390b9a9ce8c11b8af95ad35bcaa62f4759663c09c936cd8d2b511f329 \
             server /data
           for _ in $(seq 1 30); do curl -fsS -o /dev/null http://localhost:9000/minio/health/live && exit 0; sleep 1; done
           docker logs minio; exit 1
@@ -702,6 +718,47 @@ jobs:
         with:
           name: load-results-${{ matrix.scenario }}
           path: load-results/
+
+  # WP-958 (NFR-11, PRB-04): capacity of the collector's probe engine. The
+  # test fails above its budgets (drift p99 < 500 ms, heap < 256 MiB, no
+  # goroutine leak, at most 2 spool files/s, no overrun or skipped check, no
+  # second above 1.5 × the mean starts); the measured values are uploaded
+  # also when it fails.
+  collector-capacity:
+    name: Collector capacity
+    if: github.event_name != 'workflow_dispatch' || inputs.collector_capacity
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.11"
+          cache-dependency-path: collector/go.sum
+
+      - name: Run the capacity test
+        working-directory: collector
+        env:
+          RETICORA_CAPACITY_DURATION: ${{ inputs.collector_capacity_duration || '3m' }}
+          RETICORA_CAPACITY_OUT: ${{ runner.temp }}/collector-capacity/capacity.json
+        run: |
+          mkdir -p "$(dirname "$RETICORA_CAPACITY_OUT")"
+          go test -tags load -count=1 -run 'TestCollectorCapacity' -timeout 25m -v ./probe/... \
+            | tee "$(dirname "$RETICORA_CAPACITY_OUT")/go-test.txt"
+          test "${PIPESTATUS[0]}" -eq 0
+          {
+            echo '### Collector capacity (WP-958)'
+            echo '```json'
+            cat "$RETICORA_CAPACITY_OUT"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: collector-capacity-${{ github.run_id }}
+          path: ${{ runner.temp }}/collector-capacity/
 
   # WP-439 (E-58, NFR-10): one artifact per run, load-archive-<run id>, with
   # the k6 summaries, run records and outcomes of every selected job and

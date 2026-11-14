@@ -76,27 +76,29 @@ const (
 	PermAgentRead         Permission = "agent:read"
 	PermAgentManage       Permission = "agent:manage"
 	PermAgentIngest       Permission = "agent:ingest"
-	PermSecurityRead      Permission = "security:read"
-	PermSecurityWrite     Permission = "security:write"
-	PermTicketRead        Permission = "ticket:read"
-	PermTicketWrite       Permission = "ticket:write"
-	PermSLARead           Permission = "sla:read"
-	PermSLAWrite          Permission = "sla:write"
-	PermIPAMRead          Permission = "ipam:read"
-	PermIPAMWrite         Permission = "ipam:write"
-	PermFormRead          Permission = "form:read"
-	PermFormWrite         Permission = "form:write"
-	PermWorkflowRead      Permission = "workflow:read"
-	PermWorkflowWrite     Permission = "workflow:write"
-	PermComplianceRead    Permission = "compliance:read"
-	PermComplianceWrite   Permission = "compliance:write"
-	PermMonitoringRead    Permission = "monitoring:read"
-	PermMonitoringWrite   Permission = "monitoring:write"
-	PermIGARead           Permission = "iga:read"
-	PermIGAWrite          Permission = "iga:write"
-	PermSearchRead        Permission = "search:read"
-	PermSearchWrite       Permission = "search:write"
-	PermAIRead            Permission = "ai:read"
+	// finding:* replaces security:* without an alias (RBA-05, WP-866,
+	// migration 000285).
+	PermFindingRead     Permission = "finding:read"
+	PermFindingWrite    Permission = "finding:write"
+	PermTicketRead      Permission = "ticket:read"
+	PermTicketWrite     Permission = "ticket:write"
+	PermSLARead         Permission = "sla:read"
+	PermSLAWrite        Permission = "sla:write"
+	PermIPAMRead        Permission = "ipam:read"
+	PermIPAMWrite       Permission = "ipam:write"
+	PermFormRead        Permission = "form:read"
+	PermFormWrite       Permission = "form:write"
+	PermWorkflowRead    Permission = "workflow:read"
+	PermWorkflowWrite   Permission = "workflow:write"
+	PermComplianceRead  Permission = "compliance:read"
+	PermComplianceWrite Permission = "compliance:write"
+	PermMonitoringRead  Permission = "monitoring:read"
+	PermMonitoringWrite Permission = "monitoring:write"
+	PermIGARead         Permission = "iga:read"
+	PermIGAWrite        Permission = "iga:write"
+	PermSearchRead      Permission = "search:read"
+	PermSearchWrite     Permission = "search:write"
+	PermAIRead          Permission = "ai:read"
 
 	// Enterprise CMDB + asset/inventory extension (spec §21). These keys are
 	// seeded into the permission catalogue by migration 000055.
@@ -128,6 +130,21 @@ const (
 	PermTagManage             Permission = "tag:manage"
 	PermMetamodelPublish      Permission = "metamodel:publish"
 	PermSavedViewManage       Permission = "saved_view:manage"
+
+	// Action keys of phase 3 (RBA-05, E-161, WP-866, migration 000285).
+	PermAlertAcknowledge Permission = "alert:acknowledge"
+	PermWorkflowApprove  Permission = "workflow:approve"
+	PermADMPRead         Permission = "admp:read"
+	PermEscalationManage Permission = "escalation:manage"
+	PermOrgExport        Permission = "org:export"
+	PermOrgDelete        Permission = "org:delete"
+
+	// Keys of the network domain of phase 3 (E-159, WP-870, migration
+	// 000286).
+	PermCredentialBind Permission = "credential:bind"
+	PermVaultManage    Permission = "vault:manage"
+	PermADMPHolderRead Permission = "admp:holder_read"
+	PermADMPManage     Permission = "admp:manage"
 )
 
 // AllPermissions returns the full set of permissions the identity layer can
@@ -198,8 +215,8 @@ func allPermissions() []Permission {
 		PermAgentRead,
 		PermAgentManage,
 		PermAgentIngest,
-		PermSecurityRead,
-		PermSecurityWrite,
+		PermFindingRead,
+		PermFindingWrite,
 		PermTicketRead,
 		PermTicketWrite,
 		PermSLARead,
@@ -242,6 +259,16 @@ func allPermissions() []Permission {
 		PermTagManage,
 		PermMetamodelPublish,
 		PermSavedViewManage,
+		PermAlertAcknowledge,
+		PermWorkflowApprove,
+		PermADMPRead,
+		PermEscalationManage,
+		PermOrgExport,
+		PermOrgDelete,
+		PermCredentialBind,
+		PermVaultManage,
+		PermADMPHolderRead,
+		PermADMPManage,
 	}
 }
 
@@ -272,7 +299,11 @@ type SessionClaims struct {
 	ID string
 	// Operator marks an operator session of the /admin path (SEC-07). Such a
 	// token carries no organization and is refused by the tenant API.
-	Operator  bool
+	Operator bool
+	// MFA records that the login of the session used a second factor
+	// (MFASatisfied on amr and acr of the ID token, WP-1152). A refresh
+	// keeps it; the org deletion of TLC-06 requires it.
+	MFA       bool
 	IssuedAt  time.Time
 	ExpiresAt time.Time
 }
@@ -299,6 +330,7 @@ type sessionClaimsWire struct {
 	SessionID        string                          `json:"sid,omitempty"`
 	ID               string                          `json:"jti,omitempty"`
 	Operator         bool                            `json:"opr,omitempty"`
+	MFA              bool                            `json:"mfa,omitempty"`
 	IssuedAt         int64                           `json:"iat,omitempty"`
 	ExpiresAt        int64                           `json:"exp,omitempty"`
 }
@@ -377,6 +409,7 @@ func (c SessionClaims) MarshalJSON() ([]byte, error) { //nolint:gocritic // see 
 		SessionID:      c.SessionID,
 		ID:             c.ID,
 		Operator:       c.Operator,
+		MFA:            c.MFA,
 		IssuedAt:       numericDate(c.IssuedAt),
 		ExpiresAt:      numericDate(c.ExpiresAt),
 	}
@@ -414,6 +447,7 @@ func (c *SessionClaims) UnmarshalJSON(data []byte) error {
 		SessionID:      w.SessionID,
 		ID:             w.ID,
 		Operator:       w.Operator,
+		MFA:            w.MFA,
 		IssuedAt:       fromNumericDate(w.IssuedAt),
 		ExpiresAt:      fromNumericDate(w.ExpiresAt),
 	}

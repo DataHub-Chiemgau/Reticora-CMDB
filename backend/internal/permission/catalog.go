@@ -82,8 +82,8 @@ var Catalogue = []Permission{
 	{Key: "agent:read", Resource: "agent", Action: "read", Description: "Read endpoint agents"},
 	{Key: "agent:manage", Resource: "agent", Action: "manage", Description: "Manage endpoint agents, policies and kill-switch"},
 	{Key: "agent:ingest", Resource: "agent", Action: "ingest", Description: "Ingest endpoint agent telemetry"},
-	{Key: "security:read", Resource: "security", Action: "read", Description: "Read security findings"},
-	{Key: "security:write", Resource: "security", Action: "write", Description: "Manage security findings"},
+	{Key: "finding:read", Resource: "finding", Action: "read", Description: "Read security findings"},
+	{Key: "finding:write", Resource: "finding", Action: "write", Description: "Manage security findings"},
 	// Enterprise CMDB + asset/inventory extension (spec §21).
 	{Key: "ci_attribute:manage", Resource: "ci_attribute", Action: "manage", Description: "Manage CI attribute definitions"},
 	{Key: "ci_instance_attribute:manage", Resource: "ci_instance_attribute", Action: "manage", Description: "Manage CI instance attributes"},
@@ -112,4 +112,17 @@ var Catalogue = []Permission{
 	{Key: "tag:manage", Resource: "tag", Action: "manage", Description: "Manage tags"},
 	{Key: "metamodel:publish", Resource: "metamodel", Action: "publish", Description: "Publish metamodel drafts and template versions"},
 	{Key: "saved_view:manage", Resource: "saved_view", Action: "manage", Description: "Manage saved views of other owners"},
+	// Action keys of phase 3 (RBA-05, E-161, WP-866, migration 000285);
+	// finding:* above replaces security:*.
+	{Key: "alert:acknowledge", Resource: "alert", Action: "acknowledge", Description: "Acknowledge alarms, incidents and notification escalations"},
+	{Key: "workflow:approve", Resource: "workflow", Action: "approve", Description: "Approve workflow steps"},
+	{Key: "admp:read", Resource: "admp", Action: "read", Description: "Read ADMP connection data"},
+	{Key: "escalation:manage", Resource: "escalation", Action: "manage", Description: "Manage escalation policies and notification escalations"},
+	{Key: "org:export", Resource: "org", Action: "export", Description: "Export all data of the organization"},
+	{Key: "org:delete", Resource: "org", Action: "delete", Description: "Request and cancel the deletion of the organization"},
+	// Keys of the network domain of phase 3 (E-159, WP-870, migration 000286).
+	{Key: "credential:bind", Resource: "credential", Action: "bind", Description: "Bind credentials to CIs, device groups, subnets and probes"},
+	{Key: "vault:manage", Resource: "vault", Action: "manage", Description: "Manage vault connections for credential references"},
+	{Key: "admp:holder_read", Resource: "admp", Action: "holder_read", Description: "Read the holder of an ADMP connection (personal data)"},
+	{Key: "admp:manage", Resource: "admp", Action: "manage", Description: "Manage ADMP accounts"},
 }

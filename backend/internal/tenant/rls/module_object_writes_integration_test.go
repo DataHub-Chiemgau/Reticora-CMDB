@@ -69,6 +69,28 @@ func (s *memoryBlobs) PresignedGetURL(_ context.Context, bucket, key string, _ b
 	return "https://blob.example/" + bucket + "/" + key, nil
 }
 
+func (s *memoryBlobs) List(_ context.Context, bucket, prefix string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	keys := []string{}
+	for k := range s.objects {
+		if key, ok := strings.CutPrefix(k, bucket+"/"); ok && strings.HasPrefix(key, prefix) {
+			keys = append(keys, key)
+		}
+	}
+	return keys, nil
+}
+
+func (s *memoryBlobs) DeleteAll(ctx context.Context, bucket, prefix string) (int, error) {
+	keys, _ := s.List(ctx, bucket, prefix)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, k := range keys {
+		delete(s.objects, bucket+"/"+k)
+	}
+	return len(keys), nil
+}
+
 // object returns the content stored under key in any bucket.
 func (s *memoryBlobs) object(key string) string {
 	s.mu.Lock()

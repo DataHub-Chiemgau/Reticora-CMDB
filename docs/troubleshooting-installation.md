@@ -626,7 +626,7 @@ The installer is safe to re-run and reuses existing `.env` values as defaults:
 | Realm file | Re-rendered and validated on every run. Keycloak imports it only while the realm does not exist (`start --import-realm` skips an existing realm). |
 | TimescaleDB extension | The server is stopped before the migrations; an extension below the version of the current database image is updated (`scripts/ops/timescaledb-update.sh`), a current one is left alone. |
 | Migrations | Tracked in `reticora_schema_migrations`; already-applied versions are skipped. |
-| Image pins (release mode) | `RETICORA_SERVER_IMAGE`, `RETICORA_FRONTEND_IMAGE` and `RETICORA_POSTGRES_IMAGE` are written by the installer: verified again with cosign and re-pinned on every run of the release mode (the default), empty for the local source build (`--build-from-source`). A pin of an earlier run is never reused unverified. The mode is not remembered: every run without `--build-from-source` installs the signed release (section 9). |
+| Image pins (release mode) | `RETICORA_SERVER_IMAGE`, `RETICORA_FRONTEND_IMAGE`, `RETICORA_POSTGRES_IMAGE` and `RETICORA_KEYCLOAK_DB_IMAGE` are written by the installer: verified again with cosign and re-pinned on every run of the release mode (the default), empty for the local source build (`--build-from-source`). A pin of an earlier run is never reused unverified. The mode is not remembered: every run without `--build-from-source` installs the signed release (section 9). |
 
 **Rotating passwords and OIDC settings:** change the value in `.env` (or at
 the installer's prompt) and re-run the installer. Every applied Keycloak
@@ -760,10 +760,10 @@ switch.
 | Installer path | Verification |
 |---|---|
 | `install.sh` (bootstrap, e.g. piped from curl) | Downloads the source of the release tag (default: the newest release), checks the signed `SHA256SUMS`, then the commit of the checked-out tag against `SOURCE_COMMIT` (git) or the sha256 of `reticora-source-<version>.tar.gz` (without git, checked before it is unpacked), and hands the release to the component installer (`RETICORA_RELEASE`). A mismatch stops before anything of the source runs. `--ref main` without the switch stops before the download. |
-| `install-cloud.sh` (default: release mode) | The release: `--release`, otherwise the release tag the checkout is on, otherwise the newest release. First the checkout itself — compose file, realm and migrations come from it — must be the signed source of that release: a git checkout its commit (`SOURCE_COMMIT`), a directory without git every file of the signed source tarball. Then `cosign verify` of `reticora-server`, `reticora-frontend` and `reticora-postgres` (`<registry>/<image>:<release>`, registry `ghcr.io/datahub-chiemgau` or `RETICORA_IMAGE_REGISTRY`). The verified digest is pinned in `.env` (`RETICORA_*_IMAGE=<registry>/<image>@sha256:…`), only these images are pulled, nothing is built — also not PostgreSQL. All before `compose up`. |
+| `install-cloud.sh` (default: release mode) | The release: `--release`, otherwise the release tag the checkout is on, otherwise the newest release. First the checkout itself — compose file, realm and migrations come from it — must be the signed source of that release: a git checkout its commit (`SOURCE_COMMIT`), a directory without git every file of the signed source tarball. Then `cosign verify` of `reticora-server`, `reticora-frontend`, `reticora-postgres` and `reticora-keycloak-db` (`<registry>/<image>:<release>`, registry `ghcr.io/datahub-chiemgau` or `RETICORA_IMAGE_REGISTRY`). The verified digest is pinned in `.env` (`RETICORA_*_IMAGE=<registry>/<image>@sha256:…`), only these images are pulled, nothing is built — also not PostgreSQL. All before `compose up`. |
 | `install-vm.sh` (default, systemd mode) | The collector binary `reticora-collector-linux-<arch>` of the release (`--release`, `RETICORA_COLLECTOR_RELEASE`, otherwise the newest): `cosign verify-blob` with its `.sigstore.json`, and its sha256 against the signed `SHA256SUMS`, before it is copied to `/opt/reticora-collector`. No sources, no local binary. |
 | `install-vm.sh --docker` (default) | `cosign verify` of the image `reticora-collector` of the release; the generated compose project runs it pinned by digest (`image: <registry>/reticora-collector@sha256:…`), pulled, not built. |
-| `--build-from-source` (all three) | **Not signature-verified:** `install-cloud.sh` builds server, frontend and PostgreSQL from the checkout, `install-vm.sh` builds the collector (binary or image). Still checked: a release tag as source (`--ref v<version>`, `RETICORA_REPO_REF=v<version>`) against the signed release, and the Go toolchain `install-vm.sh` downloads against the sha256 that go.dev publishes (`https://go.dev/dl/?mode=json&include=all`). Another ref prints `Source not signature-verified (no release tag)`. `--release` and `--build-from-source` exclude each other. |
+| `--build-from-source` (all three) | **Not signature-verified:** `install-cloud.sh` builds server, frontend and PostgreSQL (CMDB and Keycloak) from the checkout, `install-vm.sh` builds the collector (binary or image). Still checked: a release tag as source (`--ref v<version>`, `RETICORA_REPO_REF=v<version>`) against the signed release, and the Go toolchain `install-vm.sh` downloads against the sha256 that go.dev publishes (`https://go.dev/dl/?mode=json&include=all`). Another ref prints `Source not signature-verified (no release tag)`. `--release` and `--build-from-source` exclude each other. |
 
 The signer must be `release.yml` of `DataHub-Chiemgau/Reticora-CMDB` on a
 version tag, issued by `https://token.actions.githubusercontent.com` — the
@@ -778,11 +778,16 @@ a git mirror (`--repo`) is accepted when its tag is the signed commit, an
 image mirror (`RETICORA_IMAGE_REGISTRY`) when it keeps the signatures
 (`cosign copy`).
 
-**cosign:** an installed `cosign` (v2) is used. Otherwise the installer
-downloads cosign v2.4.1 for linux/amd64 or linux/arm64 from the sigstore
+**cosign:** an installed `cosign` v3.1.3 or newer is used. An older one
+(cosign v2, or v3 before v3.1.3: GHSA-fx35-mq7g-6g98, a forged legacy bundle
+passes the identity check) is not used, with a warning. Then the installer
+downloads cosign v3.1.4 for linux/amd64 or linux/arm64 from the sigstore
 release and checks it against its published sha256 before every use (cache:
 `RETICORA_TOOLS_DIR`, default `/var/cache/reticora` as root, otherwise
-`~/.cache/reticora`).
+`~/.cache/reticora`). Releases are signed with cosign v3 (Sigstore bundle
+v0.3, image signatures as OCI referrers); releases signed before with cosign
+v2 (legacy bundles, e.g. v1.0.0-rc.1) are verified by the same commands
+(E-258).
 
 **Typical calls:**
 
@@ -837,8 +842,9 @@ curl -fsSL "$base/SOURCE_COMMIT"; git -C /opt/reticora-cmdb rev-parse HEAD
 | `Signature check failed: <file or image> is not signed by the release workflow …` | cosign rejected the signature: manipulated file or image, a signature of another identity (fork, other workflow) or of another release, a tag without signed images, or no registry access | Do not install. Check the tag and the registry (`docker login` for a private registry) and verify by hand as above; a mirror must keep the signatures (`cosign copy`). |
 | `Signature check failed: the verified signatures of <ref> do not name <image> with one digest` | The tag carries a signed image of another name (e.g. the frontend image under `reticora-server`) | Do not install; the registry content is wrong. |
 | `Checksum mismatch: <file> … is not the file of the signed manifest SHA256SUMS` | The downloaded binary, tarball or `SOURCE_COMMIT` is not the one of the release | Do not install; download again from the release page. |
-| `cosign is required to verify the signed release artifacts …` | No cosign installed and the download from github.com/sigstore failed (or no build for this CPU) | Install cosign v2 (https://docs.sigstore.dev/cosign/system_config/installation/) and re-run. |
-| `The downloaded cosign v2.4.1 does not match its published sha256 checksum` | The cosign download was manipulated or truncated | Re-run; install cosign yourself if it persists. |
+| `cosign is required to verify the signed release artifacts …` | No cosign v3.1.3 or newer installed and the download from github.com/sigstore failed (or no build for this CPU) | Install cosign v3.1.3 or newer (https://docs.sigstore.dev/cosign/system_config/installation/) and re-run. |
+| `The installed cosign <path> (<version>) is older than v3.1.3 (GHSA-fx35-mq7g-6g98) and is not used …` (warning) | An older cosign (e.g. v2.4.1) is on `PATH` | Nothing to do for the installation (the pinned v3.1.4 is used); update or remove the old cosign. |
+| `The downloaded cosign v3.1.4 does not match its published sha256 checksum` | The cosign download was manipulated or truncated | Re-run; install cosign v3.1.3 or newer yourself if it persists. |
 | `Could not download <file> of release <tag> …` | The release has no such file (tag not released, or released before WP-387 without `SHA256SUMS.sigstore.json`) or no network | Use a release that publishes the signed manifest, or `--build-from-source`. |
 | `… --build-from-source …; use one of them` | `--release` together with `--build-from-source` | Choose the signed release or the local build. |
 | `No release selected for the signed collector …` / `No registry or release selected for the signed images …` | A function of the installer ran without a selected release (internal call) | Name the release with `--release v<version>`, or use `--build-from-source`. |

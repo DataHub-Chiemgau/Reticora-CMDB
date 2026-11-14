@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { ArrowRight, CheckCircle2, Circle } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { collectorApi, credentialApi, siteApi } from '../../api/client';
 import { useClients } from '../../api/cmdbHooks';
 import { useCIList, useEffectivePermissions } from '../../api/hooks';

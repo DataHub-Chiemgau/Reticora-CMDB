@@ -47,12 +47,12 @@ func (o *Outbox) Append(ctx context.Context, tx pgx.Tx, e *Event) (*Envelope, er
 	if e.Data == nil {
 		data = []byte("{}")
 	}
-	env := &Envelope{OrgID: e.OrgID, Type: e.Type, EntityID: e.EntityID, Data: data}
+	env := &Envelope{OrgID: e.OrgID, Type: e.Type, EntityID: e.EntityID, Data: data, Origin: OriginFrom(ctx)}
 	var entitySeq *int64
-	err = tx.QueryRow(ctx, `INSERT INTO event_outbox (organization_id, sequence, type, entity_id, entity_seq, data)
-		VALUES ($1, 0, $2, $3, CASE WHEN $3::text IS NULL THEN NULL ELSE 0 END, $4)
+	err = tx.QueryRow(ctx, `INSERT INTO event_outbox (organization_id, sequence, type, entity_id, entity_seq, data, origin)
+		VALUES ($1, 0, $2, $3, CASE WHEN $3::text IS NULL THEN NULL ELSE 0 END, $4, $5::jsonb)
 		RETURNING id::text, sequence, entity_seq, occurred_at`,
-		e.OrgID, e.Type, nilIfEmpty(e.EntityID), data).Scan(&env.ID, &env.Sequence, &entitySeq, &env.OccurredAt)
+		e.OrgID, e.Type, nilIfEmpty(e.EntityID), data, originJSON(ctx)).Scan(&env.ID, &env.Sequence, &entitySeq, &env.OccurredAt)
 	if err != nil {
 		return nil, fmt.Errorf("events: append %s: %w", e.Type, err)
 	}
@@ -90,7 +90,7 @@ func (o *Outbox) AppendMany(ctx context.Context, tx pgx.Tx, es []*Event) ([]*Env
 		if e.Data == nil {
 			raw = []byte("{}")
 		}
-		envs[i] = &Envelope{OrgID: e.OrgID, Type: e.Type, EntityID: e.EntityID, Data: raw}
+		envs[i] = &Envelope{OrgID: e.OrgID, Type: e.Type, EntityID: e.EntityID, Data: raw, Origin: OriginFrom(ctx)}
 		orgs[i], types[i], data[i] = e.OrgID, e.Type, string(raw)
 		if e.EntityID != "" {
 			entity := e.EntityID
@@ -102,13 +102,13 @@ func (o *Outbox) AppendMany(ctx context.Context, tx pgx.Tx, es []*Event) ([]*Env
 			SELECT gen_random_uuid() AS id, e.*
 			FROM unnest($1::text[], $2::text[], $3::text[], $4::text[]) WITH ORDINALITY AS e(org, type, entity_id, data, ord)
 		), ins AS (
-			INSERT INTO event_outbox (id, organization_id, sequence, type, entity_id, entity_seq, data)
-			SELECT id, org::uuid, 0, type, entity_id, CASE WHEN entity_id IS NULL THEN NULL ELSE 0 END, data::jsonb
+			INSERT INTO event_outbox (id, organization_id, sequence, type, entity_id, entity_seq, data, origin)
+			SELECT id, org::uuid, 0, type, entity_id, CASE WHEN entity_id IS NULL THEN NULL ELSE 0 END, data::jsonb, $5::jsonb
 			FROM input ORDER BY ord
 			RETURNING id, sequence, entity_seq, occurred_at
 		)
 		SELECT input.ord, ins.id::text, ins.sequence, ins.entity_seq, ins.occurred_at
-		FROM input JOIN ins ON ins.id = input.id ORDER BY input.ord`, orgs, types, entities, data)
+		FROM input JOIN ins ON ins.id = input.id ORDER BY input.ord`, orgs, types, entities, data, originJSON(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("events: append %d events: %w", len(es), err)
 	}

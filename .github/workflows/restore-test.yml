@@ -39,7 +39,7 @@ jobs:
     services:
       postgres:
         # Same image family as the production database (TimescaleDB on PG16).
-        image: timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
+        image: timescale/timescaledb:2.32.0-pg16@sha256:2f87efeaec6fbdd3ba4a6993b921c05d069cd8e980792cb23c7c5f32a6fe68a7
         env:
           POSTGRES_USER: reticora
           POSTGRES_PASSWORD: reticora
@@ -60,7 +60,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
 
       - name: Install golang-migrate
         run: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
@@ -87,7 +87,7 @@ jobs:
       - name: Dump the database (logical backup)
         run: >-
           docker run --rm --network host -e PGPASSWORD -v /tmp:/tmp
-          timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
+          timescale/timescaledb:2.32.0-pg16@sha256:2f87efeaec6fbdd3ba4a6993b921c05d069cd8e980792cb23c7c5f32a6fe68a7
           pg_dump --format=custom --file=/tmp/reticora.dump "$DATABASE_URL"
 
       - name: Create the restore target database
@@ -97,7 +97,7 @@ jobs:
       - name: Restore into the fresh database
         run: >-
           docker run --rm --network host -e PGPASSWORD -v /tmp:/tmp
-          timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
+          timescale/timescaledb:2.32.0-pg16@sha256:2f87efeaec6fbdd3ba4a6993b921c05d069cd8e980792cb23c7c5f32a6fe68a7
           pg_restore --dbname="$RESTORE_DATABASE_URL" /tmp/reticora.dump
 
       - name: "Integrity check: row counts match"
@@ -153,7 +153,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
 
       - name: Install golang-migrate
         run: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1

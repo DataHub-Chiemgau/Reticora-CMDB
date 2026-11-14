@@ -1225,6 +1225,9 @@ fake_realm() {
     flow_of() { jq -r --arg id "$1" '[.authenticationFlows[] | select(any(.authenticationExecutions[]; .id == $id)) | .alias] | first' "$realm"; }
     next_id() { a=$(( $(cat "$KC_STATE/seq" 2>/dev/null || echo 0) + 1 )); echo "$a" > "$KC_STATE/seq"; printf '%s-%s' "$1" "$a"; }
     case "$verb $path" in
+        # The server's admin client lives in KC_STATE/admin-client.json (fake_kcadm).
+        "get clients/admin-uuid"*|"update clients/admin-uuid"*) return 3 ;;
+        "get client-scopes") jq '[.clientScopes[] | {id, name}]' "$realm" ;;
         "create partial-export") jq '(.clients[]?.secret) |= "**********"' "$realm" ;;
         "get users/profile")
             jq '.components["org.keycloak.userprofile.UserProfileProvider"][0].config["kc.user.profile.config"][0] | fromjson' "$realm" ;;
@@ -1381,6 +1384,15 @@ fake_kcadm() {
                 printf 'admin-uuid\n'
                 return 0 ;;
             "get clients/admin-uuid") cat "$KC_STATE/admin-client.json"; return 0 ;;
+            "get clients/admin-uuid/default-client-scopes")
+                jq '(.defaultClientScopes // []) | map({id: ("scope-" + .), name: .})' "$KC_STATE/admin-client.json"
+                return 0 ;;
+            "update clients/admin-uuid/default-client-scopes/"*)
+                a="${2##*/}"
+                printf 'default-client-scope %s %s\n' "$(jq -r .clientId "$KC_STATE/admin-client.json")" "${a#scope-}" >> "$KCADM_WRITES"
+                jq --arg n "${a#scope-}" '.defaultClientScopes = ((.defaultClientScopes // []) + [$n])' "$KC_STATE/admin-client.json" \
+                    > "$KC_STATE/client.new" && mv "$KC_STATE/client.new" "$KC_STATE/admin-client.json"
+                return 0 ;;
             "get clients/admin-uuid/client-secret") jq '{type: "secret", value: .secret}' "$KC_STATE/admin-client.json"; return 0 ;;
             "get clients/admin-uuid/service-account-user")
                 jq '{id: "sa-uuid", username: ("service-account-" + (.clientId | ascii_downcase))}' "$KC_STATE/admin-client.json"
@@ -1469,12 +1481,13 @@ kc_applied() {
 
 # kc_imported_realm <realm file> — the partial export of a realm Keycloak
 # imported from the file: ids for the client, groups, flows, executions and
-# authenticator configs, the client scopes Keycloak creates in every realm,
+# authenticator configs, the client scopes Keycloak 26.8.2 creates in every
+# realm (basic and kc-admin-api among them),
 # its built-in browser flow and an attribute of its own (cibaInterval).
 kc_imported_realm() {
     jq '.clients |= map(. + {id: "client-uuid"})
         | .groups |= map(. + {id: ("group-" + .name), realmRoles: (.realmRoles // [])})
-        | .clientScopes = (["profile", "email", "acr", "roles", "web-origins"] | map({id: ("scope-" + .), name: .}))
+        | .clientScopes = (["profile", "email", "acr", "roles", "web-origins", "basic", "kc-admin-api"] | map({id: ("scope-" + .), name: .}))
         | .authenticationFlows = ([{alias: "browser", providerId: "basic-flow", topLevel: true, builtIn: true,
               authenticationExecutions: [{authenticator: "auth-cookie", authenticatorFlow: false, requirement: "ALTERNATIVE", priority: 10}]}]
             + (.authenticationFlows // []))
@@ -1488,7 +1501,9 @@ kc_imported_realm() {
 # kc_legacy_realm — the fake realm becomes the realm of the release before
 # WP-044 (tests/keycloak/realm-reticora-legacy.json) as Keycloak 24 imports
 # it: no password policy, brute-force detection off with Keycloak's defaults,
-# browser flow "browser", no organization_id in the user profile.
+# browser flow "browser", no organization_id in the user profile; Keycloak 26
+# migrated it, so every client has the default client scope basic
+# (MigrateTo25_0_0).
 kc_legacy_realm() {
     local current="$KC_STATE/realm.json"
     sed -e "s/RETICORA_OIDC_CLIENT_SECRET_PLACEHOLDER/$RETICORA_OIDC_CLIENT_SECRET/g" \
@@ -1497,6 +1512,7 @@ kc_legacy_realm() {
         -e "s|RETICORA_OIDC_ISSUER_ORIGIN_PLACEHOLDER|http://192.0.2.10:8180|g" \
         "$REPO_ROOT/tests/keycloak/realm-reticora-legacy.json" > "$KC_STATE/legacy.json"
     kc_imported_realm "$KC_STATE/legacy.json" | jq --slurpfile cur "$current" 'del(.users)
+        | .clients |= map(.defaultClientScopes = ((.defaultClientScopes // []) + ["basic"]))
         | . + {bruteForceProtected: false, permanentLockout: false, failureFactor: 30, waitIncrementSeconds: 60,
                maxFailureWaitSeconds: 900, minimumQuickLoginWaitSeconds: 60, quickLoginCheckMilliSeconds: 1000,
                maxDeltaTimeSeconds: 43200}
@@ -2773,16 +2789,19 @@ test_admin_client_created() {
     ensure_admin_client > "$out" 2>&1 || { cat "$out"; return 1; }
     [ "$(cat "$KCADM_WRITES")" = "$(printf '%s\n' \
         'create client reticora-server-admin clientAuthenticatorType,clientId,directAccessGrantsEnabled,enabled,implicitFlowEnabled,name,protocol,publicClient,secret,serviceAccountsEnabled,standardFlowEnabled' \
-        'add-roles service-account manage-users view-users query-users')" ] || { cat "$KCADM_WRITES"; return 1; }
+        'add-roles service-account manage-users view-users query-users' \
+        'default-client-scope reticora-server-admin kc-admin-api')" ] || { cat "$KCADM_WRITES"; return 1; }
     jq -e --arg s "$ADMIN_SECRET_A" '.clientId == "reticora-server-admin" and .secret == $s and .enabled == true
         and .publicClient == false and .clientAuthenticatorType == "client-secret" and .serviceAccountsEnabled == true
         and .standardFlowEnabled == false and .implicitFlowEnabled == false and .directAccessGrantsEnabled == false
-        and .protocol == "openid-connect"' "$KC_STATE/admin-client.json" >/dev/null || return 1
+        and .protocol == "openid-connect" and .defaultClientScopes == ["kc-admin-api"]' "$KC_STATE/admin-client.json" >/dev/null || return 1
     jq -e '. == ["manage-users", "view-users", "query-users"]' "$KC_STATE/sa-roles.json" >/dev/null || return 1
     grep -qx 'create clients -r reticora -f - -i' "$KCADM_LOG" &&
         grep -qx 'add-roles -r reticora --uid sa-uuid --cclientid realm-management --rolename manage-users --rolename view-users --rolename query-users' "$KCADM_LOG" &&
         grep -qF 'Keycloak: confidential client reticora-server-admin created' "$out" &&
         grep -qF 'Keycloak: service account of reticora-server-admin holds realm-management manage-users view-users query-users' "$out" &&
+        grep -qx 'update clients/admin-uuid/default-client-scopes/scope-kc-admin-api -r reticora' "$KCADM_LOG" &&
+        grep -qF 'Keycloak: client reticora-server-admin has the default client scope kc-admin-api (admin REST API)' "$out" &&
         no_admin_secret_in "$out" "$KCADM_LOG" "$KCADM_WRITES" &&
         [ "$(jq -r .secret "$KC_STATE/client.json")" = "client-secret-0" ]
 }
@@ -2796,7 +2815,7 @@ test_admin_client_unchanged() {
     local out="$TMP_ROOT/admin-client-unchanged-out"
     ensure_admin_client > "$out" 2>&1 || { cat "$out"; return 1; }
     [ ! -s "$KCADM_WRITES" ] && [ -z "$(kc_log_writes)" ] &&
-        grep -qF 'Keycloak admin client reticora-server-admin matches the configuration (service account: realm-management manage-users view-users query-users)' "$out"
+        grep -qF 'Keycloak admin client reticora-server-admin matches the configuration (service account: realm-management manage-users view-users query-users, scope kc-admin-api)' "$out"
 }
 
 # A changed secret in .env is set in Keycloak with exactly one update, logged

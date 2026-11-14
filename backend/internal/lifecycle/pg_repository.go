@@ -100,7 +100,7 @@ func (r *PGRepository) getTx(ctx context.Context, tx pgx.Tx, id string) (*Defini
 func (r *PGRepository) listStatesTx(ctx context.Context, tx pgx.Tx, definitionID string) ([]State, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, definition_id::text, key, label, is_initial, is_terminal,
-			sort_order, required_fields
+			sort_order, required_fields, locked_fields
 		FROM lifecycle_state WHERE definition_id = $1
 		ORDER BY sort_order ASC, key ASC`, definitionID)
 	if err != nil {
@@ -110,14 +110,17 @@ func (r *PGRepository) listStatesTx(ctx context.Context, tx pgx.Tx, definitionID
 	var out []State
 	for rows.Next() {
 		var s State
-		var required []byte
+		var required, locked []byte
 		if err := rows.Scan(&s.ID, &s.DefinitionID, &s.Key, &s.Label,
-			&s.IsInitial, &s.IsTerminal, &s.SortOrder, &required); err != nil {
+			&s.IsInitial, &s.IsTerminal, &s.SortOrder, &required, &locked); err != nil {
 			return nil, err
 		}
-		s.RequiredFields = []string{}
+		s.RequiredFields, s.LockedFields = []string{}, []string{}
 		if len(required) > 0 {
 			_ = json.Unmarshal(required, &s.RequiredFields)
+		}
+		if len(locked) > 0 {
+			_ = json.Unmarshal(locked, &s.LockedFields)
 		}
 		out = append(out, s)
 	}
@@ -192,12 +195,13 @@ func (r *PGRepository) Create(ctx context.Context, def *Definition) error {
 
 func insertStateTx(ctx context.Context, tx pgx.Tx, orgID, definitionID string, st *State) (string, error) {
 	required, _ := json.Marshal(api.NonNilSlice(st.RequiredFields))
+	locked, _ := json.Marshal(api.NonNilSlice(st.LockedFields))
 	var id string
 	if err := tx.QueryRow(ctx, `
-		INSERT INTO lifecycle_state (organization_id, definition_id, key, label, is_initial, is_terminal, sort_order, required_fields)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		INSERT INTO lifecycle_state (organization_id, definition_id, key, label, is_initial, is_terminal, sort_order, required_fields, locked_fields)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id::text`,
-		orgID, definitionID, st.Key, st.Label, st.IsInitial, st.IsTerminal, st.SortOrder, string(required)).
+		orgID, definitionID, st.Key, st.Label, st.IsInitial, st.IsTerminal, st.SortOrder, string(required), string(locked)).
 		Scan(&id); err != nil {
 		return "", fmt.Errorf("create lifecycle state: %w", err)
 	}
@@ -263,12 +267,13 @@ func (r *PGRepository) Update(ctx context.Context, def *Definition, expectedVers
 			return ErrVersionMismatch
 		}
 		wanted := map[string]bool{}
-		for _, st := range def.States {
-			wanted[st.Key] = true
+		for i := range def.States {
+			wanted[def.States[i].Key] = true
 		}
 		existing := map[string]string{}
 		var removed []string
-		for _, st := range current.States {
+		for i := range current.States {
+			st := &current.States[i]
 			existing[st.Key] = st.ID
 			if !wanted[st.Key] {
 				removed = append(removed, st.Key)
@@ -297,11 +302,12 @@ func (r *PGRepository) Update(ctx context.Context, def *Definition, expectedVers
 			st := &def.States[i]
 			if id, ok := existing[st.Key]; ok {
 				required, _ := json.Marshal(api.NonNilSlice(st.RequiredFields))
+				locked, _ := json.Marshal(api.NonNilSlice(st.LockedFields))
 				if _, err = tx.Exec(ctx, `
 					UPDATE lifecycle_state SET label = $2, is_initial = $3, is_terminal = $4,
-						sort_order = $5, required_fields = $6
+						sort_order = $5, required_fields = $6, locked_fields = $7
 					WHERE id = $1`,
-					id, st.Label, st.IsInitial, st.IsTerminal, st.SortOrder, string(required)); err != nil {
+					id, st.Label, st.IsInitial, st.IsTerminal, st.SortOrder, string(required), string(locked)); err != nil {
 					return fmt.Errorf("update lifecycle state: %w", err)
 				}
 				stateIDs[st.Key] = id

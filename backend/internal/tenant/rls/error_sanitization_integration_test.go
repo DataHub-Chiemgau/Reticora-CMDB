@@ -96,7 +96,7 @@ func TestRepositoryErrorsAreSanitized(t *testing.T) {
 	}
 	rule := func(ciType string) map[string]any {
 		return map[string]any{"ci_type_id": ciType, "name": "t1-err-rule", "severity": "high", "category": "security",
-			"expression": map[string]any{"field": "x"}}
+			"expression": map[string]any{"op": "not_empty", "field": "name"}}
 	}
 
 	for _, c := range []struct {
@@ -136,12 +136,17 @@ func TestRepositoryErrorsAreSanitized(t *testing.T) {
 			"kind": "snmp_v2c", "client_id": f.Client2, "secret": map[string]any{"community": "x"}}, []int{403}, "the operation is not permitted"},
 		{"WP-011", "lifecycle transition of an invalid CI id", w.orgA, http.MethodPost, "/api/v1/cis/not-a-uuid/lifecycle-transitions",
 			map[string]any{"to_state": "a"}, []int{404}, "entity not found"},
-		{"WP-011", "source policy with a NUL byte", w.orgA, http.MethodPut, "/api/v1/reconciliation/source-policy", map[string]any{"name": nul,
-			"priorities": []string{"manual"}}, []int{400, 422}, `"field":"name"`},
-		{"WP-011", "source policy priority with a NUL byte", w.orgA, http.MethodPut, "/api/v1/reconciliation/source-policy",
-			map[string]any{"priorities": []string{"manual", nul}}, []int{400}, `"field":"priorities"`},
-		{"WP-011", "source policy without priorities", w.orgA, http.MethodPut, "/api/v1/reconciliation/source-policy",
-			map[string]any{"priorities": []string{}}, []int{400}, `"field":"priorities"`},
+		// The source-priority list is gone (410, WP-1105); its successor,
+		// the source ranks per attribute, checks its fields before SQL.
+		{"WP-011", "source policy write is gone", w.orgA, http.MethodPut, "/api/v1/reconciliation/source-policy", map[string]any{"name": nul,
+			"priorities": []string{"manual"}}, []int{410}, "source-ranks"},
+		{"WP-1105", "source rank source with a NUL byte", w.orgA, http.MethodPut, "/api/v1/reconciliation/source-ranks",
+			map[string]any{"entries": []map[string]any{{"attribute_key": "a", "source": "snmp" + nul, "rank": 50}}}, []int{422}, `"field":"entries[0].source"`},
+		{"WP-1105", "source ranks without entries", w.orgA, http.MethodPut, "/api/v1/reconciliation/source-ranks",
+			map[string]any{}, []int{422}, `"field":"entries"`},
+		{"WP-1105", "source rank of an unknown CI type", w.orgA, http.MethodPut, "/api/v1/reconciliation/source-ranks",
+			map[string]any{"entries": []map[string]any{{"ci_type_id": unknown, "attribute_key": "a", "source": "snmp", "rank": 50}}}, []int{422},
+			`"field":"entries[0].ci_type_id"`},
 		{"WP-011", "privacy retention_days beyond int4", w.orgA, http.MethodPut, "/api/v1/privacy/retention", map[string]any{"retention_days": 3000000000},
 			[]int{400, 422}, `"field":"retention_days"`},
 		{"WP-011", "privacy retention_days just beyond int4", w.orgA, http.MethodPut, "/api/v1/privacy/retention", map[string]any{"retention_days": 2147483648},
@@ -207,8 +212,8 @@ func TestRepositoryErrorsAreSanitized(t *testing.T) {
 			`"field":"duration"`},
 
 		// WP-407: reservations and assets (WP-017).
-		{"WP-017", "reservation of an unknown asset", w.orgA, http.MethodPost, "/api/v1/reservations", map[string]any{"asset_id": unknown}, []int{404},
-			"asset not found"},
+		{"WP-017", "reservation of an unknown asset", w.orgA, http.MethodPost, "/api/v1/reservations", map[string]any{"asset_id": unknown}, []int{422},
+			`"field":"asset_id"`},
 		{"WP-017", "release of an invalid reservation id", w.orgA, http.MethodPost, "/api/v1/reservations/not-a-uuid/release", nil, []int{404},
 			"reservation not found"},
 		{"WP-017", "release of a client-2 reservation by client 1", client1, http.MethodPost, "/api/v1/reservations/" + reservation2 + "/release", nil,
@@ -216,9 +221,9 @@ func TestRepositoryErrorsAreSanitized(t *testing.T) {
 		{"WP-017", "PATCH asset with an invalid id", w.orgA, http.MethodPatch, "/api/v1/assets/not-a-uuid", map[string]any{"name": "x"}, []int{404},
 			"asset not found"},
 		{"WP-017", "reservation of an organization-B asset", w.orgA, http.MethodPost, "/api/v1/reservations", map[string]any{"asset_id": assetB},
-			[]int{404}, "asset not found"},
+			[]int{422}, `"field":"asset_id"`},
 		{"WP-017", "reservation of a client-2 asset by client 1", client1, http.MethodPost, "/api/v1/reservations", map[string]any{"asset_id": asset2},
-			[]int{404}, "asset not found"},
+			[]int{422}, `"field":"asset_id"`},
 		{"WP-017", "reservation with an invalid asset_id", w.orgA, http.MethodPost, "/api/v1/reservations", map[string]any{"asset_id": "not-a-uuid"},
 			[]int{422}, `"field":"asset_id"`},
 		{"WP-017", "reservation of an invalid id", w.orgA, http.MethodGet, "/api/v1/reservations/not-a-uuid", nil, []int{404}, "reservation not found"},
@@ -227,12 +232,12 @@ func TestRepositoryErrorsAreSanitized(t *testing.T) {
 			"name": "t1", "client_id": f.Client1, "primary_ci_id": ci2}, []int{422}, `"field":"primary_ci_id"`},
 
 		// WP-407: stock movements and quantity items (WP-018).
-		{"WP-018", "stock movement of an unknown asset", w.orgA, http.MethodPost, "/api/v1/stock-movements", movement(unknown), []int{404},
-			"asset not found"},
+		{"WP-018", "stock movement of an unknown asset", w.orgA, http.MethodPost, "/api/v1/stock-movements", movement(unknown), []int{422},
+			`"field":"asset_id"`},
 		{"WP-018", "inventory item of an unknown client", w.orgA, http.MethodPost, "/api/v1/inventory/items", map[string]any{"name": "t1",
 			"client_id": unknown}, []int{422}, "a referenced record does not exist"},
-		{"WP-018", "stock movement of an organization-B asset", w.orgA, http.MethodPost, "/api/v1/stock-movements", movement(assetB), []int{404},
-			"asset not found"},
+		{"WP-018", "stock movement of an organization-B asset", w.orgA, http.MethodPost, "/api/v1/stock-movements", movement(assetB), []int{422},
+			`"field":"asset_id"`},
 		{"WP-018", "stock movement to an unknown location", w.orgA, http.MethodPost, "/api/v1/stock-movements", map[string]any{"movement_type": "transfer",
 			"asset_id": asset1, "to_location_id": unknown}, []int{422}, `"field":"to_location_id"`},
 		{"WP-018", "inventory item of an invalid id", w.orgA, http.MethodGet, "/api/v1/inventory/items/not-a-uuid", nil, []int{404},
@@ -390,14 +395,14 @@ func TestRepositoryErrorsAreSanitized(t *testing.T) {
 	})
 
 	// WP-018: a stock movement of a client-2 asset by a client-1 principal is
-	// 404 with the fixed text like an unknown asset (not 400 "not found"),
+	// a 422 on asset_id like an unknown asset (SR-50, WP-879; 404 before),
 	// names no table or constraint and records nothing; the movement of a
 	// client-1 asset is 201.
 	t.Run("WP-018 stock movement of a client-2 asset by client 1", func(t *testing.T) {
 		before := w.scalar(`SELECT count(*)::text FROM stock_movement WHERE asset_id = $1`, asset2)
 		code, body := w.do(client1, http.MethodPost, "/api/v1/stock-movements", movement(asset2))
-		if code != http.StatusNotFound || !strings.Contains(body, "asset not found") {
-			t.Errorf("movement of a client-2 asset by client 1: %d %s, want 404 asset not found", code, trim(body))
+		if code != http.StatusUnprocessableEntity || !strings.Contains(body, `"field":"asset_id"`) {
+			t.Errorf("movement of a client-2 asset by client 1: %d %s, want 422 on asset_id", code, trim(body))
 		}
 		for _, m := range append([]string{"stock_movement", "_fkey", "policy for table"}, t1LeakMarkers...) {
 			if strings.Contains(body, m) {

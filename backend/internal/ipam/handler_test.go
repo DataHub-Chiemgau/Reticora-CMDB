@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -434,5 +435,143 @@ func TestSubnetReservations(t *testing.T) {
 	}
 	if got := do(mux, http.MethodDelete, base+"/"+res.ID, "", "org-1"); got.Code != http.StatusNotFound {
 		t.Errorf("second delete: expected 404, got %d", got.Code)
+	}
+}
+
+// TestSubnetGatewayInsideSubnet covers AK2 to AK4 of WP-902 (IPM-04) on the
+// memory repository: a gateway outside the prefix is 422 gateway at POST and
+// PATCH, also against a new prefix; an invalid gateway stays 400; setting
+// the gateway marks an address of the subnet, changing it moves the mark,
+// clearing it removes the mark and keeps the addresses; the gateway
+// address cannot leave its subnet (422 subnet_id) or be deleted (409
+// is_gateway); an unknown state is 422 state.
+func TestSubnetGatewayInsideSubnet(t *testing.T) {
+	repo, mux := newMux()
+	page := api.PaginationParams{Limit: 50}
+	w := do(mux, "POST", "/api/v1/subnets", `{"cidr":"10.9.0.0/24","gateway":"10.9.1.1"}`, "org-1")
+	if w.Code != http.StatusUnprocessableEntity || !strings.Contains(w.Body.String(), `"gateway"`) {
+		t.Errorf("POST gateway outside: %d %s, want 422 gateway", w.Code, w.Body.String())
+	}
+	if w = do(mux, "POST", "/api/v1/subnets", `{"cidr":"10.9.0.0/24","gateway":"10.9.0.300"}`, "org-1"); w.Code != http.StatusBadRequest {
+		t.Errorf("POST invalid gateway: %d, want 400", w.Code)
+	}
+	w = do(mux, "POST", "/api/v1/subnets", `{"cidr":"10.9.0.0/24","gateway":"10.9.0.1"}`, "org-1")
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST: %d %s", w.Code, w.Body.String())
+	}
+	var s Subnet
+	if err := json.Unmarshal(w.Body.Bytes(), &s); err != nil {
+		t.Fatal(err)
+	}
+	marked := func() []IPAddress {
+		gw := true
+		items, _, _ := repo.ListIPAddresses(context.Background(), "org-1", &IPFilter{SubnetID: s.ID, IsGateway: &gw}, page)
+		return items
+	}
+	if m := marked(); len(m) != 1 || m[0].Address != "10.9.0.1" || m[0].Type != IPTypeStatic || m[0].State != IPStateUnknown {
+		t.Errorf("gateway address after POST: %+v", m)
+	}
+	if w = do(mux, "PATCH", "/api/v1/subnets/"+s.ID, `{"gateway":"10.9.2.1"}`, "org-1"); w.Code != http.StatusUnprocessableEntity ||
+		!strings.Contains(w.Body.String(), `"gateway"`) {
+		t.Errorf("PATCH gateway outside: %d %s, want 422 gateway", w.Code, w.Body.String())
+	}
+	if w = do(mux, "PATCH", "/api/v1/subnets/"+s.ID, `{"gateway":"bad"}`, "org-1"); w.Code != http.StatusBadRequest {
+		t.Errorf("PATCH invalid gateway: %d, want 400", w.Code)
+	}
+	// The gateway 10.9.0.1 lies outside the new prefix 10.9.0.128/25.
+	if w = do(mux, "PATCH", "/api/v1/subnets/"+s.ID, `{"cidr":"10.9.0.128/25"}`, "org-1"); w.Code != http.StatusUnprocessableEntity ||
+		!strings.Contains(w.Body.String(), `"gateway"`) {
+		t.Errorf("PATCH cidr without the gateway: %d %s, want 422 gateway", w.Code, w.Body.String())
+	}
+	if w = do(mux, "PATCH", "/api/v1/subnets/"+s.ID, `{"gateway":"10.9.0.254"}`, "org-1"); w.Code != http.StatusOK {
+		t.Fatalf("PATCH gateway: %d %s", w.Code, w.Body.String())
+	}
+	if m := marked(); len(m) != 1 || m[0].Address != "10.9.0.254" {
+		t.Errorf("gateway mark after the change: %+v", m)
+	}
+	// The gateway address keeps its subnet and stays (422 subnet_id, 409
+	// is_gateway) until the subnet's gateway changes.
+	gwID := marked()[0].ID
+	if w = do(mux, "PATCH", "/api/v1/ips/"+gwID, `{"subnet_id":""}`, "org-1"); w.Code != http.StatusUnprocessableEntity ||
+		!strings.Contains(w.Body.String(), `"subnet_id"`) {
+		t.Errorf("PATCH gateway address out of its subnet: %d %s, want 422 subnet_id", w.Code, w.Body.String())
+	}
+	if w = do(mux, "DELETE", "/api/v1/ips/"+gwID, "", "org-1"); w.Code != http.StatusConflict ||
+		!strings.Contains(w.Body.String(), `"is_gateway"`) {
+		t.Errorf("DELETE gateway address: %d %s, want 409 is_gateway", w.Code, w.Body.String())
+	}
+	if w = do(mux, "PATCH", "/api/v1/subnets/"+s.ID, `{"gateway":""}`, "org-1"); w.Code != http.StatusOK {
+		t.Fatalf("PATCH clear gateway: %d %s", w.Code, w.Body.String())
+	}
+	if m := marked(); len(m) != 0 {
+		t.Errorf("gateway mark after clearing: %+v", m)
+	}
+	all, _, _ := repo.ListIPAddresses(context.Background(), "org-1", &IPFilter{SubnetID: s.ID}, page)
+	if len(all) != 2 {
+		t.Fatalf("addresses after clearing the gateway: %+v, want both former gateways", all)
+	}
+	if w = do(mux, "PATCH", "/api/v1/ips/"+all[0].ID, `{"state":"up"}`, "org-1"); w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("PATCH state up: %d, want 422", w.Code)
+	}
+	if w = do(mux, "PATCH", "/api/v1/ips/"+all[0].ID, `{"state":"offline"}`, "org-1"); w.Code != http.StatusOK ||
+		!strings.Contains(w.Body.String(), `"state":"offline"`) || !strings.Contains(w.Body.String(), "state_changed_at") {
+		t.Errorf("PATCH state offline: %d %s", w.Code, w.Body.String())
+	}
+	if w = do(mux, "PATCH", "/api/v1/ips/"+all[0].ID, `{"is_gateway":true}`, "org-1"); w.Code != http.StatusBadRequest {
+		t.Errorf("PATCH is_gateway: %d, want 400 (only the subnet sets it)", w.Code)
+	}
+	if w = do(mux, "GET", "/api/v1/ips?state=nope", "", "org-1"); w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("GET ?state=nope: %d, want 422", w.Code)
+	}
+}
+
+// TestStateFromPHPIPAMTag pins the mapping of the phpIPAM tags (IPM-04).
+func TestStateFromPHPIPAMTag(t *testing.T) {
+	for tag, want := range map[string][2]string{
+		"Used":     {IPStateActive, ""},
+		"Offline":  {IPStateOffline, ""},
+		"Reserved": {IPStateUnknown, IPTypeReserved},
+		"DHCP":     {IPStateUnknown, IPTypeDHCP},
+	} {
+		state, ipType, ok := StateFromPHPIPAMTag(tag)
+		if !ok || state != want[0] || ipType != want[1] {
+			t.Errorf("%s = (%q, %q, %v), want (%q, %q, true)", tag, state, ipType, ok, want[0], want[1])
+		}
+	}
+	if _, _, ok := StateFromPHPIPAMTag("Gone"); ok {
+		t.Error("unknown tag mapped")
+	}
+}
+
+// TestFreeSpaceDefaultLimit pins the limit of the free-space lists of
+// IPM-03 (WP-903 AK2): without limit an empty /22 answers 20 free
+// addresses and 20 free /31, a larger limit is capped at 200, a malformed
+// one falls back to 20.
+func TestFreeSpaceDefaultLimit(t *testing.T) {
+	_, mux := newMux()
+	w := do(mux, "POST", "/api/v1/subnets", `{"cidr":"10.77.0.0/22"}`, "org-1")
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST subnet: %d %s", w.Code, w.Body.String())
+	}
+	var s Subnet
+	_ = json.Unmarshal(w.Body.Bytes(), &s)
+	for query, want := range map[string]int{"": 20, "?limit=0": 20, "?limit=x": 20, "?limit=5": 5, "?limit=500": 200} {
+		var free FreeAddresses
+		if w = do(mux, "GET", "/api/v1/subnets/"+s.ID+"/free-addresses"+query, "", "org-1"); w.Code != http.StatusOK {
+			t.Fatalf("free-addresses%s: %d %s", query, w.Code, w.Body.String())
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &free); err != nil || len(free.Addresses) != want {
+			t.Errorf("free-addresses%s = %d addresses (%v), want %d", query, len(free.Addresses), err, want)
+		}
+		if query != "" {
+			query = "&" + query[1:]
+		}
+		var subnets FreeSubnets
+		if w = do(mux, "GET", "/api/v1/subnets/"+s.ID+"/free-subnets?prefix_length=31"+query, "", "org-1"); w.Code != http.StatusOK {
+			t.Fatalf("free-subnets%s: %d %s", query, w.Code, w.Body.String())
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &subnets); err != nil || len(subnets.Subnets) != want {
+			t.Errorf("free-subnets%s = %d subnets (%v), want %d", query, len(subnets.Subnets), err, want)
+		}
 	}
 }

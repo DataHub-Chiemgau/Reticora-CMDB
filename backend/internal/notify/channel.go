@@ -138,6 +138,10 @@ type Recipient struct {
 	UserID string `json:"user_id,omitempty"`
 	Email  string `json:"email,omitempty"`
 	Name   string `json:"name,omitempty"`
+	// Phone is the mobile number in E.164 of a user (vault subject of
+	// app_user.mobile_pii_subject_id) or the phone of a contact, the
+	// address of SMS (NTF-02, NTF-03, WP-1140); empty without a vault.
+	Phone string `json:"phone,omitempty"`
 	// Locale is the user's locale (app_user.locale); empty for an address
 	// without an account, which reads the organization's (NTF-03).
 	Locale string `json:"-"`

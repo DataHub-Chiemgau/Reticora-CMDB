@@ -26,7 +26,9 @@ const (
 	// RuleOrgPredicate: USING and WITH CHECK of every command use OrgGUC.
 	RuleOrgPredicate Rule = "org-predicate"
 	// RuleSystemWrite: no policy lets the system flag SystemGUC write
-	// (INSERT, UPDATE, DELETE); it may only widen SELECT for claiming.
+	// (INSERT, UPDATE, DELETE); it may only widen SELECT for claiming. It
+	// applies to the tenant tables; the tables of SystemTables and
+	// SystemCatalogTables are written with the system flag by design.
 	RuleSystemWrite Rule = "system-write"
 	// RuleGlobalRows: no policy lets INSERT, UPDATE or DELETE reach global
 	// catalog rows (organization_id IS NULL).
@@ -61,6 +63,13 @@ const (
 	// (database.WithSystem) and writes (database.WithSystemWrite) them, and
 	// no one deletes their rows.
 	RuleSystemOnly Rule = "system-only"
+	// RuleSystemCatalog: tables of SystemCatalogTables have no
+	// organization_id, ENABLE and FORCE ROW LEVEL SECURITY and the TRUNCATE
+	// guard; one SELECT policy without condition lets every context read,
+	// INSERT, UPDATE and DELETE are each covered, and every policy for them
+	// (no ALL policy) requires SystemGUC in USING and WITH CHECK: only the
+	// system context (database.WithSystemWrite) writes them.
+	RuleSystemCatalog Rule = "system-catalog"
 	// RuleLocatedScope: every tenant table with a location or CI reference
 	// (a column location_id, room_id, rack_id or ci_id, also with a prefix
 	// such as from_location_id or child_ci_id, or a node of the location
@@ -97,11 +106,6 @@ var DerivedScopeTables = map[string]DerivedScope{
 		Reason:   "a building carries its site; the site determines the client",
 		TestFile: "internal/tenantapi/tenantapi_scope_integration_test.go", TestName: "TestTenantRepositoryClientScope",
 	},
-	"form_submission": {
-		Path:     "form_id -> form_def, ci_id -> ci, ticket_id -> ticket (form.submissionVisible)",
-		Reason:   "a submission is visible only when its form, CI and ticket are",
-		TestFile: "internal/form/form_scope_integration_test.go", TestName: "TestFormRepositoryClientScope",
-	},
 	"internal_order": {
 		Path: "target_location_id -> location (bin check in the order repository on every write, order.checkTargetBin)",
 		Reason: "the target bin is a delivery target, not a location of the order; " +
@@ -121,22 +125,29 @@ var DerivedScopeTables = map[string]DerivedScope{
 // (docs/decisions/0001-timescale-rls.md, WP-040). This is a documented
 // exception to the RLS rules, not a gap: the catalog test checks
 // RuleViewBarrier for these tables instead.
-var ViewProtectedTables = map[string]string{"metric_sample": "metric_sample_v"}
+// probe_result (WP-945, ADR 0002) is protected like metric_sample; its
+// client and site come from the probe inside probe_result_v, it has no
+// column RuleLocatedScope reports and so no DerivedScopeTables entry.
+var ViewProtectedTables = map[string]string{"metric_sample": "metric_sample_v", "probe_result": "probe_result_v"}
 
 // GlobalCatalogTables are global catalogs without organization_id (E-10,
 // WP-024). They are maintained by migrations only; the application role may
 // read but not write them. This is a documented exception to RuleOrgColumn,
 // not a gap: the catalog test checks RuleReadOnlyCatalog for them instead.
-var GlobalCatalogTables = []string{"permission"}
+// compliance_control is the control catalog of ISO 27001, NIS2 and KRITIS
+// (SEC-04, WP-1128, E-238).
+var GlobalCatalogTables = []string{"permission", "compliance_control"}
 
 // OperatorTables are organization-spanning tables of the operator path
 // (SEC-07, WP-070) without organization_id, signup_request, which exists
 // before its organization (WP-111), and scheduler_run, the state of the
 // organization-spanning system job scheduler (JOB-02, WP-131), and
 // collector_ca, the internal CA of the collector certificates (COL-04,
-// WP-145). This is a documented exception to RuleOrgColumn, not a gap: the
+// WP-145), and org_deletion_notice, the encrypted address of the
+// deletion protocol that outlives the purge of its organization (TLC-06,
+// WP-1156). This is a documented exception to RuleOrgColumn, not a gap: the
 // catalog test checks RuleOperatorOnly for them instead.
-var OperatorTables = []string{"operator_audit", "signup_request", "scheduler_run", "collector_ca"}
+var OperatorTables = []string{"operator_audit", "signup_request", "scheduler_run", "collector_ca", "org_deletion_notice"}
 
 // SystemTables are tables of the installation without organization_id that
 // only the server itself reaches, through the system flag: platform_secret
@@ -146,6 +157,19 @@ var OperatorTables = []string{"operator_audit", "signup_request", "scheduler_run
 // database.WithSystemWrite. This is a documented exception to RuleOrgColumn,
 // not a gap: the catalog test checks RuleSystemOnly for them instead.
 var SystemTables = []string{"platform_secret"}
+
+// SystemCatalogTables are the global catalogs of the installation that a
+// job of the server maintains (SEC-02, WP-1117): the vulnerability catalog
+// of the feeds (vuln_source, vuln_advisory, vuln_affected). They have no
+// organization_id, every context reads them (the version match of an
+// organization reads them in its tenant transaction), and only the system
+// context writes them (database.WithSystemWrite), deletes replaced ranges
+// included. Neither GlobalCatalogTables (maintained by migrations only,
+// RuleReadOnlyCatalog) nor SystemTables (read only with the system flag,
+// no DELETE, RuleSystemOnly) fit. This is a documented exception to
+// RuleOrgColumn and RuleSystemWrite, not a gap: the catalog test checks
+// RuleSystemCatalog for them instead.
+var SystemCatalogTables = []string{"vuln_source", "vuln_advisory", "vuln_affected"}
 
 // Session variables (GUCs) the policies are expected to reference. Site and
 // team scope do not exist yet; WP-027 and WP-029 introduce them under these
@@ -212,10 +236,19 @@ type LeakyIndex struct {
 // row level security uses leakproof operators (a stored column compared
 // with texteq, a side table such as ci_identity_mac, or reticora_attr_text
 // of migration 000162), and the change that drops or replaces a listed
-// index removes its entry. reticora_attr_text is leakproof (E-73, WP-435),
+// index removes its entry. The exception is an index the plan of its work
+// package demands and no leakproof operator can serve: the index of an
+// exclusion constraint over ranges (desk_booking_no_overlap,
+// asn_range_no_overlap) or a GIN index over an array the API filters on
+// (idx_security_finding_cve_ids); its entry names the work package. reticora_attr_text is leakproof (E-73, WP-435),
 // so the attribute indexes idx_attr_* are not listed. No migration of
 // phase 2 sets a function LEAKPROOF (E-133).
 var LeakyIndexes = map[string]LeakyIndex{
+	"asn_range_no_overlap": {
+		Table: "asn_range", Leaky: "function int8range(bigint,bigint,text), operator class range_ops",
+		Reason: "exclusion constraint against overlapping AS number ranges of an organization (000316, WP-1066); the " +
+			"constraint is checked without the policies, no read of the application role filters on the range",
+	},
 	"desk_booking_no_overlap": {
 		Table: "desk_booking", Leaky: "function tstzrange(timestamp with time zone,timestamp with time zone), operator class range_ops",
 		Reason: "exclusion constraint against overlapping bookings of a desk (000065); the constraint is checked " +
@@ -252,6 +285,16 @@ var LeakyIndexes = map[string]LeakyIndex{
 		Reason: "full-text index over the stored search_vector (000030); @@ (ts_match_vq) is not leakproof, the " +
 			"search of the application role stays linear within the budget up to 10,000 objects " +
 			"(E-133 option 3, E-17; TestSearchPlanUnderRLS)",
+	},
+	"idx_security_finding_cve_ids": {
+		Table: "security_finding", Leaky: "operator class array_ops",
+		Reason: "CVE ids of the findings (000315, WP-1116); @> (arraycontains) is not leakproof, the filter cve of " +
+			"GET /security/findings reads the findings of the organization within the caller's scope",
+	},
+	"idx_vuln_advisory_cve_ids": {
+		Table: "vuln_advisory", Leaky: "operator class array_ops",
+		Reason: "CVE ids of the global vulnerability catalog (000333, WP-1117); the catalog belongs to no organization and " +
+			"its SELECT policy is USING (true), so no row hides behind a policy the operator could leak",
 	},
 	"idx_signup_request_email": {
 		Table: "signup_request", Leaky: "function lower(text)",
@@ -359,15 +402,6 @@ type ReferenceWithoutOrganization struct {
 	Reason string
 }
 
-// Reasons of the entries of ReferencesWithoutOrganization.
-const (
-	refG1           = "G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329)"
-	refLocationNode = "the specialist row shares its id with its node of the location tree (000157); " +
-		"rest of SR-03, fixed before GA (E-137, WP-329)"
-	refWP287 = "stock_scan is replaced by the stocktake scans of WP-287 (K19); " +
-		"the successor references with the organization"
-)
-
 // ReferencesWithoutOrganization are the foreign keys between two tenant
 // tables (tables of schema public with an organization_id column) without
 // organization_id, by "table.columns" (WP-838, SR-03). References to tables
@@ -381,120 +415,9 @@ const (
 // fixes a listed reference removes its entry. Migration 000194 made the
 // references of the phase-2 modules on ci, asset, location and consumable
 // composite; the references of desk, key and training are composite since
-// 000177 (WP-639) and are not listed (E-137).
-var ReferencesWithoutOrganization = map[string]ReferenceWithoutOrganization{
-	"agent_enrollment_token.site_id":                 {Constraint: "agent_enrollment_token_site_id_fkey", Target: "site", Reason: refG1},
-	"ai_conversation.user_id":                        {Constraint: "ai_conversation_user_id_fkey", Target: "app_user", Reason: refG1},
-	"ai_message.conversation_id":                     {Constraint: "ai_message_conversation_id_fkey", Target: "ai_conversation", Reason: refG1},
-	"api_key.rotated_from":                           {Constraint: "api_key_rotated_from_fkey", Target: "api_key", Reason: refG1},
-	"asset_location.asset_id":                        {Constraint: "asset_location_asset_id_fkey", Target: "asset", Reason: refG1},
-	"building.id":                                    {Constraint: "building_location_fkey", Target: "location", Reason: refLocationNode},
-	"building.site_id":                               {Constraint: "building_site_id_fkey", Target: "site", Reason: refG1},
-	"cable.source_interface_id":                      {Constraint: "cable_source_interface_id_fkey", Target: "network_interface", Reason: refG1},
-	"cable.target_interface_id":                      {Constraint: "cable_target_interface_id_fkey", Target: "network_interface", Reason: refG1},
-	"ci.room_id":                                     {Constraint: "ci_room_id_fkey", Target: "room", Reason: refG1},
-	"ci.site_id":                                     {Constraint: "ci_site_id_fkey", Target: "site", Reason: refG1},
-	"ci_change.ci_id":                                {Constraint: "ci_change_ci_id_fkey", Target: "ci", Reason: refG1},
-	"ci_contact.ci_id":                               {Constraint: "ci_contact_ci_id_fkey", Target: "ci", Reason: refG1},
-	"ci_contact.contact_id":                          {Constraint: "ci_contact_contact_id_fkey", Target: "contact", Reason: refG1},
-	"ci_field_value.ci_id":                           {Constraint: "ci_field_value_ci_id_fkey", Target: "ci", Reason: refG1},
-	"ci_instance_field_definition.ci_id":             {Constraint: "ci_instance_field_definition_ci_id_fkey", Target: "ci", Reason: refG1},
-	"ci_merge.site_id":                               {Constraint: "ci_merge_site_id_fkey", Target: "site", Reason: refG1},
-	"ci_relationship.source_ci_id":                   {Constraint: "ci_relationship_source_ci_id_fkey", Target: "ci", Reason: refG1},
-	"ci_relationship.source_interface_id":            {Constraint: "ci_relationship_source_interface_id_fkey", Target: "network_interface", Reason: refG1},
-	"ci_relationship.target_ci_id":                   {Constraint: "ci_relationship_target_ci_id_fkey", Target: "ci", Reason: refG1},
-	"ci_relationship.target_interface_id":            {Constraint: "ci_relationship_target_interface_id_fkey", Target: "network_interface", Reason: refG1},
-	"ci_relationship.verified_by":                    {Constraint: "ci_relationship_verified_by_fkey", Target: "app_user", Reason: refG1},
-	"collector.site_id":                              {Constraint: "collector_site_id_fkey", Target: "site", Reason: refG1},
-	"collector_certificate.collector_id":             {Constraint: "collector_certificate_collector_id_fkey", Target: "collector", Reason: refG1},
-	"collector_enrollment_code.used_by_collector_id": {Constraint: "collector_enrollment_code_used_by_collector_id_fkey", Target: "collector", Reason: refG1},
-	"compliance_result.ci_id":                        {Constraint: "compliance_result_ci_id_fkey", Target: "ci", Reason: refG1},
-	"compliance_result.rule_id":                      {Constraint: "compliance_result_rule_id_fkey", Target: "compliance_rule", Reason: refG1},
-	"contact.pii_subject_id":                         {Constraint: "contact_pii_subject_id_fkey", Target: "pii_subject", Reason: refG1},
-	"discovery_job.collector_id":                     {Constraint: "discovery_job_collector_id_fkey", Target: "collector", Reason: refG1},
-	"discovery_result.job_id":                        {Constraint: "discovery_result_job_id_fkey", Target: "discovery_job", Reason: refG1},
-	"discovery_result.matched_ci_id":                 {Constraint: "discovery_result_matched_ci_id_fkey", Target: "ci", Reason: refG1},
-	"discovery_scope.collector_id":                   {Constraint: "discovery_scope_collector_id_fkey", Target: "collector", Reason: refG1},
-	"discovery_scope.site_id":                        {Constraint: "discovery_scope_site_id_fkey", Target: "site", Reason: refG1},
-	"document.uploaded_by":                           {Constraint: "document_uploaded_by_fkey", Target: "app_user", Reason: refG1},
-	"document_link.document_id":                      {Constraint: "document_link_document_id_fkey", Target: "document", Reason: refG1},
-	"endpoint_agent.ci_id":                           {Constraint: "endpoint_agent_ci_id_fkey", Target: "ci", Reason: refG1},
-	"form_submission.ci_id":                          {Constraint: "form_submission_ci_id_fkey", Target: "ci", Reason: refG1},
-	"form_submission.form_id":                        {Constraint: "form_submission_form_id_fkey", Target: "form_def", Reason: refG1},
-	"form_submission.submitted_by":                   {Constraint: "form_submission_submitted_by_fkey", Target: "app_user", Reason: refG1},
-	"form_submission.ticket_id":                      {Constraint: "form_submission_ticket_id_fkey", Target: "ticket", Reason: refG1},
-	"iga_access_request.connector_id":                {Constraint: "iga_access_request_connector_id_fkey", Target: "iga_connector", Reason: refG1},
-	"iga_access_request.decision_by":                 {Constraint: "iga_access_request_decision_by_fkey", Target: "app_user", Reason: refG1},
-	"iga_access_request.requester_id":                {Constraint: "iga_access_request_requester_id_fkey", Target: "app_user", Reason: refG1},
-	"iga_access_request.subject_user_id":             {Constraint: "iga_access_request_subject_user_id_fkey", Target: "app_user", Reason: refG1},
-	"iga_access_request.workflow_run_id":             {Constraint: "iga_access_request_workflow_run_id_fkey", Target: "workflow_run", Reason: refG1},
-	"iga_access_review_item.connector_id":            {Constraint: "iga_access_review_item_connector_id_fkey", Target: "iga_connector", Reason: refG1},
-	"iga_access_review_item.decision_by":             {Constraint: "iga_access_review_item_decision_by_fkey", Target: "app_user", Reason: refG1},
-	"iga_access_review_item.review_id":               {Constraint: "iga_access_review_item_review_id_fkey", Target: "iga_access_review", Reason: refG1},
-	"iga_access_review_item.user_id":                 {Constraint: "iga_access_review_item_user_id_fkey", Target: "app_user", Reason: refG1},
-	"iga_connector.collector_id":                     {Constraint: "iga_connector_collector_id_fkey", Target: "collector", Reason: refG1},
-	"iga_connector.credential_id":                    {Constraint: "iga_connector_credential_id_fkey", Target: "credential", Reason: refG1},
-	"iga_drift_finding.connector_id":                 {Constraint: "iga_drift_finding_connector_id_fkey", Target: "iga_connector", Reason: refG1},
-	"iga_drift_finding.remediation_task_id":          {Constraint: "iga_drift_finding_remediation_task_id_fkey", Target: "iga_provisioning_task", Reason: refG1},
-	"iga_drift_finding.user_id":                      {Constraint: "iga_drift_finding_user_id_fkey", Target: "app_user", Reason: refG1},
-	"iga_provisioning_task.connector_id":             {Constraint: "iga_provisioning_task_connector_id_fkey", Target: "iga_connector", Reason: refG1},
-	"iga_provisioning_task.user_id":                  {Constraint: "iga_provisioning_task_user_id_fkey", Target: "app_user", Reason: refG1},
-	"internal_order_item.order_id":                   {Constraint: "internal_order_item_order_id_fkey", Target: "internal_order", Reason: refG1},
-	"ip_address.interface_id":                        {Constraint: "ip_address_interface_id_fkey", Target: "network_interface", Reason: refG1},
-	"ip_address.subnet_id":                           {Constraint: "ip_address_subnet_id_fkey", Target: "subnet", Reason: refG1},
-	"maintenance_notification.maintenance_window_id": {Constraint: "maintenance_notification_maintenance_window_id_fkey", Target: "maintenance_window", Reason: refG1},
-	"maintenance_window_ci.ci_id":                    {Constraint: "maintenance_window_ci_ci_id_fkey", Target: "ci", Reason: refG1},
-	"maintenance_window_ci.maintenance_window_id":    {Constraint: "maintenance_window_ci_maintenance_window_id_fkey", Target: "maintenance_window", Reason: refG1},
-	"network_interface.ci_id":                        {Constraint: "network_interface_ci_id_fkey", Target: "ci", Reason: refG1},
-	"notification_delivery.channel_id":               {Constraint: "notification_delivery_channel_id_fkey", Target: "notification_channel", Reason: refG1},
-	"notification_delivery.recipient_user_id":        {Constraint: "notification_delivery_recipient_user_id_fkey", Target: "app_user", Reason: refG1},
-	"notification_digest_item.channel_id":            {Constraint: "notification_digest_item_channel_id_fkey", Target: "notification_channel", Reason: refG1},
-	"notification_digest_item.delivery_id":           {Constraint: "notification_digest_item_delivery_id_fkey", Target: "notification_delivery", Reason: refG1},
-	"notification_digest_item.recipient_user_id":     {Constraint: "notification_digest_item_recipient_user_id_fkey", Target: "app_user", Reason: refG1},
-	"notification_inbox.user_id":                     {Constraint: "notification_inbox_user_id_fkey", Target: "app_user", Reason: refG1},
-	"notification_preference.user_id":                {Constraint: "notification_preference_user_id_fkey", Target: "app_user", Reason: refG1},
-	"pii_subject.parent_id":                          {Constraint: "pii_subject_parent_id_fkey", Target: "pii_subject", Reason: refG1},
-	"rack.id":                                        {Constraint: "rack_location_fkey", Target: "location", Reason: refLocationNode},
-	"rack.room_id":                                   {Constraint: "rack_room_id_fkey", Target: "room", Reason: refG1},
-	"rack_mount.ci_id":                               {Constraint: "rack_mount_ci_id_fkey", Target: "ci", Reason: refG1},
-	"rack_mount.rack_id":                             {Constraint: "rack_mount_rack_id_fkey", Target: "rack", Reason: refG1},
-	"relationship_suppression.source_ci_id":          {Constraint: "relationship_suppression_source_ci_id_fkey", Target: "ci", Reason: refG1},
-	"relationship_suppression.target_ci_id":          {Constraint: "relationship_suppression_target_ci_id_fkey", Target: "ci", Reason: refG1},
-	"role_assignment.role_id":                        {Constraint: "role_assignment_role_id_fkey", Target: "role", Reason: refG1},
-	"role_assignment.scope_site_id":                  {Constraint: "role_assignment_scope_site_id_fkey", Target: "site", Reason: refG1},
-	"role_assignment.user_id":                        {Constraint: "role_assignment_user_id_fkey", Target: "app_user", Reason: refG1},
-	"role_permission.granted_by":                     {Constraint: "role_permission_granted_by_fkey", Target: "app_user", Reason: refG1},
-	"role_permission.role_id":                        {Constraint: "role_permission_role_id_fkey", Target: "role", Reason: refG1},
-	"room.building_id":                               {Constraint: "room_building_id_fkey", Target: "building", Reason: refG1},
-	"room.id":                                        {Constraint: "room_location_fkey", Target: "location", Reason: refLocationNode},
-	"security_finding.ci_id":                         {Constraint: "security_finding_ci_id_fkey", Target: "ci", Reason: refG1},
-	"service_account_role.role_id":                   {Constraint: "service_account_role_role_id_fkey", Target: "role", Reason: refG1},
-	"service_account_role.scope_site_id":             {Constraint: "service_account_role_scope_site_id_fkey", Target: "site", Reason: refG1},
-	"site.id":                                        {Constraint: "site_location_fkey", Target: "location", Reason: refLocationNode},
-	"stock_scan.asset_id":                            {Constraint: "stock_scan_asset_id_fkey", Target: "asset", Reason: refWP287},
-	"stock_scan.ci_id":                               {Constraint: "stock_scan_ci_id_fkey", Target: "ci", Reason: refWP287},
-	"stock_scan.scanned_by":                          {Constraint: "stock_scan_scanned_by_fkey", Target: "app_user", Reason: refWP287},
-	"stock_scan.stocktake_id":                        {Constraint: "stock_scan_stocktake_id_fkey", Target: "stocktake", Reason: refWP287},
-	"stocktake.started_by":                           {Constraint: "stocktake_started_by_fkey", Target: "app_user", Reason: refG1},
-	"subnet.site_id":                                 {Constraint: "subnet_site_id_fkey", Target: "site", Reason: refG1},
-	"team.lead_id":                                   {Constraint: "team_lead_id_fkey", Target: "app_user", Reason: refG1},
-	"team_member.team_id":                            {Constraint: "team_member_team_id_fkey", Target: "team", Reason: refG1},
-	"team_member.user_id":                            {Constraint: "team_member_user_id_fkey", Target: "app_user", Reason: refG1},
-	"ticket.assignee_id":                             {Constraint: "ticket_assignee_id_fkey", Target: "app_user", Reason: refG1},
-	"ticket.reporter_id":                             {Constraint: "ticket_reporter_id_fkey", Target: "app_user", Reason: refG1},
-	"ticket.team_id":                                 {Constraint: "ticket_team_id_fkey", Target: "team", Reason: refG1},
-	"ticket_comment.author_id":                       {Constraint: "ticket_comment_author_id_fkey", Target: "app_user", Reason: refG1},
-	"ticket_comment.ticket_id":                       {Constraint: "ticket_comment_ticket_id_fkey", Target: "ticket", Reason: refG1},
-	"ticket_sla.sla_id":                              {Constraint: "ticket_sla_sla_id_fkey", Target: "sla", Reason: refG1},
-	"ticket_sla.ticket_id":                           {Constraint: "ticket_sla_ticket_id_fkey", Target: "ticket", Reason: refG1},
-	"user_custom_role.custom_role_id":                {Constraint: "user_custom_role_custom_role_id_fkey", Target: "custom_role", Reason: refG1},
-	"user_custom_role.granted_by":                    {Constraint: "user_custom_role_granted_by_fkey", Target: "app_user", Reason: refG1},
-	"user_custom_role.user_id":                       {Constraint: "user_custom_role_user_id_fkey", Target: "app_user", Reason: refG1},
-	"user_invitation.role_id":                        {Constraint: "user_invitation_role_id_fkey", Target: "role", Reason: refG1},
-	"vlan.site_id":                                   {Constraint: "vlan_site_id_fkey", Target: "site", Reason: refG1},
-	"webhook_dead_letter.delivery_id":                {Constraint: "webhook_dead_letter_delivery_id_fkey", Target: "webhook_delivery", Reason: refG1},
-	"webhook_dead_letter.subscription_id":            {Constraint: "webhook_dead_letter_subscription_id_fkey", Target: "webhook_subscription", Reason: refG1},
-	"webhook_delivery.subscription_id":               {Constraint: "webhook_delivery_subscription_id_fkey", Target: "webhook_subscription", Reason: refG1},
-	"workflow_run.workflow_id":                       {Constraint: "workflow_run_workflow_id_fkey", Target: "workflow_def", Reason: refG1},
-	"workflow_step.run_id":                           {Constraint: "workflow_step_run_id_fkey", Target: "workflow_run", Reason: refG1},
-}
+// 000177 (WP-639) and are not listed (E-137). Migration 000287 (WP-876,
+// SR-03 rest I) made the 59 references of the core, location, network,
+// rack, role and discovery tables composite, migration 000288 (WP-877,
+// SR-03 rest II) the remaining 55: the list is empty and stays empty, every
+// new reference between tenant tables carries the organization.
+var ReferencesWithoutOrganization = map[string]ReferenceWithoutOrganization{}

@@ -373,6 +373,9 @@ func TestApplyRefusesUnsignedAndWronglySignedReleases(t *testing.T) {
 func TestCosignVerifierPinsTheReleaseIdentity(t *testing.T) {
 	var got []string
 	v := CosignVerifier{run: func(_ context.Context, name string, args ...string) ([]byte, error) {
+		if len(args) == 1 && args[0] == "version" {
+			return []byte("GitVersion:    v3.1.4\nGitCommit:     0e48502c\n"), nil
+		}
 		got = append([]string{name}, args...)
 		return nil, nil
 	}}
@@ -389,11 +392,78 @@ func TestCosignVerifierPinsTheReleaseIdentity(t *testing.T) {
 		t.Errorf("identity does not pin the release workflow: %s", ReleaseIdentityRegexp)
 	}
 
-	v.run = func(context.Context, string, ...string) ([]byte, error) {
+	v.run = func(_ context.Context, _ string, args ...string) ([]byte, error) {
+		if len(args) == 1 && args[0] == "version" {
+			return []byte("GitVersion:    v3.1.4\n"), nil
+		}
 		return []byte("error: no matching signatures\n"), errors.New("exit status 1")
 	}
 	if err := v.Verify(context.Background(), "a", "b"); err == nil || !strings.Contains(err.Error(), "no matching signatures") {
 		t.Errorf("failing cosign: %v", err)
+	}
+}
+
+// TestCosignVerifierRefusesAnOutdatedCosign (E-258, GHSA-fx35-mq7g-6g98):
+// a cosign older than MinCosignVersion (v2.4.1 of earlier installations, a
+// pre-release of the minimum), one without a release version and one whose
+// 'cosign version' fails are not run for the verification; the refusal
+// names ErrCosignOutdated and the hint. The minimum and newer pass.
+func TestCosignVerifierRefusesAnOutdatedCosign(t *testing.T) {
+	for _, tt := range []struct {
+		name, out string
+		fail      bool
+		accepted  bool
+	}{
+		{name: "v2.4.1", out: "GitVersion:    v2.4.1\n"},
+		{name: "v2.6.5", out: "GitVersion:    v2.6.5\n"},
+		{name: "v3.1.2", out: "GitVersion:    v3.1.2\n"},
+		{name: "pre-release of the minimum", out: "GitVersion:    v3.1.3-rc.1\n"},
+		{name: "devel build", out: "GitVersion:    devel\n"},
+		{name: "no GitVersion", out: "cosign\n"},
+		{name: "version fails", out: "boom\n", fail: true},
+		{name: "minimum", out: "  ______\nGitVersion:    v3.1.3\nGitCommit: x\n", accepted: true},
+		{name: "pinned", out: "GitVersion:    v3.1.4\n", accepted: true},
+		{name: "newer major", out: "GitVersion:    v4.0.0\n", accepted: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			verified := false
+			v := CosignVerifier{run: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+				if len(args) == 1 && args[0] == "version" {
+					if tt.fail {
+						return []byte(tt.out), errors.New("exit status 1")
+					}
+					return []byte(tt.out), nil
+				}
+				verified = true
+				return nil, nil
+			}}
+			err := v.Verify(context.Background(), "/tmp/bin", "/tmp/bin.sigstore.json")
+			if tt.accepted {
+				if err != nil || !verified {
+					t.Fatalf("cosign %q refused: %v (verify-blob run: %v)", tt.out, err, verified)
+				}
+				return
+			}
+			if !errors.Is(err, ErrCosignOutdated) || verified {
+				t.Fatalf("cosign %q: err %v, verify-blob run %v; want ErrCosignOutdated without verify-blob", tt.out, err, verified)
+			}
+			if !strings.Contains(err.Error(), "install-vm.sh") || !strings.Contains(err.Error(), MinCosignVersion) {
+				t.Errorf("refusal without the hint: %v", err)
+			}
+		})
+	}
+}
+
+// TestMinCosignVersionMatchesTheInstallers: the updater and the installers
+// (COSIGN_MIN_VERSION of the shared signature block) accept the same cosign.
+func TestMinCosignVersionMatchesTheInstallers(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "install-preflight.sh"))
+	if err != nil {
+		t.Fatalf("install-preflight.sh: %v", err)
+	}
+	want := `COSIGN_MIN_VERSION="` + MinCosignVersion + `"`
+	if !strings.Contains(string(raw), "\n"+want+"\n") {
+		t.Errorf("install-preflight.sh does not set %s", want)
 	}
 }
 

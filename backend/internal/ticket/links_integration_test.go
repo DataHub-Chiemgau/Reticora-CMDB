@@ -24,8 +24,8 @@ import (
 
 // The tests of this file run only against PostgreSQL (TEST_DATABASE_URL,
 // see scopetest.Seed). They cover TKT-01 of WP-764: object links of a
-// ticket (ci, asset, location, contract, review_item) and ticket tags from
-// the tag catalog (E-127).
+// ticket (ci, asset, location, contract, review_item; incident and alarm
+// since WP-1039) and ticket tags from the tag catalog (E-127).
 
 // linkTargets seeds one target per entity type in organization A (client
 // clientID) through the maintenance pool.
@@ -51,6 +51,11 @@ func linkTargets(t *testing.T, f *scopetest.Fixture, clientID, name string) map[
 			f.OrgA, clientID, "link-contract-"+name),
 		ticket.LinkReviewItem: scalar(`INSERT INTO review_item (organization_id, kind, payload, candidate_ci_ids)
 			VALUES ($1, 'ambiguous_identity', '{}', ARRAY[$2::uuid]) RETURNING id::text`, f.OrgA, ciID),
+		// An incident and an alarm of the client without CI (WP-1039).
+		ticket.LinkIncident: scalar(`INSERT INTO incident (organization_id, client_id) VALUES ($1, $2) RETURNING id::text`,
+			f.OrgA, clientID),
+		ticket.LinkAlarm: scalar(`INSERT INTO alarm (organization_id, client_id, source_kind, source_id, series_key, severity, state, opened_at)
+			VALUES ($1, $2, 'collector', gen_random_uuid(), $3, 'critical', 'open', now()) RETURNING id::text`, f.OrgA, clientID, "link-"+name),
 	}
 }
 
@@ -124,7 +129,7 @@ func TestTicketLinksInPostgreSQL(t *testing.T) {
 	tk := e.create(t, map[string]any{"title": "Objektbezug"})
 
 	got := linkScenario(t, e, e.mux, tk.ID, targets)
-	want := []int{201, 201, 201, 201, 201, 409, 422, 404, 200, 200, 200, 400, 204, 404}
+	want := []int{201, 201, 201, 201, 201, 201, 201, 409, 422, 404, 200, 200, 200, 200, 400, 204, 404}
 	if !slices.Equal(got, want) {
 		t.Fatalf("PostgreSQL status codes %v, want %v", got, want)
 	}
@@ -153,14 +158,14 @@ func TestTicketLinksInPostgreSQL(t *testing.T) {
 			changes = append(changes, change)
 		}
 	}
-	if wantChanges := []string{"link", "link", "link", "link", "link", "unlink"}; !slices.Equal(changes, wantChanges) {
+	if wantChanges := []string{"link", "link", "link", "link", "link", "link", "link", "unlink"}; !slices.Equal(changes, wantChanges) {
 		t.Errorf("link events %v, want %v", changes, wantChanges)
 	}
 
 	// Each link carries exactly one target column, the one of its type.
 	var bad int
 	if err := e.f.Admin.QueryRow(context.Background(), `SELECT count(*) FROM ticket_link WHERE ticket_id = $1 AND NOT (
-		num_nonnulls(ci_id, asset_id, location_id, contract_id, review_item_id) = 1)`, tk.ID).Scan(&bad); err != nil || bad != 0 {
+		num_nonnulls(ci_id, asset_id, location_id, contract_id, review_item_id, incident_id, alarm_id) = 1)`, tk.ID).Scan(&bad); err != nil || bad != 0 {
 		t.Fatalf("links with more than one target: %d err=%v", bad, err)
 	}
 }
@@ -287,8 +292,8 @@ func TestTicketLinksGoWithTheirTarget(t *testing.T) {
 	if n := count(`ticket_id = $1 AND entity_type IN ('ci', 'asset')`, tk.ID); n != 0 {
 		t.Errorf("%d links on deleted CI or asset remain", n)
 	}
-	if n := count(`ticket_id = $1`, tk.ID); n != 3 {
-		t.Errorf("%d links remain, want 3", n)
+	if n := count(`ticket_id = $1`, tk.ID); n != 5 {
+		t.Errorf("%d links remain, want 5", n)
 	}
 	if w := e.request(t, e.mux, http.MethodDelete, "/api/v1/tickets/"+tk.ID, nil); w.Code != http.StatusNoContent {
 		t.Fatalf("delete ticket: %d %s", w.Code, w.Body)
@@ -463,6 +468,15 @@ func TestTicketTagsMigration(t *testing.T) {
 	// 000275 hangs reservation.ticket_id on the key the down drops; the
 	// later migration goes first, as a real rollback would order it.
 	exec("later fk", `ALTER TABLE reservation DROP CONSTRAINT reservation_ticket_id_fkey`)
+	// 000288 (WP-877) made the references on ticket composite; they go back
+	// to their simple form before the down drops the key.
+	exec("later fk 000288", `
+		ALTER TABLE ticket_comment DROP CONSTRAINT ticket_comment_ticket_id_fkey,
+			ADD CONSTRAINT ticket_comment_ticket_id_fkey FOREIGN KEY (ticket_id) REFERENCES ticket (id) ON DELETE CASCADE;
+		ALTER TABLE ticket_sla DROP CONSTRAINT ticket_sla_ticket_id_fkey,
+			ADD CONSTRAINT ticket_sla_ticket_id_fkey FOREIGN KEY (ticket_id) REFERENCES ticket (id) ON DELETE CASCADE;
+		ALTER TABLE form_submission DROP CONSTRAINT form_submission_ticket_id_fkey,
+			ADD CONSTRAINT form_submission_ticket_id_fkey FOREIGN KEY (ticket_id) REFERENCES ticket (id) ON DELETE SET NULL;`)
 	exec("down", read("down"))
 	var tags []string
 	if err = tx.QueryRow(bg, `SELECT tags FROM ticket WHERE id = $1`, kept).Scan(&tags); err != nil || !slices.Equal(tags, []string{"netz"}) {

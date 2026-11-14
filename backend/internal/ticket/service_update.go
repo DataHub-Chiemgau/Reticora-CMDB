@@ -88,8 +88,11 @@ func (s *Service) CreateLink(ctx context.Context, link *Link) error {
 		return &api.FieldError{Field: "entity_type", Status: http.StatusUnprocessableEntity,
 			Message: "must be one of " + strings.Join(LinkEntityTypes, ", ")}
 	}
-	if !api.IsUUID(link.EntityID) || !api.IsUUID(link.TicketID) {
+	if !api.IsUUID(link.TicketID) {
 		return ErrNotFound
+	}
+	if !api.IsUUID(link.EntityID) {
+		return ErrLinkTargetNotFound
 	}
 	return s.repo.CreateLink(ctx, link)
 }

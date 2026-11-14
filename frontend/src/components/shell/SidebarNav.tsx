@@ -1,7 +1,7 @@
 import { ChevronDown, Lock } from 'lucide-react';
 import { useContext, useEffect, useId, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router';
 import { pageToPath } from '../CommandPalette';
 import type { AppPage } from '../CommandPalette';
 import { cn } from '../ui/utils';

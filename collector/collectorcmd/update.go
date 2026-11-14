@@ -23,16 +23,31 @@ const updateArtifact = "reticora-collector"
 // cosignBinary is the CLI the verifier runs, looked up in PATH.
 const cosignBinary = "cosign"
 
+// cosignVersionTimeout bounds the 'cosign version' check at the start.
+const cosignVersionTimeout = 10 * time.Second
+
 // newUpdateChecker builds the signed auto-updater (COL-06): releases of
 // the subscribed channel from RETICORA_UPDATE_URL, installed only after
 // the cosign signature verified and the new binary started with "version".
 // It runs at the start when updates are on and warns when cosign is not on
-// PATH: every update would be refused until it is installed.
+// PATH or older than update.MinCosignVersion: every update would be refused
+// until a recent one is installed.
 func newUpdateChecker(cfg *collectorConfig) *update.Checker {
-	if _, err := exec.LookPath(cosignBinary); err != nil {
+	if path, err := exec.LookPath(cosignBinary); err != nil {
 		slog.Warn("auto-updates are enabled, but cosign is not on PATH: every update is refused until it is installed",
 			"event", "collector.update.cosign_missing", "channel", cfg.UpdateChannel,
 			"hint", "re-run install-vm.sh with RETICORA_UPDATE_URL (installs the pinned cosign as /usr/local/bin/cosign) or install cosign")
+	} else {
+		// E-258: a cosign below update.MinCosignVersion (e.g. v2.4.1 of
+		// earlier installations) is not run; every update is refused.
+		ctx, cancel := context.WithTimeout(context.Background(), cosignVersionTimeout)
+		version, verr := update.CheckCosignVersion(ctx, path, nil)
+		cancel()
+		if verr != nil {
+			slog.Warn("auto-updates are enabled, but the cosign on PATH is older than "+update.MinCosignVersion+": every update is refused until it is replaced",
+				"event", "collector.update.cosign_outdated", "channel", cfg.UpdateChannel, "cosign", path, "version", version, "error", verr.Error(),
+				"hint", "re-run install-vm.sh with RETICORA_UPDATE_URL (installs the pinned cosign as /usr/local/bin/cosign) or install cosign "+update.MinCosignVersion+" or newer")
+		}
 	}
 	return &update.Checker{
 		Source:    &update.HTTPSource{BaseURL: cfg.UpdateURL, Channel: cfg.UpdateChannel, Artifact: updateArtifact},

@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"net/http"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -23,6 +25,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 )
 
 // Plan represents a subscription tier.
@@ -83,35 +86,152 @@ var Phase2Features = []string{
 	FeatureInternalOrders,
 }
 
-// Module feature keys of phases 3 and 4 (ENT-06); they gate modules already
-// present in the code and stay in their plans (E-34).
+// Feature keys of phase 3 (ENT-06, PKG-08, E-151 Option 2 and the decision
+// of the client of 2026-11-09): monitoring holds the core functions from
+// standard on (reachability probes, state changes, notification, root-cause
+// suppression, flapping, maintenance windows, availability history);
+// threshold rules, recommendations and the network-protocol probes are
+// monitoring_network from pro on, access networks and analytics enterprise.
+// workflows and compliance_findings replace workflow_forms and compliance
+// (E-152, migration 000284).
 const (
-	FeatureMonitoring    = "monitoring"
-	FeatureEndpointAgent = "endpoint_agent"
-	FeatureWorkflowForms = "workflow_forms"
-	FeatureCompliance    = "compliance"
+	FeatureMonitoring            = "monitoring"
+	FeatureIPAM                  = "ipam"
+	FeatureMonitoringNetwork     = "monitoring_network"
+	FeatureCredentialVault       = "credential_vault"
+	FeatureNotificationsSMSPager = "notifications_sms_pager"
+	FeatureWorkflows             = "workflows"
+	FeatureComplianceFindings    = "compliance_findings"
+	FeatureMonitoringAccess      = "monitoring_access"
+	FeatureMonitoringAnalytics   = "monitoring_analytics"
+	FeatureComplianceAutomation  = "compliance_automation"
 )
 
-// LaterFeatures are the module feature keys of phases 3 and 4 in use.
-var LaterFeatures = []string{FeatureMonitoring, FeatureEndpointAgent, FeatureWorkflowForms, FeatureCompliance}
+// Phase3Features are the feature keys of phase 3, ordered by the plan that
+// includes them first.
+var Phase3Features = []string{
+	FeatureMonitoring, FeatureIPAM,
+	FeatureMonitoringNetwork, FeatureCredentialVault, FeatureNotificationsSMSPager, FeatureWorkflows,
+	FeatureComplianceFindings,
+	FeatureMonitoringAccess, FeatureMonitoringAnalytics, FeatureComplianceAutomation,
+}
 
-// Add-ons (CH14, ENT-06): IGA and AI are no part of any plan; they are
-// unlocked only by their own entitlement row.
+// probeTypeFeatures maps every key of the probe type registry
+// (api/probe-types.json, WP-934, convention 30) to the feature key that
+// unlocks it (E-151, WP-865): the reachability probes are the monitoring
+// core of standard, the network-protocol probes monitoring_network (pro),
+// the access-network probes monitoring_access (enterprise).
+var probeTypeFeatures = map[string]string{
+	"icmp": FeatureMonitoring, "tcp": FeatureMonitoring, "http": FeatureMonitoring, "dns": FeatureMonitoring,
+	"snmp_status": FeatureMonitoringNetwork, "snmp_if": FeatureMonitoringNetwork, "snmp_custom": FeatureMonitoringNetwork,
+	"redfish": FeatureMonitoringNetwork, "bgp": FeatureMonitoringNetwork, "ospf": FeatureMonitoringNetwork,
+	"isis": FeatureMonitoringNetwork, "bfd": FeatureMonitoringNetwork, "optical": FeatureMonitoringNetwork,
+	"dhcp": FeatureMonitoringNetwork, "stamp": FeatureMonitoringNetwork, "twamp_control": FeatureMonitoringNetwork,
+	"gnmi": FeatureMonitoringNetwork, "rpki_rtr": FeatureMonitoringNetwork, "rpki_roa": FeatureMonitoringNetwork,
+	"bng": FeatureMonitoringAccess, "pon": FeatureMonitoringAccess, "tr069": FeatureMonitoringAccess,
+	"usp": FeatureMonitoringAccess,
+}
+
+// ProbeTypes returns the keys of the probe type registry in sorted order.
+func ProbeTypes() []string {
+	keys := make([]string, 0, len(probeTypeFeatures))
+	for k := range probeTypeFeatures {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+// ProbeTypeFeature returns the feature key a probe type needs. A long form
+// (icmp_ping, snmp_interfaces) or an unknown type is an error: only the keys
+// of the registry are probe types.
+func ProbeTypeFeature(probeType string) (string, error) {
+	if f, ok := probeTypeFeatures[probeType]; ok {
+		return f, nil
+	}
+	return "", fmt.Errorf("unknown probe type %q", probeType)
+}
+
+// Sub-functions of the monitoring without a path of their own (WP-865);
+// handlers and workers check them through SubFunctionFeature and Checker.
 const (
-	FeatureIGA = "iga"
-	FeatureAI  = "ai"
+	SubFunctionCorrelation      = "correlation"
+	SubFunctionRecommendation   = "recommendation"
+	SubFunctionThresholds       = "thresholds"
+	SubFunctionConfigChange     = "config_change"
+	SubFunctionSLAReport        = "sla_report"
+	SubFunctionCapacityForecast = "capacity_forecast"
+)
+
+// subFunctionFeatures maps the sub-functions to their feature key (E-151,
+// decision of the client of 2026-11-09): correlation and root cause
+// (ALR-03) are part of every monitoring plan; the recommendation (ALR-09),
+// the threshold rules (ALR-05) and the configuration change detection
+// (ALR-07) are monitoring_network from pro on; SLA reports (ALR-06) and
+// capacity forecasts (ALR-08) monitoring_analytics.
+var subFunctionFeatures = map[string]string{
+	SubFunctionCorrelation:      FeatureMonitoring,
+	SubFunctionRecommendation:   FeatureMonitoringNetwork,
+	SubFunctionThresholds:       FeatureMonitoringNetwork,
+	SubFunctionConfigChange:     FeatureMonitoringNetwork,
+	SubFunctionSLAReport:        FeatureMonitoringAnalytics,
+	SubFunctionCapacityForecast: FeatureMonitoringAnalytics,
+}
+
+// SubFunctionFeature returns the feature key of a monitoring sub-function;
+// an unknown sub-function is an error.
+func SubFunctionFeature(subFunction string) (string, error) {
+	if f, ok := subFunctionFeatures[subFunction]; ok {
+		return f, nil
+	}
+	return "", fmt.Errorf("unknown sub-function %q", subFunction)
+}
+
+// Module feature key of phase 4 (ENT-06); it gates a module already present
+// in the code and stays in its plan (E-34).
+const FeatureEndpointAgent = "endpoint_agent"
+
+// LaterFeatures are the module feature keys of phase 4 in use.
+var LaterFeatures = []string{FeatureEndpointAgent}
+
+// Add-ons (CH14, ENT-06): IGA, AI and the ADMP connection (PKG-08) are no
+// part of any plan; they are unlocked only by their own entitlement row.
+const (
+	FeatureIGA  = "iga"
+	FeatureAI   = "ai"
+	FeatureADMP = "admp"
 )
 
 // Addons are the add-on feature keys of CH14.
-var Addons = []string{FeatureIGA, FeatureAI}
+var Addons = []string{FeatureIGA, FeatureAI, FeatureADMP}
+
+// AddonInfo is one entry of the add-on catalog (PKG-03, WP-883).
+type AddonInfo struct {
+	Key string `json:"key"`
+	// Phase is the catalog tag of the add-on: A (add-on, CH14).
+	Phase string `json:"phase"`
+	// DescriptionKey is the i18n key of its description.
+	DescriptionKey string `json:"description_key"`
+}
+
+// AddonCatalog lists the bookable add-ons, derived from Addons; it holds
+// no data of an organization.
+func AddonCatalog() []AddonInfo {
+	out := make([]AddonInfo, 0, len(Addons))
+	for _, key := range Addons {
+		out = append(out, AddonInfo{Key: key, Phase: "A", DescriptionKey: "addons." + key + ".description"})
+	}
+	return out
+}
 
 // FeatureKeys are the feature keys an entitlement row may carry (F-209):
 // the phase-1 keys of ENT-02, the phase-2 keys of ENT-06 (E-44), the
-// module keys of phases 3 and 4 in use and the add-ons. The former keys
-// inventory, stocktake and ticketing are no feature keys any more
-// (migration 000190).
+// phase-3 keys (E-151), the module keys of phase 4 in use and the add-ons.
+// The former keys inventory, stocktake and ticketing (migration 000190) and
+// workflow_forms and compliance (migration 000284) are no feature keys any
+// more.
 func FeatureKeys() []string {
-	return slices.Concat(Phase1Features, Phase2Features, LaterFeatures, Addons)
+	return slices.Concat(Phase1Features, Phase2Features, Phase3Features, LaterFeatures, Addons)
 }
 
 // Quotas of ENT-02 and the storage quota of MGT-01 (ENT-06, E-44), stored
@@ -124,22 +244,121 @@ const (
 	// LimitMaxStorageMB is the document storage of the organization in MiB
 	// (2^20 bytes). A value stored in the limits of the documents row goes
 	// first (E-34); without one the plan default of E-44 applies
-	// (storageDefaultMB, StorageLimitBytes). The usage check "usage +
+	// (PlanQuotaDefaults, StorageLimitBytes). The usage check "usage +
 	// upload > limit" belongs to the document upload, not to AllowCreate.
 	LimitMaxStorageMB = "max_storage_mb"
+	// Monitoring quotas (PKG-04, E-153) on the monitoring row: the probe
+	// targets, the probes per minute of all targets and the shortest
+	// interval of a probe in seconds.
+	LimitMaxMonitoredTargets = "max_monitored_targets"
+	LimitMaxProbesPerMinute  = "max_probes_per_minute"
+	LimitMinProbeIntervalS   = "min_probe_interval_s"
+	// Workflow quotas (WFL-08, WP-1112) on the workflows row: the active
+	// workflow definitions, the runs started per hour and the form
+	// definitions. Without a stored value the plan default applies
+	// (planDefaultedQuotas).
+	LimitMaxWorkflowDefinitions = "max_workflow_definitions"
+	LimitMaxWorkflowRunsPerHour = "max_workflow_runs_per_hour"
+	LimitMaxFormDefinitions     = "max_form_definitions"
 )
 
-// storageDefaultMB is the document storage per plan in MiB when the
-// documents row stores no max_storage_mb (E-44): essential 1,000 MiB,
-// standard 10,000 MiB, pro 50,000 MiB; enterprise is unlimited (no entry).
-var storageDefaultMB = map[Plan]int64{
-	PlanEssential: 1000,
-	PlanStandard:  10000,
-	PlanPro:       50000,
+// planDefaultedQuotas are the quotas whose plan default applies when the
+// entitlement row stores no value (WFL-08); every other quota without a
+// stored value is unlimited (E-34).
+var planDefaultedQuotas = map[string]bool{LimitMaxWorkflowDefinitions: true, LimitMaxWorkflowRunsPerHour: true, LimitMaxFormDefinitions: true}
+
+// targetTypeQuota is the optional cap of the probe targets of one probe
+// type, max_targets_<type> (E-154); <type> must be a key of the probe type
+// register (probewire.Types(), api/probe-types.json, WP-934), long forms
+// (icmp_ping instead of icmp) are no quota.
+// TargetTypeQuotaPattern is its pattern, also in the OpenAPI limits.
+const TargetTypeQuotaPattern = `^max_targets_[a-z][a-z0-9_]{1,30}$`
+
+var targetTypeQuota = regexp.MustCompile(TargetTypeQuotaPattern)
+
+// QuotaFeatureOf returns the feature whose row stores the quota: those of
+// QuotaFeature and monitoring for max_targets_<type>; false for any other
+// key.
+func QuotaFeatureOf(quota string) (string, bool) {
+	if f, ok := QuotaFeature[quota]; ok {
+		return f, true
+	}
+	if IsTargetTypeQuota(quota) {
+		return FeatureMonitoring, true
+	}
+	return "", false
 }
 
-// Quotas are the quota keys an entitlement row may carry.
-var Quotas = []string{LimitMaxCIs, LimitMaxCollectors, LimitMaxUsers, LimitMaxAPIKeys, LimitMaxStorageMB}
+// TargetTypeQuotaPrefix starts every cap of the targets of one probe type.
+const TargetTypeQuotaPrefix = "max_targets_"
+
+// IsTargetTypeQuota reports whether quota is max_targets_<type> for a key of
+// the probe type register (WP-934 AK5).
+func IsTargetTypeQuota(quota string) bool {
+	if !targetTypeQuota.MatchString(quota) {
+		return false
+	}
+	_, ok := probewire.Lookup(strings.TrimPrefix(quota, TargetTypeQuotaPrefix))
+	return ok
+}
+
+// planQuotaDefaults are the default limits per plan (PKG-04, E-153; ENT-06
+// limits): a missing entry is unlimited, or the feature is not in the plan.
+// essential / standard / pro / enterprise: max_cis 500 / 2,500 / 10,000 /
+// 50,000; max_collectors 2 / 5 / 20 / -; max_users 5 / 25 / 100 / -;
+// max_storage_mb 1,000 / 10,000 / 50,000 / - (MiB, E-44);
+// max_monitored_targets - / 500 / 5,000 / 25,000; max_probes_per_minute
+// - / 1,000 / 10,000 / 30,000; min_probe_interval_s - / 30 / 30 / 10. The
+// monitoring values hold only for plans with monitoring (WP-862). Workflow
+// quotas (WFL-08, proposal to confirm with E-153): max_workflow_definitions
+// - / - / 50 / 500, max_workflow_runs_per_hour - / - / 2,000 / 20,000,
+// max_form_definitions - / - / 50 / 500; Essential and Standard have no
+// workflows.
+var planQuotaDefaults = map[Plan]map[string]int64{
+	PlanEssential: {LimitMaxCIs: 500, LimitMaxCollectors: 2, LimitMaxUsers: 5, LimitMaxStorageMB: 1000},
+	PlanStandard: {LimitMaxCIs: 2500, LimitMaxCollectors: 5, LimitMaxUsers: 25, LimitMaxStorageMB: 10000,
+		LimitMaxMonitoredTargets: 500, LimitMaxProbesPerMinute: 1000, LimitMinProbeIntervalS: 30},
+	PlanPro: {LimitMaxCIs: 10000, LimitMaxCollectors: 20, LimitMaxUsers: 100, LimitMaxStorageMB: 50000,
+		LimitMaxMonitoredTargets: 5000, LimitMaxProbesPerMinute: 10000, LimitMinProbeIntervalS: 30,
+		LimitMaxWorkflowDefinitions: 50, LimitMaxWorkflowRunsPerHour: 2000, LimitMaxFormDefinitions: 50},
+	PlanEnterprise: {LimitMaxCIs: 50000,
+		LimitMaxMonitoredTargets: 25000, LimitMaxProbesPerMinute: 30000, LimitMinProbeIntervalS: 10,
+		LimitMaxWorkflowDefinitions: 500, LimitMaxWorkflowRunsPerHour: 20000, LimitMaxFormDefinitions: 500},
+}
+
+// PlanQuotaDefaults returns the default limits of the plan (E-153); a quota
+// without entry is unlimited. A monitoring quota appears only for a plan
+// that includes monitoring.
+func PlanQuotaDefaults(plan Plan) map[string]int64 {
+	plan = normalizePlan(plan)
+	features := PlanFeatures(plan)
+	out := map[string]int64{}
+	for quota, value := range planQuotaDefaults[plan] {
+		if f, _ := QuotaFeatureOf(quota); slices.Contains(features, f) {
+			out[quota] = value
+		}
+	}
+	return out
+}
+
+// LimitOrigin reports whether a stored limit is the default of the plan
+// (plan) or an override (override): a value equal to PlanQuotaDefaults is
+// plan; a missing value (nil, unlimited) is plan when the plan has no
+// default, else override. WP-882 and WP-885 use it.
+func LimitOrigin(plan Plan, quota string, value *int64) string {
+	def, has := PlanQuotaDefaults(plan)[quota]
+	switch {
+	case value == nil && !has, value != nil && has && *value == def:
+		return OriginPlan
+	}
+	return "override"
+}
+
+// Quotas are the quota keys an entitlement row may carry; the optional
+// caps max_targets_<type> (E-154) match targetTypeQuota.
+var Quotas = []string{LimitMaxCIs, LimitMaxCollectors, LimitMaxUsers, LimitMaxAPIKeys, LimitMaxStorageMB,
+	LimitMaxMonitoredTargets, LimitMaxProbesPerMinute, LimitMinProbeIntervalS,
+	LimitMaxWorkflowDefinitions, LimitMaxWorkflowRunsPerHour, LimitMaxFormDefinitions}
 
 // QuotaFeature is the feature a quota belongs to: the quota is stored in the
 // limits of that feature's row, and a quota of a feature the organization is
@@ -150,27 +369,69 @@ var QuotaFeature = map[string]string{
 	LimitMaxUsers:      FeatureCMDBCore,
 	LimitMaxAPIKeys:    FeatureAPIAccess,
 	LimitMaxStorageMB:  FeatureDocuments,
+	// Monitoring quotas (PKG-04, E-153).
+	LimitMaxMonitoredTargets: FeatureMonitoring,
+	LimitMaxProbesPerMinute:  FeatureMonitoring,
+	LimitMinProbeIntervalS:   FeatureMonitoring,
+	// Workflow quotas (WFL-08, WP-1112).
+	LimitMaxWorkflowDefinitions: FeatureWorkflows,
+	LimitMaxWorkflowRunsPerHour: FeatureWorkflows,
+	LimitMaxFormDefinitions:     FeatureWorkflows,
+}
+
+// Origins of an entitlement row (PKG-01, E-155): a feature of the
+// organization's plan, an add-on (CH14) or a single grant of the operator.
+// A plan change (WP-882) replaces only the rows of origin plan.
+const (
+	OriginPlan   = "plan"
+	OriginAddon  = "addon"
+	OriginManual = "manual"
+)
+
+// Origins are the values of entitlement.origin (CHECK
+// entitlement_origin_check, migration 000289).
+var Origins = []string{OriginPlan, OriginAddon, OriginManual}
+
+// DefaultOrigin is the origin of a row without one, the rule of the
+// backfill of migration 000289: an add-on key is addon, a key of the
+// plan's features plan, every other row manual.
+func DefaultOrigin(featureKey string, plan Plan) string {
+	switch {
+	case slices.Contains(Addons, featureKey):
+		return OriginAddon
+	case slices.Contains(PlanFeatures(plan), featureKey):
+		return OriginPlan
+	}
+	return OriginManual
 }
 
 // Sources of an entitlement row (ENT-01).
 var Sources = []string{"manual", "selfsignup", "billing", "reseller"}
 
 // planFeatures maps a plan to the features it includes (ENT-06 in the
-// version of E-44, E-34): every plan includes the phase-1 features and
-// assets_basic, documents, import and ticketing_essential; standard adds
-// the remaining phase-2 keys but internal_orders, pro adds internal_orders,
-// monitoring and workflow_forms, enterprise endpoint_agent and compliance.
+// version of E-44 and E-151, E-34): every plan includes the phase-1
+// features and assets_basic, documents, import and ticketing_essential;
+// standard adds the remaining phase-2 keys but internal_orders, monitoring
+// and ipam; pro adds internal_orders, monitoring_network, credential_vault,
+// notifications_sms_pager, workflows and compliance_findings; enterprise
+// monitoring_access, monitoring_analytics, compliance_automation and
+// endpoint_agent. monitoring from standard on deviates from ENT-06
+// (enterprise); the client confirmed it on 2026-11-09 (A-58).
 // No plan includes an add-on (CH14). Quotas only gate when stored in the
 // limits of a row (E-34); only max_storage_mb has a plan default (E-44,
-// storageDefaultMB).
+// PlanQuotaDefaults).
 var planFeatures = func() map[Plan][]string {
 	essential := slices.Concat(Phase1Features, []string{
 		FeatureAssetsBasic, FeatureDocuments, FeatureImport, FeatureTicketingEssential})
 	standard := slices.Concat(essential, []string{
 		FeatureTicketingStandard, FeatureSignature, FeatureStock, FeatureStocktakeStandard,
-		FeatureBarcode, FeatureGPSStandard, FeatureWorkplace, FeatureExportDATEV})
-	pro := slices.Concat(standard, []string{FeatureInternalOrders, FeatureMonitoring, FeatureWorkflowForms})
-	enterprise := slices.Concat(pro, []string{FeatureEndpointAgent, FeatureCompliance})
+		FeatureBarcode, FeatureGPSStandard, FeatureWorkplace, FeatureExportDATEV,
+		FeatureMonitoring, FeatureIPAM})
+	pro := slices.Concat(standard, []string{FeatureInternalOrders,
+		FeatureMonitoringNetwork, FeatureCredentialVault, FeatureNotificationsSMSPager, FeatureWorkflows,
+		FeatureComplianceFindings})
+	enterprise := slices.Concat(pro, []string{FeatureMonitoringAccess, FeatureMonitoringAnalytics,
+		FeatureComplianceAutomation, FeatureEndpointAgent})
 	return map[Plan][]string{PlanEssential: essential, PlanStandard: standard, PlanPro: pro, PlanEnterprise: enterprise}
 }()
 
@@ -203,7 +464,10 @@ type Entitlement struct {
 	Limits     map[string]int64 `json:"limits"`
 	ValidUntil *time.Time       `json:"valid_until,omitempty"`
 	// Source is manual, selfsignup, billing or reseller.
-	Source    string    `json:"source"`
+	Source string `json:"source"`
+	// Origin is plan, addon or manual (PKG-01, WP-880): where the row comes
+	// from, kept when the row is changed.
+	Origin    string    `json:"origin"`
 	UpdatedAt time.Time `json:"updated_at,omitempty"`
 }
 
@@ -281,9 +545,20 @@ func (e *Entitlement) Validate() error {
 	if !slices.Contains(Sources, e.Source) {
 		return invalid("source", fmt.Errorf("source must be one of %s", strings.Join(Sources, ", ")))
 	}
+	if e.Origin == "" {
+		e.Origin = DefaultOrigin(e.FeatureKey, e.Plan)
+	}
+	switch addon := slices.Contains(Addons, e.FeatureKey); {
+	case !slices.Contains(Origins, e.Origin):
+		return invalid("origin", fmt.Errorf("origin must be one of %s", strings.Join(Origins, ", ")))
+	case addon && e.Origin != OriginAddon:
+		return invalid("origin", fmt.Errorf("the add-on %s has origin addon", e.FeatureKey))
+	case !addon && e.Origin == OriginAddon:
+		return invalid("origin", fmt.Errorf("%s is no add-on and cannot have origin addon", e.FeatureKey))
+	}
 	for k, v := range e.Limits {
-		if !slices.Contains(Quotas, k) {
-			return invalid("limits", fmt.Errorf("unknown limit %q (allowed: %s)", k, strings.Join(Quotas, ", ")))
+		if _, ok := QuotaFeatureOf(k); !ok {
+			return invalid("limits", fmt.Errorf("unknown limit %q (allowed: %s, max_targets_<type> with a probe type of the register)", k, strings.Join(Quotas, ", ")))
 		}
 		if v < 0 {
 			return invalid("limits", fmt.Errorf("limit %s must not be negative", k))
@@ -391,6 +666,9 @@ type Service struct {
 	cache   cache.Store
 	now     func() time.Time
 	adopter UnlicensedAdopter
+	// counters and monitoring feed the usage report (WP-885).
+	counters   UsageCounters
+	monitoring MonitoringUsage
 }
 
 // NewService creates an entitlement service backed by the given repository.
@@ -447,6 +725,22 @@ func (s *Service) Status(ctx context.Context, orgID, featureKey string) (Entitle
 	return ent, status, nil
 }
 
+// ActiveUntilExpiry reports whether a feature is active and, unlike Status,
+// not past its valid_until for any feature, on the clock of the service:
+// the expiry of a monitoring feature ends it (PKG-09, ENT-08, WP-942),
+// while Status keeps an expired row active for every feature but discovery
+// (expiryStops). Without enforcement every feature is active.
+func (s *Service) ActiveUntilExpiry(ctx context.Context, orgID, featureKey string) (bool, error) {
+	ent, status, err := s.Status(ctx, orgID, featureKey)
+	if err != nil {
+		return false, err
+	}
+	if !s.opts.Enforce {
+		return true, nil
+	}
+	return status == StatusActive && (ent.ValidUntil == nil || s.now().Before(*ent.ValidUntil)), nil
+}
+
 // Check returns the effective entitlement for a feature and whether it grants
 // access.
 func (s *Service) Check(ctx context.Context, orgID, featureKey string) (Entitlement, bool, error) {
@@ -470,7 +764,7 @@ func (s *Service) Provision(ctx context.Context, orgID string, plan Plan) ([]str
 	ents := make([]Entitlement, 0, len(features))
 	for _, feature := range features {
 		ent := Entitlement{OrganizationID: orgID, FeatureKey: feature, Plan: plan, Enabled: true,
-			Limits: map[string]int64{}, Source: "manual", UpdatedAt: s.now()}
+			Limits: map[string]int64{}, Source: "manual", Origin: OriginPlan, UpdatedAt: s.now()}
 		if err := ent.Validate(); err != nil {
 			return nil, fmt.Errorf("provision %s for %s: %w", feature, orgID, err)
 		}
@@ -493,20 +787,76 @@ func (s *Service) Provision(ctx context.Context, orgID string, plan Plan) ([]str
 
 // ProvisionOrganizations provisions the missing plan features of every
 // listed organization (id to plan), each in its own tenant context, and
-// returns how many organizations got rows.
+// returns how many organizations got rows. It reports, without changing
+// anything, every organization whose rows of origin plan deviate from
+// organization.plan (PlanMismatch, WP-880): slog.Warn "entitlement plan
+// mismatch" and the gauge reticora_entitlement_plan_mismatch_organizations.
 func (s *Service) ProvisionOrganizations(ctx context.Context, plans map[string]Plan) (int, error) {
-	n := 0
+	n, mismatched := 0, 0
 	for orgID, plan := range plans {
 		scope := database.OrgWideScope(orgID, "")
-		added, err := s.Provision(database.ContextWithTenantScope(ctx, &scope), orgID, plan)
+		orgCtx := database.ContextWithTenantScope(ctx, &scope)
+		added, err := s.Provision(orgCtx, orgID, plan)
 		if err != nil {
 			return n, err
 		}
 		if len(added) > 0 {
 			n++
 		}
+		stored, err := s.repo.List(orgCtx, orgID)
+		if err != nil {
+			return n, err
+		}
+		if keys := PlanMismatch(normalizePlan(plan), stored); len(keys) > 0 {
+			mismatched++
+			slog.WarnContext(ctx, "entitlement plan mismatch", "organization_id", orgID, "plan", string(normalizePlan(plan)), "features", keys)
+		}
 	}
+	planMismatchOrgs.Set(float64(mismatched))
 	return n, nil
+}
+
+// PlanMismatch returns the feature keys of the rows of origin plan that
+// deviate from the plan of the organization: a different plan column, or
+// an active row outside PlanFeatures(plan). Rows of origin addon or manual
+// never deviate.
+func PlanMismatch(plan Plan, stored []Entitlement) []string {
+	features := PlanFeatures(plan)
+	var out []string
+	for i := range stored {
+		ent := &stored[i]
+		origin := ent.Origin
+		if origin == "" {
+			origin = DefaultOrigin(ent.FeatureKey, ent.Plan)
+		}
+		if origin != OriginPlan {
+			continue
+		}
+		if normalizePlan(ent.Plan) != plan || (ent.Enabled && !slices.Contains(features, ent.FeatureKey)) {
+			out = append(out, ent.FeatureKey)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// OrganizationPlan returns the leading plan of the organization
+// (organization.plan) and the time of its last change; a repository
+// without PlanReader takes the plan of the cmdb_core row.
+func (s *Service) OrganizationPlan(ctx context.Context, orgID string) (Plan, *time.Time, error) {
+	if reader, ok := s.repo.(PlanReader); ok {
+		return reader.OrganizationPlan(ctx, orgID)
+	}
+	stored, err := s.load(ctx, orgID)
+	if err != nil {
+		return "", nil, err
+	}
+	for i := range stored {
+		if stored[i].FeatureKey == FeatureCMDBCore && stored[i].Plan != "" {
+			return normalizePlan(stored[i].Plan), nil, nil
+		}
+	}
+	return PlanEssential, nil, nil
 }
 
 // IsEnabled reports whether a feature is available for the organization.
@@ -534,13 +884,23 @@ func (s *Service) Quota(ctx context.Context, orgID, quota string) (*int64, error
 	if v, ok := ent.Limits[quota]; ok {
 		return &v, nil
 	}
+	// The workflow quotas fall back to the plan default (WFL-08).
+	if planDefaultedQuotas[quota] {
+		if v, ok := PlanQuotaDefaults(ent.Plan)[quota]; ok {
+			return &v, nil
+		}
+	}
 	return nil, nil
 }
+
+// Enforcing reports whether the service enforces entitlements and quotas
+// (Options.Enforce).
+func (s *Service) Enforcing() bool { return s.opts.Enforce }
 
 // StorageLimitBytes returns the document storage limit of the organization
 // in bytes (max_storage_mb · 2^20, MGT-01): the value stored in the limits
 // of the documents row (E-34), else the default of the row's plan (E-44,
-// storageDefaultMB). It returns nil, unlimited, with enforcement off or for
+// PlanQuotaDefaults). It returns nil, unlimited, with enforcement off or for
 // an unlimited plan, and FeatureNotEntitledError without documents.
 func (s *Service) StorageLimitBytes(ctx context.Context, orgID string) (*int64, error) {
 	if !s.opts.Enforce {
@@ -555,7 +915,7 @@ func (s *Service) StorageLimitBytes(ctx context.Context, orgID string) (*int64, 
 	}
 	mb, ok := ent.Limits[LimitMaxStorageMB]
 	if !ok {
-		if mb, ok = storageDefaultMB[normalizePlan(ent.Plan)]; !ok {
+		if mb, ok = PlanQuotaDefaults(ent.Plan)[LimitMaxStorageMB]; !ok {
 			return nil, nil
 		}
 	}
@@ -564,6 +924,70 @@ func (s *Service) StorageLimitBytes(ctx context.Context, orgID string) (*int64, 
 	}
 	limit := mb << 20
 	return &limit, nil
+}
+
+// AdmitCount admits n more resources of a quota exactly under concurrency
+// (PKG-04, ENT-03, WP-881): in the context transaction it takes the lock of
+// the quota (database.LockQuota), then counts with count, which must read
+// what every holder before committed, and refuses with LimitExceededError
+// when count + n exceeds the stored limit. Without a context transaction it
+// fails with database.ErrNoLockTx, without the feature of the quota with
+// FeatureNotEntitledError; without a stored limit or with enforcement off
+// it admits. The probes admit their whole budget instead (targets, checks
+// per minute, caps per type and the shortest interval: AllowProbeChange
+// under the lock ProbeBudgetLock, probe_budget.go, WP-940).
+func (s *Service) AdmitCount(ctx context.Context, orgID, quota string, n int64, count func(ctx context.Context) (int64, error)) error {
+	feature, ok := QuotaFeatureOf(quota)
+	if !ok {
+		return fmt.Errorf("unknown quota %q", quota)
+	}
+	if !database.InTx(ctx) {
+		return database.ErrNoLockTx
+	}
+	if !s.opts.Enforce {
+		return nil
+	}
+	ent, entitled, err := s.Check(ctx, orgID, feature)
+	if err != nil {
+		return err
+	}
+	if !entitled {
+		return &FeatureNotEntitledError{FeatureKey: feature}
+	}
+	limit, limited := ent.Limits[quota]
+	if lockErr := database.LockQuota(ctx, orgID, quota); lockErr != nil {
+		return lockErr
+	}
+	if !limited {
+		return nil
+	}
+	current, err := count(ctx)
+	if err != nil {
+		return err
+	}
+	if current+n > limit {
+		return &LimitExceededError{FeatureKey: quota, Limit: limit, Current: current}
+	}
+	return nil
+}
+
+// CheckInterval refuses a probe interval below min_probe_interval_s of the
+// organization with a 422 field error on interval_s (PKG-04); without a
+// stored value, without monitoring or with enforcement off every interval
+// passes.
+func (s *Service) CheckInterval(ctx context.Context, orgID string, seconds int) error {
+	if !s.opts.Enforce {
+		return nil
+	}
+	ent, entitled, err := s.Check(ctx, orgID, FeatureMonitoring)
+	if err != nil || !entitled {
+		return err
+	}
+	if minimum, ok := ent.Limits[LimitMinProbeIntervalS]; ok && int64(seconds) < minimum {
+		return &api.FieldError{Field: "interval_s", Status: http.StatusUnprocessableEntity,
+			Message: fmt.Sprintf("the interval must be at least %d seconds (min_probe_interval_s of the plan)", minimum)}
+	}
+	return nil
 }
 
 // AllowCreate enforces a quota (max_cis, max_collectors, max_users,
@@ -650,6 +1074,12 @@ func (s *Service) load(ctx context.Context, orgID string) ([]Entitlement, error)
 	return items, nil
 }
 
+// InvalidateOrganization drops the cached entitlements of a purged
+// organization (entitlements:<org>, TLC-06, WP-1155).
+func (s *Service) InvalidateOrganization(ctx context.Context, orgID string) error {
+	return s.cache.Delete(ctx, cacheKey(orgID))
+}
+
 // invalidate drops the cached entitlements of the organization; with Redis
 // the change reaches every instance.
 func (s *Service) invalidate(ctx context.Context, orgID string) {
@@ -668,11 +1098,15 @@ func (s *Service) effective(orgID string, stored []Entitlement) []Entitlement {
 		ent := stored[i]
 		core = core || ent.FeatureKey == FeatureCMDBCore
 		ent.Enabled = !s.opts.Enforce || ent.status(now) == StatusActive
+		if ent.Origin == "" {
+			// A cached row from before migration 000289.
+			ent.Origin = DefaultOrigin(ent.FeatureKey, ent.Plan)
+		}
 		out = append(out, ent)
 	}
 	if !core {
 		out = append(out, Entitlement{OrganizationID: orgID, FeatureKey: FeatureCMDBCore, Enabled: true,
-			Limits: map[string]int64{}, Source: "manual"})
+			Limits: map[string]int64{}, Source: "manual", Origin: OriginPlan})
 	}
 	return out
 }

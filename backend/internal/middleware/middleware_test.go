@@ -857,3 +857,29 @@ func TestAuditRouteAnswersInvalidBodyKeysBeforeTheIntent(t *testing.T) {
 		t.Errorf("valid body = %d, handler ran %d times, entries %+v; want 204 and the fields [b ä]", w.Code, ran, store.entries)
 	}
 }
+
+// WP-910 (IPM-10, E-214): the scope of an API key carries its kind, the
+// scope of a session none, so ipam_section_denied counts only the team
+// scope of a key like team memberships.
+func TestTenantScopeForCarriesPrincipalType(t *testing.T) {
+	const org = "aaaa1111-0000-4000-8000-000000000001"
+	teams := identity.Scope{Clients: identity.ScopeSet{All: true}, Sites: identity.ScopeSet{All: true},
+		Teams: identity.ScopeSet{IDs: []string{"aaaa1111-0000-4000-8000-0000000000c1"}}}
+	for _, tc := range []struct {
+		name string
+		p    identity.Principal
+		want string
+	}{
+		{"API key with team scope", identity.Principal{OrganizationID: org, Subject: "owner", Type: identity.PrincipalTypeAPIKey, Scope: &teams}, database.PrincipalTypeAPIKey},
+		{"API key without resolved scope", identity.Principal{OrganizationID: org, Subject: "owner", Type: identity.PrincipalTypeAPIKey}, database.PrincipalTypeAPIKey},
+		{"session", identity.Principal{OrganizationID: org, Subject: "user-1", Type: identity.PrincipalTypeUser, Scope: &teams}, ""},
+	} {
+		scope := TenantScopeFor(&tc.p)
+		if err := scope.Validate(); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if scope.PrincipalType != tc.want {
+			t.Errorf("%s: principal type %q, want %q", tc.name, scope.PrincipalType, tc.want)
+		}
+	}
+}

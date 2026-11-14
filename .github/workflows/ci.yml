@@ -10,12 +10,13 @@ permissions:
   contents: read
 
 # Pinned nats-server for the tests that start their own server
-# (TEST_NATS_SERVER_BIN); 2.10.x like the image nats:2.10-alpine. The step
+# (TEST_NATS_SERVER_BIN); the version of the image nats of
+# deploy/docker-compose/docker-compose.yml (WP-873). The step
 # "Install nats-server" is the same in the jobs go-modules (collector),
 # migrations and auditdefect (WP-337, WP-374).
 env:
-  NATS_SERVER_VERSION: "2.10.29"
-  NATS_SERVER_SHA256: e314da74a83a1d3876db8814c27eb990fe729640fd6452025b441bcede8390da
+  NATS_SERVER_VERSION: "2.14.10"
+  NATS_SERVER_SHA256: 464f118a8aecf293e405514c1ab2c197a5d9209e58e36a5d05ad9577e5ee9b99
 
 jobs:
   backend:
@@ -28,7 +29,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
 
       - name: Download dependencies
         run: go mod download
@@ -72,7 +73,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
 
       - name: Download dependencies
         run: go mod download
@@ -106,7 +107,7 @@ jobs:
         # TimescaleDB is required by migration 000020 (metric_sample hypertable);
         # every TimescaleDB image of the repository is this reference, pinned
         # by version and digest (E-96, tests/ci-config.test.sh).
-        image: timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
+        image: timescale/timescaledb:2.32.0-pg16@sha256:2f87efeaec6fbdd3ba4a6993b921c05d069cd8e980792cb23c7c5f32a6fe68a7
         env:
           POSTGRES_USER: reticora
           POSTGRES_PASSWORD: reticora
@@ -121,7 +122,7 @@ jobs:
       # Session revocation and refresh rotation are tested against a real
       # Redis (AUT-02, internal/identity/revocation_integration_test.go).
       redis:
-        image: redis:7-alpine
+        image: redis:7.4.12-alpine@sha256:7b1753b4c5ad8458906c272a8132b8c15f5557b000379eb115fb239706a384b7
         ports:
           - 6379:6379
         options: >-
@@ -132,9 +133,12 @@ jobs:
       # TEC-12 (WP-534): the scope filters of the OpenSearch backend are
       # tested against a real OpenSearch, the version of deploy/ (single
       # node, security plugin off; internal/search/
-      # opensearch_real_integration_test.go).
+      # opensearch_real_integration_test.go), the field rows, identifiers
+      # and highlights of its own HTTP client too (Upd-02,
+      # opensearch_real_fields_integration_test.go). OpenSearch 3 loads
+      # about 25 plugins before the port opens, hence the start period.
       opensearch:
-        image: opensearchproject/opensearch:2.13.0
+        image: opensearchproject/opensearch:3.9.0@sha256:3b55f6b6249cfdb92b52ee59adc8a266203ba9ef9f5d82544fad6f1af2f3609e
         env:
           discovery.type: single-node
           DISABLE_INSTALL_DEMO_CONFIG: "true"
@@ -149,6 +153,7 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 18
+          --health-start-period 120s
     env:
       PGPASSWORD: reticora
       DATABASE_URL: postgres://reticora:reticora@localhost:5432/reticora_migrations?sslmode=disable
@@ -159,7 +164,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
 
       - name: Install golang-migrate
         run: go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@v4.18.1
@@ -235,20 +240,21 @@ jobs:
       # containers cannot pass arguments, so NATS is started here.
       - name: Start NATS with JetStream
         run: |
-          docker run -d --name nats -p 4222:4222 nats:2.10-alpine -js
+          docker run -d --name nats -p 4222:4222 nats:2.14.10-alpine@sha256:311da47e2f31c26e99c623cd78d486a1e8ab039c49b32652770bb91a4f70512e -js
           for i in $(seq 1 30); do nc -z localhost 4222 && exit 0; sleep 1; done
           docker logs nats; exit 1
 
       # OPS-04/NFR-05 (WP-544): setupObjectStorage creates the buckets and
-      # switches on their versioning against a real MinIO, the image of
-      # deploy/docker-compose (cmd/server/objectstorage_integration_test.go).
+      # switches on their versioning against a real MinIO (Silo, the MinIO
+      # fork), the image of deploy/docker-compose
+      # (cmd/server/objectstorage_integration_test.go).
       # Service containers cannot pass arguments ("server /data"), so MinIO
       # is started here.
       - name: Start MinIO
         run: |
           docker run -d --name minio -p 9000:9000 \
             -e MINIO_ROOT_USER=reticora -e MINIO_ROOT_PASSWORD=reticora_dev \
-            pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372 \
+            pgsty/silo:RELEASE.2026-11-12T00-00-00Z@sha256:c20d112390b9a9ce8c11b8af95ad35bcaa62f4759663c09c936cd8d2b511f329 \
             server /data
           for _ in $(seq 1 30); do curl -fsS -o /dev/null http://localhost:9000/minio/health/live && exit 0; sleep 1; done
           docker logs minio; exit 1
@@ -339,14 +345,17 @@ jobs:
   # [B]/[Q] ID needs a row or an entry in docs/acceptance/g1-ausnahmen.csv
   # (E-76); [Pn]/[A] completeness is reported. The plans are
   # docs/plan/implementierungsplan.md, the G1 remediation plan
-  # docs/plan/g1-korrektur/implementierungsplan.md (WP-336) and the Phase-2
-  # plan docs/plan/phase2/implementierungsplan.md (WP-243); WP numbers are
-  # unique across all three, and the deferred WP-215 to WP-239 are no work
-  # packages of a PR (E-46). The Phase-2 plan must agree with
-  # docs/plan/phase2/abdeckung.csv in every run; Phase-2 completeness (a row of
+  # docs/plan/g1-korrektur/implementierungsplan.md (WP-336), the Phase-2
+  # plan docs/plan/phase2/implementierungsplan.md (WP-243) and the Phase-3
+  # plan docs/plan/phase3/implementierungsplan.md (WP-860); WP numbers have
+  # three or four digits (E-244) and are unique across all four, and the
+  # deferred WP-215 to WP-239 are no work packages of a PR (E-46). The Phase-2
+  # and Phase-3 plans must agree with docs/plan/phase2/abdeckung.csv and
+  # docs/plan/phase3/abdeckung.csv in every run; their completeness (a row of
   # the abschluss_wp of every ID) is checked in every run.
   # TRACEABILITY_REQUIRE_COMPLETE takes a comma-separated list of levels: P2
-  # blocks on Phase 2, 1 on every [B]/[Pn]/[A] ID (E-30, E-48). Since gate G2
+  # blocks on Phase 2, P3 on Phase 3 (set by WP-1177 at gate G3), 1 on every
+  # [B]/[Pn]/[A] ID (E-30, E-48). Since gate G2
   # (WP-331) this job sets B,Q,P2: every ID of docs/plan/phase2/abdeckung.csv
   # needs a row of its abschluss_wp (Phase-1 rows do not count) and every
   # non-optional WP of the Phase-2 plan all its planned rows
@@ -361,7 +370,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
 
       # Work packages are taken from the PR title and the "Arbeitspakete:" line
       # of the PR template, ranges included ("WP-332 – WP-335"). The untrusted
@@ -383,7 +392,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731
+        image: timescale/timescaledb:2.32.0-pg16@sha256:2f87efeaec6fbdd3ba4a6993b921c05d069cd8e980792cb23c7c5f32a6fe68a7
         env:
           POSTGRES_USER: reticora
           POSTGRES_PASSWORD: reticora
@@ -396,7 +405,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
       redis:
-        image: redis:7-alpine
+        image: redis:7.4.12-alpine@sha256:7b1753b4c5ad8458906c272a8132b8c15f5557b000379eb115fb239706a384b7
         ports:
           - 6379:6379
         options: >-
@@ -417,7 +426,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
 
       - uses: actions/setup-node@v4
         with:
@@ -464,7 +473,7 @@ jobs:
 
       - name: Start NATS with JetStream
         run: |
-          docker run -d --name nats -p 4222:4222 nats:2.10-alpine -js
+          docker run -d --name nats -p 4222:4222 nats:2.14.10-alpine@sha256:311da47e2f31c26e99c623cd78d486a1e8ab039c49b32652770bb91a4f70512e -js
           for i in $(seq 1 30); do nc -z localhost 4222 && exit 0; sleep 1; done
           docker logs nats; exit 1
 
@@ -592,7 +601,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
@@ -716,10 +725,18 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      # The build is served by vite preview from the audited lockfile (SPA
+      # fallback like `serve -s`); no package is fetched outside it (Upd-07:
+      # every serve >=10.1.0 pins compression 1.8.1, GHSA-vc2v-76pw-4v95).
+      # curl waits for the server, --strictPort fails on a busy port.
       - name: Run E2E tests
         run: |
-          npx serve -s dist -l 4173 &
-          npx wait-on http://localhost:4173 --timeout 10000
+          npm run preview -- --port 4173 --strictPort &
+          preview=$!
+          curl --silent --show-error --fail --output /dev/null \
+            --retry 20 --retry-delay 1 --retry-all-errors --max-time 5 \
+            http://localhost:4173/
+          kill -0 "$preview"
           npx playwright test --project=${{ matrix.project }}
         env:
           BASE_URL: http://localhost:4173
@@ -759,7 +776,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
 
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
@@ -855,6 +872,11 @@ jobs:
           - image: postgres
             context: deploy/docker-compose/postgres
             dockerfile: deploy/docker-compose/postgres/Dockerfile
+          # reticora-keycloak-db of release.yml (E-96, A-85): the official
+          # postgres image with gosu rebuilt by the repository toolchain.
+          - image: keycloak-db
+            context: deploy/docker-compose/keycloak-db
+            dockerfile: deploy/docker-compose/keycloak-db/Dockerfile
     steps:
       - uses: actions/checkout@v4
 
@@ -907,36 +929,86 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # SR-60 (WP-873): every third-party image of the operation, pinned by
+      # version and digest. compose_service names the service of
+      # deploy/docker-compose/docker-compose.yml, manifest the Kubernetes
+      # component that runs the same image (empty: none, no comparison).
+      # tests/ci-config.test.sh (thirdparty_image_pins) checks that every
+      # third-party reference of both is in this matrix.
       matrix:
         include:
           - image: clamd
             compose_service: clamd
             manifest: deploy/k8s/base/components/clamav/clamd.yaml
+          - image: nats
+            compose_service: nats
+            manifest: deploy/k8s/base/components/nats-edge/nats-edge.yaml
+          - image: redis
+            compose_service: redis
+            manifest: ""
+          - image: keycloak
+            compose_service: keycloak
+            manifest: ""
+          - image: opensearch
+            compose_service: opensearch
+            manifest: deploy/k8s/base/components/opensearch/statefulset.yaml
+          - image: certbot
+            compose_service: certbot
+            manifest: ""
+          - image: minio
+            compose_service: minio
+            manifest: ""
     steps:
       - uses: actions/checkout@v4
 
+      # The vendor findings have a file of their own (E-246): they never
+      # suppress an ID in the scans of the own images.
       - name: Check scan exceptions (SEC-11 SLA)
-        run: ./scripts/ci/check-scan-exceptions.sh
+        run: |
+          ./scripts/ci/check-scan-exceptions.sh
+          ./scripts/ci/check-scan-exceptions.sh security/scan-exceptions-thirdparty.txt
+          cat security/scan-exceptions.txt security/scan-exceptions-thirdparty.txt > "$RUNNER_TEMP/trivyignore-thirdparty"
 
+      # The reference of the compose service and the third-party images of
+      # the manifest (Deployment, StatefulSet, CronJob); both must be pinned
+      # by version and digest and, when both exist, be the same.
       - name: Resolve the pinned image
         id: pin
         env:
           SERVICE: ${{ matrix.compose_service }}
           MANIFEST: ${{ matrix.manifest }}
         run: |
-          compose=$(python3 -c 'import sys, yaml; print(yaml.safe_load(open("deploy/docker-compose/docker-compose.yml"))["services"][sys.argv[1]]["image"])' "$SERVICE")
-          k8s=$(python3 -c 'import sys, yaml; print(" ".join(c["image"] for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get("kind") == "Deployment" for c in d["spec"]["template"]["spec"]["containers"]))' "$MANIFEST")
-          echo "compose: $compose"
-          echo "k8s:     $k8s"
-          if ! [[ "$compose" =~ ^[^[:space:]@]+:[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]]; then
-            echo "::error::$SERVICE in docker-compose.yml is not pinned by version and digest: $compose"
-            exit 1
-          fi
-          if [ "$compose" != "$k8s" ]; then
-            echo "::error::$MANIFEST pins '$k8s', docker-compose.yml '$compose'"
-            exit 1
-          fi
-          echo "ref=$compose" >> "$GITHUB_OUTPUT"
+          ref=$(python3 - <<'PY'
+          import os, re, sys, yaml
+          pin = re.compile(r"^[^\s@]+:[^\s@]+@sha256:[0-9a-f]{64}$")
+          service, manifest = os.environ["SERVICE"], os.environ["MANIFEST"]
+          refs = []
+          if service:
+              refs.append(("docker-compose.yml " + service,
+                           yaml.safe_load(open("deploy/docker-compose/docker-compose.yml"))["services"][service]["image"]))
+          if manifest:
+              for d in yaml.safe_load_all(open(manifest)):
+                  if not d or d.get("kind") not in ("Deployment", "StatefulSet", "CronJob"):
+                      continue
+                  spec = d["spec"]
+                  if d["kind"] == "CronJob":
+                      spec = spec["jobTemplate"]["spec"]
+                  pod = spec["template"]["spec"]
+                  for c in pod.get("initContainers", []) + pod["containers"]:
+                      if not c["image"].startswith("reticora-cmdb/"):
+                          refs.append((manifest + " " + c["name"], c["image"]))
+          if not refs:
+              sys.exit("::error::no image for service '%s' and manifest '%s'" % (service, manifest))
+          for where, ref in refs:
+              print(where + ": " + ref, file=sys.stderr)
+              if not pin.match(ref):
+                  sys.exit("::error::%s is not pinned by version and digest: %s" % (where, ref))
+          if len({ref for _, ref in refs}) != 1:
+              sys.exit("::error::the references differ: %s" % refs)
+          print(refs[0][1])
+          PY
+          )
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
       # Trivy pulls the image from its registry by digest; no local build.
       - name: Scan image with Trivy
@@ -945,9 +1017,10 @@ jobs:
         run: |
           docker run --rm \
             -v "$PWD:/work" -w /work \
+            -v "$RUNNER_TEMP/trivyignore-thirdparty:/trivyignore:ro" \
             aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa image \
             --severity CRITICAL,HIGH --ignore-unfixed \
-            --ignorefile security/scan-exceptions.txt \
+            --ignorefile /trivyignore \
             --format json --output "trivy-${{ matrix.image }}.json" \
             --exit-code 1 \
             "$REF"
@@ -1002,7 +1075,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
 
       - name: Install kustomize
         run: |
@@ -1227,22 +1300,25 @@ jobs:
   # changed artifact and the foreign bundle are refused; with the pinned
   # release identity (no COSIGN_EXPECT_IDENTITY) the signature is refused for
   # the identity. Release bundles are checked in release.yml (WP-545).
+  # E-258: the bundles are Sigstore bundles (v0.3) of cosign v3, and the
+  # legacy bundle of the published release v1.0.0-rc.1 (cosign v2, fixture in
+  # edgecore/update/testdata) stays verifiable with it.
   cosign-verify:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write   # keyless signing (Fulcio) with the identity of this workflow
     env:
-      COSIGN_VERSION: v2.4.1
+      COSIGN_VERSION: v3.1.4
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
           cache-dependency-path: edgecore/go.mod
 
-      - uses: sigstore/cosign-installer@v3.7.0
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
         with:
           cosign-release: ${{ env.COSIGN_VERSION }}
 
@@ -1255,6 +1331,10 @@ jobs:
           printf 'reticora cosign-verify foreign artifact %s run %s\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" > "$dir/reticora-foreign-artifact"
           for file in reticora-test-artifact reticora-foreign-artifact; do
             cosign sign-blob --yes --bundle "$dir/$file.sigstore.json" "$dir/$file"
+            if ! jq -e '.mediaType == "application/vnd.dev.sigstore.bundle.v0.3+json"' "$dir/$file.sigstore.json" > /dev/null; then
+              echo "::error::$file.sigstore.json is no Sigstore bundle v0.3"
+              exit 1
+            fi
           done
           # The certificate names this workflow at the ref of the run
           # (owner/repo/.github/workflows/ci.yml@refs/...), as a regexp.
@@ -1308,7 +1388,7 @@ jobs:
             exit 1
           fi
           if ! grep -qE -- "--- FAIL: ${positive} \(" "$log" \
-            || ! grep -q 'none of the expected identities matched' "$log"; then
+            || ! grep -qE 'no matching CertificateIdentity found|none of the expected identities matched' "$log"; then
             echo "::error::exit $rc, but not refused for the identity"
             exit 1
           fi
@@ -1318,3 +1398,26 @@ jobs:
             exit 1
           fi
           echo "refused for the pinned release identity (exit $rc): identity mismatch"
+
+      - name: Real cosign with the legacy bundle of a published release (accepted; changed, foreign, other tag refused)
+        working-directory: edgecore
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/cosign-legacy.log"
+          COSIGN_BIN="$(command -v cosign)" \
+            go test -tags cosignreal -count=1 -v -run '^TestCosignVerifierWithLegacyReleaseBundle$' ./update/ 2>&1 | tee "$log"
+          for name in 'TestCosignVerifierWithLegacyReleaseBundle' \
+            'TestCosignVerifierWithLegacyReleaseBundle/legacy_bundle_with_the_pinned_release_identity_is_accepted' \
+            'TestCosignVerifierWithLegacyReleaseBundle/legacy_bundle_with_the_identity_of_exactly_its_tag_is_accepted' \
+            'TestCosignVerifierWithLegacyReleaseBundle/manifest_changed_by_one_byte_is_refused' \
+            'TestCosignVerifierWithLegacyReleaseBundle/bundle_of_another_file_is_refused' \
+            'TestCosignVerifierWithLegacyReleaseBundle/identity_of_another_tag_is_refused'; do
+            if ! grep -qE -- "--- PASS: ${name} \(" "$log"; then
+              echo "::error::$name did not pass"
+              exit 1
+            fi
+          done
+          if grep -qE -- '--- (SKIP|FAIL)|no tests to run' "$log"; then
+            echo "::error::TestCosignVerifierWithLegacyReleaseBundle skipped or failed a case"
+            exit 1
+          fi

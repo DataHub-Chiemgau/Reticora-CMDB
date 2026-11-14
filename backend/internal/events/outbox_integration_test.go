@@ -118,7 +118,10 @@ func TestOutboxAgainstPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	maintenance := "maintenance"
-	if _, err := repo.Update(ctx, f.OrgA, item.ID, ci.UpdateRequest{Status: &maintenance}); err != nil {
+	// The update runs in a workflow run: its events carry the origin
+	// (WP-1090).
+	runOrigin := events.Origin{Kind: events.OriginWorkflowRun, RunID: f.ID(), Depth: 2}
+	if _, err := repo.Update(events.WithOrigin(ctx, runOrigin), f.OrgA, item.ID, ci.UpdateRequest{Status: &maintenance}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.Delete(ctx, f.OrgA, item.ID); err != nil {
@@ -155,6 +158,29 @@ func TestOutboxAgainstPostgres(t *testing.T) {
 	}
 	if fields, _ := got[1].data["changed_fields"].([]any); len(fields) != 1 || fields[0] != "status" {
 		t.Errorf("changed fields: %v", got[1].data["changed_fields"])
+	}
+	// Only the events of the update name the run as their origin.
+	originRows, err := f.Admin.Query(bg, `SELECT COALESCE(origin->>'run_id', ''), COALESCE((origin->>'depth')::int, -1)
+		FROM event_outbox WHERE organization_id = $1 ORDER BY sequence`, f.OrgA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type originRow struct {
+		run   string
+		depth int
+	}
+	origins, err := pgx.CollectRows(originRows, func(r pgx.CollectableRow) (originRow, error) {
+		var o originRow
+		return o, r.Scan(&o.run, &o.depth)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, o := range origins {
+		withOrigin := i == 1 || i == 2
+		if withOrigin != (o.run == runOrigin.RunID && o.depth == 2) || (!withOrigin && o.run != "") {
+			t.Errorf("origin of event %d: %+v (want origin %v)", i+1, o, withOrigin)
+		}
 	}
 
 	// Concurrent writers of one organization: sequence without gaps or
@@ -234,6 +260,10 @@ func TestOutboxAgainstPostgres(t *testing.T) {
 	}
 	if a := ofA(); len(a) != 4 || a[3].Sequence != 4 {
 		t.Fatalf("delivered before the failure: %d", len(a))
+	}
+	// The publisher reads the origin into the envelope (WP-1090).
+	if a := ofA(); a[0].Origin != nil || a[1].Origin == nil || a[1].Origin.RunID != runOrigin.RunID || a[1].Origin.Kind != events.OriginWorkflowRun {
+		t.Errorf("origins of the delivered envelopes: %+v, %+v; want none, then the run", a[0].Origin, a[1].Origin)
 	}
 	var attempts int
 	var lastError string

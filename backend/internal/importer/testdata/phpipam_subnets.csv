@@ -1,0 +1,8 @@
+section,subnet,mask,cidr,description,vlan,vrf,gateway,customer,nameserver,is_pool
+,10.92.0.0,16,,Campus,,,,,,1
+,10.92.1.0,255.255.255.0,,Office,200,,10.92.1.1,,intern,0
+,10.92.2.0,24,10.92.2.0/24,Lab,,,,Client 1,,
+lab,,,10.92.3.0/24,Lab section,,,,,,
+unknown-section,10.92.4.0,24,,Missing section,,,,,,
+,10.92.5.0,24,,Ambiguous VLAN,300,,,,,
+,10.92.6.0,24,10.92.7.0/24,Contradiction,,,,,,

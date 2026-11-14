@@ -153,6 +153,21 @@ func LockCICount(ctx context.Context, orgID string, exclusive bool, timeout time
 	return count, err
 }
 
+// LockQuota takes the lock of quota for orgID until the end of the context
+// transaction (PKG-04, WP-881; pattern LockCICount): every admission of
+// the quota (entitlement.Service.AdmitCount) runs one after the other, so
+// its count sees what the holder before committed. The key is
+// hashtextextended('quota:' || quota || ':' || organization_id, 0). Without
+// a context transaction it fails with ErrNoLockTx.
+func LockQuota(ctx context.Context, orgID, quota string) error {
+	return inLockTx(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('quota:' || $1 || ':' || $2, 0))`, quota, orgID); err != nil {
+			return fmt.Errorf("lock quota %s: %w", quota, err)
+		}
+		return nil
+	})
+}
+
 // LockIdentities takes the identity locks of the context transaction with
 // IdentityLockSQL: the organization's lock org (IdentityOrgLockKey) shared,
 // or exclusive with exclusive, then keys (IdentityValueLockKey; ignored

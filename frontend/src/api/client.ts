@@ -2,6 +2,8 @@ import { clearSession, getSessionToken, refreshSession } from '../auth/session';
 import { useScopeStore } from '../stores/scope';
 import { useMetamodelDraftStore } from '../stores/metamodelDraft';
 import type { components } from './generated/schema';
+import i18n from '../i18n';
+import type { Condition } from '../rules/rules';
 
 const API_BASE = '/api/v1';
 
@@ -577,6 +579,19 @@ export class ApiError extends Error {
         )
       : [];
 
+    // A write of the grace period of a deletion (423, WP-1153) says so in
+    // every form, with the end of the grace period (WP-1157).
+    if (status === 423 && type === PROBLEM_ORG_PENDING_DELETION) {
+      const message = orgPendingDeletionMessage((body as { due_at?: unknown }).due_at);
+      return new ApiError(status, message, {
+        title,
+        detail: message,
+        traceId,
+        problem: body as Record<string, unknown>,
+        type,
+      });
+    }
+
     return new ApiError(status, detail || title || statusText, {
       title,
       detail,
@@ -598,6 +613,44 @@ export class ApiError extends Error {
 export const PROBLEM_FEATURE_NOT_ENTITLED = 'https://reticora.io/problems/feature-not-entitled';
 /** The problem type of a 403 for a reached limit of the plan (ENT-06, E-44). */
 export const PROBLEM_ENTITLEMENT_LIMIT = 'https://reticora.io/problems/entitlement-limit';
+/**
+ * The problem type of a write during the grace period of a deletion of the
+ * organization (423, TLC-06, WP-1153): read-only until due_at.
+ */
+export const PROBLEM_ORG_PENDING_DELETION = 'urn:reticora:problem:org-pending-deletion';
+/**
+ * orgReadOnlyMessage is the message of a write refused during the grace
+ * period of a deletion (423 org-pending-deletion: "Organisation wird
+ * gelöscht – nur Lesen bis <Datum>"), undefined for any other error. A form
+ * with a fixed failure text asks it first (WP-1157 AK4).
+ */
+export function orgReadOnlyMessage(error: unknown): string | undefined {
+  return error instanceof ApiError &&
+    error.status === 423 &&
+    error.type === PROBLEM_ORG_PENDING_DELETION
+    ? error.message
+    : undefined;
+}
+
+/** The problem type of a write that needs a session with a second factor (403, WP-1151, WP-1152). */
+export const PROBLEM_MFA_REQUIRED = 'urn:reticora:problem:mfa-required';
+
+/** isMfaRequired tells a refusal for a session without a second factor (403 mfa-required). */
+export function isMfaRequired(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 403 && error.type === PROBLEM_MFA_REQUIRED;
+}
+
+/**
+ * orgPendingDeletionMessage is the text of a 423 org-pending-deletion:
+ * "Organisation wird gelöscht – nur Lesen bis <Datum>" (WP-1157).
+ */
+export function orgPendingDeletionMessage(dueAt: unknown): string {
+  const due = typeof dueAt === 'string' ? new Date(dueAt) : undefined;
+  if (!due || Number.isNaN(due.getTime())) return i18n.t('orgData.readOnlyNoDate');
+  const date = new Intl.DateTimeFormat(i18n.language || 'de-DE', { dateStyle: 'long' }).format(due);
+  return i18n.t('orgData.readOnly', { date });
+}
+
 /** The problem type of a 422 for a deactivated CI type (MET-05, WP-249, WP-317). */
 export const PROBLEM_TYPE_INACTIVE = 'https://reticora.io/problems/type-inactive';
 /** The violation text of POST /cis on ci_type_id for a deactivated type (WP-249). */
@@ -638,9 +691,26 @@ export const SCOPED_LISTS: Record<string, readonly ('client_id' | 'site_id')[]> 
   '/buildings': ['site_id'],
   '/vlans': ['site_id'],
   '/subnets': ['client_id', 'site_id'],
+  // The address lists filter by client (IPM-20, WP-909); /ip-addresses is
+  // the path until its sunset (API-01).
+  '/ips': ['client_id'],
+  '/ip-addresses': ['client_id'],
+  // The AS numbers filter by client (IPM-16, WP-1066).
+  '/asns': ['client_id'],
   '/slas': ['client_id'],
   '/business-calendars': ['client_id'],
   '/forms': ['client_id'],
+  // Monitoring P3 (WP-938, E-160): probes, monitoring groups and collector
+  // groups filter by client (collector groups also by site).
+  '/monitoring/probes': ['client_id'],
+  '/monitoring/groups': ['client_id'],
+  '/collector-groups': ['client_id', 'site_id'],
+  // The alarms filter by client and site (ALR-01, WP-983).
+  '/monitoring/alarms': ['client_id', 'site_id'],
+  // The incidents (WP-1036) and the availability targets (WP-1048) filter
+  // by client.
+  '/monitoring/incidents': ['client_id'],
+  '/monitoring/sla/targets': ['client_id'],
 };
 
 /** withScope adds the selected scope to a GET of a scoped list. */
@@ -2505,14 +2575,45 @@ export interface FormDefinition {
   schema: JsonRecord;
   ui_hints: JsonRecord;
   active: boolean;
+  /** Counter of every change of the definition, the ETag (API-07, WP-1133). */
+  version?: number;
+  /** The stored schema version that schema and ui_hints copy (WFL-01). */
+  current_version_id?: string;
+  /** Number of the current schema version. */
+  schema_version?: number;
   created_at: string;
   updated_at: string;
+}
+
+/** One immutable version of schema and ui_hints of a form (WFL-01, WP-1133). */
+export interface FormDefinitionVersion {
+  id: string;
+  organization_id: string;
+  form_id: string;
+  client_id?: string;
+  version: number;
+  schema: JsonRecord;
+  ui_hints: JsonRecord;
+  created_by?: string;
+  created_at: string;
+}
+
+/** The fields of POST /forms and PATCH /forms/{id} the form editor sends. */
+export interface FormDefinitionWrite {
+  name?: string;
+  description?: string;
+  schema?: JsonRecord;
+  ui_hints?: JsonRecord;
+  active?: boolean;
 }
 
 export interface FormSubmission {
   id: string;
   organization_id: string;
   form_id: string;
+  /** The schema version the values were captured against (WFL-01). */
+  form_version_id?: string;
+  form_version?: number;
   values: JsonRecord;
   submitted_by?: string;
   ci_id?: string;
@@ -2571,11 +2672,31 @@ export interface ComplianceRule {
   severity: string;
   category: string;
   expression: JsonRecord;
+  /** MET-45 condition: false is not_applicable; null applies always (WP-1125). */
+  applies_when?: JsonRecord | null;
   remediation_hint?: string;
   active: boolean;
   created_at: string;
   updated_at: string;
 }
+
+/** A rule with the controls assigned to it (GET /compliance/rules/{id}, WP-1128). */
+export type ComplianceRuleDetail = ComplianceRule & { control_ids: string[] };
+export type ComplianceRuleWrite = components['schemas']['CreateComplianceRuleRequest'];
+export type ComplianceRulePatch = components['schemas']['UpdateComplianceRuleRequest'];
+export type ComplianceControl = components['schemas']['ComplianceControl'];
+export type ComplianceStandard = ComplianceControl['standard'];
+export const COMPLIANCE_STANDARDS: readonly ComplianceStandard[] = ['iso27001', 'nis2', 'kritis'];
+export type ComplianceScoreGroup = components['schemas']['ComplianceScoreGroup'];
+export type ComplianceScoreGroupBy = NonNullable<
+  components['schemas']['ComplianceScoreResponse']['group_by']
+>;
+export type ComplianceScoreHistory = components['schemas']['ComplianceScoreHistory'];
+export type ComplianceRuleTemplate = components['schemas']['ComplianceRuleTemplate'];
+export type ComplianceReportRequest = components['schemas']['ComplianceReportRequest'];
+export type ComplianceReportEntry = components['schemas']['ComplianceReportEntry'];
+/** The job a compliance evaluation or report runs as (POST answers 202). */
+export type ComplianceJob = components['schemas']['Job'];
 
 export interface ComplianceResult {
   id: string;
@@ -2608,8 +2729,29 @@ export const formApi = {
   list(params: ListParams & { active?: boolean } = {}): Promise<PaginatedResponse<FormDefinition>> {
     return fetchAPI(`/forms${buildQuery(params)}`);
   },
-  create(data: Partial<FormDefinition>): Promise<FormDefinition> {
+  create(data: FormDefinitionWrite): Promise<FormDefinition> {
     return fetchAPI('/forms', { method: 'POST', body: JSON.stringify(data) });
+  },
+  get(id: string): Promise<FormDefinition> {
+    return fetchAPI(`/forms/${id}`);
+  },
+  /**
+   * update sends PATCH /forms/{id} with If-Match on version (API-07): 412
+   * when another change came first (WP-1133).
+   */
+  update(id: string, data: FormDefinitionWrite, version?: number): Promise<FormDefinition> {
+    return fetchAPI(`/forms/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+      headers: version !== undefined ? { 'If-Match': `"${version}"` } : undefined,
+    });
+  },
+  /** The schema versions of a form, newest first (WFL-01). */
+  versions(id: string): Promise<FormDefinitionVersion[]> {
+    return fetchAllPages(`/forms/${id}/versions`);
+  },
+  version(id: string, version: number): Promise<FormDefinitionVersion> {
+    return fetchAPI(`/forms/${id}/versions/${version}`);
   },
   submit(id: string, data: { values: JsonRecord; ci_id?: string; ticket_id?: string }) {
     return fetchAPI<FormSubmission>(`/forms/${id}/submissions`, {
@@ -2619,6 +2761,10 @@ export const formApi = {
   },
   submissions(params: ListParams & { form_id?: string } = {}) {
     return fetchAPI<PaginatedResponse<FormSubmission>>(`/form-submissions${buildQuery(params)}`);
+  },
+  /** Every submission of a form, page by page (grouped by version, WP-1133). */
+  allSubmissions(formId: string): Promise<FormSubmission[]> {
+    return fetchAllPages(`/form-submissions`, { form_id: formId });
   },
 };
 
@@ -2655,11 +2801,76 @@ export const complianceApi = {
   score() {
     return fetchAPI<ComplianceEvaluationResponse>('/compliance/score');
   },
+  /** POST /compliance/evaluations queues the job compliance.evaluate (WP-1126). */
   evaluate() {
-    return fetchAPI<ComplianceEvaluationResponse>('/compliance/evaluations', { method: 'POST' });
+    return fetchAPI<ComplianceJob>('/compliance/evaluations', { method: 'POST' });
   },
   report(standard = 'iso27001') {
     return fetchAPI<SecurityReport>(`/compliance/report?standard=${encodeURIComponent(standard)}`);
+  },
+  rule(id: string) {
+    return fetchAPI<ComplianceRuleDetail>(`/compliance/rules/${id}`);
+  },
+  createRule(data: ComplianceRuleWrite) {
+    return fetchAPI<ComplianceRule>('/compliance/rules', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+  updateRule(id: string, data: ComplianceRulePatch) {
+    return fetchAPI<ComplianceRule>(`/compliance/rules/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+  setRuleControls(id: string, controlIds: string[]) {
+    return fetchAPI<{ rule_id: string; control_ids: string[] }>(
+      `/compliance/rules/${id}/controls`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ control_ids: controlIds }),
+      },
+    );
+  },
+  controls(standard: ComplianceStandard) {
+    return fetchAPI<PaginatedResponse<ComplianceControl>>(
+      `/compliance/controls${buildQuery({ standard })}`,
+    );
+  },
+  /** The controls of a standard without an active rule (WP-1128). */
+  coverage(standard: ComplianceStandard) {
+    return fetchAPI<PaginatedResponse<ComplianceControl>>(
+      `/compliance/controls/coverage${buildQuery({ standard })}`,
+    );
+  },
+  scoreBy(groupBy: ComplianceScoreGroupBy) {
+    return fetchAPI<components['schemas']['ComplianceScoreResponse']>(
+      `/compliance/score${buildQuery({ group_by: groupBy })}`,
+    );
+  },
+  scoreHistory(from: string, to: string) {
+    return fetchAPI<ComplianceScoreHistory>(`/compliance/score/history${buildQuery({ from, to })}`);
+  },
+  templates() {
+    return fetchAPI<{ data: ComplianceRuleTemplate[] }>('/compliance/rule-templates');
+  },
+  instantiate(key: string) {
+    return fetchAPI<ComplianceRuleDetail>(
+      `/compliance/rule-templates/${encodeURIComponent(key)}/instantiate`,
+      { method: 'POST' },
+    );
+  },
+  reports(params: ListParams = {}) {
+    return fetchAPI<PaginatedResponse<ComplianceReportEntry>>(
+      `/compliance/reports${buildQuery(params)}`,
+    );
+  },
+  /** POST /compliance/reports queues the job compliance.report (WP-1129). */
+  createReport(data: ComplianceReportRequest) {
+    return fetchAPI<ComplianceJob>('/compliance/reports', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   },
 };
 
@@ -2725,6 +2936,8 @@ export interface Credential {
   kind: string;
   scope?: string;
   key_version: number;
+  /** stored keeps the encrypted secret, vault_ref a reference into a vault (WP-894). */
+  source?: 'stored' | 'vault_ref';
   created_at: string;
   updated_at: string;
 }
@@ -2751,7 +2964,19 @@ export interface CredentialInput {
   name: string;
   kind: CredentialKind;
   client_id?: string;
-  secret: Record<string, string>;
+  /**
+   * stored (default) sends secret; vault_ref sends vault_ref instead and no
+   * secret (CRD-02, WP-894). The server takes the source from which of the
+   * two is present, so source itself is not sent.
+   */
+  source?: 'stored' | 'vault_ref';
+  secret?: Record<string, string>;
+  vault_ref?: {
+    connection_id: string;
+    path: string;
+    version?: number;
+    field_map: Record<string, string>;
+  };
 }
 
 export const credentialApi = {
@@ -2759,7 +2984,11 @@ export const credentialApi = {
     return fetchAPI(`/credentials${buildQuery(params)}`);
   },
   create(input: CredentialInput): Promise<Credential> {
-    return fetchAPI('/credentials', { method: 'POST', body: JSON.stringify(input) });
+    // source only picks the member; the request carries secret or vault_ref.
+    const { source, ...body } = input;
+    if (source === 'vault_ref') delete body.secret;
+    else delete body.vault_ref;
+    return fetchAPI('/credentials', { method: 'POST', body: JSON.stringify(body) });
   },
   remove(id: string): Promise<void> {
     return fetchAPI(`/credentials/${encodeURIComponent(id)}`, { method: 'DELETE' });
@@ -2967,7 +3196,17 @@ export const webhookApi = {
 
 // --- Export ---
 
+/**
+ * ExportJobIPAMFilters are the filters of an export of subnets or addresses
+ * (filters.ipam, WP-921): those of GET /subnets resp. GET /ips (WP-909).
+ */
+export type ExportJobIPAMFilters = components['schemas']['ExportJobIPAMFilters'];
+
 export interface ExportJobFilters {
+  /** What a csv or json export renders; subnet and ip_address export IPAM as CSV (WP-921). */
+  entity?: components['schemas']['ExportJobFilters']['entity'];
+  /** The filters of an IPAM export (entity subnet or ip_address, WP-922). */
+  ipam?: ExportJobIPAMFilters;
   status?: string;
   ci_type_id?: string;
   client_id?: string;
@@ -3037,29 +3276,75 @@ export interface MetricQueryParams {
   step?: string;
 }
 
+/**
+ * A stage or the clear condition of an alert rule (WP-985): a MET-45
+ * condition over the metric context of a series (value, avg, max, min,
+ * delta, rate); null is no condition.
+ */
+export type AlertRuleCondition = Condition | null;
+
 export interface AlertRule {
   id: string;
   org_id: string;
   name: string;
   metric_name: string;
-  condition: 'gt' | 'lt' | 'eq';
-  threshold: number;
+  /** @deprecated Old form, only for a rule with one stage comparing value. */
+  condition?: 'gt' | 'lt' | 'eq';
+  /** @deprecated Old form, with condition. */
+  threshold?: number;
   duration: string;
-  severity: 'critical' | 'warning' | 'info';
+  /** @deprecated Old form, with condition. */
+  severity?: 'critical' | 'warning' | 'info';
   enabled: boolean;
-  pending_since?: string;
-  last_fired_at?: string;
+  critical_condition: AlertRuleCondition;
+  warning_condition: AlertRuleCondition;
+  info_condition: AlertRuleCondition;
+  clear_condition: AlertRuleCondition;
+  eval_window: string;
+  scope?: AlertRuleScope;
+  group_by?: string[];
+  /** The follow-up actions of the rule (WP-988). */
+  actions?: AlertRuleActions;
+}
+
+/** The scope of an alert rule (ALR-05): CIs, CI types with subtypes, client, site, labels. */
+export interface AlertRuleScope {
+  ci_ids?: string[];
+  ci_type_ids?: string[];
+  client_id?: string;
+  site_id?: string;
+  labels?: Record<string, string>;
+}
+
+/** The follow-up actions of an alert rule (WP-988): notification and webhook on or off. */
+export interface AlertRuleActions {
+  notify?: { enabled: boolean };
+  webhook?: { enabled: boolean };
 }
 
 export interface AlertRuleCreateRequest {
   name: string;
   metric_name: string;
-  condition: 'gt' | 'lt' | 'eq';
-  threshold: number;
+  /** @deprecated Use the stages; the old form becomes the stage of severity. */
+  condition?: 'gt' | 'lt' | 'eq';
+  /** @deprecated Use the stages. */
+  threshold?: number;
   duration?: string;
+  /** @deprecated Use the stages. */
   severity?: 'critical' | 'warning' | 'info';
   enabled?: boolean;
+  critical_condition?: AlertRuleCondition;
+  warning_condition?: AlertRuleCondition;
+  info_condition?: AlertRuleCondition;
+  clear_condition?: AlertRuleCondition;
+  eval_window?: string;
+  scope?: AlertRuleScope;
+  group_by?: string[];
+  actions?: AlertRuleActions | null;
 }
+
+/** PATCH /monitoring/alerts/{id} (WP-990): every field of the rule but its metric. */
+export type AlertRuleUpdateRequest = Partial<Omit<AlertRuleCreateRequest, 'metric_name'>>;
 
 export interface CIMetricSeries {
   name: string;
@@ -3088,8 +3373,177 @@ export const monitoringApi = {
   createAlert(data: AlertRuleCreateRequest): Promise<AlertRule> {
     return fetchAPI('/monitoring/alerts', { method: 'POST', body: JSON.stringify(data) });
   },
+  updateAlert(id: string, data: AlertRuleUpdateRequest): Promise<AlertRule> {
+    return fetchAPI(`/monitoring/alerts/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
   deleteAlert(id: string): Promise<void> {
     return fetchAPI(`/monitoring/alerts/${id}`, { method: 'DELETE' });
+  },
+
+  // ─── Settings: probe types, profiles, groups (PRB-01, WP-946, WP-1080) ───
+  /** Every entry of the probe type register (monitoring:read). */
+  probeTypes(): Promise<ProbeType[]> {
+    return fetchAllPages<ProbeType>('/monitoring/probe-types');
+  },
+  /** The profiles of a filter, every page (monitoring:read). */
+  profiles(params: MonitoringProfileQuery = {}): Promise<MonitoringProfile[]> {
+    return fetchAllPages<MonitoringProfile>('/monitoring/profiles', params);
+  },
+  createProfile(data: MonitoringProfileCreate): Promise<MonitoringProfile> {
+    return fetchAPI('/monitoring/profiles', { method: 'POST', body: JSON.stringify(data) });
+  },
+  updateProfile(id: string, params: ProbeOverrides): Promise<MonitoringProfile> {
+    return fetchAPI(`/monitoring/profiles/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ params }),
+    });
+  },
+  deleteProfile(id: string): Promise<void> {
+    return fetchAPI(`/monitoring/profiles/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+  /** Every monitoring group in the caller's scope (monitoring:read). */
+  groups(): Promise<MonitoringGroup[]> {
+    return fetchAllPages<MonitoringGroup>('/monitoring/groups');
+  },
+  createGroup(data: MonitoringGroupCreate): Promise<MonitoringGroup> {
+    return fetchAPI('/monitoring/groups', { method: 'POST', body: JSON.stringify(data) });
+  },
+  updateGroup(id: string, data: MonitoringGroupUpdate): Promise<MonitoringGroup> {
+    return fetchAPI(`/monitoring/groups/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+  /** Deletes the group with its memberships and profiles; names the deleted profiles. */
+  deleteGroup(id: string): Promise<MonitoringGroupDeleteResult> {
+    return fetchAPI(`/monitoring/groups/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+  groupMembers(id: string): Promise<MonitoringGroupMember[]> {
+    return fetchAllPages<MonitoringGroupMember>(
+      `/monitoring/groups/${encodeURIComponent(id)}/members`,
+    );
+  },
+  /** Adds up to MONITORING_GROUP_MAX_MEMBERS CIs per call (422 ci_ids for another client). */
+  addGroupMembers(id: string, ciIds: string[]): Promise<{ data: MonitoringGroupMember[] }> {
+    return fetchAPI(`/monitoring/groups/${encodeURIComponent(id)}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ ci_ids: ciIds }),
+    });
+  },
+  removeGroupMember(id: string, ciId: string): Promise<void> {
+    return fetchAPI(
+      `/monitoring/groups/${encodeURIComponent(id)}/members/${encodeURIComponent(ciId)}`,
+      { method: 'DELETE' },
+    );
+  },
+  /** The probes of a CI (monitoring:read). */
+  ciProbes(ciId: string): Promise<Probe[]> {
+    return fetchAllPages<Probe>('/monitoring/probes', { ci_id: ciId });
+  },
+  /** The effective values of a probe with their origin per field (PRB-01). */
+  probeEffective(id: string): Promise<EffectiveProbe> {
+    return fetchAPI(`/monitoring/probes/${encodeURIComponent(id)}/effective`);
+  },
+};
+
+// The types of the monitoring settings (api/openapi.yaml, WP-946).
+export type ProbeType = components['schemas']['ProbeType'];
+export type ProbeOverrides = components['schemas']['ProbeOverrides'];
+export type MonitoringProfile = components['schemas']['MonitoringProfile'];
+export type MonitoringProfileLevel = components['schemas']['MonitoringProfileLevel'];
+export type MonitoringProfileCreate = components['schemas']['MonitoringProfileCreateRequest'];
+export type MonitoringGroup = components['schemas']['MonitoringGroup'];
+export type MonitoringGroupCreate = components['schemas']['MonitoringGroupCreateRequest'];
+export type MonitoringGroupUpdate = components['schemas']['MonitoringGroupUpdateRequest'];
+export type MonitoringGroupDeleteResult = components['schemas']['MonitoringGroupDeleteResult'];
+export type MonitoringGroupMember = components['schemas']['MonitoringGroupMember'];
+export type Probe = components['schemas']['Probe'];
+export type EffectiveProbe = components['schemas']['EffectiveProbe'];
+export type EffectiveProbeField = components['schemas']['EffectiveProbeField'];
+export type ProbeValueOrigin = components['schemas']['ProbeValueOrigin'];
+
+/** The filters of GET /monitoring/profiles. */
+export interface MonitoringProfileQuery {
+  level?: MonitoringProfileLevel;
+  level_id?: string;
+  probe_type?: string;
+}
+
+/** The most CIs one POST /monitoring/groups/{id}/members takes. */
+export const MONITORING_GROUP_MAX_MEMBERS = 500;
+
+// --- Alarms (ALR-01, WP-983, WP-991) ---
+
+export type Alarm = components['schemas']['Alarm'];
+export type AlarmDetail = components['schemas']['AlarmDetail'];
+export type AlarmTransition = components['schemas']['AlarmTransition'];
+export type AlarmState = components['schemas']['AlarmState'];
+export type AlarmSeverity = components['schemas']['AlarmSeverity'];
+
+/** AlarmListParams are the filters of GET /monitoring/alarms; lists are comma-separated. */
+export interface AlarmListParams {
+  state?: string;
+  severity?: string;
+  client_id?: string;
+  ci_id?: string;
+  incident_id?: string;
+  suppressed?: boolean;
+  limit?: number;
+  cursor?: string;
+}
+
+/** AlarmListPage is one cursor page of the alarms (API-02). */
+export type AlarmListPage = components['schemas']['AlarmListResponse'];
+
+export const alarmApi = {
+  list(params: AlarmListParams = {}): Promise<AlarmListPage> {
+    return fetchAPI(`/monitoring/alarms${buildQuery(params)}`);
+  },
+  get(id: string): Promise<AlarmDetail> {
+    return fetchAPI(`/monitoring/alarms/${encodeURIComponent(id)}`);
+  },
+  acknowledge(id: string, comment?: string): Promise<Alarm> {
+    return fetchAPI(`/monitoring/alarms/${encodeURIComponent(id)}/ack`, {
+      method: 'POST',
+      body: JSON.stringify(comment ? { comment } : {}),
+    });
+  },
+  unacknowledge(id: string, comment?: string): Promise<Alarm> {
+    return fetchAPI(`/monitoring/alarms/${encodeURIComponent(id)}/unack`, {
+      method: 'POST',
+      body: JSON.stringify(comment ? { comment } : {}),
+    });
+  },
+};
+
+// --- Incidents (ALR-03, ALR-10, WP-1036, WP-1045) ---
+
+export type Incident = components['schemas']['Incident'];
+export type IncidentListPage = components['schemas']['IncidentListResponse'];
+
+/** The states and cause classes of an incident (enums of the API). */
+export const INCIDENT_STATES = ['open', 'acknowledged', 'resolved'] as const;
+export const INCIDENT_CAUSE_CLASSES = ['topology', 'collector_unreachable', 'unknown'] as const;
+
+/**
+ * IncidentListParams are the filters of GET /monitoring/incidents: state and
+ * cause_class comma-separated, from and to (RFC 3339) on opened_at,
+ * resolved_from (RFC 3339) on resolved_at.
+ */
+export interface IncidentListParams {
+  state?: string;
+  client_id?: string;
+  cause_class?: string;
+  from?: string;
+  to?: string;
+  resolved_from?: string;
+  limit?: number;
+  cursor?: string;
+}
+
+export const incidentApi = {
+  list(params: IncidentListParams = {}): Promise<IncidentListPage> {
+    return fetchAPI(`/monitoring/incidents${buildQuery(params)}`);
   },
 };
 
@@ -3129,12 +3583,66 @@ export interface Entitlement {
   limits: Record<string, number>;
   valid_until?: string;
   source: 'manual' | 'selfsignup' | 'billing' | 'reseller';
+  /** Where the row comes from (PKG-01, WP-880). */
+  origin: 'plan' | 'addon' | 'manual';
   updated_at: string;
 }
 
+/** GET /entitlements: the rows and the leading plan of the organization. */
+export interface EntitlementListResponse extends PaginatedResponse<Entitlement> {
+  /** organization.plan, the leading plan (WP-880). */
+  plan: string;
+  /** Time of the last plan change; null while the plan of the creation applies. */
+  plan_changed_at: string | null;
+}
+
+/** The use of one quota (PKG-05, WP-885). */
+export interface QuotaUsage {
+  quota: string;
+  /** Current use; null when the caller may not see the counts (F-414). */
+  used: number | null;
+  /** The limit; null is unlimited. */
+  limit: number | null;
+  /** The limit is the plan default or an override. */
+  origin: 'plan' | 'override';
+}
+
+/** GET /entitlements/usage. */
+export interface QuotaUsageResponse {
+  data: QuotaUsage[];
+  plan: string;
+}
+
+/** One plan of the plan matrix (E-151, E-153). */
+export interface PlanInfo {
+  plan: string;
+  features: string[];
+  /** Default limits; a quota without entry is unlimited. */
+  quota_defaults: Record<string, number>;
+}
+
+/** A bookable add-on (CH14). */
+export interface AddonInfo {
+  key: string;
+  phase: 'A';
+  description_key: string;
+}
+
+/** GET /entitlements/plans: the plan matrix and the add-ons. */
+export interface PlanMatrixResponse {
+  data: PlanInfo[];
+  addons: AddonInfo[];
+}
+
 export const entitlementApi = {
-  list(params: ListParams = {}): Promise<PaginatedResponse<Entitlement>> {
+  list(params: ListParams = {}): Promise<EntitlementListResponse> {
     return fetchAPI(`/entitlements${buildQuery(params)}`);
+  },
+  usage(): Promise<QuotaUsageResponse> {
+    return fetchAPI('/entitlements/usage');
+  },
+  plans(): Promise<PlanMatrixResponse> {
+    return fetchAPI('/entitlements/plans');
   },
 };
 
@@ -3664,7 +4172,7 @@ export interface SecurityFinding {
 
 export const securityFindingApi = {
   list(
-    params: ListParams & { status?: string; severity?: string; kind?: string } = {},
+    params: ListParams & { status?: string; severity?: string; kind?: string; ci_id?: string } = {},
   ): Promise<PaginatedResponse<SecurityFinding>> {
     return fetchAPI(`/security/findings${buildQuery(params)}`);
   },
@@ -3676,5 +4184,151 @@ export const securityFindingApi = {
       method: 'PATCH',
       body: JSON.stringify({ status }),
     });
+  },
+};
+
+/** A product mapping of the version match (SEC-02, WP-1122). */
+export type CPEMapping = components['schemas']['CPEMapping'];
+export type CPEMappingRequest = components['schemas']['CPEMappingRequest'];
+/** A group of CIs without product mapping (manufacturer, model, sys_object_id). */
+export type UnmappedCIGroup = components['schemas']['UnmappedCIGroup'];
+/** A vendor and product of the vulnerability catalog. */
+export type VulnProduct = components['schemas']['VulnProduct'];
+export type CPEVersionScheme = NonNullable<CPEMapping['version_scheme']>;
+export const CPE_VERSION_SCHEMES: readonly CPEVersionScheme[] = [
+  'generic',
+  'cisco_ios',
+  'cisco_ios_xe',
+  'cisco_nxos',
+  'junos',
+];
+
+export const productMappingApi = {
+  list(params: ListParams = {}): Promise<PaginatedResponse<CPEMapping>> {
+    return fetchAPI(`/security/cpe-mappings${buildQuery(params)}`);
+  },
+  create(data: CPEMappingRequest): Promise<CPEMapping> {
+    return fetchAPI('/security/cpe-mappings', { method: 'POST', body: JSON.stringify(data) });
+  },
+  update(id: string, data: CPEMappingRequest): Promise<CPEMapping> {
+    return fetchAPI(`/security/cpe-mappings/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+  /** remove answers match_job_id when the deletion queued a match (200), nothing otherwise (204). */
+  remove(id: string): Promise<{ match_job_id: string } | undefined> {
+    return fetchAPI(`/security/cpe-mappings/${id}`, { method: 'DELETE' });
+  },
+  unmapped(params: ListParams = {}): Promise<PaginatedResponse<UnmappedCIGroup>> {
+    return fetchAPI(`/security/unmapped${buildQuery(params)}`);
+  },
+  products(q: string): Promise<{ data: VulnProduct[] }> {
+    return fetchAPI(`/security/vuln-products${buildQuery({ q })}`);
+  },
+};
+
+/** One stored source rank of the organization (REC-04, WP-1105). */
+export type SourceRankEntry = components['schemas']['SourceRankEntry'];
+/** The effective ranks of one attribute with their origin (type, org, default). */
+export type SourceRankEffective = components['schemas']['SourceRankEffective'];
+export type SourceRanks = components['schemas']['SourceRanks'];
+/** The automation sources whose rank an organization configures (WP-1105). */
+export type RankSource = SourceRankEntry['source'];
+export const RANK_SOURCES: readonly RankSource[] = [
+  'import',
+  'workflow',
+  'redfish',
+  'ipmi',
+  'agent',
+  'snmp',
+  'api',
+  'integration',
+  'wmi',
+  'ssh',
+  'nas',
+  'sweep',
+];
+
+export interface SourceRankParams {
+  /** Resolve the effective ranks for this CI type; empty: organization-wide. */
+  ci_type_id?: string;
+  /** Attributes whose effective tables are wanted. */
+  attribute_keys?: string[];
+}
+
+/**
+ * sourceRankApi reads and replaces the source ranks per attribute (REC-04,
+ * WP-1105, WP-1115). PUT replaces every entry of the organization, so the
+ * caller sends the complete list, also the entries of other CI types.
+ */
+export const sourceRankApi = {
+  get(params: SourceRankParams = {}): Promise<SourceRanks> {
+    const query = new URLSearchParams();
+    if (params.ci_type_id) query.set('ci_type_id', params.ci_type_id);
+    if (params.attribute_keys?.length) query.set('attribute_key', params.attribute_keys.join(','));
+    const search = query.toString();
+    return fetchAPI(`/reconciliation/source-ranks${search ? `?${search}` : ''}`);
+  },
+  replace(entries: SourceRankEntry[]): Promise<SourceRanks> {
+    return fetchAPI('/reconciliation/source-ranks', {
+      method: 'PUT',
+      body: JSON.stringify({ entries }),
+    });
+  },
+};
+
+// --- Organization data: full export and deletion (TLC-05, TLC-06, WP-1157) ---
+
+export type OrganizationExport = components['schemas']['OrganizationExport'];
+export type OrganizationExportDownload = components['schemas']['OrganizationExportDownload'];
+export type OrganizationDeletion = components['schemas']['OrganizationDeletion'];
+export type OrganizationDeletionState = OrganizationDeletion['state'];
+export type OrganizationExportStatus = OrganizationExport['status'];
+
+/** The states of an organization's deletion (labels orgData.states.*). */
+export const ORG_DELETION_STATES = [
+  'none',
+  'requested',
+  'purging',
+  'purged',
+] as const satisfies readonly OrganizationDeletionState[];
+/** The statuses of a full export (labels orgData.exportStatuses.*). */
+export const ORG_EXPORT_STATUSES = [
+  'queued',
+  'running',
+  'completed',
+  'expired',
+  'failed',
+  'cancelled',
+] as const satisfies readonly OrganizationExportStatus[];
+
+export const orgLifecycleApi = {
+  /** The full exports of the organization, newest first (one page, org:export). */
+  exports(): Promise<PaginatedResponse<OrganizationExport>> {
+    return fetchAPI('/org/exports?limit=50');
+  },
+  /** Starts a full export (org:export with a second factor; 403 mfa-required without). */
+  startExport(): Promise<OrganizationExport> {
+    return fetchAPI('/org/exports', { method: 'POST' });
+  },
+  /** The objects of a completed export with signed URLs (org:export, second factor). */
+  download(id: string): Promise<OrganizationExportDownload> {
+    return fetchAPI(`/org/exports/${encodeURIComponent(id)}/download`);
+  },
+  /** The deletion state of the organization (every user, location:read). */
+  deletion(): Promise<OrganizationDeletion> {
+    return fetchAPI('/org/deletion');
+  },
+  /** Requests the deletion with the slug as confirmation (org:delete, second factor). */
+  requestDeletion(confirmSlug: string): Promise<OrganizationDeletion> {
+    return fetchAPI('/org/deletion', {
+      method: 'POST',
+      body: JSON.stringify({ confirm_slug: confirmSlug }),
+    });
+  },
+  /** Withdraws the request during the grace period (org:delete, second factor). */
+  cancelDeletion(): Promise<OrganizationDeletion> {
+    return fetchAPI('/org/deletion', { method: 'DELETE' });
   },
 };

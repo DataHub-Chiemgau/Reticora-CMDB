@@ -1,7 +1,6 @@
 package events
 
 import (
-	"strings"
 	"time"
 )
 
@@ -61,6 +60,79 @@ const (
 	ImportCompleted       = "import.completed"
 )
 
+// Event types of the monitoring of phase 3 (EVT-03 [P3], ALR-02, PRB-03,
+// ALR-07; WP-867, E-161 Option 2): one event per state change, never one
+// per probe result. config.changed is a change of the configuration of a
+// probe, ci.config_changed one of a device. The producing work packages
+// write them (plannedProducers in evt02_producers_integration_test.go).
+const (
+	ProbeStateChanged           = "probe.state_changed"
+	AlarmOpened                 = "alarm.opened"
+	AlarmAcknowledged           = "alarm.acknowledged"
+	AlarmEscalated              = "alarm.escalated"
+	AlarmSeverityChanged        = "alarm.severity_changed"
+	AlarmResolved               = "alarm.resolved"
+	IncidentOpened              = "incident.opened"
+	IncidentUpdated             = "incident.updated"
+	IncidentResolved            = "incident.resolved"
+	CollectorGroupUnreachable   = "collector_group.unreachable"
+	CollectorGroupReachable     = "collector_group.reachable"
+	CollectorGroupFailover      = "collector_group.failover"
+	CollectorClockSkew          = "collector.clock_skew"
+	ProbeConfigChanged          = "config.changed"
+	CIConfigChanged             = "ci.config_changed"
+	MonitoringSuspensionChanged = "monitoring.suspension_changed"
+	CapacityForecastExceeded    = "capacity.forecast_exceeded"
+	SLAViolated                 = "sla.violated"
+)
+
+// Event types of the modules of phase 3 (EVT-03 [P3], NTF-05 [P3], MGT-04,
+// WFL-02, SEC-02, NTF-02, PKG-02, TLC-05, TLC-06; WP-868, E-161). They
+// replace the reservation of phase 2 (maintenance.scheduled, workflow.*,
+// finding.*).
+const (
+	MaintenanceScheduled      = "maintenance.scheduled"
+	MaintenanceStarted        = "maintenance.started"
+	MaintenanceEnded          = "maintenance.ended"
+	WorkflowRunStarted        = "workflow.run_started"
+	WorkflowRunSucceeded      = "workflow.run_succeeded"
+	WorkflowRunFailed         = "workflow.run_failed"
+	WorkflowRunCancelled      = "workflow.run_cancelled"
+	WorkflowApprovalRequested = "workflow.approval_requested"
+	WorkflowApprovalDecided   = "workflow.approval_decided"
+	WorkflowWebhook           = "workflow.webhook"
+	FindingCreated            = "finding.created"
+	FindingChanged            = "finding.changed"
+	FindingResolved           = "finding.resolved"
+	NotificationEscalated     = "notification.escalated"
+	NotificationAcknowledged  = "notification.acknowledged"
+	EntitlementChanged        = "entitlement.changed"
+	OrgExportCompleted        = "org.export_completed"
+	OrgDeletionRequested      = "org.deletion_requested"
+	OrgDeletionCancelled      = "org.deletion_cancelled"
+)
+
+// Event types of the network domain of phase 3 (IPAM/ASN, credentials, ADMP;
+// WP-870). Their data never carry a secret or the holder of a connection in
+// plain text (SEC-05).
+const (
+	IPAMSubnetChanged          = "ipam.subnet.changed"
+	IPAMAddressStateChanged    = "ipam.address.state_changed"
+	ASNChanged                 = "asn.changed"
+	CredentialRotated          = "credential.rotated"
+	CredentialRotationDue      = "credential.rotation_due"
+	CredentialResolutionFailed = "credential.resolution_failed"
+	ADMPConnectionRefreshed    = "admp.connection.refreshed"
+)
+
+// Phase3Types are the event types of phase 3 (EVT-03 [P3]); every one has a
+// producer case or a planned producer (TestEveryEVT02TypeHasAProducer).
+var Phase3Types = []string{
+	ProbeStateChanged, AlarmOpened, AlarmAcknowledged, AlarmEscalated, AlarmSeverityChanged, AlarmResolved, IncidentOpened, IncidentUpdated, IncidentResolved, CollectorGroupUnreachable, CollectorGroupReachable, CollectorGroupFailover, CollectorClockSkew, ProbeConfigChanged, CIConfigChanged, MonitoringSuspensionChanged, CapacityForecastExceeded, SLAViolated,
+	MaintenanceScheduled, MaintenanceStarted, MaintenanceEnded, WorkflowRunStarted, WorkflowRunSucceeded, WorkflowRunFailed, WorkflowRunCancelled, WorkflowApprovalRequested, WorkflowApprovalDecided, WorkflowWebhook, FindingCreated, FindingChanged, FindingResolved, NotificationEscalated, NotificationAcknowledged, EntitlementChanged, OrgExportCompleted, OrgDeletionRequested, OrgDeletionCancelled,
+	IPAMSubnetChanged, IPAMAddressStateChanged, ASNChanged, CredentialRotated, CredentialRotationDue, CredentialResolutionFailed, ADMPConnectionRefreshed,
+}
+
 // Types lists the event types, in the order of the type enum of
 // api/events.schema.json. New types are added here and in the schema only.
 var Types = []string{
@@ -74,34 +146,16 @@ var Types = []string{
 	ContractExpiring, StockMovement, StockBelowMinimum,
 	ReservationCreated, ReservationReleased, ReservationExpired, ReservationConverted,
 	TicketUpdated, TicketSLABreached, MetamodelPublished, DocumentScanned, ImportCompleted,
+	ProbeStateChanged, AlarmOpened, AlarmAcknowledged, AlarmEscalated, AlarmSeverityChanged, AlarmResolved, IncidentOpened, IncidentUpdated, IncidentResolved, CollectorGroupUnreachable, CollectorGroupReachable, CollectorGroupFailover, CollectorClockSkew, ProbeConfigChanged, CIConfigChanged, MonitoringSuspensionChanged, CapacityForecastExceeded, SLAViolated,
+	MaintenanceScheduled, MaintenanceStarted, MaintenanceEnded, WorkflowRunStarted, WorkflowRunSucceeded, WorkflowRunFailed, WorkflowRunCancelled, WorkflowApprovalRequested, WorkflowApprovalDecided, WorkflowWebhook, FindingCreated, FindingChanged, FindingResolved, NotificationEscalated, NotificationAcknowledged, EntitlementChanged, OrgExportCompleted, OrgDeletionRequested, OrgDeletionCancelled,
+	IPAMSubnetChanged, IPAMAddressStateChanged, ASNChanged, CredentialRotated, CredentialRotationDue, CredentialResolutionFailed, ADMPConnectionRefreshed,
 }
 
-// Reserved are the event types of phase 3 (EVT-03 [P3]); a trailing ".*"
-// reserves every type of the prefix. They are no event types yet: IsType,
-// and with it Outbox.Append and AppendMany, refuses them.
-var Reserved = []string{"maintenance.scheduled", "workflow.*", "finding.*"}
-
-// IsType reports whether t is a registered event type.
+// IsType reports whether t is a registered event type. The reservation of
+// phase 3 ended with WP-868: every type of phase 3 is registered.
 func IsType(t string) bool {
-	if IsReserved(t) {
-		return false
-	}
 	for _, known := range Types {
 		if known == t {
-			return true
-		}
-	}
-	return false
-}
-
-// IsReserved reports whether t is a reserved type of phase 3.
-func IsReserved(t string) bool {
-	for _, r := range Reserved {
-		if prefix, ok := strings.CutSuffix(r, "*"); ok {
-			if strings.HasPrefix(t, prefix) {
-				return true
-			}
-		} else if r == t {
 			return true
 		}
 	}
@@ -367,27 +421,423 @@ type ImportCompletedData struct {
 	InitiatedBy string `json:"initiated_by,omitempty"`
 }
 
-// Payloads assigns every phase 2 type the frame of its data.
+// ProbeStateChangedData is the data of probe.state_changed (PRB-05, ALR-02):
+// one state change of a probe, never one result (E-161). suppressed_by and
+// root_incident_id name the root of a consequential outage.
+type ProbeStateChangedData struct {
+	ID             string `json:"id"`
+	CIID           string `json:"ci_id,omitempty"`
+	ClientID       string `json:"client_id,omitempty"`
+	SiteID         string `json:"site_id,omitempty"`
+	From           string `json:"from"`
+	To             string `json:"to"`
+	Reason         string `json:"reason,omitempty"`
+	SuppressedBy   string `json:"suppressed_by,omitempty"`
+	RootIncidentID string `json:"root_incident_id,omitempty"`
+}
+
+// AlarmData is the data of the alarm.* types (ALR-01, ALR-02). id and
+// alarm_id both name the alarm: id is the frame of every type (WP-867),
+// alarm_id the name of ALR-01 (WP-982); dedup_key is the deduplication key
+// of the alarm. source_kind, summary, value, suppressed_reason, opened_at
+// and resolved_at serve the notifications (WP-987): a suppressed alarm
+// notifies nobody, the texts name the summary, the value and the duration.
+// actions are the follow-up actions of the alarm (WP-988, AlarmActions):
+// notify.enabled false notifies nobody, webhook.enabled false reaches no
+// webhook subscription; absent is both on.
+type AlarmData struct {
+	ID               string   `json:"id"`
+	AlarmID          string   `json:"alarm_id"`
+	DedupKey         string   `json:"dedup_key"`
+	CIID             string   `json:"ci_id,omitempty"`
+	ClientID         string   `json:"client_id,omitempty"`
+	SiteID           string   `json:"site_id,omitempty"`
+	Severity         string   `json:"severity"`
+	IncidentID       string   `json:"incident_id,omitempty"`
+	SourceKind       string   `json:"source_kind,omitempty"`
+	Summary          string   `json:"summary,omitempty"`
+	Value            *float64 `json:"value,omitempty"`
+	SuppressedReason string   `json:"suppressed_reason,omitempty"`
+	// AfterMaintenance marks the alarm.opened of an alarm still open at
+	// the end of the window that suppressed it (WP-1033).
+	AfterMaintenance bool          `json:"after_maintenance,omitempty"`
+	OpenedAt         *time.Time    `json:"opened_at,omitempty"`
+	ResolvedAt       *time.Time    `json:"resolved_at,omitempty"`
+	Actions          *AlarmActions `json:"actions,omitempty"`
+}
+
+// IncidentData is the data of the incident.* types (ALR-03): the incident
+// with its root CI and cause class.
+//
+// incident.updated of a user action (WP-1036) adds incident_id (the
+// incident, as id), the kind of the change (acknowledged, root_changed),
+// the root alarm and the acting user.
+type IncidentData struct {
+	ID          string `json:"id"`
+	IncidentID  string `json:"incident_id,omitempty"`
+	RootCIID    string `json:"root_ci_id,omitempty"`
+	ClientID    string `json:"client_id,omitempty"`
+	SiteID      string `json:"site_id,omitempty"`
+	Severity    string `json:"severity"`
+	CauseClass  string `json:"cause_class,omitempty"`
+	Change      string `json:"change,omitempty"`
+	RootAlarmID string `json:"root_alarm_id,omitempty"`
+	ActorID     string `json:"actor_id,omitempty"`
+}
+
+// CollectorGroupData is the data of the collector_group.* types (PRB-03,
+// PRB-10): the group, its scope and the root event of a network outage.
+type CollectorGroupData struct {
+	ID          string `json:"id"`
+	ClientID    string `json:"client_id,omitempty"`
+	SiteID      string `json:"site_id,omitempty"`
+	RootEventID string `json:"root_event_id,omitempty"`
+}
+
+// CollectorGroupFailoverData is the data of collector_group.failover
+// (PRB-03, PRB-10, WP-963): a member of the group stopped its monitoring
+// alive messages and its probes moved to the remaining healthy members.
+// ID and CollectorGroupID are the group, FailedCollectorID the member set
+// down, MovedProbes the number of probes assigned anew.
+type CollectorGroupFailoverData struct {
+	ID                string `json:"id"`
+	CollectorGroupID  string `json:"collector_group_id"`
+	ClientID          string `json:"client_id,omitempty"`
+	SiteID            string `json:"site_id,omitempty"`
+	FailedCollectorID string `json:"failed_collector_id"`
+	MovedProbes       int    `json:"moved_probes"`
+}
+
+// CollectorClockSkewData is the data of collector.clock_skew: a collector
+// whose clock deviates from the server (PRB-09, WP-962). SkewMS is the
+// median offset collector − server, OffsetMS the same under the name of
+// WP-962 AK3, CollectorID the same as ID (id and skew_ms stay for the
+// consumers of E-161); Degraded marks the crossing of 60 s
+// (the member is degraded and its timestamps are corrected), Resolved the
+// end of the warning (below 2 s for six alive messages).
+type CollectorClockSkewData struct {
+	ID               string `json:"id"`
+	CollectorID      string `json:"collector_id"`
+	CollectorGroupID string `json:"collector_group_id,omitempty"`
+	ClientID         string `json:"client_id,omitempty"`
+	SiteID           string `json:"site_id,omitempty"`
+	SkewMS           int64  `json:"skew_ms"`
+	OffsetMS         int64  `json:"offset_ms"`
+	Degraded         bool   `json:"degraded"`
+	Resolved         bool   `json:"resolved,omitempty"`
+}
+
+// ProbeConfigChangedData is the data of config.changed: a change of the
+// configuration of a probe, never of a device (E-161).
+type ProbeConfigChangedData struct {
+	ID            string   `json:"id"`
+	CIID          string   `json:"ci_id,omitempty"`
+	ClientID      string   `json:"client_id,omitempty"`
+	SiteID        string   `json:"site_id,omitempty"`
+	ChangedFields []string `json:"changed_fields"`
+}
+
+// CIConfigChangedData is the data of ci.config_changed (ALR-07): a new
+// configuration version of a device.
+type CIConfigChangedData struct {
+	ID       string `json:"id"`
+	CIID     string `json:"ci_id"`
+	ClientID string `json:"client_id,omitempty"`
+	SiteID   string `json:"site_id,omitempty"`
+	Hash     string `json:"hash"`
+}
+
+// MonitoringSuspensionData is the data of monitoring.suspension_changed:
+// monitoring functions of the organization were suspended or resumed because
+// their feature was lost or regained.
+type MonitoringSuspensionData struct {
+	FeatureKey string `json:"feature_key"`
+	Suspended  bool   `json:"suspended"`
+}
+
+// CapacityForecastData is the data of capacity.forecast_exceeded (ALR-08): a
+// forecast reaches its threshold within the horizon.
+type CapacityForecastData struct {
+	ID          string `json:"id"`
+	CIID        string `json:"ci_id"`
+	ClientID    string `json:"client_id,omitempty"`
+	SiteID      string `json:"site_id,omitempty"`
+	Metric      string `json:"metric"`
+	ThresholdAt string `json:"threshold_at"`
+}
+
+// SLAViolatedData is the data of sla.violated (ALR-06): an availability
+// target missed its goal in a period.
+type SLAViolatedData struct {
+	ID            string  `json:"id"`
+	ClientID      string  `json:"client_id,omitempty"`
+	SiteID        string  `json:"site_id,omitempty"`
+	Period        string  `json:"period"`
+	TargetPercent float64 `json:"target_percent"`
+	ActualPercent float64 `json:"actual_percent"`
+}
+
+// MaintenanceWindowData is the data of the maintenance.* types (MGT-04): the
+// window, its scope and its time span.
+type MaintenanceWindowData struct {
+	ID       string `json:"id"`
+	ClientID string `json:"client_id,omitempty"`
+	SiteID   string `json:"site_id,omitempty"`
+	StartsAt string `json:"starts_at"`
+	EndsAt   string `json:"ends_at"`
+}
+
+// WorkflowRunData is the data of the workflow.run_* types (WFL-02): the run,
+// its workflow and the object of its trigger.
+type WorkflowRunData struct {
+	ID         string `json:"id"`
+	WorkflowID string `json:"workflow_id"`
+	CIID       string `json:"ci_id,omitempty"`
+	ClientID   string `json:"client_id,omitempty"`
+	SiteID     string `json:"site_id,omitempty"`
+	Status     string `json:"status"`
+}
+
+// WorkflowApprovalData is the data of the workflow.approval_* types (WFL-02,
+// WFL-04): one approval step of a run.
+type WorkflowApprovalData struct {
+	ID       string `json:"id"`
+	RunID    string `json:"run_id"`
+	StepKey  string `json:"step_key"`
+	Decision string `json:"decision,omitempty"`
+	ClientID string `json:"client_id,omitempty"`
+	SiteID   string `json:"site_id,omitempty"`
+}
+
+// WorkflowWebhookData is the data of workflow.webhook: the send_webhook
+// action of a run (WFL-02); the action adds its fields.
+type WorkflowWebhookData struct {
+	ID         string `json:"id"`
+	WorkflowID string `json:"workflow_id"`
+	CIID       string `json:"ci_id,omitempty"`
+	ClientID   string `json:"client_id,omitempty"`
+	SiteID     string `json:"site_id,omitempty"`
+}
+
+// FindingData is the data of the finding.* types (SEC-02): the finding of a
+// CI with its severity.
+type FindingData struct {
+	ID       string `json:"id"`
+	CIID     string `json:"ci_id,omitempty"`
+	ClientID string `json:"client_id,omitempty"`
+	SiteID   string `json:"site_id,omitempty"`
+	Severity string `json:"severity"`
+}
+
+// NotificationEscalationData is the data of the notification.* types
+// (NTF-02): one step of an escalation chain.
+type NotificationEscalationData struct {
+	ID         string `json:"id"`
+	AlarmID    string `json:"alarm_id,omitempty"`
+	IncidentID string `json:"incident_id,omitempty"`
+	ClientID   string `json:"client_id,omitempty"`
+	SiteID     string `json:"site_id,omitempty"`
+	Step       int    `json:"step"`
+}
+
+// EntitlementChangedData is the data of entitlement.changed (PKG-02): a
+// change of plan, add-on or quota of the organization.
+type EntitlementChangedData struct {
+	ID   string `json:"id"`
+	Plan string `json:"plan"`
+	// PlanBefore is the plan before a plan change (WP-882); empty when the
+	// plan stayed (an add-on or a quota changed).
+	PlanBefore string `json:"plan_before,omitempty"`
+	// Addon is the add-on booked or cancelled (WP-883); empty otherwise.
+	Addon   string   `json:"addon,omitempty"`
+	Changed []string `json:"changed"`
+}
+
+// OrgExportData is the data of org.export_completed (TLC-05): the full
+// export of the organization is ready for download (WP-1151): the job, the
+// user who started it, the exported rows and bytes and the end of the
+// download period.
+type OrgExportData struct {
+	ID          string `json:"id"`
+	InitiatedBy string `json:"initiated_by,omitempty"`
+	Rows        int64  `json:"rows"`
+	Bytes       int64  `json:"bytes"`
+	ExpiresAt   string `json:"expires_at"`
+}
+
+// OrgDeletionData is the data of the org.deletion_* types (TLC-06,
+// WP-1152): the deletion request of the organization. ID is the
+// organization, RequestedBy the user who requested it, DueAt the end of the
+// 30-day grace period (of the cancelled request for org.deletion_cancelled),
+// CancelledBy the user who cancelled it.
+type OrgDeletionData struct {
+	ID          string `json:"id"`
+	RequestedBy string `json:"requested_by,omitempty"`
+	DueAt       string `json:"due_at"`
+	CancelledBy string `json:"cancelled_by,omitempty"`
+}
+
+// SubnetChangedData is the data of ipam.subnet.changed (IPM-02): a subnet
+// was created, changed, allocated or deleted.
+type SubnetChangedData struct {
+	ID         string `json:"id"`
+	ClientID   string `json:"client_id,omitempty"`
+	SiteID     string `json:"site_id,omitempty"`
+	CIDR       string `json:"cidr"`
+	ChangeKind string `json:"change_kind"`
+}
+
+// AddressStateChangedData is the data of ipam.address.state_changed
+// (IPM-04): the state of an IP address changed (active, offline, unknown).
+// SubnetID is the subnet of the address, empty without one (WP-902).
+type AddressStateChangedData struct {
+	ID       string `json:"id"`
+	SubnetID string `json:"subnet_id,omitempty"`
+	ClientID string `json:"client_id,omitempty"`
+	SiteID   string `json:"site_id,omitempty"`
+	CIID     string `json:"ci_id,omitempty"`
+	From     string `json:"from,omitempty"`
+	To       string `json:"to"`
+}
+
+// ASNChangedData is the data of asn.changed (IPM-15): an AS number was
+// created, assigned or released.
+type ASNChangedData struct {
+	ID       string `json:"id"`
+	ClientID string `json:"client_id,omitempty"`
+	ASN      int64  `json:"asn"`
+}
+
+// CredentialEventData is the data of the credential.* types (CRD-05,
+// CRD-06): the credential and its client; never a secret.
+type CredentialEventData struct {
+	ID       string `json:"id"`
+	ClientID string `json:"client_id,omitempty"`
+	Kind     string `json:"kind"`
+	Reason   string `json:"reason,omitempty"`
+	// SecretVersion is the version of the secret after a rotation and
+	// Source where it lives, stored or vault (WP-889).
+	SecretVersion int    `json:"secret_version,omitempty"`
+	Source        string `json:"source,omitempty"`
+}
+
+// CredentialRotationDueData is the data of credential.rotation_due
+// (CRD-05, WP-897): a stored secret older than its age limit; never a
+// secret.
+type CredentialRotationDueData struct {
+	ID string `json:"id"`
+	// CredentialID is the credential as AK4 of WP-897 names it; the same
+	// value as ID, which every credential event carries.
+	CredentialID  string `json:"credential_id"`
+	ClientID      string `json:"client_id,omitempty"`
+	Kind          string `json:"kind"`
+	Reason        string `json:"reason,omitempty"`
+	SecretVersion int    `json:"secret_version,omitempty"`
+	Source        string `json:"source,omitempty"`
+	// MaxAgeDays is the age limit of the credential, DueAt the time the
+	// secret reached it (RFC 3339).
+	MaxAgeDays int    `json:"max_age_days,omitempty"`
+	DueAt      string `json:"due_at,omitempty"`
+}
+
+// CredentialResolutionFailedData is the data of
+// credential.resolution_failed (CRD-06, WP-898): the frame of the
+// credential.* types with the failed use, the credential (again as
+// credential_id), the CI, the namespace and the error class; never a
+// secret.
+type CredentialResolutionFailedData struct {
+	ID            string `json:"id"`
+	ClientID      string `json:"client_id,omitempty"`
+	Kind          string `json:"kind"`
+	Reason        string `json:"reason,omitempty"`
+	SecretVersion int    `json:"secret_version,omitempty"`
+	Source        string `json:"source,omitempty"`
+	CredentialID  string `json:"credential_id"`
+	CIID          string `json:"ci_id,omitempty"`
+	Namespace     string `json:"namespace,omitempty"`
+	ErrorClass    string `json:"error_class"`
+}
+
+// ADMPConnectionRefreshedData is the data of admp.connection.refreshed
+// (ADM-03): the read-only copy of an ADMP connection was refreshed; never
+// the holder in plain text.
+type ADMPConnectionRefreshedData struct {
+	ID string `json:"id"`
+	// AccountID is the ADMP account of the connection (WP-929).
+	AccountID string `json:"account_id,omitempty"`
+	CIID      string `json:"ci_id,omitempty"`
+	ClientID  string `json:"client_id,omitempty"`
+	SiteID    string `json:"site_id,omitempty"`
+	// Stale: the refresh failed and the copy is the last known state
+	// (ADM-03, WP-929).
+	Stale bool `json:"stale"`
+}
+
+// Payloads assigns every phase 2 and phase 3 type the frame of its data.
 var Payloads = map[string]any{
-	CIStatusChanged:       CIStatusChangedData{},
-	LifecycleChanged:      LifecycleChangedData{},
-	RelationshipChanged:   RelationshipChangedData{},
-	AssetCreated:          AssetData{},
-	AssetChanged:          AssetChangedData{},
-	AssetDeleted:          AssetData{},
-	AssetAssigned:         AssetAssignmentData{},
-	AssetReturned:         AssetAssignmentData{},
-	AssetWarrantyExpiring: AssetWarrantyData{},
-	ContractExpiring:      ContractExpiringData{},
-	StockMovement:         StockMovementData{},
-	StockBelowMinimum:     StockBelowMinimumData{},
-	ReservationCreated:    ReservationData{},
-	ReservationReleased:   ReservationData{},
-	ReservationExpired:    ReservationData{},
-	ReservationConverted:  ReservationData{},
-	TicketUpdated:         TicketData{},
-	TicketSLABreached:     TicketSLABreachedData{},
-	MetamodelPublished:    MetamodelPublishedData{},
-	DocumentScanned:       DocumentScannedData{},
-	ImportCompleted:       ImportCompletedData{},
+	CIStatusChanged:             CIStatusChangedData{},
+	LifecycleChanged:            LifecycleChangedData{},
+	RelationshipChanged:         RelationshipChangedData{},
+	AssetCreated:                AssetData{},
+	AssetChanged:                AssetChangedData{},
+	AssetDeleted:                AssetData{},
+	AssetAssigned:               AssetAssignmentData{},
+	AssetReturned:               AssetAssignmentData{},
+	AssetWarrantyExpiring:       AssetWarrantyData{},
+	ContractExpiring:            ContractExpiringData{},
+	StockMovement:               StockMovementData{},
+	StockBelowMinimum:           StockBelowMinimumData{},
+	ReservationCreated:          ReservationData{},
+	ReservationReleased:         ReservationData{},
+	ReservationExpired:          ReservationData{},
+	ReservationConverted:        ReservationData{},
+	TicketUpdated:               TicketData{},
+	TicketSLABreached:           TicketSLABreachedData{},
+	MetamodelPublished:          MetamodelPublishedData{},
+	DocumentScanned:             DocumentScannedData{},
+	ImportCompleted:             ImportCompletedData{},
+	ProbeStateChanged:           ProbeStateChangedData{},
+	AlarmOpened:                 AlarmData{},
+	AlarmAcknowledged:           AlarmData{},
+	AlarmEscalated:              AlarmData{},
+	AlarmSeverityChanged:        AlarmData{},
+	AlarmResolved:               AlarmData{},
+	IncidentOpened:              IncidentData{},
+	IncidentUpdated:             IncidentData{},
+	IncidentResolved:            IncidentData{},
+	CollectorGroupUnreachable:   CollectorGroupData{},
+	CollectorGroupReachable:     CollectorGroupData{},
+	CollectorGroupFailover:      CollectorGroupFailoverData{},
+	CollectorClockSkew:          CollectorClockSkewData{},
+	ProbeConfigChanged:          ProbeConfigChangedData{},
+	CIConfigChanged:             CIConfigChangedData{},
+	MonitoringSuspensionChanged: MonitoringSuspensionData{},
+	CapacityForecastExceeded:    CapacityForecastData{},
+	SLAViolated:                 SLAViolatedData{},
+	MaintenanceScheduled:        MaintenanceWindowData{},
+	MaintenanceStarted:          MaintenanceWindowData{},
+	MaintenanceEnded:            MaintenanceWindowData{},
+	WorkflowRunStarted:          WorkflowRunData{},
+	WorkflowRunSucceeded:        WorkflowRunData{},
+	WorkflowRunFailed:           WorkflowRunData{},
+	WorkflowRunCancelled:        WorkflowRunData{},
+	WorkflowApprovalRequested:   WorkflowApprovalData{},
+	WorkflowApprovalDecided:     WorkflowApprovalData{},
+	WorkflowWebhook:             WorkflowWebhookData{},
+	FindingCreated:              FindingData{},
+	FindingChanged:              FindingData{},
+	FindingResolved:             FindingData{},
+	NotificationEscalated:       NotificationEscalationData{},
+	NotificationAcknowledged:    NotificationEscalationData{},
+	EntitlementChanged:          EntitlementChangedData{},
+	OrgExportCompleted:          OrgExportData{},
+	OrgDeletionRequested:        OrgDeletionData{},
+	OrgDeletionCancelled:        OrgDeletionData{},
+	IPAMSubnetChanged:           SubnetChangedData{},
+	IPAMAddressStateChanged:     AddressStateChangedData{},
+	ASNChanged:                  ASNChangedData{},
+	CredentialRotated:           CredentialEventData{},
+	CredentialRotationDue:       CredentialRotationDueData{},
+	CredentialResolutionFailed:  CredentialResolutionFailedData{},
+	ADMPConnectionRefreshed:     ADMPConnectionRefreshedData{},
 }

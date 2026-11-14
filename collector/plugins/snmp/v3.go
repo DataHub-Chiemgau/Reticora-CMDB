@@ -89,30 +89,6 @@ func v3FromCreds(creds map[string]string) (cfg *v3Config, ok bool, err error) {
 	return cfg, true, nil
 }
 
-// session builds an SNMPv3 authPriv session to target.
-func (p *Plugin) v3Session(ctx context.Context, target string, cfg *v3Config) *gosnmp.GoSNMP {
-	return &gosnmp.GoSNMP{
-		Context:       ctx,
-		Target:        target,
-		Port:          uint16(p.port()),
-		Transport:     "udp",
-		Version:       gosnmp.Version3,
-		Timeout:       p.timeout(),
-		Retries:       p.Retries,
-		MaxOids:       gosnmp.MaxOids,
-		SecurityModel: gosnmp.UserSecurityModel,
-		MsgFlags:      gosnmp.AuthPriv,
-		ContextName:   cfg.contextName,
-		SecurityParameters: &gosnmp.UsmSecurityParameters{
-			UserName:                 cfg.user,
-			AuthenticationProtocol:   cfg.authProto,
-			AuthenticationPassphrase: cfg.authPass,
-			PrivacyProtocol:          cfg.privProto,
-			PrivacyPassphrase:        cfg.privPass,
-		},
-	}
-}
-
 // v2cSession builds an SNMPv2c session (collection GET and table walks).
 func (p *Plugin) v2cSession(ctx context.Context, target, community string) *gosnmp.GoSNMP {
 	return &gosnmp.GoSNMP{
@@ -434,29 +410,16 @@ func v3Failure(target string, conn *reportConn, err error) error {
 // agent refuses with usmStatsNotInTimeWindows is retried once on a new
 // session, whose engine discovery resynchronises boots and time; only a
 // second refusal is reported.
+// The session (Session.run, WP-993) does the resync.
 func (p *Plugin) v3Request(ctx context.Context, target string, cfg *v3Config, do func(g *gosnmp.GoSNMP) error) error {
-	err := p.v3Attempt(ctx, target, cfg, do)
-	if errors.Is(err, errNotInTimeWindow) {
-		if err = p.v3Attempt(ctx, target, cfg, do); errors.Is(err, errNotInTimeWindow) {
-			return fmt.Errorf("%w, also after a time resync", err)
-		}
+	retries := p.Retries
+	s := &Session{ctx: ctx, target: target, v3: cfg,
+		opts: Options{Port: p.port(), Timeout: p.timeout(), Retries: &retries, MaxRepetitions: defaultMaxRepetitions}}
+	if err := s.connect(); err != nil {
+		return err
 	}
-	return err
-}
-
-// v3Attempt runs do on one session; see v3Request.
-func (p *Plugin) v3Attempt(ctx context.Context, target string, cfg *v3Config, do func(g *gosnmp.GoSNMP) error) error {
-	g := p.v3Session(ctx, target, cfg)
-	if err := g.Connect(); err != nil {
-		return fmt.Errorf("snmp v3: connect %s: %w", target, err)
-	}
-	conn := &reportConn{Conn: g.Conn, user: cfg.user}
-	g.Conn = conn
-	defer conn.Close()
-	if err := do(g); err != nil {
-		return v3Failure(target, conn, err)
-	}
-	return nil
+	defer func() { _ = s.Close() }()
+	return s.run(do)
 }
 
 // probeV3 checks one target with an authenticated, encrypted GET of

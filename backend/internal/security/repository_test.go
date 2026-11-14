@@ -34,7 +34,7 @@ func TestFindingLifecycleAndSummary(t *testing.T) {
 		t.Fatal("cross-tenant read must fail")
 	}
 	// filters
-	items, total, _ := repo.List(context.Background(), "org-1", FilterParams{Kind: "vulnerability"}, api.PaginationParams{Limit: 10})
+	items, total, _ := repo.List(context.Background(), "org-1", &FilterParams{Kind: "vulnerability"}, api.PaginationParams{Limit: 10})
 	if total != 1 || items[0].ID != f.ID {
 		t.Fatalf("expected 1 vulnerability, got %d", total)
 	}

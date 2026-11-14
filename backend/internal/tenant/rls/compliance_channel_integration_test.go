@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -38,11 +39,18 @@ func TestComplianceEvaluationStaysInCallerScope(t *testing.T) {
 		"name": "t1 has name", "severity": "low", "category": "hygiene",
 		"expression": map[string]any{"field": "name", "op": "not_empty"},
 	})
-	// Positive control: the org-wide evaluation covers both clients.
+	// Positive control: the org-wide evaluation, the job
+	// compliance.evaluate (WP-1126), covers both clients.
 	code, body := w.do(w.orgA, http.MethodPost, "/api/v1/compliance/evaluations", nil)
-	if code != http.StatusOK || !strings.Contains(body, own) || !strings.Contains(body, foreign) {
-		t.Fatalf("org-wide evaluation: %d, own=%v foreign=%v; want 200 with both CIs", code,
-			strings.Contains(body, own), strings.Contains(body, foreign))
+	if code != http.StatusAccepted {
+		t.Fatalf("org-wide evaluation: %d %s, want 202 with the job", code, trim(body))
+	}
+	deadline := time.Now().Add(15 * time.Second)
+	for w.scalar(`SELECT count(*)::text FROM compliance_result WHERE ci_id IN ($1, $2)`, own, foreign) != "2" {
+		if time.Now().After(deadline) {
+			t.Fatal("the evaluation job did not evaluate both CIs")
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 	before := w.scalar(`SELECT id::text || '|' || evaluated_at::text FROM compliance_result WHERE ci_id = $1`, foreign)
 

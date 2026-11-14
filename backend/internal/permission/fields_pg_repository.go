@@ -527,12 +527,42 @@ func (r *PGFieldGrants) Snapshot(ctx context.Context, orgID string) (Snapshot, e
 			WHERE organization_id = $1 ORDER BY created_at, id`, orgID); err != nil {
 			return fmt.Errorf("read field sensitivity: %w", err)
 		}
+		if snap.Computed, err = readComputedSources(ctx, tx, orgID); err != nil {
+			return fmt.Errorf("read computed attribute sources: %w", err)
+		}
 		return nil
 	})
 	if err != nil {
 		return Snapshot{}, err
 	}
 	return snap, nil
+}
+
+// readComputedSources reads the computed attribute definitions visible to
+// the organization (its own and the system ones) whose expression reads an
+// asset field (SR-58, WP-871). An expression that does not parse counts as
+// reading every asset field of rules.AssetFields (fail-closed).
+func readComputedSources(ctx context.Context, tx pgx.Tx, orgID string) ([]ComputedSource, error) {
+	rows, err := tx.Query(ctx, `SELECT ci_type_id::text, key, computed FROM attribute_definition
+		WHERE computed IS NOT NULL AND (organization_id = $1 OR organization_id IS NULL)
+		ORDER BY key, ci_type_id NULLS FIRST, id`, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ComputedSource
+	for rows.Next() {
+		var typeID *string
+		var key string
+		var raw []byte
+		if err := rows.Scan(&typeID, &key, &raw); err != nil {
+			return nil, err
+		}
+		if fields := ComputedAssetFields(raw); len(fields) > 0 {
+			out = append(out, ComputedSource{CITypeID: typeID, Attribute: key, AssetFields: fields})
+		}
+	}
+	return out, rows.Err()
 }
 
 // TeamIDs reads team_member org-wide: its policy otherwise filters by the

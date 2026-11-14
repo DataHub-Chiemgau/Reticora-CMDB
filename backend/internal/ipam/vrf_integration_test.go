@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -37,7 +40,7 @@ func TestVRFModel(t *testing.T) {
 	repo := ipam.NewPGRepository(f.App)
 	page := api.PaginationParams{Limit: 50}
 
-	vrfs, _, err := repo.ListVRFs(ctx, f.OrgA, page)
+	vrfs, _, err := repo.ListVRFs(ctx, f.OrgA, ipam.VRFFilter{}, page)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +48,7 @@ func TestVRFModel(t *testing.T) {
 		t.Fatalf("VRFs of a new organization: %+v, want only the default global", vrfs)
 	}
 	global := vrfs[0]
-	if bVRFs, _, _ := repo.ListVRFs(f.OrgCtx(f.OrgB), f.OrgB, page); len(bVRFs) != 1 || bVRFs[0].ID == global.ID {
+	if bVRFs, _, _ := repo.ListVRFs(f.OrgCtx(f.OrgB), f.OrgB, ipam.VRFFilter{}, page); len(bVRFs) != 1 || bVRFs[0].ID == global.ID {
 		t.Errorf("organization B VRFs: %+v", bVRFs)
 	}
 
@@ -179,7 +182,7 @@ func TestAuditT3VRFWritesNeedOrgScope(t *testing.T) {
 	if err := repo.CreateVRF(org, orgVRF); err != nil {
 		t.Fatalf("control: org-wide CreateVRF: %v", err)
 	}
-	vrfs, _, err := repo.ListVRFs(c1, f.OrgA, page)
+	vrfs, _, err := repo.ListVRFs(c1, f.OrgA, ipam.VRFFilter{}, page)
 	if err != nil {
 		t.Fatalf("control: client-1 ListVRFs: %v", err)
 	}
@@ -245,7 +248,7 @@ func TestAuditT3VRFWritesNeedOrgScope(t *testing.T) {
 		{"empty client set", restricted(func(s *database.TenantScope) { s.Clients = database.ScopeIDs() })},
 	} {
 		t.Run("scoped "+p.name, func(t *testing.T) {
-			if got, _, listErr := repo.ListVRFs(p.ctx, f.OrgA, page); listErr != nil || len(got) != 2 {
+			if got, _, listErr := repo.ListVRFs(p.ctx, f.OrgA, ipam.VRFFilter{}, page); listErr != nil || len(got) != 2 {
 				t.Errorf("ListVRFs: %d VRFs, %v; want the default and the org VRF", len(got), listErr)
 			}
 			if _, getErr := repo.GetVRF(p.ctx, f.OrgA, orgVRF.ID); getErr != nil {
@@ -341,4 +344,229 @@ func TestAuditT3VRFWritesNeedOrgScope(t *testing.T) {
 func vrfRLSDenied(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "42501" && strings.Contains(pgErr.Message, "row-level security")
+}
+
+// TestVRFAttributesOnPostgreSQL covers IPM-07 (WP-907) against PostgreSQL:
+//   - route distinguishers in the three forms of RFC 4364 (ASN16:nn32,
+//     IPv4:nn16, ASN32:nn16) are accepted, others are 422
+//     route_distinguisher; a route distinguisher taken is 409;
+//   - route target lists with a duplicate or more than 64 entries are 422
+//     import_targets or export_targets;
+//   - the default VRF takes no route distinguisher or route targets (422)
+//     and still cannot be deleted, but takes sections;
+//   - section_ids replaces the sections, ?section_id= filters the VRFs,
+//     the section answers vrf_ids; an unknown section is 422 section_ids;
+//   - a client principal writes neither attributes nor sections (404) and
+//     sees only the sections it can see.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestVRFAttributesOnPostgreSQL(t *testing.T) {
+	f := scopetest.Seed(t, "d7")
+	mux := chi.NewRouter()
+	ipam.NewHandler(ipam.NewPGRepository(f.App)).RegisterRoutes(mux)
+	orgCtx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	orgBCtx := tenant.WithTenant(f.OrgCtx(f.OrgB), tenant.TenantInfo{OrganizationID: f.OrgB, UserID: f.User})
+	client1Ctx := tenant.WithTenant(f.ClientCtx(f.Client1), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	call := func(ctx context.Context, method, path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(method, path, strings.NewReader(body)).WithContext(ctx))
+		return w
+	}
+	decode := func(w *httptest.ResponseRecorder, v any) {
+		t.Helper()
+		if err := json.Unmarshal(w.Body.Bytes(), v); err != nil {
+			t.Fatalf("decode %s: %v", w.Body.String(), err)
+		}
+	}
+	expect := func(w *httptest.ResponseRecorder, want int, field, what string) {
+		t.Helper()
+		if w.Code != want || (field != "" && !strings.Contains(w.Body.String(), `"`+field+`"`)) {
+			t.Errorf("%s = %d %s, want %d %s", what, w.Code, w.Body.String(), want, field)
+		}
+	}
+	createVRF := func(ctx context.Context, body string) ipam.VRF {
+		t.Helper()
+		w := call(ctx, http.MethodPost, "/api/v1/vrfs", body)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("POST /vrfs %s = %d %s", body, w.Code, w.Body.String())
+		}
+		var v ipam.VRF
+		decode(w, &v)
+		return v
+	}
+	createSection := func(ctx context.Context, body string) string {
+		t.Helper()
+		w := call(ctx, http.MethodPost, "/api/v1/ipam-sections", body)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("POST /ipam-sections %s = %d %s", body, w.Code, w.Body.String())
+		}
+		var s ipam.Section
+		decode(w, &s)
+		return s.ID
+	}
+
+	// The three forms of RFC 4364, canonical on output.
+	for i, rd := range []struct{ in, want string }{
+		{"65000:4294967295", "65000:4294967295"},
+		{"192.0.2.1:65535", "192.0.2.1:65535"},
+		{"4200000000:007", "4200000000:7"},
+	} {
+		v := createVRF(orgCtx, `{"name":"d7-rd-`+strconv.Itoa(i)+`","route_distinguisher":"`+rd.in+`"}`)
+		if v.RouteDistinguisher != rd.want {
+			t.Errorf("route distinguisher %q stored as %q, want %q", rd.in, v.RouteDistinguisher, rd.want)
+		}
+	}
+	for _, rd := range []string{"65000", "0:1", "65000:4294967296", "192.0.2.1:65536", "4200000000:65536", "4294967296:1",
+		"2001:db8::1:1", "a:1", "65000:-1", ":1"} {
+		expect(call(orgCtx, http.MethodPost, "/api/v1/vrfs", `{"name":"d7-bad","route_distinguisher":"`+rd+`"}`),
+			http.StatusUnprocessableEntity, "route_distinguisher", "route distinguisher "+rd)
+	}
+	expect(call(orgCtx, http.MethodPost, "/api/v1/vrfs", `{"name":"d7-dup","route_distinguisher":"65000:4294967295"}`),
+		http.StatusConflict, "route_distinguisher", "duplicate route distinguisher")
+
+	// Route targets.
+	vrf := createVRF(orgCtx, `{"name":"d7-cust","route_distinguisher":"65001:1","import_targets":["65001:1","192.0.2.1:1"],"export_targets":["65001:1"]}`)
+	if !slices.Equal(vrf.ImportTargets, []string{"65001:1", "192.0.2.1:1"}) || !slices.Equal(vrf.ExportTargets, []string{"65001:1"}) {
+		t.Errorf("route targets = %v / %v", vrf.ImportTargets, vrf.ExportTargets)
+	}
+	expect(call(orgCtx, http.MethodPatch, "/api/v1/vrfs/"+vrf.ID, `{"import_targets":["65001:1","65001:01"]}`),
+		http.StatusUnprocessableEntity, "import_targets", "duplicate import target")
+	many := make([]string, 65)
+	for i := range many {
+		many[i] = `"65001:` + strconv.Itoa(i) + `"`
+	}
+	expect(call(orgCtx, http.MethodPatch, "/api/v1/vrfs/"+vrf.ID, `{"export_targets":[`+strings.Join(many, ",")+`]}`),
+		http.StatusUnprocessableEntity, "export_targets", "65 export targets")
+	expect(call(orgCtx, http.MethodPatch, "/api/v1/vrfs/"+vrf.ID, `{"export_targets":["x"]}`),
+		http.StatusUnprocessableEntity, "export_targets", "invalid export target")
+	expect(call(orgCtx, http.MethodPatch, "/api/v1/vrfs/"+vrf.ID, `{"route_distinguisher":"65000:4294967295"}`),
+		http.StatusConflict, "route_distinguisher", "PATCH to a taken route distinguisher")
+	w := call(orgCtx, http.MethodPatch, "/api/v1/vrfs/"+vrf.ID, `{"route_distinguisher":"","import_targets":[]}`)
+	var got ipam.VRF
+	decode(w, &got)
+	if w.Code != http.StatusOK || got.RouteDistinguisher != "" || len(got.ImportTargets) != 0 || !slices.Equal(got.ExportTargets, []string{"65001:1"}) {
+		t.Errorf("PATCH clears route distinguisher and imports = %d %s", w.Code, w.Body.String())
+	}
+
+	// The default VRF keeps no routing attributes and stays undeletable.
+	global := auditT3Str(t, f, `SELECT id::text FROM vrf WHERE organization_id = $1 AND is_default`, f.OrgA)
+	expect(call(orgCtx, http.MethodPatch, "/api/v1/vrfs/"+global, `{"route_distinguisher":"65002:1"}`),
+		http.StatusUnprocessableEntity, "route_distinguisher", "route distinguisher on the default VRF")
+	expect(call(orgCtx, http.MethodPatch, "/api/v1/vrfs/"+global, `{"import_targets":["65002:1"]}`),
+		http.StatusUnprocessableEntity, "import_targets", "import targets on the default VRF")
+	expect(call(orgCtx, http.MethodDelete, "/api/v1/vrfs/"+global, ""), http.StatusUnprocessableEntity, "", "DELETE default VRF")
+
+	// Sections: replace, filter, vrf_ids of the section.
+	wide := createSection(orgCtx, `{"name":"d7-wide"}`)
+	sec2 := createSection(orgCtx, `{"name":"d7-client2","client_id":"`+f.Client2+`"}`)
+	w = call(orgCtx, http.MethodPatch, "/api/v1/vrfs/"+vrf.ID, `{"section_ids":["`+wide+`","`+sec2+`","`+wide+`"]}`)
+	got = ipam.VRF{}
+	decode(w, &got)
+	want := []string{wide, sec2}
+	sort.Strings(want)
+	if w.Code != http.StatusOK || !slices.Equal(got.SectionIDs, want) {
+		t.Errorf("PATCH section_ids = %d %s, want %v", w.Code, w.Body.String(), want)
+	}
+	expect(call(orgCtx, http.MethodPatch, "/api/v1/vrfs/"+global, `{"section_ids":["`+wide+`"]}`), http.StatusOK, "", "sections of the default VRF")
+	w = call(orgCtx, http.MethodGet, "/api/v1/vrfs?section_id="+sec2, "")
+	var list struct {
+		Data  []ipam.VRF `json:"data"`
+		Total int        `json:"total"`
+	}
+	decode(w, &list)
+	if w.Code != http.StatusOK || list.Total != 1 || len(list.Data) != 1 || list.Data[0].ID != vrf.ID {
+		t.Errorf("GET /vrfs?section_id=sec2 = %d %s", w.Code, w.Body.String())
+	}
+	w = call(orgCtx, http.MethodGet, "/api/v1/ipam-sections/"+wide, "")
+	var sec ipam.Section
+	decode(w, &sec)
+	wantVRFs := []string{vrf.ID, global}
+	sort.Strings(wantVRFs)
+	if !slices.Equal(sec.VRFIDs, wantVRFs) {
+		t.Errorf("vrf_ids of the org-wide section = %v, want %v", sec.VRFIDs, wantVRFs)
+	}
+	secB := createSection(orgBCtx, `{"name":"d7-b"}`)
+	for _, id := range []string{secB, f.ID(), "not-a-uuid"} {
+		expect(call(orgCtx, http.MethodPatch, "/api/v1/vrfs/"+vrf.ID, `{"section_ids":["`+id+`"]}`),
+			http.StatusUnprocessableEntity, "section_ids", "unknown section "+id)
+	}
+
+	// A client principal reads the sections it sees and writes nothing.
+	w = call(client1Ctx, http.MethodGet, "/api/v1/vrfs/"+vrf.ID, "")
+	got = ipam.VRF{}
+	decode(w, &got)
+	if w.Code != http.StatusOK || !slices.Equal(got.SectionIDs, []string{wide}) {
+		t.Errorf("client GET VRF = %d %s, want only the org-wide section", w.Code, w.Body.String())
+	}
+	expect(call(client1Ctx, http.MethodPatch, "/api/v1/vrfs/"+vrf.ID, `{"route_distinguisher":"65003:1"}`),
+		http.StatusNotFound, "", "client PATCH route distinguisher")
+	expect(call(client1Ctx, http.MethodPatch, "/api/v1/vrfs/"+vrf.ID, `{"section_ids":[]}`), http.StatusNotFound, "", "client PATCH sections")
+	if n := auditT3Str(t, f, `SELECT count(*)::text FROM vrf_section WHERE vrf_id = $1`, vrf.ID); n != "2" {
+		t.Errorf("sections of the VRF after the client writes: %s, want 2", n)
+	}
+
+	// Deleting a section removes its assignments.
+	expect(call(orgCtx, http.MethodDelete, "/api/v1/ipam-sections/"+sec2, ""), http.StatusNoContent, "", "DELETE section with a VRF")
+	w = call(orgCtx, http.MethodGet, "/api/v1/vrfs/"+vrf.ID, "")
+	got = ipam.VRF{}
+	decode(w, &got)
+	if !slices.Equal(got.SectionIDs, []string{wide}) {
+		t.Errorf("sections after deleting section 2 = %v", got.SectionIDs)
+	}
+}
+
+// TestVRFAttributesWithoutDatabase pins AK5 of WP-907 for the memory
+// repository: it keeps the attributes, the sections and the filter.
+func TestVRFAttributesWithoutDatabase(t *testing.T) {
+	repo := ipam.NewMemoryRepository()
+	mux := chi.NewRouter()
+	ipam.NewHandler(repo).RegisterRoutes(mux)
+	ctx := tenant.WithTenant(context.Background(), tenant.TenantInfo{OrganizationID: "org-1", UserID: "user-1"})
+	serve := func(method, path, body string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(method, path, strings.NewReader(body)).WithContext(ctx))
+		return w
+	}
+	w := serve(http.MethodPost, "/api/v1/vrfs", `{"name":"a","route_distinguisher":"65000:1","import_targets":["65000:1"]}`)
+	var v ipam.VRF
+	_ = json.Unmarshal(w.Body.Bytes(), &v)
+	if w.Code != http.StatusCreated || v.RouteDistinguisher != "65000:1" || !slices.Equal(v.ImportTargets, []string{"65000:1"}) {
+		t.Fatalf("POST /vrfs = %d %s", w.Code, w.Body.String())
+	}
+	if w = serve(http.MethodPost, "/api/v1/vrfs", `{"name":"b","route_distinguisher":"65000:1"}`); w.Code != http.StatusConflict {
+		t.Errorf("duplicate route distinguisher = %d %s, want 409", w.Code, w.Body.String())
+	}
+	if w = serve(http.MethodPatch, "/api/v1/vrfs/"+v.ID, `{"section_ids":["c0de0000-0000-4000-8000-000000000001"]}`); w.Code != http.StatusUnprocessableEntity {
+		t.Errorf("unknown section = %d %s, want 422", w.Code, w.Body.String())
+	}
+	// The memory section ids are no UUIDs; the API sets them all the same,
+	// and filter and vrf_ids follow the assignment.
+	sec := &ipam.Section{OrganizationID: "org-1", Name: "s"}
+	if err := repo.CreateSection(ctx, sec); err != nil {
+		t.Fatal(err)
+	}
+	if w = serve(http.MethodPatch, "/api/v1/vrfs/"+v.ID, `{"section_ids":["`+sec.ID+`"]}`); w.Code != http.StatusOK ||
+		!strings.Contains(w.Body.String(), `"`+sec.ID+`"`) {
+		t.Fatalf("PATCH section_ids = %d %s, want 200 with the section", w.Code, w.Body.String())
+	}
+	if w = serve(http.MethodGet, "/api/v1/vrfs?section_id="+sec.ID, ""); !strings.Contains(w.Body.String(), `"total":1`) {
+		t.Errorf("GET /vrfs?section_id = %s, want the VRF", w.Body.String())
+	}
+	if got, err := repo.GetSection(ctx, "org-1", sec.ID); err != nil || !slices.Equal(got.VRFIDs, []string{v.ID}) {
+		t.Errorf("vrf_ids of the section = %v, %v", got, err)
+	}
+	var list struct {
+		Data []ipam.VRF `json:"data"`
+	}
+	w = serve(http.MethodGet, "/api/v1/vrfs", "")
+	_ = json.Unmarshal(w.Body.Bytes(), &list)
+	for _, item := range list.Data {
+		if item.IsDefault {
+			if w = serve(http.MethodPatch, "/api/v1/vrfs/"+item.ID, `{"export_targets":["65000:2"]}`); w.Code != http.StatusUnprocessableEntity ||
+				!strings.Contains(w.Body.String(), "export_targets") {
+				t.Errorf("export targets on the default VRF = %d %s, want 422", w.Code, w.Body.String())
+			}
+		}
+	}
 }

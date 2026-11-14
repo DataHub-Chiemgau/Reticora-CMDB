@@ -13,44 +13,101 @@ type Subnet struct {
 	// VRFID is the VRF of the subnet; the organization's default VRF when
 	// none is given (CH10). The CIDR is unique per VRF.
 	VRFID string `json:"vrf_id"`
-	Name  string `json:"name,omitempty"`
+	// SectionID is the IPAM section of the subnet (IPM-01); the
+	// organization's default section when none is given.
+	SectionID string `json:"section_id"`
+	Name      string `json:"name,omitempty"`
 	// VLANID references the VLAN catalog (NET-02, NET-08).
-	VLANID       string    `json:"vlan_id,omitempty"`
-	Gateway      string    `json:"gateway,omitempty"`
-	DNSServers   []string  `json:"dns_servers,omitempty"`
-	Description  string    `json:"description,omitempty"`
-	IsManagement bool      `json:"is_management"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	VLANID     string   `json:"vlan_id,omitempty"`
+	Gateway    string   `json:"gateway,omitempty"`
+	DNSServers []string `json:"dns_servers,omitempty"`
+	// NameserverSetID references a nameserver set (IPM-05); empty without
+	// one.
+	NameserverSetID string `json:"nameserver_set_id,omitempty"`
+	// EffectiveDNSServers are the DNS servers that apply to the subnet
+	// (read-only, IPM-05): its own dns_servers when set, else the servers
+	// of its nameserver set, else none. Only the PostgreSQL repository
+	// resolves them.
+	EffectiveDNSServers []string `json:"effective_dns_servers,omitempty"`
+	Description         string   `json:"description,omitempty"`
+	IsManagement        bool     `json:"is_management"`
+	// ParentID is the narrowest subnet of the VRF that contains this one
+	// (IPM-02), computed on write and never written by the API; empty for
+	// a root and for a parent the caller cannot see (Konvention 11).
+	ParentID string `json:"parent_id,omitempty"`
+	// IsPool marks a container without host addresses of its own.
+	IsPool bool `json:"is_pool"`
+	// OriginASNID is the AS number that originates the prefix (IPM-16,
+	// WP-1067); OriginASN shows it (read-only, only when the caller sees
+	// it; the PostgreSQL repository only).
+	OriginASNID string           `json:"origin_asn_id,omitempty"`
+	OriginASN   *SubnetOriginASN `json:"origin_asn,omitempty"`
+	// ChildCount counts the children the caller can see.
+	ChildCount int `json:"child_count"`
+	// Warnings are set by create and update only: overlaps (a parent that
+	// is no pool holds addresses of its own inside its child) in a section
+	// without strict_mode (IPM-02).
+	Warnings  []SubnetWarning `json:"warnings,omitempty"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
+}
+
+// SubnetWarning is a warning of a subnet write: code overlap names the
+// subnet whose address space it shares, when the caller sees it.
+type SubnetWarning struct {
+	Code     string `json:"code"`
+	SubnetID string `json:"subnet_id,omitempty"`
 }
 
 // CreateSubnetRequest is the payload for creating a subnet.
 type CreateSubnetRequest struct {
-	ClientID     string   `json:"client_id,omitempty"`
-	SiteID       string   `json:"site_id,omitempty"`
-	CIDR         string   `json:"cidr"`
-	VRFID        string   `json:"vrf_id,omitempty"`
-	Name         string   `json:"name,omitempty"`
-	VLANID       string   `json:"vlan_id,omitempty"`
-	Gateway      string   `json:"gateway,omitempty"`
-	DNSServers   []string `json:"dns_servers,omitempty"`
-	Description  string   `json:"description,omitempty"`
-	IsManagement bool     `json:"is_management,omitempty"`
+	ClientID   string   `json:"client_id,omitempty"`
+	SiteID     string   `json:"site_id,omitempty"`
+	CIDR       string   `json:"cidr"`
+	VRFID      string   `json:"vrf_id,omitempty"`
+	SectionID  string   `json:"section_id,omitempty"`
+	Name       string   `json:"name,omitempty"`
+	VLANID     string   `json:"vlan_id,omitempty"`
+	Gateway    string   `json:"gateway,omitempty"`
+	DNSServers []string `json:"dns_servers,omitempty"`
+	// NameserverSetID names a nameserver set of the organization (IPM-05);
+	// an unknown one is 422 nameserver_set_id.
+	NameserverSetID string `json:"nameserver_set_id,omitempty"`
+	Description     string `json:"description,omitempty"`
+	IsManagement    bool   `json:"is_management,omitempty"`
+	IsPool          bool   `json:"is_pool,omitempty"`
+	// OriginASNID names the origin AS (WP-1067): a visible AS number that
+	// is org-wide or of the subnet's client, else 422 origin_asn_id.
+	OriginASNID string `json:"origin_asn_id,omitempty"`
 }
 
 // UpdateSubnetRequest is the payload for updating a subnet.
 type UpdateSubnetRequest struct {
 	ClientID *string `json:"client_id,omitempty"`
 	SiteID   *string `json:"site_id,omitempty"`
+	// CIDR changes the prefix of the subnet; its addresses must stay inside
+	// (422 cidr), and the gateway is checked against the new prefix (422
+	// gateway, IPM-04).
+	CIDR *string `json:"cidr,omitempty"`
 	// VRFID moves the subnet to another VRF ("" = default VRF).
 	VRFID *string `json:"vrf_id,omitempty"`
-	Name  *string `json:"name,omitempty"`
+	// SectionID moves the subnet to another IPAM section ("" = default
+	// section, IPM-01).
+	SectionID *string `json:"section_id,omitempty"`
+	Name      *string `json:"name,omitempty"`
 	// VLANID sets ("" clears) the VLAN of the subnet.
-	VLANID       *string  `json:"vlan_id,omitempty"`
-	Gateway      *string  `json:"gateway,omitempty"`
-	DNSServers   []string `json:"dns_servers,omitempty"`
-	Description  *string  `json:"description,omitempty"`
-	IsManagement *bool    `json:"is_management,omitempty"`
+	VLANID     *string  `json:"vlan_id,omitempty"`
+	Gateway    *string  `json:"gateway,omitempty"`
+	DNSServers []string `json:"dns_servers,omitempty"`
+	// NameserverSetID sets ("" clears) the nameserver set (IPM-05).
+	NameserverSetID *string `json:"nameserver_set_id,omitempty"`
+	Description     *string `json:"description,omitempty"`
+	IsManagement    *bool   `json:"is_management,omitempty"`
+	// IsPool makes the subnet a container; a subnet with addresses of its
+	// own cannot become one (409 is_pool).
+	IsPool *bool `json:"is_pool,omitempty"`
+	// OriginASNID sets ("" clears) the origin AS (WP-1067).
+	OriginASNID *string `json:"origin_asn_id,omitempty"`
 }
 
 // IPAddress represents a single IP address assignment.
@@ -74,8 +131,70 @@ type IPAddress struct {
 	// /subnets/{id}/reservations, never by POST or PATCH /ips.
 	ReservedUntil *time.Time `json:"reserved_until,omitempty"`
 	ReservedBy    string     `json:"reserved_by,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	// State is the reachability of the address, active, offline or unknown
+	// (IPM-04, E-211), apart from Type; StateChangedAt is the time of the
+	// last change. IsGateway marks the gateway of the subnet; only the
+	// gateway of the subnet sets it (read-only here).
+	State          string     `json:"state"`
+	StateChangedAt *time.Time `json:"state_changed_at,omitempty"`
+	IsGateway      bool       `json:"is_gateway"`
+	// CIID is the device of the address (IPM-13, E-215): with an interface
+	// always the CI of the interface, without one (VIP, anycast, a
+	// management address) set directly. Role is primary, secondary, vip,
+	// anycast, loopback or management.
+	CIID string `json:"ci_id,omitempty"`
+	Role string `json:"role"`
+	// Origin is where the row came from: manual (API), discovery, scan or
+	// import (IPM-14, E-216); the API never sets it. Pinned marks the
+	// binding as authoritative: discovery neither moves nor removes the
+	// row, and an observation of the address at another device opens the
+	// review ip_binding_conflict.
+	Origin    string    `json:"origin"`
+	Pinned    bool      `json:"pinned"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// Origins of an address (IPM-14, ip_address_origin_check).
+const (
+	IPOriginManual    = "manual"
+	IPOriginDiscovery = "discovery"
+	IPOriginScan      = "scan"
+	IPOriginImport    = "import"
+)
+
+// ValidIPOrigins lists the origins of an address.
+var ValidIPOrigins = map[string]bool{IPOriginManual: true, IPOriginDiscovery: true, IPOriginScan: true, IPOriginImport: true}
+
+// AddressNAT is a translation in which an address takes part (GET
+// /api/v1/ips/{id}): Role is inside or outside for a direct reference and
+// inside_subnet or outside_subnet for a translation of a subnet that
+// contains the address; Counterpart is the other side (address or CIDR).
+type AddressNAT struct {
+	ID          string `json:"id"`
+	Kind        string `json:"kind"`
+	Role        string `json:"role"`
+	Counterpart string `json:"counterpart,omitempty"`
+	Protocol    string `json:"protocol"`
+	InsidePort  *int   `json:"inside_port,omitempty"`
+	OutsidePort *int   `json:"outside_port,omitempty"`
+	DeviceCIID  string `json:"device_ci_id"`
+}
+
+// IPAddressDetail is the answer of GET /api/v1/ips/{id}: the address with
+// the NAT translations it takes part in (IPM-15).
+type IPAddressDetail struct {
+	IPAddress
+	NATTranslations []AddressNAT `json:"nat_translations"`
+}
+
+// CIAddress is an address of a CI in GET /api/v1/cis/{id}/addresses
+// (IPM-13): the address with the name of its interface and the CIDR of
+// its subnet.
+type CIAddress struct {
+	IPAddress
+	InterfaceName string `json:"interface_name,omitempty"`
+	SubnetCIDR    string `json:"subnet_cidr,omitempty"`
 }
 
 // CreateIPAddressRequest is the payload for creating an IP address.
@@ -86,6 +205,15 @@ type CreateIPAddressRequest struct {
 	Type        string `json:"type,omitempty"`
 	DNSName     string `json:"dns_name,omitempty"`
 	Description string `json:"description,omitempty"`
+	// CIID binds the address to a device (IPM-13); with an interface it
+	// must be the CI of the interface (422 ci_id), empty takes it.
+	CIID string `json:"ci_id,omitempty"`
+	// Role of the address, default primary (IPM-13).
+	Role string `json:"role,omitempty"`
+	// VRFID is the VRF of an address without subnet_id (IPM-14): its
+	// longest prefix is searched there; empty is the default VRF. With
+	// subnet_id it must be the VRF of the subnet (422 vrf_id).
+	VRFID string `json:"vrf_id,omitempty"`
 }
 
 // UpdateIPAddressRequest is the payload for updating an IP address.
@@ -95,7 +223,58 @@ type UpdateIPAddressRequest struct {
 	Type        *string `json:"type,omitempty"`
 	DNSName     *string `json:"dns_name,omitempty"`
 	Description *string `json:"description,omitempty"`
+	// State sets the state of the address manually (IPM-04).
+	State *string `json:"state,omitempty"`
+	// CIID sets ("" clears) the device of the address (IPM-13); a new
+	// interface takes its CI along.
+	CIID *string `json:"ci_id,omitempty"`
+	// Role changes the role of the address (IPM-13).
+	Role *string `json:"role,omitempty"`
+	// Pinned pins or releases the binding of the address (IPM-14).
+	Pinned *bool `json:"pinned,omitempty"`
 }
+
+// Roles of an address (IPM-13, E-215).
+const (
+	IPRolePrimary    = "primary"
+	IPRoleSecondary  = "secondary"
+	IPRoleVIP        = "vip"
+	IPRoleAnycast    = "anycast"
+	IPRoleLoopback   = "loopback"
+	IPRoleManagement = "management"
+)
+
+// ValidIPRoles lists the roles of an address (ip_address_role_check).
+var ValidIPRoles = map[string]bool{IPRolePrimary: true, IPRoleSecondary: true, IPRoleVIP: true, IPRoleAnycast: true,
+	IPRoleLoopback: true, IPRoleManagement: true}
+
+// IPFilter holds the optional filters of the address lists: the subnet,
+// the state and the gateway mark (IPM-04); type, client, VRF, CI (ci_id
+// of the address, IPM-13) and q (prefix of the host or part of the DNS
+// name) (IPM-20, filter.go).
+type IPFilter struct {
+	SubnetID  string
+	State     string
+	IsGateway *bool
+	Type      string
+	ClientID  string
+	VRFID     string
+	CIID      string
+	Q         string
+	// Origin and Pinned filter by origin and pin (IPM-14, IPM-20).
+	Origin string
+	Pinned *bool
+}
+
+// Address states of IPM-04 (E-211).
+const (
+	IPStateActive  = "active"
+	IPStateOffline = "offline"
+	IPStateUnknown = "unknown"
+)
+
+// ValidIPStates lists the address states (IPM-04).
+var ValidIPStates = map[string]bool{IPStateActive: true, IPStateOffline: true, IPStateUnknown: true}
 
 // NetworkInterface represents a CI's network interface (NET-01): the
 // name is unique per CI.

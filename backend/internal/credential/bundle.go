@@ -29,8 +29,11 @@ import (
 // plaintext exists only in the server's memory while sealing and in the
 // collector's memory; it is never stored, logged or returned by the API.
 
-// BundleVersion is the format of SealedBundle.
-const BundleVersion = 1
+// BundleVersion is the format of SealedBundle. Format 2 (WP-891) adds the
+// targets: the credential of a CI and namespace from a level above the
+// scope (CRD-04); a collector that does not know them ignores the field and
+// resolves per scope as in format 1.
+const BundleVersion = 2
 
 // BundleRequestSuffix is appended to the collector's subject tree
 // (collector.<org>.<id>) for bundle requests.
@@ -47,17 +50,28 @@ type SealedBundle struct {
 	Ciphertext   []byte `json:"ciphertext"`
 }
 
-// BundleCredential is one credential in a bundle.
+// BundleCredential is one credential in a bundle: a stored secret, or a
+// vault reference without secret (source vault_ref, WP-894).
 type BundleCredential struct {
-	ID     string         `json:"id"`
-	Name   string         `json:"name"`
-	Kind   string         `json:"kind"`
-	Secret map[string]any `json:"secret"`
+	ID       string          `json:"id"`
+	Name     string          `json:"name"`
+	Kind     string          `json:"kind"`
+	Source   string          `json:"source,omitempty"`
+	Secret   map[string]any  `json:"secret,omitempty"`
+	VaultRef *BundleVaultRef `json:"vault_ref,omitempty"`
 }
 
 // BundleContent is the plaintext of a bundle.
 type BundleContent struct {
 	Credentials []BundleCredential `json:"credentials"`
+	// Targets are the per-device credentials (format 2, WP-891); each names
+	// a credential of Credentials.
+	Targets []BundleTargetCredential `json:"targets"`
+	// VaultConnections are the enabled connections with resolve_at
+	// collector the collector is assigned to (WP-896), for their test;
+	// their logins are entries of Credentials. A connection with
+	// resolve_at server never appears.
+	VaultConnections []BundleVaultConnection `json:"vault_connections,omitempty"`
 }
 
 func bundleKey(shared, ephemeral []byte, collectorID string) ([]byte, error) {
@@ -154,13 +168,38 @@ type BundleTarget struct {
 	PublicKey      *ecdsa.PublicKey
 	// CredentialIDs are the credentials of the bundle: the effective
 	// credentials of the collector's enabled discovery scopes (E-67). An
-	// empty list, like nil, selects none.
+	// empty list, like nil, selects none. It includes the credentials of
+	// Targets (AddTargets).
 	CredentialIDs []string
+	// Targets are the credentials of single CIs from a level above the scope
+	// (ResolveCollector, CRD-04).
+	Targets []BundleTargetCredential
+}
+
+// AddTargets sets the targets of the bundle and adds their credentials to
+// CredentialIDs (sorted, without duplicates).
+func (t *BundleTarget) AddTargets(targets []BundleTargetCredential) {
+	t.Targets = targets
+	ids := slices.Clone(t.CredentialIDs)
+	if ids == nil {
+		ids = []string{}
+	}
+	for i := range targets {
+		if !slices.Contains(ids, targets[i].CredentialID) {
+			ids = append(ids, targets[i].CredentialID)
+		}
+	}
+	slices.Sort(ids)
+	t.CredentialIDs = ids
 }
 
 // relevant reports whether a credential belongs into the target's bundle:
-// only the listed ones.
+// only the listed ones, never a vault login (WP-893), which reaches a
+// collector only as the login of a vault reference it resolves (WP-894).
 func (t *BundleTarget) relevant(c *Credential) bool {
+	if _, login := vaultLoginFields[c.Kind]; login {
+		return false
+	}
 	return slices.Contains(t.CredentialIDs, c.ID)
 }
 
@@ -172,19 +211,42 @@ func (s *Service) Bundle(ctx context.Context, t *BundleTarget) (*SealedBundle, [
 	if err != nil {
 		return nil, nil, err
 	}
-	content := &BundleContent{Credentials: []BundleCredential{}}
+	content := &BundleContent{Credentials: []BundleCredential{}, Targets: []BundleTargetCredential{}}
 	ids := []string{}
 	for i := range all {
 		c := &all[i]
 		if !t.relevant(c) {
 			continue
 		}
-		secret, derr := s.Decrypt(ctx, t.OrganizationID, c.ID)
-		if derr != nil {
-			return nil, nil, fmt.Errorf("credential %s: %w", c.ID, derr)
+		entries, berr := s.bundleEntries(ctx, t, c)
+		if berr != nil {
+			return nil, nil, berr
 		}
-		content.Credentials = append(content.Credentials, BundleCredential{ID: c.ID, Name: c.Name, Kind: c.Kind, Secret: secret})
-		ids = append(ids, c.ID)
+		for _, entry := range entries {
+			if !slices.Contains(ids, entry.ID) {
+				content.Credentials = append(content.Credentials, entry)
+				ids = append(ids, entry.ID)
+			}
+		}
+	}
+	// The connections the collector resolves, for their test (WP-896);
+	// the resolver of the server is never asked here (AK6).
+	conns, logins, err := s.bundleVaultConnections(ctx, t)
+	if err != nil {
+		return nil, nil, err
+	}
+	content.VaultConnections = conns
+	for _, login := range logins {
+		if !slices.Contains(ids, login.ID) {
+			content.Credentials = append(content.Credentials, login)
+			ids = append(ids, login.ID)
+		}
+	}
+	// A target whose credential is not in the bundle is dropped.
+	for i := range t.Targets {
+		if slices.Contains(ids, t.Targets[i].CredentialID) {
+			content.Targets = append(content.Targets, t.Targets[i])
+		}
 	}
 	sealed, err := SealBundle(content, t.CollectorID, t.PublicKey, time.Now())
 	return sealed, ids, err

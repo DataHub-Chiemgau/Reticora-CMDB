@@ -6,8 +6,8 @@ Reticora CMDB is a multi-tenant Configuration Management Database designed for M
 
 ### Technology Stack
 
-- **Backend**: Go 1.26.10+, chi v5 router, pgx v5 (hand-written SQL)
-- **Frontend**: React 18, TypeScript, Vite, TanStack Query v5, Zustand, React Router v6
+- **Backend**: Go 1.26.11+, chi v5 router, pgx v5 (hand-written SQL)
+- **Frontend**: React 19, TypeScript, Vite, TanStack Query v5, Zustand, React Router v7
 - **Database**: PostgreSQL 16 with Row-Level Security
 - **Messaging**: NATS JetStream
 - **Cache**: Redis 7
@@ -387,13 +387,45 @@ deny access (fail-closed). The tenant API is read-only (`GET
 `POST /api/v1/admin/orgs/{id}/entitlements`, and every change is recorded
 in `operator_audit` with the previous and the new state, in the same
 transaction: without its entry the change is rolled back (500) (ENT-04,
-E-12). Only the feature keys of ENT-02, the phase-2 keys of ENT-06 (E-44),
-the module keys of phases 3 and 4 (`monitoring`, `endpoint_agent`,
-`workflow_forms`, `compliance`) and the add-ons, and the quotas `max_cis`,
-`max_collectors`, `max_users`, `max_api_keys` and `max_storage_mb` are
+E-12). The plan of an organization changes only through
+`PUT /api/v1/admin/orgs/{id}/plan` (`{plan, reason}`, PKG-02, WP-882): in
+one transaction `organization.plan` and `plan_changed_at` are set, every
+feature of the new plan gets a row of origin `plan` (a disabled one is
+enabled again), rows of origin `plan` outside the new plan are disabled
+with their limits and `valid_until`, and all rows of origin `plan` take
+the new plan (`entitlement.PlanTransition`). Rows of origin `addon` and
+`manual` stay as they are; nothing is deleted (ENT-08). A quota of a plan
+row that is missing or equal to the default of the old plan takes the
+default of the new plan (no default: unlimited), an override stays. The
+change is recorded as `plan.change` with before, after and reason in
+`operator_audit`; `entitlement.changed` (with `plan_before`) is the last
+write of the transaction and notifies the org_admins with
+`entitlement:read`; the entitlement cache of every instance is dropped
+after the commit. The current plan again answers 200 with `unchanged`,
+without event. Add-ons (`iga`, `ai`, `admp`; CH14, PKG-03, WP-883) are
+booked per organization independently of the plan:
+`POST /api/v1/admin/orgs/{id}/addons/{key}` with an optional
+`{valid_until, source}` stores the row with origin `addon`, enabled (201,
+200 when booked again); `DELETE` cancels it (204): the row is disabled,
+its limits and `valid_until` stay; an add-on that is not booked is 404, a
+key that is no add-on 422 (`field` key). Both are recorded as
+`addon.book`/`addon.cancel` with before and after in `operator_audit`
+and emit `entitlement.changed` with `addon`; a plan change never touches
+an add-on row. `GET /api/v1/admin/addons` lists the catalog
+(`entitlement.AddonCatalog`: key, phase `A`, i18n key
+`addons.<key>.description`). Only the feature keys of ENT-02, the phase-2 keys of ENT-06 (E-44),
+the phase-3 keys (`monitoring`, `ipam`, `monitoring_network`,
+`credential_vault`, `notifications_sms_pager`, `workflows`,
+`compliance_findings`, `monitoring_access`, `monitoring_analytics`,
+`compliance_automation`; E-151, WP-862), the module key of phase 4
+(`endpoint_agent`) and the add-ons, and the quotas `max_cis`,
+`max_collectors`, `max_users`, `max_api_keys`, `max_storage_mb`, the
+monitoring quotas `max_monitored_targets`, `max_probes_per_minute`,
+`min_probe_interval_s` and `max_targets_<type>` (WP-881) are
 accepted (`entitlement.FeatureKeys`, `entitlement.Quotas`); any other key,
-the former keys `inventory`, `stocktake` and `ticketing` among them, is 422
-with the field.
+the former keys `inventory`, `stocktake`, `ticketing`, `workflow_forms` and
+`compliance` among them, is 422 with the field. Migration 000284 renamed
+`workflow_forms` to `workflows` and `compliance` to `compliance_findings`.
 
 Route→feature mapping of the phase-1 features (ENT-02, ENT-05;
 `featureRules`/`coreRoutes` in `backend/internal/entitlement/middleware.go`,
@@ -448,28 +480,70 @@ server (`RETICORA_SMTP_HOST`, whose settings the installer also gives the
 realm) the first org_admin is invited by the IdP's mail to set a password
 (`admin_invited`), otherwise the organization is created without an IdP
 account.
-Plan matrix (ENT-06 in the version of E-44, confirmed with E-34;
+Plan matrix (ENT-06 in the version of E-44 and E-151, confirmed with E-34;
 `planFeatures` in `backend/internal/entitlement/entitlement.go`):
 
 | Plan | Features |
 |------|----------|
 | essential | cmdb_core, discovery, topology, rack_view, export_csv, webhooks, api_access, notifications_email, assets_basic, documents, import, ticketing_essential |
-| standard | + ticketing_standard, signature, stock, stocktake_standard, barcode, gps_standard, workplace, export_datev |
-| pro | + internal_orders, monitoring, workflow_forms |
-| enterprise | + endpoint_agent, compliance |
+| standard | + ticketing_standard, signature, stock, stocktake_standard, barcode, gps_standard, workplace, export_datev, monitoring, ipam |
+| pro | + internal_orders, monitoring_network, credential_vault, notifications_sms_pager, workflows, compliance_findings |
+| enterprise | + monitoring_access, monitoring_analytics, compliance_automation, endpoint_agent |
 
-IGA (`iga`) and AI (`ai`) are add-ons (CH14): no plan includes them, only
-their own entitlement row unlocks them. `gps_standard` and `workplace` have
+`monitoring` from standard on deviates from ENT-06 (there enterprise only):
+by decision of the client of 2026-11-09 standard holds the monitoring core
+(reachability probes, state changes, notification, root-cause suppression,
+flapping, maintenance windows, availability history); threshold rules,
+recommendations and the network-protocol probes are `monitoring_network`
+from pro on (E-151). IGA (`iga`), AI (`ai`) and the ADMP connection (`admp`)
+are add-ons (CH14): no plan includes them, only their own entitlement row
+unlocks them. `gps_standard` and `workplace` have
 no module in phase 2 (LOC-09 and MGT-06 are P4); `ticketing_pro`,
 `stocktake_pro`, `disposition`, `audit_extended` and `usage_tracking` are
-not created. Quotas have no plan default (E-34): a quota only gates when it
-is stored in the limits of a row. `max_storage_mb` (MiB) is stored on
-`documents` (MGT-01). New organizations get the plan default of E-44 stored
-there (WP-706): essential 1,000, standard 10,000, pro 50,000; enterprise is
-unlimited and gets no entry. The trial stores the value of the trial plan,
-the operator creation (`POST /api/v1/admin/orgs`) the plan's value unless
-`limits.max_storage_mb` is given; existing organizations get no value, so
-for them the quota stays unlimited until the operator stores one.
+not created. Every plan has default quotas (PKG-04, E-153, WP-881;
+`entitlement.PlanQuotaDefaults`), stored in the limits of the feature's
+row: essential / standard / pro / enterprise `max_cis` 500 / 2,500 /
+10,000 / 50,000, `max_collectors` 2 / 5 / 20 / –, `max_users` 5 / 25 /
+100 / –, `max_storage_mb` (MiB, on `documents`, MGT-01) 1,000 / 10,000 /
+50,000 / –; on `monitoring` from standard on `max_monitored_targets`
+500 / 5,000 / 25,000, `max_probes_per_minute` 1,000 / 10,000 / 30,000 and
+`min_probe_interval_s` 30 / 30 / 10 (– is unlimited, no entry). The trial
+stores the defaults of the trial plan (with its configured `max_cis`; after the trial the system job `entitlement.trial_end` changes to the fallback plan with `ResetLimits`, recorded in `operator_audit` under the operator kind `system`, migration 000290, and once per trial through `notice_sent`), the
+operator creation (`POST /api/v1/admin/orgs`) the defaults unless
+`limits` passes a value. A quota only gates when it is stored: existing
+organizations keep their rows, so a quota without entry stays unlimited
+until the operator stores one; `entitlement.LimitOrigin` tells a plan
+default from an override. Monitoring quotas are admitted under the
+advisory lock `database.LockQuota` (`Service.AdmitCount`), so concurrent
+creations cannot pass the limit; an interval below `min_probe_interval_s`
+is 422 on `interval_s` (`Service.CheckInterval`).
+**Probe budget (PKG-04, NFR-11, WP-940):** the monitoring domain admits
+every create, change and enable of a probe with
+`entitlement.(*Service).AllowProbeChange(ctx, org, before, after)`; the
+budgets come from `entitlement.BudgetOf` over the effective values of the
+active probes: distinct targets (the CI, else the host of the target in
+the probe's client) against `max_monitored_targets`, Σ 60/`interval_s`
+exactly as a fraction against `max_probes_per_minute` (30 s are 2 checks
+per minute), distinct targets per registry type against
+`max_targets_<type>` and the shortest interval against
+`min_probe_interval_s`. Lock order: the write transaction takes the budget
+lock `database.LockQuota(ctx, org, "probe_budget")` exclusively first,
+before every row lock, and counts both budgets in the same transaction
+over every active probe of the organization (also those outside the
+caller's scope). A create counts before its insert. A change takes, after
+the budget lock, only the row lock of the changed probe (`probe` `FOR NO
+KEY UPDATE`; the count then sees the row it changes as stored, and no
+other write can change it before the commit) and counts before its update;
+the advisory lock `probe_parent:<org>` follows it. A disabled probe needs
+no budget lock: only the interval it asks for is checked.
+Error mapping: a raise above a quota is 403 `entitlement-limit` naming the
+quota and its limit, a shorter interval than the plan minimum 422 on
+`interval_s`, also on a disabled probe (a create, an interval change and
+an enable of a probe stored below the minimum); the limit is reachable
+exactly. Only raises are checked: delete and disable never refuse, and stock above a quota after a plan
+change keeps running. A stored interval below `min_probe_interval_s` runs
+at the minimum: the resolution of the effective values marks it with
+origin `plan` and `clamped`.
 `gps_standard` gates the GPS history in the P4 module `gps`; disposal
 records (MGT-02) are the P2 module `disposal` with `assets_basic`.
 Migration 000190 moved existing
@@ -504,10 +578,41 @@ discovery license stops only `IsIngest` requests. The phase-2 mapping:
 | stock | `/api/v1/consumables*`, `/api/v1/inventory/*`, POST (and every method but GET) `/api/v1/stock-movements*` |
 | stocktake_standard | `/api/v1/stocktakes*` |
 | internal_orders | `/api/v1/orders*` |
-| documents | `/api/v1/documents*` |
+| documents | `/api/v1/documents*`, `/api/v1/tickets/{id}/attachments` (together with ticketing_essential; without the release module `documents` the route is not registered, 404; SR-61, WP-874) |
 | import | `/api/v1/imports*`, `/api/v1/import-profiles*` |
 | ticketing_essential | `/api/v1/tickets*`, POST `/api/v1/review-items/{id}/ticket` (reading the review queue stays core) |
 | ticketing_standard | `/api/v1/slas*`, `/api/v1/tickets/{id}/sla`, `/api/v1/business-calendars*` |
+
+The phase-3 mapping (WP-865, E-151, E-160; `TestP3ModulePrefixesAreGated`:
+every prefix of a P3 module except `org_lifecycle` and the provider callback
+has a key):
+
+| Feature | REST (middleware) |
+|---------|-------------------|
+| monitoring | `/api/v1/monitoring*` (probes, probe types, profiles, groups, events, alarms, incidents, alarm settings and playbooks, alert rules, metrics), `/api/v1/collector-groups*`, `/api/v1/cis/{id}/availability`, `/api/v1/credential-bindings*`, `/api/v1/cis/{id}/credentials*`, `/api/v1/maintenance-windows*` |
+| monitoring_network | `/api/v1/monitoring/incidents/{id}/recommendation`, `/api/v1/cis/{id}/configs*`, `/api/v1/subnets/{id}/rpki` (together with ipam) |
+| monitoring_analytics | `/api/v1/monitoring/sla*`, `/api/v1/monitoring/forecasts*` |
+| ipam | `/api/v1/ipam*`, `/api/v1/ipam-sections*`, `/api/v1/asns*`, `/api/v1/asn-ranges*`, `/api/v1/bgp-peerings*`, `/api/v1/nat-translations*`, `/api/v1/nameserver-sets*`, `/api/v1/vlan-domains*`, `/api/v1/cis/{id}/addresses`, `/api/v1/subnets/{id}/scan` (together with monitoring) |
+| credential_vault | `/api/v1/vault-connections*` |
+| admp (add-on) | `/api/v1/admp*`, `/api/v1/cis/{id}/admp-connections`, `/api/v1/network-interfaces/{id}/admp` |
+| notifications_sms_pager | `/api/v1/escalation-policies*`, `/api/v1/notification-escalations*` |
+| workflows | `/api/v1/forms*`, `/api/v1/form-submissions*`, `/api/v1/workflows*`, `/api/v1/workflow-runs*` |
+| compliance_findings | `/api/v1/compliance*`, `/api/v1/security*` |
+
+Core without feature: `/api/v1/org/exports*` and `/api/v1/org/deletion`
+(`coreRoutes`, TLC-05, TLC-06) and the public provider callback
+`/api/v1/notification-callbacks*` (signature of the provider, WP-1146).
+Functions without a path of their own are checked in handlers and workers:
+`entitlement.ProbeTypeFeature` maps every key of the probe type registry
+(`icmp`, `tcp`, `http`, `dns` → monitoring; `snmp_status`, `snmp_if`,
+`snmp_custom`, `redfish`, `bgp`, `ospf`, `isis`, `bfd`, `optical`, `dhcp`,
+`stamp`, `twamp_control`, `gnmi`, `rpki_rtr`, `rpki_roa` →
+monitoring_network; `bng`, `pon`, `tr069`, `usp` → monitoring_access), and
+`entitlement.SubFunctionFeature` the sub-functions (correlation →
+monitoring; recommendation, threshold rules, configuration change detection
+→ monitoring_network; SLA reports, capacity forecasts →
+monitoring_analytics). Standard holds the monitoring core only (decision of
+the client of 2026-11-09).
 | workplace | `/api/v1/desks*`, `/api/v1/desk-bookings*` |
 
 Prefixes without a route yet (`suppliers`, `contracts`, `labels`,
@@ -608,7 +713,8 @@ from the implementation in either direction. It compares the profiles
 `postgres` and `no-db` in the releases "all modules", "G1" (the test profile
 without late modules: paths without `x-phase`) and "G2" (the default without
 `RETICORA_MODULES`, the same as `P2`: paths without `x-phase` or with
-`x-phase: P2`, WP-830). The deliberate exceptions are `/metrics` (the Prometheus scrape
+`x-phase: P2`, WP-830) and "G3" (the phase value `P3`: paths without
+`x-phase` or with `x-phase` P2 or P3, WP-863). The deliberate exceptions are `/metrics` (the Prometheus scrape
 endpoint, not part of the tenant API), the undocumented GraphQL BFF under
 `/bff/` (GQL-01) and, as the only exception inside the contract, operations
 marked `x-status: planned` (E-38, WP-247).
@@ -628,6 +734,30 @@ operations it does not implement and regenerates
 `backend/internal/server/testdata/route_permissions.txt`. The work package
 for each planned resource is listed in the path inventory of E-38
 (`docs/plan/phase2/entscheidungen.md`).
+
+Path inventory of phase 3 (WP-864, E-160): the scaffold below marks every
+prefix of the P3 modules of WP-863 and the operator package management with
+`x-status: planned`; the paths of P3 modules carry `x-phase: P3`, the
+operator paths none. Feature keys follow E-151 (gates of the new prefixes:
+WP-865), permissions WP-866 and WP-870 or the work package that registers
+the route. Below `/api/v1/admp` only GET is documented except the account
+management `/api/v1/admp/accounts` (`TestADMPPathsAreReadOnly`); the access
+to ADMP itself is read-only (WP-926, WP-927).
+
+| Prefix | Module | Feature key | Permission | Work packages |
+|---|---|---|---|---|
+| `/api/v1/monitoring/{targets,probes,probe-types,profiles,groups,events}` | `monitoring` | `monitoring` | `monitoring:read`/`monitoring:write` | WP-934 – WP-949, WP-975, WP-979 |
+| `/api/v1/monitoring/{alarms,incidents,alarm-settings,alarm-playbooks}` | `monitoring` | `monitoring`; recommendation `monitoring_network` | `monitoring:read`; ack `alert:acknowledge` | WP-982 – WP-1043 |
+| `/api/v1/monitoring/{sla,forecasts}` | `monitoring` | `monitoring_analytics` | `monitoring:read`/`monitoring:write` | WP-1048 – WP-1061 |
+| `/api/v1/collector-groups` | `monitoring` | `monitoring` | `monitoring:read`/`collector:manage` | WP-947 |
+| `/api/v1/cis/{id}/{availability,configs}` | `monitoring` | `monitoring`; configs `monitoring_network` | `monitoring:read` | WP-973, WP-1056 |
+| `/api/v1/credential-bindings`, `/api/v1/cis/{id}/credentials` | `monitoring` | `monitoring` | `credential:read`/`credential:bind` | WP-890, WP-894 – WP-896 |
+| `/api/v1/vault-connections` | `monitoring` | `credential_vault` | `credential:read`/`vault:manage` | WP-893 |
+| `/api/v1/ipam`, `/api/v1/ipam-sections`, `/api/v1/asns`, `/api/v1/asn-ranges`, `/api/v1/bgp-peerings`, `/api/v1/nat-translations`, `/api/v1/nameserver-sets`, `/api/v1/vlan-domains`, `/api/v1/cis/{id}/addresses`, `/api/v1/subnets/{id}/{scan,rpki}` | `ipam` | `ipam`; rpki `monitoring_network` | `ipam:read`/`ipam:write` | WP-900 – WP-924, WP-1062 – WP-1072 |
+| `/api/v1/admp`, `/api/v1/cis/{id}/admp-connections`, `/api/v1/network-interfaces/{id}/admp` | `admp` | `admp` (add-on) | `admp:read`; holder `admp:holder_read`; accounts `admp:manage` | WP-925 – WP-932, WP-1073 – WP-1078 |
+| `/api/v1/escalation-policies`, `/api/v1/notification-escalations`, `/api/v1/notification-callbacks` | `escalation` | `notifications_sms_pager` | `escalation:manage`; ack `alert:acknowledge`; callback public (provider signature) | WP-1140 – WP-1148 |
+| `/api/v1/org/exports`, `/api/v1/org/deletion` | `org_lifecycle` | none (core) | `org:export`, `org:delete` | WP-1149 – WP-1157 |
+| `/api/v1/admin/orgs/{id}/{plan,addons,usage}` | none (operator) | none | operator login | WP-880 – WP-885 |
 
 Deprecation follows API-01 (E-25, WP-167): the operation carries
 `deprecated: true`, `x-deprecated-at`, `x-sunset` (at least 12 months later)
@@ -675,6 +805,100 @@ development mode). Failed jobs keep their error message; expired jobs no longer
 expose a URL. When no blob store is configured the endpoint answers 503 and the
 streaming export remains available.
 
+**Full export of the organization (TLC-05, WP-1149):** the job kind
+`org.export` (3 attempts, 2 h, cancellable) exports every table of the
+organization as JSONL for portability and the data processing agreement.
+`export.OrgTables` reads the catalog from `pg_catalog`: every table and
+hypertable of `public` with `organization_id` plus the organization row, so
+a new table is exported without a code change; only `orgExportExcluded` is
+left out, each with a reason (`org_dek`, `pii_subject` — exported decrypted
+as `pii_subject.jsonl` —, `search_document`, `search_document_field`).
+Secret columns are never selected (suffix `_hash`, `_enc`, `_ciphertext`,
+prefix `encrypted_` or `secret`, plus `orgExportSecretColumns`, e.g. the
+credential ciphertext and the previous webhook secret). The job reads in one
+tenant transaction `REPEATABLE READ, READ ONLY`
+(`database.WithTenantSnapshot`), in batches of 5,000 rows by primary key
+(without one through a cursor by `ctid`; `metric_sample` through its view
+`metric_sample_v`), reveals `$pii` references with `pii.RevealTx` (E-165)
+and writes `org/<org>/org-export/<job>/tables/<table>/part-<nnnn>.jsonl`
+(at most 64 MiB per part) to the bucket `exports`. `manifest.json` next to
+the parts and in the job result lists per table the rows, the parts with
+key, bytes and SHA-256 and the snapshot; progress rises per table. A retry
+after a crash keeps the completed tables and exports the rest in a new
+snapshot; a cancel (JOB-03) stops before the next batch and removes the
+objects of the job. Documents, routes and download follow in WP-1150 and
+WP-1151.
+
+**Routes and download of the full export (TLC-05, WP-1151):** `POST
+/api/v1/org/exports` (`org:export` for the whole organization and a session
+opened with a second factor, else 403 `mfa-required`) queues `org.export` and
+answers 202; while another one is queued or running 409. `GET
+/api/v1/org/exports` lists the exports newest first, `GET
+/api/v1/org/exports/{id}` gives status (`queued`, `running`, `completed`,
+`expired`, `failed`, `cancelled`), progress and, once completed, the manifest
+and `expires_at` = completion + 24 h; an export of another organization is
+404. `GET /api/v1/org/exports/{id}/download` (MFA as well) lists every object
+(table parts, document ZIPs, `manifest.json`) with name, bytes, SHA-256 and a
+signed URL valid 15 minutes at most and never beyond `expires_at`
+(`blob.Download.MaxAge`); after it 410. Each download writes the audit entry
+`org.export_downloaded` (`resource_type` `org`). The success of the job
+writes `org.export_completed` (job id, `initiated_by`, rows, bytes,
+`expires_at`) in the transaction that marks it succeeded
+(`jobs.SuccessEvents`); the notification reaches the initiator personally
+(`DirectUserIDs`, no webhook channel). The hourly system job
+`org.export_cleanup` (module `org_lifecycle`) removes the objects of exports
+past their 24 hours and records `expired_at` in the job result (the job model
+has no status `expired`; the API derives it); cancelled and failed exports
+lose their objects 24 hours after their end, read from the stored
+`manifest.json`. Two starts at the same time queue one export (transaction
+lock of the organization). In the generic job API an `org.export` job is
+seen and cancelled only with `org:export`; `job:read` alone does not show it.
+
+**Read-only grace period of an organization deletion (TLC-06, WP-1153):**
+while `organization.deletion_state` is `requested` or `purging`, the route
+middleware `middleware.OrgState` (before validation and idempotency) answers
+every `POST`, `PUT`, `PATCH` and `DELETE` of the organization with 423 and the
+problem type `urn:reticora:problem:org-pending-deletion` (member `due_at`);
+REST ingest included. Open stay `DELETE /api/v1/org/deletion`,
+`POST /api/v1/org/exports`, `POST /api/v1/auth/logout`,
+`POST /api/v1/collectors/{id}/heartbeat` and the reading POST routes
+(`/bff/graphql`, `/api/v1/search/query`, `/api/v1/audit/verify`,
+`/api/v1/ai/ask`; `middleware.OrgStateExemptRoutes`). The state is kept per
+process for at most 15 s; request and cancel drop the entry of the own
+process at once. `jobs.Service.Enqueue` refuses every job kind but
+`org.export` with `ErrOrgPendingDeletion`, running jobs run to their end; a
+job route whose process still held the old state answers 423 as well (the
+refusal marks the request, the middleware replaces the error response and
+renews its entry). The NATS edge refuses new connections of the collectors
+of the organization (`discovery.ErrOrgPendingDeletion`); on a connection
+opened before the request every data request (ingest, metrics, probes,
+scope channel) is refused with 423, only the heartbeat passes. The collector
+status run sets them `paused`
+(`discovery.LicensedUnlessPendingDeletion`); after the cancel the next run
+sets them `offline`, their next heartbeat `active`. System runs without a request (retention, rotation,
+notifications) go on; the purge removes their results.
+
+**Purge outside the tables (TLC-06, SEC-05, WP-1155):** after the rows of
+the organization (WP-1154) the system job `org.purge` runs these steps, each
+idempotent and counted, before it sets `purged`: (1) crypto-shredding of the
+vault, `pii.ShredOrganizationTx` through `org_purge_batch`, the data key in
+`org_dek` first and then every `pii_subject` (from the first commit no value
+of the organization can be decrypted); (2) every object below `org/<id>/`
+in the buckets `exports`, `reticora-documents` and `RETICORA_S3_BUCKET` with
+all versions and delete markers (`blob.Store.DeleteAll`, S3
+`ListObjectVersions` in pages of 1,000, each version deleted by its
+`versionId`); (3) the documents of the organization in OpenSearch
+(`_delete_by_query` on `organization_id`; without OpenSearch the PostgreSQL
+index went with the rows); (4) the messages under `events.<id>.>` of
+`RETICORA_EVENTS` (`Stream.Purge` with the subject filter; without NATS
+nothing); (5) the cache entries `entitlements:<id>` and the field permission
+snapshot. The counts of the finished steps are kept in
+`organization.settings.org_purge_external`: a failed step leaves the state
+`purging`, the next run repeats only the open steps. When all succeeded,
+`operator_audit` receives `org.deletion.external_purged` with the counts,
+then `org.deletion.db_purged` and the state `purged`. Backups expire with
+their retention; a customer vault (WP-893) is not touched.
+
 **Privacy / GDPR:** `GET /api/v1/users/{id}/data-export` returns the full set
 of personal data stored about a user (account record plus all contact records
 carrying the user's e-mail address) — the Art. 15 access request.
@@ -685,6 +909,34 @@ account is deactivated, while the row itself is kept so foreign keys
 (tickets, assignments, audit hash chain) stay intact. Self-anonymization is
 rejected so an operator cannot lock themselves out mid-request. Both
 endpoints require `user:manage`.
+
+**Rights of a person (SEC-05 [P3], WP-1158):** `POST
+/api/v1/privacy/subjects/report` and `POST /api/v1/privacy/subjects/erase`
+(both `user:manage`, 202 with the job, `Location: /api/v1/jobs/{id}`) cover
+every person, not only users: the body names exactly one of `user_id`,
+`contact_id` or `subject_id` (a vault subject of kind person or contact, e.g.
+the holder of an ADMP connection); a person of another organization is 404.
+The match values are e-mail, name and phone of the account or of the
+decrypted vault subject (lower case, trimmed). Personal values of the history
+are value subjects without a blind index, so the jobs decrypt them in batches
+of 1,000 and compare; a value anchored to the person's subject belongs to it
+anyway. The job `privacy.subject_report` lists per finding table, row id and
+field path: surrogate references in every jsonb column of the tenant tables
+(audit changes, CI history, events and later tables without code change), the
+user as actor, assignee or recipient (audit, CI history, stock movements,
+deliveries, tickets, assignments), deliveries to the person's address, every
+column with a foreign key on `pii_subject` (read from `pg_constraint`, e.g.
+`contact.pii_subject_id`, `admp_connection.holder_subject_id`) and other
+contacts with the same address. The values are unsealed in the result (E-165),
+which only `user:manage` reads. `privacy.subject_erase` with `mode = shred`
+deletes the value subjects (one transaction per batch) and the person's
+subject (anchored ones such as an ADMP address by cascade), anonymizes a user
+(sessions revoked), empties the address of deliveries to the person and the
+results of earlier reports about it; every reference then resolves to null
+(shown as "deleted"). `mode = pseudonymize` replaces the data of the found
+subjects with `person-<8 hex digits of SHA-256 of the surrogate>` and keeps the
+surrogates. Both jobs write one audit entry (`privacy.subject_report`,
+`privacy.subject_erase`) with id or surrogate, mode and counts, never a value.
 
 **Document content:** documents carry metadata rows; the binary content lives
 in blob storage. `PUT /api/v1/documents/{id}/content` stores the request body
@@ -744,8 +996,11 @@ and the server env patch. On every startup the server applies the index
 template and re-checks connectivity. PostgreSQL remains the source of truth:
 the hybrid backend rebuilds OpenSearch from `search_document` on
 `POST /api/v1/search/reindex`, so a lost or rebuilt index is recovered online
-and tenant-scoped. See `docs/opensearch.md` for the reindex runbook and
-troubleshooting (yellow status, disk watermark, unreachable backend).
+and tenant-scoped. The pinned version is OpenSearch 3.9.0 (Upd-02, before
+2.19.7); after the upgrade the index is rebuilt from PostgreSQL rather than
+taken over from a 2.x snapshot. See `docs/opensearch.md` for the reindex and
+upgrade runbook and troubleshooting (yellow status, disk watermark,
+unreachable backend).
 
 **Collector connectivity:** the collector authenticates uploads with mTLS when
 client-certificate material is available — from `RETICORA_TLS_CLIENT_CERT`/
@@ -779,6 +1034,40 @@ data first is the safe degradation. Spool occupancy (message count, bytes,
 oldest age) is emitted as structured `spool stats` log records on every
 spool/flush so operators can alert on a growing backlog.
 
+**Probe spool (PRB-07, NFR-04, COL-05, WP-954):** next to the discovery
+spool the monitoring keeps two queues of its own below `RETICORA_SPOOL_DIR`:
+`probe-state` (every state change as an entry of its own, written before
+the engine goes on; kept at least 24 h and never displaced within them)
+and `probe-results` (the results, bundled every second or at 1,000 results
+into one gzip-compressed entry with `seq_from`/`seq_to`, delivered in
+sequence order). `RETICORA_PROBE_SPOOL_MAX_BYTES` (default 2 GiB) is the
+budget of both together, a tenth of it for the state changes; 24 h at 170
+results/s fit into it. At 80 % of the result share the oldest bundles are
+compacted (per probe one result per 5 minutes plus every failure and every
+result of a state change): a window of up to 900 bundles behind a cursor,
+the last compacted part included so it thins out again with the bundles
+behind it; a full window with nothing to leave out (an outage with only
+failures) is passed over, so the compaction never stalls on it and reads
+only the bundles behind its cursor (`DiskBuffer.PeekAfter`). Only at the
+limit a new bundle is dropped. Losses are
+counted per reason (`max_bytes`, `compacted`, `quarantined`; compacted
+results are no loss), persisted and reported in the monitoring alive
+message (`collector/probe/outbox.go`).
+
+**Probe uplink (PRB-05, PRB-07, WP-955):** the probe engine
+(`collector/probe/engine.go`) sends a state change on
+`collector.<org>.<id>.probe.state` as soon as it is spooled and the results
+on `….probe.results` every 10 s or at 1,000 results (at most 256 KiB per
+message), one message in flight per queue. An entry leaves the spool only
+after the server answered with the highest sequence number it persisted.
+After a reconnect the state changes go first, then the results at most
+`RETICORA_PROBE_SYNC_RATE` messages per second (default 5). A refusal for
+good (4xx) moves the entries into the quarantine of the queue and counts
+them as `quarantined`; network errors and 5xx are repeated with backoff
+(1 s to 60 s); 403 `feature-not-entitled` pauses the uplink (and the metric
+samples) for an hour without loss. Without the edge connection everything
+stays in the spool; there is no HTTP fallback.
+
 **Identity resolution (spec §5.3):** `discovery.Reconcile` matches incoming
 items against existing CIs in the spec's priority order — serial number,
 hardware UUID, MAC address(es), management IP + CI type, hostname/FQDN. Each
@@ -804,10 +1093,28 @@ profile; `TestEmbeddedProfileData` validates the set in CI. Shipped profiles
 cover Cisco, Juniper, Arista, Fortinet, HPE, Dell, MikroTik, Ubiquiti,
 Synology, NetApp, APC, Supermicro and Lenovo plus generic SNMP/SSH fallbacks.
 
-**SNMP trap reception:** when `RETICORA_SNMP_TRAP_LISTEN` is set (e.g.
-`:162`), the collector runs a tolerant SNMPv1/v2c trap receiver
-(`collector/plugins/snmp/trap.go`). Traps carrying a different community than
-`RETICORA_SNMP_COMMUNITY` are dropped; every accepted trap is normalized into
+**SNMP trap reception:** the server configures the trap receiver per
+collector group (`collector_group.trap_config`: enabled, UDP port, default
+162, and `credential_ids`) and hands the configuration over with every
+assignment set; the collector starts, stops or rebinds the receiver without
+a restart (DIS-06, WP-977). The credentials decide what is accepted:
+SNMPv1/v2c traps need the community of a `snmp_v2c` credential, SNMPv3
+traps (WP-978, `collector/plugins/snmp/trap_v3.go`) a user of a `snmp_v3`
+credential with the field names of polling (`username`, `auth_protocol`,
+`auth_password`, `priv_protocol`, `priv_password`). SNMPv3 is accepted at
+authNoPriv (no `priv_password`) and authPriv with SHA or SHA-224/256/384/512
+and AES-128/192/256; MD5, DES and noAuthNoPriv are refused. The sender is
+the authoritative engine: keys are localized per user and
+`msgAuthoritativeEngineID` (RFC 3414) and cached (at most 1,024, least
+recently used out), and a trap whose engine boots/time lie outside the
+150-second window of RFC 3414 §3.2 is dropped as a replay. Every dropped
+trap is counted by reason in the monitoring alive message
+(`traps_received`, `traps_dropped{reason=community|security_level|
+unknown_user|auth|decrypt|not_in_time_window}`); no key material is logged.
+Fallback: until an assignment set with `trap_config` arrives,
+`RETICORA_SNMP_TRAP_LISTEN` (e.g. `:162`) starts a v1/v2c receiver as before.
+Traps carrying a different community than `RETICORA_SNMP_COMMUNITY` are
+dropped there, and v3 traps are not accepted. Every accepted trap is normalized into
 a `snmp_trap_received` metric sample (labels: source IP, trap OID, up to 16
 varbinds) and posted to `POST /api/v1/monitoring/metrics`, so the standard
 alert rules can fire on traps. Trap delivery is fire-and-forget — a burst
@@ -815,6 +1122,25 @@ during a backend outage is logged and dropped rather than spooled, because a
 delayed alert is usually worse than a lost one. Trap storms are bounded by a
 64-events-in-flight cap. The BER parser is deliberately tolerant: malformed
 varbinds are skipped, never fatal.
+
+**SNMPv3 polling:** the collector polls SNMPv3 only with authPriv
+(`collector/plugins/snmp/v3.go`) through gosnmp v1.47.0, which fixes
+GHSA-w96x-5v55-24xx (forged unauthenticated answers accepted before the
+engine ID is known, remote panic in USM parsing). Since v1.47.0 the engine
+discovery fails when the agent's REPORT carries an empty engine ID or one
+outside 5–32 bytes (RFC 3411 `SnmpEngineID`); such a non-conforming agent
+is reported as a failed target instead of being polled.
+
+**Identity values per record (SR-10, WP-878):** a DeviceRecord
+(`api/devicerecord.schema.json`) carries at most 256 identity values
+(`x-max-identity-keys`; counted as distinct values: serial number, hardware
+UUID, every MAC of identity and interfaces, every IP of the interfaces and
+`target_ip`). The server refuses a record with more on its own and never
+shortens it: HTTP ingest and edge channel count it in
+`rejected_identity_limit` of the answer, log its `record_id` with the count and
+raise `reticora_ingest_records_rejected_total{reason="identity_keys"}`; the
+other records of the batch are processed. A record within the limit never
+takes the organization's identity lock exclusively.
 
 **Metric polling (Epic E, MON-02):** the collector polls base metrics over
 SNMP and uploads them to the monitoring ingest (labels `collector_id` and
@@ -842,6 +1168,26 @@ SNMP and uploads them to the monitoring ingest (labels `collector_id` and
   `phase`; bank rows are left out) and Raritan PX2/PX3 (PDU2-MIB inlet
   sensors, current and active power per `inlet`). PDUs of other vendors give
   no readings.
+- *Probe values (`kind=probe`, WP-976):* the values a server-side probe
+  reports (`values` of a result, e.g. `rtt_min_ms`, `jitter_ms` of `icmp`,
+  `connect_ms`, `ttfb_ms`, `cert_expiry_s` of `http`) are stored as metric
+  samples of the probe's CI (`probe.ci_id`, no address lookup, also for a CI
+  without management IP), labelled `kind=probe`, `probe_id` and the labels of
+  the result (at most 16), at the `observed_at` of the result. Only the value
+  names the probe type declares are kept; probes without CI and results of a
+  stale epoch give none (`reticora_probe_metrics_discarded_total{reason}`).
+  A repeated delivery writes no second sample.
+
+**Migration to server-side probes (MON-03):** the environment poll
+(`RETICORA_METRICS_INTERVAL`, `RETICORA_SNMP_POLL_METRICS`) is deprecated.
+A collector that runs it (also with the default interval) and holds an
+assignment set with at least one probe logs
+`collector.metrics.env_poll_deprecated` (warning) once per set version,
+as soon as the collector takes over assignment sets (WP-956); before that
+it holds none and logs nothing.
+Configure the probes on the server instead (`snmp_if`, `snmp_custom`,
+`redfish`, once available); their samples carry `kind=probe` and
+`probe_id` instead of `kind=snmp_poll` and `target`.
 
 Values a device does not answer (noSuchObject) or answers non-numerically are
 skipped, an unreachable target is skipped for the cycle, so one failing
@@ -862,6 +1208,27 @@ only when its condition holds continuously for the configured duration; the
 pending/fired state is persisted on `alert_rule` (migration 0037), so
 restarts neither re-notify nor lose ongoing durations. Fired alerts are
 logged as structured warnings via the default notifier.
+
+**Notification categories (NTF-05 [P3], WP-1147):** users subscribe to
+notification categories through `PUT /api/v1/notifications/preferences`
+(`subscriptions`, `muted_categories`, `digest`); every category is subscribed
+by default, also for the users of a new organization. The [P3] groups are
+`alarm` (`alarm.*`, `incident.*` and `sla.violated`), `config`
+(`ci.config_changed`, part of the Alerts), `maintenance`
+(`maintenance.scheduled`) and `workflow` (`workflow.run_failed` and the action
+`send_notification`). `workflow.run_failed` reaches the initiator of the run
+and the org_admins with `workflow:read` in its client and site, with the
+definition, the failed step and its error (URLs masked); `sla.violated` the
+contacts of the CI in the roles operations and escalation and the users with
+`monitoring:read` in its scope; `ci.config_changed` only the operations
+contacts of the CI and the users with `monitoring:read` who may read it, with
+the number of changed lines and a link to the diff, never configuration
+content. Approval requests (WP-1098) and escalation steps (WP-1145) are sent
+directly; `escalation` is no subscribable category. Critical alarms: an
+alarm or incident of severity `critical` is never part of a digest and
+reaches the user also with `alarm` muted and during quiet hours, so the
+opt-out of `alarm` applies to non-critical alarms only. A stored earlier
+category name (`maintenance_window`) reads as `maintenance`.
 
 **AI/RAG governance:** `/api/v1/ai/conversations` and `/api/v1/ai/ask` are
 gated by the `ai` add-on entitlement (CH14). If no
@@ -922,9 +1289,9 @@ type (both allow further fields).
   fields. Personal fields (`pii.IsPersonalKey`) carry a surrogate reference
   `{"$pii": "<id>"}` (WP-241). The envelope of a phase 2 type always names
   `entity_id` and `entity_seq`.
-- **Reserved (phase 3):** `maintenance.scheduled`, `workflow.*`, `finding.*`
-  (`events.Reserved`). They are no event types: the outbox refuses them and
-  webhooks cannot subscribe to them.
+- **Phase 3:** the reservation of `maintenance.scheduled`, `workflow.*` and
+  `finding.*` ended with WP-868; the types of phase 3 (`events.Phase3Types`)
+  are registered with their frames and listed below.
 
 | Type | `entity_id` | Origin | Producer |
 |---|---|---|---|
@@ -943,6 +1310,44 @@ type (both allow further fields).
 | `metamodel.published` | publication (content after E-37) | EVT-03 | WP-261 |
 | `document.scanned` | document | plan addition | WP-734 |
 | `import.completed` | import run | plan addition | WP-775 |
+
+Types of phase 3 (EVT-03 [P3]; monitoring of ALR-02, PRB-03 and ALR-07 with
+WP-867, the modules with WP-868; E-161 Option 2): one event per state change, never one per probe result
+(30.5 million results a day would exceed the outbox retention of EVT-01).
+They are registered with their frame (`events.Phase3Types`); until its
+producer is merged a type stands in `plannedProducers` of
+`backend/internal/server/evt02_producers_integration_test.go`, never in
+both lists, and the list is empty before WP-1177. Bound subscriptions read
+the monitoring with `monitoring:read`, `ci.config_changed` too (not
+`ci:read`), the module types with the read permission of their route
+(`maintenance:read`, `workflow:read`, `finding:read`, `escalation:manage`);
+`monitoring.suspension_changed` reaches org-wide subscriptions only.
+
+| Type | `entity_id` | Origin | Producer |
+|---|---|---|---|
+| `probe.state_changed` | probe | ALR-02, PRB-05 | WP-961 |
+| `alarm.opened`, `alarm.acknowledged`, `alarm.severity_changed`, `alarm.resolved` | alarm | ALR-01, ALR-02 | WP-982 |
+| `alarm.escalated` | alarm | NTF-02 | WP-1146 |
+| `incident.opened`, `incident.resolved` | incident | ALR-03 | WP-1028 |
+| `incident.updated` | incident | ALR-03, ALR-10 | WP-1036 |
+| `collector_group.unreachable`, `collector_group.reachable` | collector group | PRB-03 | WP-964 |
+| `collector_group.failover` | collector group | PRB-10 | WP-963 |
+| `collector.clock_skew` | collector | PRB-07 | WP-962 |
+| `config.changed` | probe (configuration of the probe) | PRB-01 | WP-939 |
+| `ci.config_changed` | CI (configuration of the device) | ALR-07 | WP-1054 |
+| `monitoring.suspension_changed` | organization | PKG-06 | WP-942 |
+| `capacity.forecast_exceeded` | forecast | ALR-08 | WP-1060 |
+| `sla.violated` | availability target | ALR-06 | WP-1049 |
+| `maintenance.scheduled` | maintenance window | MGT-04 | WP-1034 |
+| `maintenance.started`, `maintenance.ended` | maintenance window | MGT-04 | WP-1033 |
+| `workflow.run_started`, `workflow.run_succeeded`, `workflow.run_failed`, `workflow.run_cancelled` | workflow run | WFL-02 | WP-1092 |
+| `workflow.approval_requested`, `workflow.approval_decided` | approval | WFL-04 | WP-1098 |
+| `workflow.webhook` | workflow run | WFL-02 | WP-1096 |
+| `finding.created`, `finding.changed`, `finding.resolved` | finding | SEC-02 | WP-1116 |
+| `notification.escalated`, `notification.acknowledged` | notification escalation | NTF-02 | WP-1146 |
+| `entitlement.changed` | organization (org-wide subscriptions only, `entitlement:read`); produced by the plan change | PKG-02 | WP-882 |
+| `org.export_completed` | export (org-wide only, `org:export`) | TLC-05 | WP-1151 |
+| `org.deletion_requested`, `org.deletion_cancelled` | deletion request (org-wide only, `org:export`) | TLC-06 | WP-1152 |
 
 **`ci.status_changed`** (WP-707): an update of a CI
 (`ci.PGRepository.Update`, e.g. `PATCH /api/v1/cis/{id}` and the bulk status
@@ -1044,7 +1449,7 @@ The frontend is a **React 19 SPA** built with TypeScript and Vite.
 | React | 19 | UI framework |
 | TypeScript | 5.7 | Type safety |
 | Vite | 6 | Build tool and dev server |
-| React Router | 6 | Client-side routing |
+| React Router | 7 (package `react-router`, declarative mode, `useTransitions={false}`) | Client-side routing |
 | TanStack Query | 5 | Server-state management, caching, background refetch |
 | Zustand | 5 | Client-side state (lightweight, minimal boilerplate) |
 | Radix UI | latest | Accessible, unstyled component primitives |
@@ -1123,13 +1528,19 @@ Safari (E-88). The evidence is automated, without an external browser grid:
 
 Both jobs run the same specs of `frontend/e2e/` (smoke, the axe WCAG 2.1 AA
 check `a11y.spec.ts`, keyboard and the core flows against the strict,
-contract-checked mock backend); no test is skipped per browser. Limitations:
+contract-checked mock backend); no test is skipped per browser. Both serve the
+build with `vite preview` of `frontend/package-lock.json`
+(`npm run preview -- --port 4173 --strictPort`, SPA fallback) and wait for it
+with a curl retry; no server package is fetched by `npx` outside the lockfiles
+(Upd-07: every `serve` ≥10.1.0 pins `compression` 1.8.1, GHSA-vc2v-76pw-4v95;
+checked by `tests/ci-config.test.sh`, `workflow_npx_lockfile`). Limitations:
 Edge n-1 is approximated by Chromium n-1 and Safari n-1 by WebKit n-1, since
 no previous Edge or Safari build is available on the Linux runners; the
 mobile projects are the desktop engines with a device profile (viewport,
 touch, user agent), so `mobile-safari` is WebKit, not iOS Safari. A local run
 of `e2e-prev`: `cd frontend/e2e-prev && npm ci && npx playwright install`,
-serve a build on port 4173, then
+serve a build with `npm run build && npm run preview -- --port 4173 --strictPort`
+in `frontend/`, then
 `CI=1 npx playwright test --config playwright.prev.config.ts --project=<name>`
 (`chrome-prev` needs `PW_CHROME_PREV_EXECUTABLE`).
 
@@ -1176,11 +1587,11 @@ counts and verifies the audit hash chain with the `audit-verify` binary.
 
 | Service | Image | Purpose |
 |---------|-------|---------|
-| PostgreSQL + TimescaleDB | timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731 | Primary database with time-series |
-| NATS | nats:2.10-alpine | Event bus (JetStream) |
-| Redis | redis:7-alpine | Cache, sessions, rate-limiting |
-| MinIO (Silo build) | pgsty/minio:RELEASE.2026-08-04T00-00-00Z | S3-compatible object storage; `minio/minio` is no longer published |
-| Keycloak | keycloak:24.0 | OIDC identity provider |
+| PostgreSQL + TimescaleDB | timescale/timescaledb:2.32.0-pg16@sha256:2f87efeaec6fbdd3ba4a6993b921c05d069cd8e980792cb23c7c5f32a6fe68a7 | Primary database with time-series |
+| NATS | nats:2.14.10-alpine | Event bus (JetStream) |
+| Redis | redis:7.4.12-alpine | Cache, sessions, rate-limiting |
+| MinIO (Silo fork) | pgsty/silo:RELEASE.2026-11-12T00-00-00Z@sha256:c20d112390b9a9ce8c11b8af95ad35bcaa62f4759663c09c936cd8d2b511f329 | S3-compatible object storage; `minio/minio` is archived, the image name `pgsty/minio` is frozen since 2026-08-04 |
+| Keycloak | keycloak:26.8.2 | OIDC identity provider |
 
 **Terraform:**
 
@@ -1235,6 +1646,8 @@ The server is configured via environment variables:
   to an empty value disables the role switch but not the startup check.
 - `RETICORA_NATS_URL` — NATS server URL. Required with `RETICORA_ENVIRONMENT=production`: the server refuses to start without it, because only the NATS ingest queue takes the identity locks that keep several instances from duplicating devices with a weak identity (F-282). Development and staging start without it (ingest in the request, without identity locks) and log a configuration warning. See [`docs/betrieb/ingest-spuren.md`](betrieb/ingest-spuren.md).
 - `RETICORA_INGEST_LANES` — parallel ingest lanes per organization (default `4`, `1`–`16`, the same on every instance; `1` is the serial ingest of the releases before WP-334). See [`docs/betrieb/ingest-spuren.md`](betrieb/ingest-spuren.md).
+- `RETICORA_PROBE_STREAM_MAX_BYTES` — byte limit of the JetStream stream `RETICORA_PROBE` that takes the collectors' probe state changes and results (default `5368709120`, 5 GiB). See [`docs/ops/workers.md`](ops/workers.md#probe-edge-and-stream-reticora_probe-wp-959).
+- `RETICORA_PROBE_EDGE_WORKERS` — handlers per instance that answer the probe edge subjects in parallel (default and minimum `8`, at most `256`).
 - `RETICORA_REDIS_URL` — Redis connection string.
 - `RETICORA_ENVIRONMENT` — Environment name (development/staging/production). The collector reads the same variable: it accepts `RETICORA_SIMULATE=true` (simulated device fleet, SIM-02) only with `development` or `test` (case-insensitive) and exits with code 1 and `collector.simulate.refused` for any other value, including an unset or empty one (F-276).
 - `RETICORA_DEFAULT_PLAN` — Plan provisioned for the `--no-db` demo organization (default `essential`); organizations in the database are provisioned with their own plan.
@@ -1245,15 +1658,26 @@ The server is configured via environment variables:
 - `RETICORA_SMTP_HOST`, `RETICORA_SMTP_PORT` (587), `RETICORA_SMTP_USERNAME`, `RETICORA_SMTP_PASSWORD`, `RETICORA_SMTP_FROM`, `RETICORA_SMTP_TLS` (`starttls` default, `tls`, `none`; a user name needs `starttls` or `tls`, Go `net/smtp` sends no login unencrypted to a host other than `localhost`) — the central SMTP server of the installation (TEC-13): verification e-mails of the self-signup and the `central_smtp` notification channels, which send with the organization as sender name; DKIM and SPF are set up for the sender domain at the relay. Organizations of dedicated, on-premises and air-gapped installations configure their own server as an `smtp` channel; its credentials are stored encrypted (NTF-01).
 - `RETICORA_SIGNUP_CAPTCHA_KEY` — HMAC key (at least 32 characters, the same on every instance) that signs the self-hosted ALTCHA challenges of `GET /api/v1/signup/challenge` (E-33); without it each instance draws a random key, so challenges verify only where they were issued. Signups additionally pass the pre-auth limit, at most 5 signups per client IP in any hour (sliding window in the shared cache, so it holds across replicas; Retry-After names the time until the oldest of them leaves the hour) and the disposable-domain blocklist (`backend/internal/signup/disposable/`, updated monthly by the *Disposable domains* workflow).
 - `RETICORA_SIGNUP_BLOCKED_DOMAINS`, `RETICORA_SIGNUP_ALLOWED_DOMAINS` — comma-separated operator entries that extend the disposable-domain blocklist and allowlist; a domain covers its subdomains, the allowlist wins.
-- `RETICORA_TRIAL_PLAN`, `RETICORA_TRIAL_DAYS`, `RETICORA_TRIAL_MAX_CIS` — trial of a self-signed-up organization (ENT-07, defaults `standard`, `30`, `100`); features the `essential` plan lacks expire at the trial's end.
+- `RETICORA_TRIAL_PLAN`, `RETICORA_TRIAL_DAYS`, `RETICORA_TRIAL_MAX_CIS` — trial of a self-signed-up organization (ENT-07, defaults `standard`, `30`, `100`); features the `essential` plan lacks expire at the trial's end; the daily system job `entitlement.trial_end` then switches the organization to the fallback plan with its default limits (`max_cis` 500, E-157, WP-884), unless an operator changed the plan before.
 - `RETICORA_ENTITLEMENT_ENFORCEMENT` — Set to `false` to disable feature/limit enforcement (default `true`).
 - `RETICORA_SEARCH_BACKEND` — `postgres` (default) or `opensearch`.
 - `RETICORA_OPENSEARCH_URL`, `RETICORA_OPENSEARCH_USERNAME`, `RETICORA_OPENSEARCH_PASSWORD`, `RETICORA_OPENSEARCH_INDEX` — OpenSearch connection settings.
 - `RETICORA_LLM_BASE_URL`, `RETICORA_LLM_API_KEY`, `RETICORA_LLM_CHAT_MODEL`, `RETICORA_LLM_EMBEDDING_MODEL` — OpenAI-compatible chat and embedding provider settings.
 - `RETICORA_AIR_GAPPED` — `true` disables every external AI call (air-gapped profile, AI-02; default `false`).
+- `RETICORA_VULNFEED_CSAF_PROVIDERS` — comma separated https URLs of CSAF 2.0 `provider-metadata.json` or `aggregator.json` files the system job `vulnfeed.csaf` imports with the module `findings` (SEC-02, WP-1118; default the CSAF provider of the BSI, `https://wid.cert-bund.de/.well-known/csaf/provider-metadata.json`). Each document is checked against its `.sha512`/`.sha256` and its OpenPGP signature (`.asc`, keys from `public_openpgp_keys` with matching fingerprint); a document that fails is counted and not imported. Requests leave over the egress client and only to the hosts of the configured entries; an aggregator contributes only the providers mirrored on its own host. A URL without HTTPS refuses the start. With `RETICORA_AIR_GAPPED=true` the import runs only when this variable is set explicitly (an own CSAF mirror, E-235). Metrics: `reticora_vulnfeed_documents_total{source,result}`, `reticora_vulnfeed_sync_errors_total{source}`, `reticora_vulnfeed_age_seconds{source}`.
+- `RETICORA_VULNFEED_CSAF_INTERVAL` — interval of `vulnfeed.csaf` (default `6h`, at least `5m`).
+- `RETICORA_VULNFEED_NVD_API_KEY` — API key of the NVD CVE API 2.0 for the system job `vulnfeed.nvd` (SEC-02, WP-1119); a deployment secret of the installation like `RETICORA_OIDC_CLIENT_SECRET`, not an organization's credential. It is sent only in the header `apiKey` and never logged; with it the client sends up to 50 requests per 30 s, without it 5. `vulnfeed.nvd` imports the CVEs changed since its cursor in windows of at most 120 days (CPE ranges of vulnerable configurations, CVSS v3.1/v3.0); a vendor and product a CSAF advisory of the same CVE covers gets no NVD range (CSAF first, also when the CSAF advisory arrives later). 403 and 503 back off; the next run resumes from the last complete window. The job runs with the module `findings` and never with `RETICORA_AIR_GAPPED=true` (offline bundle only); requests go only to `services.nvd.nist.gov` and the KEV host.
+- `RETICORA_VULNFEED_NVD_INTERVAL` — interval of `vulnfeed.nvd` (default `2h`, at least `5m`); the same job fetches the CISA KEV catalog at most once per 24 h and sets `kev` on every advisory with a listed CVE (cleared for the others).
+- `RETICORA_VULNFEED_KEV_URL` — https URL of the KEV catalog (`known_exploited_vulnerabilities.json`; default the feed of the CISA, `https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json`).
+- `RETICORA_VULNFEED_BUNDLE_PUBLIC_KEY` — base64 Ed25519 public key that checks the offline bundles of the vulnerability catalog (SEC-02, TEC-16, WP-1120, E-235); empty keeps the key embedded in the binary, whose private half signs the bundles of the releases (secret `VULNBUNDLE_SIGNING_KEY` of the release workflow). The bundle `reticora-vulnfeed/1` (`reticora-vulnfeed-<tag>.tar.gz`, a release artifact with the cosign signature of every artifact) is a tar.gz with `manifest.json` (format, `created_at`, the sources with `synced_at`, the files with SHA-256), `manifest.sig` (Ed25519 over the bytes of `manifest.json`) and NDJSON files of advisories with their ranges; `backend/cmd/vulnbundle` builds it from every importer of `internal/vulnfeed` (CSAF, NVD, KEV). An operator imports it with `POST /api/v1/admin/vulnfeed/bundle` (body `application/octet-stream`, at most 512 MiB): unpacked to a temporary directory, signature and every hash checked, only then written in the system context; a wrong signature or hash, a missing file or an unknown format is 422, a bundle older than the imported one 409, nothing is imported then, and every attempt is in `operator_audit` (manifest hash, advisories, result). `GET /api/v1/admin/vulnfeed/status` shows per source `synced_at`, age, counters and last error and, with the online sync off (`RETICORA_AIR_GAPPED=true` without CSAF providers), the age of the bundle.
 - `RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED` — the CI offline detector, worker `offline_detector` (scheduler run `ci.offline_detector`, every 5 min; REC-09, LCY-05): an observable, discovered CI (not `is_manual`, source not manual/import) whose `last_seen_at` is older than three times the interval of its discovery scope becomes `unknown` with the event `ci.offline`, and `active` again with `ci.online` once seen; without a scope the organization's `settings.discovery.sweep_interval` (default 24 h) applies. The run changes a CI only as it read it (same status and `last_seen_at`, no other writer holding the row); a sighting the ingest writes during the run keeps the CI active, and a CI it set unknown before the sighting reached it is active again with `ci.online` (F-412). Each change is part of the CI's history and the audit log in the transaction of the change: a change set `status_changed` (source `system`, comment `ci.offline_detector`, the version stays) and the audit entry `ci.status_changed` (actor type `system`, `changes.job` `ci.offline_detector`; F-413). Default `true`. The former `RETICORA_OFFLINE_DETECTOR_ENABLED` still applies without it and is logged as deprecated (docs/ops/workers.md).
 - `RETICORA_WORKER_COMPUTED_REFRESH_ENABLED` — the refresh of computed attributes, worker `computed_refresh` (scheduler run `attribute.computed_refresh`, every hour; JOB-02 [P2], WP-718): per organization, in tenant transactions of at most 100 CIs, it recomputes the computed values (MET-10) whose expression uses `today` (the date in `organization.timezone`) or an asset field, e.g. the system attribute `warranty_days_left` (days until `warranty_end` of the linked asset). Only changed values are written with their provenance (source `computed`, rank 100); `ci.version` stays, and there is no history, audit entry, `ci.changed` or outbox event. The backfill after a change of a computed definition (`attribute.computed_backfill`, every minute) runs without this switch. Default `true` (docs/ops/workers.md).
-- `RETICORA_MODULES` — the late modules (phase tag P2 and later or add-on [A]; API-06, RBA-05) this release serves (WP-214, E-03). Empty (default) is the release G2 (WP-830), the same as the phase value `P2`: every module with phase P2 is on, the modules of P3, P4 and the add-ons [A] stay off (E-03, SEQ-01). A module that is off has no registered routes (404), its workers and system jobs do not start (the alert evaluator of `alerting`; with `inventory` off also the reservation sweeper and the expiry run `expiry.check`, with `ticketing` off the SLA breach run `sla.check`) and the UI hides its navigation (`GET /api/v1/modules`). The default does not enter the start check of the malware scan: only an explicit `documents`, `P2` or `all` makes the start outside development require `RETICORA_CLAMD_ADDR` and `RETICORA_NATS_URL`; without a clamd new document versions stay `pending_scan` (fail-closed). Release G1 (every late module off) is a test profile only (`server.NoModules`), no value of the variable selects it. `all` switches every module on; otherwise only the modules named in a comma list of the phase value `P2` (every module with phase P2, WP-706; combinable with module keys, e.g. `P2,gps`) and the module keys `inventory`, `documents`, `import`, `metamodel`, `stocktake`, `ticketing`, `disposal` (P2), `maintenance`, `workflows`, `compliance`, `findings`, `alerting` (P3), `keys`, `trainings`, `desks`, `gps`, `agents` (P4), `iga`, `ai` (add-ons, still gated by their entitlement). An unknown key stops the start. Their operations carry `x-phase` in `api/openapi.yaml`; the operations of P2 modules also carry the feature key of the org gate as `x-feature` (E-38). A route belongs to the module with the longest matching prefix: `/api/v1/assets/{id}/locations` (GPS history, LOC-09) belongs to `gps`, not `inventory`. The P2 resources of E-38 without a module of their own follow E-105: the metamodel resources go to the module `metamodel` (attribute sets since WP-250, without feature key; the others add their prefix with their first route), suppliers, contracts and labels to `inventory`, business calendars and tickets from review items to `ticketing`; tags, the successors of G1 paths and the sub-paths of core resources are core without release gate (register in `backend/internal/server/modules_test.go`).
+- `RETICORA_PROBE_ASSIGN_TICK` — interval of the system job `probe.assign` (default `5s`, 1–30 s; PRB-03, PRB-10, WP-963): each tick sets the group members without monitoring alive message within the liveness timeout of their group `down`, moves their probes (`collector_group.failover`) and assigns every group (docs/betrieb/collector-redundanz.md).
+- `RETICORA_WORKER_PROBE_ASSIGN_ENABLED` — the probe assignment engine, worker `probe_assign` of the module `monitoring` (scheduler run `probe.assign`, every 5 s; PRB-03, PRB-11, WP-941): each collector group under the lock `probe_assign:<group>` assigns every enabled probe to exactly one healthy member (weighted rendezvous hashing in mode `distributed`, the member with the highest priority in mode `failover`); a changed assignment gets `epoch` + 1 (fencing token), counted from the high-water mark of the probe in `probe_epoch` (migration 000338), so an epoch never goes down and is never issued twice, also after the assignment row went (disable, group change, member left); the `config_version` of the former and the new collector rises by one. A run locks the probes of its plan `FOR SHARE` first (the order of the probe writes: probe row, then assignment, then member) and drops what a write changed meanwhile. Probe writes assign their groups at once after the commit. Default `true` (docs/ops/workers.md).
+- `RETICORA_WORKER_PROBE_INGEST_ENABLED` — the probe result ingest, worker `probe_ingest` of the module `monitoring` (NFR-11, PRB-07, WP-960): the durable consumer `reticora-probe-results` of the stream `RETICORA_PROBE` writes up to 500 result batches per fetch, per organization in one tenant transaction, through `probe_result_v` (`unnest`, `ON CONFLICT DO NOTHING`: no duplicate rows), moves `probe_ingest_cursor` and records the credential use of the results (CRD-06); results of unknown probes and of a collector outside the organization or bound to another client than the probe are dropped and counted (`probe_ingest_discarded_total{reason="unknown_probe"|"foreign_collector"}`), results with another epoch or from another than the assigned collector are stored with `stale_epoch` and record no credential use (PRB-11); acknowledged only after the commit, `MaxDeliver` 5. Its backlog appears in `/readyz`. Default `true` (docs/ops/workers.md).
+- `RETICORA_WORKER_IPAM_SCAN_APPLY_ENABLED` — the results of the subnet scan, worker `ipam_scan_apply` of the module `ipam` (scheduler run `ipam.scan.apply`, every minute; IPM-11, WP-1063): per organization with a scanned subnet and the features `ipam` and `monitoring` under the lock `ipam_scan_apply:<org>`, the states of the scan probes become address states (`active`, `offline` after `offline_after_s`, `unknown` for a lost collector group, never `offline`), `last_seen_at` and, with `discover_new_hosts`, new addresses of origin `scan`. Default `true` (docs/ops/workers.md).
+- `RETICORA_WORKER_ALARM_CHECK_ENABLED` — alarms from the probe states, worker `alarm_check` of the module `monitoring` (durable consumer `reticora-alarm-check` on `RETICORA_EVENTS`, filter `probe.state_changed`; ALR-02, MON-04, WP-986): `down` opens a critical, `degraded` a warning alarm, `up` resolves it, `unknown` changes nothing. Default `true` (docs/ops/workers.md).
+- `RETICORA_MODULES` — the late modules (phase tag P2 and later or add-on [A]; API-06, RBA-05) this release serves (WP-214, E-03). Empty (default) is the release G2 (WP-830), the same as the phase value `P2`: every module with phase P2 is on, the modules of P3, P4 and the add-ons [A] stay off (E-03, SEQ-01). A module that is off has no registered routes (404), its workers and system jobs do not start (the alert evaluator of `monitoring`; with `inventory` off also the reservation sweeper and the expiry run `expiry.check`, with `ticketing` off the SLA breach run `sla.check`) and the UI hides its navigation (`GET /api/v1/modules`). The default does not enter the start check of the malware scan: only an explicit `documents`, `P2`, `P3` or `all` makes the start outside development require `RETICORA_CLAMD_ADDR` and `RETICORA_NATS_URL`; without a clamd new document versions stay `pending_scan` (fail-closed). Release G1 (every late module off) is a test profile only (`server.NoModules`), no value of the variable selects it. `all` switches every module on; otherwise only the modules named in a comma list of the phase values `P2` (every module with phase P2, WP-706; combinable with module keys, e.g. `P2,gps`) and `P3` (every module with phase P2 or P3, release G3, WP-863; the empty default stays G2 until WP-1166) and the module keys `inventory`, `documents`, `import`, `metamodel`, `stocktake`, `ticketing`, `disposal` (P2), `maintenance`, `workflows`, `compliance`, `findings`, `monitoring`, `ipam`, `admp`, `escalation`, `org_lifecycle` (P3; the former key `alerting` still selects `monitoring` and is reported as a configuration warning), `keys`, `trainings`, `desks`, `gps`, `agents` (P4), `iga`, `ai` (add-ons, still gated by their entitlement). An unknown key stops the start. Their operations carry `x-phase` in `api/openapi.yaml`; the operations of P2 and P3 modules also carry the feature key of the org gate as `x-feature` (E-38, WP-863). A route belongs to the module with the longest matching prefix: `/api/v1/assets/{id}/locations` (GPS history, LOC-09) belongs to `gps`, not `inventory`. The P2 resources of E-38 without a module of their own follow E-105: the metamodel resources go to the module `metamodel` (attribute sets since WP-250, without feature key; the others add their prefix with their first route), suppliers, contracts and labels to `inventory`, business calendars and tickets from review items to `ticketing`; tags, the successors of G1 paths and the sub-paths of core resources are core without release gate (register in `backend/internal/server/modules_test.go`).
 - `RETICORA_S3_ENDPOINT`, `RETICORA_S3_BUCKET`, `RETICORA_S3_ACCESS_KEY`, `RETICORA_S3_SECRET_KEY`, `RETICORA_S3_USE_SSL` — object storage for asynchronous export jobs (MinIO/S3).
 - `RETICORA_S3_PUBLIC_URL` — base URL under which browsers reach the object store for signed downloads of exports and documents (`download_url`). The signature stays the one over `RETICORA_S3_ENDPOINT`; the URL names this base instead. The compose stack sets `<RETICORA_PUBLIC_BASE_URL>/objects`, which the frontend nginx forwards read-only (GET of the buckets `exports` and `reticora-documents`, `Host` of the internal endpoint) to MinIO (`frontend/objects-proxy.conf`). Empty keeps the internal endpoint in the URL, which a browser can only use if it resolves that name; from an HTTPS page an `http://` URL is blocked as mixed content (F-376). Other deployments point it at a reverse-proxy path that forwards the same way.
 - `RETICORA_BLOB_DIR` — filesystem blob storage used by export jobs in `--no-db` development mode (defaults to a temp directory).
@@ -1264,7 +1688,7 @@ The server is configured via environment variables:
 - `RETICORA_PREAUTH_RATE_LIMIT_RPM` — authentication attempts per client IP and minute before any credential check (default `20`, AUT-10): requests to `/auth/callback`, `/auth/refresh`, `/collectors/enroll`, `/signup`, `/signup/verify` and `/invitations/accept` and every failed authentication count (`/auth/refresh` only when it fails); once spent, the IP gets 429 until the minute is over. Concurrent requests with valid credentials do not spend it: a credential check holds a unit only until it succeeds, and a request that finds every unit held by checks in flight waits for one (at most 2.5 s) instead of getting 429 (F-387). Per server instance at most twice this budget of requests of one IP and 256 of all IPs wait; further requests get 429 at once. The budget belongs to fixed UTC-minute windows: checks admitted at the end of a minute keep their units, so right after the minute changes up to twice the budget can run at once, and two adjacent minutes together admit up to twice the budget of failed attempts.
 - `RETICORA_RATE_LIMIT_RPM` — requests per minute per API key or session (default `600`, API-04).
 - `RETICORA_RATE_LIMIT_ORG_RPM` — requests per minute of all credentials of an organization together (default `6000`, API-04; must not be below `RETICORA_RATE_LIMIT_RPM`). Responses carry `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset`; a 429 adds `Retry-After`.
-- `RETICORA_WORKER_<NAME>_ENABLED` — operator switch per background worker (OPS-02, default `true`): `WEBHOOK_DISPATCHER`, `EXPORT`, `INGEST`, `MONITORING`, `SCHEDULER`, `JOBS`, `EVENTS`, `NOTIFIER`. A disabled worker is not started in that process; see [`docs/ops/workers.md`](ops/workers.md).
+- `RETICORA_WORKER_<NAME>_ENABLED` — operator switch per background worker (OPS-02, default `true`): `WEBHOOK_DISPATCHER`, `EXPORT`, `INGEST`, `MONITORING`, `SCHEDULER`, `JOBS`, `EVENTS`, `NOTIFIER`, `PROBE_ASSIGN`, `PROBE_INGEST`, `WORKFLOW`, `IPAM_SCAN_APPLY`. A disabled worker is not started in that process; see [`docs/ops/workers.md`](ops/workers.md).
 - `RETICORA_TRUSTED_PROXIES` — comma-separated CIDRs of reverse proxies whose `X-Real-IP` header names the client for IP-based limits (default loopback and private networks; empty trusts none).
 - Endpoint agent channel (AGT-03): the agent sends telemetry only over TLS — to the collector relay (`RETICORA_COLLECTOR_RELAY`, host:port) or directly to an `https://` `RETICORA_SERVER_URL`; there is no plaintext fallback. It authenticates with the `agent_token` returned once by `POST /api/v1/agents/enroll` (`RETICORA_AGENT_TOKEN` or `RETICORA_AGENT_TOKEN_FILE`); `RETICORA_TLS_CA_FILE` adds a private CA. The collector relay listens on `RETICORA_AGENT_RELAY_ADDR` (default `:9443`) only when `RETICORA_AGENT_RELAY_TLS_CERT_FILE` and `RETICORA_AGENT_RELAY_TLS_KEY_FILE` are set, and forwards each message with the agent's token to `/api/v1/agents/telemetry`.
 
@@ -1275,7 +1699,7 @@ Continuous Integration runs on **GitHub Actions** (`.github/workflows/ci.yml`), 
 **Backend job:**
 
 1. Checkout code.
-2. Setup Go 1.26.10.
+2. Setup Go 1.26.11.
 3. `go mod download` — Fetch dependencies.
 4. `go build ./...` — Compile all packages.
 5. `go test -race -coverprofile=coverage.out ./...` — Run tests with race detector and coverage.
@@ -1296,16 +1720,18 @@ Continuous Integration runs on **GitHub Actions** (`.github/workflows/ci.yml`), 
 A version tag `v*` starts the release workflow. Tools follow E-31.
 
 1. It builds the edge binaries `reticora-collector` and `reticora-agent` for linux/amd64 and linux/arm64.
-2. It builds the images `reticora-server`, `reticora-collector`, `reticora-frontend` and `reticora-postgres` and pushes them to `ghcr.io/datahub-chiemgau`.
-   - `reticora-postgres` is TimescaleDB with pgBackRest (`deploy/docker-compose/postgres/Dockerfile`). Its base is pinned by version and digest (the same TimescaleDB reference as CI and the dev stack, E-96), its Go helpers `gosu` and `timescaledb-tune` are rebuilt with the repository's Go toolchain, and the pgBackRest tarball is checked by sha256.
+2. It builds the images `reticora-server`, `reticora-collector`, `reticora-frontend`, `reticora-postgres` and `reticora-keycloak-db` and pushes them to `ghcr.io/datahub-chiemgau`.
+   - `reticora-postgres` is TimescaleDB with pgBackRest (`deploy/docker-compose/postgres/Dockerfile`). Its base is pinned by version and digest (the same TimescaleDB reference as CI and the dev stack, E-96), its Go helpers `gosu` and `timescaledb-tune` are rebuilt with the repository's Go toolchain, and pgBackRest is built from its distribution tarball (release asset), checked by sha256.
+   - `reticora-keycloak-db` is the PostgreSQL of Keycloak (`deploy/docker-compose/keycloak-db/Dockerfile`): the official `postgres:16.16-alpine`, pinned by version and digest, with its `gosu` rebuilt by the repository's Go toolchain (the vendor's is built with an outdated Go, E-96, A-85). Major version, data directory and UID 70 are the vendor's, so the `keycloakdb` volume of an earlier installation (`postgres:16.x-alpine`) keeps running.
    - Before the push, Trivy scans each image with the threshold of the CI job `image-scan`: Critical/High findings with an available fix block. Exceptions follow `security/scan-exceptions.txt`, see [security/abhaengigkeitsscans.md](security/abhaengigkeitsscans.md).
 3. Syft generates an SPDX SBOM for every binary and every image, plus one for the source tree.
-4. Everything is signed keyless with cosign: a Fulcio certificate for the identity of the release workflow and an entry in the Rekor log.
-   - Binaries and SBOMs get a Sigstore bundle (`<file>.sigstore.json`).
-   - Images are signed, and their SBOM is attached as a cosign attestation (`spdxjson`).
+4. Everything is signed keyless with cosign v3.1.4 (E-258): a Fulcio certificate for the identity of the release workflow and an entry in the transparency log.
+   - Binaries and SBOMs get a Sigstore bundle v0.3 (`<file>.sigstore.json`); a bundle in another format stops the release.
+   - Images are signed, and their SBOM is attached as a cosign attestation (`spdxjson`); cosign v3 stores both as OCI referrers of the image digest.
+   - Releases up to `v1.0.0-rc.1` were signed with cosign v2.4.1 (legacy bundle, signatures as `.sig` tags). The same verification commands accept them; `ci.yml` (job `cosign-verify`) proves this with the legacy bundle of `v1.0.0-rc.1`.
 5. The workflow verifies its own signatures with the real cosign before anything is published (WP-545):
    - For linux/amd64 and linux/arm64, `edgecore/update/cosign_real_test.go` (build tag `cosignreal`) runs the updater's `CosignVerifier` against the collector and its bundle: the signed binary passes with the pinned release identity; the binary changed by one byte, the bundle of another artifact and another identity are refused. A failing or skipped test stops the release.
-   - Every bundle passes `cosign verify-blob`; every image passes `cosign verify` and `cosign verify-attestation --type spdxjson`. The release is published only after all four images passed.
+   - Every bundle passes `cosign verify-blob`; every image passes `cosign verify` (the signature names the image with the pushed digest, as the installers require) and `cosign verify-attestation --type spdxjson`. The release is published only after all five images passed.
    - It then publishes the files on the GitHub release, together with `SHA256SUMS` and one updater manifest per binary (`<binary>.release.json`, holding `downloadUrl`, `signatureBundleUrl` and `checksums.sha256`).
 
 Release candidate of gate G1 (WP-595, `docs/security/review-g1.md`, section „Läufe auf dem Release-Kandidaten“): commit `536e3ab8` on `main` (gate decision of 2026-11-10, result „bedingt bestanden“; CI run 42712217817 and install smoke run 42712217841 green); tag `v1.0.0-rc.1` on `9989d9d3`, release run 42780580858 green (attempt 2), install smoke with release mode 42780580723 green: pre-release with SBOMs, Sigstore bundles, image signatures, SBOM attestations and the `cosign_real` test.
@@ -1319,8 +1745,9 @@ Mandatory signature check in the updater (`edgecore/update`):
   - verification fails;
   - no verifier is configured.
 - `CosignVerifier` calls `cosign verify-blob --bundle`. It pins the signer to `release.yml` of this repository on a `v*` tag, with the GitHub Actions OIDC issuer.
+- It runs cosign only when `cosign version` reports at least v3.1.3 (`update.MinCosignVersion`, the same as `COSIGN_MIN_VERSION` of the installers, E-258, GHSA-fx35-mq7g-6g98); otherwise every update is refused and the collector warns at start (`collector.update.cosign_outdated`). Collector hosts with the cosign v2.4.1 of earlier installations: [`docs/betrieb/collector-updates.md`](betrieb/collector-updates.md), "cosign v3".
 
-Check a release by hand (operators, before an installation or an air-gapped transfer). Every command must exit 0 (`verify-blob` prints `Verified OK`, `verify` the verified signature payload); any other result means the file or image is not the one the release workflow signed. The signer is the release workflow of this repository on a version tag:
+Check a release by hand (operators, before an installation or an air-gapped transfer) with cosign v3.1.3 or newer. Every command must exit 0 (`verify-blob` prints `Verified OK`, `verify` the verified signature payload); any other result means the file or image is not the one the release workflow signed. The signer is the release workflow of this repository on a version tag:
 
 ```bash
 VERSION=v1.2.3   # the release tag
@@ -1343,10 +1770,10 @@ sha256sum -c --ignore-missing SHA256SUMS
 
 The same `verify-blob` call checks an SBOM (`<binary>.spdx.json`, `reticora-source.spdx.json`) and the source tarball (`reticora-source-<tag>.tar.gz`).
 
-Images: the signature (`cosign verify`) and the SPDX SBOM attestation (`cosign verify-attestation --type spdxjson`) of all four images `reticora-server`, `reticora-collector`, `reticora-frontend` and `reticora-postgres`:
+Images: the signature (`cosign verify`) and the SPDX SBOM attestation (`cosign verify-attestation --type spdxjson`) of all five images `reticora-server`, `reticora-collector`, `reticora-frontend`, `reticora-postgres` and `reticora-keycloak-db`:
 
 ```bash
-for image in reticora-server reticora-collector reticora-frontend reticora-postgres; do
+for image in reticora-server reticora-collector reticora-frontend reticora-postgres reticora-keycloak-db; do
   cosign verify "ghcr.io/datahub-chiemgau/$image:$VERSION" \
     --certificate-identity-regexp "$IDENTITY" \
     --certificate-oidc-issuer "$ISSUER"
@@ -1356,7 +1783,7 @@ for image in reticora-server reticora-collector reticora-frontend reticora-postg
 done
 ```
 
-`cosign verify` prints the image digest (`docker-manifest-digest`); pin that digest (`ghcr.io/datahub-chiemgau/<image>@sha256:…`) instead of the tag, as the installers do in release mode. Without `> /dev/null`, `verify-attestation` prints the attestation; the SBOM is the `predicate` of the in-toto statement in its base64 `payload`.
+`cosign verify` prints the image digest (`docker-manifest-digest`) and the signed reference (`docker-reference`: the repository for releases signed with cosign v2, `<image>@<digest>` since cosign v3); pin that digest (`ghcr.io/datahub-chiemgau/<image>@sha256:…`) instead of the tag, as the installers do in release mode. Without `> /dev/null`, `verify-attestation` prints the attestation; the SBOM is the `predicate` of the in-toto statement in its base64 `payload`.
 
 **Planned additions:**
 

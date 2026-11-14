@@ -36,7 +36,18 @@ import { LINK_ENTITY_TYPES } from '../pages/DocumentDetailPage';
 import { TICKET_CATEGORIES, TICKET_PRIORITIES, TICKET_STATUSES } from '../pages/TicketListPage';
 import { TICKET_TRANSITIONS } from '../pages/TicketDetailPage';
 import { NODE_KINDS, SCAN_STATUSES, relationshipChangeKinds } from '../api/client';
-import { CONSUMABLE_BOOKING_TYPES } from '../api/cmdb';
+import {
+  CONSUMABLE_BOOKING_TYPES,
+  IPAM_CHANGE_SOURCES,
+  IP_ADDRESS_ORIGINS,
+  IP_ADDRESS_ROLES,
+  IP_ADDRESS_STATES,
+  IP_ADDRESS_TYPES,
+  PTR_MODES,
+  PTR_STATUSES,
+  SCAN_TARGET_STATES,
+} from '../api/cmdb';
+import { REVIEW_KINDS } from '../hooks/useReviews';
 import {
   CARDINALITIES,
   IMPACT_DIRECTIONS,
@@ -259,6 +270,17 @@ const BACKEND_ENUMS = {
     'failed',
     'cancelled',
   ],
+  // backend/internal/workflow/model.go runStatuses: the step statuses and
+  // waiting_input (request_form, WP-1102; filter and cancel, WP-1092).
+  workflowRunStatuses: [
+    'pending',
+    'running',
+    'waiting_approval',
+    'waiting_input',
+    'succeeded',
+    'failed',
+    'cancelled',
+  ],
   // backend/internal/user/pg_repository.go (CASE WHEN is_active THEN 'active'
   // ELSE 'inactive') and internal/user/repository.go (anonymized).
   userStatuses: ['active', 'inactive', 'anonymized'],
@@ -298,6 +320,7 @@ const pageEnumerations: Array<[string, readonly string[]]> = [
   ['ci.statuses', specEnum('CIStatus')],
   ['workflows.statuses', specEnum('WorkflowRun', 'status')],
   ['workflows.statuses', BACKEND_ENUMS.workflowStepStatuses],
+  ['workflows.statuses', BACKEND_ENUMS.workflowRunStatuses],
   ['userMgmt.statuses', BACKEND_ENUMS.userStatuses],
   // WP-527: agent, maintenance, findings, desk, compliance, security and IGA
   // pages.
@@ -460,6 +483,25 @@ const enumerations: Array<[string, readonly string[]]> = [
   ['ticket.priorities', specEnum('CreateSLAPolicyRequest', 'priority')],
   ['sla.calendar.weekdays', WEEKDAYS],
   ['sla.calendar.weekdaysShort', WEEKDAYS],
+  // WP-917: state, type, role and origin of an address, the sources of the
+  // IPAM history and the review types of the inbox (ip_binding_conflict).
+  ['ipam.states', IP_ADDRESS_STATES],
+  ['ipam.states', specEnum('IPAddressState')],
+  ['ipam.types', IP_ADDRESS_TYPES],
+  ['ipam.types', specEnum('IPAddressType')],
+  ['ipam.roles', IP_ADDRESS_ROLES],
+  ['ipam.roles', specEnum('IPAddressRole')],
+  ['ipam.origins', IP_ADDRESS_ORIGINS],
+  ['ipam.origins', specEnum('IPAddressOrigin')],
+  ['ipam.history.sources', IPAM_CHANGE_SOURCES],
+  ['ipam.history.sources', specEnum('IPAMChange', 'source')],
+  ['ipam.ptr.modes', PTR_MODES],
+  ['ipam.ptr.modes', specEnum('IPAMPTRMode')],
+  ['ipam.ptr.statuses', PTR_STATUSES],
+  ['ipam.ptr.statuses', specEnum('PTRMismatch', 'ptr_status')],
+  ['ipam.scan.targetStates', SCAN_TARGET_STATES],
+  ['ipam.history.changeTypes', specEnum('IPAMChange', 'change_type')],
+  ['reviews.kinds', REVIEW_KINDS],
   ...Object.values(IMPORT_TARGETS).map((targets): [string, readonly string[]] => [
     'savedviews.fields',
     targets,
@@ -527,7 +569,7 @@ describe('i18n catalog', () => {
       'decommissioned',
       'unknown',
     ]);
-    expect(specEnum('WorkflowRun', 'status')).toEqual(BACKEND_ENUMS.workflowStepStatuses);
+    expect(specEnum('WorkflowRun', 'status')).toEqual(BACKEND_ENUMS.workflowRunStatuses);
     expect(specEnum('Agent', 'status')).toEqual(['online', 'offline', 'disabled']);
     expect(specEnum('MaintenanceWindow', 'status')).toEqual([
       'scheduled',

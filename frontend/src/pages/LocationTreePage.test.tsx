@@ -571,6 +571,7 @@ describe('LocationTreePage', () => {
         ci_attribute: true,
         internal_order: true,
         vlan: true,
+        vlan_domain_site: true,
         subnet: true,
         collector: true,
         discovery_scope: true,
@@ -580,6 +581,7 @@ describe('LocationTreePage', () => {
         stocktake: true,
         stocktake_item: true,
         stock_scan: true,
+        probe: true,
       };
       for (const lng of ['de-DE', 'en-US']) {
         for (const kind of Object.keys(kinds)) {

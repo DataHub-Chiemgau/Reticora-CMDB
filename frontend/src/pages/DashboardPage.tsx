@@ -1,7 +1,7 @@
 import { ArrowRight, Check, Plus } from 'lucide-react';
 import type * as React from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import {
   useAssetList,
   useCIList,
@@ -55,7 +55,7 @@ const widgetFeature: Partial<Record<DashboardWidget, string>> = {
   stocktake: 'stocktake_standard',
   tickets: 'ticketing_essential',
   slaBreaches: 'ticketing_standard',
-  compliance: 'compliance',
+  compliance: 'compliance_findings',
 };
 
 function CISummaryWidget() {

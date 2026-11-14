@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { Route, Routes } from 'react-router-dom';
+import { Route, Routes } from 'react-router';
 import i18n from '../i18n';
 import { CIDetailPage, buildNeighborList } from './CIDetailPage';
 import type { TopologyGraphData } from '../api/client';
@@ -1119,5 +1119,63 @@ describe('CIDetailPage owner (CI-07, WP-805)', () => {
         await i18n.changeLanguage('de-DE');
       });
     }
+  });
+});
+
+/**
+ * IPM-13, UI-14 (WP-919): the section "Netzwerk" follows the neighbors and
+ * appears only with ipam:read; without it the page sends no request to
+ * /cis/{id}/interfaces or /cis/{id}/addresses.
+ */
+describe('CIDetailPage network section (WP-919)', () => {
+  function mockNetworkApi(permissions: string[]) {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const { pathname } = new URL(String(input), 'http://localhost');
+      const ok = (body: unknown) =>
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      const empty = { data: [], total: 0, limit: 100, offset: 0, has_more: false };
+      if (pathname.endsWith('/me/permissions')) return ok({ user_id: 'user-1', permissions });
+      if (pathname.endsWith('/cis/ci-1/interfaces')) return ok(empty);
+      if (pathname.endsWith('/cis/ci-1/addresses')) return ok(empty);
+      if (pathname.endsWith('/vrfs')) return ok(empty);
+      if (pathname.endsWith('/cis/ci-1')) {
+        return ok({ ...ci, version: 1, tags: [], management_ip: '10.0.0.1' });
+      }
+      return new Response(JSON.stringify({ detail: 'unexpected' }), { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  const ipamReads = (fetchMock: ReturnType<typeof mockNetworkApi>) =>
+    fetchMock.mock.calls
+      .map(([input]) => new URL(String(input), 'http://localhost').pathname)
+      .filter((path) => /\/cis\/ci-1\/(interfaces|addresses)$/.test(path));
+
+  it('shows the network section with ipam:read', async () => {
+    const fetchMock = mockNetworkApi(['ci:read', 'ipam:read']);
+    renderDetail();
+
+    expect(await screen.findByRole('heading', { name: 'Netzwerk' })).toBeInTheDocument();
+    expect(await screen.findByText('Keine Interfaces')).toBeInTheDocument();
+    expect(ipamReads(fetchMock).length).toBeGreaterThan(0);
+  });
+
+  it('shows no network section and reads no interfaces without ipam:read', async () => {
+    const fetchMock = mockNetworkApi(['ci:read']);
+    renderDetail();
+
+    await screen.findByRole('heading', { level: 1, name: 'core-sw-01' });
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([input]) => String(input).includes('/me/permissions')),
+      ).toBe(true),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByRole('heading', { name: 'Netzwerk' })).not.toBeInTheDocument();
+    expect(ipamReads(fetchMock)).toEqual([]);
   });
 });

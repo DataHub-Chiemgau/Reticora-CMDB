@@ -1,7 +1,7 @@
 import { vi } from 'vitest';
 import type { ReactElement, ReactNode } from 'react';
 import { render } from '@testing-library/react';
-import { MemoryRouter, type MemoryRouterProps } from 'react-router-dom';
+import { MemoryRouter, type MemoryRouterProps } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { I18nextProvider } from 'react-i18next';
 import i18n from '../i18n';
@@ -25,7 +25,10 @@ export function renderWithProviders(
     return (
       <I18nextProvider i18n={i18n}>
         <QueryClientProvider client={queryClient}>
-          <MemoryRouter initialEntries={[route]}>{children}</MemoryRouter>
+          {/* Same router updates as the app (src/main.tsx): without startTransition. */}
+          <MemoryRouter initialEntries={[route]} useTransitions={false}>
+            {children}
+          </MemoryRouter>
         </QueryClientProvider>
       </I18nextProvider>
     );

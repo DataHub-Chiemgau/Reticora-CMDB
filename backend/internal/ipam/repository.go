@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"sort"
 	"strings"
 	"sync"
@@ -45,17 +46,33 @@ func (e *InterfaceInUseError) Error() string {
 type SubnetFilter struct {
 	ClientID string
 	SiteID   string
+	// ParentID lists the children of a subnet (IPM-02); Root lists the
+	// subnets without a parent the caller can see.
+	ParentID string
+	Root     bool
+	// Section, VRF, VLAN, pool and q (part of name, description or CIDR)
+	// (IPM-20, filter.go).
+	SectionID string
+	VRFID     string
+	VLANID    string
+	IsPool    *bool
+	Q         string
+	// OriginASNID lists the subnets with this origin AS (WP-1067).
+	OriginASNID string
+	// Contains lists the subnets of the VRF (VRFID, else the default VRF)
+	// that contain the address, the narrowest first.
+	Contains string
 }
 
 // Repository defines persistence operations for IPAM entities.
 type Repository interface {
-	ListSubnets(ctx context.Context, orgID string, f SubnetFilter, page api.PaginationParams) ([]Subnet, int, error)
+	ListSubnets(ctx context.Context, orgID string, f *SubnetFilter, page api.PaginationParams) ([]Subnet, int, error)
 	GetSubnet(ctx context.Context, orgID, id string) (*Subnet, error)
 	CreateSubnet(ctx context.Context, s *Subnet) error
 	UpdateSubnet(ctx context.Context, orgID, id string, req *UpdateSubnetRequest) (*Subnet, error)
 	DeleteSubnet(ctx context.Context, orgID, id string) error
 
-	ListIPAddresses(ctx context.Context, orgID, subnetID string, page api.PaginationParams) ([]IPAddress, int, error)
+	ListIPAddresses(ctx context.Context, orgID string, f *IPFilter, page api.PaginationParams) ([]IPAddress, int, error)
 	GetIPAddress(ctx context.Context, orgID, id string) (*IPAddress, error)
 	CreateIPAddress(ctx context.Context, a *IPAddress) error
 	UpdateIPAddress(ctx context.Context, orgID, id string, req UpdateIPAddressRequest) (*IPAddress, error)
@@ -79,11 +96,21 @@ type Repository interface {
 	UpdateVLAN(ctx context.Context, orgID, id string, req UpdateVLANRequest) (*VLAN, error)
 	DeleteVLAN(ctx context.Context, orgID, id string) error
 
-	ListVRFs(ctx context.Context, orgID string, page api.PaginationParams) ([]VRF, int, error)
+	ListVRFs(ctx context.Context, orgID string, f VRFFilter, page api.PaginationParams) ([]VRF, int, error)
 	GetVRF(ctx context.Context, orgID, id string) (*VRF, error)
 	CreateVRF(ctx context.Context, v *VRF) error
 	UpdateVRF(ctx context.Context, orgID, id string, req UpdateVRFRequest) (*VRF, error)
 	DeleteVRF(ctx context.Context, orgID, id string) error
+
+	// IPAM sections (IPM-01, section.go).
+	SectionRepository
+
+	// Occupancy of a subnet for usage and free space (IPM-03,
+	// space_handler.go).
+	SpaceRepository
+
+	// Atomic allocation of addresses and subnets (IPM-03, allocate.go).
+	AllocationRepository
 }
 
 // MemoryRepository is an in-memory implementation of Repository.
@@ -94,6 +121,7 @@ type MemoryRepository struct {
 	interfaces map[string]*NetworkInterface
 	vlans      map[string]*VLAN
 	vrfs       map[string]*VRF
+	sections   map[string]*Section
 	seq        int
 }
 
@@ -105,6 +133,7 @@ func NewMemoryRepository() *MemoryRepository {
 		interfaces: make(map[string]*NetworkInterface),
 		vlans:      make(map[string]*VLAN),
 		vrfs:       make(map[string]*VRF),
+		sections:   make(map[string]*Section),
 	}
 }
 
@@ -123,7 +152,7 @@ func pageSlice[T any](items []T, page api.PaginationParams) (window []T, total i
 
 // --- Subnets ---
 
-func (r *MemoryRepository) ListSubnets(_ context.Context, orgID string, f SubnetFilter, page api.PaginationParams) ([]Subnet, int, error) {
+func (r *MemoryRepository) ListSubnets(_ context.Context, orgID string, f *SubnetFilter, page api.PaginationParams) ([]Subnet, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []Subnet
@@ -137,11 +166,104 @@ func (r *MemoryRepository) ListSubnets(_ context.Context, orgID string, f Subnet
 		if f.SiteID != "" && s.SiteID != f.SiteID {
 			continue
 		}
-		out = append(out, *s)
+		if (f.ParentID != "" && s.ParentID != f.ParentID) || (f.Root && s.ParentID != "") {
+			continue
+		}
+		if !r.subnetMatches(s, f) {
+			continue
+		}
+		out = append(out, r.withChildCount(s))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	if f.Contains != "" {
+		sortNarrowestFirst(out)
+	}
 	items, total := pageSlice(out, page)
 	return items, total, nil
+}
+
+// withChildCount is a copy of s with the number of its children.
+func (r *MemoryRepository) withChildCount(s *Subnet) Subnet {
+	cp := *s
+	cp.ChildCount = 0
+	for _, c := range r.subnets {
+		if c.OrganizationID == s.OrganizationID && c.ParentID == s.ID {
+			cp.ChildCount++
+		}
+	}
+	return cp
+}
+
+// placeOrg recomputes the parents of the subnets of the organization
+// (IPM-02).
+func (r *MemoryRepository) placeOrg(orgID string) {
+	var all []*Subnet
+	for _, s := range r.subnets {
+		if s.OrganizationID == orgID {
+			all = append(all, s)
+		}
+	}
+	placeSubnets(all)
+}
+
+// overlapPartners are the subnets whose address space s uses twice
+// (IPM-02, subnet_overlap_partners of migration 000300): its parent, when
+// that is no pool and holds addresses of its own inside s, and its
+// children that hold addresses of s, when s is no pool. A true nesting is
+// no overlap.
+func (r *MemoryRepository) overlapPartners(s *Subnet) []string {
+	var out []string
+	if p, ok := r.subnets[s.ParentID]; ok && !p.IsPool && r.holdsAddressIn(p.ID, s.CIDR) {
+		out = append(out, p.ID)
+	}
+	if !s.IsPool {
+		for _, c := range r.subnets {
+			if c.OrganizationID == s.OrganizationID && c.ParentID == s.ID && r.holdsAddressIn(s.ID, c.CIDR) {
+				out = append(out, c.ID)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// holdsAddressIn reports whether subnet subnetID has an address of its own
+// inside cidr.
+func (r *MemoryRepository) holdsAddressIn(subnetID, cidr string) bool {
+	p, err := netip.ParsePrefix(cidr)
+	if err != nil {
+		return false
+	}
+	for _, a := range r.addresses {
+		if a.SubnetID != subnetID {
+			continue
+		}
+		addr, err := netip.ParseAddr(strings.TrimSpace(a.Address))
+		if err != nil {
+			if ap, perr := netip.ParsePrefix(strings.TrimSpace(a.Address)); perr == nil {
+				addr, err = ap.Addr(), nil
+			}
+		}
+		if err == nil && p.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+// checkPlacement applies the overlap rule to s after placement: in a
+// strict section the first partner is a conflict; otherwise each partner
+// becomes a warning of s.
+func (r *MemoryRepository) checkPlacement(s *Subnet) error {
+	partners := r.overlapPartners(s)
+	if sec, ok := r.sections[s.SectionID]; ok && sec.StrictMode && len(partners) > 0 {
+		return overlapConflict(partners[0])
+	}
+	s.Warnings = nil
+	for _, id := range partners {
+		s.Warnings = append(s.Warnings, SubnetWarning{Code: "overlap", SubnetID: id})
+	}
+	return nil
 }
 
 func (r *MemoryRepository) GetSubnet(_ context.Context, orgID, id string) (*Subnet, error) {
@@ -151,16 +273,26 @@ func (r *MemoryRepository) GetSubnet(_ context.Context, orgID, id string) (*Subn
 	if !ok || s.OrganizationID != orgID {
 		return nil, ErrNotFound
 	}
-	cp := *s
+	cp := r.withChildCount(s)
 	return &cp, nil
 }
 
 func (r *MemoryRepository) CreateSubnet(_ context.Context, s *Subnet) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.createSubnetLocked(s)
+}
+
+// createSubnetLocked is CreateSubnet under a held lock.
+func (r *MemoryRepository) createSubnetLocked(s *Subnet) error {
 	if s.VRFID == "" {
 		s.VRFID = r.defaultVRF(s.OrganizationID).ID
 	}
+	sectionID, err := r.sectionFor(s.OrganizationID, s.SectionID, s.ClientID)
+	if err != nil {
+		return err
+	}
+	s.SectionID = sectionID
 	for _, e := range r.subnets {
 		if e.OrganizationID == s.OrganizationID && e.VRFID == s.VRFID && e.CIDR == s.CIDR {
 			return fmt.Errorf("%w: duplicate cidr", ErrValidation)
@@ -172,7 +304,56 @@ func (r *MemoryRepository) CreateSubnet(_ context.Context, s *Subnet) error {
 	s.CreatedAt, s.UpdatedAt = now, now
 	stored := *s
 	r.subnets[s.ID] = &stored
+	r.placeOrg(s.OrganizationID)
+	if err := r.checkPlacement(&stored); err != nil {
+		delete(r.subnets, s.ID)
+		r.placeOrg(s.OrganizationID)
+		return err
+	}
+	r.syncGateway(&stored)
+	r.takeOverAddressesLocked(&stored)
+	*s = r.withChildCount(&stored)
+	stored.Warnings = nil
 	return nil
+}
+
+// syncGateway keeps the gateway mark of the addresses of subnet s in step
+// with its gateway (IPM-04), as the PostgreSQL repository does.
+func (r *MemoryRepository) syncGateway(s *Subnet) {
+	var marked *IPAddress
+	for _, a := range r.addresses {
+		if a.OrganizationID != s.OrganizationID || a.SubnetID != s.ID || !a.IsGateway {
+			continue
+		}
+		if s.Gateway != "" && hostOf(a.Address) == s.Gateway {
+			marked = a
+			continue
+		}
+		a.IsGateway = false
+	}
+	if s.Gateway == "" || marked != nil {
+		return
+	}
+	var pick *IPAddress
+	for _, a := range r.addresses {
+		if a.OrganizationID != s.OrganizationID || a.VRFID != s.VRFID || hostOf(a.Address) != s.Gateway ||
+			(a.SubnetID != s.ID && a.SubnetID != "") {
+			continue
+		}
+		if pick == nil || (a.SubnetID != "" && pick.SubnetID == "") ||
+			(a.SubnetID == pick.SubnetID && a.InterfaceID == "" && pick.InterfaceID != "") {
+			pick = a
+		}
+	}
+	now := time.Now().UTC()
+	if pick != nil {
+		pick.IsGateway, pick.SubnetID, pick.UpdatedAt = true, s.ID, now
+		return
+	}
+	r.seq++
+	a := &IPAddress{ID: fmt.Sprintf("ip-%d", r.seq), OrganizationID: s.OrganizationID, SubnetID: s.ID, Address: s.Gateway,
+		VRFID: s.VRFID, Type: IPTypeStatic, State: IPStateUnknown, IsGateway: true, Origin: IPOriginManual, CreatedAt: now, UpdatedAt: now}
+	r.addresses[a.ID] = a
 }
 
 func (r *MemoryRepository) UpdateSubnet(_ context.Context, orgID, id string, req *UpdateSubnetRequest) (*Subnet, error) {
@@ -181,6 +362,31 @@ func (r *MemoryRepository) UpdateSubnet(_ context.Context, orgID, id string, req
 	s, ok := r.subnets[id]
 	if !ok || s.OrganizationID != orgID {
 		return nil, ErrNotFound
+	}
+	before := *s
+	if req.IsPool != nil && *req.IsPool && !s.IsPool {
+		for _, a := range r.addresses {
+			if a.OrganizationID == orgID && a.SubnetID == id {
+				return nil, errPoolWithAddresses
+			}
+		}
+	}
+	if req.ClientID != nil || req.SectionID != nil {
+		clientID, sectionID := s.ClientID, s.SectionID
+		if req.ClientID != nil {
+			clientID = *req.ClientID
+		}
+		if req.SectionID != nil {
+			sectionID = *req.SectionID
+		}
+		resolved, err := r.sectionFor(orgID, sectionID, clientID)
+		if err != nil {
+			return nil, err
+		}
+		s.SectionID = resolved
+	}
+	if req.CIDR != nil {
+		s.CIDR = *req.CIDR
 	}
 	if req.ClientID != nil {
 		s.ClientID = *req.ClientID
@@ -209,8 +415,40 @@ func (r *MemoryRepository) UpdateSubnet(_ context.Context, orgID, id string, req
 	if req.IsManagement != nil {
 		s.IsManagement = *req.IsManagement
 	}
+	if req.IsPool != nil {
+		s.IsPool = *req.IsPool
+	}
+	if req.OriginASNID != nil {
+		s.OriginASNID = *req.OriginASNID
+	}
 	s.UpdatedAt = time.Now().UTC()
-	cp := *s
+	r.placeOrg(orgID)
+	if err := r.checkPlacement(s); err != nil {
+		*s = before
+		r.placeOrg(orgID)
+		return nil, err
+	}
+	// A shrunk prefix hands the addresses of the subnet outside it to their
+	// longest prefix and takes their gateway mark (subnet_place, IPM-14).
+	if req.CIDR != nil {
+		for _, a := range r.addresses {
+			if a.OrganizationID != orgID || a.SubnetID != id {
+				continue
+			}
+			if in, err := ipInSubnet(hostOf(a.Address), s.CIDR); err == nil && !in {
+				a.SubnetID, a.IsGateway = r.longestPrefixLocked(orgID, a.VRFID, a.Address, id), false
+				a.UpdatedAt = s.UpdatedAt
+			}
+		}
+	}
+	if req.Gateway != nil {
+		r.syncGateway(s)
+	}
+	if req.CIDR != nil || req.VRFID != nil || (req.IsPool != nil && !*req.IsPool) {
+		r.takeOverAddressesLocked(s)
+	}
+	cp := r.withChildCount(s)
+	s.Warnings = nil
 	return &cp, nil
 }
 
@@ -221,13 +459,22 @@ func (r *MemoryRepository) DeleteSubnet(_ context.Context, orgID, id string) err
 	if !ok || s.OrganizationID != orgID {
 		return ErrNotFound
 	}
+	// The addresses go to their longest prefix without the subnet (the
+	// parent or none, subnet_release_addresses, IPM-14) and lose the
+	// gateway mark (trg_ip_address_gateway_leaves_subnet).
+	for _, a := range r.addresses {
+		if a.OrganizationID == orgID && a.SubnetID == id {
+			a.SubnetID, a.IsGateway = r.longestPrefixLocked(orgID, a.VRFID, a.Address, id), false
+		}
+	}
 	delete(r.subnets, id)
+	r.placeOrg(orgID)
 	return nil
 }
 
 // --- IP Addresses ---
 
-func (r *MemoryRepository) ListIPAddresses(_ context.Context, orgID, subnetID string, page api.PaginationParams) ([]IPAddress, int, error) {
+func (r *MemoryRepository) ListIPAddresses(_ context.Context, orgID string, f *IPFilter, page api.PaginationParams) ([]IPAddress, int, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []IPAddress
@@ -235,7 +482,8 @@ func (r *MemoryRepository) ListIPAddresses(_ context.Context, orgID, subnetID st
 		if a.OrganizationID != orgID {
 			continue
 		}
-		if subnetID != "" && a.SubnetID != subnetID {
+		if (f.SubnetID != "" && a.SubnetID != f.SubnetID) || (f.State != "" && a.State != f.State) ||
+			(f.IsGateway != nil && a.IsGateway != *f.IsGateway) || !r.addressMatches(a, f) {
 			continue
 		}
 		out = append(out, *a)
@@ -256,12 +504,46 @@ func (r *MemoryRepository) GetIPAddress(_ context.Context, orgID, id string) (*I
 	return &cp, nil
 }
 
+// bindCI applies the device rule of ip_address_ci_bind (IPM-13): with an
+// interface the CI of the address is the CI of the interface; an empty or
+// not explicitly written one is filled (a new interface takes its CI
+// along), an explicitly written different one is refused (422 ci_id).
+func (r *MemoryRepository) bindCI(a *IPAddress, ciExplicit bool) error {
+	if a.Role == "" {
+		a.Role = IPRolePrimary
+	}
+	ni, ok := r.interfaces[a.InterfaceID]
+	if a.InterfaceID == "" || !ok {
+		return nil
+	}
+	switch {
+	case a.CIID == "" || !ciExplicit:
+		a.CIID = ni.CIID
+	case a.CIID != ni.CIID:
+		return errAddressCIInterface
+	}
+	return nil
+}
+
 func (r *MemoryRepository) CreateIPAddress(_ context.Context, a *IPAddress) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	a.VRFID = r.defaultVRF(a.OrganizationID).ID
+	if err := r.bindCI(a, a.CIID != ""); err != nil {
+		return err
+	}
+	if a.VRFID != "" && a.SubnetID == "" {
+		if v, ok := r.vrfs[a.VRFID]; !ok || v.OrganizationID != a.OrganizationID {
+			return errAddressVRFNotFound
+		}
+	} else {
+		a.VRFID = r.defaultVRF(a.OrganizationID).ID
+	}
 	if sn, ok := r.subnets[a.SubnetID]; ok && sn.VRFID != "" {
 		a.VRFID = sn.VRFID
+	}
+	// Without subnet the longest prefix of the VRF (IPM-14).
+	if a.SubnetID == "" {
+		a.SubnetID = r.longestPrefixLocked(a.OrganizationID, a.VRFID, a.Address, "")
 	}
 	for _, e := range r.addresses {
 		if e.OrganizationID == a.OrganizationID && e.VRFID == a.VRFID && e.InterfaceID == a.InterfaceID && e.Address == a.Address {
@@ -270,6 +552,12 @@ func (r *MemoryRepository) CreateIPAddress(_ context.Context, a *IPAddress) erro
 	}
 	r.seq++
 	a.ID = fmt.Sprintf("ip-%d", r.seq)
+	if a.State == "" {
+		a.State = IPStateUnknown
+	}
+	if a.Origin == "" {
+		a.Origin = IPOriginManual
+	}
 	now := time.Now().UTC()
 	a.CreatedAt, a.UpdatedAt = now, now
 	stored := *a
@@ -284,20 +572,41 @@ func (r *MemoryRepository) UpdateIPAddress(_ context.Context, orgID, id string, 
 	if !ok || a.OrganizationID != orgID {
 		return nil, ErrNotFound
 	}
+	if req.SubnetID != nil && a.IsGateway && *req.SubnetID != a.SubnetID {
+		return nil, errGatewayAddressSubnet
+	}
+	next := *a
 	if req.SubnetID != nil {
-		a.SubnetID = *req.SubnetID
+		next.SubnetID = *req.SubnetID
 	}
 	if req.InterfaceID != nil {
-		a.InterfaceID = *req.InterfaceID
+		next.InterfaceID = *req.InterfaceID
 	}
+	if req.CIID != nil {
+		next.CIID = *req.CIID
+	}
+	if req.Role != nil {
+		next.Role = *req.Role
+	}
+	if err := r.bindCI(&next, req.CIID != nil && *req.CIID != ""); err != nil {
+		return nil, err
+	}
+	a.SubnetID, a.InterfaceID, a.CIID, a.Role = next.SubnetID, next.InterfaceID, next.CIID, next.Role
 	if req.Type != nil {
 		a.Type = *req.Type
+	}
+	if req.State != nil && *req.State != a.State {
+		changed := time.Now().UTC()
+		a.State, a.StateChangedAt = *req.State, &changed
 	}
 	if req.DNSName != nil {
 		a.DNSName = *req.DNSName
 	}
 	if req.Description != nil {
 		a.Description = *req.Description
+	}
+	if req.Pinned != nil {
+		a.Pinned = *req.Pinned
 	}
 	a.UpdatedAt = time.Now().UTC()
 	cp := *a
@@ -311,8 +620,36 @@ func (r *MemoryRepository) DeleteIPAddress(_ context.Context, orgID, id string) 
 	if !ok || a.OrganizationID != orgID {
 		return ErrNotFound
 	}
+	if a.IsGateway {
+		return errGatewayAddressDelete
+	}
 	delete(r.addresses, id)
 	return nil
+}
+
+// ListCIAddresses implements CIAddressLister: the addresses bound to the
+// CI, ordered by address. Without a database the CIs are unknown, so an
+// unknown CI has no addresses.
+func (r *MemoryRepository) ListCIAddresses(_ context.Context, orgID, ciID string, page api.PaginationParams) ([]CIAddress, int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := []CIAddress{}
+	for _, a := range r.addresses {
+		if a.OrganizationID != orgID || a.CIID != ciID {
+			continue
+		}
+		c := CIAddress{IPAddress: *a}
+		if ni, ok := r.interfaces[a.InterfaceID]; ok {
+			c.InterfaceName = ni.Name
+		}
+		if sn, ok := r.subnets[a.SubnetID]; ok {
+			c.SubnetCIDR = sn.CIDR
+		}
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Address < out[j].Address })
+	items, total := pageSlice(out, page)
+	return items, total, nil
 }
 
 // --- Network Interfaces ---

@@ -377,3 +377,56 @@ func TestOperatorAuditRecordsAnyRequestPath(t *testing.T) {
 		t.Errorf("verify: %+v, %v", result, verr)
 	}
 }
+
+// TestOperatorAuditFilterByTargetOrg covers WP-888 (PKG-07): GET
+// /api/v1/admin/audit?target_org=<id> lists only the entries of that
+// organization, an invalid UUID is 400, and the chain stays valid.
+func TestOperatorAuditFilterByTargetOrg(t *testing.T) {
+	if os.Getenv("TEST_DATABASE_URL") == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping PostgreSQL integration test")
+	}
+	f := scopetest.Seed(t, "66")
+	bg := context.Background()
+	auditor := NewAuditor(f.App)
+	mux := testRouter(NewHandler(Config{BreakGlassToken: testBreakGlass}, nil, testIssuer(t), auditor, f.App))
+	var mark int64
+	if err := f.Admin.QueryRow(bg, `SELECT COALESCE(max(id), 0) FROM operator_audit`).Scan(&mark); err != nil {
+		t.Fatal(err)
+	}
+	for _, org := range []string{f.OrgA, f.OrgB, f.OrgA} {
+		if err := auditor.Record(bg, &AuditEntry{OperatorID: "op-wp888", OperatorKind: KindOIDC, Action: "wp888.probe",
+			TargetOrg: org, Status: http.StatusOK, Details: map[string]any{}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	header := map[string]string{BreakGlassHeader: testBreakGlass}
+	w := get(mux, "/api/v1/admin/audit?limit=200&target_org="+f.OrgA, header)
+	if w.Code != http.StatusOK {
+		t.Fatalf("filtered audit: %d %s", w.Code, w.Body.String())
+	}
+	var page struct {
+		Data  []AuditEntry `json:"data"`
+		Total int          `json:"total"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	probes := 0
+	for _, e := range page.Data {
+		if e.TargetOrg != f.OrgA {
+			t.Errorf("entry %d of organization %q in the history of %s", e.ID, e.TargetOrg, f.OrgA)
+		}
+		if e.Action == "wp888.probe" && e.ID > mark {
+			probes++
+		}
+	}
+	if probes != 2 || page.Total < probes {
+		t.Errorf("history of A: %d new probe entries (want 2), total %d", probes, page.Total)
+	}
+	if w = get(mux, "/api/v1/admin/audit?target_org=not-a-uuid", header); w.Code != http.StatusBadRequest {
+		t.Errorf("invalid target_org: %d, want 400", w.Code)
+	}
+	if result, err := auditor.Verify(bg); err != nil || !result.Valid {
+		t.Errorf("verify: %+v, %v", result, err)
+	}
+}

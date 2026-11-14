@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -400,5 +401,58 @@ func TestFormFieldPolicy(t *testing.T) {
 	}
 	if slices.Contains(sectionKeys(form), "G1") {
 		t.Fatalf("a section of unreadable fields only: %v", sectionKeys(form))
+	}
+}
+
+// TestFormStatesOverUnreadableFields covers SR-59 (WP-872): catalog rules
+// and attribute conditions over a field the reader cannot read are
+// unknown and act conservatively (visible, not required, not read only);
+// two values of that field give the reader the same form; conditions over
+// readable fields act unchanged.
+func TestFormStatesOverUnreadableFields(t *testing.T) {
+	when := func(field string, value any) *rules.Rule {
+		return &rules.Rule{Op: rules.OpEq, Field: field, Value: value}
+	}
+	source := func(a string) *stubFormSource {
+		s := baseSource()
+		s.subject.Values = map[string]any{"a": a, "d": "5"}
+		s.catalog = []fieldmeta.CatalogRule{
+			{Key: "req-b", AttributeKey: "b", Kind: fieldmeta.CatalogRequired, Condition: when("a", "on")},
+			{Key: "vis-b", AttributeKey: "b", Kind: fieldmeta.CatalogVisible, Condition: when("a", "on")},
+			{Key: "ro-c", AttributeKey: "c", Kind: fieldmeta.CatalogReadonly,
+				Condition: &rules.Rule{Op: rules.OpAll, Rules: []rules.Rule{*when("d", "5"), *when("a", "on")}}},
+			{Key: "ro-d", AttributeKey: "d", Kind: fieldmeta.CatalogReadonly, Condition: when("d", "5")},
+		}
+		s.defs[3].Conditional = &fieldmeta.ConditionalRules{
+			VisibleWhen:  []fieldmeta.Predicate{{Field: "a", Op: "eq", Value: "on"}},
+			RequiredWhen: []fieldmeta.Predicate{{Field: "a", Op: "eq", Value: "off"}},
+		}
+		s.defs[2].Conditional = &fieldmeta.ConditionalRules{
+			RequiredWhen: []fieldmeta.Predicate{{Field: "d", Op: "eq", Value: "5"}},
+		}
+		return s
+	}
+	hideA := stubPolicy{hidden: "a"}
+	on := mustForm(t, source("on"), userCtx(false), FormRequest{CIID: fsCI}, hideA)
+	off := mustForm(t, source("off"), userCtx(false), FormRequest{CIID: fsCI}, hideA)
+	if !reflect.DeepEqual(on, off) {
+		t.Fatalf("the value of an unreadable field changes the form:\n%+v\n%+v", on, off)
+	}
+	b, c, d := formField(on, "b").State, formField(on, "c").State, formField(on, "d").State
+	if b.Required || !b.Visible || c.ReadOnly || !d.Visible || d.Required {
+		t.Errorf("unknown conditions must act conservatively: b=%+v c=%+v d=%+v", b, c, d)
+	}
+	// Conditions over the readable d act: d read only, c required.
+	if !d.ReadOnly || !c.Required {
+		t.Errorf("conditions over readable fields: c=%+v d=%+v", c, d)
+	}
+	if formField(on, "a") != nil {
+		t.Errorf("unreadable field a in the form")
+	}
+	// Without a restriction the conditions over a act as before.
+	full := mustForm(t, source("off"), userCtx(false), FormRequest{CIID: fsCI}, NoopFieldPolicy{})
+	b, d = formField(full, "b").State, formField(full, "d").State
+	if b.Visible || b.Required || d.Visible || d.Required {
+		t.Errorf("readable a=off: b=%+v d=%+v", b, d)
 	}
 }

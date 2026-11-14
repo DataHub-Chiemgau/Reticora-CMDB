@@ -455,13 +455,18 @@ type runError struct {
 	Target   string `json:"target,omitempty"`
 	Cause    string `json:"cause,omitempty"`
 	Message  string `json:"message"`
+	// CredentialID is the bundle credential the target used in the
+	// namespace of the protocol (WP-898); never a value of it.
+	CredentialID string `json:"credential_id,omitempty"`
 }
 
 // maxReportedErrors bounds the errors of one run report.
 const maxReportedErrors = 50
 
-// reportScopeRun sends the result of a scope run to the server.
-func reportScopeRun(ctx context.Context, s *collectorScope, started time.Time, records int, errs []runError, next time.Time) {
+// reportScopeRun sends the result of a scope run to the server, with the
+// credential usage of the run (CRD-06, at most maxReportedUsage entries).
+func reportScopeRun(ctx context.Context, s *collectorScope, started time.Time, records int, errs []runError,
+	usage []credentialUse, next time.Time) {
 	ch := scopeChannel.Load()
 	if ch == nil || s == nil {
 		return
@@ -474,10 +479,15 @@ func reportScopeRun(ctx context.Context, s *collectorScope, started time.Time, r
 		}
 		result["errors"] = errs
 	}
+	report := map[string]any{"scope_id": s.ID, "at": started.UTC(), "next_run": next.UTC(), "result": result}
+	if len(usage) > 0 {
+		if len(usage) > maxReportedUsage {
+			usage = usage[:maxReportedUsage]
+		}
+		report["credential_usage"] = usage
+	}
 	var resp map[string]any
-	if err := natsRequest(ctx, ch.nc, ch.subject+".scopes.result", map[string]any{
-		"scope_id": s.ID, "at": started.UTC(), "next_run": next.UTC(), "result": result,
-	}, &resp); err != nil {
+	if err := natsRequest(ctx, ch.nc, ch.subject+".scopes.result", report, &resp); err != nil {
 		slog.Warn("scope run not reported", "scope_id", s.ID, "error", err)
 	}
 }
@@ -521,8 +531,12 @@ func fetchJobs(ctx context.Context, nc *nats.Conn, subject string) ([]collectorJ
 
 // reportJobStatus sends the status of a job, with its error and result
 // once it ended; it reports whether the server recorded it.
-func reportJobStatus(ctx context.Context, nc *nats.Conn, subject, jobID, status, errMsg string, result map[string]any) (bool, error) {
+func reportJobStatus(ctx context.Context, nc *nats.Conn, subject, jobID, status, errMsg string, result map[string]any,
+	usage []jobScopeUsage) (bool, error) {
 	body := map[string]any{"job_id": jobID, "status": status}
+	if len(usage) > 0 {
+		body["credential_usage"] = usage
+	}
 	if errMsg != "" {
 		body["error"] = errMsg
 	}
@@ -582,12 +596,12 @@ func runOpenJobs(ctx context.Context, cfg *collectorConfig, up *uploader, hosts 
 		if ctx.Err() != nil {
 			break
 		}
-		if recorded, rerr := reportJobStatus(ctx, ch.nc, ch.subject, job.ID, jobRunning, "", nil); rerr != nil || !recorded {
+		if recorded, rerr := reportJobStatus(ctx, ch.nc, ch.subject, job.ID, jobRunning, "", nil, nil); rerr != nil || !recorded {
 			slog.Warn("discovery job not started", "job_id", job.ID, "error", rerr)
 			continue
 		}
-		status, errMsg, result := runJob(ctx, cfg, up, hosts, job)
-		if recorded, rerr := reportJobStatus(ctx, ch.nc, ch.subject, job.ID, status, errMsg, result); rerr != nil || !recorded {
+		status, errMsg, result, usage := runJob(ctx, cfg, up, hosts, job)
+		if recorded, rerr := reportJobStatus(ctx, ch.nc, ch.subject, job.ID, status, errMsg, result, usage); rerr != nil || !recorded {
 			// The server fails the job after its deadline (timeout).
 			slog.Warn("discovery job result not recorded", "job_id", job.ID, "status", status, "error", rerr)
 		}
@@ -603,18 +617,28 @@ func runOpenJobs(ctx context.Context, cfg *collectorConfig, up *uploader, hosts 
 // type and uploads the records. It returns the status the job ended with,
 // the error of a failed job and the result: records, passes, duration and
 // the run errors (DIS-08). A job that ran no plugin fails with cause
-// config_error.
-func runJob(ctx context.Context, cfg *collectorConfig, up *uploader, hosts *hostCache, job *collectorJob) (status, errMsg string, result map[string]any) {
+// config_error. usage is the credential usage of the scope passes
+// (CRD-06), per scope and at most maxReportedUsage entries in all; a pass
+// without scope (configured subnets) reports none, like its runs.
+func runJob(ctx context.Context, cfg *collectorConfig, up *uploader, hosts *hostCache,
+	job *collectorJob) (status, errMsg string, result map[string]any, usage []jobScopeUsage) {
 	started := time.Now()
 	var records []plugins.DeviceRecord
 	var errs []runError
-	passes := 0
+	passes, reported := 0, 0
 	for _, pass := range discoveryPasses(cfg) {
 		protocols := jobProtocols(job.JobType, pass.protocols)
 		if len(protocols) == 0 {
 			continue
 		}
-		passRecords, passErrs := runPass(ctx, cfg, up, &pass, protocols, hosts)
+		passRecords, passErrs, passUsage := runPass(ctx, cfg, up, &pass, protocols, hosts)
+		if pass.scope != nil && len(passUsage) > 0 && reported < maxReportedUsage {
+			if len(passUsage) > maxReportedUsage-reported {
+				passUsage = passUsage[:maxReportedUsage-reported]
+			}
+			reported += len(passUsage)
+			usage = append(usage, jobScopeUsage{ScopeID: pass.scope.ID, Usage: passUsage})
+		}
 		records = append(records, passRecords...)
 		errs = append(errs, passErrs...)
 		passes++
@@ -641,5 +665,11 @@ func runJob(ctx context.Context, cfg *collectorConfig, up *uploader, hosts *host
 		}
 		result["errors"] = errs
 	}
-	return status, errMsg, result
+	return status, errMsg, result, usage
+}
+
+// jobScopeUsage is the credential usage of one scope pass of a job.
+type jobScopeUsage struct {
+	ScopeID string          `json:"scope_id"`
+	Usage   []credentialUse `json:"usage"`
 }

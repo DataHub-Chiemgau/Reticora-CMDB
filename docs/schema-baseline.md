@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000283_client_ci_type_hidden
+Stand: Migration 000374_org_deletion_notice
 
 ## Prüfung
 
@@ -175,12 +175,14 @@ Start bei jeder Abweichung:
 | Laufzeit-Login (z. B. `reticora_runtime`) | LOGIN, NOSUPERUSER, NOBYPASSRLS | nur Mitglied von `reticora_app`; der Pool wechselt per `SET ROLE`; erreicht keine SUPERUSER-/BYPASSRLS-Rolle |
 | `reticora_app` | NOLOGIN, NOSUPERUSER, NOBYPASSRLS | DML/Sequenzen/EXECUTE; `SET ROLE reticora_owner` erlaubt, aber ohne Vererbung (`INHERIT FALSE`); kein eigenes `CREATE` auf `public` |
 | `reticora_owner` | NOLOGIN, NOSUPERUSER, NOBYPASSRLS | Eigentümer aller Tabellen in `public` außer `schema_migrations` und TimescaleDB-Hypertables; `USAGE, CREATE` auf `public` |
+| `reticora_org_purger` (Migration `org_purge_fn`, WP-1154) | NOLOGIN, NOSUPERUSER, NOBYPASSRLS, kein Mitglied (nur der migrierende Login mit `INHERIT FALSE, SET TRUE`) | Eigentümerin der SECURITY-DEFINER-Funktionen `org_purge_batch`, `org_purge_keys` und `org_purge_rows` (`EXECUTE` nur für `reticora_app`); Tabellen-, Sequenz- und Funktionsrechte wie `reticora_app` (ohne dessen Mitgliedschaft) plus `SELECT`/`DELETE` auf jeder Tabelle mit `organization_id` und auf den Materialisierungs-Hypertables der Continuous Aggregates (`_timescaledb_internal`), Default-Privilegien für künftige Tabellen; RLS bindet sie an `app.org_id`. Die Startprüfung meldet jeden Login, der sie erreicht (`database.OrgPurgerRole`) |
 
 - Jede Tabelle mit `organization_id` (plus `organization`), auf die
   `reticora_app` zugreifen darf, hat `ENABLE` und `FORCE ROW LEVEL SECURITY`
   und gehört `reticora_owner`; die Policies binden damit auch den Eigentümer.
   `metric_sample` ist für `reticora_app` nicht zugreifbar (View-Barriere,
-  WP-040) und behält ihren Eigentümer.
+  WP-040) und behält ihren Eigentümer; ebenso `probe_result` (View
+  `probe_result_v`, WP-945, ADR 0001).
 - Laufzeit-DDL (DB-04): Die Anwendung wechselt für Index-DDL ausdrücklich in
   `reticora_owner`. Der Event-Trigger `reticora_restrict_app_ddl` erlaubt
   beiden App-Rollen nur `CREATE/ALTER/DROP INDEX`; RLS abschalten, Policies,
@@ -194,7 +196,7 @@ Start bei jeder Abweichung:
   `RoleContractError` mit dem Session-User.
 - TRUNCATE-Guard (Migration 000144, F-192): `TRUNCATE` umgeht RLS, und der
   Eigentümer `reticora_owner` darf es implizit. Jede Mandantentabelle (auch
-  `metric_sample` und die Materialisierungs-Hypertable von
+  `metric_sample`, `probe_result` und die Materialisierungs-Hypertable von
   `metric_sample_1h`) trägt den Statement-Level-Trigger
   `reticora_truncate_guard` (`BEFORE TRUNCATE`), der für `reticora_app` und
   `reticora_owner` mit 42501 abbricht. Entfernen oder Abschalten des Guards ist
@@ -202,8 +204,24 @@ Start bei jeder Abweichung:
   `VerifyRoleContract` meldet jede Mandantentabelle ohne aktiven Guard und
   einen Login mit eigenem `TRUNCATE`-Recht; eine neue Mandantentabelle braucht
   den Trigger daher in ihrer Migration.
+- Purge-Ausnahme der Append-only-Wächter (TLC-06, WP-1154): Die
+  Wächter-Triggerfunktionen (`audit_log`, `stock_movement`, abgeschlossene
+  Inventuren, `disposal_record`, `assignment_signature_legacy`,
+  `alarm_transition`, `incident_transition`, `alarm`, `incident`, Form- und
+  Workflow-Definitionsversionen, Default-Section und Default-VRF) lassen ein
+  `DELETE` zusätzlich zu ihren bisherigen Ausnahmen nur durch, wenn
+  `org_purge_active(organization_id)` gilt: `current_user` ist
+  `reticora_org_purger` und die Organisation der Zeile steht in
+  `deletion_state = 'purging'`. Erreichbar ist das nur über
+  `org_purge_batch`/`org_purge_rows`, die mit 42501 abbrechen, wenn die
+  Organisation nicht in `purging` ist, `app.org_id` sie nicht nennt oder die
+  Relation keine Tabelle bzw. kein Continuous Aggregate mit
+  `organization_id` in `public` ist. Hypertables (auch komprimierte Chunks)
+  und die Materialisierungen der Continuous Aggregates (`org_purge_target`)
+  leeren die Funktionen mit einem `DELETE` je Organisation statt über `ctid`.
 
-Nachweis: `backend/internal/database/role_check_integration_test.go`.
+Nachweis: `backend/internal/database/role_check_integration_test.go`,
+`backend/internal/tenantapi/purge_integration_test.go`.
 
 ## RLS-Katalog und bekannte Lücken
 
@@ -353,6 +371,23 @@ das Team-Prädikat wie `ticket`; ein team-beschränkter Prinzipal gilt für
 nicht mehr als org-weit. `app_scope_widen`/`app_scope_restore` leeren
 bzw. setzen auch `app.team_scope`.
 
+Compliance-Reports als Dokumente (SEC-04, E-239, WP-1129, Migration 000369):
+`doc_link_entity_type_check` erlaubt zusätzlich `organization` und
+`client`; die Registry in `backend/internal/document/links.go` führt beide
+(`organization` nur für org-weite Prinzipale, `client` für einen im Scope
+sichtbaren Client). `derive_document_link_scope` erhält zwei Zweige:
+`client` prüft, dass der Client zur Organisation des Links gehört (sonst
+`foreign_key_violation`), und setzt `client_id := entity_id`;
+`organization` verlangt `entity_id = organization_id` (sonst
+`foreign_key_violation`) und bleibt organisationsweit (`client_id`,
+`site_id`, `team_id` NULL). Die Policy `document_link_tenant_isolation`
+(Fassung aus 000217) zeigt Links der Art `organization` zusätzlich nur
+org-weiten Prinzipalen (keine Client-, Standort- oder Team-Beschränkung);
+über die EXISTS-Unterabfrage von `document_tenant_isolation` (000281) gilt
+das auch für das Dokument. Down löscht die Links beider Arten, setzt die
+Report-Dokumente auf `other` und stellt Liste, Funktion (000266) und
+Policy (000217) wieder her.
+
 Seit Migration 000275 (WP-827, ABN-03) überlebt kein Link sein Ziel: Die
 AFTER-DELETE-Trigger `<tabelle>_document_links` auf `ci`, `asset`,
 `ticket`, `location`, `disposal_record`, `stocktake` und `stock_movement`
@@ -479,15 +514,51 @@ des Artikels, und folgen deren Änderung.
 Tabellen mit Standort- oder CI-Bezug ohne eigene Scope-Spalten stehen mit
 Ableitungspfad, Begründung und prüfendem Test in `rls.DerivedScopeTables`
 (`backend/internal/tenant/rls/known_gaps.go`, Regel `located-scope`):
-`form_submission` (Sichtbarkeit über das referenzierte Formular, CI und
-Ticket per Repository-Prädikat), `building` (Standort per `site_id`, Client
+`building` (Standort per `site_id`, Client
 über die Site) und `metric_sample` (über die Views `metric_sample_v` und
-`metric_sample_1h_v`). `TestRLSCatalog` scheitert für einen Eintrag ohne
+`metric_sample_1h_v`). `workflow_run`, `workflow_step` und
+`form_submission` tragen seit Migration 000351 (WP-1093) eigene Spalten
+`client_id`/`site_id` (aus CI, Run bzw. Formular abgeleitet) mit
+Scope-Policies; Runs und Schritte ohne Client sind nur org-weit sichtbar.
+`workflow_run.started_at` ist seit Migration 000353 (WP-1112) NULL-fähig
+ohne Standardwert: NULL, solange ein eingereihter Run wartet; gesetzt beim
+Start im Request bzw. beim ersten Claim seines Jobs. Der Index
+`idx_workflow_run_org_started (organization_id, started_at)` trägt das
+Stundenfenster von `max_workflow_runs_per_hour` (WFL-08); RLS unverändert.
+Migration 000371 (WP-1102, vorläufige Nummer) nimmt `waiting_input` in
+`workflow_run_status_check` und `workflow_step_status_check` auf (Run und
+Schritt von `request_form` warten auf eine Einreichung) und ergänzt
+`form_submission.run_id` (UUID, NULL-fähig) mit
+`form_submission_run_fkey` (`run_id`, `organization_id`) → `workflow_run`
+(`id`, `organization_id`, Schlüssel `workflow_run_id_organization_key`,
+bedingt im DO-Block) `ON DELETE SET NULL (run_id)`, Index
+`idx_form_submission_run (organization_id, run_id)` (ohne Unique-Index:
+ein Run mit mehreren `request_form`-Schritten nimmt je Schritt eine
+Einreichung; die zweite zum selben Schritt verhindern Sperre und
+Statusprüfung). Down setzt wartende Runs und
+Schritte auf `cancelled`. RLS unverändert.
+Migration 000372 (WP-1108, vorläufige Nummer) ergänzt
+`internal_order.approval_run_id` (UUID, NULL-fähig) mit
+`internal_order_approval_run_fkey` (`approval_run_id`, `organization_id`) →
+`workflow_run` (`id`, `organization_id`) `ON DELETE SET NULL
+(approval_run_id)` und dem Teilindex `idx_internal_order_approval_run`
+(`organization_id`, `approval_run_id`) `WHERE approval_run_id IS NOT NULL`;
+`uq_workflow_def_order_submitted` (UNIQUE auf `organization_id` `WHERE
+active AND trigger_type = 'order_submitted'`, über die gespeicherte Spalte
+`workflow_def.trigger_type GENERATED ALWAYS AS (trigger->>'type') STORED`,
+weil ein Index unter RLS keine nicht leakproof Funktion nutzen darf) lässt je Organisation
+höchstens eine aktive Bestellgenehmigung zu. Die Triggerfunktion
+`workflow_run_scope` setzt für einen Run mit Trigger `order_submitted` ohne
+CI den Kunden der Bestellung aus `context.order_id` (Scope erweitert) statt
+des einzigen Kunden des Einreichenden; Down stellt die Fassung aus 000351
+wieder her. RLS unverändert.
+`TestRLSCatalog` scheitert für einen Eintrag ohne
 vorhandenen Test und für einen Eintrag, den die Regel nicht meldet.
 
 Globale Kataloge ohne Org-Spalte sind nach E-10 eine dokumentierte Ausnahme,
 keine Lücke: Sie werden nur durch Migrationen gepflegt und sind für die
-App-Rolle schreibgeschützt. Heute ist das nur `permission` (WP-024). Globale
+App-Rolle schreibgeschützt: `permission` (WP-024) und der Kontrollkatalog
+`compliance_control` (ISO 27001, NIS2, KRITIS; Migration 000355, WP-1128). Globale
 Katalogzeilen in Tabellen mit Org-Spalte (`organization_id IS NULL`, z. B.
 System-CI-Typen) sind über getrennte Policies je Kommando nur lesbar. Ein CI
 hat einen System-Typ oder einen Typ seiner Organisation: Der einspaltige
@@ -505,6 +576,13 @@ kein UPDATE/DELETE, zusätzlich verhindern Trigger Änderungen
 `signup_request` (WP-111) geschützt: Ein Signup-Antrag existiert vor seiner
 Organisation und ist nur im Operator-Kontext (`database.WithOperator`,
 `database.WithOrganizationSetup`) erreichbar.
+Ebenso `org_deletion_notice` (Migration 000374, WP-1156, vorläufige Nummer):
+Die mit eigenem Datenschlüssel verschlüsselte Adresse (`recipient_enc`, DEK in
+`wrapped_dek` mit dem Master-Key gewrappt) und Sprache des Antragstellers einer
+Org-Löschung, Schlüssel `target_org` ohne Fremdschlüssel, damit die Zeile den
+Purge übersteht; Policy `org_deletion_notice_operator` (USING und WITH CHECK
+`app.operator`), Truncate-Guard, `rls.OperatorTables`. Versand, Widerruf oder
+drei Fehlversuche löschen die Zeile.
 
 `platform_secret` (Migration 000163, SEC-06, WP-459) ist eine Systemtabelle der
 Installation ohne Org-Spalte, eine weitere dokumentierte Ausnahme
@@ -532,6 +610,100 @@ TestKnownGapsDocumented ./internal/tenant/rls/` neu.
 |---|---|---|
 
 <!-- rls-known-gaps:end -->
+
+### Automatische Ping-Probes (WP-949)
+
+Migration 000345 (vorläufige Nummer) ergänzt `probe.origin` (`text NOT NULL
+DEFAULT 'manual'`, `CONSTRAINT probe_origin_check CHECK (origin IN ('manual',
+'auto'))`): `auto` markiert die Probes des Jobs `probe.autocreate`, nur sie
+folgen einer Änderung der Management-IP. Die Tabelle
+`probe_autocreate_suppression` (Primärschlüssel `(organization_id, ci_id,
+probe_type)`) merkt sich gelöschte Auto-Probes. Ihre Verweise tragen die
+Organisation (K19): `probe_autocreate_suppression_ci_fkey` `(ci_id,
+organization_id) REFERENCES ci (id, organization_id) ON DELETE CASCADE`,
+`probe_autocreate_suppression_client_fkey` auf `client` und
+`probe_autocreate_suppression_site_fkey` auf `site`. `client_id` und
+`site_id` leitet der Trigger `probe_autocreate_suppression_scope` wie
+`probe_ci_scope` aus dem CI ab; ein verschobenes CI nimmt seine Einträge über
+`propagate_monitoring_scope` mit (Version aus 000307 plus diese Tabelle). Die
+Policies folgen Konvention 5 (located-scope, USING und WITH CHECK, RESTRICTIVE
+für UPDATE und DELETE), dazu FORCE RLS und Truncate-Guard.
+
+### Folgeaktionen von Alarmregeln (WP-988)
+
+Migration 000358_alert_rule_actions (vorläufige Nummer) ergänzt
+`alert_rule.actions` (`jsonb NOT NULL DEFAULT '{}'`, `CONSTRAINT
+alert_rule_actions_check CHECK (jsonb_typeof(actions) = 'object')`) mit den
+Schlüsseln `notify` und `webhook` (`{"enabled": bool}`, Standard an); `'{}'`
+gilt als Standard. `ticket` (WP-1040) und `workflow` (WP-1110) sind
+reserviert und werden von der API abgewiesen; beim Lesen gelten unbekannte
+Schlüssel als Standard. Keine neue Tabelle; RLS und die Policies
+`alert_rule_isolation` und `alert_rule_system_select` bleiben unverändert.
+
+### Uhrabweichung je Collector (WP-962)
+
+Migration `probe_clock_offset` (WP-962, PRB-09, E-175, vorläufige Nummer
+000366) ergänzt `probe_state_change.clock_offset_ms` und
+`probe_result.clock_offset_ms` (`integer NULL`: die Abweichung, um die
+`observed_at` bzw. `time` eines wegen Uhrabweichung degradierten Collectors
+korrigiert wurde; NULL = unkorrigiert). Auf der komprimierten Hypertable
+`probe_result` ohne Default; `probe_result_v` trägt die Spalte am Ende,
+`security_barrier`, `CASCADED CHECK OPTION` und die Grants der App-Rolle
+bleiben. An `collector_group_member` kommen der geteilte Zustand der
+Auswertung (`clock_skew_warned boolean NOT NULL DEFAULT false`,
+`clock_skew_calm` und `clock_skew_settle` `smallint NOT NULL DEFAULT 0`, je
+CHECK 0–6) und `clock_corrected_at timestamptz NULL` (letztes Lebenszeichen
+als `degraded`; bis 24 h danach prüft der Ingest erneute Zustellungen auf
+eine andere Korrektur). Keine neue Tabelle, RLS und Policies unverändert.
+Down entfernt die Spalten und stellt die View aus 000325 wieder her.
+
+### Fähigkeitsmeldung des Collectors (WP-966)
+
+Migration `collector_probe_capabilities` (WP-966, PRT-18, vorläufige Nummer
+000367) ergänzt `collector.probe_capabilities jsonb NULL`: die letzte
+Fähigkeitsmeldung aus Heartbeat bzw. `.probe.alive`
+(`probewire.ProbeCapabilities`), nur bei Änderung geschrieben; NULL = noch
+keine Meldung (ältere Collectoren, gelten bei der Zuweisung als fähig). RLS
+und Policies von `collector` bleiben unverändert. Down entfernt die Spalte.
+
+### Trap-Receiver je Collector-Gruppe (WP-977)
+
+Migration `collector_group_trap_config` (WP-977, DIS-06, vorläufige Nummer
+000368) ergänzt `collector_group.trap_config` (`jsonb NOT NULL DEFAULT
+'{"enabled": false}'`, `CONSTRAINT collector_group_trap_config_check CHECK
+(jsonb_typeof(trap_config) = 'object')`) mit `enabled`, `port` (1–65535,
+Standard 162) und `credential_ids` (höchstens 16, Arten `snmp_v2c` und
+`snmp_v3`); die Feldregeln prüft der Handler. Der Standardwert ohne `port`
+kennzeichnet eine nie konfigurierte Gruppe: Ihr Zuweisungssatz trägt kein
+`trap_config`, ihre Collectoren behalten `RETICORA_SNMP_TRAP_LISTEN`. Ein
+PATCH speichert die vollständige Konfiguration mit Port. RLS, Policies und
+Truncate-Guard von `collector_group` bleiben unverändert. Down entfernt die
+Spalte.
+
+### Monitoring-Ereignisse (WP-979)
+
+Migration `monitoring_event` (WP-979, DIS-06, vorläufige Nummer 000370)
+legt die Mandantentabelle `monitoring_event` an: SNMP-Traps des
+Monitoring-Modus mit `id` (UUIDv7 des Collectors, Primärschlüssel),
+`organization_id`, abgeleitetem `client_id`/`site_id`, `collector_id`,
+`ci_id NULL`, `probe_id NULL`, `source_ip inet`, `kind` (`link_down`,
+`link_up`, `cold_start`, `warm_start`, `auth_failure`, `other`),
+`trap_oid`, `varbinds jsonb` (höchstens 64 Einträge und 16 KiB, markiert
+über `truncated`), `observed_at`, `received_at`. Fremdschlüssel nach
+Konvention 19: `(ci_id, organization_id) → ci ON DELETE CASCADE`,
+`(probe_id, organization_id) → probe ON DELETE SET NULL (probe_id)`,
+`(collector_id, organization_id) → collector ON DELETE CASCADE`; die
+abgeleiteten Scope-Spalten bleiben ohne Fremdschlüssel. Der
+BEFORE-INSERT/UPDATE-Trigger `monitoring_event_scope` übernimmt
+`client_id`/`site_id` aus dem CI, ohne CI aus dem Collector. ENABLE und
+FORCE ROW LEVEL SECURITY mit `monitoring_event_isolation` sowie den
+restriktiven `_scoped_update` (mit WITH CHECK) und `_scoped_delete` nach
+Konvention 5 (Muster 000307), `reticora_truncate_guard`. Indizes
+`(organization_id, observed_at DESC)`, `(ci_id, observed_at DESC) WHERE
+ci_id IS NOT NULL`, `(probe_id, observed_at DESC) WHERE probe_id IS NOT
+NULL` und `(collector_id, organization_id)`. Aufbewahrung 30 Tage
+(`probe.PurgeEvents`, Portionen von höchstens 10.000). Down entfernt
+Tabelle und Funktion.
 
 ## Indizes unter RLS (SR-04, K22, WP-836)
 
@@ -644,10 +816,23 @@ des Assets (`source_id` = Asset); `search_index_asset` und sein Trigger
 (zusätzlich `UPDATE OF owner_user_id, assigned_user_id`) sowie
 `search_identifier_rows` sind entsprechend erweitert.
 
+Migration 000373 (WP-1140, vorläufige Nummer) gibt `app_user` die Spalte
+`mobile_pii_subject_id` (UUID, nullbar, kein Klartext): Die Mobilnummer steht
+nur im PII-Vault (`pii_subject`, Art `user`, Daten `mobile`). Der
+zusammengesetzte Fremdschlüssel `app_user_mobile_pii_subject_id_fkey`
+(`mobile_pii_subject_id`, `organization_id`) → `pii_subject` (`surrogate_id`,
+`organization_id`) mit `ON DELETE SET NULL (mobile_pii_subject_id)` hält das
+Subjekt in der Organisation des Nutzers (Konvention 19); der dafür nötige
+eindeutige Schlüssel ist `pii_subject_surrogate_id_organization_key` (000287),
+fehlt er, legt der DO-Block `pii_subject_id_organization_key` an. Index
+`idx_app_user_mobile_pii_subject` (partiell). RLS und Policies von `app_user`
+bleiben unverändert.
+
 <!-- rls-leaky-indexes:begin -->
 
 | Index | Tabelle | Nicht leakproof |
 |---|---|---|
+| `asn_range_no_overlap` | `asn_range` | function int8range(bigint,bigint,text), operator class range_ops |
 | `desk_booking_no_overlap` | `desk_booking` | function tstzrange(timestamp with time zone,timestamp with time zone), operator class range_ops |
 | `idx_ci_attributes_path` | `ci` | operator class jsonb_path_ops |
 | `idx_location_path` | `location` | operator class gist_ltree_ops |
@@ -655,7 +840,9 @@ des Assets (`source_id` = Asset); `search_index_asset` und sein Trigger
 | `idx_review_item_candidates` | `review_item` | operator class array_ops |
 | `idx_saved_view_shared_roles` | `saved_view` | operator class array_ops |
 | `idx_search_document_fts` | `search_document` | operator class tsvector_ops |
+| `idx_security_finding_cve_ids` | `security_finding` | operator class array_ops |
 | `idx_signup_request_email` | `signup_request` | function lower(text) |
+| `idx_vuln_advisory_cve_ids` | `vuln_advisory` | operator class array_ops |
 | `location_path_key` | `location` | operator class ltree_ops |
 | `rack_mount_no_overlap` | `rack_mount` | function int4pl(integer,integer), function int4range(integer,integer), function rack_face_range(text), operator class range_ops |
 | `review_item_open_override_conflict` | `review_item` | function jsonb_object_field_text(jsonb,text) |
@@ -692,6 +879,31 @@ gesetzt, die ganze Zeile ist protokolliert; Reservierungen sind verschoben
 bricht sie mit der Liste ab (Muster 000177). Die Down-Migration stellt die
 einfachen Fremdschlüssel und die Zeilen wieder her.
 
+Migration 000287 (WP-876, SR-03 Rest I) stellt die 59 Verweise der Kern-,
+Standort-, Netz-, Rack-, Rollen- und Discovery-Tabellen (37 Tabellen) um, u. a.
+`ci_relationship.source_ci_id`, `network_interface.ci_id`,
+`role_assignment.role_id`, `team_member.user_id`, `building.site_id` und die
+Spezialzeilen `building.id`, `room.id`, `rack.id`, `site.id` auf ihren Knoten
+in `location`. Wo das Ziel noch keinen hatte, legt sie
+`<tabelle>_<spalte>_organization_key` an (`api_key`, `building`, `collector`,
+`discovery_job`, `network_interface`, `rack`, `subnet` mit `id`,
+`pii_subject` mit `surrogate_id`). Constraint-Namen und Löschverhalten bleiben
+(SET NULL als `ON DELETE SET NULL (spalte)`). Fremde Verweise stehen in
+`migration_quarantine` (Migration `000287`): nullbare auf NULL gesetzt,
+Zeilen mit Pflichtverweis verschoben; eine Spezialzeile mit Knoten einer
+anderen Organisation bricht die Migration mit der Liste ab. Die Down-Migration
+stellt die einfachen Fremdschlüssel und die Zeilen wieder her und entfernt
+einen angelegten Schlüssel nur, wenn kein Fremdschlüssel ihn mehr nutzt.
+
+Migration 000288 (WP-877, SR-03 Rest II) stellt die übrigen 55 Verweise um
+(28 Tabellen): Modul- und Ticket-Tabellen (`ticket`, `ticket_comment`,
+`ticket_sla`, `stocktake`, `stock_scan`, `internal_order_item`, `document`,
+`document_link`), Benachrichtigungen und Webhooks, die vorhandenen Tabellen
+der Phase-3-Module (Wartung, Workflows, Formulare, Compliance), KI und IGA. Wo
+das Ziel noch keinen hatte, legt sie `<tabelle>_id_organization_key` an (u. a.
+`sla`, `webhook_subscription`, `workflow_def`, `maintenance_window`,
+`notification_channel`). Quarantäne und Down-Migration wie 000287.
+
 Migration 000275 (WP-827) legt `UNIQUE (id, organization_id)`
 (`internal_order_id_organization_key`) auf `internal_order` an und gibt den
 bis dahin ungebundenen Spalten `reservation.assignee_id`,
@@ -701,6 +913,165 @@ Fremdschlüssel (`reservation_assignee_id_fkey` auf `app_user`,
 `internal_order`, je `ON DELETE SET NULL (spalte)`). Bestehende Verweise ohne
 Zeile in der eigenen Organisation stehen in `migration_quarantine`
 (Migration `000275`) und sind auf NULL gesetzt.
+
+Migration 000293 (WP-893) verweist von `vault_connection` mit Organisation
+auf `client` (`vault_connection_client_fkey`) und auf die Anmeldedaten in
+`credential` (`vault_connection_auth_credential_fkey`, ON DELETE RESTRICT),
+von `vault_connection_collector` auf `vault_connection` (ON DELETE CASCADE)
+und `collector`. Migration 000294 (WP-894) ergänzt
+`credential_vault_connection_fkey`: `credential (vault_connection_id,
+organization_id) REFERENCES vault_connection (id, organization_id)` mit ON
+DELETE RESTRICT; eine referenzierte Tresorverbindung wird nicht gelöscht.
+
+Migration 000329 (WP-1067, IPM-16) gibt `subnet` die Spalte
+`origin_asn_id` (Origin-AS des Präfixes) mit dem zusammengesetzten
+Fremdschlüssel `subnet_origin_asn_fkey`: `(origin_asn_id, organization_id)
+REFERENCES asn (id, organization_id) ON DELETE SET NULL (origin_asn_id)`
+und dem Teilindex `idx_subnet_origin_asn` auf `(organization_id,
+origin_asn_id) WHERE origin_asn_id IS NOT NULL`. Die Funktion
+`asn_next_free(org, lo, hi)` (SECURITY INVOKER, fester `search_path`)
+liefert die kleinste freie AS-Nummer in `[lo, hi]` ohne 23456 und 65535 oder
+NULL für eine volle Range; sie sucht mengenbasiert mit erweitertem Kunden-,
+Standort- und Team-Scope (`app_scope_widen`/`app_scope_restore`), die
+Organisation bleibt über `app.org_id` fest. Der Aufrufer serialisiert die
+Vergabe je Range mit einem Transaktions-Advisory-Lock
+(`pg_advisory_xact_lock`), weil ein Kunden-Principal die UPDATE-Policy
+organisationsweiter Ranges nicht hat. Die Tabelle oben und die Zeile
+„Stand:“ erzeugt `RETICORA_UPDATE_SCHEMA_BASELINE=1` beim Zusammenführen mit
+den endgültigen Migrationsnummern neu.
+
+Migration `nat_translation` (WP-1071, IPM-15, vorläufige Nummer 000336)
+legt `nat_translation` an: Art (`kind` static, source, destination, pat),
+Gerät, je genau eine Innen- und Außenseite als Adresse oder Subnetz
+(`nat_translation_inside_check`, `nat_translation_outside_check`), Protokoll,
+Ports nur bei tcp/udp (`nat_translation_ports_check`), pat verlangt den
+Außenport (`nat_translation_pat_port_check`). Die Fremdschlüssel sind
+zusammengesetzt mit Organisation (Konvention 19) und alle ON DELETE CASCADE:
+`nat_translation_device_fkey` auf `ci`, `nat_translation_inside_address_fkey`
+und `nat_translation_outside_address_fkey` auf `ip_address`,
+`nat_translation_inside_subnet_fkey` und `nat_translation_outside_subnet_fkey`
+auf `subnet`, dazu Teilindizes je Seite und `idx_nat_translation_device`.
+`ip_address` und `subnet` erhalten `ip_address_id_organization_key` bzw.
+`subnet_id_organization_key` (UNIQUE (id, organization_id)) nur, wenn noch
+kein eindeutiger Schlüssel über genau diese Spalten besteht; Down entfernt sie
+nur, solange kein Fremdschlüssel mehr auf sie verweist. `client_id` und
+`site_id` folgen dem Gerät (Scope-Trigger mit erweitertem Scope);
+`propagate_ci_scope` leitet sie bei einer Kunden- oder Standortänderung des CI
+neu ab. ENABLE und FORCE RLS mit den Policies nach Konvention 5, `updated_at`
+und `reticora_truncate_guard`. Die Tabelle oben und die Zeile „Stand:“
+erzeugt `RETICORA_UPDATE_SCHEMA_BASELINE=1` beim Zusammenführen mit den
+endgültigen Migrationsnummern neu.
+
+Migration `subnet_scan` (WP-1062, IPM-11, vorläufige Nummer 000357) gibt
+`subnet` die Scan-Spalten `scan_enabled`, `collector_group_id` (zusammengesetzter
+Fremdschlüssel `subnet_collector_group_fkey` auf `collector_group`, ON DELETE
+RESTRICT, Teilindex `idx_subnet_collector_group`), `scan_interval_s`,
+`discover_new_hosts`, `offline_after_s` (60 s bis 30 Tage, Standard 3600) und
+`scan_synced_at` mit `subnet_scan_collector_group_required`. `probe` erhält
+`managed_by` (`ipam_scan`, `ipam_ptr`) und `managed_key` (beide oder keiner,
+`probe_managed_pair`); der Schlüssel `probe_target_key` aus WP-935 wird ein
+partieller eindeutiger Index gleichen Namens (NULLS NOT DISTINCT, nur ohne
+`managed_by`), verwaltete Probes sind über `probe_managed_key`
+(organization_id, managed_by, managed_key) eindeutig. Neue Mandantentabelle
+`subnet_scan_target` (PK subnet_id, address) mit zusammengesetzten
+Fremdschlüsseln auf `subnet` und `probe` (ON DELETE CASCADE), Index
+`(organization_id, probe_id)`; `client_id` und `site_id` leitet ein
+BEFORE-Trigger aus dem Subnetz ab (ohne Fremdschlüssel), ein AFTER-UPDATE-
+Trigger auf `subnet` zieht sie nach, ein AFTER-DELETE-Trigger löscht die Probe
+einer Zeile mit `owned`. ENABLE und FORCE RLS mit den Policies nach Konvention 5
+und `reticora_truncate_guard`. `subnet_id_organization_key` besteht seit 000287
+und wird nur angelegt, wenn er fehlt.
+
+Migration `ipam_scan_apply` (WP-1063, IPM-11, vorläufige Nummer 000364) gibt
+`subnet` die Spalten `scan_applied_at` (letzter Lauf des Systemjobs
+`ipam.scan.apply`) und `scan_sync_failed_at` (letzter gescheiterter
+Zielabgleich des Jobs; das Subnetz rückt ans Ende der Reihenfolge).
+`trg_subnet_updated_at` erhält eine WHEN-Bedingung: eine Änderung nur von
+`scan_applied_at` oder `scan_sync_failed_at` lässt `updated_at` stehen.
+`ipam_change_record()` (000302) wird ersetzt und protokolliert zusätzlich
+`scan_applied_at`, `scan_synced_at` und `scan_sync_failed_at` nicht als Feldänderung (`last_seen_at`
+schon seit 000302 nicht). Keine neue Tabelle, RLS unverändert.
+
+Migration `ip_address_ptr` (WP-1064, IPM-12, vorläufige Nummer 000365) gibt
+`ip_address` die Spalten `ptr_name`, `ptr_checked_at` und `ptr_status`
+(`ip_address_ptr_status_check`: match, mismatch, missing, error) mit dem
+Teilindex `idx_ip_address_ptr_deviation` (organization_id, ptr_status) WHERE
+ptr_status IN ('mismatch', 'missing') und `ipam_section` die Spalte `ptr_mode`
+(off, report, adopt; Standard off, `ipam_section_ptr_mode_check`).
+`ipam_change_record()` protokolliert `ptr_checked_at` nicht, `ptr_name` und
+`ptr_status` schon. Keine neue Tabelle, RLS unverändert.
+
+Migration `bgp_peering` (WP-1068, IPM-17, vorläufige Nummer 000337) legt
+`bgp_peering` als Soll-Inventar an: Gerät, VRF, lokale ASN, entfernte
+AS-Nummer (`remote_asn_number`, 1 bis 4294967294, beim Lesen gegen `asn`
+aufgelöst), lokale Adresse, entfernte Adresse (`inet`), `expected_state`
+(established, admin_down) und Beschreibung. Eindeutig sind
+`bgp_peering_remote_key` (organization_id, device_ci_id, vrf_id,
+remote_address) und `bgp_peering_id_organization_key` (id, organization_id).
+Die Fremdschlüssel sind zusammengesetzt mit Organisation (Konvention 19):
+`bgp_peering_device_fkey` auf `ci` (ON DELETE CASCADE), `bgp_peering_vrf_fkey`
+auf `vrf` und `bgp_peering_local_asn_fkey` auf `asn` (ON DELETE RESTRICT),
+`bgp_peering_local_address_fkey` auf `ip_address` (ON DELETE SET NULL
+(local_address_id)); dazu `idx_bgp_peering_remote_asn`, `idx_bgp_peering_vrf`
+und Teilindizes für lokale ASN und Adresse. `ip_address_id_organization_key`
+entsteht nur, wenn noch kein eindeutiger Schlüssel über (id,
+organization_id) besteht; Down entfernt ihn nur ohne verbleibende Verweise.
+`client_id` und `site_id` folgen dem Gerät (`trg_bgp_peering_scope`),
+`propagate_ci_scope` leitet auch die Peerings eines CI neu ab. ENABLE und
+FORCE RLS mit den Policies nach Konvention 5, `updated_at` und
+`reticora_truncate_guard`. Die Tabelle oben und die Zeile „Stand:“ erzeugt
+`RETICORA_UPDATE_SCHEMA_BASELINE=1` beim Zusammenführen neu.
+
+Migration `workflow_approval` (WP-1098, WFL-02, E-230, vorläufige Nummer
+000361) legt `workflow_approval` an: eine Zeile je Entscheidung eines
+Genehmigers zu einem Genehmigungsschritt (`decision` approved oder rejected,
+`comment`, `decided_at`), eindeutig über `workflow_approval_step_approver_key`
+(organization_id, step_id, approver_id). Die Fremdschlüssel sind
+zusammengesetzt mit Organisation (Konvention 19):
+`workflow_approval_run_fkey` auf `workflow_run` und
+`workflow_approval_step_fkey` auf `workflow_step` (ON DELETE CASCADE),
+`workflow_approval_approver_fkey` auf `app_user` (ON DELETE SET NULL
+(approver_id)). `workflow_step_id_organization_key` (und
+`workflow_run_id_organization_key`, falls er fehlt) entsteht nur, wenn noch
+kein eindeutiger Schlüssel über (id, organization_id) besteht; Down entfernt
+ihn nur ohne verbleibende Verweise. `client_id` und `site_id` übernimmt der
+BEFORE-Trigger `workflow_approval_scope` aus dem Run, ein Run mit neuem
+Scope nimmt seine Entscheidungen mit (`workflow_approval_scope_propagation`);
+die Tabelle steht damit nicht in `rls.DerivedScopeTables`. ENABLE und FORCE
+RLS mit der Policy `workflow_approval_isolation` (USING und WITH CHECK über
+`app.org_id`, `app.client_scope`, `app.site_scope`, ohne EXISTS) und den
+restriktiven `workflow_approval_scoped_update`/`_scoped_delete` (E-09, Muster
+000351); wie bei den Runs sind Entscheidungen ohne Client nur org-weit sichtbar
+(`matrixClientOnlyReads`). Dazu `reticora_truncate_guard`. `workflow_step`
+erhält `due_at` und `reminded_at` (Frist und Erinnerung, WP-1099) und den
+Teilindex `idx_workflow_step_due` (organization_id, due_at) WHERE status =
+'waiting_approval'. Die Tabelle oben und die Zeile „Stand:“ erzeugt
+`RETICORA_UPDATE_SCHEMA_BASELINE=1` beim Zusammenführen neu.
+
+Migration `lifecycle_locked_fields` (WP-1103, LCY-04, E-232, vorläufige
+Nummer 000362) gibt `lifecycle_state` die Spalte `locked_fields` (`jsonb NOT
+NULL DEFAULT '[]'`, `lifecycle_state_locked_fields_check`:
+`jsonb_typeof(locked_fields) = 'array'`): die Attributschlüssel und
+typisierten CI-Spalten, die ein CI im Zustand nicht ändern darf. Der
+CI-Service leitet daraus beim Auflösen der Regeln eines CIs je Feld eine
+readonly-Katalogregel mit der Bedingung `lifecycle_state = <zustand>` ab
+(gelesen mit der Typkette, keine eigene Anweisung), die Schreibentscheidung
+der Automationsquellen liest die Sperre mit der Provenienz. Keine neue
+Tabelle, RLS unverändert. Die Zeile „Stand:“ erzeugt
+`RETICORA_UPDATE_SCHEMA_BASELINE=1` beim Zusammenführen neu.
+
+Migration `cpe_mapping` (WP-1121, SEC-02, E-236, vorläufige Nummer 000363)
+legt `cpe_mapping` an: die Produktzuordnung der CIs einer Organisation für
+den Versionsabgleich (`match_kind` manufacturer_model mit Glob-Mustern oder
+sys_object_id mit Präfix, `vendor`, `products text[]` mit mindestens einem
+Eintrag, `version_field`, `version_scheme`, `priority`, `created_by` ohne
+Fremdschlüssel). Checks je `match_kind` (`cpe_mapping_pattern_check`),
+`UNIQUE (id, organization_id)` für spätere Verweise, Index
+`idx_cpe_mapping_kind_priority` (organization_id, match_kind, priority).
+Organisationsweite Konfiguration: ENABLE und FORCE RLS, Policy
+`cpe_mapping_isolation` über `app.org_id` in USING und WITH CHECK, dazu
+`reticora_truncate_guard`. Die Tabelle oben und die Zeile „Stand:“ erzeugt
+`RETICORA_UPDATE_SCHEMA_BASELINE=1` beim Zusammenführen neu.
 
 `TestTenantReferencesCarryOrganization`
 (`backend/internal/tenant/rls/object_reference_integration_test.go`) prüft
@@ -713,127 +1084,14 @@ umgestellte Spalte mit der ID eines Objekts einer fremden Organisation
 (23503) und prüft die Fremdschlüssel bei abgeschalteten Triggern. Die Liste
 wird mit `RETICORA_UPDATE_SCHEMA_BASELINE=1 go test -run
 TestReferencesWithoutOrganizationDocumented ./internal/tenant/rls/` neu
-erzeugt. Rest von SR-03 vor GA (E-137, WP-329); Tabellen, die Phase-2-WPs
-ersetzen, folgen K19 in ihren Nachfolgern.
+erzeugt. Seit Migration 000288 (WP-877) ist die Liste leer: Jeder Verweis
+zwischen zwei Mandantentabellen trägt die Organisation, SR-03 ist behoben, und
+ein neuer Verweis ohne Organisation lässt den Test scheitern.
 
 <!-- rls-references-without-organization:begin -->
 
 | Verweis | Fremdschlüssel | Ziel | Grund |
 |---|---|---|---|
-| `agent_enrollment_token.site_id` | `agent_enrollment_token_site_id_fkey` | `site` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ai_conversation.user_id` | `ai_conversation_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ai_message.conversation_id` | `ai_message_conversation_id_fkey` | `ai_conversation` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `api_key.rotated_from` | `api_key_rotated_from_fkey` | `api_key` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `asset_location.asset_id` | `asset_location_asset_id_fkey` | `asset` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `building.id` | `building_location_fkey` | `location` | the specialist row shares its id with its node of the location tree (000157); rest of SR-03, fixed before GA (E-137, WP-329) |
-| `building.site_id` | `building_site_id_fkey` | `site` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `cable.source_interface_id` | `cable_source_interface_id_fkey` | `network_interface` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `cable.target_interface_id` | `cable_target_interface_id_fkey` | `network_interface` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ci.room_id` | `ci_room_id_fkey` | `room` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ci.site_id` | `ci_site_id_fkey` | `site` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ci_change.ci_id` | `ci_change_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ci_contact.ci_id` | `ci_contact_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ci_contact.contact_id` | `ci_contact_contact_id_fkey` | `contact` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ci_field_value.ci_id` | `ci_field_value_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ci_instance_field_definition.ci_id` | `ci_instance_field_definition_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ci_merge.site_id` | `ci_merge_site_id_fkey` | `site` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ci_relationship.source_ci_id` | `ci_relationship_source_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ci_relationship.source_interface_id` | `ci_relationship_source_interface_id_fkey` | `network_interface` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ci_relationship.target_ci_id` | `ci_relationship_target_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ci_relationship.target_interface_id` | `ci_relationship_target_interface_id_fkey` | `network_interface` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ci_relationship.verified_by` | `ci_relationship_verified_by_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `collector.site_id` | `collector_site_id_fkey` | `site` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `collector_certificate.collector_id` | `collector_certificate_collector_id_fkey` | `collector` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `collector_enrollment_code.used_by_collector_id` | `collector_enrollment_code_used_by_collector_id_fkey` | `collector` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `compliance_result.ci_id` | `compliance_result_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `compliance_result.rule_id` | `compliance_result_rule_id_fkey` | `compliance_rule` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `contact.pii_subject_id` | `contact_pii_subject_id_fkey` | `pii_subject` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `discovery_job.collector_id` | `discovery_job_collector_id_fkey` | `collector` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `discovery_result.job_id` | `discovery_result_job_id_fkey` | `discovery_job` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `discovery_result.matched_ci_id` | `discovery_result_matched_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `discovery_scope.collector_id` | `discovery_scope_collector_id_fkey` | `collector` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `discovery_scope.site_id` | `discovery_scope_site_id_fkey` | `site` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `document.uploaded_by` | `document_uploaded_by_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `document_link.document_id` | `document_link_document_id_fkey` | `document` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `endpoint_agent.ci_id` | `endpoint_agent_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `form_submission.ci_id` | `form_submission_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `form_submission.form_id` | `form_submission_form_id_fkey` | `form_def` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `form_submission.submitted_by` | `form_submission_submitted_by_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `form_submission.ticket_id` | `form_submission_ticket_id_fkey` | `ticket` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_access_request.connector_id` | `iga_access_request_connector_id_fkey` | `iga_connector` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_access_request.decision_by` | `iga_access_request_decision_by_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_access_request.requester_id` | `iga_access_request_requester_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_access_request.subject_user_id` | `iga_access_request_subject_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_access_request.workflow_run_id` | `iga_access_request_workflow_run_id_fkey` | `workflow_run` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_access_review_item.connector_id` | `iga_access_review_item_connector_id_fkey` | `iga_connector` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_access_review_item.decision_by` | `iga_access_review_item_decision_by_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_access_review_item.review_id` | `iga_access_review_item_review_id_fkey` | `iga_access_review` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_access_review_item.user_id` | `iga_access_review_item_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_connector.collector_id` | `iga_connector_collector_id_fkey` | `collector` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_connector.credential_id` | `iga_connector_credential_id_fkey` | `credential` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_drift_finding.connector_id` | `iga_drift_finding_connector_id_fkey` | `iga_connector` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_drift_finding.remediation_task_id` | `iga_drift_finding_remediation_task_id_fkey` | `iga_provisioning_task` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_drift_finding.user_id` | `iga_drift_finding_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_provisioning_task.connector_id` | `iga_provisioning_task_connector_id_fkey` | `iga_connector` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `iga_provisioning_task.user_id` | `iga_provisioning_task_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `internal_order_item.order_id` | `internal_order_item_order_id_fkey` | `internal_order` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ip_address.interface_id` | `ip_address_interface_id_fkey` | `network_interface` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ip_address.subnet_id` | `ip_address_subnet_id_fkey` | `subnet` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `maintenance_notification.maintenance_window_id` | `maintenance_notification_maintenance_window_id_fkey` | `maintenance_window` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `maintenance_window_ci.ci_id` | `maintenance_window_ci_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `maintenance_window_ci.maintenance_window_id` | `maintenance_window_ci_maintenance_window_id_fkey` | `maintenance_window` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `network_interface.ci_id` | `network_interface_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `notification_delivery.channel_id` | `notification_delivery_channel_id_fkey` | `notification_channel` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `notification_delivery.recipient_user_id` | `notification_delivery_recipient_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `notification_digest_item.channel_id` | `notification_digest_item_channel_id_fkey` | `notification_channel` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `notification_digest_item.delivery_id` | `notification_digest_item_delivery_id_fkey` | `notification_delivery` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `notification_digest_item.recipient_user_id` | `notification_digest_item_recipient_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `notification_inbox.user_id` | `notification_inbox_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `notification_preference.user_id` | `notification_preference_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `pii_subject.parent_id` | `pii_subject_parent_id_fkey` | `pii_subject` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `rack.id` | `rack_location_fkey` | `location` | the specialist row shares its id with its node of the location tree (000157); rest of SR-03, fixed before GA (E-137, WP-329) |
-| `rack.room_id` | `rack_room_id_fkey` | `room` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `rack_mount.ci_id` | `rack_mount_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `rack_mount.rack_id` | `rack_mount_rack_id_fkey` | `rack` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `relationship_suppression.source_ci_id` | `relationship_suppression_source_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `relationship_suppression.target_ci_id` | `relationship_suppression_target_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `role_assignment.role_id` | `role_assignment_role_id_fkey` | `role` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `role_assignment.scope_site_id` | `role_assignment_scope_site_id_fkey` | `site` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `role_assignment.user_id` | `role_assignment_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `role_permission.granted_by` | `role_permission_granted_by_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `role_permission.role_id` | `role_permission_role_id_fkey` | `role` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `room.building_id` | `room_building_id_fkey` | `building` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `room.id` | `room_location_fkey` | `location` | the specialist row shares its id with its node of the location tree (000157); rest of SR-03, fixed before GA (E-137, WP-329) |
-| `security_finding.ci_id` | `security_finding_ci_id_fkey` | `ci` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `service_account_role.role_id` | `service_account_role_role_id_fkey` | `role` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `service_account_role.scope_site_id` | `service_account_role_scope_site_id_fkey` | `site` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `site.id` | `site_location_fkey` | `location` | the specialist row shares its id with its node of the location tree (000157); rest of SR-03, fixed before GA (E-137, WP-329) |
-| `stock_scan.asset_id` | `stock_scan_asset_id_fkey` | `asset` | stock_scan is replaced by the stocktake scans of WP-287 (K19); the successor references with the organization |
-| `stock_scan.ci_id` | `stock_scan_ci_id_fkey` | `ci` | stock_scan is replaced by the stocktake scans of WP-287 (K19); the successor references with the organization |
-| `stock_scan.scanned_by` | `stock_scan_scanned_by_fkey` | `app_user` | stock_scan is replaced by the stocktake scans of WP-287 (K19); the successor references with the organization |
-| `stock_scan.stocktake_id` | `stock_scan_stocktake_id_fkey` | `stocktake` | stock_scan is replaced by the stocktake scans of WP-287 (K19); the successor references with the organization |
-| `stocktake.started_by` | `stocktake_started_by_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `subnet.site_id` | `subnet_site_id_fkey` | `site` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `team.lead_id` | `team_lead_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `team_member.team_id` | `team_member_team_id_fkey` | `team` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `team_member.user_id` | `team_member_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ticket.assignee_id` | `ticket_assignee_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ticket.reporter_id` | `ticket_reporter_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ticket.team_id` | `ticket_team_id_fkey` | `team` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ticket_comment.author_id` | `ticket_comment_author_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ticket_comment.ticket_id` | `ticket_comment_ticket_id_fkey` | `ticket` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ticket_sla.sla_id` | `ticket_sla_sla_id_fkey` | `sla` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `ticket_sla.ticket_id` | `ticket_sla_ticket_id_fkey` | `ticket` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `user_custom_role.custom_role_id` | `user_custom_role_custom_role_id_fkey` | `custom_role` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `user_custom_role.granted_by` | `user_custom_role_granted_by_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `user_custom_role.user_id` | `user_custom_role_user_id_fkey` | `app_user` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `user_invitation.role_id` | `user_invitation_role_id_fkey` | `role` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `vlan.site_id` | `vlan_site_id_fkey` | `site` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `webhook_dead_letter.delivery_id` | `webhook_dead_letter_delivery_id_fkey` | `webhook_delivery` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `webhook_dead_letter.subscription_id` | `webhook_dead_letter_subscription_id_fkey` | `webhook_subscription` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `webhook_delivery.subscription_id` | `webhook_delivery_subscription_id_fkey` | `webhook_subscription` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `workflow_run.workflow_id` | `workflow_run_workflow_id_fkey` | `workflow_def` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
-| `workflow_step.run_id` | `workflow_step_run_id_fkey` | `workflow_run` | G1 reference that phase 2 does not change; rest of SR-03, fixed before GA (E-137, WP-329) |
 
 <!-- rls-references-without-organization:end -->
 
@@ -1139,7 +1397,9 @@ Policy `metamodel_draft_isolation` (FOR ALL, `app.org_id`), TRUNCATE-Schutz
 Import-Mapping-Profile (IMP-IO-01, API-06, WP-774, Migration 000219):
 `import_profile` speichert die Mapping-Profile des Dateiimports je
 Organisation. `entity` ist `ci`, `asset`, `contract`, `consumable`,
-`location` oder `relationship` (`import_profile_entity_check`), `format`
+`location`, `relationship`, `subnet` oder `ip_address`
+(`import_profile_entity_check`; `subnet` und `ip_address` seit WP-920,
+Migration 000343_import_profile_ipam, vorläufige Nummer), `format`
 `csv`, `xlsx` oder `json` (`import_profile_format_check`), `mode`
 `create_missing`, `update_existing` oder `both` (`import_profile_mode_check`).
 `mapping` (`jsonb`) muss ein Objekt sein (`import_profile_mapping_check`; je
@@ -1390,6 +1650,21 @@ NULL-Ausnahme, WITH CHECK ohne) und die RESTRICTIVE-Policies
 Organisation in `tag` (Schlüssel nach `tag_normalize_key`, leere Schlüssel
 entfallen, `display_name` de/en = Originalwert, bestehende Schlüssel
 bleiben) und `ticket_tag`; danach entfällt die Spalte `ticket.tags`.
+
+Link-Typen `incident` und `alarm` (ALR-09 d, TKT-01 Monitoring [P3],
+WP-1039, Migration 000359_ticket_link_incident, vorläufige Nummer):
+`ticket_link` erhält die Zielspalten `incident_id` und `alarm_id` (beide
+`uuid`). `ticket_link_entity_type_check` umfasst damit `ci`, `asset`,
+`location`, `contract`, `review_item`, `incident` und `alarm`,
+`ticket_link_target_check` verlangt `num_nonnulls` über die sieben
+Zielspalten gleich 1 mit den Zweigen `incident` → `incident_id` und `alarm`
+→ `alarm_id`. Verweise mit Organisation (K19): `ticket_link_incident_fkey`
+(`incident_id`, `organization_id`) → `incident` und `ticket_link_alarm_fkey`
+(`alarm_id`, `organization_id`) → `alarm`, beide ON DELETE CASCADE; dazu
+`ticket_link_ticket_id_incident_id_key` und
+`ticket_link_ticket_id_alarm_id_key` (UNIQUE) sowie die Teilindizes
+`idx_ticket_link_incident` und `idx_ticket_link_alarm`. Scope-Ableitung,
+Policies, FORCE RLS und Truncate-Guard aus 000230 bleiben unverändert.
 
 Asset-Kern nach AST-01 (WP-271, E-41, E-120, E-124, Migration 000229):
 `asset` erhält `manufacturer`, `model`, `cost_center`, `supplier_id`,
@@ -1882,7 +2157,10 @@ WITH CHECK mit dem Schreibprädikat aus 000142) und die restriktiven
 `relationship_change_scoped_update` und `relationship_change_scoped_delete`.
 Digitale Unterschrift an Bewegungen (AST-02, E-51, E-124, WP-276, Migration
 000262): `document_category_check` erlaubt neben den acht Werten aus 000011
-die Kategorie `signature`. `stock_movement` erhält `signer_user_id` und
+die Kategorie `signature`, seit Migration 000369 (SEC-04, WP-1129) auch
+`compliance_report` (vom Job `compliance.report` erzeugte Reports; die
+Dokument-API setzt keine der beiden Kategorien und sperrt solche Dokumente
+gegen Änderungen). `stock_movement` erhält `signer_user_id` und
 `signer_surrogate` (beide `uuid`, ohne Fremdschlüssel wie `actor_id`, damit
 Crypto-Shredding möglich bleibt) mit `stock_movement_signer_check`
 (`num_nonnulls(signer_user_id, signer_surrogate) <= 1`) und
@@ -1963,13 +2241,23 @@ SECURITY`), Policies mit ihrem Kommando.
 
 | Tabelle | RLS | FORCE RLS | Policies (Kommando) |
 |---|---|---|---|
+| `admp_access_port` | ja | ja | admp_access_port_isolation (ALL), admp_access_port_scoped_delete (DELETE), admp_access_port_scoped_update (UPDATE) |
+| `admp_account` | ja | ja | admp_account_isolation (ALL), admp_account_scoped_delete (DELETE), admp_account_scoped_update (UPDATE) |
+| `admp_connection` | ja | ja | admp_connection_isolation (ALL), admp_connection_scoped_delete (DELETE), admp_connection_scoped_update (UPDATE) |
+| `admp_service` | ja | ja | admp_service_isolation (ALL), admp_service_scoped_delete (DELETE), admp_service_scoped_update (UPDATE) |
+| `admp_service_port` | ja | ja | admp_service_port_isolation (ALL), admp_service_port_scoped_delete (DELETE), admp_service_port_scoped_update (UPDATE) |
 | `agent_enrollment_token` | ja | ja | agent_enrollment_token_isolation (ALL), agent_enrollment_token_scoped_delete (DELETE), agent_enrollment_token_scoped_update (UPDATE) |
 | `ai_chunk` | ja | ja | ai_chunk_scoped_delete (DELETE), ai_chunk_scoped_update (UPDATE), ai_chunk_tenant_isolation (ALL) |
 | `ai_conversation` | ja | ja | ai_conversation_tenant_isolation (ALL) |
 | `ai_message` | ja | ja | ai_message_tenant_isolation (ALL) |
+| `alarm` | ja | ja | alarm_isolation (ALL), alarm_scoped_delete (DELETE), alarm_scoped_update (UPDATE) |
+| `alarm_settings` | ja | ja | alarm_settings_isolation (ALL) |
+| `alarm_transition` | ja | ja | alarm_transition_isolation (ALL), alarm_transition_scoped_delete (DELETE), alarm_transition_scoped_update (UPDATE) |
 | `alert_rule` | ja | ja | alert_rule_isolation (ALL), alert_rule_system_select (SELECT) |
 | `api_key` | ja | ja | api_key_system_select (SELECT), org_isolation (ALL) |
 | `app_user` | ja | ja | user_isolation (ALL) |
+| `asn` | ja | ja | asn_isolation (ALL), asn_scoped_delete (DELETE), asn_scoped_update (UPDATE) |
+| `asn_range` | ja | ja | asn_range_isolation (ALL), asn_range_scoped_delete (DELETE), asn_range_scoped_update (UPDATE) |
 | `asset` | ja | ja | asset_scoped_delete (DELETE), asset_scoped_update (UPDATE), asset_tenant_isolation (ALL) |
 | `asset_location` | ja | ja | asset_location_isolation (ALL) |
 | `asset_snapshot` | ja | ja | asset_snapshot_isolation (ALL), asset_snapshot_scoped_delete (DELETE), asset_snapshot_scoped_update (UPDATE) |
@@ -1979,7 +2267,9 @@ SECURITY`), Policies mit ihrem Kommando.
 | `attribute_set` | ja | ja | attribute_set_isolation_delete (DELETE), attribute_set_isolation_insert (INSERT), attribute_set_isolation_select (SELECT), attribute_set_isolation_update (UPDATE) |
 | `audit_log` | ja | ja | audit_isolation (ALL) |
 | `audit_route_intent` | ja | ja | audit_route_intent_isolation (ALL), audit_route_intent_system_select (SELECT) |
+| `availability_target` | ja | ja | availability_target_isolation (ALL), availability_target_scoped_delete (DELETE), availability_target_scoped_update (UPDATE) |
 | `barcode_registry` | ja | ja | barcode_registry_isolation (ALL), barcode_registry_scoped_delete (DELETE), barcode_registry_scoped_update (UPDATE) |
+| `bgp_peering` | ja | ja | bgp_peering_isolation (ALL), bgp_peering_scoped_delete (DELETE), bgp_peering_scoped_update (UPDATE) |
 | `building` | ja | ja | building_isolation (ALL) |
 | `bulk_change_set` | ja | ja | bulk_change_set_isolation (ALL), bulk_change_set_scoped_delete (DELETE), bulk_change_set_scoped_update (UPDATE) |
 | `business_calendar` | ja | ja | business_calendar_isolation (ALL), business_calendar_scoped_delete (DELETE), business_calendar_scoped_update (UPDATE) |
@@ -2003,12 +2293,22 @@ SECURITY`), Policies mit ihrem Kommando.
 | `collector_ca` | ja | ja | collector_ca_operator (ALL) |
 | `collector_certificate` | ja | ja | collector_certificate_isolation (ALL), collector_certificate_system_select (SELECT) |
 | `collector_enrollment_code` | ja | ja | collector_enrollment_code_isolation (ALL), collector_enrollment_code_scope_delete (DELETE), collector_enrollment_code_scope_insert (INSERT), collector_enrollment_code_scope_select (SELECT), collector_enrollment_code_scope_update (UPDATE), collector_enrollment_code_system_select (SELECT) |
+| `collector_group` | ja | ja | collector_group_isolation (ALL), collector_group_scoped_delete (DELETE), collector_group_scoped_update (UPDATE) |
+| `collector_group_member` | ja | ja | collector_group_member_isolation (ALL), collector_group_member_scoped_delete (DELETE), collector_group_member_scoped_update (UPDATE) |
+| `compliance_control` | nein | nein | – |
 | `compliance_result` | ja | ja | compliance_result_scoped_delete (DELETE), compliance_result_scoped_update (UPDATE), compliance_result_tenant_isolation (ALL) |
 | `compliance_rule` | ja | ja | compliance_rule_tenant_isolation (ALL) |
+| `compliance_rule_control` | ja | ja | compliance_rule_control_isolation (ALL) |
+| `compliance_score_snapshot` | ja | ja | compliance_score_snapshot_isolation (ALL), compliance_score_snapshot_scoped_delete (DELETE), compliance_score_snapshot_scoped_update (UPDATE) |
+| `compliance_settings` | ja | ja | compliance_settings_isolation (ALL) |
+| `config_snapshot` | ja | ja | config_snapshot_isolation (ALL), config_snapshot_scoped_delete (DELETE), config_snapshot_scoped_update (UPDATE) |
 | `consumable` | ja | ja | consumable_isolation (ALL), consumable_scoped_delete (DELETE), consumable_scoped_update (UPDATE) |
 | `contact` | ja | ja | contact_scoped_delete (DELETE), contact_scoped_update (UPDATE), org_isolation (ALL) |
 | `contract` | ja | ja | contract_isolation (ALL), contract_scoped_delete (DELETE), contract_scoped_update (UPDATE) |
+| `cpe_mapping` | ja | ja | cpe_mapping_isolation (ALL) |
 | `credential` | ja | ja | credential_isolation (ALL), credential_scoped_delete (DELETE), credential_scoped_update (UPDATE) |
+| `credential_binding` | ja | ja | credential_binding_isolation (ALL), credential_binding_scoped_delete (DELETE), credential_binding_scoped_update (UPDATE) |
+| `credential_usage` | ja | ja | credential_usage_isolation (ALL), credential_usage_scoped_delete (DELETE), credential_usage_scoped_update (UPDATE) |
 | `custom_role` | ja | ja | custom_role_tenant_isolation (ALL) |
 | `desk` | ja | ja | desk_isolation (ALL), desk_scoped_delete (DELETE), desk_scoped_update (UPDATE) |
 | `desk_booking` | ja | ja | desk_booking_isolation (ALL), desk_booking_scoped_delete (DELETE), desk_booking_scoped_update (UPDATE) |
@@ -2028,8 +2328,9 @@ SECURITY`), Policies mit ihrem Kommando.
 | `field_grant` | ja | ja | field_grant_isolation (ALL) |
 | `field_sensitivity` | ja | ja | field_sensitivity_isolation (ALL) |
 | `form_def` | ja | ja | form_def_scoped_delete (DELETE), form_def_scoped_update (UPDATE), form_def_tenant_isolation (ALL) |
+| `form_def_version` | ja | ja | form_def_version_isolation (ALL), form_def_version_scoped_delete (DELETE), form_def_version_scoped_update (UPDATE) |
 | `form_layout` | ja | ja | form_layout_isolation (ALL) |
-| `form_submission` | ja | ja | form_submission_tenant_isolation (ALL) |
+| `form_submission` | ja | ja | form_submission_scoped_delete (DELETE), form_submission_scoped_update (UPDATE), form_submission_tenant_isolation (ALL) |
 | `iga_access_request` | ja | ja | iga_access_request_tenant_isolation (ALL) |
 | `iga_access_review` | ja | ja | iga_review_tenant_isolation (ALL) |
 | `iga_access_review_item` | ja | ja | iga_review_item_tenant_isolation (ALL) |
@@ -2038,10 +2339,15 @@ SECURITY`), Policies mit ihrem Kommando.
 | `iga_lifecycle_policy` | ja | ja | iga_lifecycle_tenant_isolation (ALL) |
 | `iga_provisioning_task` | ja | ja | iga_task_tenant_isolation (ALL) |
 | `import_profile` | ja | ja | import_profile_isolation (ALL) |
+| `incident` | ja | ja | incident_isolation (ALL), incident_scoped_delete (DELETE), incident_scoped_update (UPDATE) |
+| `incident_transition` | ja | ja | incident_transition_isolation (ALL), incident_transition_scoped_delete (DELETE), incident_transition_scoped_update (UPDATE) |
 | `ingest_record` | ja | ja | ingest_record_isolation (ALL) |
 | `internal_order` | ja | ja | internal_order_isolation (ALL), internal_order_scoped_delete (DELETE), internal_order_scoped_update (UPDATE) |
 | `internal_order_item` | ja | ja | internal_order_item_isolation (ALL), internal_order_item_scoped_delete (DELETE), internal_order_item_scoped_update (UPDATE) |
-| `ip_address` | ja | ja | ip_address_scoped_delete (DELETE), ip_address_scoped_update (UPDATE), org_isolation (ALL) |
+| `ip_address` | ja | ja | ip_address_scoped_delete (DELETE), ip_address_scoped_update (UPDATE), ip_address_section_acl_delete (DELETE), ip_address_section_acl_insert (INSERT), ip_address_section_acl_read (SELECT), ip_address_section_acl_update (UPDATE), org_isolation (ALL) |
+| `ipam_change` | ja | ja | ipam_change_isolation (ALL), ipam_change_scoped_delete (DELETE) |
+| `ipam_section` | ja | ja | ipam_section_acl_read (SELECT), ipam_section_isolation (ALL), ipam_section_scoped_delete (DELETE), ipam_section_scoped_update (UPDATE) |
+| `ipam_section_permission` | ja | ja | ipam_section_permission_isolation (ALL), ipam_section_permission_scoped_delete (DELETE), ipam_section_permission_scoped_insert (INSERT), ipam_section_permission_scoped_update (UPDATE) |
 | `job` | ja | ja | job_isolation (ALL), job_scope_select (SELECT), job_system_select (SELECT) |
 | `key_assignment` | ja | ja | key_assignment_isolation (ALL), key_assignment_scoped_delete (DELETE), key_assignment_scoped_update (UPDATE) |
 | `key_item` | ja | ja | key_item_isolation (ALL), key_item_scoped_delete (DELETE), key_item_scoped_update (UPDATE) |
@@ -2059,6 +2365,12 @@ SECURITY`), Policies mit ihrem Kommando.
 | `metamodel_rule` | ja | ja | metamodel_rule_isolation_delete (DELETE), metamodel_rule_isolation_insert (INSERT), metamodel_rule_isolation_select (SELECT), metamodel_rule_isolation_update (UPDATE) |
 | `metric_sample` | nein | nein | – |
 | `migration_quarantine` | ja | ja | migration_quarantine_isolation (ALL) |
+| `monitoring_event` | ja | ja | monitoring_event_isolation (ALL), monitoring_event_scoped_delete (DELETE), monitoring_event_scoped_update (UPDATE) |
+| `monitoring_group` | ja | ja | monitoring_group_isolation (ALL), monitoring_group_scoped_delete (DELETE), monitoring_group_scoped_update (UPDATE) |
+| `monitoring_group_member` | ja | ja | monitoring_group_member_isolation (ALL), monitoring_group_member_scoped_delete (DELETE), monitoring_group_member_scoped_update (UPDATE) |
+| `monitoring_profile` | ja | ja | monitoring_profile_isolation (ALL), monitoring_profile_scoped_delete (DELETE), monitoring_profile_scoped_update (UPDATE) |
+| `nameserver_set` | ja | ja | nameserver_set_isolation (ALL), nameserver_set_scoped_delete (DELETE), nameserver_set_scoped_insert (INSERT), nameserver_set_scoped_update (UPDATE) |
+| `nat_translation` | ja | ja | nat_translation_isolation (ALL), nat_translation_scoped_delete (DELETE), nat_translation_scoped_update (UPDATE) |
 | `network_interface` | ja | ja | network_interface_scoped_delete (DELETE), network_interface_scoped_update (UPDATE), org_isolation (ALL) |
 | `notice_sent` | ja | ja | notice_sent_isolation (ALL) |
 | `notification_channel` | ja | ja | notification_channel_isolation (ALL) |
@@ -2069,12 +2381,21 @@ SECURITY`), Policies mit ihrem Kommando.
 | `object_grant` | ja | ja | object_grant_isolation (ALL) |
 | `operator_audit` | ja | ja | operator_audit_operator (ALL) |
 | `org_dek` | ja | ja | org_dek_isolation (ALL) |
+| `org_deletion_notice` | ja | ja | org_deletion_notice_operator (ALL) |
 | `organization` | ja | ja | org_isolation (ALL), organization_system_select (SELECT) |
 | `organization_usage` | ja | ja | organization_usage_isolation (ALL) |
 | `permission` | nein | nein | – |
 | `pii_subject` | ja | ja | pii_subject_isolation (ALL) |
 | `platform_secret` | ja | ja | platform_secret_system_insert (INSERT), platform_secret_system_select (SELECT), platform_secret_system_update (UPDATE) |
 | `privacy_retention_policy` | ja | ja | privacy_retention_isolation (ALL) |
+| `probe` | ja | ja | probe_isolation (ALL), probe_scoped_delete (DELETE), probe_scoped_update (UPDATE) |
+| `probe_assignment` | ja | ja | probe_assignment_isolation (ALL), probe_assignment_scoped_delete (DELETE), probe_assignment_scoped_update (UPDATE) |
+| `probe_autocreate_suppression` | ja | ja | probe_autocreate_suppression_isolation (ALL), probe_autocreate_suppression_scoped_delete (DELETE), probe_autocreate_suppression_scoped_update (UPDATE) |
+| `probe_epoch` | ja | ja | probe_epoch_isolation (ALL) |
+| `probe_ingest_cursor` | ja | ja | probe_ingest_cursor_isolation (ALL), probe_ingest_cursor_system_select (SELECT) |
+| `probe_result` | nein | nein | – |
+| `probe_state` | ja | ja | probe_state_isolation (ALL), probe_state_scoped_delete (DELETE), probe_state_scoped_update (UPDATE) |
+| `probe_state_change` | ja | ja | probe_state_change_isolation (ALL), probe_state_change_scoped_delete (DELETE), probe_state_change_scoped_update (UPDATE) |
 | `rack` | ja | ja | rack_isolation (ALL) |
 | `rack_mount` | ja | ja | rack_mount_isolation (ALL), rack_mount_scoped_delete (DELETE), rack_mount_scoped_update (UPDATE) |
 | `relationship_change` | ja | ja | relationship_change_isolation (ALL), relationship_change_scoped_delete (DELETE), relationship_change_scoped_update (UPDATE) |
@@ -2088,7 +2409,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `room` | ja | ja | room_isolation (ALL) |
 | `saved_view` | ja | ja | saved_view_isolation (ALL) |
 | `scheduler_run` | ja | ja | scheduler_run_operator (ALL) |
-| `search_document` | ja | ja | search_document_scoped_delete (DELETE), search_document_scoped_update (UPDATE), search_document_tenant_isolation (ALL) |
+| `search_document` | ja | ja | search_document_scoped_delete (DELETE), search_document_scoped_update (UPDATE), search_document_section_acl (SELECT), search_document_tenant_isolation (ALL) |
 | `search_document_field` | ja | ja | search_document_field_scoped_delete (DELETE), search_document_field_scoped_update (UPDATE), search_document_field_tenant_isolation (ALL) |
 | `search_identifier` | ja | ja | search_identifier_tenant_isolation (ALL) |
 | `security_finding` | ja | ja | security_finding_isolation (ALL), security_finding_scoped_delete (DELETE), security_finding_scoped_update (UPDATE) |
@@ -2098,12 +2419,14 @@ SECURITY`), Policies mit ihrem Kommando.
 | `site` | ja | ja | site_isolation (ALL), site_scoped_delete (DELETE), site_scoped_update (UPDATE) |
 | `sla` | ja | ja | sla_scoped_delete (DELETE), sla_scoped_update (UPDATE), sla_tenant_isolation (ALL) |
 | `source_priority_policy` | ja | ja | source_priority_policy_isolation (ALL) |
+| `source_rank_policy` | ja | ja | source_rank_policy_isolation (ALL) |
 | `stock_level` | ja | ja | stock_level_isolation (ALL) |
 | `stock_movement` | ja | ja | stock_movement_isolation (ALL), stock_movement_scoped_delete (DELETE), stock_movement_scoped_update (UPDATE) |
 | `stock_scan` | ja | ja | stock_scan_isolation (ALL), stock_scan_scoped_delete (DELETE), stock_scan_scoped_update (UPDATE) |
 | `stocktake` | ja | ja | stocktake_isolation (ALL), stocktake_scoped_delete (DELETE), stocktake_scoped_update (UPDATE) |
 | `stocktake_item` | ja | ja | stocktake_item_isolation (ALL) |
-| `subnet` | ja | ja | org_isolation (ALL), subnet_scoped_delete (DELETE), subnet_scoped_update (UPDATE) |
+| `subnet` | ja | ja | org_isolation (ALL), subnet_scoped_delete (DELETE), subnet_scoped_update (UPDATE), subnet_section_acl_delete (DELETE), subnet_section_acl_insert (INSERT), subnet_section_acl_read (SELECT), subnet_section_acl_update (UPDATE) |
+| `subnet_scan_target` | ja | ja | subnet_scan_target_isolation (ALL), subnet_scan_target_scoped_delete (DELETE), subnet_scan_target_scoped_update (UPDATE) |
 | `supplier` | ja | ja | supplier_isolation (ALL), supplier_scoped_delete (DELETE), supplier_scoped_update (UPDATE) |
 | `tag` | ja | ja | tag_isolation (ALL) |
 | `team` | ja | ja | team_tenant_isolation (ALL) |
@@ -2121,13 +2444,23 @@ SECURITY`), Policies mit ihrem Kommando.
 | `training_assignment` | ja | ja | training_assignment_isolation (ALL) |
 | `user_custom_role` | ja | ja | user_custom_role_isolation (ALL) |
 | `user_invitation` | ja | ja | org_isolation (ALL) |
+| `vault_connection` | ja | ja | vault_connection_isolation (ALL), vault_connection_scoped_delete (DELETE), vault_connection_scoped_update (UPDATE) |
+| `vault_connection_collector` | ja | ja | vault_connection_collector_isolation (ALL), vault_connection_collector_scoped_delete (DELETE), vault_connection_collector_scoped_update (UPDATE) |
 | `vlan` | ja | ja | vlan_isolation (ALL), vlan_scoped_delete (DELETE), vlan_scoped_update (UPDATE) |
+| `vlan_domain` | ja | ja | vlan_domain_isolation (ALL), vlan_domain_scoped_delete (DELETE), vlan_domain_scoped_insert (INSERT), vlan_domain_scoped_update (UPDATE) |
+| `vlan_domain_site` | ja | ja | vlan_domain_site_isolation (ALL) |
 | `vrf` | ja | ja | vrf_isolation (ALL), vrf_scoped_delete (DELETE), vrf_scoped_insert (INSERT), vrf_scoped_update (UPDATE) |
+| `vrf_section` | ja | ja | vrf_section_isolation (ALL), vrf_section_scoped_delete (DELETE), vrf_section_scoped_insert (INSERT), vrf_section_scoped_update (UPDATE) |
+| `vuln_advisory` | ja | ja | vuln_advisory_read (SELECT), vuln_advisory_system_delete (DELETE), vuln_advisory_system_insert (INSERT), vuln_advisory_system_update (UPDATE) |
+| `vuln_affected` | ja | ja | vuln_affected_read (SELECT), vuln_affected_system_delete (DELETE), vuln_affected_system_insert (INSERT), vuln_affected_system_update (UPDATE) |
+| `vuln_source` | ja | ja | vuln_source_read (SELECT), vuln_source_system_delete (DELETE), vuln_source_system_insert (INSERT), vuln_source_system_update (UPDATE) |
 | `webhook_dead_letter` | ja | ja | webhook_dead_letter_isolation (ALL), webhook_dead_letter_system_select (SELECT) |
 | `webhook_delivery` | ja | ja | webhook_delivery_isolation (ALL), webhook_delivery_system_select (SELECT) |
 | `webhook_subscription` | ja | ja | webhook_sub_isolation (ALL), webhook_sub_scope_select (SELECT) |
+| `workflow_approval` | ja | ja | workflow_approval_isolation (ALL), workflow_approval_scoped_delete (DELETE), workflow_approval_scoped_update (UPDATE) |
 | `workflow_def` | ja | ja | workflow_def_tenant_isolation (ALL) |
-| `workflow_run` | ja | ja | workflow_run_tenant_isolation (ALL) |
-| `workflow_step` | ja | ja | workflow_step_tenant_isolation (ALL) |
+| `workflow_def_version` | ja | ja | workflow_def_version_tenant_isolation (ALL) |
+| `workflow_run` | ja | ja | workflow_run_scoped_delete (DELETE), workflow_run_scoped_update (UPDATE), workflow_run_tenant_isolation (ALL) |
+| `workflow_step` | ja | ja | workflow_step_scoped_delete (DELETE), workflow_step_scoped_update (UPDATE), workflow_step_tenant_isolation (ALL) |
 
 <!-- schema-baseline:tables:end -->

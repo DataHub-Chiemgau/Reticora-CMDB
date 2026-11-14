@@ -98,21 +98,45 @@ var readPermissionFor = map[string]identity.Permission{
 	"notification-channels":   identity.PermNotificationManage,
 	"notification-deliveries": identity.PermNotificationManage,
 	"credentials":             identity.PermCredentialRead,
-	"export":                  identity.PermCIRead,
-	"ip-addresses":            identity.PermIPAMRead,
-	"ips":                     identity.PermIPAMRead,
-	"subnets":                 identity.PermIPAMRead,
-	"vlans":                   identity.PermIPAMRead,
-	"vrfs":                    identity.PermIPAMRead,
-	"network-interfaces":      identity.PermIPAMRead,
-	"cables":                  identity.PermRackRead,
-	"forms":                   identity.PermFormRead,
-	"form-submissions":        identity.PermFormRead,
-	"workflows":               identity.PermWorkflowRead,
-	"workflow-runs":           identity.PermWorkflowRead,
-	"compliance":              identity.PermComplianceRead,
-	"security":                identity.PermSecurityRead,
-	"monitoring":              identity.PermMonitoringRead,
+	// Credential bindings (CRD-01, WP-890): read with credential:read.
+	"credential-bindings": identity.PermCredentialRead,
+	// Vault connections (CRD-03, WP-893): read without secret with
+	// credential:read, written with vault:manage.
+	"vault-connections":  identity.PermCredentialRead,
+	"export":             identity.PermCIRead,
+	"ip-addresses":       identity.PermIPAMRead,
+	"ips":                identity.PermIPAMRead,
+	"subnets":            identity.PermIPAMRead,
+	"vlans":              identity.PermIPAMRead,
+	"vrfs":               identity.PermIPAMRead,
+	"network-interfaces": identity.PermIPAMRead,
+	"cables":             identity.PermRackRead,
+	"forms":              identity.PermFormRead,
+	"form-submissions":   identity.PermFormRead,
+	"workflows":          identity.PermWorkflowRead,
+	"workflow-runs":      identity.PermWorkflowRead,
+	"compliance":         identity.PermComplianceRead,
+	"security":           identity.PermFindingRead,
+	// Phase 3 (WP-866, E-160, E-161): IPAM/ASN and ADMP. The writes of ipam
+	// follow the suffix convention (ipam:write); the ADMP accounts have
+	// admp:manage through routeRules (WP-925).
+	"ipam":          identity.PermIPAMRead,
+	"ipam-sections": identity.PermIPAMRead,
+	// Nameserver sets (IPM-05, WP-905); written with ipam:write.
+	"nameserver-sets": identity.PermIPAMRead,
+	// VLAN domains (IPM-06, WP-906); written with ipam:write.
+	"vlan-domains":             identity.PermIPAMRead,
+	"asns":                     identity.PermIPAMRead,
+	"asn-ranges":               identity.PermIPAMRead,
+	"bgp-peerings":             identity.PermIPAMRead,
+	"nat-translations":         identity.PermIPAMRead,
+	"admp":                     identity.PermADMPRead,
+	"escalation-policies":      identity.PermEscalationManage,
+	"notification-escalations": identity.PermEscalationManage,
+	"monitoring":               identity.PermMonitoringRead,
+	// Collector groups (PRB-03, WP-947, E-160): read with monitoring:read,
+	// written with collector:manage (writePermissionOverrides).
+	"collector-groups": identity.PermMonitoringRead,
 	// Privacy/DSGVO acts on other people's personal data; even the read-side
 	// retention policy requires the manage permission.
 	"privacy": identity.PermUserManage,
@@ -147,7 +171,8 @@ var readPermissionFor = map[string]identity.Permission{
 	"override":              identity.PermCIRead,
 	"reconciliation":        identity.PermDiscoveryRead,
 	"source-policy":         identity.PermDiscoveryRead,
-	"history":               identity.PermCIRead, // minimum; the handler checks the entity type and audit:read (CI-06, E-78)
+	"source-ranks":          identity.PermDiscoveryRead, // REC-04, WP-1105
+	"history":               identity.PermCIRead,        // minimum; the handler checks the entity type and audit:read (CI-06, E-78)
 	"saved-views":           identity.PermSavedViewRead,
 	"dependencies":          identity.PermTopologyRead,
 	"blast-radius":          identity.PermTopologyRead,
@@ -182,7 +207,9 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"invitations":      identity.PermUserManage,
 	"teams":            identity.PermTeamManage,
 	// RBA-01: collectors and discovery jobs have their own manage keys.
-	"collectors":       identity.PermCollectorManage,
+	"collectors": identity.PermCollectorManage,
+	// Collector groups are managed like collectors (WP-947).
+	"collector-groups": identity.PermCollectorManage,
 	"discovery":        identity.PermDiscoveryManage,
 	"discovery-scopes": identity.PermDiscoveryManage,
 	// Resolving reconciliation conflicts is resolving review items.
@@ -195,8 +222,19 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"modules":        identity.PermEntitlementManage, // no write route: RETICORA_MODULES sets them (WP-214)
 	"webhooks":       identity.PermWebhookManage,
 	"credentials":    identity.PermCredentialManage,
-	"export":         identity.PermExportRun,
-	"search":         identity.PermSearchWrite,
+	// Binding a credential is its own right (WP-870, WP-890).
+	"credential-bindings": identity.PermCredentialBind,
+	// Vault connections are their own right (WP-870, WP-893).
+	"vault-connections": identity.PermVaultManage,
+	// The only writes below /admp are the accounts with admp:manage
+	// (routeRules, WP-925); any other write needs the org_admin key
+	// entitlement:manage (fail-closed).
+	"admp": identity.PermEntitlementManage,
+	// Escalation chains are read and written with one key (NTF-02, E-161).
+	"escalation-policies":      identity.PermEscalationManage,
+	"notification-escalations": identity.PermEscalationManage,
+	"export":                   identity.PermExportRun,
+	"search":                   identity.PermSearchWrite,
 	// Audit integrity verification is a read-side operation; the audit trail
 	// itself is append-only and written by the system, not the API.
 	"audit":     identity.PermAuditRead,
@@ -241,6 +279,7 @@ var writePermissionOverrides = map[string]identity.Permission{
 	"compositions":          identity.PermAssetWrite,
 	"override":              identity.PermOverrideWrite,
 	"source-policy":         identity.PermReconciliationManage,
+	"source-ranks":          identity.PermReconciliationManage, // REC-04, WP-1105
 	"saved-views":           identity.PermSavedViewWrite,
 	// Read-only surfaces: writes (if any) stay on the read permission so no
 	// non-existent derived write permission is required. The state snapshot
@@ -270,6 +309,52 @@ type routeRule struct {
 
 // routeRules are checked in order; the first match wins.
 var routeRules = []routeRule{
+	// Requesting and cancelling the deletion of the organization is its own
+	// right (TLC-06, WP-1152); the handler also requires the second factor
+	// of the session. Reading the state stays location:read through the
+	// segment org, so the banner of the grace period reaches every user.
+	{http.MethodPost, "org/deletion", identity.PermOrgDelete},
+	// A compliance report is a read of the compliance data: its job is
+	// started with compliance:read (SEC-04, WP-1129), not the
+	// compliance:write the segment derives for POST.
+	{http.MethodPost, "compliance/reports", identity.PermComplianceRead},
+	{http.MethodDelete, "org/deletion", identity.PermOrgDelete},
+	// The full export of the organization holds every row of it, the
+	// personal data unsealed (TLC-05, E-165, WP-1151): every method needs
+	// org:export; start and download also the second factor (handler).
+	{"*", "org/exports", identity.PermOrgExport},
+	{"*", "org/exports/*", identity.PermOrgExport},
+	{"*", "org/exports/*/download", identity.PermOrgExport},
+	// The ADMP accounts are local configuration, read and written with
+	// admp:manage (ADM-01, WP-925); the segment admp alone needs
+	// admp:read (WP-866).
+	{"*", "admp/accounts", identity.PermADMPManage},
+	{"*", "admp/accounts/*", identity.PermADMPManage},
+	// The holder of a connection is personal data: its own right, every
+	// read audited in the handler's transaction (ADM-06, WP-1076).
+	{http.MethodGet, "admp/connections/*/holder", identity.PermADMPHolderRead},
+	// The ADMP data at an interface and a CI read with admp:read, not with
+	// the ipam:read and ci:read of their first segments (WP-930).
+	{http.MethodGet, "network-interfaces/*/admp", identity.PermADMPRead},
+	{http.MethodGet, "cis/*/admp-connections", identity.PermADMPRead},
+	// Acknowledging alarms, incidents and notification escalations is its
+	// own right (RBA-05, E-161, WP-866).
+	{http.MethodPost, "monitoring/alarms/*/ack", identity.PermAlertAcknowledge},
+	{http.MethodPost, "monitoring/alarms/*/unack", identity.PermAlertAcknowledge},
+	{http.MethodPost, "monitoring/incidents/*/ack", identity.PermAlertAcknowledge},
+	// The other incident routes (WP-1036) need no rule of their own: GET
+	// monitoring/incidents and monitoring/incidents/{id} read with the
+	// monitoring:read of the prefix, POST monitoring/incidents/{id}/root
+	// writes with monitoring:write by the suffix rule
+	// (testdata/route_permissions.txt).
+	// Linking an existing ticket to an incident writes a ticket link and a
+	// system comment (WP-1039, pattern review-items/*/ticket); the handler
+	// also requires monitoring:read, because it answers the incident.
+	{http.MethodPost, "monitoring/incidents/*/tickets/*", identity.PermTicketWrite},
+	// The manual ticket of an incident (WP-1040): ticket:write; the
+	// incident is read with monitoring:read in the handler.
+	{http.MethodPost, "monitoring/incidents/*/ticket", identity.PermTicketWrite},
+	{http.MethodPost, "notification-escalations/*/acknowledge", identity.PermAlertAcknowledge},
 	// Deleting a CI is its own right; ci:write does not delete. Restoring
 	// undoes a deletion and needs the same right (CI-05).
 	{http.MethodDelete, "cis/*", identity.PermCIDelete},
@@ -289,9 +374,16 @@ var routeRules = []routeRule{
 	{http.MethodPost, "cis/*/lifecycle-transitions", identity.PermLifecycleTransition},
 	{http.MethodPost, "assets/*/lifecycle-transitions", identity.PermLifecycleTransition},
 	// Nested sub-resources are protected by their own resource's rights.
+	// The credential bindings of a CI (CRD-01, WP-890).
+	{http.MethodGet, "cis/*/credentials", identity.PermCredentialRead},
+	{http.MethodPut, "cis/*/credentials", identity.PermCredentialBind},
+	// The effective credentials of a CI (CRD-04, WP-891): references only.
+	{http.MethodGet, "cis/*/credentials/effective", identity.PermCredentialRead},
 	{http.MethodGet, "cis/*/contacts", identity.PermContactRead},
 	{http.MethodPost, "cis/*/contacts", identity.PermContactWrite},
 	{http.MethodGet, "cis/*/interfaces", identity.PermIPAMRead},
+	// The addresses of a device (IPM-13, WP-911).
+	{http.MethodGet, "cis/*/addresses", identity.PermIPAMRead},
 	{http.MethodPost, "cis/*/interfaces", identity.PermIPAMWrite},
 	{http.MethodGet, "cis/*/relationships", identity.PermRelationshipRead},
 	{http.MethodGet, "cis/*/dependencies", identity.PermTopologyRead},
@@ -316,6 +408,12 @@ var routeRules = []routeRule{
 	// (WP-272); the handler also requires asset:write.
 	{http.MethodPost, "assets/*/cis", identity.PermCIWrite},
 	{http.MethodDelete, "assets/*/cis/*", identity.PermCIWrite},
+	// Deciding on a workflow approval and the approval inbox need the
+	// approval right (RBA-05, E-230, WP-1098); the handler also checks the
+	// approver circle of the step, and the inbox without mine=true
+	// workflow:write.
+	{http.MethodPost, "workflow-runs/*/approval", identity.PermWorkflowApprove},
+	{http.MethodGet, "workflow-approvals", identity.PermWorkflowApprove},
 	// Approving or rejecting an order is not editing it.
 	{http.MethodPost, "orders/*/approve", identity.PermOrderApprove},
 	{http.MethodPost, "orders/*/reject", identity.PermOrderApprove},
@@ -324,6 +422,7 @@ var routeRules = []routeRule{
 	{http.MethodPost, "orders/*/receive", identity.PermStockWrite},
 	// Reconciliation settings (RBA-06); reading them stays discovery:read.
 	{http.MethodPut, "reconciliation/source-policy", identity.PermReconciliationManage},
+	{http.MethodPut, "reconciliation/source-ranks", identity.PermReconciliationManage},
 	// Collectors report with the ingest credential; managing them is
 	// collector:manage (RBA-01). Certificates are renewed over the
 	// collector's NATS channel, not the API (F-012).
@@ -609,9 +708,13 @@ var auditExemptions = map[string]string{
 	"POST /api/v1/collectors/enroll":  "enrollment code exchange, no tenant context",
 	"POST /api/v1/invitations/accept": "public acceptance link, no tenant context",
 	// The operator path has its own chain (operator_audit, SEC-07).
-	"POST /api/v1/admin/auth/callback":          "operator path, operator_audit",
-	"POST /api/v1/admin/orgs":                   "operator path, operator_audit",
-	"POST /api/v1/admin/orgs/{id}/entitlements": "operator path, operator_audit",
+	"POST /api/v1/admin/auth/callback":            "operator path, operator_audit",
+	"POST /api/v1/admin/orgs":                     "operator path, operator_audit",
+	"POST /api/v1/admin/orgs/{id}/entitlements":   "operator path, operator_audit",
+	"PUT /api/v1/admin/orgs/{id}/plan":            "operator path, operator_audit",
+	"POST /api/v1/admin/orgs/{id}/addons/{key}":   "operator path, operator_audit",
+	"DELETE /api/v1/admin/orgs/{id}/addons/{key}": "operator path, operator_audit",
+	"POST /api/v1/admin/vulnfeed/bundle":          "operator path, operator_audit",
 	// The Alertmanager bridge (OPS-05, E-75) records a queued alert itself,
 	// in the tenant transaction of the operator organization; refusals go to
 	// operator_audit.
@@ -703,14 +806,18 @@ var domainRecordedRoutes = map[string]string{
 	// Locations and rack placement (DOD-01).
 	// CI types hidden per client (WP-858): client.hidden_ci_types_changed.
 	"PUT /api/v1/clients/{id}/hidden-ci-types": "tenantapi.PGRepository.SetHiddenCITypes",
-	"POST /api/v1/locations":                   "locations.PGRepository",
-	"DELETE /api/v1/locations/{id}":            "locations.PGRepository",
-	"POST /api/v1/mounts":                      "rack placement",
-	"PATCH /api/v1/mounts/{id}":                "rack placement",
-	"DELETE /api/v1/mounts/{id}":               "rack placement",
-	"POST /api/v1/racks/{id}/mounts":           "rack placement",
-	"PUT /api/v1/racks/{id}/mounts/{ci_id}":    "rack placement",
-	"DELETE /api/v1/racks/{id}/mounts/{ci_id}": "rack placement",
+	// Ack and un-ack of an alarm (ALR-01, WP-983): alarm.acknowledged and
+	// alarm.unacknowledged with resource_type alarm.
+	"POST /api/v1/monitoring/alarms/{id}/ack":   "alarm.Handler (alarm.acknowledged)",
+	"POST /api/v1/monitoring/alarms/{id}/unack": "alarm.Handler (alarm.unacknowledged)",
+	"POST /api/v1/locations":                    "locations.PGRepository",
+	"DELETE /api/v1/locations/{id}":             "locations.PGRepository",
+	"POST /api/v1/mounts":                       "rack placement",
+	"PATCH /api/v1/mounts/{id}":                 "rack placement",
+	"DELETE /api/v1/mounts/{id}":                "rack placement",
+	"POST /api/v1/racks/{id}/mounts":            "rack placement",
+	"PUT /api/v1/racks/{id}/mounts/{ci_id}":     "rack placement",
+	"DELETE /api/v1/racks/{id}/mounts/{ci_id}":  "rack placement",
 	// Access: API keys, service accounts, users (RBA-05, AUT-08).
 	"POST /api/v1/api-keys":                   "identity.PGAPIKeyStore",
 	"POST /api/v1/api-keys/{id}/rotate":       "identity.PGAPIKeyStore",

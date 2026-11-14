@@ -212,6 +212,81 @@ type CI {
   parentCiId: ID
   "The child contract under the parent: configuration or standalone (AST-05)."
   childMode: String
+  """
+  The findings of the CI (SEC-02, WP-1136), newest first; without status the
+  open and acknowledged ones; at most first (default 50, at most 100). Module
+  findings, finding:read and the feature compliance_findings.
+  """
+  findings(first: Int, status: [String!]): [Finding!]!
+  """
+  The compliance results of the CI (SEC-03, WP-1136), the failing ones first;
+  at most first (default 50, at most 100). Module compliance,
+  compliance:read and the feature compliance_findings.
+  """
+  complianceResults(first: Int, status: String): [ComplianceResult!]!
+  "The weighted compliance score of the CI (CMP-02, WP-1136); null without a result."
+  complianceScore: ComplianceScore
+  """
+  The workflow runs on the CI (WFL-02, WP-1136), newest first, without the
+  inputs and outputs of their steps; at most first (default 50, at most 100).
+  Module workflows, workflow:read and the feature workflows.
+  """
+  workflowRuns(first: Int, status: String): [WorkflowRun!]!
+}
+
+"A security finding of a CI (security.Finding, WP-1116)."
+type Finding {
+  id: ID!
+  ciId: ID
+  kind: String!
+  severity: String!
+  title: String!
+  status: String!
+  statusReason: String
+  source: String!
+  cveIds: [String!]!
+  cvssScore: Float
+  kev: Boolean!
+  advisoryId: String
+  packageName: String
+  installedVersion: String
+  fixedVersion: String
+  reference: String
+  detectedAt: Time!
+  lastSeenAt: Time!
+  resolvedAt: Time
+}
+
+"The result of a compliance rule on a CI (WP-1126)."
+type ComplianceResult {
+  ruleId: ID!
+  ruleName: String!
+  status: String!
+  severity: String!
+  evaluatedAt: Time!
+  statusChangedAt: Time!
+}
+
+"The weighted compliance score of a CI (WP-1127)."
+type ComplianceScore {
+  score: Float!
+  passed: Int!
+  failed: Int!
+  notApplicable: Int!
+}
+
+"A workflow run on a CI (WP-1092) without its context and step payloads."
+type WorkflowRun {
+  id: ID!
+  workflowId: ID!
+  workflowName: String!
+  "The number of the definition version the run executes."
+  version: Int!
+  status: String!
+  trigger: String!
+  startedAt: Time
+  finishedAt: Time
+  createdAt: Time!
 }
 
 type Relationship {

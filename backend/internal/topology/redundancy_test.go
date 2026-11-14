@@ -265,3 +265,114 @@ func TestReadFeedsOfATruncatedWalk(t *testing.T) {
 		}
 	}
 }
+
+// TestRedundancyDualUplink covers E-199 (WP-1026): uplink_to is redundant,
+// so a CPE with uplinks to two switches stays up while one of them fails,
+// and the analyzer names the remaining switch as its provider; when both
+// fail, it is certainly down.
+func TestRedundancyDualUplink(t *testing.T) {
+	if !testRules["uplink_to"].redundant {
+		t.Fatal("uplink_to is not redundant in the built-in catalogue")
+	}
+	edges := []Edge{
+		{ID: "e1", SourceCIID: "cpe", TargetCIID: "switch-a", RelType: "uplink_to"},
+		{ID: "e2", SourceCIID: "cpe", TargetCIID: "switch-b", RelType: "uplink_to"},
+		{ID: "e3", SourceCIID: "phone", TargetCIID: "cpe", RelType: "uplink_to"},
+	}
+	for _, c := range []struct {
+		failed []string
+		want   string
+	}{
+		{[]string{"switch-a"}, ""},
+		{[]string{"switch-b"}, ""},
+		{[]string{"switch-a", "switch-b"}, "cpe,phone"},
+	} {
+		hits := computeImpact(c.failed, edges, impactQuery{depth: maxDepth}, testRules)
+		got := make([]string, 0, len(hits))
+		for id := range hits {
+			got = append(got, id)
+		}
+		sort.Strings(got)
+		if strings.Join(got, ",") != c.want {
+			t.Errorf("failed %v: impacted %v, want %q", c.failed, got, c.want)
+		}
+	}
+
+	// The analyzer names the remaining switch.
+	f := newAnalyzerFixture(t)
+	f.add("dual-cpe", "cpe", "client-b", "site-3")
+	f.link("dual-cpe", "uplink_to", "switch-1")
+	f.link("dual-cpe", "uplink_to", "switch-2")
+	got, err := f.analyzer().Impact(context.Background(), "org-1", f.idsOf("switch-1"), ImpactOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range got.Impacted {
+		if n.ID == f.ids["dual-cpe"] {
+			t.Error("the CPE with a second uplink is impacted by one switch")
+		}
+	}
+	var protected *ProtectedCI
+	for i := range got.Protected {
+		if got.Protected[i].ID == f.ids["dual-cpe"] {
+			protected = &got.Protected[i]
+		}
+	}
+	if protected == nil || !slices.Equal(protected.Providers, []Provider{{CIID: f.ids["switch-2"], RelType: "uplink_to"}}) {
+		t.Errorf("protected %+v, want the CPE with switch-2 as provider", got.Protected)
+	}
+	both, err := f.analyzer().Impact(context.Background(), "org-1", f.idsOf("switch-1", "switch-2"), ImpactOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	certain := false
+	for _, n := range both.Impacted {
+		if n.ID == f.ids["dual-cpe"] && !n.Heuristic {
+			certain = true
+		}
+	}
+	if !certain {
+		t.Errorf("both switches failed: dual CPE not certainly impacted: %+v", both.Impacted)
+	}
+}
+
+// TestRedundancySingleUplinkUnchanged: with one uplink the result is the
+// same as before WP-1026 — the CPE fails with its switch.
+func TestRedundancySingleUplinkUnchanged(t *testing.T) {
+	f := newAnalyzerFixture(t)
+	got, err := f.analyzer().Impact(context.Background(), "org-1", f.idsOf("switch-1"), ImpactOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	impacted := map[string]bool{}
+	for _, n := range got.Impacted {
+		if !n.Heuristic {
+			impacted[f.names[n.ID]] = true
+		}
+	}
+	// The ten CPEs of switch 1 and the server (one uplink each) with what
+	// runs on the server.
+	for i := 0; i < 20; i += 2 {
+		if !impacted[cpeName(i)] {
+			t.Errorf("%s with one uplink not impacted", cpeName(i))
+		}
+	}
+	for _, name := range []string{"server", "vm", "app", "service"} {
+		if !impacted[name] {
+			t.Errorf("%s not impacted", name)
+		}
+	}
+	if impacted[cpeName(1)] || impacted["switch-2"] {
+		t.Errorf("impacted %v reaches switch 2", impacted)
+	}
+	for _, p := range got.Protected {
+		if p.ID != "" && strings.HasPrefix(f.names[p.ID], "cpe-") {
+			t.Errorf("CPE %s with one uplink listed as protected", f.names[p.ID])
+		}
+	}
+	// The computation on edges alone: one uplink, certain impact.
+	edges := []Edge{{ID: "e1", SourceCIID: "cpe", TargetCIID: "switch", RelType: "uplink_to"}}
+	if hits := computeImpact([]string{"switch"}, edges, impactQuery{depth: maxDepth}, testRules); len(hits) != 1 || hits["cpe"].heuristic {
+		t.Errorf("single uplink: %+v", hits)
+	}
+}

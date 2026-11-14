@@ -25,6 +25,9 @@ export const IMPORT_ENTITIES = [
   'consumable',
   'location',
   'relationship',
+  // IPAM with the column names of phpIPAM (IPM-09, WP-920).
+  'subnet',
+  'ip_address',
 ] as const satisfies readonly components['schemas']['ImportProfile']['entity'][];
 export type ImportEntity = (typeof IMPORT_ENTITIES)[number];
 
@@ -120,6 +123,31 @@ export const IMPORT_TARGETS: Readonly<Record<ImportEntity, readonly string[]>> =
   ],
   consumable: ['sku', 'name', 'barcode', 'supplier_id', 'category', 'unit', 'client_id', 'notes'],
   location: ['kind', 'name', 'parent', 'path', 'client_id'],
+  // The phpIPAM columns of backend/internal/importer/ipam.go (WP-920).
+  subnet: [
+    'section',
+    'subnet',
+    'mask',
+    'cidr',
+    'description',
+    'vlan',
+    'vrf',
+    'gateway',
+    'customer',
+    'nameserver',
+    'is_pool',
+  ],
+  ip_address: [
+    'ip_addr',
+    'hostname',
+    'description',
+    'mac',
+    'state',
+    'is_gateway',
+    'vrf',
+    'subnet',
+    'type',
+  ],
   relationship: [
     'rel_type',
     'source_ci_id',

@@ -829,7 +829,9 @@ func TestLegacyNamesReceiveTheNewTypeOnce(t *testing.T) {
 func TestBoundSubscriptionsReceiveP2EventsWithTheReadPermission(t *testing.T) {
 	const ci1, asset1, item1 = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "33333333-3333-4333-8333-333333333333"
 	objects := fakeResolver{ci1: {ClientID: "c1"}, asset1: {ClientID: "c1"}, item1: {ClientID: "c1"}}
-	permissions := []string{"ci:read", "asset:read", "stock:read", "contract:read", "ticket:read", "document:read", "import:run", "reservation:read"}
+	permissions := []string{"ci:read", "asset:read", "stock:read", "contract:read", "ticket:read", "document:read", "import:run", "reservation:read", "monitoring:read",
+		"maintenance:read", "workflow:read", "finding:read", "escalation:manage", "entitlement:read", "org:export",
+		"ipam:read", "credential:read", "admp:read"}
 	want := map[string]string{
 		events.CIStatusChanged: "ci:read", events.RelationshipChanged: "ci:read",
 		events.AssetCreated: "asset:read", events.AssetChanged: "asset:read", events.AssetDeleted: "asset:read",
@@ -839,6 +841,34 @@ func TestBoundSubscriptionsReceiveP2EventsWithTheReadPermission(t *testing.T) {
 		events.ReservationExpired: "reservation:read", events.ReservationConverted: "reservation:read",
 		events.TicketUpdated: "ticket:read", events.TicketSLABreached: "ticket:read", events.MetamodelPublished: "ci:read",
 		events.DocumentScanned: "document:read", events.ImportCompleted: "import:run",
+	}
+	// The types of phase 3 (WP-867, WP-868): the monitoring reads with
+	// monitoring:read (ci.config_changed too, not with ci:read), the modules
+	// with the read permission of their route.
+	for _, typ := range events.Phase3Types {
+		prefix, _, _ := strings.Cut(typ, ".")
+		switch prefix {
+		case "maintenance":
+			want[typ] = "maintenance:read"
+		case "workflow":
+			want[typ] = "workflow:read"
+		case "finding":
+			want[typ] = "finding:read"
+		case "notification":
+			want[typ] = "escalation:manage"
+		case "entitlement":
+			want[typ] = "entitlement:read"
+		case "org":
+			want[typ] = "org:export"
+		case "ipam", "asn":
+			want[typ] = "ipam:read"
+		case "credential":
+			want[typ] = "credential:read"
+		case "admp":
+			want[typ] = "admp:read"
+		default:
+			want[typ] = "monitoring:read"
+		}
 	}
 	type deliveryCase struct {
 		event      string
@@ -905,5 +935,37 @@ func TestBoundSubscriptionsReceiveP2EventsWithTheReadPermission(t *testing.T) {
 		EventDataReadPermission(events.LifecycleChanged, []byte(`[]`)) != "" ||
 		EventDataReadPermission("lifecycle.transitioned", []byte(`{"entity_type":"asset"}`)) != "asset:read" {
 		t.Error("lifecycle read permission by entity_type")
+	}
+}
+
+// TestDispatcherSkipsAlarmWithWebhookDisabled covers MON-04 (WP-988): an
+// alarm.* event whose rule switched the webhooks off reaches no
+// subscription; one with webhook on, without actions (the defaults) or of
+// another type is delivered.
+func TestDispatcherSkipsAlarmWithWebhookDisabled(t *testing.T) {
+	subs := []Subscription{{Name: "alarms", Events: []string{events.AlarmOpened, events.AlarmResolved}}}
+	env := func(id, typ, actions string) *events.Envelope {
+		data := `{"id":"a-1","alarm_id":"a-1","dedup_key":"rule:r:s","severity":"critical"` + actions + `}`
+		return &events.Envelope{ID: id, Type: typ, OrgID: "org-1", EntityID: "a-1", EntitySeq: 1, Data: json.RawMessage(data)}
+	}
+	off := `,"actions":{"notify":{"enabled":true},"webhook":{"enabled":false}}`
+	on := `,"actions":{"notify":{"enabled":false},"webhook":{"enabled":true}}`
+	for _, tc := range []struct {
+		name string
+		env  *events.Envelope
+		want int
+	}{
+		{"opened, webhook off", env("e-1", events.AlarmOpened, off), 0},
+		{"resolved, webhook off", env("e-2", events.AlarmResolved, off), 0},
+		{"opened, webhook on", env("e-3", events.AlarmOpened, on), 1},
+		{"opened, without actions", env("e-4", events.AlarmOpened, ""), 1},
+	} {
+		got := deliverOnce(t, subs, DispatcherOptions{}, tc.env, "", nil)
+		if len(got["alarms"]) != tc.want {
+			t.Errorf("%s: delivered %v, want %d", tc.name, got, tc.want)
+		}
+	}
+	if webhookDisabled(&events.Envelope{Type: events.CIChanged, Data: json.RawMessage(`{"actions":{"webhook":{"enabled":false}}}`)}) {
+		t.Error("an event of another type is no alarm")
 	}
 }

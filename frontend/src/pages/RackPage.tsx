@@ -1,6 +1,6 @@
 import { Server } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import type { RackLayoutMount } from '../api/client';
 import { useRackLayout, useRackList } from '../api/hooks';

@@ -227,7 +227,22 @@ var (
 		Namespace: "reticora", Name: "collector_spool_backpressure_total",
 		Help: "Collector heartbeats reporting backpressure: the spool is saturated and collection is paused.",
 	})
+	// The vault version changes the collectors report with their heartbeat
+	// (CRD-05, WP-897): reads of a vault entry without a fixed version
+	// that returned a new version (a rotation in the vault).
+	collectorVaultVersionChanges = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "reticora", Name: "collector_vault_version_changes_total",
+		Help: "Vault entries without a fixed version the collectors read in a new version (a rotation in the vault), reported with the heartbeat.",
+	})
 )
+
+// recordVaultReport adds the vault version changes of an accepted
+// heartbeat; negative values are ignored.
+func recordVaultReport(v *CollectorVaultReport) {
+	if v != nil && v.VersionChanges > 0 {
+		collectorVaultVersionChanges.Add(float64(v.VersionChanges))
+	}
+}
 
 // Kinds of reticora_collector_spool_dropped_total.
 const (

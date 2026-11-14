@@ -35,7 +35,7 @@ func flags(hits map[string]impactHit) map[string]bool {
 }
 
 var testRules = func() map[string]impactRule {
-	return (&Handler{}).impactRules(context.Background(), "org-1")
+	return (&Analyzer{}).impactRules(context.Background(), "org-1")
 }()
 
 // TestComputeImpactFollowsImpactDirection covers IMP-01 (WP-176): device
@@ -256,7 +256,7 @@ func TestImpactRulesUseOrganizationTypes(t *testing.T) {
 		Directed: true, Category: "logical", ImpactDirection: relationshiptype.ImpactNone}); err != nil {
 		t.Fatal(err)
 	}
-	rules := (&Handler{types: types}).impactRules(context.Background(), "org-1")
+	rules := (&Analyzer{types: types}).impactRules(context.Background(), "org-1")
 	edges := []Edge{
 		{ID: "e1", SourceCIID: "a", TargetCIID: "b", RelType: "feeds"},
 		{ID: "e2", SourceCIID: "a", TargetCIID: "c", RelType: "documents"},

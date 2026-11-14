@@ -1,4 +1,4 @@
-# Threat-Model Phase 1 und Phase 2 (G1, G2)
+# Threat-Model Phase 1 bis 3 (G1, G2, G3)
 
 Grundlage der internen Sicherheitsreviews: G1 mit WP-209
 (`docs/security/review-g1.md`), G2 mit WP-329 (`docs/security/review-phase2.md`).
@@ -109,6 +109,22 @@ Vertrauensgrenzen:
 | T33 | TB2 | I | Ein Dokument eines Clients wird org-weit sichtbar, sobald sein letzter Link entfällt (Entlinken durch einen gescopten Principal, Löschen des Ziels) | `document.orphaned` (000281, WP-852): ein Dokument, das Links hatte, sehen ohne Link nur org-weite Principals; nur die Zähler-Trigger setzen die Spalte (SR-56 behoben) | TEN-05, TEN-09 | `backend/internal/tenant/rls/document_link_scope_integration_test.go` (`TestDocumentStaysScopedWithoutLinks`), `backend/internal/tenant/rls/module_object_integration_test.go` (`TestModuleTablesInheritObjectScope`), Kanalzeile `document-link` in `backend/internal/tenant/rls/channel_matrix_p2_integration_test.go` |
 | T34 | TB11 | E | P2-Daten ohne Lizenz-Feature oder bei abgeschaltetem Modul über REST, GraphQL, Suche, Bulk oder Import | Org-Gate je Route (`featureRules`, WP-705) mit Methoden- und Suffixregeln, Modul-Gate (WP-706), GraphQL-Resolver mit Modul und Feature (GQL-04). Lücke: SR-61 | ENT-06, GQL-04 | `backend/internal/entitlement/entitlement_test.go` (`TestRequiredFeatureMapping`), `backend/internal/entitlement/enforce_integration_test.go` (`TestPhase2RouteGates`), `backend/internal/importer/handler_test.go` (`TestImportRoutesRequireTheImportFeature`) |
 | T35 | TB2 | I | Historie und as-of als Kanal in fremde Scopes oder auf gelöschte Objekte | Lesen nur mit dem Leserecht der Entität und unter RLS; ein gelöschtes Objekt bleibt nur sichtbar, solange der Aufrufer Snapshot oder Spur sieht | AUD-08, TEN-05 | `backend/internal/history/replay_integration_test.go` (`TestCIAsOfAgainstPostgres`), `backend/internal/history/asset_replay_integration_test.go` (`TestAssetAsOfAgainstPostgres`) |
+
+## Phase 3 (G3)
+
+Umfang: die Datenschutz-Workflows der Phase 3 (SEC-05 [P3], TLC-05, TLC-06):
+Auskunft und Löschung einer Person (WP-1158), Vollexport (WP-1149 bis
+WP-1151) und Löschung einer Organisation (WP-1152 bis WP-1156). Die weiteren
+Bedrohungen der Phase 3 ergänzt das Sicherheitsreview G3 (WP-1175).
+
+Vertrauensgrenze:
+
+- **TB12:** Gelöschte Person bzw. Organisation ↔ Historie und Exporte (Audit,
+  CI-Historie, Ereignisse, Zustellungen, ADMP-Cache, Vollexporte, Backups).
+
+| # | Grenze | STRIDE | Bedrohung | Gegenmaßnahme | Anforderung | Nachweis |
+|---|---|---|---|---|---|---|
+| T36 | TB12 | I | Gelöschte PII in Historie und Exporten: Nach der Löschung einer Person oder Organisation zeigen Audit-Änderungen, `ci_change`, `event_outbox`, Zustellungen, der ADMP-Cache oder ein Export den Klartext weiter | Personenbezogene Werte der Historie stehen nur als Surrogat (`{"$pii": …}`) im Vault; `privacy.subject_erase` (shred, WP-1158) löscht die Wert-Subjekte, das Subjekt der Person und die Zustelladressen, jeder Leseweg löst danach zu `null` auf, die Hash-Kette des `audit_log` bleibt prüfbar (`audit-verify`). Der Org-Purge löscht zuerst `org_dek`, dann die Subjekte (Crypto-Shredding, WP-1155); Vollexporte sind 24 h abrufbar und werden danach gelöscht (WP-1151); Backups laufen mit ihrer Aufbewahrung aus (Löschprotokoll, WP-1156) | SEC-05, CH16, TLC-06, AUD-04 | `backend/internal/pii/history_redaction_integration_test.go` (`TestShreddedPersonInvisibleInHistory`, `TestPurgedOrganizationUnresolvable`), `backend/internal/privacy/subject_integration_test.go` (`TestSubjectShredHidesHistory`), `backend/internal/tenantapi/purge_external_test.go` |
 
 ## Restrisiken
 

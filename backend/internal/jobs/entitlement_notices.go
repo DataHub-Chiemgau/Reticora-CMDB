@@ -16,8 +16,10 @@ import (
 // Entitlement notices of ENT-07 on the scheduler (JOB-02, WP-425): every
 // day each enabled entitlement with valid_until is warned of 14, 7 and 1
 // day before its end (entitlement.warning) and reported once after it
-// (entitlement.expired). This run is the only producer of
-// entitlement.warning. Each notice is recorded in notice_sent in the
+// (entitlement.expired). This run and the workflow worker produce
+// entitlement.warning: the worker warns once per organization and hour when
+// it delays runs above max_workflow_runs_per_hour (WFL-08, WP-1112, with
+// SendNotice). Each notice is recorded in notice_sent in the
 // transaction that appends its event to the outbox, so it goes out exactly
 // once per entitlement, valid_until and threshold, also after the outbox
 // cleanup removed the published event (KeepPublished). A changed
@@ -41,6 +43,11 @@ type EntitlementNotice struct {
 	// DaysLeft is the number of days until valid_until, rounded up.
 	DaysLeft  int    `json:"days_left,omitempty"`
 	ExpiredAt string `json:"expired_at,omitempty"`
+	// Quota, Limit and DelayedUntil name the quota whose limit delayed
+	// work (max_workflow_runs_per_hour, WP-1112) and until when.
+	Quota        string `json:"quota,omitempty"`
+	Limit        *int64 `json:"limit,omitempty"`
+	DelayedUntil string `json:"delayed_until,omitempty"`
 }
 
 // EntitlementNotices sends the entitlement notices.
@@ -141,6 +148,12 @@ func entitlementNotice(id, feature string, validUntil, now time.Time) (typ, key 
 // dedup_key = key) and appends ev to the outbox in tx, the transaction of
 // the event's organization. A notice sent before appends nothing and
 // reports false.
+// SendNotice is sendNotice for the producers outside this package (the
+// workflow worker, WP-1112).
+func SendNotice(ctx context.Context, tx pgx.Tx, now time.Time, key string, ev *events.Event) (bool, error) {
+	return sendNotice(ctx, tx, now, key, ev)
+}
+
 func sendNotice(ctx context.Context, tx pgx.Tx, now time.Time, key string, ev *events.Event) (bool, error) {
 	tag, err := tx.Exec(ctx, `INSERT INTO notice_sent (organization_id, kind, dedup_key, sent_at) VALUES ($1, $2, $3, $4)
 		ON CONFLICT DO NOTHING`, ev.OrgID, ev.Type, key, now)

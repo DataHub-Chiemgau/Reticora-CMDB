@@ -37,6 +37,7 @@ var TicketPriorities = map[string]string{
 	KindOverrideConflict:    "medium",
 	KindUnclassifiedDevice:  "medium",
 	KindUnknownRelationship: "medium",
+	KindIPBindingConflict:   "medium",
 	KindScopeSuggested:      "low",
 }
 

@@ -11,7 +11,7 @@
  */
 import { act, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { Route, Routes } from 'react-router-dom';
+import { Route, Routes } from 'react-router';
 import i18n from '../i18n';
 import { renderWithProviders } from '../test/utils';
 import { CIDetailPage } from './CIDetailPage';
@@ -102,5 +102,23 @@ describe('CIDetailPage health badge (DB-05, F-087)', () => {
     renderDetail();
     await screen.findByRole('heading', { name: 'srv-health-01' });
     expect(await screen.findByText(en)).toBeInTheDocument();
+  });
+
+  // WP-991: warning and critical link to the alarms of the CI, ok does not.
+  it.each([
+    { health: 'critical', de: 'Zustand: kritisch', linked: true },
+    { health: 'warning', de: 'Zustand: Warnung', linked: true },
+    { health: 'ok', de: 'Zustand: OK', linked: false },
+  ])('links $health to the alarms: $linked', async ({ health, de, linked }) => {
+    stubBackend(health);
+    renderDetail();
+    await screen.findByRole('heading', { name: 'srv-health-01' });
+    const badge = await screen.findByText(de);
+    const link = badge.closest('a');
+    if (linked) {
+      expect(link).toHaveAttribute('href', `/alarms?ci_id=${CI_ID}`);
+    } else {
+      expect(link).toBeNull();
+    }
   });
 });

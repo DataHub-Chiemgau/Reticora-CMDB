@@ -19,16 +19,67 @@ type Repository interface {
 	InsertMissing(ctx context.Context, orgID string, ents []Entitlement) ([]string, error)
 }
 
+// PlanReader reads the leading plan of an organization (organization.plan)
+// and the time of its last change (WP-880). PGRepository and
+// MemoryRepository implement it.
+type PlanReader interface {
+	OrganizationPlan(ctx context.Context, orgID string) (Plan, *time.Time, error)
+}
+
 // MemoryRepository is an in-memory entitlement store used by tests and the
 // explicit --no-db development mode.
 type MemoryRepository struct {
 	mu    sync.RWMutex
 	items map[string][]Entitlement
+	// plans holds the plans set by SetOrganizationPlan.
+	plans map[string]Plan
 }
 
 // NewMemoryRepository creates an empty in-memory entitlement repository.
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{items: make(map[string][]Entitlement)}
+}
+
+// OrganizationPlan returns the plan of the cmdb_core row (the memory store
+// keeps no organization), essential without one.
+func (r *MemoryRepository) OrganizationPlan(_ context.Context, orgID string) (Plan, *time.Time, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.planLocked(orgID), nil, nil
+}
+
+// planLocked is the plan set by SetOrganizationPlan, else the plan of the
+// cmdb_core row, else essential; r.mu is held.
+func (r *MemoryRepository) planLocked(orgID string) Plan {
+	if plan, ok := r.plans[orgID]; ok {
+		return plan
+	}
+	items := r.items[orgID]
+	for i := range items {
+		if items[i].FeatureKey == FeatureCMDBCore && items[i].Plan != "" {
+			return normalizePlan(items[i].Plan)
+		}
+	}
+	return PlanEssential
+}
+
+// LockOrganizationPlan returns the plan (the memory store has no
+// transactions to lock in).
+func (r *MemoryRepository) LockOrganizationPlan(_ context.Context, orgID string) (Plan, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.planLocked(orgID), nil
+}
+
+// SetOrganizationPlan stores the plan of the organization.
+func (r *MemoryRepository) SetOrganizationPlan(_ context.Context, orgID string, plan Plan) (time.Time, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.plans == nil {
+		r.plans = map[string]Plan{}
+	}
+	r.plans[orgID] = normalizePlan(plan)
+	return time.Now().UTC(), nil
 }
 
 // List returns the entitlements stored for the organization.
@@ -52,9 +103,16 @@ func (r *MemoryRepository) Upsert(_ context.Context, in *Entitlement) (Entitleme
 		ent.UpdatedAt = time.Now().UTC()
 	}
 
+	if ent.Origin == "" {
+		ent.Origin = DefaultOrigin(ent.FeatureKey, ent.Plan)
+	}
 	stored := r.items[ent.OrganizationID]
 	for i := range stored {
 		if stored[i].FeatureKey == ent.FeatureKey {
+			// The origin of an existing row stays (WP-880).
+			if stored[i].Origin != "" {
+				ent.Origin = stored[i].Origin
+			}
 			stored[i] = ent
 			r.items[ent.OrganizationID] = stored
 			return ent, nil
@@ -73,7 +131,8 @@ func (r *MemoryRepository) InsertMissing(_ context.Context, orgID string, ents [
 
 	stored := r.items[orgID]
 	var added []string
-	for _, ent := range ents {
+	for i := range ents {
+		ent := ents[i]
 		exists := false
 		for i := range stored {
 			if stored[i].FeatureKey == ent.FeatureKey {
@@ -85,6 +144,9 @@ func (r *MemoryRepository) InsertMissing(_ context.Context, orgID string, ents [
 			continue
 		}
 		ent.OrganizationID = orgID
+		if ent.Origin == "" {
+			ent.Origin = DefaultOrigin(ent.FeatureKey, ent.Plan)
+		}
 		if ent.UpdatedAt.IsZero() {
 			ent.UpdatedAt = time.Now().UTC()
 		}

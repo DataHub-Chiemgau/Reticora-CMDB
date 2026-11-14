@@ -4,7 +4,8 @@
 # Reticora database to the version of the installed library (WP-604, INS-05).
 #
 # Since E-96 the database image ships the TimescaleDB libraries 2.13.0 to
-# 2.31.0; a database keeps the extension version it was created with until
+# the version of its TIMESCALE_IMAGE (2.32.0 since Upd-08); a database keeps
+# the extension version it was created with until
 # ALTER EXTENSION timescaledb UPDATE raises it. In the Reticora database the
 # event trigger reticora_restrict_app_ddl (migration 000078) runs before that
 # statement and loads the old library, and the session aborts with

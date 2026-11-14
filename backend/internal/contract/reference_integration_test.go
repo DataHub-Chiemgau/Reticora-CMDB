@@ -193,8 +193,10 @@ func TestContractReference(t *testing.T) {
 			mux.ServeHTTP(rec, req.WithContext(ctx))
 			return rec.Code
 		}
-		if code := link(client1Ctx, cC2); code != http.StatusNotFound {
-			t.Fatalf("client-1 link to the client-2 contract: %d, want 404", code)
+		// A target outside the scope answers 422 on entity_id like an
+		// unknown one (SR-50, WP-879).
+		if code := link(client1Ctx, cC2); code != http.StatusUnprocessableEntity {
+			t.Fatalf("client-1 link to the client-2 contract: %d, want 422", code)
 		}
 		if code := link(orgCtx, cC2); code != http.StatusCreated {
 			t.Fatalf("org-wide link to the client-2 contract: %d, want 201", code)

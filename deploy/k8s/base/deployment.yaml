@@ -147,6 +147,25 @@ spec:
             # system job of the scheduler.
             - name: RETICORA_WORKER_COMPUTED_REFRESH_ENABLED
               value: "true"
+            # Probe assignment to the collector group members every 10 s
+            # (PRB-03, WP-941), a system job of the scheduler; module
+            # monitoring.
+            - name: RETICORA_WORKER_PROBE_ASSIGN_ENABLED
+              value: "true"
+            # Probe result ingest into probe_result (NFR-11, WP-960); module
+            # monitoring.
+            - name: RETICORA_WORKER_PROBE_INGEST_ENABLED
+              value: "true"
+            # Workflows: trigger consumer and workflow.run (OPS-02 [P3],
+            # WP-1114); module workflows.
+            - name: RETICORA_WORKER_WORKFLOW_ENABLED
+              value: "true"
+            - name: RETICORA_WORKER_IPAM_SCAN_APPLY_ENABLED
+              value: "true"
+            # The alarms of the probe states run in reticora-monitoring
+            # (WP-986).
+            - name: RETICORA_WORKER_ALARM_CHECK_ENABLED
+              value: "false"
           volumeMounts:
             - name: session-key
               mountPath: /etc/reticora/session

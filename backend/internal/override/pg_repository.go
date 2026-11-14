@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -327,6 +328,10 @@ func (r *PGRepository) RecordDiscovered(ctx context.Context, orgID, ciID, fieldN
 	if observedAt.IsZero() {
 		observedAt = time.Now()
 	}
+	rank, rankErr := r.recordRankSQL(ctx, orgID, "(SELECT rc.ci_type_id FROM ci rc WHERE rc.id = $2::uuid)", "$3::text", "$5::text", "$6::integer")
+	if rankErr != nil {
+		return nil, rankErr
+	}
 	var out *FieldValue
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := requireVisibleCI(ctx, tx, ciID); err != nil {
@@ -336,14 +341,14 @@ func (r *PGRepository) RecordDiscovered(ctx context.Context, orgID, ciID, fieldN
 			INSERT INTO ci_field_value (
 				organization_id, ci_id, field_name, discovered_value,
 				discovered_source, discovered_at, discovered_rank, observed_at
-			) VALUES ($1, $2, $3, $4, $5, now(), $6, $7)
+			) VALUES ($1, $2, $3, $4, $5, now(), %s, $7)
 			ON CONFLICT (ci_id, field_name) DO UPDATE SET
 				discovered_value = EXCLUDED.discovered_value,
 				discovered_source = EXCLUDED.discovered_source,
 				discovered_at = EXCLUDED.discovered_at,
 				discovered_rank = EXCLUDED.discovered_rank,
 				observed_at = EXCLUDED.observed_at
-			RETURNING %s`, selectColumns),
+			RETURNING %s`, rank, selectColumns),
 			orgID, ciID, fieldName, jsonValue(value), nilIfEmpty(source), SourceRank(source), observedAt.UTC())
 		fv, err := scan(row)
 		if err != nil {
@@ -377,6 +382,10 @@ func (r *PGRepository) RecordDiscoveredMany(ctx context.Context, orgID, ciID str
 			raw[i] = &v
 		}
 	}
+	rank, err := r.recordRankSQL(ctx, orgID, "(SELECT rc.ci_type_id FROM ci rc WHERE rc.id = $2::uuid)", "f.name", "$5::text", "$6::integer")
+	if err != nil {
+		return err
+	}
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		if err := requireVisibleCI(ctx, tx, ciID); err != nil {
 			return err
@@ -386,7 +395,7 @@ func (r *PGRepository) RecordDiscoveredMany(ctx context.Context, orgID, ciID str
 				organization_id, ci_id, field_name, discovered_value,
 				discovered_source, discovered_at, discovered_rank, observed_at
 			)
-			SELECT $1, $2, f.name, f.value::jsonb, $5, now(), $6, $7
+			SELECT $1, $2, f.name, f.value::jsonb, $5, now(), `+rank+`, $7
 			FROM unnest($3::text[], $4::text[]) AS f(name, value)
 			ON CONFLICT (ci_id, field_name) DO UPDATE SET
 				discovered_value = EXCLUDED.discovered_value,
@@ -416,17 +425,25 @@ type DiscoveredValues struct {
 
 // recordDiscoveredBatchSQL upserts the discovered values of the fields of
 // several CIs ($2 … $7, one element per field) whose CIs ($8, each once) the
-// tenant scope shows.
-const recordDiscoveredBatchSQL = `
+// tenant scope shows, with the effective rank of each value (REC-04);
+// recordDiscoveredBatchPlainSQL is the statement for an organization
+// without source ranks, which records the given ranks.
+var recordDiscoveredBatchSQL = recordDiscoveredBatchWith(effectiveRankSQL("$1::uuid", "visible.ci_type_id", "f.name", "f.source", "f.rank"))
+
+var recordDiscoveredBatchPlainSQL = recordDiscoveredBatchWith("f.rank")
+
+func recordDiscoveredBatchWith(rank string) string {
+	return `
 	WITH visible AS MATERIALIZED (
-		SELECT v.id FROM unnest($8::uuid[]) AS k(id)
-		CROSS JOIN LATERAL (SELECT ci.id FROM ci WHERE ci.id = k.id) v
+		SELECT v.id, v.ci_type_id FROM unnest($8::uuid[]) AS k(id)
+		CROSS JOIN LATERAL (SELECT ci.id, ci.ci_type_id FROM ci WHERE ci.id = k.id) v
 	)
 	INSERT INTO ci_field_value (
 		organization_id, ci_id, field_name, discovered_value,
 		discovered_source, discovered_at, discovered_rank, observed_at
 	)
-	SELECT $1, f.ci_id::uuid, f.name, f.value::jsonb, f.source, now(), f.rank, f.observed_at
+	SELECT $1, f.ci_id::uuid, f.name, f.value::jsonb, f.source, now(),
+		` + rank + `, f.observed_at
 	FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::integer[], $7::timestamptz[])
 	     WITH ORDINALITY AS f(ci_id, name, value, source, rank, observed_at, ord)
 	JOIN visible ON visible.id = f.ci_id::uuid
@@ -437,6 +454,7 @@ const recordDiscoveredBatchSQL = `
 		discovered_at = EXCLUDED.discovered_at,
 		discovered_rank = EXCLUDED.discovered_rank,
 		observed_at = EXCLUDED.observed_at`
+}
 
 // RecordDiscoveredBatch upserts the discovered columns of the fields of
 // several CIs, each field at most once in batch, with one statement, each CI
@@ -489,8 +507,16 @@ func (r *PGRepository) RecordDiscoveredBatch(ctx context.Context, orgID string, 
 	if len(ids) == 0 {
 		return nil
 	}
+	table, err := r.rankTable(ctx, orgID)
+	if err != nil {
+		return err
+	}
+	statement := recordDiscoveredBatchSQL
+	if table.empty() {
+		statement = recordDiscoveredBatchPlainSQL
+	}
 	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, recordDiscoveredBatchSQL, orgID, ids, names, raw, sources, ranks, observed, cis)
+		tag, err := tx.Exec(ctx, statement, orgID, ids, names, raw, sources, ranks, observed, cis)
 		if err != nil {
 			return fmt.Errorf("record discovered values: %w", err)
 		}
@@ -1200,4 +1226,281 @@ func recordAudit(ctx context.Context, tx pgx.Tx, orgID, ciID, action string, cha
 		return fmt.Errorf("record audit: %w", err)
 	}
 	return nil
+}
+
+// effectiveRankSQL is the SQL expression of the effective rank (REC-04) of
+// source for field of a CI of type ciType in organization org: the entry of
+// the CI's type, else the organization-wide entry, else def. Manual and
+// unknown sources have no entries (CHECK of source_rank_policy) and keep
+// def.
+func effectiveRankSQL(org, ciType, field, source, def string) string {
+	return fmt.Sprintf(`COALESCE(
+		(SELECT p.rank FROM source_rank_policy p
+		  WHERE p.organization_id = %[1]s AND p.ci_type_id = %[2]s AND p.attribute_key = %[3]s AND p.source = %[4]s),
+		(SELECT p.rank FROM source_rank_policy p
+		  WHERE p.organization_id = %[1]s AND p.ci_type_id IS NULL AND p.attribute_key = %[3]s AND p.source = %[4]s),
+		%[5]s)`, org, ciType, field, source, def)
+}
+
+// recordRankSQL is the SQL of the rank a recorded value stores: the
+// effective rank expression (effectiveRankSQL) when the organization keeps
+// source ranks, else def, so an organization without entries records as
+// before without reading the policy per value.
+func (r *PGRepository) recordRankSQL(ctx context.Context, orgID, ciType, field, source, def string) (string, error) {
+	table, err := r.rankTable(ctx, orgID)
+	if err != nil {
+		return "", err
+	}
+	if table.empty() {
+		return def, nil
+	}
+	return effectiveRankSQL(recordOrgParam, ciType, field, source, def), nil
+}
+
+// recordOrgParam is the organization parameter of the record statements.
+const recordOrgParam = "$1::uuid"
+
+// decisionState reads the provenance of a field and the CI type of the CI
+// in one statement (REC-04): fv is nil without a provenance row, a
+// FieldValue with only InstanceAttribute set for an instance attribute
+// without one (as Get), and the CI type is empty for a CI the scope does
+// not show.
+func (r *PGRepository) decisionState(ctx context.Context, orgID, ciID, fieldName string) (out *FieldValue, ciType string, locked bool, err error) {
+	err = database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var instance bool
+		// lk: the lifecycle state of the CI locks the field (WP-1103 AK5).
+		fv, serr := scan(decisionScanner{row: tx.QueryRow(ctx, fmt.Sprintf(`
+			WITH ct AS (
+				SELECT COALESCE(ci.ci_type_id::text, '') AS type_id FROM ci WHERE ci.id = $1
+			), inst AS (
+				SELECT EXISTS (SELECT 1 FROM ci_instance_field_definition d
+					WHERE d.ci_id = $1 AND d.name = $2 AND EXISTS (SELECT 1 FROM ci WHERE ci.id = d.ci_id)) AS instance
+			), lk AS (
+				SELECT EXISTS (SELECT 1 FROM ci c JOIN lifecycle_state ls
+					ON ls.definition_id = lifecycle_model_effective(c.ci_type_id, 'ci') AND ls.key = c.lifecycle_state
+					WHERE c.id = $1 AND ls.locked_fields ? $2) AS locked
+			)
+			SELECT %[1]s, inst.instance, COALESCE((SELECT type_id FROM ct), ''), (SELECT locked FROM lk) FROM ci_field_value, inst
+			WHERE ci_id = $1 AND field_name = $2 AND %[2]s
+			UNION ALL
+			SELECT '', '', '', '', NULL::jsonb, '', NULL::timestamptz, NULL::jsonb, '', '', NULL::timestamptz, false,
+				now(), now(), 0, NULL::timestamptz, inst.instance, COALESCE((SELECT type_id FROM ct), ''), (SELECT locked FROM lk)
+			FROM inst WHERE NOT EXISTS (
+				SELECT 1 FROM ci_field_value WHERE ci_id = $1 AND field_name = $2 AND %[2]s)`,
+			selectColumns, visibleCI), ciID, fieldName), instance: &instance, ciType: &ciType, locked: &locked})
+		if serr != nil {
+			return fmt.Errorf("get field value for decision: %w", serr)
+		}
+		switch {
+		case fv.ID != "":
+			fv.InstanceAttribute = instance
+			out = fv
+		case instance:
+			out = &FieldValue{OrganizationID: orgID, CIID: ciID, FieldName: fieldName, InstanceAttribute: true}
+		}
+		return nil
+	})
+	return out, ciType, locked, err
+}
+
+// decisionScanner scans a row of selectColumns followed by the instance
+// attribute flag, the CI type and the lifecycle lock of the field
+// (decisionState).
+type decisionScanner struct {
+	row      pgx.Row
+	instance *bool
+	ciType   *string
+	locked   *bool
+}
+
+func (s decisionScanner) Scan(dest ...any) error {
+	return s.row.Scan(append(dest, s.instance, s.ciType, s.locked)...)
+}
+
+// rankTable returns the rank table of the organization from the cache of
+// the instance, read anew after rankCacheTTL or a write on this instance.
+func (r *PGRepository) rankTable(ctx context.Context, orgID string) (*RankTable, error) {
+	t, gen, ok := ranksOfInstance.get(orgID)
+	if ok {
+		return t, nil
+	}
+	entries, err := r.SourceRankEntries(ctx, orgID)
+	if err != nil {
+		return nil, err
+	}
+	t = NewRankTable(entries)
+	// A write that committed and invalidated while this read ran may be
+	// missing from the table: it then serves this decision only.
+	ranksOfInstance.putIfGeneration(orgID, gen, t)
+	return t, nil
+}
+
+const rankEntryColumns = `COALESCE(ci_type_id::text, ''), attribute_key, source, rank, COALESCE(updated_by::text, ''), updated_at`
+
+// SourceRankEntries returns the stored source ranks of the organization
+// (REC-04), sorted by attribute, type and source.
+func (r *PGRepository) SourceRankEntries(ctx context.Context, orgID string) ([]RankEntry, error) {
+	var out []RankEntry
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		out, err = rankEntriesTx(ctx, tx, orgID, false)
+		return err
+	})
+	return out, err
+}
+
+func rankEntriesTx(ctx context.Context, tx pgx.Tx, orgID string, lock bool) ([]RankEntry, error) {
+	query := "SELECT " + rankEntryColumns + " FROM source_rank_policy WHERE organization_id = $1"
+	if lock {
+		query += " FOR UPDATE"
+	}
+	rows, err := tx.Query(ctx, query, orgID)
+	if err != nil {
+		return nil, fmt.Errorf("read source ranks: %w", err)
+	}
+	defer rows.Close()
+	out := []RankEntry{}
+	for rows.Next() {
+		var e RankEntry
+		var at time.Time
+		if err := rows.Scan(&e.CITypeID, &e.AttributeKey, &e.Source, &e.Rank, &e.UpdatedBy, &at); err != nil {
+			return nil, fmt.Errorf("read source ranks: %w", err)
+		}
+		at = at.UTC()
+		e.UpdatedAt = &at
+		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read source ranks: %w", err)
+	}
+	sortEntries(out)
+	return out, nil
+}
+
+// ReplaceSourceRanks replaces the source ranks of the organization with
+// entries (validated by the caller) and returns the former ones. A CI type
+// that is neither a system type nor one of the organization is a 422 field
+// error. The audit entry reconciliation.source_ranks_updated with before
+// and after is written in the transaction; after the commit the rank
+// table of this instance is read anew (REC-04, AK6 of WP-1105).
+func (r *PGRepository) ReplaceSourceRanks(ctx context.Context, orgID, actor string, entries []RankEntry) (before, after []RankEntry, txErr error) {
+	txErr = database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		// One replacement at a time per organization.
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('source_rank_policy:' || $1::uuid::text, 0))`, orgID); err != nil {
+			return fmt.Errorf("lock source ranks: %w", err)
+		}
+		if err := checkRankTypes(ctx, tx, orgID, entries); err != nil {
+			return err
+		}
+		var err error
+		if before, err = rankEntriesTx(ctx, tx, orgID, true); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `DELETE FROM source_rank_policy WHERE organization_id = $1`, orgID); err != nil {
+			return fmt.Errorf("replace source ranks: %w", err)
+		}
+		if len(entries) > 0 {
+			types, keys, sources, ranks := make([]*string, len(entries)), make([]string, len(entries)), make([]string, len(entries)), make([]int32, len(entries))
+			for i := range entries {
+				if entries[i].CITypeID != "" {
+					types[i] = &entries[i].CITypeID
+				}
+				keys[i], sources[i], ranks[i] = entries[i].AttributeKey, entries[i].Source, int32(entries[i].Rank) //nolint:gosec // rank is 1-99, checked by the caller
+			}
+			var by any
+			if api.IsUUID(actor) {
+				by = actor
+			}
+			if _, err = tx.Exec(ctx, `
+				INSERT INTO source_rank_policy (organization_id, ci_type_id, attribute_key, source, rank, updated_by)
+				SELECT $1, e.ci_type_id, e.attribute_key, e.source, e.rank,
+					(SELECT u.id FROM app_user u WHERE u.id = $6::uuid AND u.organization_id = $1)
+				FROM unnest($2::uuid[], $3::text[], $4::text[], $5::integer[]) AS e(ci_type_id, attribute_key, source, rank)`,
+				orgID, types, keys, sources, ranks, by); err != nil {
+				return fmt.Errorf("replace source ranks: %w", err)
+			}
+		}
+		if after, err = rankEntriesTx(ctx, tx, orgID, false); err != nil {
+			return err
+		}
+		err = database.BeforeCommit(ctx, func() error {
+			return recordRankAudit(ctx, tx, orgID, actor, before, after)
+		})
+		if err != nil {
+			return err
+		}
+		database.AfterCommit(ctx, func(context.Context) { ranksOfInstance.invalidate(orgID) })
+		return nil
+	})
+	if txErr != nil {
+		return nil, nil, txErr
+	}
+	return before, after, nil
+}
+
+// checkRankTypes refuses a CI type that is neither a system type nor one
+// of the organization (422 on the field of the first such entry).
+func checkRankTypes(ctx context.Context, tx pgx.Tx, orgID string, entries []RankEntry) error {
+	ids := []string{}
+	for i := range entries {
+		if entries[i].CITypeID != "" {
+			ids = append(ids, entries[i].CITypeID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `SELECT id::text FROM ci_type WHERE id = ANY ($1::uuid[]) AND (organization_id IS NULL OR organization_id = $2)`, ids, orgID)
+	if err != nil {
+		return fmt.Errorf("check CI types: %w", err)
+	}
+	known := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return fmt.Errorf("check CI types: %w", err)
+		}
+		known[id] = true
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("check CI types: %w", err)
+	}
+	for i := range entries {
+		if entries[i].CITypeID != "" && !known[entries[i].CITypeID] {
+			return &api.FieldError{Field: fmt.Sprintf("entries[%d].ci_type_id", i), Message: "unknown CI type", Status: http.StatusUnprocessableEntity}
+		}
+	}
+	return nil
+}
+
+// recordRankAudit writes reconciliation.source_ranks_updated with the
+// entries before and after the change.
+func recordRankAudit(ctx context.Context, tx pgx.Tx, orgID, actor string, before, after []RankEntry) error {
+	actorType := "system"
+	if strings.TrimSpace(actor) != "" {
+		actorType = "user"
+	}
+	if _, err := audit.NewPGRecorder().Record(ctx, tx, audit.Entry{
+		OrganizationID: orgID, ActorID: actor, ActorType: actorType,
+		Action: AuditSourceRanksUpdated, ResourceType: "reconciliation",
+		Changes: map[string]any{"before": auditEntries(before), "after": auditEntries(after)},
+	}); err != nil {
+		return fmt.Errorf("record audit: %w", err)
+	}
+	return nil
+}
+
+// auditEntries are the entries without bookkeeping columns.
+func auditEntries(entries []RankEntry) []map[string]any {
+	out := make([]map[string]any, 0, len(entries))
+	for i := range entries {
+		e := map[string]any{"attribute_key": entries[i].AttributeKey, "source": entries[i].Source, "rank": entries[i].Rank}
+		if entries[i].CITypeID != "" {
+			e["ci_type_id"] = entries[i].CITypeID
+		}
+		out = append(out, e)
+	}
+	return out
 }

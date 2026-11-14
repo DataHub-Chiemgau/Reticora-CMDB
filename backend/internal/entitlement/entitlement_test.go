@@ -4,15 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 )
 
 func testService(t *testing.T, plan Plan) *Service {
@@ -55,7 +62,8 @@ func TestProvisionedPlanGrantsOnlyPlanFeatures(t *testing.T) {
 	}
 	added, err := svc.Provision(ctx, "org-1", PlanStandard)
 	if err != nil || !slices.Equal(added, []string{FeatureTicketingStandard, FeatureSignature, FeatureStock,
-		FeatureStocktakeStandard, FeatureBarcode, FeatureGPSStandard, FeatureWorkplace, FeatureExportDATEV}) {
+		FeatureStocktakeStandard, FeatureBarcode, FeatureGPSStandard, FeatureWorkplace, FeatureExportDATEV,
+		FeatureMonitoring, FeatureIPAM}) {
 		t.Errorf("provisioning a larger plan: %v, %v; want only the missing features", added, err)
 	}
 	if svc.IsEnabled(ctx, "org-1", FeatureExportCSV) {
@@ -444,7 +452,9 @@ func TestPhase1FeaturesAndQuotas(t *testing.T) {
 			}
 		}
 	}
-	if !slices.Equal(Quotas, []string{"max_cis", "max_collectors", "max_users", "max_api_keys", "max_storage_mb"}) {
+	if !slices.Equal(Quotas, []string{"max_cis", "max_collectors", "max_users", "max_api_keys", "max_storage_mb",
+		"max_monitored_targets", "max_probes_per_minute", "min_probe_interval_s",
+		"max_workflow_definitions", "max_workflow_runs_per_hour", "max_form_definitions"}) {
 		t.Errorf("quotas %v", Quotas)
 	}
 
@@ -489,10 +499,11 @@ func TestPhase1FeaturesAndQuotas(t *testing.T) {
 
 // TestGrantAcceptsOnlyENT02Keys covers WP-564 (ENT-02, F-209) and WP-244
 // (ENT-06, E-44): Grant stores only the feature keys of ENT-02, the
-// phase-2 keys of ENT-06, the module keys of phases 3 and 4 in use and the
-// add-ons, and only the quotas max_cis, max_collectors, max_users,
+// phase-2 keys of ENT-06, the phase-3 keys (WP-862, E-151), the module key
+// of phase 4 in use and the add-ons, and only the quotas max_cis, max_collectors, max_users,
 // max_api_keys and max_storage_mb; any other key, the former keys
-// inventory, stocktake and ticketing among them, is a ValidationError
+// inventory, stocktake, ticketing, workflow_forms and compliance among
+// them, is a ValidationError
 // naming the field, and nothing is stored.
 func TestGrantAcceptsOnlyENT02Keys(t *testing.T) {
 	ctx := context.Background()
@@ -502,13 +513,15 @@ func TestGrantAcceptsOnlyENT02Keys(t *testing.T) {
 	for _, f := range slices.Concat(Phase1Features, Addons, []string{"assets_basic", "documents", "import",
 		"ticketing_essential", "ticketing_standard", "signature", "stock", "stocktake_standard", "barcode",
 		"gps_standard", "workplace", "export_datev", "internal_orders",
-		"monitoring", "endpoint_agent", "workflow_forms", "compliance"}) {
+		"monitoring", "ipam", "monitoring_network", "credential_vault", "notifications_sms_pager", "workflows",
+		"compliance_findings", "monitoring_access", "monitoring_analytics", "compliance_automation",
+		"endpoint_agent", "admp"}) {
 		if !slices.Contains(keys, f) {
 			t.Errorf("FeatureKeys lacks %s", f)
 		}
 	}
-	if len(keys) != 27 {
-		t.Errorf("FeatureKeys %v, want the 8 keys of ENT-02, 13 keys of phase 2, 4 module keys of phases 3 and 4 and 2 add-ons", keys)
+	if len(keys) != 35 {
+		t.Errorf("FeatureKeys %v, want the 8 keys of ENT-02, 13 keys of phase 2, 10 keys of phase 3, 1 module key of phase 4 and 3 add-ons", keys)
 	}
 	for _, plan := range []Plan{PlanEssential, PlanStandard, PlanPro, PlanEnterprise} {
 		for _, f := range PlanFeatures(plan) {
@@ -527,6 +540,8 @@ func TestGrantAcceptsOnlyENT02Keys(t *testing.T) {
 		"former key inventory":      {Entitlement{FeatureKey: "inventory", Enabled: true}, "feature_key"},
 		"former key stocktake":      {Entitlement{FeatureKey: "stocktake", Enabled: true}, "feature_key"},
 		"former key ticketing":      {Entitlement{FeatureKey: "ticketing", Enabled: true}, "feature_key"},
+		"former key workflow_forms": {Entitlement{FeatureKey: "workflow_forms", Enabled: true}, "feature_key"},
+		"former key compliance":     {Entitlement{FeatureKey: "compliance", Enabled: true}, "feature_key"},
 		"feature key in upper case": {Entitlement{FeatureKey: "Discovery", Enabled: true}, "feature_key"},
 		"feature key with a space":  {Entitlement{FeatureKey: "discovery ", Enabled: true}, "feature_key"},
 		"empty feature key":         {Entitlement{FeatureKey: " ", Enabled: true}, "feature_key"},
@@ -563,22 +578,26 @@ func TestGrantAcceptsOnlyENT02Keys(t *testing.T) {
 // E-34, E-39, CH14): every plan includes assets_basic, documents, import
 // and ticketing_essential; standard adds ticketing_standard, signature,
 // stock, stocktake_standard, barcode, gps_standard, workplace and
-// export_datev (essential has no stock); pro adds internal_orders,
-// monitoring and workflow_forms; enterprise endpoint_agent and compliance.
-// No plan includes an add-on, a former key or a key not created in
-// phase 2.
+// export_datev (essential has no stock) and from WP-862 (E-151) monitoring
+// and ipam; pro adds internal_orders, monitoring_network, credential_vault,
+// notifications_sms_pager, workflows and compliance_findings; enterprise
+// monitoring_access, monitoring_analytics, compliance_automation and
+// endpoint_agent. No plan includes an add-on (admp among them), a former key
+// or a key not created.
 func TestPlanMatrixFollowsE44(t *testing.T) {
 	essential := slices.Concat(Phase1Features, []string{"assets_basic", "documents", "import", "ticketing_essential"})
 	standard := slices.Concat(essential, []string{"ticketing_standard", "signature", "stock", "stocktake_standard",
-		"barcode", "gps_standard", "workplace", "export_datev"})
-	pro := slices.Concat(standard, []string{"internal_orders", "monitoring", "workflow_forms"})
-	enterprise := slices.Concat(pro, []string{"endpoint_agent", "compliance"})
+		"barcode", "gps_standard", "workplace", "export_datev", "monitoring", "ipam"})
+	pro := slices.Concat(standard, []string{"internal_orders", "monitoring_network", "credential_vault",
+		"notifications_sms_pager", "workflows", "compliance_findings"})
+	enterprise := slices.Concat(pro, []string{"monitoring_access", "monitoring_analytics", "compliance_automation",
+		"endpoint_agent"})
 	for plan, want := range map[Plan][]string{PlanEssential: essential, PlanStandard: standard, PlanPro: pro, PlanEnterprise: enterprise} {
 		got := PlanFeatures(plan)
 		if !slices.Equal(sorted(got), sorted(want)) {
 			t.Errorf("plan %s: %v, want %v", plan, got, want)
 		}
-		for _, f := range slices.Concat(Addons, []string{"inventory", "stocktake", "ticketing", "ticketing_pro",
+		for _, f := range slices.Concat(Addons, []string{"inventory", "stocktake", "ticketing", "workflow_forms", "compliance", "ticketing_pro",
 			"stocktake_pro", "disposition", "audit_extended", "usage_tracking"}) {
 			if slices.Contains(got, f) {
 				t.Errorf("plan %s includes %s", plan, f)
@@ -601,6 +620,12 @@ func TestPlanMatrixFollowsE44(t *testing.T) {
 		"ticketing_standard", "signature", "stock", "stocktake_standard", "barcode", "gps_standard", "workplace",
 		"export_datev", "internal_orders"}) {
 		t.Errorf("Phase2Features %v", Phase2Features)
+	}
+	// Standard holds the monitoring core only; the extended functions start
+	// with pro (decision of the client of 2026-11-09, E-151).
+	if !slices.Contains(PlanFeatures(PlanStandard), FeatureMonitoring) || slices.Contains(PlanFeatures(PlanStandard), FeatureMonitoringNetwork) ||
+		slices.Contains(PlanFeatures(PlanEssential), FeatureMonitoring) {
+		t.Error("monitoring: want it from standard on, monitoring_network from pro on")
 	}
 	// An unknown plan provisions the essential plan.
 	if !slices.Equal(PlanFeatures("trial"), PlanFeatures(PlanEssential)) {
@@ -678,4 +703,601 @@ func deref(v *int64) any {
 		return "unlimited"
 	}
 	return *v
+}
+
+// TestPhase3RouteGates covers WP-865 (PKG-08, ENT-06, E-151, E-160): every
+// prefix and sub-path rule of the P3 modules maps to its feature key; the
+// recommendation of an incident is monitoring_network (decision of the
+// client of 2026-11-09); the provider callback and the organization export
+// and deletion are core.
+func TestPhase3RouteGates(t *testing.T) {
+	for _, c := range []struct {
+		method, path string
+		want         []string
+	}{
+		{http.MethodGet, "/api/v1/monitoring/probes", []string{FeatureMonitoring}},
+		{http.MethodGet, "/api/v1/monitoring/alarms", []string{FeatureMonitoring}},
+		{http.MethodPost, "/api/v1/monitoring/alarms/x1/ack", []string{FeatureMonitoring}},
+		{http.MethodGet, "/api/v1/monitoring/alarm-settings", []string{FeatureMonitoring}},
+		{http.MethodGet, "/api/v1/monitoring/incidents/x1", []string{FeatureMonitoring}},
+		{http.MethodGet, "/api/v1/monitoring/incidents/x1/recommendation", []string{FeatureMonitoringNetwork}},
+		{http.MethodGet, "/api/v1/monitoring/sla", []string{FeatureMonitoringAnalytics}},
+		{http.MethodPost, "/api/v1/monitoring/sla/targets", []string{FeatureMonitoringAnalytics}},
+		{http.MethodGet, "/api/v1/monitoring/forecasts/x1", []string{FeatureMonitoringAnalytics}},
+		{http.MethodGet, "/api/v1/monitoring/metrics", []string{FeatureMonitoring}},
+		{http.MethodGet, "/api/v1/collector-groups/x1", []string{FeatureMonitoring}},
+		{http.MethodGet, "/api/v1/cis/x1/availability", []string{FeatureMonitoring}},
+		{http.MethodPut, "/api/v1/cis/x1/credentials", []string{FeatureMonitoring}},
+		{http.MethodGet, "/api/v1/cis/x1/credentials/effective", []string{FeatureMonitoring}},
+		{http.MethodPost, "/api/v1/credential-bindings", []string{FeatureMonitoring}},
+		{http.MethodPost, "/api/v1/vault-connections", []string{FeatureCredentialVault}},
+		{http.MethodGet, "/api/v1/cis/x1/configs", []string{FeatureMonitoringNetwork}},
+		{http.MethodGet, "/api/v1/ipam-sections", []string{FeatureIPAM}},
+		{http.MethodPost, "/api/v1/ipam/imports", []string{FeatureIPAM}},
+		{http.MethodGet, "/api/v1/asns/x1", []string{FeatureIPAM}},
+		{http.MethodGet, "/api/v1/asn-ranges", []string{FeatureIPAM}},
+		{http.MethodGet, "/api/v1/bgp-peerings", []string{FeatureIPAM}},
+		{http.MethodGet, "/api/v1/nat-translations", []string{FeatureIPAM}},
+		{http.MethodGet, "/api/v1/nameserver-sets", []string{FeatureIPAM}},
+		{http.MethodGet, "/api/v1/vlan-domains", []string{FeatureIPAM}},
+		{http.MethodGet, "/api/v1/cis/x1/addresses", []string{FeatureIPAM}},
+		{http.MethodPost, "/api/v1/subnets/x1/scan", []string{FeatureIPAM, FeatureMonitoring}},
+		{http.MethodGet, "/api/v1/subnets/x1/rpki", []string{FeatureIPAM, FeatureMonitoringNetwork}},
+		{http.MethodGet, "/api/v1/admp/connections/x1", []string{FeatureADMP}},
+		{http.MethodGet, "/api/v1/cis/x1/admp-connections", []string{FeatureADMP}},
+		{http.MethodGet, "/api/v1/network-interfaces/x1/admp", []string{FeatureADMP}},
+		{http.MethodGet, "/api/v1/escalation-policies", []string{FeatureNotificationsSMSPager}},
+		{http.MethodPost, "/api/v1/notification-escalations/x1/acknowledge", []string{FeatureNotificationsSMSPager}},
+		{http.MethodPost, "/api/v1/notification-callbacks/o1/c1", nil},
+		{http.MethodPost, "/api/v1/org/exports", nil},
+		{http.MethodGet, "/api/v1/org/exports/x1/download", nil},
+		{http.MethodPost, "/api/v1/org/deletion", nil},
+		// The core resources of NET-05 stay ungated.
+		{http.MethodGet, "/api/v1/subnets/x1", nil},
+		{http.MethodGet, "/api/v1/cis/x1", nil},
+	} {
+		if got := RequiredFeatures(c.method, c.path); !slices.Equal(got, c.want) {
+			t.Errorf("RequiredFeatures(%s, %q) = %v, want %v", c.method, c.path, got, c.want)
+		}
+	}
+}
+
+// TestProbeTypeFeature covers WP-865 (E-151): every key of the probe type
+// registry maps to its feature key; long forms and unknown types are errors.
+func TestProbeTypeFeature(t *testing.T) {
+	want := map[string]string{}
+	for _, k := range []string{"icmp", "tcp", "http", "dns"} {
+		want[k] = FeatureMonitoring
+	}
+	for _, k := range []string{"snmp_status", "snmp_if", "snmp_custom", "redfish", "bgp", "ospf", "isis", "bfd",
+		"optical", "dhcp", "stamp", "twamp_control", "gnmi", "rpki_rtr", "rpki_roa"} {
+		want[k] = FeatureMonitoringNetwork
+	}
+	for _, k := range []string{"bng", "pon", "tr069", "usp"} {
+		want[k] = FeatureMonitoringAccess
+	}
+	if len(ProbeTypes()) != 23 || len(want) != 23 {
+		t.Fatalf("probe types %v, want the 23 keys of the registry", ProbeTypes())
+	}
+	for _, k := range ProbeTypes() {
+		got, err := ProbeTypeFeature(k)
+		if err != nil || got != want[k] {
+			t.Errorf("ProbeTypeFeature(%q) = %q, %v; want %q", k, got, err, want[k])
+		}
+		if !slices.Contains(FeatureKeys(), got) {
+			t.Errorf("probe type %s maps to the unknown feature key %s", k, got)
+		}
+	}
+	for _, k := range []string{"icmp_ping", "snmp_interfaces", "tcp_connect", "ping", ""} {
+		if f, err := ProbeTypeFeature(k); err == nil {
+			t.Errorf("ProbeTypeFeature(%q) = %q, want an error", k, f)
+		}
+	}
+	// Standard holds only the reachability probes (decision of 2026-11-09).
+	for _, k := range ProbeTypes() {
+		f, _ := ProbeTypeFeature(k)
+		if inStandard := slices.Contains(PlanFeatures(PlanStandard), f); inStandard != slices.Contains([]string{"icmp", "tcp", "http", "dns"}, k) {
+			t.Errorf("probe type %s in standard = %v", k, inStandard)
+		}
+	}
+}
+
+// TestSubFunctionFeature covers WP-865 (E-151, decision of the client of
+// 2026-11-09): correlation is part of every monitoring plan; recommendation,
+// threshold rules and configuration change detection start with pro; SLA
+// reports and capacity forecasts are analytics.
+func TestSubFunctionFeature(t *testing.T) {
+	for sub, want := range map[string]string{
+		SubFunctionCorrelation:      FeatureMonitoring,
+		SubFunctionRecommendation:   FeatureMonitoringNetwork,
+		SubFunctionThresholds:       FeatureMonitoringNetwork,
+		SubFunctionConfigChange:     FeatureMonitoringNetwork,
+		SubFunctionSLAReport:        FeatureMonitoringAnalytics,
+		SubFunctionCapacityForecast: FeatureMonitoringAnalytics,
+	} {
+		if got, err := SubFunctionFeature(sub); err != nil || got != want {
+			t.Errorf("SubFunctionFeature(%q) = %q, %v; want %q", sub, got, err, want)
+		}
+	}
+	for _, sub := range []string{"monitoring_correlation", "monitoring_sla", "unknown"} {
+		if _, err := SubFunctionFeature(sub); err == nil {
+			t.Errorf("SubFunctionFeature(%q): want an error", sub)
+		}
+	}
+}
+
+// TestEntitlementOriginValidate covers WP-880 (PKG-01): an empty origin is
+// derived (add-on → addon, plan feature → plan, else manual); an add-on with
+// another origin and a non-add-on with origin addon are refused on origin.
+func TestEntitlementOriginValidate(t *testing.T) {
+	for _, c := range []struct {
+		feature string
+		plan    Plan
+		want    string
+	}{
+		{FeatureIGA, PlanEnterprise, OriginAddon},
+		{FeatureMonitoring, PlanPro, OriginPlan},
+		{FeatureEndpointAgent, PlanPro, OriginManual},
+		{FeatureCMDBCore, PlanEssential, OriginPlan},
+	} {
+		e := Entitlement{FeatureKey: c.feature, Plan: c.plan, Enabled: true}
+		if err := e.Validate(); err != nil || e.Origin != c.want {
+			t.Errorf("%s in %s: origin %q, %v; want %q", c.feature, c.plan, e.Origin, err, c.want)
+		}
+	}
+	for name, e := range map[string]Entitlement{
+		"add-on with origin plan":        {FeatureKey: FeatureIGA, Plan: PlanPro, Enabled: true, Origin: OriginPlan},
+		"plan feature with origin addon": {FeatureKey: FeatureMonitoring, Plan: PlanPro, Enabled: true, Origin: OriginAddon},
+		"unknown origin":                 {FeatureKey: FeatureMonitoring, Plan: PlanPro, Enabled: true, Origin: "gift"},
+	} {
+		var verr *ValidationError
+		if err := e.Validate(); !errors.As(err, &verr) || verr.Field != "origin" {
+			t.Errorf("%s: %v, want a ValidationError on origin", name, err)
+		}
+	}
+}
+
+// TestProvisionReportsPlanMismatch covers AK5 of WP-880: the startup check
+// reports an active row of origin plan outside the plan of the organization
+// (warning and gauge) and changes nothing.
+func TestProvisionReportsPlanMismatch(t *testing.T) {
+	repo := NewMemoryRepository()
+	svc := NewService(repo, Options{Enforce: true})
+	ctx := context.Background()
+	const org = "org-mismatch"
+	for _, f := range PlanFeatures(PlanStandard) {
+		if _, err := repo.Upsert(ctx, &Entitlement{OrganizationID: org, FeatureKey: f, Plan: PlanStandard, Enabled: true, Origin: OriginPlan}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A pro feature of origin plan in a standard organization.
+	if _, err := repo.Upsert(ctx, &Entitlement{OrganizationID: org, FeatureKey: FeatureWorkflows, Plan: PlanStandard, Enabled: true, Origin: OriginPlan}); err != nil {
+		t.Fatal(err)
+	}
+	if got := PlanMismatch(PlanStandard, mustList(t, repo, org)); !slices.Equal(got, []string{FeatureWorkflows}) {
+		t.Errorf("PlanMismatch = %v, want [workflows]", got)
+	}
+	if _, err := svc.ProvisionOrganizations(ctx, map[string]Plan{org: PlanStandard}); err != nil {
+		t.Fatal(err)
+	}
+	if got := testutil.ToFloat64(planMismatchOrgs); got != 1 {
+		t.Errorf("gauge reticora_entitlement_plan_mismatch_organizations = %v, want 1", got)
+	}
+	var kept bool
+	for _, e := range mustList(t, repo, org) {
+		kept = kept || (e.FeatureKey == FeatureWorkflows && e.Enabled && e.Origin == OriginPlan)
+	}
+	if !kept {
+		t.Errorf("the startup check changed the deviating row")
+	}
+	// A manual grant outside the plan is no deviation.
+	other := NewMemoryRepository()
+	if _, err := other.Upsert(ctx, &Entitlement{OrganizationID: org, FeatureKey: FeatureWorkflows, Plan: PlanStandard, Enabled: true, Origin: OriginManual}); err != nil {
+		t.Fatal(err)
+	}
+	if got := PlanMismatch(PlanStandard, mustList(t, other, org)); len(got) != 0 {
+		t.Errorf("a manual grant counts as deviation: %v", got)
+	}
+}
+
+func mustList(t *testing.T, repo *MemoryRepository, org string) []Entitlement {
+	t.Helper()
+	items, err := repo.List(context.Background(), org)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return items
+}
+
+// TestPlanQuotaDefaultsFollowE151 covers AK2 of WP-881 (E-153): the default
+// limits of the four plans; the monitoring quotas only where the plan
+// includes monitoring.
+func TestPlanQuotaDefaultsFollowE151(t *testing.T) {
+	want := map[Plan]map[string]int64{
+		PlanEssential: {LimitMaxCIs: 500, LimitMaxCollectors: 2, LimitMaxUsers: 5, LimitMaxStorageMB: 1000},
+		PlanStandard: {LimitMaxCIs: 2500, LimitMaxCollectors: 5, LimitMaxUsers: 25, LimitMaxStorageMB: 10000,
+			LimitMaxMonitoredTargets: 500, LimitMaxProbesPerMinute: 1000, LimitMinProbeIntervalS: 30},
+		PlanPro: {LimitMaxCIs: 10000, LimitMaxCollectors: 20, LimitMaxUsers: 100, LimitMaxStorageMB: 50000,
+			LimitMaxMonitoredTargets: 5000, LimitMaxProbesPerMinute: 10000, LimitMinProbeIntervalS: 30,
+			LimitMaxWorkflowDefinitions: 50, LimitMaxWorkflowRunsPerHour: 2000, LimitMaxFormDefinitions: 50},
+		PlanEnterprise: {LimitMaxCIs: 50000, LimitMaxMonitoredTargets: 25000, LimitMaxProbesPerMinute: 30000, LimitMinProbeIntervalS: 10,
+			LimitMaxWorkflowDefinitions: 500, LimitMaxWorkflowRunsPerHour: 20000, LimitMaxFormDefinitions: 500},
+	}
+	for plan, w := range want {
+		got := PlanQuotaDefaults(plan)
+		if !maps.Equal(got, w) {
+			t.Errorf("PlanQuotaDefaults(%s) = %v, want %v", plan, got, w)
+		}
+		_, hasMonitoring := got[LimitMaxMonitoredTargets]
+		if hasMonitoring != slices.Contains(PlanFeatures(plan), FeatureMonitoring) {
+			t.Errorf("%s: monitoring quotas %v, monitoring in plan %v", plan, hasMonitoring, !hasMonitoring)
+		}
+	}
+}
+
+// TestTargetTypeQuotaKeys covers AK1 of WP-881 (E-154): max_targets_<type>
+// is a monitoring quota; a malformed key is refused on limits.
+func TestTargetTypeQuotaKeys(t *testing.T) {
+	ok := Entitlement{FeatureKey: FeatureMonitoring, Plan: PlanStandard, Enabled: true, Limits: map[string]int64{"max_targets_icmp": 100}}
+	if err := ok.Validate(); err != nil {
+		t.Errorf("max_targets_icmp: %v", err)
+	}
+	if f, known := QuotaFeatureOf("max_targets_icmp"); !known || f != FeatureMonitoring {
+		t.Errorf("QuotaFeatureOf(max_targets_icmp) = %q, %v", f, known)
+	}
+	for _, key := range []string{"max_targets_", "max_targetsx", "max_targets_ICMP", "max_whatever"} {
+		e := Entitlement{FeatureKey: FeatureMonitoring, Plan: PlanStandard, Enabled: true, Limits: map[string]int64{key: 1}}
+		var verr *ValidationError
+		if err := e.Validate(); !errors.As(err, &verr) || verr.Field != "limits" {
+			t.Errorf("%s: %v, want a ValidationError on limits", key, err)
+		}
+	}
+}
+
+// TestTargetTypeQuotaKeysFollowRegistry covers AK5 of WP-934: a cap
+// max_targets_<type> is accepted only for a key of the probe type register;
+// unknown types and long forms are a 422 on limits.
+func TestTargetTypeQuotaKeysFollowRegistry(t *testing.T) {
+	// The package matrix (PKG-08) references exactly the register keys.
+	if keys := slices.Sorted(slices.Values(probewire.TypeKeys())); !slices.Equal(ProbeTypes(), keys) {
+		t.Errorf("ProbeTypes() = %v, register %v", ProbeTypes(), keys)
+	}
+	for _, key := range probewire.TypeKeys() {
+		e := Entitlement{FeatureKey: FeatureMonitoring, Plan: PlanStandard, Enabled: true, Limits: map[string]int64{TargetTypeQuotaPrefix + key: 10}}
+		if err := e.Validate(); err != nil {
+			t.Errorf("max_targets_%s: %v", key, err)
+		}
+	}
+	for _, key := range []string{"max_targets_foo", "max_targets_icmp_ping", "max_targets_snmp", "max_targets_twamp"} {
+		e := Entitlement{FeatureKey: FeatureMonitoring, Plan: PlanStandard, Enabled: true, Limits: map[string]int64{key: 1}}
+		var verr *ValidationError
+		if err := e.Validate(); !errors.As(err, &verr) || verr.Field != "limits" {
+			t.Errorf("%s: %v, want a ValidationError on limits", key, err)
+		}
+		if _, known := QuotaFeatureOf(key); known {
+			t.Errorf("QuotaFeatureOf(%s) known", key)
+		}
+	}
+}
+
+// targetQuotaLiteral finds max_targets_<type> keys in package defaults and
+// seeds.
+var targetQuotaLiteral = regexp.MustCompile(`max_targets_[a-z][a-z0-9_]*`)
+
+// TestPackageTargetQuotaKeysAreRegistryKeys covers AK7 of WP-934: every
+// max_targets_<type> in the package defaults and the entitlement seeds
+// (WP-881) names a register key; long forms such as max_targets_icmp_ping
+// fail.
+func TestPackageTargetQuotaKeysAreRegistryKeys(t *testing.T) {
+	var found []string
+	for _, quotas := range planQuotaDefaults {
+		for quota := range quotas {
+			if strings.HasPrefix(quota, TargetTypeQuotaPrefix) {
+				found = append(found, "planQuotaDefaults: "+quota)
+			}
+		}
+	}
+	for _, pattern := range []string{
+		"*.go", "../../cmd/seed/*.go", "../../cmd/audit-seed/*.go", "../signup/*.go", "../../migrations/*.sql",
+	} {
+		files, err := filepath.Glob(pattern)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range files {
+			if strings.HasSuffix(f, "_test.go") {
+				continue
+			}
+			b, err := os.ReadFile(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, m := range targetQuotaLiteral.FindAllString(string(b), -1) {
+				found = append(found, f+": "+m)
+			}
+		}
+	}
+	for _, f := range found {
+		_, quota, _ := strings.Cut(f, ": ")
+		if !IsTargetTypeQuota(quota) {
+			t.Errorf("%s names no probe type of the register", f)
+		}
+	}
+	// The check itself catches a long form.
+	if IsTargetTypeQuota("max_targets_icmp_ping") || !IsTargetTypeQuota("max_targets_icmp") {
+		t.Fatal("IsTargetTypeQuota does not follow the register")
+	}
+}
+
+// TestCheckInterval covers AK6 of WP-881: an interval below
+// min_probe_interval_s is a 422 on interval_s; equal and above pass; without
+// a stored value every interval passes.
+func TestCheckInterval(t *testing.T) {
+	repo := NewMemoryRepository()
+	svc := NewService(repo, Options{Enforce: true})
+	ctx := context.Background()
+	if _, err := repo.Upsert(ctx, &Entitlement{OrganizationID: "o", FeatureKey: FeatureMonitoring, Plan: PlanStandard, Enabled: true,
+		Limits: map[string]int64{LimitMinProbeIntervalS: 30}}); err != nil {
+		t.Fatal(err)
+	}
+	var fe *api.FieldError
+	if err := svc.CheckInterval(ctx, "o", 29); !errors.As(err, &fe) || fe.Field != "interval_s" || fe.Status != http.StatusUnprocessableEntity {
+		t.Errorf("29 s: %v, want 422 on interval_s", err)
+	}
+	for _, sec := range []int{30, 60} {
+		if err := svc.CheckInterval(ctx, "o", sec); err != nil {
+			t.Errorf("%d s: %v", sec, err)
+		}
+	}
+	if _, err := repo.Upsert(ctx, &Entitlement{OrganizationID: "p", FeatureKey: FeatureMonitoring, Plan: PlanStandard, Enabled: true,
+		Limits: map[string]int64{}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.CheckInterval(ctx, "p", 1); err != nil {
+		t.Errorf("without min_probe_interval_s: %v", err)
+	}
+}
+
+// TestLimitOrigin covers AK4 of WP-881.
+func TestLimitOrigin(t *testing.T) {
+	v := func(n int64) *int64 { return &n }
+	for _, c := range []struct {
+		plan  Plan
+		quota string
+		value *int64
+		want  string
+	}{
+		{PlanStandard, LimitMaxCIs, v(2500), "plan"},
+		{PlanStandard, LimitMaxCIs, v(3000), "override"},
+		{PlanStandard, LimitMaxCIs, nil, "override"},
+		{PlanEnterprise, LimitMaxUsers, nil, "plan"},
+		{PlanEnterprise, LimitMaxUsers, v(10), "override"},
+	} {
+		if got := LimitOrigin(c.plan, c.quota, c.value); got != c.want {
+			t.Errorf("LimitOrigin(%s, %s, %v) = %s, want %s", c.plan, c.quota, c.value, got, c.want)
+		}
+	}
+}
+
+// planRows are the rows the creation of an organization of the plan
+// stores: every feature with origin plan and the default limits.
+func planRows(plan Plan) []Entitlement {
+	defaults := PlanQuotaDefaults(plan)
+	var rows []Entitlement
+	for _, f := range PlanFeatures(plan) {
+		limits := map[string]int64{}
+		for quota, value := range defaults {
+			if feature, _ := QuotaFeatureOf(quota); feature == f {
+				limits[quota] = value
+			}
+		}
+		rows = append(rows, Entitlement{OrganizationID: "org-1", FeatureKey: f, Plan: plan, Enabled: true,
+			Limits: limits, Source: "manual", Origin: OriginPlan})
+	}
+	return rows
+}
+
+// applyTransition writes the rows of PlanTransition over rows.
+func applyTransition(rows, written []Entitlement) []Entitlement {
+	out := slices.Clone(rows)
+	for _, w := range written {
+		i := slices.IndexFunc(out, func(e Entitlement) bool { return e.FeatureKey == w.FeatureKey })
+		if i < 0 {
+			out = append(out, w)
+			continue
+		}
+		out[i] = w
+	}
+	return out
+}
+
+// TestPlanTransitionFollowsMatrix covers PKG-01/PKG-02 (WP-882) for all 16
+// pairs of the four plans: after the transition the rows of origin plan are
+// exactly PlanFeatures(to) enabled, every other row of origin plan disabled
+// but kept, every row carries the new plan, the limits are the defaults of
+// the new plan, and add-on and manual rows are never written. A second
+// transition to the same plan writes nothing.
+func TestPlanTransitionFollowsMatrix(t *testing.T) {
+	plans := []Plan{PlanEssential, PlanStandard, PlanPro, PlanEnterprise}
+	extra := []Entitlement{
+		{FeatureKey: FeatureIGA, Plan: PlanEssential, Enabled: true, Limits: map[string]int64{}, Origin: OriginAddon},
+		{FeatureKey: FeatureMonitoringNetwork, Plan: PlanEssential, Enabled: true, Limits: map[string]int64{}, Origin: OriginManual},
+	}
+	for _, from := range plans {
+		for _, to := range plans {
+			rows := append(planRows(from), extra...)
+			if from == PlanPro || from == PlanEnterprise {
+				rows = planRows(from) // monitoring_network is a plan row there
+				rows = append(rows, extra[0])
+			}
+			written := PlanTransition(from, to, rows, TransitionOptions{})
+			for i := range written {
+				if written[i].Origin != OriginPlan {
+					t.Errorf("%s→%s writes the %s row %s", from, to, written[i].Origin, written[i].FeatureKey)
+				}
+			}
+			after := applyTransition(rows, written)
+			if len(after) < len(rows) {
+				t.Errorf("%s→%s deletes rows", from, to)
+			}
+			mismatch := PlanMismatch(to, after)
+			if len(mismatch) != 0 {
+				t.Errorf("%s→%s: rows deviating from the matrix %v", from, to, mismatch)
+			}
+			wantDefaults := PlanQuotaDefaults(to)
+			for i := range after {
+				row := &after[i]
+				switch row.Origin {
+				case OriginAddon, OriginManual:
+					if !row.Enabled || row.Plan != PlanEssential {
+						t.Errorf("%s→%s changed the %s row %+v", from, to, row.Origin, row)
+					}
+					continue
+				}
+				if in := slices.Contains(PlanFeatures(to), row.FeatureKey); row.Enabled != in || row.Plan != to {
+					t.Errorf("%s→%s: %s enabled %v plan %s", from, to, row.FeatureKey, row.Enabled, row.Plan)
+				}
+				if !row.Enabled {
+					continue
+				}
+				for quota, value := range row.Limits {
+					if def, ok := wantDefaults[quota]; !ok || def != value {
+						t.Errorf("%s→%s: %s.%s = %d, want the default of %s", from, to, row.FeatureKey, quota, value, to)
+					}
+				}
+				for quota, def := range wantDefaults {
+					if f, _ := QuotaFeatureOf(quota); f == row.FeatureKey && row.Limits[quota] != def {
+						t.Errorf("%s→%s: %s.%s missing, want %d", from, to, row.FeatureKey, quota, def)
+					}
+				}
+			}
+			if again := PlanTransition(to, to, after, TransitionOptions{}); len(again) != 0 {
+				t.Errorf("%s→%s→%s writes %d rows again", from, to, to, len(again))
+			}
+		}
+	}
+}
+
+// TestPlanTransitionKeepsOverrides covers the limit rule (WP-882): an
+// override stays, a value equal to the old default and a missing value take
+// the new default, a quota the new plan has no default for goes; with
+// ResetLimits (WP-884) every quota takes the new default.
+func TestPlanTransitionKeepsOverrides(t *testing.T) {
+	rows := planRows(PlanStandard)
+	for i := range rows {
+		switch rows[i].FeatureKey {
+		case FeatureCMDBCore:
+			rows[i].Limits[LimitMaxCIs] = 3000
+			delete(rows[i].Limits, LimitMaxUsers)
+		}
+	}
+	limitsOf := func(written []Entitlement, feature string) map[string]int64 {
+		for i := range written {
+			if written[i].FeatureKey == feature {
+				return written[i].Limits
+			}
+		}
+		return nil
+	}
+	written := PlanTransition(PlanStandard, PlanPro, rows, TransitionOptions{})
+	core := limitsOf(written, FeatureCMDBCore)
+	if core[LimitMaxCIs] != 3000 || core[LimitMaxUsers] != 100 {
+		t.Errorf("cmdb_core limits after standard→pro: %v, want max_cis 3000 (override), max_users 100", core)
+	}
+	if mon := limitsOf(written, FeatureMonitoring); mon[LimitMaxMonitoredTargets] != 5000 || mon[LimitMinProbeIntervalS] != 30 {
+		t.Errorf("monitoring limits after standard→pro: %v", mon)
+	}
+	written = PlanTransition(PlanStandard, PlanEnterprise, rows, TransitionOptions{})
+	if core = limitsOf(written, FeatureCMDBCore); core[LimitMaxCIs] != 3000 {
+		t.Errorf("standard→enterprise: %v, want max_cis 3000", core)
+	} else if _, ok := core[LimitMaxUsers]; ok {
+		t.Errorf("standard→enterprise keeps max_users although enterprise is unlimited: %v", core)
+	}
+	if docs := limitsOf(written, FeatureDocuments); len(docs) != 0 {
+		t.Errorf("standard→enterprise documents limits %v, want unlimited", docs)
+	}
+
+	written = PlanTransition(PlanStandard, PlanEssential, rows, TransitionOptions{ResetLimits: true})
+	if core = limitsOf(written, FeatureCMDBCore); core[LimitMaxCIs] != 500 || core[LimitMaxUsers] != 5 {
+		t.Errorf("reset to essential: %v, want the defaults", core)
+	}
+	if mon := limitsOf(written, FeatureMonitoring); mon[LimitMaxMonitoredTargets] != 500 {
+		t.Errorf("a disabled row keeps its limits: %v", mon)
+	}
+}
+
+// TestChangePlanWritesTheTransition covers Service.ChangePlan on the memory
+// store: the plan is stored, only the changed rows are written, Changed
+// names keys and quotas, the same plan is a no-op.
+func TestChangePlanWritesTheTransition(t *testing.T) {
+	repo := NewMemoryRepository()
+	svc := NewService(repo, Options{Enforce: true})
+	ctx := context.Background()
+	for _, row := range planRows(PlanEssential) {
+		if _, err := svc.Grant(ctx, &row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := repo.SetOrganizationPlan(ctx, "org-1", PlanEssential); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := svc.Check(ctx, "org-1", FeatureMonitoring); ok {
+		t.Fatal("essential is entitled to monitoring")
+	}
+	change, err := svc.ChangePlan(ctx, "org-1", PlanStandard, TransitionOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if change.Unchanged || change.From != PlanEssential || change.To != PlanStandard || change.ChangedAt == nil {
+		t.Errorf("change %+v", change)
+	}
+	if !slices.Contains(change.Changed, FeatureMonitoring) || !slices.Contains(change.Changed, LimitMaxCIs) {
+		t.Errorf("changed %v, want monitoring and max_cis", change.Changed)
+	}
+	if _, ok, _ := svc.Check(ctx, "org-1", FeatureMonitoring); !ok {
+		t.Error("monitoring is not entitled right after the change (cache)")
+	}
+	if plan, _, _ := svc.OrganizationPlan(ctx, "org-1"); plan != PlanStandard {
+		t.Errorf("organization plan %s", plan)
+	}
+	same, err := svc.ChangePlan(ctx, "org-1", PlanStandard, TransitionOptions{})
+	if err != nil || !same.Unchanged || len(same.Written) != 0 {
+		t.Errorf("same plan: %+v, %v", same, err)
+	}
+}
+
+// TestActiveUntilExpiry covers the expiry check of the monitoring
+// suspension (WP-942): an expired monitoring row is not active on the clock
+// of the service, unlike Status; without enforcement every feature is.
+func TestActiveUntilExpiry(t *testing.T) {
+	ctx := context.Background()
+	until := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+	repo := NewMemoryRepository()
+	if _, err := repo.Upsert(ctx, &Entitlement{OrganizationID: "o", FeatureKey: FeatureMonitoringAccess,
+		Plan: PlanStandard, Enabled: true, ValidUntil: &until}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name    string
+		enforce bool
+		now     time.Time
+		want    bool
+	}{
+		{"before valid_until", true, until.Add(-time.Hour), true},
+		{"after valid_until", true, until.Add(time.Hour), false},
+		{"after valid_until without enforcement", false, until.Add(time.Hour), true},
+	} {
+		svc := NewService(repo, Options{Enforce: c.enforce})
+		svc.now = func() time.Time { return c.now }
+		if got, err := svc.ActiveUntilExpiry(ctx, "o", FeatureMonitoringAccess); err != nil || got != c.want {
+			t.Errorf("%s: %v %v, want %v", c.name, got, err, c.want)
+		}
+		if _, status, _ := svc.Status(ctx, "o", FeatureMonitoringAccess); status != StatusActive {
+			t.Errorf("%s: Status %s, want active (only discovery stops at expiry)", c.name, status)
+		}
+	}
+	missing := NewService(repo, Options{Enforce: true})
+	if got, _ := missing.ActiveUntilExpiry(ctx, "o", FeatureMonitoringNetwork); got {
+		t.Error("a missing row is active")
+	}
 }

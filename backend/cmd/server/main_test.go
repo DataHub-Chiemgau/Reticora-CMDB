@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -24,24 +25,35 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/admp"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/compliance"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/maintenance"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/operator"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/probe"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenantapi"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/vulnfeed"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
 )
 
 func testSessionKeyPath(t *testing.T) string {
@@ -477,16 +489,287 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 		{"route audit intents (AUD-07, WP-504)", audit.RouteIntentsKind},
 		{"timeout reaper of the jobs (JOB-01, WP-503)", jobs.ReapKind},
 		{"notification digests (NTF-04, WP-508)", notify.DigestKind},
+		{"trial end (ENT-07, WP-884)", operator.TrialEndKind},
+		{"credential age check (CRD-05, WP-897)", credential.AgeCheckKind},
+		{"retention of the configuration versions (ALR-07, WP-1052)", jobs.RetentionConfigSnapshot},
+		{"retention of the workflow runs (WFL-02, E-241, WP-1093)", jobs.RetentionWorkflowRuns},
 	} {
 		if !registered[job.kind] {
 			t.Errorf("JOB-02 %s: kind %s is not registered (registered: %v)", job.requirement, job.kind, registered)
 		}
 	}
 
+	// The cleanup of the full exports (TLC-05, WP-1151): hourly with the
+	// module org_lifecycle and the database; without the module not.
+	lifecycleModules, err := server.ParseModules("org_lifecycle")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, withDB := range []bool{true, false} {
+		deps := systemJobTestDeps(t, cfg, withDB)
+		deps.modules = lifecycleModules
+		kinds := registeredSystemJobs(t, deps)
+		if kinds[export.OrgExportCleanupKind] != withDB {
+			t.Errorf("JOB-02 cleanup of the full exports (TLC-05) with the module org_lifecycle (database %v): registered %v",
+				withDB, kinds[export.OrgExportCleanupKind])
+		}
+		// The purge of deleted organizations (TLC-06, WP-1154): hourly.
+		if kinds[tenantapi.OrgPurgeKind] != withDB {
+			t.Errorf("JOB-02 purge of deleted organizations (TLC-06) with the module org_lifecycle (database %v): registered %v",
+				withDB, kinds[tenantapi.OrgPurgeKind])
+		}
+		for _, job := range systemJobs(deps) {
+			if job.Kind == export.OrgExportCleanupKind && job.Spec != "23 * * * *" {
+				t.Errorf("%s: spec %q, want hourly 23 * * * *", job.Kind, job.Spec)
+			}
+			if job.Kind == tenantapi.OrgPurgeKind && job.Spec != "41 * * * *" {
+				t.Errorf("%s: spec %q, want hourly 41 * * * *", job.Kind, job.Spec)
+			}
+		}
+	}
+	noLifecycle, err := server.ParseModules(server.ModuleMonitoring)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deps := systemJobTestDeps(t, cfg, true)
+	deps.modules = noLifecycle
+	if kinds := registeredSystemJobs(t, deps); kinds[export.OrgExportCleanupKind] || kinds[tenantapi.OrgPurgeKind] {
+		t.Errorf("without the module org_lifecycle %s or %s is registered", export.OrgExportCleanupKind, tenantapi.OrgPurgeKind)
+	}
+
+	// The alarm retention (ALR-01, WP-981): alarm.retention daily with the
+	// module monitoring and the database; without the module or the
+	// database not.
+	if registered[alarm.RetentionKind] {
+		t.Errorf("without the module monitoring %s is registered", alarm.RetentionKind)
+	}
+	monitoringModules, err := server.ParseModules(server.ModuleMonitoring)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The boundaries of the maintenance windows (ALR-11, MGT-04, WP-1033):
+	// every minute with the module maintenance and the database.
+	maintenanceModules, err := server.ParseModules("maintenance")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, withDB := range []bool{true, false} {
+		deps := systemJobTestDeps(t, cfg, withDB)
+		deps.modules = maintenanceModules
+		if kinds := registeredSystemJobs(t, deps); kinds[maintenance.BoundariesKind] != withDB {
+			t.Errorf("JOB-02 maintenance boundaries (ALR-11) with the module maintenance (database %v): registered %v",
+				withDB, kinds[maintenance.BoundariesKind])
+		}
+		for _, job := range systemJobs(deps) {
+			if job.Kind == maintenance.BoundariesKind && (job.Spec != "@every 1m" || job.MaxCatchUp != 1) {
+				t.Errorf("%s: spec %q, max catch-up %d; want @every 1m and 1", job.Kind, job.Spec, job.MaxCatchUp)
+			}
+		}
+	}
+	for _, withDB := range []bool{true, false} {
+		deps := systemJobTestDeps(t, cfg, withDB)
+		deps.modules = monitoringModules
+		kinds := registeredSystemJobs(t, deps)
+		if kinds[alarm.RetentionKind] != withDB {
+			t.Errorf("JOB-02 alarm retention (ALR-01) with the module monitoring (database %v): registered %v",
+				withDB, kinds[alarm.RetentionKind])
+		}
+		for _, job := range systemJobs(deps) {
+			if job.Kind == alarm.RetentionKind && (job.Spec != "37 4 * * *" || job.MaxCatchUp != 1) {
+				t.Errorf("%s: spec %q, max catch-up %d; want daily 37 4 * * * and 1", job.Kind, job.Spec, job.MaxCatchUp)
+			}
+			if job.Kind == probe.AssignKind && job.Spec != "@every 5s" {
+				t.Errorf("%s: spec %q, want @every 5s", job.Kind, job.Spec)
+			}
+		}
+		// The probe assignment (PRB-03, WP-941): probe.assign with the
+		// module monitoring and the database, the worker probe_assign.
+		if kinds[probe.AssignKind] != withDB {
+			t.Errorf("JOB-02 probe assignment (PRB-03) with the module monitoring (database %v): registered %v",
+				withDB, kinds[probe.AssignKind])
+		}
+		// The boundaries of the maintenance windows (ALR-11, WP-1033) need
+		// the module maintenance: not with monitoring alone.
+		if kinds[maintenance.BoundariesKind] {
+			t.Errorf("JOB-02 %s is registered without the module maintenance", maintenance.BoundariesKind)
+		}
+		// The results of the subnet scan (IPM-11, WP-1063) need the module
+		// ipam: not with monitoring alone.
+		if kinds[ipam.ScanApplyKind] {
+			t.Errorf("JOB-02 %s is registered without the module ipam", ipam.ScanApplyKind)
+		}
+		// The probe suspension (PKG-09, WP-942): every minute with the
+		// module monitoring and the database.
+		if kinds[probe.SuspendKind] != withDB {
+			t.Errorf("JOB-02 probe suspension (PKG-09) with the module monitoring (database %v): registered %v",
+				withDB, kinds[probe.SuspendKind])
+		}
+		for _, job := range systemJobs(deps) {
+			if job.Kind == probe.SuspendKind && (job.Spec != "@every 1m" || job.MaxCatchUp != 1) {
+				t.Errorf("%s: spec %q, max catch-up %d; want @every 1m and 1", job.Kind, job.Spec, job.MaxCatchUp)
+			}
+		}
+		// The dispatch of the automatic ping probes (MON-02, WP-949): every
+		// 15 minutes with the module monitoring, the database and the job
+		// queue.
+		if kinds[probe.AutocreateDispatchKind] {
+			t.Errorf("%s is registered without the job queue", probe.AutocreateDispatchKind)
+		}
+		deps.jobQueue = jobs.NewQueue(jobs.NewService(deps.repos.Jobs), nil)
+		queued := registeredSystemJobs(t, deps)
+		if queued[probe.AutocreateDispatchKind] != withDB {
+			t.Errorf("JOB-02 autocreate dispatch (MON-02) with the module monitoring and the job queue (database %v): registered %v",
+				withDB, queued[probe.AutocreateDispatchKind])
+		}
+		for _, job := range systemJobs(deps) {
+			if job.Kind == probe.AutocreateDispatchKind && job.Spec != "@every 15m" {
+				t.Errorf("%s: spec %q, want @every 15m", job.Kind, job.Spec)
+			}
+		}
+	}
+	if registered[probe.AssignKind] {
+		t.Errorf("without the module monitoring %s is registered", probe.AssignKind)
+	}
+	// The results of the subnet scan (IPM-11, WP-1063): ipam.scan.apply
+	// every minute with the module ipam and the database, the worker
+	// ipam_scan_apply; switched off not registered.
+	if registered[ipam.ScanApplyKind] {
+		t.Errorf("without the module ipam %s is registered", ipam.ScanApplyKind)
+	}
+	ipamModules, err := server.ParseModules("ipam")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, withDB := range []bool{true, false} {
+		deps := systemJobTestDeps(t, cfg, withDB)
+		deps.modules = ipamModules
+		if kinds := registeredSystemJobs(t, deps); kinds[ipam.ScanApplyKind] != withDB {
+			t.Errorf("JOB-02 subnet scan results (IPM-11) with the module ipam (database %v): registered %v",
+				withDB, kinds[ipam.ScanApplyKind])
+		}
+		for _, job := range systemJobs(deps) {
+			if job.Kind == ipam.ScanApplyKind && (job.Spec != "@every 1m" || job.MaxCatchUp != 1) {
+				t.Errorf("%s: spec %q, max catch-up %d; want @every 1m and 1", job.Kind, job.Spec, job.MaxCatchUp)
+			}
+		}
+	}
+	t.Run("ipam_scan_apply off", func(t *testing.T) {
+		t.Setenv(config.WorkerEnvKey(config.WorkerIPAMScanApply), "false")
+		deps := systemJobTestDeps(t, config.Load(), true)
+		deps.modules = ipamModules
+		if registeredSystemJobs(t, deps)[ipam.ScanApplyKind] {
+			t.Errorf("%s is registered with its worker switched off", ipam.ScanApplyKind)
+		}
+	})
+	// The nightly compliance evaluation (SEC-03, WP-1126): with the module
+	// compliance and the database, daily 02:30.
+	if registered[compliance.NightlyKind] || registered[compliance.SnapshotKind] {
+		t.Errorf("without the module compliance %s or %s is registered", compliance.NightlyKind, compliance.SnapshotKind)
+	}
+	complianceModules, err := server.ParseModules("compliance")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, withDB := range []bool{true, false} {
+		deps := systemJobTestDeps(t, cfg, withDB)
+		deps.modules = complianceModules
+		kinds := registeredSystemJobs(t, deps)
+		if kinds[compliance.NightlyKind] != withDB {
+			t.Errorf("JOB-02 nightly compliance evaluation with the module compliance (database %v): registered %v",
+				withDB, kinds[compliance.NightlyKind])
+		}
+		// The daily score snapshot (WP-1127): with the module and the
+		// database, 04:30 after the nightly run.
+		if kinds[compliance.SnapshotKind] != withDB {
+			t.Errorf("JOB-02 compliance score snapshot with the module compliance (database %v): registered %v",
+				withDB, kinds[compliance.SnapshotKind])
+		}
+		for _, job := range systemJobs(deps) {
+			if job.Kind == compliance.NightlyKind && (job.Spec != "30 2 * * *" || job.MaxCatchUp != 1) {
+				t.Errorf("%s: spec %q, max catch-up %d; want 30 2 * * * and 1", job.Kind, job.Spec, job.MaxCatchUp)
+			}
+			if job.Kind == compliance.SnapshotKind && (job.Spec != "30 4 * * *" || job.MaxCatchUp != 1) {
+				t.Errorf("%s: spec %q, max catch-up %d; want 30 4 * * * and 1", job.Kind, job.Spec, job.MaxCatchUp)
+			}
+		}
+	}
+	// Its worker switch off: not registered.
+	t.Setenv(config.WorkerEnvKey(config.WorkerProbeAssign), "false")
+	offDeps := systemJobTestDeps(t, config.Load(), true)
+	offDeps.modules = monitoringModules
+	if registeredSystemJobs(t, offDeps)[probe.AssignKind] {
+		t.Errorf("%s is registered with %s=false", probe.AssignKind, config.WorkerEnvKey(config.WorkerProbeAssign))
+	}
+
+	// The serial sweep of the workflow runs (WFL-02, EVT-01, WP-1089) and
+	// the approval sweep (WFL-02, WP-1099): workflow.serial_sweep and
+	// workflow.approval_sweep every minute with the module workflows and
+	// the database; without the module or the database not.
+	for _, kind := range []string{workflow.SerialSweepKind, workflow.ApprovalSweepKind} {
+		if registered[kind] {
+			t.Errorf("without the module workflows %s is registered", kind)
+		}
+	}
+	workflowModules, err := server.ParseModules("workflows")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, withDB := range []bool{true, false} {
+		deps := systemJobTestDeps(t, cfg, withDB)
+		deps.modules = workflowModules
+		kinds := registeredSystemJobs(t, deps)
+		for _, kind := range []string{workflow.SerialSweepKind, workflow.ScheduleKind, workflow.ApprovalSweepKind} {
+			if kinds[kind] != withDB {
+				t.Errorf("JOB-02 %s (database %v): registered %v", kind, withDB, kinds[kind])
+			}
+		}
+		for _, job := range systemJobs(deps) {
+			if (job.Kind == workflow.SerialSweepKind || job.Kind == workflow.ScheduleKind || job.Kind == workflow.ApprovalSweepKind) &&
+				(job.Spec != "* * * * *" || job.MaxCatchUp != 1) {
+				t.Errorf("%s: spec %q, max catch-up %d; want every minute and 1", job.Kind, job.Spec, job.MaxCatchUp)
+			}
+			if job.Kind == workflow.ScheduleKind && job.Timeout != time.Minute {
+				t.Errorf("%s: timeout %v, want 1 min", job.Kind, job.Timeout)
+			}
+		}
+	}
+	// Workflow schedules (JOB-02 [P3], WP-1091): workflow.schedule runs
+	// with the module workflows only (checked above).
+	if registered[workflow.ScheduleKind] {
+		t.Errorf("without the module workflows %s is registered", workflow.ScheduleKind)
+	}
+
+	// The ADMP cache (ADM-03, WP-929): admp.refresh_linked every 15
+	// minutes and admp.expire hourly with the module admp, in both profiles
+	// (--no-db on the memory repositories); without the module neither.
+	if registered[admp.RefreshLinkedKind] || registered[admp.ExpireKind] {
+		t.Errorf("without the module admp its system jobs are registered: %v", registered)
+	}
+	admpModules, err := server.ParseModules("admp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, withDB := range []bool{true, false} {
+		deps := systemJobTestDeps(t, cfg, withDB)
+		deps.modules = admpModules
+		specs := map[string]string{}
+		for _, job := range systemJobs(deps) {
+			specs[job.Kind] = job.Spec
+		}
+		if specs[admp.RefreshLinkedKind] != "@every 15m" || specs[admp.ExpireKind] != "@every 1h" {
+			t.Errorf("with the module admp (database %v): refresh_linked %q, expire %q; want @every 15m and @every 1h",
+				withDB, specs[admp.RefreshLinkedKind], specs[admp.ExpireKind])
+		}
+		if kinds := registeredSystemJobs(t, deps); !kinds[admp.RefreshLinkedKind] || !kinds[admp.ExpireKind] {
+			t.Errorf("JOB-02 ADMP cache (database %v): not registered (registered: %v)", withDB, kinds)
+		}
+	}
+
 	// --no-db: the notice runs need the database and are not registered.
 	for kind := range registeredSystemJobs(t, systemJobTestDeps(t, cfg, false)) {
 		if kind == jobs.EntitlementNoticesKind || kind == jobs.CertificateNoticesKind || kind == audit.RouteIntentsKind ||
-			kind == jobs.ReapKind || kind == notify.DigestKind {
+			kind == jobs.ReapKind || kind == notify.DigestKind || kind == operator.TrialEndKind || kind == credential.AgeCheckKind ||
+			kind == jobs.RetentionConfigSnapshot {
 			t.Errorf("without a database %s is registered", kind)
 		}
 	}
@@ -881,5 +1164,134 @@ func TestInvitationMailerNeedsTheCentralSMTPServer(t *testing.T) {
 	}
 	if got, ok := invitationMailer(sender).(notify.InvitationMailer); !ok || got.Sender != sender {
 		t.Errorf("central SMTP: invitation mailer %#v, want notify.InvitationMailer over the central sender", got)
+	}
+}
+
+// TestVulnfeedCSAFJobRegistration covers WP-1118 AK4: vulnfeed.csaf runs
+// with the module findings and the database every
+// RETICORA_VULNFEED_CSAF_INTERVAL; without the module, without the
+// database or air-gapped without an explicit provider list it is not
+// registered.
+func TestVulnfeedCSAFJobRegistration(t *testing.T) {
+	t.Setenv("RETICORA_VULNFEED_CSAF_PROVIDERS", "")
+	t.Setenv("RETICORA_VULNFEED_CSAF_INTERVAL", "3h")
+	t.Setenv("RETICORA_AIR_GAPPED", "")
+	findings, err := server.ParseModules("findings")
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := func(withDB bool, modules *server.ModuleSet) map[string]string {
+		deps := systemJobTestDeps(t, config.Load(), withDB)
+		if modules != nil {
+			deps.modules = modules
+		}
+		out := map[string]string{}
+		for _, job := range systemJobs(deps) {
+			out[job.Kind] = job.Spec
+		}
+		return out
+	}
+	if spec := kinds(true, findings)[vulnfeed.CSAFKind]; spec != "@every 3h0m0s" {
+		t.Fatalf("with the module findings: %s spec %q, want @every 3h0m0s", vulnfeed.CSAFKind, spec)
+	}
+	if _, ok := kinds(true, nil)[vulnfeed.CSAFKind]; ok {
+		t.Errorf("without the module findings %s is registered", vulnfeed.CSAFKind)
+	}
+	if _, ok := kinds(false, findings)[vulnfeed.CSAFKind]; ok {
+		t.Errorf("without a database %s is registered", vulnfeed.CSAFKind)
+	}
+	if spec := kinds(true, findings)[vulnfeed.NVDKind]; spec != "@every 2h0m0s" {
+		t.Errorf("with the module findings: %s spec %q, want @every 2h0m0s", vulnfeed.NVDKind, spec)
+	}
+	if _, ok := kinds(true, nil)[vulnfeed.NVDKind]; ok {
+		t.Errorf("without the module findings %s is registered", vulnfeed.NVDKind)
+	}
+	t.Setenv("RETICORA_AIR_GAPPED", "true")
+	if _, ok := kinds(true, findings)[vulnfeed.NVDKind]; ok {
+		t.Errorf("air-gapped %s is registered", vulnfeed.NVDKind)
+	}
+	if _, ok := kinds(true, findings)[vulnfeed.CSAFKind]; ok {
+		t.Errorf("air-gapped without RETICORA_VULNFEED_CSAF_PROVIDERS %s is registered", vulnfeed.CSAFKind)
+	}
+	t.Setenv("RETICORA_VULNFEED_CSAF_PROVIDERS", "https://csaf-mirror.internal.example/.well-known/csaf/provider-metadata.json")
+	if _, ok := kinds(true, findings)[vulnfeed.CSAFKind]; !ok {
+		t.Errorf("air-gapped with an own mirror %s is not registered", vulnfeed.CSAFKind)
+	}
+}
+
+// TestWorkflowWorkerRunsUnderItsWorkerSwitch covers OPS-02 [P3] (WP-1114):
+// the worker workflow starts only with its switch and the module workflows
+// (matrix switch on/off × module on/off); only on/on consumes workflow.run,
+// in every other case the instance declares the kind and still queues runs.
+// The workers monitoring and workflow switch independently.
+func TestWorkflowWorkerRunsUnderItsWorkerSwitch(t *testing.T) {
+	for _, tc := range []struct {
+		switchOn bool
+		modules  string
+	}{{true, "workflows"}, {false, "workflows"}, {true, ""}, {false, ""}} {
+		t.Run(fmt.Sprintf("switch %v modules %q", tc.switchOn, tc.modules), func(t *testing.T) {
+			t.Setenv(config.WorkerEnvKey(config.WorkerWorkflow), strconv.FormatBool(tc.switchOn))
+			t.Setenv(config.WorkerEnvKey(config.WorkerMonitoring), "true")
+			cfg := config.Load()
+			mods, err := server.ParseModules(tc.modules)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := tc.switchOn && tc.modules == "workflows"
+			enabled := workerSwitch(cfg, mods)
+			if enabled(config.WorkerWorkflow) != want {
+				t.Fatalf("worker workflow starts %v, want %v", enabled(config.WorkerWorkflow), want)
+			}
+			repos := server.MemoryRepositories()
+			built, err := buildWorkers(&workerDeps{cfg: cfg, repos: &repos, cycle: testCycle, modules: mods})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.ContainsFunc(built, func(w server.Worker) bool { return w.Name == config.WorkerWorkflow }) {
+				t.Fatal("buildWorkers builds no worker workflow")
+			}
+			svc := jobs.NewService(repos.Jobs)
+			queue := jobs.NewQueue(svc, nil)
+			key, err := crypto.GenerateMasterKey()
+			if err != nil {
+				t.Fatal(err)
+			}
+			enc, err := crypto.NewEnvelopeEncryptor(key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ents := entitlement.NewService(repos.Entitlement, entitlement.Options{})
+			if _, _, err = server.NewRouter(repos, server.Options{Version: "wp-1114", Modules: mods, JobQueue: queue, Entitlements: ents,
+				CIService: ci.NewServiceWithLimits(repos.CI, ents), Credentials: credential.NewService(repos.Credential, enc),
+				WorkflowWorkerOff: !enabled(config.WorkerWorkflow), OIDC: identity.NewOIDCProvider(identity.OIDCConfig{})}); err != nil {
+				t.Fatal(err)
+			}
+			if queue.Handles(workflow.RunJobKind) != want {
+				t.Errorf("workflow.run consumed %v, want %v", queue.Handles(workflow.RunJobKind), want)
+			}
+			if _, _, err = queue.Submit(context.Background(), "org-1", workflow.RunJobKind, workflow.RunJobParams{RunID: "r"}, jobs.EnqueueOptions{}); err != nil {
+				t.Errorf("submit workflow.run: %v, want it queued for another instance", err)
+			}
+			// The reaper of this instance requeues a run of a lost worker
+			// for another instance instead of failing it.
+			if !jobRequeues(queue)(workflow.RunJobKind) {
+				t.Error("the reaper does not requeue workflow.run, want it requeued in every case")
+			}
+		})
+	}
+	// monitoring and workflow switch independently.
+	all, err := server.ParseModules("workflows,monitoring")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(config.WorkerEnvKey(config.WorkerWorkflow), "false")
+	t.Setenv(config.WorkerEnvKey(config.WorkerMonitoring), "true")
+	if e := workerSwitch(config.Load(), all); e(config.WorkerWorkflow) || !e(config.WorkerMonitoring) {
+		t.Errorf("workflow off, monitoring on: workflow %v, monitoring %v", e(config.WorkerWorkflow), e(config.WorkerMonitoring))
+	}
+	t.Setenv(config.WorkerEnvKey(config.WorkerWorkflow), "true")
+	t.Setenv(config.WorkerEnvKey(config.WorkerMonitoring), "false")
+	if e := workerSwitch(config.Load(), all); !e(config.WorkerWorkflow) || e(config.WorkerMonitoring) {
+		t.Errorf("workflow on, monitoring off: workflow %v, monitoring %v", e(config.WorkerWorkflow), e(config.WorkerMonitoring))
 	}
 }

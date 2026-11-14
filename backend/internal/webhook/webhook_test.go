@@ -676,7 +676,7 @@ func TestRegisteredTypesAreSubscribable(t *testing.T) {
 	if !maps.Equal(want, ValidEvents) {
 		t.Errorf("ValidEvents %v, want %v", slices.Sorted(maps.Keys(ValidEvents)), slices.Sorted(maps.Keys(want)))
 	}
-	for _, event := range []string{events.WebhookDead, events.APIKeyCreatorDeactivated, TestEvent, "maintenance.scheduled", "workflow.started", "finding.created"} {
+	for _, event := range []string{events.WebhookDead, events.APIKeyCreatorDeactivated, TestEvent, "workflow.started", "finding.updated", "maintenance.window_changed"} {
 		w := create(event)
 		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "invalid event") {
 			t.Errorf("subscribe %s: %d %s, want 400 invalid event", event, w.Code, w.Body.String())

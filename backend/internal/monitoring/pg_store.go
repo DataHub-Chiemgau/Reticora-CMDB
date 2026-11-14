@@ -78,47 +78,122 @@ func (h *PGHealthRefresher) RefreshHealth(ctx context.Context) error {
 // must belong to the caller's organization and name a CI visible under its
 // scope (or no CI). The batch is stored whole or not at all: a sample whose
 // CI is unknown, of another organization or outside the scope rolls back
-// the batch with an *UnknownCIError naming that ci_id (TEN-06, F-394).
+// the batch with an *UnknownCIError naming that ci_id (TEN-06, F-394). The
+// missing CIs are found with one statement first; the samples go in with
+// one bulk statement (InsertSamplesTx, WP-976).
 func (s *PGMetricStore) Ingest(ctx context.Context, metrics []Metric) error {
 	if len(metrics) == 0 {
 		return nil
 	}
 	orgID := metrics[0].OrgID
 	return database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
-		batch := &pgx.Batch{}
-		for _, m := range metrics {
+		// The ids in the canonical lower-case form that id::text returns
+		// (api.IsUUID also takes upper-case hex); errors name the id as
+		// the client sent it.
+		ids := make([]string, 0, len(metrics))
+		given := map[string]string{}
+		for i := range metrics {
+			m := &metrics[i]
 			if m.OrgID != orgID {
 				return fmt.Errorf("%w: %q", database.ErrTenantMismatch, m.OrgID)
 			}
-			ts := m.Timestamp
-			if ts.IsZero() {
-				ts = time.Now().UTC()
+			id := strings.ToLower(m.CIID)
+			if id == "" || given[id] != "" {
+				continue
 			}
-			labels := m.Labels
-			if labels == nil {
-				labels = map[string]string{}
+			if !api.IsUUID(m.CIID) {
+				// A malformed ci_id is a bad request (400), as with the
+				// cast of the former per-row insert, not an unknown CI.
+				return &InvalidMetricsError{Detail: "ci_id must be a UUID"}
 			}
-			batch.Queue(
-				`INSERT INTO metric_sample_v (time, organization_id, ci_id, metric_name, value, labels)
-				 SELECT $1, $2, NULLIF($3, '')::uuid, $4, $5, $6
-				 WHERE $3 = '' OR EXISTS (SELECT 1 FROM ci WHERE ci.id = NULLIF($3, '')::uuid)`,
-				ts.UTC(), m.OrgID, m.CIID, m.Name, m.Value, labels,
-			)
+			given[id] = m.CIID
+			ids = append(ids, id)
 		}
-		results := tx.SendBatch(ctx, batch)
-		for _, m := range metrics {
-			tag, err := results.Exec()
+		if len(ids) > 0 {
+			rows, err := tx.Query(ctx, `SELECT id::text FROM ci WHERE id = ANY ($1::uuid[])`, ids)
 			if err != nil {
-				_ = results.Close()
 				return fmt.Errorf("ingest metric sample: %w", err)
 			}
-			if tag.RowsAffected() == 0 {
-				_ = results.Close()
-				return &UnknownCIError{CIID: m.CIID}
+			visible, err := pgx.CollectRows(rows, pgx.RowTo[string])
+			if err != nil {
+				return fmt.Errorf("ingest metric sample: %w", err)
+			}
+			found := make(map[string]bool, len(visible))
+			for _, id := range visible {
+				found[id] = true
+			}
+			for _, id := range ids {
+				if !found[id] {
+					return &UnknownCIError{CIID: given[id]}
+				}
 			}
 		}
-		return results.Close()
+		n, err := InsertSamplesTx(ctx, tx, metrics)
+		if err != nil {
+			return err
+		}
+		if n != len(metrics) {
+			return &UnknownCIError{CIID: firstCI(metrics)}
+		}
+		return nil
 	})
+}
+
+// firstCI names the first ci_id of the samples (the refusal of a batch a
+// concurrent delete shortened).
+func firstCI(metrics []Metric) string {
+	for i := range metrics {
+		if metrics[i].CIID != "" {
+			return metrics[i].CIID
+		}
+	}
+	return ""
+}
+
+// InsertSamplesTx writes the samples in tx with one statement over
+// metric_sample_v (WP-976, MON-02): INSERT … SELECT … FROM unnest(…). A
+// sample whose CI the scope of the transaction does not see is not
+// written; it returns the number of written rows. Every sample belongs to
+// the organization of the first one.
+func InsertSamplesTx(ctx context.Context, tx pgx.Tx, metrics []Metric) (int, error) {
+	if len(metrics) == 0 {
+		return 0, nil
+	}
+	orgID := metrics[0].OrgID
+	times := make([]time.Time, len(metrics))
+	cis := make([]*string, len(metrics))
+	names := make([]string, len(metrics))
+	values := make([]float64, len(metrics))
+	labels := make([]map[string]string, len(metrics))
+	now := time.Now().UTC()
+	for i := range metrics {
+		m := &metrics[i]
+		if m.OrgID != orgID {
+			return 0, fmt.Errorf("%w: %q", database.ErrTenantMismatch, m.OrgID)
+		}
+		times[i] = m.Timestamp.UTC()
+		if m.Timestamp.IsZero() {
+			times[i] = now
+		}
+		if m.CIID != "" {
+			ci := m.CIID
+			cis[i] = &ci
+		}
+		names[i], values[i] = m.Name, m.Value
+		labels[i] = m.Labels
+		if labels[i] == nil {
+			labels[i] = map[string]string{}
+		}
+	}
+	tag, err := tx.Exec(ctx, `INSERT INTO metric_sample_v (time, organization_id, ci_id, metric_name, value, labels)
+		SELECT u.time, $1, u.ci_id, u.name, u.value, u.labels
+		  FROM unnest($2::timestamptz[], $3::uuid[], $4::text[], $5::float8[], $6::jsonb[]) AS u (time, ci_id, name, value, labels)
+		 WHERE u.ci_id IS NULL OR EXISTS (SELECT 1 FROM ci WHERE ci.id = u.ci_id)`,
+		orgID, times, cis, names, values, labels)
+	if err != nil {
+		return 0, fmt.Errorf("ingest metric samples: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
 }
 
 // Query returns raw samples in chronological order, or bucketed averages
@@ -265,4 +340,94 @@ func (s *PGMetricStore) CIVisible(ctx context.Context, orgID, ciID string) (bool
 		return tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM ci WHERE id = $1::uuid)`, ciID).Scan(&visible)
 	})
 	return visible, err
+}
+
+// LatestBySeries implements SeriesStore (WP-984, WP-985): in one statement
+// the latest sample of every series (CI and the values of the group_by
+// labels) of the metric in the window and its metric context (value, avg,
+// max, min, delta, rate over q.Window back from the latest sample), in the
+// tenant transaction of the organization through metric_sample_v. Samples
+// without CI form no series; the scope narrows the CIs (ids, types with
+// their subtypes, client, site) and the labels (equality), and only CIs
+// visible under the scope of the transaction count. The increase of the
+// rate adds every rise and, on a drop (counter reset), the new value.
+func (s *PGMetricStore) LatestBySeries(ctx context.Context, q *SeriesQuery) ([]SeriesPoint, error) {
+	args := []any{q.OrgID, q.Name, q.From.UTC(), q.To.UTC(), groupByOf(q.GroupBy), intervalLiteral(q.Window)}
+	arg := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	where := []string{"s.organization_id = $1", "s.metric_name = $2", "s.time >= $3", "s.time <= $4", "s.ci_id IS NOT NULL"}
+	ciWhere := []string{"c.id = s.ci_id"}
+	if len(q.Scope.CIIDs) > 0 {
+		where = append(where, "s.ci_id = ANY("+arg(q.Scope.CIIDs)+"::uuid[])")
+	}
+	if len(q.Scope.CITypeIDs) > 0 {
+		ciWhere = append(ciWhere, "c.ci_type_id IN (SELECT st.id FROM unnest("+arg(q.Scope.CITypeIDs)+
+			"::uuid[]) AS t(id), LATERAL ci_type_subtree(t.id) st)")
+	}
+	if q.Scope.ClientID != "" {
+		ciWhere = append(ciWhere, "c.client_id = "+arg(q.Scope.ClientID)+"::uuid")
+	}
+	if q.Scope.SiteID != "" {
+		ciWhere = append(ciWhere, "c.site_id = "+arg(q.Scope.SiteID)+"::uuid")
+	}
+	if len(q.Scope.Labels) > 0 {
+		where = append(where, "s.labels @> "+arg(q.Scope.Labels)+"::jsonb")
+	}
+	// The ci policy filters the semi-join, so samples of CIs outside the
+	// transaction's scope drop out (as in metricWhere).
+	where = append(where, "EXISTS (SELECT 1 FROM ci c WHERE "+strings.Join(ciWhere, " AND ")+")")
+	query := `WITH x AS (
+		SELECT s.ci_id, s.time, s.value,
+		       COALESCE((SELECT jsonb_object_agg(k, s.labels->>k) FROM unnest($5::text[]) AS k WHERE s.labels ? k),
+		                '{}'::jsonb) AS series
+		  FROM metric_sample_v s
+		 WHERE ` + strings.Join(where, " AND ") + `
+	), w AS (
+		SELECT x.*, max(x.time) OVER (PARTITION BY x.ci_id, x.series) AS last_time FROM x
+	), y AS (
+		SELECT w.ci_id, w.series, w.time, w.value,
+		       lag(w.value) OVER (PARTITION BY w.ci_id, w.series ORDER BY w.time) AS prev
+		  FROM w WHERE w.time >= w.last_time - $6::interval
+	)
+	SELECT y.ci_id::text, y.series, max(y.time),
+	       (array_agg(y.value ORDER BY y.time DESC))[1],
+	       avg(y.value), max(y.value), min(y.value),
+	       (array_agg(y.value ORDER BY y.time DESC))[1] - (array_agg(y.value ORDER BY y.time ASC))[1],
+	       COALESCE(sum(CASE WHEN y.prev IS NULL THEN 0 WHEN y.value >= y.prev THEN y.value - y.prev ELSE y.value END), 0),
+	       EXTRACT(EPOCH FROM max(y.time) - min(y.time))::float8,
+	       count(*)
+	  FROM y GROUP BY y.ci_id, y.series ORDER BY y.ci_id, y.series`
+	var out []SeriesPoint
+	err := database.WithRequestTenant(ctx, s.pool, q.OrgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, query, args...)
+		if err != nil {
+			return fmt.Errorf("latest samples by series: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var (
+				p              SeriesPoint
+				increase, span float64
+			)
+			c := &p.Context
+			if err := rows.Scan(&p.CIID, &p.Labels, &p.Timestamp, &p.Value, &c.Avg, &c.Max, &c.Min, &c.Delta,
+				&increase, &span, &c.Samples); err != nil {
+				return fmt.Errorf("scan series sample: %w", err)
+			}
+			c.Value = p.Value
+			if span > 0 {
+				rate := increase / span
+				c.Rate = &rate
+			}
+			if p.Labels == nil {
+				p.Labels = map[string]string{}
+			}
+			p.Timestamp = p.Timestamp.UTC()
+			out = append(out, p)
+		}
+		return rows.Err()
+	})
+	return out, err
 }

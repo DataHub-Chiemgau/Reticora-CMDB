@@ -66,6 +66,7 @@ func (h *Handler) ReviewService() *reviews.Service {
 		svc.WithEffect(ReviewKindScopeSuggested, h.resolveScopeSuggested)
 		svc.WithEffect(ReviewKindUnknownRelationship, h.resolveUnknownRelationship)
 		svc.WithEffect(reviews.KindDuplicateIP, h.resolveDuplicateIP)
+		svc.WithEffect(reviews.KindIPBindingConflict, h.resolveBindingConflict)
 		if h.reviewNotifier != nil {
 			svc.WithNotifier(afterCommitNotifier{next: h.reviewNotifier})
 		}
@@ -645,6 +646,50 @@ func (h *Handler) resolveDuplicateIP(ctx context.Context, item *ReviewItem, res 
 		return false, err
 	}
 	res.Note = "reservation " + reservationID + " of " + payloadString(item.Payload, "address") + " released, observation accepted"
+	return false, nil
+}
+
+// addressBinder moves a pinned address to an observed interface and
+// releases its pin (IPM-14, WP-914); the PostgreSQL IPAM repository
+// implements it.
+type addressBinder interface {
+	BindObservedAddress(ctx context.Context, orgID, ipID, interfaceID, pinnedCIID string) error
+}
+
+// resolveBindingConflict carries out accept of an ip_binding_conflict item
+// (IPM-14, E-216) in the resolution transaction (WP-675): the pinned address
+// moves to the observed interface, its CI follows (WP-911), the pin is
+// released and the IPAM history names the source discovery. Dismiss keeps
+// the pinned binding. A refused accept leaves the item open (WP-676): 422
+// when the address or the interface is gone, the address is no longer
+// pinned to pinned_ci_id or the interface already holds the address, 501 on a server without
+// IPAM repository.
+func (h *Handler) resolveBindingConflict(ctx context.Context, item *ReviewItem, res *Resolution) (bool, error) {
+	if res.Action != reviews.ActionAccept {
+		res.Note = "pinned binding kept"
+		return false, nil
+	}
+	binder, ok := h.interfaces.(addressBinder)
+	if !ok {
+		return false, refused(http.StatusNotImplemented, "this server cannot bind addresses")
+	}
+	ipID, interfaceID := payloadString(item.Payload, "ip_address_id"), payloadString(item.Payload, "observed_interface_id")
+	pinnedCIID := payloadString(item.Payload, "pinned_ci_id")
+	if !api.IsUUID(ipID) || !api.IsUUID(interfaceID) || !api.IsUUID(pinnedCIID) {
+		return false, refused(http.StatusUnprocessableEntity, "the item names no address or interface")
+	}
+	if err := binder.BindObservedAddress(ctx, item.OrganizationID, ipID, interfaceID, pinnedCIID); err != nil {
+		if errors.Is(err, ipam.ErrNotFound) {
+			return false, refused(http.StatusUnprocessableEntity, "the address or the observed interface is gone; dismiss the item")
+		}
+		var fe *api.FieldError
+		if errors.As(err, &fe) {
+			return false, refused(http.StatusUnprocessableEntity, fe.Message)
+		}
+		return false, err
+	}
+	res.Note = payloadString(item.Payload, "address") + " bound to interface " + interfaceID + " of CI " +
+		payloadString(item.Payload, "observed_ci_id") + ", pin released"
 	return false, nil
 }
 

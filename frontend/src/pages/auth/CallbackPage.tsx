@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { AuthCard } from '../../components/shell/AuthCard';
 import {
   AuthCallbackError,
   clearAuthTransaction,
   completeAuthorizationCodeFlow,
+  pendingAuthKind,
 } from '../../auth/oidc';
 
 // The refused logins the server names by problem type (F-197): each has its
@@ -31,10 +32,18 @@ export function CallbackPage() {
     }
 
     processed.current = true;
+    // An operator login (WP-887) ends at the operator callback; its refusal
+    // names no cause (not in the group operators or without a second factor).
+    const kind = pendingAuthKind();
     completeAuthorizationCodeFlow(location.search)
       .then(({ returnTo }) => navigate(returnTo || '/dashboard', { replace: true }))
       .catch((err) => {
         clearAuthTransaction();
+        if (kind === 'operator') {
+          const unavailable = err instanceof AuthCallbackError && err.status === 503;
+          setError(t(unavailable ? 'operator.login.unavailable' : 'operator.login.refused'));
+          return;
+        }
         if (err instanceof AuthCallbackError) {
           // Any other answer of the server is shown as the general error;
           // its detail is technical.

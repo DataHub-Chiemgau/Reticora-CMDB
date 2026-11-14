@@ -105,7 +105,11 @@ func (a *assetResolver) Cis(ctx context.Context, obj *asset.Asset, first *int) (
 	if err != nil {
 		return nil, err
 	}
-	return firstCIs(items, first), nil
+	out := firstCIs(items, first)
+	if l := loaderFrom(ctx); l != nil {
+		l.registerSiblings(out)
+	}
+	return out, nil
 }
 
 // Children reads the child CIs of all CIs of the asset in one query
@@ -127,7 +131,9 @@ func (a *assetResolver) Children(ctx context.Context, obj *asset.Asset, first *i
 	if err != nil {
 		return nil, err
 	}
-	return firstCIs(kids, first), nil
+	out := firstCIs(kids, first)
+	l.registerSiblings(out)
+	return out, nil
 }
 
 // Movements pages the movements of the asset newest first with the keyset

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, Handshake, Pencil, Plus, Trash2 } from 'lucide-react';
 import {

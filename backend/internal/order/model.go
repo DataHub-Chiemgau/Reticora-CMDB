@@ -114,13 +114,17 @@ type Order struct {
 	// TargetLocationID is the bin the goods receipt books into (WP-847):
 	// a location of kind bin within the scope and, for an order with a
 	// client, of that client.
-	TargetLocationID string    `json:"target_location_id,omitempty"`
-	TotalCost        float64   `json:"total_cost,omitempty"`
-	Currency         string    `json:"currency,omitempty"`
-	Notes            string    `json:"notes,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
-	Items            []Item    `json:"items,omitempty"`
+	TargetLocationID string `json:"target_location_id,omitempty"`
+	// ApprovalRunID is the workflow run of the trigger order_submitted that
+	// decides on the approval (WP-1108); while it is open, approve and
+	// reject are 409.
+	ApprovalRunID string    `json:"approval_run_id,omitempty"`
+	TotalCost     float64   `json:"total_cost,omitempty"`
+	Currency      string    `json:"currency,omitempty"`
+	Notes         string    `json:"notes,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+	Items         []Item    `json:"items,omitempty"`
 }
 
 // Item is one position of an internal order: a consumable position

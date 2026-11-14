@@ -656,3 +656,62 @@ func TestJobAPICancelRunningJobsByKind(t *testing.T) {
 		t.Errorf("result of a cancelled job with report: %d %s", w.Code, w.Body.String())
 	}
 }
+
+// TestJobAPIReadKindNeedsPermission (WP-1158): a job of a kind with a read
+// permission (the report about a person, whose result holds its values
+// unsealed) is seen only with that permission. job:read alone gets 404 on
+// the job, its result and its cancel, and the list leaves it out, also
+// with the kind as filter and for its creator without the permission.
+func TestJobAPIReadKindNeedsPermission(t *testing.T) {
+	f := &apiFixture{svc: NewService(NewMemoryRepository())}
+	for _, k := range []string{"privacy.subject_report", "ci.bulk"} {
+		f.svc.Register(Kind{Name: k, MaxAttempts: 1})
+	}
+	f.mux = chi.NewRouter()
+	NewAPIHandler(f.svc).
+		WithKind("privacy.subject_report", identity.PermUserManage, nil).
+		WithReadKind("privacy.subject_report", identity.PermUserManage).
+		RegisterRoutes(f.mux)
+	report := f.enqueue(t, "privacy.subject_report", "alice", "")
+	f.finish(t, report, map[string]string{"email": "erika@example.org"})
+	f.enqueue(t, "ci.bulk", "alice", "")
+
+	listed := func(w *httptest.ResponseRecorder) (kinds []string, total int) {
+		t.Helper()
+		var list struct {
+			Data  []Job `json:"data"`
+			Total int   `json:"total"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil || w.Code != http.StatusOK {
+			t.Fatalf("list: %d %s", w.Code, w.Body.String())
+		}
+		for _, j := range list.Data {
+			kinds = append(kinds, j.Kind)
+		}
+		return kinds, list.Total
+	}
+	for _, user := range []string{"bob", "alice"} {
+		for _, path := range []string{"/api/v1/jobs/" + report.ID, "/api/v1/jobs/" + report.ID + "/result"} {
+			if w := f.call("GET", path, user); w.Code != http.StatusNotFound || strings.Contains(w.Body.String(), "erika") {
+				t.Errorf("%s GET %s with job:read: %d %s, want 404", user, path, w.Code, w.Body.String())
+			}
+		}
+		if w := f.call("DELETE", "/api/v1/jobs/"+report.ID, user); w.Code != http.StatusNotFound {
+			t.Errorf("%s DELETE with job:read: %d, want 404", user, w.Code)
+		}
+		if kinds, total := listed(f.call("GET", "/api/v1/jobs", user)); total != 1 || len(kinds) != 1 || kinds[0] != "ci.bulk" {
+			t.Errorf("%s list with job:read: %v (%d)", user, kinds, total)
+		}
+		if kinds, total := listed(f.call("GET", "/api/v1/jobs?kind=privacy.subject_report", user)); total != 0 || len(kinds) != 0 {
+			t.Errorf("%s list of the kind with job:read: %v (%d)", user, kinds, total)
+		}
+	}
+	// With user:manage the job, its result and the list show it.
+	if w := f.call("GET", "/api/v1/jobs/"+report.ID+"/result", "bob", identity.PermUserManage); w.Code != http.StatusOK ||
+		!strings.Contains(w.Body.String(), "erika") {
+		t.Errorf("result with user:manage: %d %s", w.Code, w.Body.String())
+	}
+	if _, total := listed(f.call("GET", "/api/v1/jobs", "bob", identity.PermUserManage)); total != 2 {
+		t.Errorf("list with user:manage: %d jobs, want 2", total)
+	}
+}

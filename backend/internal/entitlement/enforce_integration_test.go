@@ -4,13 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
@@ -659,6 +663,7 @@ func TestPhase2RouteGates(t *testing.T) {
 	ok := func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }
 	mux.Get("/api/v1/tickets", ok)
 	mux.Get("/api/v1/tickets/{id}/sla", ok)
+	mux.Get("/api/v1/tickets/{id}/attachments", ok)
 	mux.Get("/api/v1/stock-movements", ok)
 	mux.Post("/api/v1/stock-movements", ok)
 	mux.Get("/api/v1/slas", ok)
@@ -673,6 +678,7 @@ func TestPhase2RouteGates(t *testing.T) {
 		{http.MethodGet, "/api/v1/slas", false},
 		{http.MethodPost, "/api/v1/stock-movements", false},
 		{http.MethodGet, "/api/v1/tickets/t1/sla", false},
+		{http.MethodGet, "/api/v1/tickets/t1/attachments", true},
 	} {
 		essential := call(t, routes, f.OrgA, c.method, c.path)
 		switch {
@@ -685,4 +691,149 @@ func TestPhase2RouteGates(t *testing.T) {
 			t.Errorf("standard %s %s: %+v, want 204", c.method, c.path, standard)
 		}
 	}
+
+	// SR-61 (WP-874): the attachments of a ticket are documents and need
+	// both ticketing_essential and documents; without documents 403
+	// feature-not-entitled, the ticket itself stays reachable.
+	if _, err = f.Admin.Exec(bg, `UPDATE entitlement SET enabled = false WHERE organization_id = $1 AND feature_key = 'documents'`, f.OrgB); err != nil {
+		t.Fatal(err)
+	}
+	_ = store.Delete(bg, "entitlements:"+f.OrgB)
+	if got := call(t, routes, f.OrgB, http.MethodGet, "/api/v1/tickets/t1/attachments"); got.status != http.StatusForbidden || got.problem != api.ProblemFeatureNotEntitled {
+		t.Errorf("attachments without documents: %+v, want 403 feature-not-entitled", got)
+	}
+	if got := call(t, routes, f.OrgB, http.MethodGet, "/api/v1/tickets"); got.status != http.StatusNoContent {
+		t.Errorf("tickets without documents: %+v, want 204", got)
+	}
+}
+
+// TestPhase3RouteGatesAgainstPostgres covers WP-865 (PKG-08, ENT-05, ENT-06,
+// E-151): a standard organization reaches the monitoring core, IPAM and the
+// subnet scan, but not the analytics, the vault, the configuration history,
+// the RPKI state, the escalation chains or the ADMP add-on (403
+// feature-not-entitled); an enterprise organization reaches everything but
+// the add-on admp; the organization export is core for both.
+func TestPhase3RouteGatesAgainstPostgres(t *testing.T) {
+	redisURL := os.Getenv("TEST_REDIS_URL")
+	if redisURL == "" || os.Getenv("TEST_DATABASE_URL") == "" {
+		t.Skip("TEST_DATABASE_URL and TEST_REDIS_URL required; skipping phase-3 route gate test")
+	}
+	f := scopetest.Seed(t, "65")
+	bg := context.Background()
+	client, err := redisx.Connect(bg, redisURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	store := cache.NewRedisStore(client.Unwrap())
+	for _, org := range []string{f.OrgA, f.OrgB} {
+		_ = store.Delete(bg, "entitlements:"+org)
+		t.Cleanup(func() { _ = store.Delete(bg, "entitlements:"+org) })
+	}
+	svc := entitlement.NewService(entitlement.NewPGRepository(f.App), entitlement.Options{Cache: store, Enforce: true})
+	if n, provErr := svc.ProvisionOrganizations(bg, map[string]entitlement.Plan{
+		f.OrgA: entitlement.PlanStandard, f.OrgB: entitlement.PlanEnterprise}); n != 2 || provErr != nil {
+		t.Fatalf("provision: %d, %v", n, provErr)
+	}
+
+	mux := chi.NewRouter()
+	ok := func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }
+	cases := []struct {
+		method, path         string
+		standard, enterprise bool
+	}{
+		{http.MethodGet, "/api/v1/monitoring/probes", true, true},
+		{http.MethodGet, "/api/v1/monitoring/incidents/{id}", true, true},
+		{http.MethodGet, "/api/v1/monitoring/incidents/{id}/recommendation", false, true},
+		{http.MethodGet, "/api/v1/monitoring/sla", false, true},
+		{http.MethodGet, "/api/v1/ipam-sections", true, true},
+		{http.MethodPost, "/api/v1/subnets/{id}/scan", true, true},
+		{http.MethodGet, "/api/v1/subnets/{id}/rpki", false, true},
+		{http.MethodGet, "/api/v1/cis/{id}/configs", false, true},
+		{http.MethodPost, "/api/v1/vault-connections", false, true},
+		{http.MethodGet, "/api/v1/escalation-policies", false, true},
+		{http.MethodGet, "/api/v1/admp/connections", false, false},
+		{http.MethodPost, "/api/v1/org/exports", true, true},
+	}
+	for _, c := range cases {
+		mux.MethodFunc(c.method, c.path, ok)
+	}
+	routes := svc.Middleware(mux)
+	for _, c := range cases {
+		path := strings.ReplaceAll(c.path, "{id}", "x1")
+		for org, want := range map[string]bool{f.OrgA: c.standard, f.OrgB: c.enterprise} {
+			got := call(t, routes, org, c.method, path)
+			switch {
+			case want && got.status != http.StatusNoContent:
+				t.Errorf("org %s %s %s: %+v, want 204", org, c.method, path, got)
+			case !want && (got.status != http.StatusForbidden || got.problem != api.ProblemFeatureNotEntitled):
+				t.Errorf("org %s %s %s: %+v, want 403 feature-not-entitled", org, c.method, path, got)
+			}
+		}
+	}
+}
+
+// TestMonitoredTargetsQuotaUnderConcurrency covers PKG-04 and ENT-03 (WP-881):
+// with max_monitored_targets 5, 20 parallel transactions each admit one
+// target through AdmitCount (counting rows of notice_sent of a test kind,
+// standing in for the probe targets of M3.6) and then store it: exactly 5
+// succeed, 15 get LimitExceededError. Without a context transaction
+// AdmitCount fails with database.ErrNoLockTx.
+func TestMonitoredTargetsQuotaUnderConcurrency(t *testing.T) {
+	if os.Getenv("TEST_DATABASE_URL") == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping PostgreSQL integration test")
+	}
+	f := scopetest.Seed(t, "66")
+	bg := context.Background()
+	svc := entitlement.NewService(entitlement.NewPGRepository(f.App), entitlement.Options{Enforce: true})
+	if _, err := svc.Grant(f.OrgCtx(f.OrgA), &entitlement.Entitlement{OrganizationID: f.OrgA, FeatureKey: entitlement.FeatureMonitoring,
+		Plan: entitlement.PlanStandard, Enabled: true, Limits: map[string]int64{entitlement.LimitMaxMonitoredTargets: 5}}); err != nil {
+		t.Fatal(err)
+	}
+	const kind = "wp881.target"
+	count := func(ctx context.Context) (int64, error) {
+		var n int64
+		err := database.WithRequestTenant(ctx, nil, f.OrgA, func(ctx context.Context, tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT count(*) FROM notice_sent WHERE kind = $1`, kind).Scan(&n)
+		})
+		return n, err
+	}
+	scope := database.OrgWideScope(f.OrgA, f.User)
+	var wg sync.WaitGroup
+	results := make([]error, 20)
+	for i := range results {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			results[i] = database.WithTenant(bg, f.App, &scope, func(ctx context.Context, tx pgx.Tx) error {
+				ctx = database.ContextWithTx(ctx, tx)
+				if err := svc.AdmitCount(ctx, f.OrgA, entitlement.LimitMaxMonitoredTargets, 1, count); err != nil {
+					return err
+				}
+				_, err := tx.Exec(ctx, `INSERT INTO notice_sent (organization_id, kind, dedup_key) VALUES ($1, $2, $3)`,
+					f.OrgA, kind, fmt.Sprintf("t-%d", i))
+				return err
+			})
+		}(i)
+	}
+	wg.Wait()
+	admitted, refused := 0, 0
+	for _, err := range results {
+		var le *entitlement.LimitExceededError
+		switch {
+		case err == nil:
+			admitted++
+		case errors.As(err, &le):
+			refused++
+		default:
+			t.Errorf("unexpected error: %v", err)
+		}
+	}
+	if admitted != 5 || refused != 15 {
+		t.Errorf("admitted %d, refused %d; want exactly 5 and 15", admitted, refused)
+	}
+	if err := svc.AdmitCount(f.OrgCtx(f.OrgA), f.OrgA, entitlement.LimitMaxMonitoredTargets, 1, count); !errors.Is(err, database.ErrNoLockTx) {
+		t.Errorf("without a context transaction: %v, want ErrNoLockTx", err)
+	}
+	t.Cleanup(func() { _, _ = f.Admin.Exec(bg, `DELETE FROM notice_sent WHERE kind = $1`, kind) })
 }

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -305,5 +306,29 @@ func TestComputedAttributesWritePath(t *testing.T) {
 	}
 	if v, _, _, ok := provenance(survivor.ID, "wp717_label"); !ok || v != "ZETA" {
 		t.Errorf("survivor's provenance after the merge = %v (found %v)", v, ok)
+	}
+
+	// SR-58 (WP-871, AK3): without assets_basic the computation reads no
+	// asset field; the asset source is empty as for a CI without asset.
+	var checked []string
+	repo.WithFeatureCheck(func(_ context.Context, orgID, key string) bool {
+		checked = append(checked, orgID+"/"+key)
+		return false
+	})
+	defer repo.WithFeatureCheck(nil)
+	w = call(http.MethodPost, "/api/v1/cis", `{"ci_type_id":"`+typeA+`","client_id":"`+f.Client1+`","name":"wp871-1",
+		"hostname":"SRV-3","asset_id":"`+assetID+`","attributes":{"wp717_host":"gamma"}}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create without assets_basic: %d %s", w.Code, w.Body.String())
+	}
+	var noAssets ciBody
+	if err := json.Unmarshal(w.Body.Bytes(), &noAssets); err != nil {
+		t.Fatal(err)
+	}
+	if where, _ := noAssets.Attributes["wp717_where"].(string); strings.Contains(where, "WP717-TAG") || noAssets.Attributes["wp717_label"] != "GAMMA" {
+		t.Errorf("attributes without assets_basic = %v, want no asset value and wp717_label GAMMA", noAssets.Attributes)
+	}
+	if !slices.Contains(checked, f.OrgA+"/assets_basic") {
+		t.Errorf("feature checks = %v, want %s/assets_basic", checked, f.OrgA)
 	}
 }

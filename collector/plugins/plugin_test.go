@@ -62,6 +62,44 @@ func TestAuditT2CredentialsArePerProtocol(t *testing.T) {
 	}
 }
 
+// TestCredentialsForProbeNamespacesIsolated covers WP-967 (PRT-22, COL-02):
+// the probe namespaces http, gnmi and acs each get only their own entries;
+// none borrows another namespace and none has an alias.
+func TestCredentialsForProbeNamespacesIsolated(t *testing.T) {
+	all := map[string]string{
+		"http.username": "http-user", "http.password": "http-pw",
+		"gnmi.username": "gnmi-user", "gnmi.client_cert": "gnmi-cert",
+		"acs.token": "acs-token",
+		"api.token": "api-token", "snmp.community": "public",
+	}
+	for protocol, want := range map[string]map[string]string{
+		"http": {"username": "http-user", "password": "http-pw"},
+		"gnmi": {"username": "gnmi-user", "client_cert": "gnmi-cert"},
+		"acs":  {"token": "acs-token"},
+	} {
+		if got := CredentialsFor(protocol, all); !maps.Equal(got, want) {
+			t.Errorf("CredentialsFor(%q) = %v, want only its own entries %v", protocol, got, want)
+		}
+		if _, aliased := credentialAliases[protocol]; aliased {
+			t.Errorf("probe namespace %q must not have an alias", protocol)
+		}
+	}
+	// Without entries of its namespace a probe namespace gets nothing, in
+	// particular not the token of acs or api.
+	for _, protocol := range []string{"http", "gnmi", "acs"} {
+		only := map[string]string{"api.token": "api-token"}
+		for _, other := range []string{"http", "gnmi", "acs"} {
+			if other != protocol {
+				only[other+".token"] = other + "-token"
+				only[other+".password"] = other + "-pw"
+			}
+		}
+		if got := CredentialsFor(protocol, only); len(got) != 0 {
+			t.Errorf("CredentialsFor(%q) without %s.* entries = %v, want an empty map", protocol, protocol, got)
+		}
+	}
+}
+
 // TestOctetText: the text of an SNMP OctetString (SNMP and power plugin)
 // without NUL padding; a binary value stays empty.
 func TestOctetText(t *testing.T) {

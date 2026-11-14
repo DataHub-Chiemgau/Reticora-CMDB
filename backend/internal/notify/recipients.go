@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm/configsnap/configtext"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
@@ -42,6 +43,11 @@ type Audience struct {
 	// ClientContacts adds the contacts of the object's client
 	// (contact.client_id = ClientID); never those of another client.
 	ClientContacts *ClientContacts
+	// ContactIDs adds individual contacts of the organization (the
+	// recipient of a form request, WP-1102). With ClientID only those of
+	// that client and the organization-wide ones (without client); never
+	// a contact of another client.
+	ContactIDs []string
 	// DirectUserIDs are users the notification concerns personally (the
 	// initiator of an export): active users, without the permission
 	// check. Direct are addresses outside the organization's users (an
@@ -136,7 +142,42 @@ func (r *PGResolver) Branding(ctx context.Context, orgID string) (*Branding, err
 }
 
 type candidate struct {
-	id, email, name, locale string
+	id, email, name, locale, mobile string
+}
+
+// userCandidates reads the rows of app_user (id, e-mail, name, locale and
+// the vault subject of the mobile number) and resolves the numbers in one
+// vault read (WP-1140); without a vault they stay empty.
+func userCandidates(ctx context.Context, tx pgx.Tx, orgID string, rows pgx.Rows) ([]candidate, error) {
+	found, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (candidate, error) {
+		var c candidate
+		scanErr := row.Scan(&c.id, &c.email, &c.name, &c.locale, &c.mobile)
+		return c, scanErr
+	})
+	if err != nil {
+		return nil, err
+	}
+	vault := pii.Default()
+	ids := make([]string, 0, len(found))
+	for _, c := range found {
+		if c.mobile != "" {
+			ids = append(ids, c.mobile)
+		}
+	}
+	var subjects map[string]*pii.Subject
+	if vault != nil && len(ids) > 0 {
+		if subjects, err = vault.ResolveTx(ctx, tx, orgID, ids); err != nil {
+			return nil, err
+		}
+	}
+	for i := range found {
+		subject := found[i].mobile
+		found[i].mobile = ""
+		if s := subjects[subject]; s != nil {
+			found[i].mobile = s.Data["mobile"]
+		}
+	}
+	return found, nil
 }
 
 // Resolve implements Resolver: active users among the candidates who hold
@@ -152,7 +193,8 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
 		if len(a.Roles) > 0 || len(a.TeamIDs) > 0 || len(a.UserIDs) > 0 || a.AllWithPermission {
 			rows, err := tx.Query(ctx, `
-				SELECT u.id::text, COALESCE(u.email, ''), COALESCE(u.display_name, ''), u.locale
+				SELECT u.id::text, COALESCE(u.email, ''), COALESCE(u.display_name, ''), u.locale,
+					COALESCE(u.mobile_pii_subject_id::text, '')
 				FROM app_user u
 				WHERE u.organization_id = $1 AND u.is_active AND (
 					$5
@@ -165,26 +207,19 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 			if err != nil {
 				return fmt.Errorf("resolve users: %w", err)
 			}
-			users, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (candidate, error) {
-				var c candidate
-				scanErr := row.Scan(&c.id, &c.email, &c.name, &c.locale)
-				return c, scanErr
-			})
+			users, err = userCandidates(ctx, tx, orgID, rows)
 			if err != nil {
 				return fmt.Errorf("resolve users: %w", err)
 			}
 		}
 		if len(a.DirectUserIDs) > 0 {
-			rows, err := tx.Query(ctx, `SELECT id::text, COALESCE(email, ''), COALESCE(display_name, ''), locale FROM app_user
+			rows, err := tx.Query(ctx, `SELECT id::text, COALESCE(email, ''), COALESCE(display_name, ''), locale,
+				COALESCE(mobile_pii_subject_id::text, '') FROM app_user
 				WHERE organization_id = $1 AND is_active AND id::text = ANY($2) ORDER BY display_name, id`, orgID, a.DirectUserIDs)
 			if err != nil {
 				return fmt.Errorf("resolve direct users: %w", err)
 			}
-			direct, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (candidate, error) {
-				var c candidate
-				scanErr := row.Scan(&c.id, &c.email, &c.name, &c.locale)
-				return c, scanErr
-			})
+			direct, err = userCandidates(ctx, tx, orgID, rows)
 			if err != nil {
 				return fmt.Errorf("resolve direct users: %w", err)
 			}
@@ -201,6 +236,20 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 			found, err := revealContacts(ctx, tx, orgID, rows)
 			if err != nil {
 				return fmt.Errorf("resolve contacts: %w", err)
+			}
+			contacts = append(contacts, found...)
+		}
+		if len(a.ContactIDs) > 0 {
+			rows, err := tx.Query(ctx, `
+				SELECT COALESCE(c.email, ''), COALESCE(c.display_name, ''), COALESCE(c.pii_subject_id::text, '')
+				FROM contact c WHERE c.organization_id = $1 AND c.id::text = ANY($2)
+				  AND ($3 = '' OR c.client_id IS NULL OR c.client_id::text = $3)`, orgID, a.ContactIDs, a.ClientID)
+			if err != nil {
+				return fmt.Errorf("resolve named contacts: %w", err)
+			}
+			found, err := revealContacts(ctx, tx, orgID, rows)
+			if err != nil {
+				return fmt.Errorf("resolve named contacts: %w", err)
 			}
 			contacts = append(contacts, found...)
 		}
@@ -256,7 +305,7 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 		out = append(out, r)
 	}
 	for _, u := range direct {
-		add(Recipient{UserID: u.id, Email: u.email, Name: u.name, Locale: u.locale})
+		add(Recipient{UserID: u.id, Email: u.email, Name: u.name, Phone: u.mobile, Locale: u.locale})
 	}
 	for _, u := range users {
 		grants, err := r.grants.AccessGrants(ctx, orgID, u.id)
@@ -266,7 +315,7 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 		if !permission.Covers(grants, a.Permission, a.ClientID, a.SiteID) {
 			continue
 		}
-		add(Recipient{UserID: u.id, Email: u.email, Name: u.name, Locale: u.locale})
+		add(Recipient{UserID: u.id, Email: u.email, Name: u.name, Phone: u.mobile, Locale: u.locale})
 	}
 	for _, c := range contacts {
 		add(c)
@@ -304,12 +353,134 @@ func revealContacts(ctx context.Context, tx pgx.Tx, orgID string, rows pgx.Rows)
 	}
 	var out []Recipient
 	for _, c := range found {
+		phone := ""
 		if s := subjects[c.subject]; s != nil {
-			c.email, c.name = s.Data["email"], s.Data["name"]
+			c.email, c.name, phone = s.Data["email"], s.Data["name"], s.Data["phone"]
 		}
-		if c.email != "" {
-			out = append(out, Recipient{Email: c.email, Name: c.name})
+		// A contact is an addressee with an e-mail address or a phone
+		// number (SMS, WP-1140).
+		if c.email != "" || phone != "" {
+			out = append(out, Recipient{Email: c.email, Name: c.name, Phone: phone})
 		}
 	}
 	return out, nil
+}
+
+// CIName implements CINamer: the name of a CI of the organization (empty
+// for an unknown one), for the alarm texts (WP-987).
+func (r *PGResolver) CIName(ctx context.Context, orgID, ciID string) (string, error) {
+	var name string
+	scope := database.OrgWideScope(orgID, "")
+	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `SELECT name FROM ci WHERE organization_id = $1 AND id::text = $2`, orgID, ciID).Scan(&name)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("ci name: %w", err)
+		}
+		return nil
+	})
+	return name, err
+}
+
+// RunFailure implements RunDescriber: the definition name, the initiator,
+// the last failed step and the error of a workflow run (workflow.run_failed,
+// WP-1147). The error is the failed step's, else the run's last error.
+func (r *PGResolver) RunFailure(ctx context.Context, orgID, runID string) (RunFailure, bool, error) {
+	var f RunFailure
+	found := false
+	scope := database.OrgWideScope(orgID, "")
+	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		var lastError string
+		err := tx.QueryRow(ctx, `SELECT COALESCE(d.name, ''), COALESCE(wr.initiated_by::text, ''), COALESCE(wr.last_error, '')
+			FROM workflow_run wr LEFT JOIN workflow_def d ON d.organization_id = wr.organization_id AND d.id = wr.workflow_id
+			WHERE wr.organization_id = $1 AND wr.id::text = $2`, orgID, runID).Scan(&f.WorkflowName, &f.InitiatedBy, &lastError)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("failed workflow run: %w", err)
+		}
+		found = true
+		err = tx.QueryRow(ctx, `SELECT step_index, action_type, error FROM workflow_step
+			WHERE organization_id = $1 AND run_id::text = $2 AND status = 'failed' ORDER BY step_index DESC LIMIT 1`, orgID, runID).
+			Scan(&f.StepIndex, &f.StepAction, &f.Error)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("failed workflow step: %w", err)
+		}
+		if f.Error == "" {
+			f.Error = lastError
+		}
+		return nil
+	})
+	return f, found, err
+}
+
+// SLATarget implements AlertDescriber: the name and the CI of an
+// availability target (sla.violated, WP-1147); found is false for a target
+// that no longer exists.
+func (r *PGResolver) SLATarget(ctx context.Context, orgID, targetID string) (SLATarget, bool, error) {
+	var s SLATarget
+	found := false
+	scope := database.OrgWideScope(orgID, "")
+	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `SELECT name, COALESCE(ci_id::text, '') FROM availability_target
+			WHERE organization_id = $1 AND id::text = $2`, orgID, targetID).Scan(&s.Name, &s.CIID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("availability target: %w", err)
+		}
+		found = true
+		return nil
+	})
+	return s, found, err
+}
+
+// ConfigChange implements AlertDescriber: the time of a configuration
+// version, its predecessor and the number of lines changed against it
+// (ci.config_changed, WP-1147). The predecessor is previousID, else the
+// version of the same CI collected last before it. The content is read to
+// count and never leaves this method.
+func (r *PGResolver) ConfigChange(ctx context.Context, orgID, snapshotID, previousID string) (ConfigChange, bool, error) {
+	var c ConfigChange
+	found := false
+	scope := database.OrgWideScope(orgID, "")
+	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		var ciID string
+		var current []byte
+		err := tx.QueryRow(ctx, `SELECT ci_id::text, collected_at, content FROM config_snapshot
+			WHERE organization_id = $1 AND id::text = $2`, orgID, snapshotID).Scan(&ciID, &c.CollectedAt, &current)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("config version: %w", err)
+		}
+		found = true
+		var previous []byte
+		err = tx.QueryRow(ctx, `SELECT p.id::text, p.content FROM config_snapshot p, config_snapshot s
+			WHERE s.organization_id = $1 AND s.id::text = $2 AND p.organization_id = s.organization_id AND p.ci_id = s.ci_id
+			  AND (CASE WHEN $3 <> '' THEN p.id::text = $3 ELSE (p.collected_at, p.id) < (s.collected_at, s.id) END)
+			ORDER BY p.collected_at DESC, p.id DESC LIMIT 1`, orgID, snapshotID, previousID).Scan(&c.PreviousID, &previous)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("previous config version: %w", err)
+		}
+		cur, err := configtext.Decompress(current)
+		if err != nil {
+			return err
+		}
+		prev, err := configtext.Decompress(previous)
+		if err != nil {
+			return err
+		}
+		c.ChangedLines, c.HasPrevious = configtext.ChangedLines(prev, cur), true
+		return nil
+	})
+	return c, found, err
 }

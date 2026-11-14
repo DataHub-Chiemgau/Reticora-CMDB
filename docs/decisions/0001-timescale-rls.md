@@ -24,11 +24,14 @@ Hypertable als bekannte Lücke für WP-040.
 Umgebung: PostgreSQL 16 mit TimescaleDB 2.17.2, beim Spike die Version des
 CI-Images (der Compose-Stack nutzte den gleitenden Tag `latest-pg16`).
 Nachtrag 2026-10-21 (E-96, WP-389): CI, Compose-Stack und `reticora-postgres`
-nutzen jetzt
-`timescale/timescaledb:2.31.0-pg16@sha256:322ae364eca3321cf2a48f1ef31213b87843413b3cf8feeebf54e999a26bb731`
-(PostgreSQL 16.15). Die Nachweistests im Kopf sind darauf grün; die Zeilen 1
+nutzten ab da TimescaleDB 2.31.0 (`2.31.0-pg16`, Digest `sha256:322ae364…`,
+PostgreSQL 16.15). Die Nachweistests im Kopf waren darauf grün; die Zeilen 1
 bis 3 von Ergebnis 1 prüft `TestTimescaleRefusesRLSWithCompression` mit
 denselben Fehlertexten, die Zeilen 4 und 5 wurden nicht erneut geprüft.
+Nachtrag 2026-11-13 (Update-Plan Upd-08): Alle Stellen nutzen jetzt
+`timescale/timescaledb:2.32.0-pg16@sha256:2f87efeaec6fbdd3ba4a6993b921c05d069cd8e980792cb23c7c5f32a6fe68a7`
+(TimescaleDB 2.32.0, weiterhin PostgreSQL 16.15); die Nachweistests laufen in
+der CI auf diesem Image.
 
 Geprüft wurde mit der App-Rolle `reticora_app` (ohne Superuser, ohne
 BYPASSRLS) über `database.WithTenant`. Ein Superuser umgeht RLS auch mit FORCE
@@ -163,3 +166,10 @@ Ausweg.
   Dann ist diese ADR neu zu bewerten.
 - Abfragen auf Metriken müssen über die Views laufen. Für Systemjobs, die über
   alle Orgs aggregieren, gilt der Systempfad (`WithSystem`, E-08).
+- Weitere view-geschützte Hypertable nach demselben Muster: `probe_result`
+  mit der View `probe_result_v` (WP-945, Migration `000325_probe_result`,
+  Nummer vorläufig; Werte nach ADR 0002). Die View prüft Organisation,
+  Kunde und Standort über die Probe (`probe.client_id`, `probe.site_id`)
+  wie Punkt 4 über das CI; die App-Rolle hat nur `SELECT, INSERT` auf die
+  View und kein Recht auf Hypertable, Chunks und `<chunk>_compressed`.
+  `rls.ViewProtectedTables` führt `probe_result` → `probe_result_v`.

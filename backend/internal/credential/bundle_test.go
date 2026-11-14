@@ -196,3 +196,59 @@ func TestBundleSelectsScopeCredentials(t *testing.T) {
 		t.Fatalf("request of an unverified collector: %+v", resp)
 	}
 }
+
+// TestBundleVersion2CarriesTargets covers CRD-04 (WP-891): a bundle has
+// format 2; AddTargets adds the credentials of the targets to the selection,
+// the sealed content carries the targets with CI, address, namespace,
+// credential and origin, and a target whose credential is missing from the
+// bundle is dropped. A bundle without targets carries an empty list.
+func TestBundleVersion2CarriesTargets(t *testing.T) {
+	ctx := context.Background()
+	svc := NewService(NewMemoryRepository(), testEncryptor(t))
+	mk := func(name string) string {
+		t.Helper()
+		c, err := svc.Create(ctx, CreateRequest{OrganizationID: "org-1", Name: name, Kind: KindSNMPv2c,
+			Secret: map[string]any{"community": "c-" + name}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c.ID
+	}
+	scoped, device := mk("scoped"), mk("device")
+	key := newCollectorKey(t)
+	target := &BundleTarget{OrganizationID: "org-1", CollectorID: "col-1", PublicKey: &key.PublicKey, CredentialIDs: []string{scoped}}
+	entry := BundleTargetCredential{CIID: "ci-1", ManagementIP: "10.0.0.5", Namespace: "snmp", CredentialID: device, Origin: OriginCI}
+	ghost := BundleTargetCredential{CIID: "ci-2", ManagementIP: "10.0.0.6", Namespace: "snmp",
+		CredentialID: "00000000-0000-4000-8000-0000000000aa", Origin: OriginSubnet}
+	target.AddTargets([]BundleTargetCredential{entry, ghost})
+	if !slices.Contains(target.CredentialIDs, device) || !slices.Contains(target.CredentialIDs, scoped) {
+		t.Fatalf("credential ids %v lack the target's or the scope's credential", target.CredentialIDs)
+	}
+	b, ids, err := svc.Bundle(ctx, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Version != 2 || BundleVersion != 2 {
+		t.Fatalf("bundle version %d, want 2", b.Version)
+	}
+	if !slices.Contains(ids, device) || len(ids) != 2 {
+		t.Errorf("delivered ids %v, want the scope's and the target's credential", ids)
+	}
+	opened, err := OpenBundle(b, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(opened.Targets) != 1 || opened.Targets[0] != entry {
+		t.Fatalf("targets %+v, want only %+v", opened.Targets, entry)
+	}
+	target.AddTargets(nil)
+	target.CredentialIDs = []string{scoped}
+	b, _, err = svc.Bundle(ctx, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := OpenBundle(b, key)
+	if err != nil || raw.Targets == nil || len(raw.Targets) != 0 {
+		t.Fatalf("bundle without targets: %+v, %v; want an empty list", raw, err)
+	}
+}

@@ -43,6 +43,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/httpx"
 	redisx "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/redis"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/probe"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
@@ -313,6 +314,15 @@ func main() {
 		}
 		defer ingestQueue.Close()
 		slog.Info("ingest lanes", "lanes", ingestQueue.Lanes())
+		// The collectors' probe state changes and results are stored in
+		// RETICORA_PROBE before the edge acknowledges them (E-173, WP-959).
+		streamCtx, cancelStream := context.WithTimeout(context.Background(), 30*time.Second)
+		_, natsErr = probe.EnsureStream(streamCtx, ingestQueue.JetStream(), probe.DefaultStream(cfg.ProbeStreamMaxBytes))
+		cancelStream()
+		if natsErr != nil {
+			slog.Error("failed to set up the probe stream on NATS", "error", natsErr)
+			os.Exit(1)
+		}
 	}
 	// Jobs are distributed over the JOBS work queue on NATS (TEC-14); job
 	// kinds register their handlers with jobQueue.Handle.
@@ -394,6 +404,13 @@ func main() {
 		Cache:   cacheStore,
 		Enforce: cfg.EntitlementEnforcement,
 	})
+	// Computed attributes read no asset field without assets_basic
+	// (SR-58, WP-871). Set on the plain repository, before
+	// bootstrap.NewCIRepository decorates it (the decorators keep the
+	// pointer).
+	if cis, ok := repos.CI.(*ci.PGRepository); ok {
+		cis.WithFeatureCheck(entitlementSvc.IsEnabled)
+	}
 	// A missing entitlement row means not entitled (ENT-05): every
 	// organization gets the missing rows of its plan at each start (F-210).
 	if err = provisionEntitlements(context.Background(), entitlementSvc, auditPool, cfg.DefaultPlan); err != nil {
@@ -446,7 +463,7 @@ func main() {
 		// by the field policy of the account, unbound ones by the default
 		// policy without role (RBA-07, WP-730). The policy shares the cache
 		// of the API, so a change of the grants reaches the dispatcher.
-		Access: user.ServiceAccountAccess{Repo: repos.ServiceAccounts, Fields: server.NewFieldResolver(&repos, cacheStore)},
+		Access: user.ServiceAccountAccess{Repo: repos.ServiceAccounts, Fields: server.WithAssetsFeature(server.NewFieldResolver(&repos, cacheStore), entitlementSvc)},
 		// Events without client_id/site_id in the payload are scoped by
 		// the CIs and assets they reference.
 		Objects: objectResolverOf(auditPool),
@@ -465,7 +482,16 @@ func main() {
 		}
 	}()
 
-	credentialService := credential.NewService(repos.Credential, encryptor)
+	// Vault references of connections with resolve_at server are read by
+	// the server over the egress policy; the tests of collector
+	// connections go over the core NATS connection (WP-896, E-220).
+	vaultResolver := credential.NewVaultResolver(egressPolicy, coreNATS)
+	defer vaultResolver.Close()
+	credentialService := credential.NewService(repos.Credential, encryptor).WithVault(vaultResolver)
+	// The refresh of the ADMP cache (WP-929, E-223): read-only clients per
+	// account on the server over the egress policy, shared by the job
+	// admp.refresh of the router and the system jobs.
+	admpSync := server.NewADMPSync(&repos, credentialService, egressPolicy, auditPool, cfg.ADMPCacheTTLDays)
 	// The internal CA of the collector certificates (COL-04) and the
 	// collector NATS endpoint (COL-08).
 	collectorPKI := collectorCA(auditPool, encryptor)
@@ -478,6 +504,11 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("late modules", "enabled", modules.EnabledKeys())
+	// The suppression of alarms in maintenance windows needs the job that
+	// releases them, which runs only with the module maintenance (WP-1033).
+	if modules.Enabled("maintenance") {
+		repos.WireMaintenanceSuppression()
+	}
 	// Reference targets of switched-off modules (asset: inventory, file:
 	// documents) are not available to attribute definitions and writes
 	// (E-03, WP-254).
@@ -496,6 +527,12 @@ func main() {
 	// detail instead of an "unavailable" one on every probe.
 	if ingestQueue != nil && workerEnabled(config.WorkerIngest) {
 		readiness = append(readiness, server.ReadinessCheck{Name: "ingest", Detail: ingestQueue.ReadinessDetail})
+	}
+	// The backlog of the worker probe_ingest the same way (WP-960).
+	var probeIngest *probe.Ingester
+	if ingestQueue != nil && auditPool != nil && workerEnabled(config.WorkerProbeIngest) {
+		probeIngest = newProbeIngester(ingestQueue, auditPool, cfg)
+		readiness = append(readiness, server.ReadinessCheck{Name: "probe_ingest", Detail: probeIngest.ReadinessDetail})
 	}
 	// Every grant of org_admin binds the IdP account to MFA (WP-358).
 	mfa := mfaEnforcer(cfg)
@@ -539,6 +576,7 @@ func main() {
 		Dispatcher:         webhookDispatcher,
 		CIService:          ciService,
 		Credentials:        credentialService,
+		ADMPSync:           admpSync,
 		OIDC:               oidcProvider,
 		Sessions:           sessionIssuer,
 		RefreshSessions:    refreshSessions,
@@ -547,24 +585,33 @@ func main() {
 			Group:           cfg.OperatorGroup,
 			MFAACRValues:    strings.Split(cfg.OperatorMFAACR, ","),
 		},
-		OperatorPool:         auditPool,
-		OpsAlerts:            operator.AlertConfig{Token: cfg.OpsAlertToken, OrgID: cfg.OpsAlertOrgID},
-		Notifier:             notifier,
-		UserProvisioner:      userProvisioner(repos),
-		DefaultProvisionRole: cfg.DefaultProvisionRole,
-		Audit:                auditHandler,
-		AuditPool:            auditPool,
-		AIProvider:           aiProvider,
-		Blobs:                blobStore,
-		Documents:            cfg.Documents,
-		Egress:               egressPolicy,
-		Readiness:            readiness,
-		IngestQueue:          ingestQueue,
-		JobQueue:             jobQueue,
-		Signup:               signupService(cfg, auditPool, smtpSender),
-		Notifications:        notifications,
-		Events:               emitterOf(auditPool),
-		SignupProtection:     signupProtection(cfg, cacheStore),
+		OperatorPool: auditPool,
+		// The offline bundle of the vulnerability catalog (WP-1120); the
+		// online sync runs unless air-gapped without a CSAF provider list.
+		VulnfeedBundlePublicKey: cfg.VulnfeedBundlePublicKey,
+		VulnfeedOnlineSync:      !cfg.AirGapped || cfg.VulnfeedCSAFExplicit(),
+		OpsAlerts:               operator.AlertConfig{Token: cfg.OpsAlertToken, OrgID: cfg.OpsAlertOrgID},
+		Notifier:                notifier,
+		UserProvisioner:         userProvisioner(repos),
+		DefaultProvisionRole:    cfg.DefaultProvisionRole,
+		Audit:                   auditHandler,
+		AuditPool:               auditPool,
+		AIProvider:              aiProvider,
+		Blobs:                   blobStore,
+		Documents:               cfg.Documents,
+		Egress:                  egressPolicy,
+		Readiness:               readiness,
+		IngestQueue:             ingestQueue,
+		ProbeEdgeWorkers:        cfg.ProbeEdgeWorkers,
+		ProbeStreamMaxBytes:     cfg.ProbeStreamMaxBytes,
+		JobQueue:                jobQueue,
+		// The worker workflow consumes workflow.run only where it runs
+		// (OPS-02, WP-1114).
+		WorkflowWorkerOff: !workerEnabled(config.WorkerWorkflow),
+		Signup:            signupService(cfg, auditPool, smtpSender),
+		Notifications:     notifications,
+		Events:            emitterOf(auditPool),
+		SignupProtection:  signupProtection(cfg, cacheStore),
 		// Invitations need the database; in --no-db mode they answer 503.
 		InvitationAccounts:  invitationAccounts(cfg, smtpSender != nil),
 		InvitationMailer:    invitationMailer(smtpSender),
@@ -581,6 +628,9 @@ func main() {
 		rateLimit:   middleware.RateLimiterWithLimits(middleware.RateLimits{PerCredential: cfg.RateLimitRPM, PerOrganization: cfg.RateLimitOrgRPM}, cacheStore),
 		validation:  middleware.OpenAPIValidation,
 		idempotency: middleware.IdempotencyWithStore(cacheStore),
+		// The grace period of an organization deletion makes it read-only
+		// (TLC-06, WP-1153).
+		orgState: orgStateMiddleware(auditPool),
 	})
 	if err != nil {
 		slog.Error("failed to build API router", "error", err)
@@ -598,7 +648,8 @@ func main() {
 	}
 	if err = registerSystemJobs(systemScheduler, &systemJobDeps{cfg: cfg, pool: auditPool, encryptor: encryptor,
 		repos: &repos, modules: modules, entitlements: entitlementSvc, dispatcher: webhookDispatcher,
-		jobQueue: jobQueue, notifier: notifier, blobs: blobStore}); err != nil {
+		jobQueue: jobQueue, coreNATS: coreNATS, notifier: notifier, blobs: blobStore, admp: admpSync,
+		eventStream: eventStream, cache: cacheStore}); err != nil {
 		slog.Error("failed to register a system job", "error", err)
 		os.Exit(1)
 	}
@@ -609,7 +660,7 @@ func main() {
 	workers, err := buildWorkers(&workerDeps{cfg: cfg, pool: auditPool, encryptor: encryptor, repos: &repos, mfa: mfa,
 		dispatcher: webhookDispatcher, scheduler: systemScheduler, blobs: blobStore, eventStream: eventStream,
 		notifier: notifier, collectorPKI: collectorPKI, coreNATS: coreNATS, credentials: credentialService,
-		jobQueue: jobQueue, ingestQueue: ingestQueue, entitlements: entitlementSvc, modules: modules, fieldPolicyCache: cacheStore})
+		jobQueue: jobQueue, ingestQueue: ingestQueue, probeIngest: probeIngest, entitlements: entitlementSvc, modules: modules, fieldPolicyCache: cacheStore})
 	if err != nil {
 		slog.Error("failed to set up the workers", "error", err)
 		os.Exit(1)
@@ -672,6 +723,24 @@ type httpStages struct {
 	preAuth, auth, tenant, entitlement, rateLimit func(http.Handler) http.Handler
 	// validation and idempotency run per route after its authorization.
 	validation, idempotency func(http.Handler) http.Handler
+	// orgState refuses the writes of an organization in the grace period
+	// of its deletion (WP-1153); per route before validation, nil without
+	// a database.
+	orgState func(http.Handler) http.Handler
+}
+
+// orgStateMiddleware is the route middleware of the read-only grace period
+// (TLC-06, WP-1153): the deletion state of an organization read in the
+// tenant context of the request, kept 15 s per process; without a
+// database none.
+func orgStateMiddleware(pool *pgxpool.Pool) func(http.Handler) http.Handler {
+	if pool == nil {
+		return nil
+	}
+	cache := middleware.NewOrgStateCache(func(ctx context.Context, orgID string) (middleware.OrgDeletionState, error) {
+		return readOrgDeletionState(ctx, pool, orgID)
+	}, middleware.OrgStateTTL)
+	return middleware.OrgState(cache, middleware.OrgStateExempt)
 }
 
 // openAPINotLoadedReadiness is the informational /readyz detail
@@ -695,6 +764,9 @@ func openAPINotLoadedReadiness() server.ReadinessCheck {
 // populated from the request context.
 func newHTTPHandler(repos server.Repositories, opts server.Options, stages httpStages) (http.Handler, error) {
 	opts.RouteMiddleware = []func(http.Handler) http.Handler{stages.validation, stages.idempotency}
+	if stages.orgState != nil {
+		opts.RouteMiddleware = append([]func(http.Handler) http.Handler{stages.orgState}, opts.RouteMiddleware...)
+	}
 	mux, httpMetrics, err := server.NewRouter(repos, opts)
 	if err != nil {
 		return nil, err

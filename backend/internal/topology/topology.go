@@ -19,7 +19,6 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -84,19 +83,10 @@ type Graph struct {
 
 // Handler exposes topology query endpoints.
 type Handler struct {
-	ciRepo    ci.Repository
-	relRepo   relationship.Repository
-	traverser relationship.Traverser
-	// walker walks with CI numbers (WP-611); the memory repository has
-	// none, its walks go through traverser or hop by hop.
-	walker relationship.Walker
-	// types supplies the impact semantics of the organization's
-	// relationship types; without it the built-in catalogue applies.
-	types relationshiptype.Repository
-	// ciTypes resolves which CI types are services (business_service,
-	// application and their subtypes, IMP-08); without it the service
-	// impact chain has no services.
-	ciTypes citype.Repository
+	// Analyzer holds the repositories and runs the graph analyses (impact,
+	// blast radius, dependencies); the handler parses the request, delegates
+	// to it and writes the answer (WP-1025, E-203).
+	*Analyzer
 	// subtypes supplies the subtree of a CI type for the type filter of a
 	// walk from a root (MET-06, WP-708); without it the type must match.
 	subtypes TypeSubtrees
@@ -109,7 +99,7 @@ type Handler struct {
 // points of failure (IMP-08, WP-297): the analysis reads the CI types of
 // the organization once to tell the services by type and type chain.
 func (h *Handler) WithCITypes(types citype.Repository) *Handler {
-	h.ciTypes = types
+	h.Analyzer.WithCITypes(types)
 	return h
 }
 
@@ -131,14 +121,7 @@ func (h *Handler) WithTypeSubtrees(t TypeSubtrees) *Handler {
 // relationship.Walker or relationship.Traverser, graph walks run as one
 // walk of the repository instead of iterative hop-by-hop lookups.
 func NewHandler(ciRepo ci.Repository, relRepo relationship.Repository) *Handler {
-	h := &Handler{ciRepo: ciRepo, relRepo: relRepo}
-	if traverser, ok := relRepo.(relationship.Traverser); ok {
-		h.traverser = traverser
-	}
-	if walker, ok := relRepo.(relationship.Walker); ok {
-		h.walker = walker
-	}
-	return h
+	return &Handler{Analyzer: NewAnalyzer(ciRepo, relRepo)}
 }
 
 // RegisterRoutes registers topology routes.
@@ -438,17 +421,17 @@ func (h *Handler) buildFromRoot(ctx context.Context, orgID, rootCIID string, dep
 // WP-611) and falls back to its traversal or to a breadth-first expansion
 // hop by hop (the memory profile). A CI that is not visible or was removed
 // stays out; its dangling edges are dropped.
-func (h *Handler) graphFrom(ctx context.Context, orgID string, root *ci.Item, depth int) (*ciGraph, error) {
-	if h.walker != nil {
-		return h.walkedGraph(ctx, orgID, root, depth)
+func (a *Analyzer) graphFrom(ctx context.Context, orgID string, root *ci.Item, depth int) (*ciGraph, error) {
+	if a.walker != nil {
+		return a.walkedGraph(ctx, orgID, root, depth)
 	}
 	var nodes map[string]Node
 	var edges []Edge
 	var err error
-	if h.traverser != nil {
-		nodes, edges, err = h.traversedGraph(ctx, orgID, root, depth)
+	if a.traverser != nil {
+		nodes, edges, err = a.traversedGraph(ctx, orgID, root, depth)
 	} else {
-		nodes, edges, err = h.iterativeGraph(ctx, orgID, root, depth)
+		nodes, edges, err = a.iterativeGraph(ctx, orgID, root, depth)
 	}
 	if err != nil {
 		return nil, err
@@ -462,12 +445,12 @@ func (h *Handler) graphFrom(ctx context.Context, orgID string, root *ci.Item, de
 
 // walkedGraph is graphFrom with the repository's walk: the graph keeps its
 // CI numbers, and the nodes are read in one query (NFR-02).
-func (h *Handler) walkedGraph(ctx context.Context, orgID string, root *ci.Item, depth int) (*ciGraph, error) {
-	walk, err := h.walker.WalkFrom(ctx, orgID, root.ID, depth, relationship.MaxTraversalNodes)
+func (a *Analyzer) walkedGraph(ctx context.Context, orgID string, root *ci.Item, depth int) (*ciGraph, error) {
+	walk, err := a.walker.WalkFrom(ctx, orgID, root.ID, depth, relationship.MaxTraversalNodes)
 	if err != nil {
 		return nil, err
 	}
-	return h.graphOfWalk(ctx, orgID, walk, []ci.Item{*root})
+	return a.graphOfWalk(ctx, orgID, walk, []ci.Item{*root})
 }
 
 // graphFromRoots walks the configuration graph from several distinct
@@ -476,30 +459,30 @@ func (h *Handler) walkedGraph(ctx context.Context, orgID string, root *ci.Item, 
 // walk for all roots that reads each edge once and numbers the roots 0 to
 // len(roots)-1 (relationship.Walker.WalkFromMany, WP-840); else each root
 // is walked as graphFrom does and the graphs are merged (mergeGraphs).
-func (h *Handler) graphFromRoots(ctx context.Context, orgID string, roots []ci.Item, depth int) (*ciGraph, []int32, error) {
+func (a *Analyzer) graphFromRoots(ctx context.Context, orgID string, roots []ci.Item, depth int) (*ciGraph, []int32, error) {
 	numbers := make([]int32, len(roots))
 	for n := range numbers {
 		numbers[n] = int32(n)
 	}
 	if len(roots) == 1 {
-		g, err := h.graphFrom(ctx, orgID, &roots[0], depth)
+		g, err := a.graphFrom(ctx, orgID, &roots[0], depth)
 		return g, numbers, err
 	}
-	if h.walker != nil {
+	if a.walker != nil {
 		ids := make([]string, len(roots))
 		for i := range roots {
 			ids[i] = roots[i].ID
 		}
-		walk, err := h.walker.WalkFromMany(ctx, orgID, ids, depth, relationship.MaxTraversalNodes)
+		walk, err := a.walker.WalkFromMany(ctx, orgID, ids, depth, relationship.MaxTraversalNodes)
 		if err != nil {
 			return nil, nil, err
 		}
-		g, err := h.graphOfWalk(ctx, orgID, walk, roots)
+		g, err := a.graphOfWalk(ctx, orgID, walk, roots)
 		return g, numbers, err
 	}
 	graphs := make([]*ciGraph, len(roots))
 	for i := range roots {
-		g, err := h.graphFrom(ctx, orgID, &roots[i], depth)
+		g, err := a.graphFrom(ctx, orgID, &roots[i], depth)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -513,7 +496,7 @@ func (h *Handler) graphFromRoots(ctx context.Context, orgID string, roots []ci.I
 // numbers of the walk and their nodes from the CIs read before, the other
 // CIs are read in one query, and edges to a CI that is gone meanwhile are
 // dropped.
-func (h *Handler) graphOfWalk(ctx context.Context, orgID string, walk *relationship.Walk, roots []ci.Item) (*ciGraph, error) {
+func (a *Analyzer) graphOfWalk(ctx context.Context, orgID string, walk *relationship.Walk, roots []ci.Item) (*ciGraph, error) {
 	g := &ciGraph{ids: walk.CIs, nodes: make([]Node, len(walk.CIs)), known: make([]bool, len(walk.CIs)),
 		edges: make([]ciEdge, len(walk.Edges)), truncated: walk.Truncated}
 	for n := range roots {
@@ -525,7 +508,7 @@ func (h *Handler) graphOfWalk(ctx context.Context, orgID string, walk *relations
 		g.edges[i] = ciEdge{id: e.ID, source: e.SourceCI, target: e.TargetCI, relType: g.typeNumber(types, e.RelType), origin: e.Source}
 	}
 	if len(g.ids) > len(roots) {
-		nodes, err := h.readNodes(ctx, orgID, g.ids[len(roots):])
+		nodes, err := a.readNodes(ctx, orgID, g.ids[len(roots):])
 		if err != nil {
 			return nil, err
 		}
@@ -551,8 +534,8 @@ func (h *Handler) graphOfWalk(ctx context.Context, orgID string, walk *relations
 
 // traversedGraph expands the subgraph with the repository's traversal,
 // then resolves the discovered nodes.
-func (h *Handler) traversedGraph(ctx context.Context, orgID string, root *ci.Item, depth int) (map[string]Node, []Edge, error) {
-	rels, err := h.traverser.TraverseFrom(ctx, orgID, root.ID, depth, relationship.MaxTraversalNodes)
+func (a *Analyzer) traversedGraph(ctx context.Context, orgID string, root *ci.Item, depth int) (map[string]Node, []Edge, error) {
+	rels, err := a.traverser.TraverseFrom(ctx, orgID, root.ID, depth, relationship.MaxTraversalNodes)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -570,7 +553,7 @@ func (h *Handler) traversedGraph(ctx context.Context, orgID string, root *ci.Ite
 		}
 	}
 	// One read for all nodes (NFR-02).
-	if err := h.resolveNodes(ctx, orgID, ids, nodes); err != nil {
+	if err := a.resolveNodes(ctx, orgID, ids, nodes); err != nil {
 		return nil, nil, err
 	}
 	return nodes, edges, nil
@@ -578,7 +561,7 @@ func (h *Handler) traversedGraph(ctx context.Context, orgID string, root *ci.Ite
 
 // iterativeGraph performs a breadth-first traversal from root up to depth
 // hops, querying relationships one frontier at a time.
-func (h *Handler) iterativeGraph(ctx context.Context, orgID string, root *ci.Item, depth int) (map[string]Node, []Edge, error) {
+func (a *Analyzer) iterativeGraph(ctx context.Context, orgID string, root *ci.Item, depth int) (map[string]Node, []Edge, error) {
 	nodes := map[string]Node{root.ID: nodeFromItem(ctx, root)}
 	edgeSet := make(map[string]Edge)
 	visited := map[string]bool{}
@@ -592,7 +575,7 @@ func (h *Handler) iterativeGraph(ctx context.Context, orgID string, root *ci.Ite
 			}
 			visited[id] = true
 
-			rels, err := h.listRelationships(ctx, orgID, id)
+			rels, err := a.listRelationships(ctx, orgID, id)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -611,7 +594,7 @@ func (h *Handler) iterativeGraph(ctx context.Context, orgID string, root *ci.Ite
 		// The neighbors of one hop in one read (NFR-02). Invisible or
 		// deleted CIs stay out: the walk must not pass through them
 		// (IMP-07); their edges dangle and are dropped.
-		if err := h.resolveNodes(ctx, orgID, next, nodes); err != nil {
+		if err := a.resolveNodes(ctx, orgID, next, nodes); err != nil {
 			return nil, nil, err
 		}
 		frontier = frontier[:0]
@@ -628,8 +611,8 @@ func (h *Handler) iterativeGraph(ctx context.Context, orgID string, root *ci.Ite
 // root reads the root CI of a walk. A CI the repository does not find
 // (unknown, deleted, or invisible under the caller's organization and
 // scope) is ErrCINotFound; any other failure stays as it is.
-func (h *Handler) root(ctx context.Context, orgID, rootCIID string) (*ci.Item, error) {
-	root, err := h.ciRepo.GetByID(ctx, orgID, rootCIID)
+func (a *Analyzer) root(ctx context.Context, orgID, rootCIID string) (*ci.Item, error) {
+	root, err := a.ciRepo.GetByID(ctx, orgID, rootCIID)
 	if err != nil && (err.Error() == "not found" || errors.Is(err, api.ErrNotFound)) {
 		return nil, ErrCINotFound
 	}
@@ -638,7 +621,7 @@ func (h *Handler) root(ctx context.Context, orgID, rootCIID string) (*ci.Item, e
 
 // resolveNodes adds the visible, not deleted CIs among ids to nodes
 // (readNodes).
-func (h *Handler) resolveNodes(ctx context.Context, orgID string, ids []string, nodes map[string]Node) error {
+func (a *Analyzer) resolveNodes(ctx context.Context, orgID string, ids []string, nodes map[string]Node) error {
 	missing := make([]string, 0, len(ids))
 	seen := map[string]bool{}
 	for _, id := range ids {
@@ -650,7 +633,7 @@ func (h *Handler) resolveNodes(ctx context.Context, orgID string, ids []string, 
 	if len(missing) == 0 {
 		return nil
 	}
-	list, err := h.readNodes(ctx, orgID, missing)
+	list, err := a.readNodes(ctx, orgID, missing)
 	if err != nil {
 		return err
 	}
@@ -663,8 +646,8 @@ func (h *Handler) resolveNodes(ctx context.Context, orgID string, ids []string, 
 // readNodes reads the visible, not deleted CIs among ids, in one query
 // when the repository reads in batches: the node projection without
 // attributes (NFR-02), else the full CIs.
-func (h *Handler) readNodes(ctx context.Context, orgID string, ids []string) ([]Node, error) {
-	switch reader := h.ciRepo.(type) {
+func (a *Analyzer) readNodes(ctx context.Context, orgID string, ids []string) ([]Node, error) {
+	switch reader := a.ciRepo.(type) {
 	case ci.NodeReader:
 		list, err := reader.ListNodes(ctx, orgID, ids)
 		if err != nil {
@@ -688,7 +671,7 @@ func (h *Handler) readNodes(ctx context.Context, orgID string, ids []string) ([]
 	}
 	var nodes []Node
 	for _, id := range ids {
-		if item, err := h.ciRepo.GetByID(ctx, orgID, id); err == nil {
+		if item, err := a.ciRepo.GetByID(ctx, orgID, id); err == nil {
 			nodes = append(nodes, nodeFromItem(ctx, item))
 		}
 	}
@@ -726,6 +709,10 @@ type ciEdge struct {
 	source, target int32
 	relType        int32
 	origin         string
+	// outsideID is the id of the end outside the graph of a feed beyond
+	// the depth (readDepthFeeds); empty for a hidden one (readHiddenFeeds)
+	// and for every edge of the graph.
+	outsideID string
 }
 
 // typeNumber returns the number of a relationship type in g.
@@ -834,8 +821,8 @@ func (g *ciGraph) topology(types map[string]bool) Graph {
 	return Graph{Nodes: nodes, Edges: edges, Truncated: g.truncated}
 }
 
-func (h *Handler) listRelationships(ctx context.Context, orgID, ciID string) ([]relationship.Relationship, error) {
-	rels, _, err := h.relRepo.List(ctx, orgID, ciID, api.PaginationParams{Limit: maxFetch, Offset: 0})
+func (a *Analyzer) listRelationships(ctx context.Context, orgID, ciID string) ([]relationship.Relationship, error) {
+	rels, _, err := a.relRepo.List(ctx, orgID, ciID, api.PaginationParams{Limit: maxFetch, Offset: 0})
 	return rels, err
 }
 

@@ -702,9 +702,10 @@ func TestLocationDeleteReferencesMapToSpecKinds(t *testing.T) {
 	kinds := []string{
 		locations.DependencyLocation, locations.DependencyCI, locations.DependencyAsset, locations.DependencyStockLevel,
 		locations.DependencyStockMovement, locations.DependencyRackMount, locations.DependencyRoleAssignment,
-		locations.DependencyCIAttribute, locations.DependencyInternalOrder, "vlan", "subnet", "collector", "discovery_scope", "agent_enrollment_token", "ci_merge",
+		locations.DependencyCIAttribute, locations.DependencyInternalOrder, "vlan", "vlan_domain_site", "subnet", "collector", "discovery_scope", "agent_enrollment_token", "ci_merge",
 		"collector_enrollment_code",
 		locations.DependencyStocktake, locations.DependencyStocktakeItem, locations.DependencyStockScan,
+		locations.DependencyProbe,
 	}
 	if !slices.Equal(slices.Sorted(slices.Values(spec)), slices.Sorted(slices.Values(kinds))) {
 		t.Errorf("DependencyProblem.dependencies enum %v, want the kinds %v", spec, kinds)
@@ -751,11 +752,16 @@ func TestLocationDeleteReferencesMapToSpecKinds(t *testing.T) {
 	// change set row keeps its revert data and loses only the site of its
 	// scope snapshot (WP-305); the register row of a location barcode goes
 	// with its location, it only mirrors the code of the deleted node
-	// (WP-289).
+	// (WP-289); an incident keeps its history and loses only its site, which
+	// it derives from its root CI (WP-1027) – a site with CIs is not deleted
+	// anyway.
 	follow := map[string]string{
 		"site_location_fkey": "c", "building_location_fkey": "c", "room_location_fkey": "c", "rack_location_fkey": "c",
 		"desk_room_id_fkey": "n", "review_item_site_id_fkey": "n", "ticket_link_location_fkey": "c",
 		"bulk_change_set_site_fkey": "n", "barcode_registry_location_fkey": "c",
+		"incident_site_fkey": "n",
+		// A daily compliance score snapshot goes with its site (WP-1127).
+		"compliance_score_snapshot_site_fkey": "c",
 	}
 	tree := []string{"location", "building", "room", "rack"}
 	seen := 0

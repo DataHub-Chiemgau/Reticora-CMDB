@@ -47,10 +47,18 @@ const (
 	DependencyDiscoveryScope  = "discovery_scope"
 	DependencyEnrollmentToken = "agent_enrollment_token"
 	DependencyCIMerge         = "ci_merge"
+	// DependencyVLANDomain is the assignment of the site to a VLAN domain
+	// (IPM-06, WP-906, RESTRICT).
+	DependencyVLANDomain = "vlan_domain_site"
 
 	// DependencyEnrollmentCode is a collector enrollment code bound to the
 	// site (000187), RESTRICT since 000189 (F-430).
 	DependencyEnrollmentCode = "collector_enrollment_code"
+
+	// DependencyProbe is a monitoring probe at the site (PRB-01, WP-935):
+	// a probe of a CI carries the CI's site, a probe without CI (a plain
+	// target address) its own; the kind is the name of the table.
+	DependencyProbe = "probe"
 )
 
 // dependency is a kind of object that keeps the location $1; present is
@@ -79,6 +87,7 @@ var dependencies = []dependency{
 	{DependencyStocktake, `EXISTS (SELECT 1 FROM stocktake st WHERE st.location_id = $1)`},
 	{DependencyStocktakeItem, `EXISTS (SELECT 1 FROM stocktake_item si WHERE si.location_id = $1)`},
 	{DependencyStockScan, `EXISTS (SELECT 1 FROM stock_scan ss WHERE ss.location_id = $1)`},
+	{DependencyProbe, `EXISTS (SELECT 1 FROM probe p WHERE p.site_id = $1)`},
 }
 
 // ciAttributeReference is the condition of DependencyCIAttribute (MET-12,
@@ -124,6 +133,7 @@ type siteObject struct {
 // follow-up migration.
 var siteObjects = []siteObject{
 	{DependencyVLAN, ""},
+	{DependencyVLANDomain, ""},
 	{DependencySubnet, ""},
 	{DependencyCollector, ""},
 	{DependencyDiscoveryScope, ""},
@@ -149,6 +159,23 @@ var referenceKinds = map[string]string{
 	// 000258, WP-750) and references a site only while its object stands
 	// there; the object is the dependency.
 	"reservation": DependencyAsset,
+	// Monitoring group members and monitoring profiles carry the site of
+	// their CI (000307, WP-935); the CI at the site is the dependency. A
+	// probe is a kind of its own (DependencyProbe): without CI it holds the
+	// site itself.
+	"monitoring_group_member": DependencyCI,
+	"monitoring_profile":      DependencyCI,
+	// A suppressed auto probe carries the site of its CI (000345, WP-949);
+	// the CI at the site is the dependency.
+	"probe_autocreate_suppression": DependencyCI,
+	// A probe assignment carries the site of its probe (000308, WP-936);
+	// the probe is the dependency.
+	"probe_assignment": DependencyProbe,
+	// A collector group and its members carry the site of the collectors
+	// at the site (000308, WP-936): every collector gets a group of its
+	// own with its site; the collector is the dependency.
+	"collector_group":        DependencyCollector,
+	"collector_group_member": DependencyCollector,
 }
 
 // DependencyError reports the kinds of objects that still reference a

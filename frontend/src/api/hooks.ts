@@ -10,6 +10,7 @@ import {
   ciApi,
   relationshipApi,
   relationshipSuppressionApi,
+  alarmApi,
   collectorApi,
   discoveryScopeApi,
   scopeSuggestionApi,
@@ -49,11 +50,20 @@ import {
   auditApi,
   privacyApi,
   credentialApi,
-  vrfApi,
+  sourceRankApi,
+  type SourceRankEntry,
+  type SourceRankParams,
+  type FormDefinitionWrite,
   bffQueryPartial,
   ApiError,
+  orgLifecycleApi,
+  type OrganizationDeletion,
 } from '../api/client';
 import type {
+  ComplianceReportRequest,
+  ComplianceRuleWrite,
+  ComplianceScoreGroupBy,
+  ComplianceStandard,
   BusinessCalendar,
   CreateBusinessCalendarRequest,
   CreateDisposalRecordRequest,
@@ -125,8 +135,19 @@ import type {
   ExportJobCreateRequest,
   MetricQueryParams,
   AlertRuleCreateRequest,
+  AlertRuleUpdateRequest,
+  AlarmListPage,
+  AlarmListParams,
 } from '../api/client';
 import { isActive, type Job } from '../hooks/useJobs';
+import {
+  ciCredentials,
+  ciEffectiveCredentials,
+  credentialOriginTarget,
+  credentialUsage,
+  vaultConnectionApi,
+  type CICredentialBindingEntry,
+} from './cmdb';
 
 /**
  * ListQueryOptions switch a list query off, e.g. a picker until the user
@@ -326,12 +347,66 @@ export function useCredentialMutations() {
   };
 }
 
-/** The VRFs of the organization, the default first (TEN-10). */
-export function useVrfs(enabled = true) {
+/** The effective credential per namespace of a CI (CRD-04); needs credential:read. */
+export function useCIEffectiveCredentials(ciId: string, enabled = true) {
   return useQuery({
-    queryKey: ['vrfs', 'options'],
-    queryFn: () => vrfApi.list({ limit: 200 }),
+    queryKey: ['credentials', 'ci', ciId, 'effective'],
+    queryFn: () => ciEffectiveCredentials(ciId),
     enabled,
+    retry: false,
+  });
+}
+
+/** The bindings with target ci of a CI (CRD-01); needs credential:read. */
+export function useCICredentialBindings(ciId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['credentials', 'ci', ciId, 'bindings'],
+    queryFn: () => ciCredentials.list(ciId),
+    enabled,
+    retry: false,
+  });
+}
+
+/** The usage of one credential at one CI (CRD-06); needs credential:read. */
+export function useCredentialUsage(credentialId: string | undefined, ciId: string) {
+  return useQuery({
+    queryKey: ['credentials', 'usage', credentialId, ciId],
+    queryFn: () => credentialUsage(credentialId ?? '', ciId),
+    enabled: !!credentialId,
+    retry: false,
+  });
+}
+
+/** The name of the group or the CIDR of the subnet a binding of the resolution targets. */
+export function useCredentialOriginTarget(bindingId: string | undefined) {
+  return useQuery({
+    queryKey: ['credentials', 'origin-target', bindingId],
+    queryFn: () => credentialOriginTarget(bindingId ?? ''),
+    enabled: !!bindingId,
+    retry: false,
+    staleTime: 60_000,
+  });
+}
+
+/** The vault connections a vault reference can use (credential:read). */
+export function useVaultConnections(enabled = true) {
+  return useQuery({
+    queryKey: ['vault-connections'],
+    queryFn: () => vaultConnectionApi.list(),
+    enabled,
+    retry: false,
+  });
+}
+
+/**
+ * Replacing the CI bindings (credential:bind); invalidates the bindings, the
+ * effective credentials and the usage of the CI.
+ */
+export function useReplaceCICredentials(ciId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (bindings: CICredentialBindingEntry[]) => ciCredentials.replace(ciId, bindings),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['credentials', 'ci', ciId] }),
   });
 }
 
@@ -403,10 +478,11 @@ export function useImpactMany(ids: string[], relType?: string, include?: string)
   });
 }
 
-export function useSites(clientId?: string) {
+export function useSites(clientId?: string, options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: ['sites', 'options', clientId],
     queryFn: () => siteApi.list({ limit: 200, ...(clientId ? { client_id: clientId } : {}) }),
+    ...options,
   });
 }
 
@@ -792,6 +868,88 @@ export function assetDetailQuery(id: string) {
     queryFn: (): Promise<BffPartialResult<AssetDetailAggregate>> =>
       bffQueryPartial<AssetDetailAggregate>(ASSET_DETAIL_QUERY, { id }),
   };
+}
+
+/** A finding of a CI in the BFF (WP-1136). */
+export interface CIP3Finding {
+  id: string;
+  severity: string;
+  title: string;
+  status: string;
+  cveIds: string[];
+  kev: boolean;
+  fixedVersion?: string | null;
+}
+
+/** A compliance result of a CI in the BFF (WP-1136). */
+export interface CIP3ComplianceResult {
+  ruleId: string;
+  ruleName: string;
+  status: string;
+  severity: string;
+  evaluatedAt: string;
+  statusChangedAt: string;
+}
+
+/** A workflow run on a CI in the BFF (WP-1136). */
+export interface CIP3WorkflowRun {
+  id: string;
+  workflowId: string;
+  workflowName: string;
+  version: number;
+  status: string;
+  trigger: string;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  createdAt: string;
+}
+
+/** The P3 fields of a CI the detail page reads (WP-1137). */
+export interface CIP3Detail {
+  ci: {
+    id: string;
+    findings: CIP3Finding[];
+    complianceResults: CIP3ComplianceResult[];
+    complianceScore: {
+      score: number;
+      passed: number;
+      failed: number;
+      notApplicable: number;
+    } | null;
+    workflowRuns: CIP3WorkflowRun[];
+  } | null;
+}
+
+/** CI_P3_QUERY reads findings, compliance and runs of a CI in one BFF query (WP-1137). */
+/** How many findings the CI detail reads; a full page means there may be more. */
+export const CI_FINDINGS_LIMIT = 50;
+
+export const CI_P3_QUERY = `query CIP3Detail($id: ID!) {
+  ci(id: $id) {
+    id
+    findings(first: ${CI_FINDINGS_LIMIT}) { id severity title status cveIds kev fixedVersion }
+    complianceResults(first: 100) { ruleId ruleName status severity evaluatedAt statusChangedAt }
+    complianceScore { score passed failed notApplicable }
+    workflowRuns(first: 20) { id workflowId workflowName version status trigger startedAt finishedAt createdAt }
+  }
+}`;
+
+/**
+ * useCIP3Detail reads the findings, compliance results and score and the
+ * workflow runs of a CI in one BFF query (WP-1137 AK1), only once enabled
+ * (the first expand of one of the three sections); the sections share the
+ * answer. A field the server refuses (FORBIDDEN) or leaves out
+ * (UNAVAILABLE) comes back as an error of its path.
+ */
+export function useCIP3Detail(ciId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ['cis', ciId, 'p3'] as const,
+    queryFn: () => bffQueryPartial<CIP3Detail>(CI_P3_QUERY, { id: ciId }),
+    enabled: enabled && !!ciId,
+    retry: false,
+    // The sections share one answer: a second section opened later reads it.
+    staleTime: 60_000,
+  });
 }
 
 /**
@@ -1797,10 +1955,57 @@ export function useFormDefinitions() {
   return useQuery({ queryKey: ['forms'], queryFn: () => formApi.list({ active: true }) });
 }
 
+/** useFormDefinition reads one form definition for the editor (WP-1133). */
+export function useFormDefinition(id: string | undefined) {
+  return useQuery({
+    queryKey: ['forms', 'detail', id ?? ''],
+    queryFn: () => formApi.get(id ?? ''),
+    enabled: !!id,
+  });
+}
+
+/** useFormVersions lists the schema versions of a form, newest first. */
+export function useFormVersions(id: string | undefined) {
+  return useQuery({
+    queryKey: ['forms', 'versions', id ?? ''],
+    queryFn: () => formApi.versions(id ?? ''),
+    enabled: !!id,
+  });
+}
+
+/**
+ * useSaveForm creates (no id) or changes a form with If-Match on version;
+ * the lists, the definition and its versions refresh.
+ */
+export function useSaveForm() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      data,
+      version,
+    }: {
+      id?: string;
+      data: FormDefinitionWrite;
+      version?: number;
+    }) => (id ? formApi.update(id, data, version) : formApi.create(data)),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['forms'] }),
+  });
+}
+
 export function useFormSubmissions(formId?: string) {
   return useQuery({
     queryKey: ['form-submissions', formId],
     queryFn: () => formApi.submissions({ form_id: formId }),
+  });
+}
+
+/** useAllFormSubmissions reads every submission of a form (grouped by version, WP-1133). */
+export function useAllFormSubmissions(formId: string | undefined) {
+  return useQuery({
+    queryKey: ['form-submissions', 'all', formId ?? ''],
+    queryFn: () => formApi.allSubmissions(formId ?? ''),
+    enabled: !!formId,
   });
 }
 
@@ -1850,14 +2055,136 @@ export function useComplianceScore() {
   return useQuery({ queryKey: ['compliance-score'], queryFn: () => complianceApi.score() });
 }
 
+/**
+ * useEvaluateCompliance starts the evaluation job (WP-1126); the page
+ * follows the job and reloads score and results once it ended
+ * (useInvalidateCompliance).
+ */
 export function useEvaluateCompliance() {
+  return useMutation({ mutationFn: () => complianceApi.evaluate() });
+}
+
+/** useInvalidateCompliance reloads rules, results, score and coverage. */
+export function useInvalidateCompliance() {
   const queryClient = useQueryClient();
+  return () => {
+    for (const key of [
+      'compliance-rules',
+      'compliance-results',
+      'compliance-score',
+      'compliance-controls',
+      'compliance-coverage',
+    ]) {
+      void queryClient.invalidateQueries({ queryKey: [key] });
+    }
+  };
+}
+
+export function useComplianceRule(id: string | undefined) {
+  return useQuery({
+    queryKey: ['compliance-rules', 'detail', id],
+    queryFn: () => complianceApi.rule(id as string),
+    enabled: !!id,
+  });
+}
+
+/** useSaveComplianceRule creates or patches a rule and replaces its controls (WP-1135 AK1). */
+export function useSaveComplianceRule() {
+  const invalidate = useInvalidateCompliance();
   return useMutation({
-    mutationFn: () => complianceApi.evaluate(),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['compliance-results'] });
-      queryClient.invalidateQueries({ queryKey: ['compliance-score'] });
+    mutationFn: async ({
+      id,
+      rule,
+      controlIds,
+    }: {
+      id?: string;
+      rule: ComplianceRuleWrite & { active?: boolean };
+      controlIds: string[];
+    }) => {
+      const saved = id
+        ? await complianceApi.updateRule(id, rule)
+        : await complianceApi.createRule(rule);
+      if (!id && rule.active === false && saved.active) {
+        // POST creates active rules; the switch is a PATCH.
+        await complianceApi.updateRule(saved.id, { active: false });
+      }
+      await complianceApi.setRuleControls(saved.id, controlIds);
+      return saved;
     },
+    onSuccess: invalidate,
+  });
+}
+
+export function useComplianceControls(standard: ComplianceStandard) {
+  return useQuery({
+    queryKey: ['compliance-controls', standard],
+    queryFn: () => complianceApi.controls(standard),
+  });
+}
+
+export function useComplianceCoverage(standard: ComplianceStandard) {
+  return useQuery({
+    queryKey: ['compliance-coverage', standard],
+    queryFn: () => complianceApi.coverage(standard),
+  });
+}
+
+export function useComplianceScoreBy(groupBy: ComplianceScoreGroupBy) {
+  return useQuery({
+    queryKey: ['compliance-score', 'group', groupBy],
+    queryFn: () => complianceApi.scoreBy(groupBy),
+  });
+}
+
+/** useComplianceScoreHistory reads the daily score of the last days (up to 400). */
+export function useComplianceScoreHistory(days: number) {
+  return useQuery({
+    queryKey: ['compliance-score', 'history', days],
+    queryFn: () => {
+      const to = new Date();
+      const from = new Date(to.getTime() - (days - 1) * 86_400_000);
+      const day = (d: Date) => d.toISOString().slice(0, 10);
+      return complianceApi.scoreHistory(day(from), day(to));
+    },
+  });
+}
+
+export function useComplianceRuleTemplates(enabled = true) {
+  return useQuery({
+    queryKey: ['compliance-rule-templates'],
+    queryFn: () => complianceApi.templates(),
+    enabled,
+  });
+}
+
+export function useInstantiateComplianceTemplate() {
+  const invalidate = useInvalidateCompliance();
+  return useMutation({
+    mutationFn: (key: string) => complianceApi.instantiate(key),
+    onSuccess: invalidate,
+  });
+}
+
+export function useComplianceReports(enabled = true) {
+  return useQuery({
+    queryKey: ['compliance-reports'],
+    queryFn: () => complianceApi.reports({ limit: 50 }),
+    enabled,
+    // A report whose malware scan is pending is reloaded until the scan
+    // ends, so its download unlocks without a reload of the page.
+    refetchInterval: (query: { state: { data?: { data: { scan_status: string }[] } } }) =>
+      query.state.data?.data.some((r) => r.scan_status === 'pending_scan')
+        ? REPORT_SCAN_POLL_MS
+        : false,
+  });
+}
+
+/** How often the report list is reloaded while a scan is pending. */
+export const REPORT_SCAN_POLL_MS = 5000;
+
+export function useCreateComplianceReport() {
+  return useMutation({
+    mutationFn: (data: ComplianceReportRequest) => complianceApi.createReport(data),
   });
 }
 
@@ -2034,6 +2361,26 @@ export function useCIMetrics(ciId: string | undefined, enabled = false) {
   });
 }
 
+/** useAlarms loads the alarms of the filters page by page over next_cursor (WP-991). */
+export function useAlarms(params: Omit<AlarmListParams, 'cursor'>) {
+  return useInfiniteQuery({
+    queryKey: ['alarms', params],
+    queryFn: ({ pageParam }) => alarmApi.list({ ...params, cursor: pageParam }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last: AlarmListPage) =>
+      last.has_more ? last.next_cursor || undefined : undefined,
+  });
+}
+
+/** useAlarm reads an alarm with its transitions. */
+export function useAlarm(id: string | undefined) {
+  return useQuery({
+    queryKey: ['alarm', id],
+    queryFn: () => alarmApi.get(id!),
+    enabled: !!id,
+  });
+}
+
 export function useAlertRules() {
   return useQuery({
     queryKey: ['alert-rules'],
@@ -2045,6 +2392,16 @@ export function useCreateAlertRule() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: AlertRuleCreateRequest) => monitoringApi.createAlert(data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['alert-rules'] }),
+  });
+}
+
+/** PATCH /monitoring/alerts/{id} (WP-990). */
+export function useUpdateAlertRule() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: AlertRuleUpdateRequest }) =>
+      monitoringApi.updateAlert(id, data),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['alert-rules'] }),
   });
 }
@@ -2116,4 +2473,88 @@ export function useRotateCredentialKeys() {
     mutationFn: () => credentialApi.rotateKeys(),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['credentials'] }),
   });
+}
+
+/**
+ * useSourceRanks reads the source ranks of the organization (GET
+ * /reconciliation/source-ranks, WP-1115): without parameters every stored
+ * entry, with ci_type_id and attribute_keys the effective tables.
+ */
+export function useSourceRanks(params: SourceRankParams = {}, enabled = true) {
+  return useQuery({
+    queryKey: ['source-ranks', params],
+    queryFn: () => sourceRankApi.get(params),
+    enabled,
+  });
+}
+
+/** useReplaceSourceRanks replaces every entry of the organization (PUT). */
+export function useReplaceSourceRanks() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (entries: SourceRankEntry[]) => sourceRankApi.replace(entries),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['source-ranks'] }),
+  });
+}
+
+// ─── Organization data: full export and deletion (TLC-05, TLC-06, WP-1157) ───
+
+/** The full exports of the organization (org:export); enabled holds the request back. */
+export function useOrgExports(enabled = true) {
+  return useQuery({
+    queryKey: ['org-data', 'exports'],
+    queryFn: () => orgLifecycleApi.exports(),
+    enabled,
+    retry: false,
+    // A running export moves on: poll while one is queued or running.
+    refetchInterval: (query) =>
+      (query.state.data?.data ?? []).some((e) => e.status === 'queued' || e.status === 'running')
+        ? 5_000
+        : false,
+  });
+}
+
+/** Starting a full export (org:export with a second factor). */
+export function useStartOrgExport() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => orgLifecycleApi.startExport(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['org-data', 'exports'] }),
+  });
+}
+
+/** The objects of a completed export with their signed URLs. */
+export function useOrgExportDownload() {
+  return useMutation({ mutationFn: (id: string) => orgLifecycleApi.download(id) });
+}
+
+/**
+ * The deletion state of the organization (every user); enabled holds the
+ * request back (module org_lifecycle off).
+ */
+export function useOrgDeletion(enabled = true) {
+  return useQuery({
+    queryKey: ['org-data', 'deletion'],
+    queryFn: () => orgLifecycleApi.deletion(),
+    enabled,
+    retry: false,
+    staleTime: 60_000,
+  });
+}
+
+/** Requesting and withdrawing the deletion (org:delete with a second factor). */
+export function useOrgDeletionMutations() {
+  const queryClient = useQueryClient();
+  const settle = (state: OrganizationDeletion) =>
+    queryClient.setQueryData(['org-data', 'deletion'], state);
+  return {
+    request: useMutation({
+      mutationFn: (slug: string) => orgLifecycleApi.requestDeletion(slug),
+      onSuccess: settle,
+    }),
+    cancel: useMutation({
+      mutationFn: () => orgLifecycleApi.cancelDeletion(),
+      onSuccess: settle,
+    }),
+  };
 }

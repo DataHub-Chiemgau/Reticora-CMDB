@@ -23,8 +23,8 @@ import {
   useResolveScopeSuggestion,
   useScopeSuggestions,
   useSites,
-  useVrfs,
 } from '../api/hooks';
+import { useVrfs } from '../api/ipamHooks';
 import type {
   Collector,
   DiscoveryPlugin,

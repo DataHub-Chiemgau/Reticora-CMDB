@@ -29,6 +29,9 @@ type Handler struct {
 	entitlements *entitlement.Service
 	// orgs creates organizations (TLC-02).
 	orgs OrgCreator
+	// vulnfeed serves the vulnerability catalog routes (WithVulnfeed,
+	// WP-1120).
+	vulnfeed *VulnfeedConfig
 }
 
 // NewHandler creates the operator handler. pool serves the organization
@@ -48,6 +51,14 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.With(h.Middleware).Get("/api/v1/admin/audit/verify", h.VerifyAudit)
 	r.With(h.Middleware).Get("/api/v1/admin/orgs/{id}/entitlements", h.ListEntitlements)
 	r.With(h.Middleware).Post("/api/v1/admin/orgs/{id}/entitlements", h.GrantEntitlement)
+	r.With(h.Middleware).Put("/api/v1/admin/orgs/{id}/plan", h.ChangePlan)
+	r.With(h.Middleware).Get("/api/v1/admin/addons", h.ListAddonCatalog)
+	r.With(h.Middleware).Get("/api/v1/admin/plans", h.PlanMatrix)
+	r.With(h.Middleware).Get("/api/v1/admin/orgs/{id}/usage", h.OrganizationUsage)
+	r.With(h.Middleware).Post("/api/v1/admin/orgs/{id}/addons/{key}", h.BookAddon)
+	r.With(h.Middleware).Delete("/api/v1/admin/orgs/{id}/addons/{key}", h.CancelAddon)
+	r.With(h.Middleware).Post("/api/v1/admin/vulnfeed/bundle", h.ImportVulnfeedBundle)
+	r.With(h.Middleware).Get("/api/v1/admin/vulnfeed/status", h.VulnfeedStatus)
 }
 
 var errNotOperator = errors.New("operator: login is not an operator with MFA")
@@ -199,7 +210,14 @@ func (h *Handler) ListAudit(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusBadRequest, "Bad Request", page.CursorError.Error())
 		return
 	}
-	entries, total, err := h.audit.List(r.Context(), page.Limit, page.Offset)
+	// target_org (WP-888): the history of one organization.
+	target := r.URL.Query().Get("target_org")
+	if target != "" && !api.IsUUID(target) {
+		api.WriteFieldError(w, &api.FieldError{Field: "target_org", Message: "target_org must be a UUID",
+			Status: http.StatusBadRequest})
+		return
+	}
+	entries, total, err := h.audit.List(r.Context(), strings.ToLower(target), page.Limit, page.Offset)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return

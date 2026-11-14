@@ -16,22 +16,50 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/pii"
 )
 
-// TestReservedTypesAreNoEventTypes covers EVT-03 (WP-246): the reserved
-// types of phase 3 and the registered types are disjoint; IsType, and with
-// it Outbox.Append and AppendMany, refuses a reserved type.
-func TestReservedTypesAreNoEventTypes(t *testing.T) {
-	for _, typ := range events.Types {
-		if events.IsReserved(typ) {
-			t.Errorf("registered type %s is reserved", typ)
-		}
+// TestPhase3TypesAreRegistered covers EVT-03 [P3] (WP-867, WP-868, E-161):
+// the reservation of phase 2 ended; every type of phase 3 is a registered
+// type with a frame and stands in the type enum of api/events.schema.json,
+// the module types of WP-868 among them; an unknown type is still refused by
+// Append and AppendMany.
+func TestPhase3TypesAreRegistered(t *testing.T) {
+	raw, err := os.ReadFile("../../../api/events.schema.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var schema struct {
+		Properties struct {
+			Type struct {
+				Enum []string `json:"enum"`
+			} `json:"type"`
+		} `json:"properties"`
+	}
+	if err = json.Unmarshal(raw, &schema); err != nil {
+		t.Fatal(err)
+	}
+	for _, typ := range events.Phase3Types {
 		if !events.IsType(typ) {
 			t.Errorf("IsType(%s) = false", typ)
 		}
+		if _, ok := events.Payloads[typ]; !ok {
+			t.Errorf("%s has no frame", typ)
+		}
+		if !slices.Contains(schema.Properties.Type.Enum, typ) {
+			t.Errorf("%s is missing from the type enum of the schema", typ)
+		}
+	}
+	for _, typ := range []string{"maintenance.scheduled", "maintenance.started", "maintenance.ended", "workflow.run_started",
+		"workflow.run_succeeded", "workflow.run_failed", "workflow.run_cancelled", "workflow.approval_requested",
+		"workflow.approval_decided", "workflow.webhook", "finding.created", "finding.changed", "finding.resolved",
+		"notification.escalated", "notification.acknowledged", "entitlement.changed", "org.export_completed",
+		"org.deletion_requested", "org.deletion_cancelled"} {
+		if !slices.Contains(events.Phase3Types, typ) {
+			t.Errorf("%s is no type of phase 3", typ)
+		}
 	}
 	outbox := events.NewOutbox()
-	for _, typ := range []string{"maintenance.scheduled", "workflow.started", "workflow.completed", "finding.created"} {
-		if !events.IsReserved(typ) || events.IsType(typ) {
-			t.Errorf("%s: reserved %v, type %v; want a reserved type that is no event type", typ, events.IsReserved(typ), events.IsType(typ))
+	for _, typ := range []string{"workflow.started", "finding.updated", "maintenance.window_changed"} {
+		if events.IsType(typ) {
+			t.Errorf("IsType(%s) = true", typ)
 		}
 		if _, err := outbox.Append(context.Background(), nil, &events.Event{OrgID: "o", Type: typ}); err == nil || !strings.Contains(err.Error(), "unknown event type") {
 			t.Errorf("Append(%s) = %v, want unknown event type", typ, err)
@@ -39,9 +67,6 @@ func TestReservedTypesAreNoEventTypes(t *testing.T) {
 		if _, err := outbox.AppendMany(context.Background(), nil, []*events.Event{{OrgID: "o", Type: typ}}); err == nil || !strings.Contains(err.Error(), "unknown event type") {
 			t.Errorf("AppendMany(%s) = %v, want unknown event type", typ, err)
 		}
-	}
-	if events.IsReserved("maintenance.window_changed") {
-		t.Error("only maintenance.scheduled of the maintenance types is reserved")
 	}
 }
 

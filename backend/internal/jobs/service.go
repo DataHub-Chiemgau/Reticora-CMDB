@@ -9,8 +9,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 )
 
@@ -141,6 +144,20 @@ func (s *Service) Enqueue(ctx context.Context, orgID, kind string, params any, o
 	if err != nil {
 		return nil, false, err
 	}
+	// The grace period of an organization deletion (TLC-06, WP-1153): no
+	// new job but the full export; running jobs run to their end.
+	if checker, ok := s.repo.(orgStateChecker); ok && kind != orgExportKind {
+		pending, cerr := checker.OrgPendingDeletion(ctx, orgID)
+		if cerr != nil {
+			return nil, false, cerr
+		}
+		if pending {
+			// The route middleware answers 423 even when the handler maps
+			// the error otherwise (its cached state was older).
+			api.SignalOrgPendingDeletion(ctx)
+			return nil, false, ErrOrgPendingDeletion
+		}
+	}
 	raw, err := json.Marshal(params)
 	if err != nil {
 		return nil, false, fmt.Errorf("encode job params: %w", err)
@@ -159,6 +176,37 @@ func (s *Service) Enqueue(ctx context.Context, orgID, kind string, params any, o
 	}
 	created, err := s.repo.Insert(ctx, job)
 	return job, created, err
+}
+
+// ErrOrgPendingDeletion refuses a job of an organization whose deletion is
+// requested or whose purge runs (TLC-06, WP-1153); the routes answer 423
+// (api.WriteRepoError, and the route middleware OrgState through the
+// signal of the request).
+var ErrOrgPendingDeletion = api.ErrOrgPendingDeletion
+
+// orgExportKind is the job kind of the full export (export.OrgExportJobKind),
+// the one kind the grace period of a deletion still starts (E-166).
+const orgExportKind = "org.export"
+
+// orgStateChecker is a repository that knows the deletion state of an
+// organization (PGRepository).
+type orgStateChecker interface {
+	OrgPendingDeletion(ctx context.Context, orgID string) (bool, error)
+}
+
+// OrgPendingDeletion reports whether the deletion of the organization is
+// requested or its purge runs; it reads organization.deletion_state in
+// the tenant context of the call.
+func (r *PGRepository) OrgPendingDeletion(ctx context.Context, orgID string) (bool, error) {
+	var pending bool
+	err := r.inScope(ctx, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT COALESCE(bool_or(deletion_state IN ('requested', 'purging')), false)
+			FROM organization WHERE id = $1`, orgID).Scan(&pending)
+	})
+	if err != nil {
+		return false, fmt.Errorf("read the deletion state: %w", err)
+	}
+	return pending, nil
 }
 
 // Claim starts the next due queued job of the given kinds; nil when none
@@ -199,6 +247,19 @@ func (s *Service) Progress(ctx context.Context, orgID, id string, percent int) e
 	return err
 }
 
+// ProgressResult records the progress (0–100) of a running job together
+// with an interim result (counters such as processed/total), which the
+// result of its end replaces.
+func (s *Service) ProgressResult(ctx context.Context, orgID, id string, percent int, interim any) error {
+	percent = max(0, min(100, percent))
+	raw, err := json.Marshal(interim)
+	if err != nil {
+		return fmt.Errorf("encode the interim result: %w", err)
+	}
+	_, err = s.repo.Transition(ctx, orgID, id, []Status{StatusRunning}, &Update{Status: StatusRunning, Progress: &percent, Result: raw})
+	return err
+}
+
 // Succeed ends a running job with its result.
 func (s *Service) Succeed(ctx context.Context, orgID, id string, result any) (*Job, error) {
 	raw, err := json.Marshal(result)
@@ -206,12 +267,23 @@ func (s *Service) Succeed(ctx context.Context, orgID, id string, result any) (*J
 		return nil, fmt.Errorf("encode job result: %w", err)
 	}
 	done, now := 100, s.now()
-	job, err := s.repo.Transition(ctx, orgID, id, []Status{StatusRunning},
-		&Update{Status: StatusSucceeded, Progress: &done, Result: raw, FinishedAt: &now})
+	u := &Update{Status: StatusSucceeded, Progress: &done, Result: raw, FinishedAt: &now}
+	if e, ok := result.(SuccessEvents); ok {
+		u.Events = e.SucceededEvents
+	}
+	job, err := s.repo.Transition(ctx, orgID, id, []Status{StatusRunning}, u)
 	if err == nil {
 		observeEnd(job)
 	}
 	return job, err
+}
+
+// SuccessEvents is a job result that names the events of the job's
+// success (e.g. org.export_completed, WP-1151): Succeed appends them to the
+// outbox in the transaction that marks the job succeeded, with the
+// succeeded job (finished_at, created_by).
+type SuccessEvents interface {
+	SucceededEvents(j *Job) []*events.Event
 }
 
 // Fail records a failed attempt: the job goes back to the queue after the
@@ -254,6 +326,9 @@ func (s *Service) fail(ctx context.Context, orgID, id string, cause error, retry
 		&Update{Status: StatusFailed, Error: &msg, FinishedAt: &now, ReportFailed: true})
 	if err == nil {
 		observeEnd(failed)
+		if k, kerr := s.kind(job.Kind); kerr == nil && k.Failed != nil {
+			k.Failed(ctx, failed)
+		}
 	}
 	return failed, err
 }
@@ -672,10 +747,25 @@ func mirrorRetry(job *Job, to Status) bool {
 // dropped and the job stays cancelled (JOB-03, F-162).
 func (s *Service) RunDetached(ctx context.Context, orgID, kind string, params any, createdBy string,
 	run func(ctx context.Context) (any, error)) (*Job, error) {
-	job, _, err := s.Enqueue(ctx, orgID, kind, params, EnqueueOptions{CreatedBy: createdBy})
-	if err != nil {
-		return nil, err
+	job, _, err := s.RunDetachedWith(ctx, orgID, kind, params, EnqueueOptions{CreatedBy: createdBy}, run)
+	return job, err
+}
+
+// RunDetachedWith is RunDetached with the enqueue options: a job whose
+// idempotency key is taken is not run again; the first job is returned
+// with created false (the dedupe of admp.refresh, WP-929).
+func (s *Service) RunDetachedWith(ctx context.Context, orgID, kind string, params any, opts EnqueueOptions,
+	run func(ctx context.Context) (any, error)) (job *Job, created bool, err error) {
+	job, created, err = s.Enqueue(ctx, orgID, kind, params, opts)
+	if err != nil || !created {
+		return job, created, err
 	}
+	s.runDetached(ctx, orgID, kind, job, run)
+	return job, true, nil
+}
+
+// runDetached runs the enqueued job in the background (RunDetached).
+func (s *Service) runDetached(ctx context.Context, orgID, kind string, job *Job, run func(ctx context.Context) (any, error)) {
 	detached := context.WithoutCancel(ctx)
 	go func() {
 		claimed, cerr := s.ClaimJob(detached, orgID, job.ID)
@@ -699,5 +789,4 @@ func (s *Service) RunDetached(ctx context.Context, orgID, kind string, params an
 			slog.ErrorContext(detached, "record detached job", "job", job.ID, "error", serr)
 		}
 	}()
-	return job, nil
 }

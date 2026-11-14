@@ -18,18 +18,27 @@ type Repository interface {
 	// are part of a CI's history only with opts.IncludeAudit (CI-06, E-78),
 	// opts.ChangeKind keeps the CI changes of that kind (AUD-03).
 	List(ctx context.Context, orgID, entityType, entityID string, page api.PaginationParams, opts ListOptions) ([]Change, int, error)
-	// TrailUpTo returns the changes of one entity up to a point in time,
+	// TrailUpTo returns the changes of one entity up to a point in time (zero:
+	// now, the whole trail without upper bound),
 	// oldest first, for point-in-time reconstruction.
 	TrailUpTo(ctx context.Context, orgID, entityType, entityID string, at time.Time) ([]Change, error)
 	// Visible reports whether the entity of a state snapshot exists under
 	// the caller's tenant scope (JOB-04).
 	Visible(ctx context.Context, orgID, entityType, entityID string) (bool, error)
-	// StateAt reconstructs the state of an entity at req.At in one tenant
+	// StateAt reconstructs the state of an entity at req.At (zero: now, the
+	// database time of the read, which is also the bound of the trail and
+	// StateSnapshot.At) in one tenant
 	// transaction (AUD-08, WP-793): base, trail, edges and the resolution
 	// of the personal values. An entity the caller sees neither as row nor,
 	// for a CI, as ci_snapshot is api.ErrNotFound; one without a recorded
 	// change up to req.At is a *NoRecordedStateError.
 	StateAt(ctx context.Context, orgID string, req *StateRequest) (*StateSnapshot, error)
+	// Now returns the current time of the store (the database clock for
+	// PostgreSQL, clock_timestamp()): the at of a snapshot request without
+	// at, so the job replays the state of the request, not of its run, and
+	// a change committed before the request is part of it whatever the
+	// clock of the process says.
+	Now(ctx context.Context, orgID string) (time.Time, error)
 }
 
 // StateRequest asks StateAt for the state of an entity (ci or asset) at a
@@ -39,11 +48,29 @@ type Repository interface {
 // CI at At, visible under the caller's scope and projected by the
 // relationship grant of the principal of the context.
 type StateRequest struct {
-	EntityType    string
-	EntityID      string
+	EntityType string
+	EntityID   string
+	// At is the time of recording of the state; zero is now: the replay
+	// has no upper bound, so a change the caller has just written is part
+	// of it whatever the clock of the process says, and the state carries
+	// the database time of the read (Read-your-writes despite a clock skew
+	// between application and database).
 	At            time.Time
 	Reveal        bool
 	Relationships bool
+}
+
+// unbounded is the upper bound of a replay without at: later than every
+// recorded change.
+var unbounded = time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)
+
+// upperBound is the bound of the trail of a state at at: at, or unbounded
+// for now (zero).
+func upperBound(at time.Time) time.Time {
+	if at.IsZero() {
+		return unbounded
+	}
+	return at
 }
 
 // CITimeline reads the timeline of a CI for the GraphQL BFF (ciHistory,
@@ -138,6 +165,7 @@ func (r *MemoryRepository) CITimeline(_ context.Context, orgID, ciID string, pag
 
 // TrailUpTo returns changes oldest-first for replay.
 func (r *MemoryRepository) TrailUpTo(_ context.Context, orgID, entityType, entityID string, at time.Time) ([]Change, error) {
+	at = upperBound(at)
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var out []Change
@@ -163,14 +191,19 @@ func (r *MemoryRepository) StateAt(ctx context.Context, orgID string, req *State
 	if !visible {
 		return nil, api.ErrNotFound
 	}
-	trail, err := r.TrailUpTo(ctx, orgID, req.EntityType, req.EntityID, req.At)
+	at := req.At
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	trail, err := r.TrailUpTo(ctx, orgID, req.EntityType, req.EntityID, upperBound(req.At))
 	if err != nil {
 		return nil, err
 	}
 	if len(trail) == 0 {
-		return nil, &NoRecordedStateError{At: req.At}
+		return nil, &NoRecordedStateError{At: at}
 	}
 	s := Replay(trail)
+	s.At = at
 	if req.Relationships && req.EntityType == "ci" {
 		s.Relationships = &[]EdgeState{}
 	}
@@ -179,6 +212,11 @@ func (r *MemoryRepository) StateAt(ctx context.Context, orgID string, req *State
 
 // Visible reports whether a change of the entity was recorded: the
 // in-memory trail knows no entity rows.
+// Now returns the clock of the process: the memory store has no other.
+func (r *MemoryRepository) Now(context.Context, string) (time.Time, error) {
+	return time.Now().UTC(), nil
+}
+
 func (r *MemoryRepository) Visible(_ context.Context, orgID, entityType, entityID string) (bool, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

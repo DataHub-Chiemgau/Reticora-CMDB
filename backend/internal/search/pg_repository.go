@@ -556,11 +556,26 @@ func (fs *fieldScope) readable(q *Query) []string {
 	}
 	kind := permission.ObjectKind(fs.entityType)
 	for _, key := range fs.attributes {
-		if !strings.Contains(key, ",") && q.Policy.Level(kind, fs.typeID, key, ref).Readable() {
+		if !strings.Contains(key, ",") && fs.attributeReadable(q, kind, &ref, key) {
 			out = append(out, key)
 		}
 	}
 	return out
+}
+
+// attributeReadable reports whether a custom field row counts: a CI
+// attribute through the central projection rule with the linked asset, so
+// a computed attribute over asset fields follows its sources (SR-58,
+// WP-871); the custom field of another kind by its level.
+func (fs *fieldScope) attributeReadable(q *Query, kind permission.ObjectKind, ref *permission.ObjectRef, key string) bool {
+	if kind != permission.KindCI {
+		return q.Policy.Level(kind, fs.typeID, key, *ref).Readable()
+	}
+	var opts []permission.ProjectOption
+	if parts := strings.Split(fs.assetRef, "|"); len(parts) == 4 && parts[0] != "" {
+		opts = append(opts, permission.WithAsset(parts[1], permission.ObjectRef{ID: parts[0], ClientID: parts[2], SiteID: parts[3]}))
+	}
+	return permission.Readable(q.Policy, kind, fs.typeID, *ref, permission.DTOPath(key), opts...)
 }
 
 // restrictedQuery builds the query of a search with restricted field
@@ -1071,6 +1086,8 @@ func canonicalMAC(norm string) string {
 // the statement of the field rows of its documents ("" for a type without).
 type reindexSource struct {
 	entityType, table, live, title, summary, url, fields string
+	// metadata is the expression of the metadata; empty is '{}'.
+	metadata string
 }
 
 // reindexSources are the indexed entity types in the order of the rebuild.
@@ -1126,6 +1143,16 @@ UNION ALL
 	{entityType: "location", table: "location", live: "true", title: "e.name", summary: "e.kind", url: "'/locations?node=' || e.id"},
 	{entityType: "reservation", table: "reservation", live: "true", title: "COALESCE(e.project_ref, e.reason, 'reservation')",
 		summary: "concat_ws(' ', e.state, e.reason, e.project_ref)", url: "'/reservations'"},
+	// Subnets and IP addresses (IPM-20, WP-909): the expressions of the
+	// triggers search_index_subnet and search_index_ip_address (000303).
+	{entityType: "subnet", table: "subnet", live: "true", title: "concat_ws(' ', e.cidr::text, e.name)",
+		summary: "COALESCE(e.description, '')", url: "'/ipam/subnets/' || e.id",
+		metadata: "jsonb_build_object('vrf_id', e.vrf_id, 'section_id', e.section_id)"},
+	{entityType: "ip_address", table: "ip_address", live: "true", title: "host(e.address)",
+		summary: "concat_ws(' ', e.dns_name, e.description)",
+		url:     "CASE WHEN e.subnet_id IS NULL THEN '/ipam?address=' || e.id ELSE '/ipam/subnets/' || e.subnet_id || '?address=' || e.id END",
+		metadata: "jsonb_build_object('vrf_id', e.vrf_id, 'subnet_id', e.subnet_id, " +
+			"'section_id', (SELECT s.section_id FROM subnet s WHERE s.id = e.subnet_id))"},
 }
 
 // reindexTags is the statement of the field rows core.tags of the documents
@@ -1231,12 +1258,16 @@ func (r *PGRepository) reindexBatch(ctx context.Context, scope *database.TenantS
 		if qerr != nil || len(ids) == 0 {
 			return qerr
 		}
+		metadata := src.metadata
+		if metadata == "" {
+			metadata = "'{}'::jsonb"
+		}
 		if _, qerr = tx.Exec(ctx, fmt.Sprintf(`INSERT INTO search_document (organization_id, entity_type, entity_id, title, summary, url, metadata)
-			SELECT e.organization_id, '%s', e.id, %s, %s, %s, '{}'::jsonb FROM %s e
+			SELECT e.organization_id, '%s', e.id, %s, %s, %s, %s FROM %s e
 			WHERE e.organization_id = $1 AND e.id = ANY($2::uuid[]) ORDER BY e.id
 			ON CONFLICT (organization_id, entity_type, entity_id) DO UPDATE SET title = EXCLUDED.title, summary = EXCLUDED.summary,
 				url = EXCLUDED.url, metadata = EXCLUDED.metadata, updated_at = now()`,
-			src.entityType, src.title, src.summary, src.url, src.table), orgID, ids); qerr != nil {
+			src.entityType, src.title, src.summary, src.url, metadata, src.table), orgID, ids); qerr != nil {
 			return qerr
 		}
 		// The stale rows are the field rows of the batch without a fresh

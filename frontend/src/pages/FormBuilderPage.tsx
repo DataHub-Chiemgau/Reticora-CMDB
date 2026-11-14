@@ -16,7 +16,7 @@
  */
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router';
 import { ArrowLeft, Eye, EyeOff, Send, Trash2 } from 'lucide-react';
 import {
   useActiveDraftItems,

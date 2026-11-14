@@ -5,7 +5,7 @@
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
-import { Route, Routes, useLocation } from 'react-router-dom';
+import { Route, Routes, useLocation } from 'react-router';
 import { renderWithProviders } from '../test/utils';
 import { OnboardingPage, currentStep, passwordPolicyViolations } from './OnboardingPage';
 import { useAuthStore } from '../auth/authStore';

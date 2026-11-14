@@ -115,6 +115,25 @@ func (h *Handler) UpdateCollector(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, c)
 }
 
+// LicensedUnlessPendingDeletion is the Licensed function of the status
+// run (COL-05, TLC-06/WP-1153): the collectors of an organization run only
+// while licensed reports an active discovery license and pending does not
+// report the grace period of the organization's deletion. pending is not
+// read without a license; an error of either answers false with it.
+func LicensedUnlessPendingDeletion(licensed, pending func(ctx context.Context, orgID string) (bool, error)) func(ctx context.Context, orgID string) (bool, error) {
+	return func(ctx context.Context, orgID string) (bool, error) {
+		ok, err := licensed(ctx, orgID)
+		if err != nil || !ok {
+			return false, err
+		}
+		locked, err := pending(ctx, orgID)
+		if err != nil {
+			return false, err
+		}
+		return !locked, nil
+	}
+}
+
 // StatusMonitor is the collector.status run of the scheduler: it pauses
 // the collectors of organizations whose discovery license is not active
 // and resumes them when it is again (ENT-07), and sets collectors offline

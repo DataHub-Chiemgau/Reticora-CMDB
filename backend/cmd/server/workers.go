@@ -2,19 +2,25 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/admp"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm/configsnap"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/cache"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/citype"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/compliance"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -25,20 +31,32 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/importer"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/maintenance"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/operator"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/probe"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reservation"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/search"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/security"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/sla"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenantapi"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/vulnfeed"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
 )
 
 // serviceCycle is how often a worker that answers requests records a cycle
@@ -67,6 +85,9 @@ type workerDeps struct {
 	credentials  *credential.Service
 	jobQueue     *jobs.Queue
 	ingestQueue  *discovery.NATSIngestQueue
+	// probeIngest is the worker probe_ingest main built for /readyz; nil
+	// builds one on ingestQueue (probeIngester).
+	probeIngest *probe.Ingester
 	// entitlements checks the discovery license on the collectors' scope
 	// channel (F-400); nil treats every organization as licensed.
 	entitlements *entitlement.Service
@@ -79,6 +100,119 @@ type workerDeps struct {
 	// cycle replaces the intervals of the polling workers and of the
 	// cycles of the workers that answer requests (tests); 0 keeps them.
 	cycle time.Duration
+}
+
+// workflowTriggers is the consumer of the workflow event triggers
+// (WP-1090): with the module workflows, the database, the job queue and the
+// event stream; nil otherwise.
+func (d *workerDeps) workflowTriggers() *workflow.TriggerConsumer {
+	if d.modules == nil || !d.modules.Enabled("workflows") || d.pool == nil || d.eventStream == nil || d.jobQueue == nil {
+		return nil
+	}
+	store, ok := d.repos.Workflow.(workflow.EventStore)
+	if !ok {
+		return nil
+	}
+	dispatcher := d.dispatcher
+	if d.repos.EventOutbox {
+		dispatcher = nil
+	}
+	exec := workflow.NewExecutor(d.repos.Workflow, d.repos.Ticket, d.repos.CI, d.repos.Form, dispatcher).
+		WithFieldGuard(override.NewGuard(d.repos.Override)).WithQueue(d.jobQueue)
+	// lifecycle.changed of an asset carries the asset (LCY-04, WP-1104).
+	if d.repos.Asset != nil {
+		exec.WithAssets(d.repos.Asset)
+	}
+	if d.repos.EventOutbox {
+		exec.WithEventOutbox()
+	}
+	ents := d.entitlements
+	return workflow.NewTriggerConsumer(exec, store, d.eventStream, func(ctx context.Context, orgID string) bool {
+		return ents != nil && ents.IsEnabled(ctx, orgID, entitlement.FeatureWorkflows)
+	})
+}
+
+// versionMatcher is the version match on pool; its jobs go to the job queue,
+// without it they run in this process (WP-1121).
+func versionMatcher(pool *pgxpool.Pool, queue *jobs.Queue, repos *server.Repositories) *security.Matcher {
+	m := security.NewMatcher(pool, vulnfeed.NewPGRepository(pool), security.NewPGRepository(pool))
+	if queue != nil {
+		return m.WithQueue(queue)
+	}
+	svc := jobs.NewService(repos.Jobs)
+	svc.Register(security.MatchJobKindConfig)
+	return m.WithJobs(svc)
+}
+
+// workflowWorker is the worker workflow (OPS-02 [P3], WP-1114): it runs the
+// consumer workflow-triggers; its cycle checks that the consumer can run
+// (module, database, job queue and event stream present) and records a
+// failure otherwise, every interval while it runs.
+func (d *workerDeps) workflowWorker() server.Worker {
+	cycles := observability.NewCycles(config.WorkerWorkflow)
+	triggers := d.workflowTriggers()
+	if triggers == nil {
+		cycles.Check("workflow-triggers", func(context.Context) error {
+			return errors.New("the workflow trigger consumer needs the module workflows, the database, the job queue and the event stream")
+		})
+	}
+	return server.Worker{Name: config.WorkerWorkflow, Run: serving(cycles, d.every(serviceCycle), func(ctx context.Context) {
+		if triggers == nil {
+			<-ctx.Done()
+			return
+		}
+		triggers.Run(ctx)
+	})}
+}
+
+// alarmCheckWorker is the worker alarm_check: the check consumer on the
+// event stream and the database; without either every cycle fails its
+// check.
+func (d *workerDeps) alarmCheckWorker() server.Worker {
+	cycles := observability.NewCycles(config.WorkerAlarmCheck)
+	var consumer *alarm.CheckConsumer
+	if d.pool != nil && d.eventStream != nil {
+		consumer = alarm.NewCheckConsumer(alarm.NewPGService(d.pool), alarm.PGCheckReader{Pool: d.pool}, d.eventStream)
+		cycles.Check("database", d.pool.Ping)
+	} else {
+		cycles.Check("alarm-check", func(context.Context) error {
+			return errors.New("the alarm check consumer needs the database and the event stream")
+		})
+	}
+	w := server.Worker{Name: config.WorkerAlarmCheck, Run: serving(cycles, d.every(serviceCycle), func(ctx context.Context) {
+		if consumer == nil {
+			<-ctx.Done()
+			return
+		}
+		consumer.Run(ctx)
+	})}
+	if consumer != nil {
+		w.Backlog = consumer.Backlog
+	}
+	return w
+}
+
+// probeIngester is the worker probe_ingest: the one main built for /readyz,
+// else one on the ingest queue's JetStream and the database; nil without
+// either.
+func (d *workerDeps) probeIngester() *probe.Ingester {
+	if d.probeIngest != nil {
+		return d.probeIngest
+	}
+	if d.ingestQueue == nil || d.pool == nil {
+		return nil
+	}
+	d.probeIngest = newProbeIngester(d.ingestQueue, d.pool, d.cfg)
+	return d.probeIngest
+}
+
+// newProbeIngester builds the worker probe_ingest on the stream
+// RETICORA_PROBE.
+func newProbeIngester(q *discovery.NATSIngestQueue, pool *pgxpool.Pool, cfg *config.Config) *probe.Ingester {
+	// The state changes run in the same worker (WP-961).
+	stream := probe.DefaultStream(cfg.ProbeStreamMaxBytes)
+	return probe.NewIngester(q.JetStream(), stream, probe.NewPGIngestStore(pool)).
+		WithStates(probe.NewStateApplier(q.JetStream(), stream, pool))
 }
 
 // every is the interval of a worker: def, or the one of the tests.
@@ -132,12 +266,14 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 		// The field policy of the job's creator is resolved at render time
 		// with the role assignments of then (RBA-07, WP-729); the snapshots
 		// share the cache of the API, so an invalidation reaches the worker.
-		exportWorker.Policies = server.NewFieldResolver(d.repos, d.fieldPolicyCache)
+		exportWorker.Policies = server.WithAssetsFeature(server.NewFieldResolver(d.repos, d.fieldPolicyCache), d.entitlements)
 		// DATEV jobs read assets and the mapping override (WP-310).
 		exportWorker.Assets, _ = d.repos.Asset.(export.AssetSource)
 		exportWorker.Orgs = d.repos.TenantHierarchy
 		// Asset jobs of POST /assets/bulk read the selection by id (WP-782).
 		exportWorker.AssetRows, _ = d.repos.Asset.(export.AssetRows)
+		// Subnet and address jobs read IPAM (WP-921).
+		exportWorker.IPAMRows, _ = d.repos.IPAM.(export.IPAMRows)
 		workers = append(workers, server.Worker{
 			Name: config.WorkerExport,
 			Run:  func(ctx context.Context) { exportWorker.Run(ctx, d.every(2*time.Second)) },
@@ -150,8 +286,33 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 	// webhook subscriptions (EVT-01, WP-136).
 	if d.repos.EventOutbox && d.pool != nil {
 		// Subscribed events become notifications (NTF-05).
-		publisher := events.NewPublisher(d.pool, d.eventStream, d.dispatcher,
-			notify.NewEventConsumer(notify.NewPGResolver(d.pool, permission.NewPGRepository(d.pool)), d.notifier))
+		// The alarm texts link to the frontend of the invitation page
+		// (WP-987); alarms reach notify only through the outbox, the
+		// evaluator has no log notifier with a database.
+		consumers := []events.Consumer{d.dispatcher,
+			notify.NewEventConsumer(notify.NewPGResolver(d.pool, permission.NewPGRepository(d.pool)), d.notifier).
+				WithLinkBase(d.cfg.InvitationAcceptURL)}
+		// A changed CI, lifecycle state or finding evaluates its CI against
+		// the active compliance rules (SEC-03, WP-1126), with the module
+		// compliance and the feature compliance_findings.
+		if d.modules != nil && d.modules.Enabled("compliance") {
+			ents := d.entitlements
+			consumers = append(consumers, compliance.NewIncrementalConsumer(compliance.NewEvaluator(d.repos.Compliance, d.repos.CI),
+				func(ctx context.Context, orgID string) bool {
+					return ents != nil && ents.IsEnabled(ctx, orgID, entitlement.FeatureComplianceFindings)
+				}))
+		}
+		// A created CI and a change of its product fields queue the version
+		// match of the CI (SEC-02, WP-1121), with the module findings and
+		// the feature compliance_findings.
+		if d.modules != nil && d.modules.Enabled("findings") {
+			ents := d.entitlements
+			consumers = append(consumers, security.NewMatchConsumer(versionMatcher(d.pool, d.jobQueue, d.repos),
+				func(ctx context.Context, orgID string) bool {
+					return ents != nil && ents.IsEnabled(ctx, orgID, entitlement.FeatureComplianceFindings)
+				}))
+		}
+		publisher := events.NewPublisher(d.pool, d.eventStream, consumers...)
 		// The stream retention of the installation (EVT-01, NFR-06); the
 		// outbox keeps published event data as long.
 		publisher.MaxAge, publisher.MaxBytes = d.cfg.EventsMaxAge, d.cfg.EventsMaxBytes
@@ -195,6 +356,14 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 			cycles.Check("database", d.pool.Ping)
 		}
 		gate := discovery.NewBundleGate(d.pool, d.collectorPKI)
+		// A change of a secret, a reference or a binding tells the
+		// collectors holding the credential to reload their bundle after
+		// the commit (bundle.changed); a vault value read in a new version
+		// emits credential.rotated (CRD-05, WP-897). Set before the routes
+		// serve: the service is the one of the API.
+		if d.pool != nil {
+			d.credentials.WithRotation(credential.NewRotation(d.pool, d.coreNATS, gate))
+		}
 		renewal := discovery.NewCertificateRenewal(d.pool, d.collectorPKI).WithCycles(cycles)
 		bundles := d.credentials.WithCycles(cycles)
 		workers = append(workers, server.Worker{Name: config.WorkerCredentialBundles, Run: serving(cycles, d.every(serviceCycle), func(ctx context.Context) {
@@ -244,19 +413,65 @@ func buildWorkers(d *workerDeps) ([]server.Worker, error) {
 	if d.jobQueue != nil {
 		workers = append(workers, server.Worker{Name: config.WorkerJobs, Run: d.jobQueue.Run, Backlog: d.jobBacklog})
 	}
+	// Event triggers of workflows (WFL-02, WP-1090, E-226, OPS-02 [P3],
+	// WP-1114): the durable consumer workflow-triggers on RETICORA_EVENTS
+	// starts the runs of the event definitions and queues them as
+	// workflow.run; the consumer of workflow.run runs in the worker jobs of
+	// the instances where this worker is on (server.Options.
+	// WorkflowWorkerOff). Module workflows.
+	workers = append(workers, d.workflowWorker())
+	// Alarms from the probe states (ALR-02, MON-04, WP-986; module
+	// monitoring): the durable consumer reticora-alarm-check on
+	// RETICORA_EVENTS, serial per probe.
+	workers = append(workers, d.alarmCheckWorker())
 	// Consume ingest.> (REC-01).
 	if d.ingestQueue != nil {
 		workers = append(workers, server.Worker{Name: config.WorkerIngest, Run: d.ingestQueue.Run, Backlog: d.ingestQueue.Backlog})
 	}
-	// Evaluate monitoring alert rules against the metric store (module
-	// alerting, MON-04). Fired alerts are logged via the default notifier;
-	// evaluation state is persisted in the alert store so restarts neither
-	// re-notify nor lose pending durations.
-	if alertStore, ok := d.repos.Metrics.(monitoring.EvaluatingStore); ok {
-		evaluator := monitoring.NewEvaluator(d.repos.Metrics, alertStore.AlertStore(), nil)
+	// Answer the assignment set requests of the collectors
+	// (.probes.request, PRB-11, WP-948) in the worker probe_assign, with
+	// NATS and the probe store on PostgreSQL.
+	if store, ok := d.repos.Probes.(*probe.PGRepository); ok && d.coreNATS != nil && d.pool != nil {
+		cycles := observability.NewCycles(config.WorkerProbeAssign)
+		cycles.Check("nats", d.coreNATS.FlushWithContext)
+		cycles.Check("database", d.pool.Ping)
+		channel := discovery.NewHandler(d.repos.Discovery, d.repos.CI)
+		// The credential ids of a probe must be in the collector's bundle:
+		// the gate computes them as VerifyBundleTarget does, the probe
+		// bindings of the collector included (AK2).
+		bundle := discovery.NewBundleGate(d.pool, d.collectorPKI).CredentialIDs
+		distributor := probe.NewDistributor(store, channel.CheckCollectorChannel).WithCycles(cycles).WithBundle(bundle)
+		if d.entitlements != nil {
+			distributor.WithFeatures(d.entitlements)
+		}
+		workers = append(workers, server.Worker{Name: config.WorkerProbeAssign, Run: serving(cycles, d.every(serviceCycle), func(ctx context.Context) {
+			if serr := distributor.ServeProbeRequests(ctx, d.coreNATS); serr != nil {
+				slog.Error("probe distribution", "error", serr)
+			}
+		})})
+	}
+	// Write the probe result batches of the stream RETICORA_PROBE to
+	// probe_result (NFR-11, PRB-07, WP-960; module monitoring); the backlog
+	// is the consumer's unacknowledged messages, also in /readyz.
+	if ingester := d.probeIngester(); ingester != nil {
+		workers = append(workers, server.Worker{Name: config.WorkerProbeIngest, Run: ingester.Run, Backlog: ingester.Backlog})
+	}
+	// Evaluate the alert rules per series every 15 seconds (module
+	// monitoring, MON-04, ALR-05, WP-984): the state of a series is its
+	// alarm (WP-982), so a restart neither reports again nor loses a
+	// pending start.
+	alertStore, evaluating := d.repos.Metrics.(monitoring.EvaluatingStore)
+	series, bySeries := d.repos.Metrics.(monitoring.SeriesStore)
+	if evaluating && bySeries && d.repos.Alarms != nil {
+		evaluator := monitoring.NewEvaluator(series, alertStore.AlertStore(), alarm.NewRuleSink(d.repos.Alarms))
+		// Threshold rules only for organizations with monitoring_network
+		// (E-151, WP-985); without entitlements (--no-db) every rule runs.
+		if d.entitlements != nil {
+			evaluator.WithFeatures(d.entitlements)
+		}
 		workers = append(workers, server.Worker{
 			Name: config.WorkerMonitoring,
-			Run:  func(ctx context.Context) { evaluator.Run(ctx, d.every(time.Minute)) },
+			Run:  func(ctx context.Context) { evaluator.Run(ctx, d.every(monitoring.EvaluationInterval)) },
 		})
 	}
 	// The health of the CIs follows the monitoring state every minute
@@ -343,6 +558,12 @@ type systemJobDeps struct {
 	dispatcher   *webhook.Dispatcher
 	// jobQueue is the job queue on NATS; nil without NATS.
 	jobQueue *jobs.Queue
+	// coreNATS sends .probes.changed to the collectors after an
+	// assignment change (WP-948); nil logs the changes only.
+	coreNATS *nats.Conn
+	// admp is the refresh of the ADMP cache the router queues admp.refresh
+	// with (WP-929); nil builds one on the repositories (tests).
+	admp *admp.Sync
 	// notifier bundles the digests (notify.digest); nil: no digest run.
 	notifier *notify.Notifier
 	// blobs holds the document content the soft-delete run deletes with
@@ -350,6 +571,75 @@ type systemJobDeps struct {
 	// (import.staging.sweep, WP-303); nil keeps documents with stored
 	// content and registers no staging sweep.
 	blobs blob.Store
+	// eventStream is RETICORA_EVENTS, whose messages of a purged
+	// organization the purge removes (WP-1155); nil without NATS.
+	eventStream jetstream.JetStream
+	// cache holds the entitlement and field permission snapshots the purge
+	// invalidates (WP-1155); nil keeps a memory store.
+	cache cache.Store
+}
+
+// externalPurge are the stores outside the tables the purge of an
+// organization empties (WP-1155): the buckets with keys of organizations,
+// the remote search index (OpenSearch; the PostgreSQL index goes with the
+// rows), the event stream (without NATS none) and the caches of the
+// entitlements and the field permissions.
+func externalPurge(d *systemJobDeps) *tenantapi.ExternalPurge {
+	x := &tenantapi.ExternalPurge{Blobs: d.blobs, Buckets: []string{export.ExportBucket, document.Bucket, d.cfg.S3Bucket},
+		// Keys outside org/<id>/: the CI exports with manifest and DATEV
+		// error report (<org>/<job>.<ext>) and the document versions from
+		// before migration 000066 (documents/<org>/<doc>/…).
+		Prefixes: []tenantapi.ObjectPrefix{
+			{Name: "exports", Bucket: export.ExportBucket, Prefix: export.JobPrefix},
+			{Name: "legacy-documents", Bucket: document.Bucket, Prefix: document.LegacyPrefix},
+		}}
+	backend := d.repos.Search
+	if hybrid, ok := backend.(*search.HybridBackend); ok {
+		backend = hybrid.Remote
+	}
+	if deleter, ok := backend.(tenantapi.TenantIndexDeleter); ok {
+		x.Search = deleter
+	}
+	if d.eventStream != nil {
+		x.Stream = events.NewPublisher(d.pool, d.eventStream)
+	}
+	if d.entitlements != nil {
+		x.Caches = append(x.Caches, d.entitlements.InvalidateOrganization)
+	}
+	// The field permission snapshot: a failed deletion keeps the step open.
+	x.Caches = append(x.Caches, permission.NewFieldResolver(nil, nil, nil, d.cache).InvalidateOrganization)
+	return x
+}
+
+// vulnfeedJobs are the system jobs of the vulnerability feeds on store:
+// vulnfeed.csaf (WP-1118), unless the air-gapped profile has no explicit
+// provider list, and vulnfeed.nvd with the KEV sync (WP-1119), not in the
+// air-gapped profile.
+func vulnfeedJobs(cfg *config.Config, store vulnfeed.NVDStore) []jobs.Schedule {
+	var out []jobs.Schedule
+	csaf, err := vulnfeed.NewCSAF(store, &vulnfeed.CSAFConfig{Providers: cfg.VulnfeedCSAFProviders,
+		Explicit: cfg.VulnfeedCSAFExplicit(), AirGapped: cfg.AirGapped, Interval: cfg.VulnfeedCSAFInterval,
+		Egress: egress.Options{AllowPrivate: cfg.EgressAllowPrivate}})
+	switch {
+	case err == nil:
+		out = append(out, csaf.Schedule())
+	case errors.Is(err, vulnfeed.ErrCSAFDisabled):
+		slog.Info("CSAF import off: air-gapped without RETICORA_VULNFEED_CSAF_PROVIDERS", "event", "vulnfeed.csaf.disabled")
+	default:
+		// Validate refuses the start for an invalid provider list.
+		slog.Error("CSAF import not registered", "event", "vulnfeed.csaf.disabled", "error", err)
+	}
+	if !cfg.VulnfeedNVDEnabled() {
+		slog.Info("NVD and KEV import off in the air-gapped profile", "event", "vulnfeed.nvd.disabled")
+		return out
+	}
+	nvd, err := vulnfeed.NewNVD(store, &vulnfeed.NVDConfig{APIKey: cfg.VulnfeedNVDAPIKey, Interval: cfg.VulnfeedNVDInterval,
+		KEVURL: cfg.VulnfeedKEVURL, Egress: egress.Options{AllowPrivate: cfg.EgressAllowPrivate}})
+	if err != nil {
+		slog.Error("NVD import not registered", "event", "vulnfeed.nvd.disabled", "error", err)
+		return out
+	}
+	return append(out, nvd.Schedule())
 }
 
 // registerSystemJobs registers the system jobs (systemJobs) with the
@@ -374,6 +664,19 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 	if d.modules.Enabled(server.ModuleInventory) {
 		systemJobs = append(systemJobs, reservation.NewSweeper(d.repos.Reservation, d.dispatcher).Schedule())
 	}
+	// The ADMP cache (ADM-03, E-225, WP-929), with the module admp: every
+	// 15 minutes the services linked to a port and their connections that
+	// expire within seven days are queued for admp.refresh within the
+	// rate of their account; hourly the entries past their TTL are removed
+	// with their personal surrogates. Without a database on the memory
+	// repositories.
+	if d.modules.Enabled("admp") {
+		admpSync := d.admp
+		if admpSync == nil {
+			admpSync = server.NewADMPSync(d.repos, nil, egress.Options{}, d.pool, d.cfg.ADMPCacheTTLDays)
+		}
+		systemJobs = append(systemJobs, admpSync.RefreshLinkedSchedule(), admpSync.ExpireSchedule())
+	}
 	// Document versions without a scan result are submitted to the
 	// malware scan again every 15 minutes (SEC-09, E-42, WP-734), with
 	// the module documents and the job queue only.
@@ -387,16 +690,206 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 	if pool := d.pool; pool != nil {
 		systemJobs = append(systemJobs, jobs.NewRotation(pool, d.encryptor, dekRotator{repo: credential.NewPGRepository(pool)},
 			webhook.NewPGRepository(pool)).Schedules()...)
-		systemJobs = append(systemJobs, jobs.NewRetention(pool, jobs.RetentionFromDays(d.cfg.RetentionAuditYears,
-			d.cfg.RetentionHistoryDays, d.cfg.RetentionSoftDeleteDays, d.cfg.RetentionReviewItemDays)).WithBlobs(d.blobs).Schedules()...)
+		// Ended workflow runs are kept RETICORA_RETENTION_WORKFLOW_RUN_DAYS
+		// (400 days, E-241, WP-1093) by retention.workflow_runs.
+		retention := jobs.RetentionFromDays(d.cfg.RetentionAuditYears,
+			d.cfg.RetentionHistoryDays, d.cfg.RetentionSoftDeleteDays, d.cfg.RetentionReviewItemDays)
+		if days := d.cfg.RetentionWorkflowRunDays; days > 0 {
+			retention.WorkflowRuns = time.Duration(days) * 24 * time.Hour
+		}
+		// retention.config_snapshot also resolves the configuration alarms
+		// unchanged for 24 h (ALR-07, WP-1054).
+		systemJobs = append(systemJobs, jobs.NewRetention(pool, retention).WithBlobs(d.blobs).
+			WithConfigAlarms(configsnap.StableAlarms{Alarms: d.repos.Alarms}).Schedules()...)
 		// Collector status: offline after five minutes without heartbeat,
 		// paused while the discovery license is not active (COL-01, COL-05).
 		collectorStatus := discovery.NewStatusMonitor(pool)
-		collectorStatus.Licensed = func(ctx context.Context, orgID string) (bool, error) {
-			_, status, serr := d.entitlements.Status(ctx, orgID, entitlement.FeatureDiscovery)
-			return status == entitlement.StatusActive, serr
-		}
+		// The collectors of an organization in the grace period of its
+		// deletion are paused as well (TLC-06, WP-1153); after the cancel
+		// the next run sets them offline, their next heartbeat active.
+		collectorStatus.Licensed = discovery.LicensedUnlessPendingDeletion(
+			func(ctx context.Context, orgID string) (bool, error) {
+				_, status, serr := d.entitlements.Status(ctx, orgID, entitlement.FeatureDiscovery)
+				return status == entitlement.StatusActive, serr
+			},
+			func(ctx context.Context, orgID string) (bool, error) {
+				return tenantapi.OrgPendingDeletion(ctx, pool, orgID)
+			})
 		systemJobs = append(systemJobs, collectorStatus.Schedule())
+		// Workflow runs of a CI whose wake-up was lost (WP-1089, EVT-01):
+		// one executor queues the runs of both workflow system jobs on the
+		// job queue (without it a scheduled run executes in the job).
+		// every minute the next pending run of each free CI that waited
+		// longer than five minutes is queued again, with the module
+		// workflows; without the job queue the runs execute in the request
+		// and the sweep queues nothing.
+		if d.modules.Enabled("workflows") {
+			sweepDispatcher := d.dispatcher
+			if d.repos.EventOutbox {
+				sweepDispatcher = nil
+			}
+			sweepRuns := workflow.NewExecutor(d.repos.Workflow, d.repos.Ticket, d.repos.CI, d.repos.Form, sweepDispatcher).
+				WithFieldGuard(override.NewGuard(d.repos.Override))
+			// send_webhook of a run executed here writes to the outbox
+			// like the runs of the router (WP-1096).
+			if d.repos.EventOutbox {
+				sweepRuns.WithEventOutbox()
+			}
+			if d.jobQueue != nil {
+				sweepRuns.WithQueue(d.jobQueue)
+			}
+			// The approver circles and the notices of the approval sweep
+			// (WP-1098, WP-1099) and send_notification of a run executed
+			// here (WP-1095) resolve their recipients in the database.
+			resolver := notify.NewPGResolver(pool, permission.NewPGRepository(pool))
+			sweepRuns.WithApprovers(resolver)
+			if d.notifier != nil {
+				sweepRuns.WithNotifier(d.notifier, resolver)
+			}
+			orgs := func(ctx context.Context) ([]string, error) { return database.OrganizationIDs(ctx, pool) }
+			systemJobs = append(systemJobs, workflow.NewSerialSweep(sweepRuns, orgs).Schedule())
+			// Deadlines, reminders and escalation of approval steps
+			// (WFL-02, WP-1099, E-230): every minute on one instance.
+			systemJobs = append(systemJobs, workflow.NewApprovalSweep(sweepRuns, orgs).Schedule())
+			// Schedule triggers of workflows (JOB-02 [P3], WP-1091): every
+			// minute on one instance the due slot of each active schedule
+			// definition of the organizations with the feature workflows,
+			// at most the newest missed slot.
+			if store, ok := d.repos.Workflow.(workflow.ScheduleStore); ok {
+				ents := d.entitlements
+				systemJobs = append(systemJobs, workflow.NewScheduler(sweepRuns, store, orgs,
+					func(ctx context.Context, orgID string) bool {
+						return ents != nil && ents.IsEnabled(ctx, orgID, entitlement.FeatureWorkflows)
+					}).Schedule())
+			}
+		}
+		// The nightly compliance evaluation (SEC-03, WP-1126, E-237): daily
+		// 02:30 UTC one job compliance.evaluate per organization with the
+		// feature compliance_findings and an active rule, with the module
+		// compliance.
+		if d.modules.Enabled("compliance") && d.repos.Jobs != nil {
+			// Without the job queue the job runs in this process: the service
+			// knows its kind (NewJobService).
+			evalJobs := compliance.NewJobs(compliance.NewEvaluator(d.repos.Compliance, d.repos.CI)).WithJobs(compliance.NewJobService(d.repos.Jobs))
+			if d.jobQueue != nil {
+				evalJobs.WithQueue(d.jobQueue)
+			}
+			ents := d.entitlements
+			orgs := func(ctx context.Context) ([]string, error) { return database.OrganizationIDs(ctx, pool) }
+			systemJobs = append(systemJobs, compliance.NewNightly(evalJobs, d.repos.Compliance, orgs, func(ctx context.Context, orgID string) bool {
+				return ents != nil && ents.IsEnabled(ctx, orgID, entitlement.FeatureComplianceFindings)
+			}).Schedule())
+			// The daily score snapshot (CMP-02, WP-1127): 04:30 UTC, after
+			// the nightly evaluation, for trends over 400 days.
+			systemJobs = append(systemJobs, compliance.NewSnapshot(d.repos.Compliance, orgs, func(ctx context.Context, orgID string) bool {
+				return ents != nil && ents.IsEnabled(ctx, orgID, entitlement.FeatureComplianceFindings)
+			}).Schedule())
+		}
+		// The boundaries of the maintenance windows (ALR-11, MGT-04,
+		// WP-1033): every minute per organization one maintenance.started
+		// or maintenance.ended per transition; at the end the alarms the
+		// window suppressed are released (notify_after_maintenance).
+		if d.modules.Enabled("maintenance") {
+			var releaser maintenance.AlarmReleaser
+			if d.repos.Alarms != nil {
+				releaser = d.repos.Alarms
+			}
+			systemJobs = append(systemJobs, maintenance.NewBoundaries(pool, d.repos.Maintenance, releaser).Schedule())
+		}
+		// Alarm retention (ALR-01, WP-981): daily the resolved alarms
+		// older than 400 days with their transitions, with the module
+		// monitoring.
+		if d.modules.Enabled(server.ModuleMonitoring) {
+			systemJobs = append(systemJobs, alarm.NewRetention(pool).Schedule())
+			// Probe assignment (PRB-03, PRB-11, WP-941): every 5 s
+			// (RETICORA_PROBE_ASSIGN_TICK) the liveness sweep of the group
+			// members (PRB-10, WP-963: a member without monitoring alive
+			// message within the liveness timeout is down, its probes move
+			// at once, collector_group.failover) and then each collector
+			// group under its lock probe_assign:<group>, the worker
+			// probe_assign under RETICORA_WORKER_PROBE_ASSIGN_ENABLED; a
+			// committed probe write assigns its groups at once on the
+			// instance that served it.
+			assigner := probe.NewAssigner(pool).WithTick(d.cfg.ProbeAssignTick)
+			var notifier probe.AssignmentNotifier = probe.LogNotifier{}
+			if d.coreNATS != nil {
+				notifier = probe.NewNATSAssignmentNotifier(d.coreNATS)
+			}
+			assigner.WithNotifier(notifier).WithLiveness(probe.NewLiveness(pool).WithNotifier(notifier))
+			if store, ok := d.repos.Probes.(*probe.PGRepository); ok {
+				store.SetAssignTrigger(assigner)
+			}
+			if d.cfg.WorkerEnabled(config.WorkerProbeAssign) {
+				systemJobs = append(systemJobs, workerJob(config.WorkerProbeAssign, assigner.Schedule()))
+			}
+			// Suspension of the probes of a lost monitoring feature
+			// (PKG-09, ENT-08, WP-942): every minute per organization;
+			// resumed when the feature is active again.
+			systemJobs = append(systemJobs, probe.NewSuspender(pool, probe.LicensedBy(d.entitlements)).WithNotifier(notifier).Schedule())
+			// Automatic ping probes (MON-02, WP-949): every 15 minutes one
+			// job probe.autocreate per organization with
+			// monitoring.auto_ping and the feature monitoring, on the job
+			// queue only (the kind runs on its handlers, jobkinds.go).
+			if d.jobQueue != nil {
+				systemJobs = append(systemJobs, probe.NewAutocreateDispatcher(pool, d.jobQueue,
+					probe.LicensedBy(d.entitlements)).Schedule())
+			}
+		}
+		// The results of the subnet scan (IPM-11, WP-1063): every minute per
+		// organization with a scanned subnet and the features ipam and
+		// monitoring the probe states become address states, last_seen_at
+		// and new hosts, under the lock ipam_scan_apply:<org>; the worker
+		// ipam_scan_apply under RETICORA_WORKER_IPAM_SCAN_APPLY_ENABLED,
+		// with the module ipam and the probe store on PostgreSQL.
+		if d.modules.Enabled("ipam") && d.cfg.WorkerEnabled(config.WorkerIPAMScanApply) {
+			if probes, ok := d.repos.Probes.(*probe.PGRepository); ok {
+				systemJobs = append(systemJobs, workerJob(config.WorkerIPAMScanApply, scanApplier(pool, probes, d.entitlements).Schedule()))
+			}
+		}
+		// Credential age: daily each stored secret beyond its max_age_days
+		// once per secret_version as credential.rotation_due (CRD-05,
+		// WP-897).
+		systemJobs = append(systemJobs, credential.NewAgeCheck(pool).Schedule())
+		// Vulnerability feeds (SEC-02, E-234, WP-1118, WP-1119): vulnfeed.csaf
+		// every RETICORA_VULNFEED_CSAF_INTERVAL and vulnfeed.nvd with the
+		// KEV sync every RETICORA_VULNFEED_NVD_INTERVAL, with the module
+		// findings, over the egress client; air-gapped only the CSAF import
+		// with an explicit provider list (E-235).
+		if d.modules.Enabled("findings") {
+			systemJobs = append(systemJobs, vulnfeedJobs(d.cfg, vulnfeed.NewPGRepository(pool))...)
+			// The full version match after a sync of the catalog (SEC-02,
+			// WP-1121): every 15 minutes per organization with the feature
+			// compliance_findings one job vulnfeed.match per sync.
+			ents := d.entitlements
+			orgs := func(ctx context.Context) ([]string, error) { return database.OrganizationIDs(ctx, pool) }
+			systemJobs = append(systemJobs, security.NewMatchSchedule(versionMatcher(pool, d.jobQueue, d.repos), vulnfeed.NewPGRepository(pool), orgs,
+				func(ctx context.Context, orgID string) bool {
+					return ents != nil && ents.IsEnabled(ctx, orgID, entitlement.FeatureComplianceFindings)
+				}).Schedule())
+		}
+		// The full exports of an organization can be downloaded for 24
+		// hours (TLC-05, WP-1151): hourly org.export_cleanup removes the
+		// objects of the expired ones, with the module org_lifecycle.
+		if d.modules.Enabled("org_lifecycle") {
+			systemJobs = append(systemJobs, export.NewOrgExportCleanup(pool, d.blobs).Schedule())
+			// After the grace period of a deletion the rows of the
+			// organization go (TLC-06, WP-1154): hourly org.purge, with the
+			// reminders 7 and 1 day before to the org_admins.
+			purger := tenantapi.NewPurger(pool, purgeTables)
+			if d.notifier != nil {
+				purger.WithNotices(d.notifier, notify.NewPGResolver(pool, permission.NewPGRepository(pool)))
+			}
+			// Then the vault (crypto-shredding), the objects of every
+			// bucket, the search index, the event stream and the caches
+			// (TLC-06, SEC-05, WP-1155).
+			purger.WithExternal(externalPurge(d))
+			// The deletion protocol goes to the requester over the central
+			// SMTP server (TLC-06, WP-1156); the requester's address is kept
+			// encrypted under a data key the master key wraps.
+			tenantapi.SetNoticeEncryptor(d.encryptor)
+			purger.WithProtocolMailer(notify.OrgPurgeProtocolMailer{Sender: centralSMTP(d.cfg)})
+			systemJobs = append(systemJobs, purger.Schedule())
+		}
 		// SLA breaches: every minute each missed due time once as
 		// ticket.sla_breached, the escalation to assignee and team lead
 		// (TKT-01, WP-769); module ticketing, ticketing_standard only.
@@ -475,6 +968,10 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 		// G1 path attribute-definitions).
 		if typeRepo, ok := d.repos.CIType.(*citype.PGRepository); ok {
 			computed := ci.NewComputedRefresh(pool, typeRepo)
+			if d.entitlements != nil {
+				// No asset source without assets_basic (SR-58).
+				computed.WithFeatureCheck(d.entitlements.IsEnabled)
+			}
 			if d.repos.Jobs != nil {
 				computed.WithJobs(jobs.NewService(d.repos.Jobs))
 				typeRepo.WithComputedScheduler(computed)
@@ -488,6 +985,11 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 		// collector certificates (COL-04), each notice once (WP-425).
 		systemJobs = append(systemJobs, jobs.NewEntitlementNotices(pool).Schedule(),
 			jobs.NewCertificateNotices(pool).Schedule())
+		// The trial end switches an ended trial to its fallback plan with the
+		// limits of that plan (ENT-07, E-157, WP-884).
+		if d.entitlements != nil {
+			systemJobs = append(systemJobs, operator.NewTrialEnd(pool, d.entitlements).Schedule())
+		}
 		// Route audit intents no response completed become audit entries
 		// with outcome unknown (AUD-07, WP-504).
 		systemJobs = append(systemJobs, routeIntentsJob(audit.NewPGRouteAuditor(pool)))
@@ -509,15 +1011,17 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 // jobRequeues reports the job kinds the reaper puts back into the queue
 // after a lost worker, those with an executor that runs queued jobs again:
 // the kinds of the job queue on NATS and the attribute index jobs of the
-// scheduler and the backfill of computed attributes (WP-718). The other
-// kinds fail, among them the in-process jobs without NATS.
+// scheduler and the backfill of computed attributes (WP-718). A kind the
+// queue only declares (workflow.run with its worker off, WP-1114) is run
+// by another instance and requeued as well. The other kinds fail, among
+// them the in-process jobs without NATS.
 func jobRequeues(queue *jobs.Queue) func(kind string) bool {
 	return func(kind string) bool {
 		switch kind {
 		case citype.IndexJobKind, citype.RebuildJobKind, citype.KeyJobKind, ci.BackfillJobKind:
 			return true
 		}
-		return queue != nil && queue.Handles(kind)
+		return queue != nil && queue.Knows(kind)
 	}
 }
 
@@ -569,6 +1073,25 @@ func workerJob(worker string, s jobs.Schedule) jobs.Schedule {
 	return s
 }
 
+// scanApplier is the system job ipam.scan.apply (WP-1063) on pool: its own
+// IPAM repository with the outbox and the managed scan probes of the probe
+// store; an organization needs the features ipam and monitoring.
+func scanApplier(pool *pgxpool.Pool, probes *probe.PGRepository, ents *entitlement.Service) *ipam.ScanApplier {
+	repo := ipam.NewPGRepository(pool).WithEvents(events.NewOutbox())
+	repo.SetScanProbes(probe.ScanProbes{Repo: probes})
+	applier := ipam.NewScanApplier(pool, repo)
+	licensed := probe.LicensedBy(ents)
+	applier.Licensed = func(ctx context.Context, orgID string) bool {
+		for _, feature := range []string{entitlement.FeatureIPAM, entitlement.FeatureMonitoring} {
+			if ok, err := licensed(ctx, orgID, feature); err != nil || !ok {
+				return false
+			}
+		}
+		return true
+	}
+	return applier
+}
+
 // dekRotator adapts the credential store to the rotation runs.
 type dekRotator struct{ repo *credential.PGRepository }
 
@@ -582,4 +1105,24 @@ func (d dekRotator) RotateOrgDEK(ctx context.Context, orgID string, enc *crypto.
 
 func (d dekRotator) RewrapOrgDEK(ctx context.Context, orgID string, enc *crypto.EnvelopeEncryptor) (bool, error) {
 	return d.repo.RewrapOrgDEK(ctx, orgID, enc)
+}
+
+// readOrgDeletionState is the deletion state of an organization for the
+// read-only grace period (WP-1153, tenantapi.ReadDeletionState).
+func readOrgDeletionState(ctx context.Context, pool *pgxpool.Pool, orgID string) (middleware.OrgDeletionState, error) {
+	state, due, err := tenantapi.ReadDeletionState(ctx, pool, orgID)
+	return middleware.OrgDeletionState{State: state, DueAt: due}, err
+}
+
+// purgeTables is the table catalog of the purge (export.OrgPurgeTables).
+func purgeTables(ctx context.Context, tx pgx.Tx) ([]string, error) {
+	tables, err := export.OrgPurgeTables(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(tables))
+	for i := range tables {
+		names = append(names, tables[i].Name)
+	}
+	return names, nil
 }

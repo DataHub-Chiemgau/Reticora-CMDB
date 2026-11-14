@@ -33,6 +33,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/wire"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -54,8 +55,11 @@ type Collector struct {
 	CertFingerprint string         `json:"cert_fingerprint,omitempty"`
 	CertNotAfter    string         `json:"cert_not_after,omitempty"`
 	Config          map[string]any `json:"config"`
-	CreatedAt       string         `json:"created_at"`
-	UpdatedAt       string         `json:"updated_at"`
+	// ProbeCapabilities is the last capability report of the collector
+	// (PRT-18, WP-966); absent before the first one.
+	ProbeCapabilities *probewire.ProbeCapabilities `json:"probe_capabilities,omitempty"`
+	CreatedAt         string                       `json:"created_at"`
+	UpdatedAt         string                       `json:"updated_at"`
 }
 
 // BulkIngestRequest is the deprecated collector_id/items ingest payload; new
@@ -148,6 +152,9 @@ type BulkIngestResponse struct {
 	// RejectedFuture counts records observed more than five minutes in the
 	// future; they change nothing (GLO-12).
 	RejectedFuture int `json:"rejected_future,omitempty"`
+	// RejectedIdentityLimit counts records with more identity values than
+	// plugins.MaxIdentityKeys; they change nothing (SR-10, WP-878).
+	RejectedIdentityLimit int `json:"rejected_identity_limit,omitempty"`
 	// Unlicensed counts new devices held as unlicensed_ci because max_cis is
 	// reached (ENT-03, CH21); already queued devices count again.
 	Unlicensed int    `json:"unlicensed,omitempty"`
@@ -230,6 +237,9 @@ type MemoryRepository struct {
 	orgSettings  map[string]map[string]any
 	orgTimezone  map[string]string
 	seq          int
+	// collectorGroups are the collector groups (WP-947); every collector
+	// gets one of its own, as on PostgreSQL (WP-936).
+	collectorGroups *memCollectorGroups
 }
 
 // NewMemoryRepository creates a new in-memory discovery repository.
@@ -317,6 +327,7 @@ func (r *MemoryRepository) RegisterCollector(_ context.Context, c *Collector) er
 		c.LastHeartbeatAt = now
 	}
 	r.collectors[c.ID] = c
+	r.addDefaultCollectorGroup(c)
 	return nil
 }
 
@@ -433,6 +444,23 @@ func (r *MemoryRepository) Heartbeat(_ context.Context, orgID, collectorID strin
 	return c.Status, nil
 }
 
+// StoreProbeCapabilities implements ProbeCapabilityStore.
+func (r *MemoryRepository) StoreProbeCapabilities(_ context.Context, orgID, collectorID string, caps *probewire.ProbeCapabilities) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.collectors[collectorID]
+	if !ok || c.OrganizationID != orgID {
+		return false, api.ErrNotFound
+	}
+	if c.ProbeCapabilities.Equal(caps) {
+		return false, nil
+	}
+	cp := *caps
+	cp.ProbeTypes = append([]string{}, caps.ProbeTypes...)
+	c.ProbeCapabilities = &cp
+	return true, nil
+}
+
 // EnrollmentCode is a short-lived, single-use secret a collector presents to
 // enroll. Only the SHA-256 hash is persisted; the raw code is carried on the
 // struct only transiently between creation and hashing.
@@ -521,6 +549,9 @@ type Handler struct {
 	// merger carries out the resolution merge of probable_duplicate items
 	// as the CI-12 merge (WithMerger).
 	merger CIMerger
+	// capabilitiesChanged runs after a collector's capability report
+	// changed (WithCapabilityChanged, WP-966).
+	capabilitiesChanged func(ctx context.Context, orgID, collectorID string)
 	// tx runs the frame of a batch and each record in one transaction
 	// (NFR-03); without one every repository call is its own transaction.
 	tx TxRunner
@@ -536,6 +567,13 @@ type Handler struct {
 	// edge (WithEdgeMetrics, MON-02).
 	metrics  MetricsIngester
 	features FeatureStatus
+	// probes takes the monitoring probe messages on the edge
+	// (WithEdgeProbes, PRB-05, WP-959).
+	probes EdgeProbes
+	// configs and configFeatures take the device configurations on the
+	// edge (WithEdgeConfig, ALR-07, WP-1054).
+	configs        ConfigIngester
+	configFeatures FeatureStatus
 	// scopeCycles counts the scope requests that failed on the server's
 	// side (worker discovery_scopes, OPS-05); nil counts none.
 	scopeCycles *observability.Cycles
@@ -917,6 +955,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/collectors", h.ListCollectors)
 	r.Post("/api/v1/collectors", h.RegisterCollector)
 	r.Post("/api/v1/collectors/{id}/heartbeat", h.Heartbeat)
+	r.Get("/api/v1/collectors/{id}", h.GetCollector)
 	r.Patch("/api/v1/collectors/{id}", h.UpdateCollector)
 	r.Get("/api/v1/collectors/pki", h.PKI)
 	// Zero-config onboarding: an operator mints a short-lived enrollment code;
@@ -939,6 +978,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	// Reconciliation review queue.
 	// The review-items resource (API-05) and its deprecated discovery path.
 	reviews.NewHandler(h.ReviewService()).RegisterRoutes(r)
+
+	// Collector groups (PRB-03, COL-06, WP-947).
+	h.RegisterCollectorGroupRoutes(r)
 }
 
 // ListCollectors handles GET /api/v1/collectors
@@ -963,6 +1005,33 @@ func (h *Handler) ListCollectors(w http.ResponseWriter, r *http.Request) {
 		Offset:  page.Offset,
 		HasMore: page.Offset+page.Limit < total,
 	})
+}
+
+// GetCollector handles GET /api/v1/collectors/{id}: one collector of the
+// organization with its stored capability report (PRT-18, WP-966). A
+// collector outside the caller's client or site scope is 404 like an
+// unknown one (row level security).
+func (h *Handler) GetCollector(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	repo, ok := h.repo.(ScopeRepository)
+	if !ok {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "collector not found")
+		return
+	}
+	c, err := repo.ScopeCollector(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	if isNotFound(err) {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "collector not found")
+		return
+	}
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, c)
 }
 
 // RegisterCollector handles POST /api/v1/collectors
@@ -1185,9 +1254,71 @@ type CollectorSpoolReport struct {
 	Backpressure   bool  `json:"backpressure"`
 }
 
+// CollectorVaultReport is the vault part of a collector heartbeat
+// (CRD-05, WP-897): the version changes of vault entries without a fixed
+// version the collector read since the last accepted heartbeat; it
+// acknowledges them after that heartbeat's 204.
+type CollectorVaultReport struct {
+	VersionChanges int64 `json:"version_changes"`
+}
+
 // CollectorHeartbeatRequest is the optional body of a collector heartbeat.
+// ProbeCapabilities is the capability report (PRT-18, WP-966); a heartbeat
+// without it leaves the stored report unchanged (older collectors).
 type CollectorHeartbeatRequest struct {
-	Spool *CollectorSpoolReport `json:"spool,omitempty"`
+	Spool             *CollectorSpoolReport        `json:"spool,omitempty"`
+	Vault             *CollectorVaultReport        `json:"vault,omitempty"`
+	ProbeCapabilities *probewire.ProbeCapabilities `json:"probe_capabilities,omitempty"`
+}
+
+// ProbeCapabilityStore stores the capability report of a collector
+// (PRT-18, WP-966): only a changed report is written; changed tells the
+// caller to assign the collector's group again.
+type ProbeCapabilityStore interface {
+	StoreProbeCapabilities(ctx context.Context, orgID, collectorID string, caps *probewire.ProbeCapabilities) (changed bool, err error)
+}
+
+// WithCapabilityChanged sets what runs after a collector's capability
+// report changed: the assignment of its group (probe.Assigner,
+// WP-966 AK5).
+func (h *Handler) WithCapabilityChanged(fn func(ctx context.Context, orgID, collectorID string)) *Handler {
+	h.capabilitiesChanged = fn
+	return h
+}
+
+// RecordProbeCapabilities stores the capability report of a heartbeat or a
+// monitoring alive message (.probe.alive, WP-959 OnAlive) when it changed
+// and then triggers the assignment of the collector's group. A nil report
+// or a repository without ProbeCapabilityStore changes nothing; an error
+// is logged, the heartbeat stays accepted.
+func (h *Handler) RecordProbeCapabilities(ctx context.Context, orgID, collectorID string, caps *probewire.ProbeCapabilities) {
+	store, ok := h.repo.(ProbeCapabilityStore)
+	if caps == nil || !ok {
+		return
+	}
+	changed, err := store.StoreProbeCapabilities(ctx, orgID, collectorID, caps)
+	if err != nil {
+		slog.Warn("collector probe capabilities not stored", "organization_id", orgID, "collector_id", collectorID, "error", err)
+		return
+	}
+	if changed && h.capabilitiesChanged != nil {
+		h.capabilitiesChanged(ctx, orgID, collectorID)
+	}
+}
+
+// RecordAliveProbeCapabilities is the hook OnAlive of the probe edge
+// (probe.AliveHook, WP-966): it stores the capability report of a
+// .probe.alive message. The edge delivers it outside any request, so the
+// hook opens its own org-wide scope of the collector's organization like
+// the other edge consumers; the repository fails closed without one.
+func (h *Handler) RecordAliveProbeCapabilities(orgID, collectorID string, alive probewire.Alive, _ time.Time) { //nolint:gocritic // signature of probe.AliveHook
+	if alive.ProbeCapabilities == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	scope := database.OrgWideScope(orgID, "")
+	h.RecordProbeCapabilities(database.ContextWithTenantScope(ctx, &scope), orgID, collectorID, alive.ProbeCapabilities)
 }
 
 // Heartbeat handles POST /api/v1/collectors/{id}/heartbeat. The body is
@@ -1221,6 +1352,8 @@ func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	// (ENT-07).
 	w.Header().Set(CollectorStatusHeader, status)
 	recordSpoolReport(r.Context(), t.OrganizationID, id, req.Spool)
+	recordVaultReport(req.Vault)
+	h.RecordProbeCapabilities(r.Context(), t.OrganizationID, id, req.ProbeCapabilities)
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -1233,14 +1366,14 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	items, ok := readIngestItems(w, r)
+	items, identityRejected, ok := readIngestItems(w, r)
 	if !ok {
 		return
 	}
 	// Times compare by the source's observed_at (GLO-12): items of the
 	// deprecated contract carry none and take the arrival time; records
 	// from the future are rejected and counted.
-	received := len(items)
+	received := len(items) + identityRejected
 	items, rejected := admitObservedAt(items, time.Now().UTC())
 
 	// Every record goes the path of the ingest.> consumer (REC-01): with a
@@ -1250,6 +1383,7 @@ func (h *Handler) BulkIngest(w http.ResponseWriter, r *http.Request) {
 	resp, err := h.dispatch(r.Context(), msgs)
 	// Records that fail are listed in the answer; only when no record was
 	// accepted does the request fail as a whole (WP-481).
+	resp.RejectedIdentityLimit = identityRejected
 	if err = resp.finish(received, rejected, err); err != nil {
 		api.WriteRepoError(w, err)
 		return

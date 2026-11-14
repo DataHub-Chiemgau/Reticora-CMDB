@@ -337,10 +337,18 @@ func (h *Handler) Record(w http.ResponseWriter, r *http.Request) {
 	if p, ok := identity.PrincipalFromContext(r.Context()); ok {
 		m.ActorID = p.Subject
 	}
-	// An object outside the caller's scope is 404 like an unknown one, and
-	// nothing is recorded (F-047, TEN-04).
+	// The asset or article is a reference of the body: unknown, of another
+	// organization or outside the caller's scope is a 422 field error with
+	// a fixed text, the same for each (SR-50, API-03); nothing is recorded.
 	if err := h.repo.Record(r.Context(), m); err != nil {
-		writeMovementError(w, r, err)
+		switch {
+		case errors.Is(err, ErrAssetNotFound):
+			api.WriteFieldError(w, &api.FieldError{Field: "asset_id", Message: "not found", Status: http.StatusUnprocessableEntity})
+		case errors.Is(err, consumable.ErrNotFound), errors.Is(err, ErrItemNotFound):
+			api.WriteFieldError(w, &api.FieldError{Field: "consumable_id", Message: "not found", Status: http.StatusUnprocessableEntity})
+		default:
+			writeMovementError(w, r, err)
+		}
 		return
 	}
 	api.WriteJSON(w, http.StatusCreated, m)

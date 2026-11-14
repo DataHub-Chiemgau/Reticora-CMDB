@@ -414,6 +414,50 @@ func chainAndSets(ctx context.Context, r FieldLister, orgID, typeID string) ([]T
 type ruleScope struct {
 	types, sets, versions []string
 	active                bool
+	// locks are the states of the effective lifecycle model of the type
+	// with locked fields (WP-1103), read with the chain; newCI marks the
+	// resolution for a CI that is created.
+	locks []lifecycleLock
+	newCI bool
+}
+
+// lifecycleLock is a state of a lifecycle model and the fields it locks
+// (lifecycle_state.locked_fields, LCY-04).
+type lifecycleLock struct {
+	Model   string   `json:"model"`
+	State   string   `json:"state"`
+	Initial bool     `json:"initial"`
+	Fields  []string `json:"fields"`
+}
+
+// LifecycleLockPrefix starts the key of a catalog rule derived from a
+// locked field of a lifecycle state (WP-1103): lifecycle_lock:<model>:
+// <state>:<field>. Such rules are not stored and not changed through
+// /api/v1/rules.
+const LifecycleLockPrefix = "lifecycle_lock:"
+
+// lifecycleStateField is the condition input of the lifecycle state of a
+// CI (ci.Service puts the stored state there, WP-1103 AK3).
+const lifecycleStateField = "lifecycle_state"
+
+// lockRules derives one readonly catalog rule per locked field of each
+// state of locks (LCY-04, E-232): the condition lifecycle_state = <state>.
+// For a new CI (newCI) the rules of the initial state also apply while the
+// CI names no state: a new CI starts in the initial state of its model.
+func lockRules(locks []lifecycleLock, newCI bool) []fieldmeta.CatalogRule {
+	var out []fieldmeta.CatalogRule
+	for _, l := range locks {
+		cond := rules.Rule{Op: rules.OpEq, Field: lifecycleStateField, Value: l.State}
+		if newCI && l.Initial {
+			cond = rules.Rule{Op: rules.OpAny, Rules: []rules.Rule{cond, {Op: rules.OpEmpty, Field: lifecycleStateField}}}
+		}
+		for _, field := range l.Fields {
+			c := cond
+			out = append(out, fieldmeta.CatalogRule{Key: LifecycleLockPrefix + l.Model + ":" + l.State + ":" + field,
+				AttributeKey: field, Kind: fieldmeta.CatalogReadonly, Condition: &c})
+		}
+	}
+	return out
 }
 
 // ResolveRules returns the active catalog rules (metamodel_rule, WP-716)
@@ -440,6 +484,7 @@ func ResolveRules(ctx context.Context, r FieldLister, orgID, ciTypeID, ciID stri
 		}
 		rs.versions, rs.active = versions.versions, rs.active || versions.active
 	}
+	rs.newCI = ciID == ""
 	return catalogRules(ctx, r, orgID, &rs)
 }
 
@@ -454,6 +499,7 @@ func ResolveFieldsAndRules(ctx context.Context, r FieldLister, orgID, ciTypeID, 
 	if err != nil {
 		return nil, nil, err
 	}
+	rs.newCI = ciID == ""
 	catalog, err := catalogRules(ctx, r, orgID, &rs)
 	if err != nil {
 		return nil, nil, err
@@ -462,11 +508,14 @@ func ResolveFieldsAndRules(ctx context.Context, r FieldLister, orgID, ciTypeID, 
 }
 
 // catalogRules reads the active rules of the scope through the RuleStore
-// of r and orders them by target: type chain, sets, template versions.
+// of r and orders them by target: type chain, sets, template versions;
+// the rules of the lifecycle locks follow (WP-1103), derived without a
+// statement of their own.
 func catalogRules(ctx context.Context, r FieldLister, orgID string, rs *ruleScope) ([]fieldmeta.CatalogRule, error) {
+	locks := lockRules(rs.locks, rs.newCI)
 	store, ok := r.(RuleStore)
 	if !ok || !rs.active {
-		return nil, nil
+		return locks, nil
 	}
 	rank := map[string]int{}
 	for _, id := range slices.Concat(rs.types, rs.sets, rs.versions) {
@@ -487,7 +536,7 @@ func catalogRules(ctx context.Context, r FieldLister, orgID string, rs *ruleScop
 		return len(rank)
 	}
 	slices.SortStableFunc(found, func(a, b MetamodelRule) int { return target(&a) - target(&b) })
-	out := make([]fieldmeta.CatalogRule, 0, len(found))
+	out := make([]fieldmeta.CatalogRule, 0, len(found)+len(locks))
 	for i := range found {
 		rule, cerr := found[i].catalogRule()
 		if cerr != nil {
@@ -495,7 +544,7 @@ func catalogRules(ctx context.Context, r FieldLister, orgID string, rs *ruleScop
 		}
 		out = append(out, rule)
 	}
-	return out, nil
+	return append(out, locks...), nil
 }
 
 // catalogRule is the neutral form of a stored rule (fieldmeta.CatalogRule)

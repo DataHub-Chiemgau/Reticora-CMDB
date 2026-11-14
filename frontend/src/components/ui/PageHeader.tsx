@@ -1,7 +1,7 @@
 import { ChevronRight } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { cn } from './utils';
 
 export interface Crumb {

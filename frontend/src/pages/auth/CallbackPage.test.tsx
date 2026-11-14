@@ -5,7 +5,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { screen } from '@testing-library/react';
-import { Route, Routes } from 'react-router-dom';
+import { Route, Routes } from 'react-router';
 import { renderWithProviders } from '../../test/utils';
 import { CallbackPage } from './CallbackPage';
 
@@ -110,5 +110,65 @@ describe('CallbackPage refusals', () => {
       await screen.findByText('Die Anmeldung konnte nicht abgeschlossen werden.'),
     ).toBeInTheDocument();
     expect(screen.queryByText('the login could not be completed')).toBeNull();
+  });
+});
+
+describe('CallbackPage operator login (WP-887)', () => {
+  function operatorCallback(response: Response) {
+    const fetchMock = vi.fn(async () => response);
+    vi.stubGlobal('fetch', fetchMock);
+    window.sessionStorage.setItem(
+      TRANSACTION_KEY,
+      JSON.stringify({
+        state: 'state-1',
+        codeVerifier: 'verifier',
+        returnTo: '/operator',
+        kind: 'operator',
+      }),
+    );
+    renderWithProviders(
+      <Routes>
+        <Route path="/auth/callback" element={<CallbackPage />} />
+        <Route path="/operator" element={<p>operator area</p>} />
+        <Route path="/dashboard" element={<p>dashboard</p>} />
+      </Routes>,
+      { route: '/auth/callback?code=code-1&state=state-1' },
+    );
+    return fetchMock;
+  }
+
+  it('calls the operator callback and opens the operator area', async () => {
+    const fetchMock = operatorCallback(
+      new Response(
+        JSON.stringify({
+          token: 'op',
+          expires_at: '2099-01-01T00:00:00Z',
+          operator: { id: 'op-1', kind: 'oidc' },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    expect(await screen.findByText('operator area')).toBeInTheDocument();
+    expect((fetchMock.mock.calls[0] as unknown[] | undefined)?.[0]).toBe(
+      '/api/v1/admin/auth/callback',
+    );
+    expect(window.sessionStorage.getItem('reticora-auth-session')).toBeNull();
+  });
+
+  it('shows a refusal without its cause on 403', async () => {
+    operatorCallback(
+      problem(403, 'about:blank', 'operator: login is not an operator with MFA: no second factor'),
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Die Operator-Anmeldung wurde abgelehnt.',
+    );
+    expect(screen.queryByText(/second factor|MFA/)).toBeNull();
+  });
+
+  it('names a missing operator login setup on 503', async () => {
+    operatorCallback(problem(503, 'about:blank', 'operator login is not configured'));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Die Operator-Anmeldung ist auf diesem Server nicht eingerichtet.',
+    );
   });
 });

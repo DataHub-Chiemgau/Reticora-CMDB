@@ -444,3 +444,156 @@ func equal(a, b []string) bool {
 	}
 	return true
 }
+
+// startWalkAgent starts the agent with the variables of the all-types walk.
+func startWalkAgent(t *testing.T) *Agent {
+	t.Helper()
+	a := startAgent(t)
+	walk, err := LoadWalkFile("testdata/all-types.walk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.Set(walk...)
+	return a
+}
+
+// getOne fetches one variable with GET.
+func getOne(t *testing.T, g *gosnmp.GoSNMP, oid string) gosnmp.SnmpPDU {
+	t.Helper()
+	pkt, err := g.Get([]string{oid})
+	if err != nil {
+		t.Fatalf("GET %s: %v", oid, err)
+	}
+	if len(pkt.Variables) != 1 {
+		t.Fatalf("GET %s: %d variables", oid, len(pkt.Variables))
+	}
+	return pkt.Variables[0]
+}
+
+// TestSetDuringWalk covers WP-992 AK2: a Set between two GETBULK requests
+// shows in the second answer; Delete and Apply change the walk as well.
+func TestSetDuringWalk(t *testing.T) {
+	a := startWalkAgent(t)
+	g := client(t, a, testCommunity)
+	const ifOper = ".1.3.6.1.2.1.2.2.1.8"
+	first := ifOper + ".1"
+	bulkValue := func() any {
+		pkt, err := g.GetBulk([]string{ifOper}, 0, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(pkt.Variables) != 1 || pkt.Variables[0].Name != first {
+			t.Fatalf("GETBULK %s: %v, want %s first", ifOper, pkt.Variables, first)
+		}
+		return pkt.Variables[0].Value
+	}
+	if v := bulkValue(); v != -2 {
+		t.Fatalf("first GETBULK: %v, want -2", v)
+	}
+	a.Set(gosnmp.SnmpPDU{Name: ifOper + ".1", Type: gosnmp.Integer, Value: 2})
+	if v := bulkValue(); v != 2 {
+		t.Fatalf("GETBULK after Set: %v, want 2", v)
+	}
+
+	// A new variable takes its place in OID order.
+	a.Set(gosnmp.SnmpPDU{Name: ".1.3.6.1.2.1.2.2.1.8.0", Type: gosnmp.Integer, Value: 1})
+	first = ifOper + ".0"
+	if v := bulkValue(); v != 1 {
+		t.Fatalf("GETBULK after inserting .8.0: %v, want 1 (OID order)", v)
+	}
+	vars := a.Variables()
+	if !slices.IsSortedFunc(vars, func(x, y gosnmp.SnmpPDU) int { return compareOID(x.Name, y.Name) }) {
+		t.Fatal("the variables lost their OID order")
+	}
+
+	a.Delete(".1.3.6.1.2.1.2.2.1.8.0")
+	a.Delete(".1.3.6.1.2.1.2.2.1.8.1")
+	if v := getOne(t, g, ".1.3.6.1.2.1.2.2.1.8.1"); v.Type != gosnmp.NoSuchObject {
+		t.Fatalf("GET after Delete: %v, want noSuchObject", v.Type)
+	}
+
+	// Apply replaces the walk but keeps the configured system group.
+	a.Apply([]gosnmp.SnmpPDU{{Name: ".1.3.6.1.2.1.2.2.1.7.1", Type: gosnmp.Integer, Value: 2}})
+	if v := getOne(t, g, ".1.3.6.1.2.1.2.2.1.7.1"); v.Value != 2 {
+		t.Fatalf("GET after Apply: %v, want 2", v.Value)
+	}
+	if v := getOne(t, g, ".1.3.6.1.2.1.2.2.1.10.1"); v.Type != gosnmp.NoSuchObject {
+		t.Fatalf("a variable missing in the applied walk is still served: %v", v)
+	}
+	if v := getOne(t, g, OIDSysName); string(v.Value.([]byte)) != testSysName {
+		t.Fatalf("Apply dropped sysName: %v", v.Value)
+	}
+}
+
+// TestCounterAdvanceWrap32: Advance moves Counter32 modulo 2^32 and
+// sysUpTime; gauges stay.
+func TestCounterAdvanceWrap32(t *testing.T) {
+	a := startWalkAgent(t)
+	g := client(t, a, testCommunity)
+	a.Advance(10) // 4294967290 + 10 = 2^32 + 4
+	if v := getOne(t, g, ".1.3.6.1.2.1.2.2.1.10.1"); v.Type != gosnmp.Counter32 || gosnmp.ToBigInt(v.Value).Uint64() != 4 {
+		t.Fatalf("Counter32 after Advance: %v %v, want 4 (wrapped)", v.Type, v.Value)
+	}
+	if v := getOne(t, g, OIDSysUpTime); gosnmp.ToBigInt(v.Value).Uint64() != 12355 {
+		t.Fatalf("sysUpTime after Advance: %v, want 12355", v.Value)
+	}
+	if v := getOne(t, g, ".1.3.6.1.2.1.31.1.1.1.15.1"); gosnmp.ToBigInt(v.Value).Uint64() != 1000 {
+		t.Fatalf("Gauge32 changed with Advance: %v", v.Value)
+	}
+	// A reboot is a Set of a smaller sysUpTime.
+	a.Set(gosnmp.SnmpPDU{Name: OIDSysUpTime, Type: gosnmp.TimeTicks, Value: 5})
+	if v := getOne(t, g, OIDSysUpTime); gosnmp.ToBigInt(v.Value).Uint64() != 5 {
+		t.Fatalf("sysUpTime after reboot: %v, want 5", v.Value)
+	}
+}
+
+// TestCounterAdvanceWrap64: Advance moves Counter64 modulo 2^64.
+func TestCounterAdvanceWrap64(t *testing.T) {
+	a := startWalkAgent(t)
+	g := client(t, a, testCommunity)
+	a.Advance(5)
+	if v := getOne(t, g, ".1.3.6.1.2.1.31.1.1.1.6.1"); v.Type != gosnmp.Counter64 || gosnmp.ToBigInt(v.Value).Uint64() != 18446744073709551615 {
+		t.Fatalf("Counter64 after Advance(5): %v %v, want 2^64-1", v.Type, v.Value)
+	}
+	a.Advance(3)
+	if v := getOne(t, g, ".1.3.6.1.2.1.31.1.1.1.6.1"); gosnmp.ToBigInt(v.Value).Uint64() != 2 {
+		t.Fatalf("Counter64 after the wrap: %v, want 2", v.Value)
+	}
+	// A counter set with another integer type advances as well.
+	a.Set(gosnmp.SnmpPDU{Name: ".1.3.6.1.2.1.31.1.1.1.10.1", Type: gosnmp.Counter64, Value: 7})
+	a.Advance(1)
+	if v := getOne(t, g, ".1.3.6.1.2.1.31.1.1.1.10.1"); gosnmp.ToBigInt(v.Value).Uint64() != 8 {
+		t.Fatalf("Counter64 set as int: %v, want 8", v.Value)
+	}
+}
+
+// TestConcurrentSetAndServe: Set, Delete and Advance while the agent
+// answers walks (go test -race).
+func TestConcurrentSetAndServe(t *testing.T) {
+	a := startWalkAgent(t)
+	g := client(t, a, testCommunity)
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			a.Set(gosnmp.SnmpPDU{Name: ".1.3.6.1.2.1.2.2.1.10." + strconv.Itoa(2+i%50), Type: gosnmp.Counter32, Value: uint32(i)})
+			a.Advance(1)
+			if i%3 == 0 {
+				a.Delete(".1.3.6.1.2.1.2.2.1.10." + strconv.Itoa(2+(i/3)%50))
+			}
+		}
+	}()
+	for range 50 {
+		if _, err := g.BulkWalkAll(".1.3.6.1.2.1.2"); err != nil {
+			t.Fatalf("walk while setting: %v", err)
+		}
+	}
+	close(stop)
+	<-done
+}

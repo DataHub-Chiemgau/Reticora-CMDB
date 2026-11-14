@@ -21,7 +21,8 @@
 #   cd deploy/docker-compose
 #   docker compose --env-file .env up -d
 # To run with prebuilt registry images instead, set RETICORA_SERVER_IMAGE /
-# RETICORA_FRONTEND_IMAGE / RETICORA_POSTGRES_IMAGE in .env and rename
+# RETICORA_FRONTEND_IMAGE / RETICORA_POSTGRES_IMAGE /
+# RETICORA_KEYCLOAK_DB_IMAGE in .env and rename
 # docker-compose.override.yml to docker-compose.override.yml.disabled.
 # install-cloud.sh does this in its release mode, the default (E-69): it
 # verifies the signed release images with cosign and pins them by digest
@@ -125,7 +126,7 @@ services:
   # Internal NATS (jobs, ingest, events), reachable only on this host; its
   # leaf node port 7422 serves nats-edge on the internal network (nats.conf).
   nats:
-    image: nats:2.10-alpine
+    image: nats:2.14.10-alpine@sha256:311da47e2f31c26e99c623cd78d486a1e8ab039c49b32652770bb91a4f70512e
     restart: unless-stopped
     logging: *logging
     command: ["-c", "/etc/nats/nats.conf"]
@@ -147,7 +148,7 @@ services:
   # writes the collector CA, the server certificate and the generated
   # pki/edge.conf into the collector-pki volume; the endpoint waits for them.
   nats-edge:
-    image: nats:2.10-alpine
+    image: nats:2.14.10-alpine@sha256:311da47e2f31c26e99c623cd78d486a1e8ab039c49b32652770bb91a4f70512e
     restart: unless-stopped
     logging: *logging
     working_dir: /etc/nats
@@ -178,7 +179,7 @@ services:
       retries: 30
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.12-alpine@sha256:7b1753b4c5ad8458906c272a8132b8c15f5557b000379eb115fb239706a384b7
     restart: unless-stopped
     logging: *logging
     ports:
@@ -192,10 +193,14 @@ services:
       retries: 5
 
   minio:
-    # minio/minio is no longer published on Docker Hub. Silo (pgsty/minio) is a
-    # community-maintained, drop-in build of the MinIO server (same CLI, `mc`
-    # included, AGPLv3), pinned by release tag and digest.
-    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
+    # minio/minio is archived and no longer published on Docker Hub. Silo
+    # (pgsty/silo, the former pgsty/minio, whose image name is frozen since
+    # RELEASE.2026-08-04) is a community-maintained, drop-in fork of the MinIO
+    # server (same S3 API, MINIO_* variables and data format, `mc` included,
+    # AGPLv3), pinned by release tag and digest (E-246). The standard image,
+    # not -distroless: the healthcheck and the test setups run `mc` and `sh`
+    # inside the container.
+    image: pgsty/silo:RELEASE.2026-11-12T00-00-00Z@sha256:c20d112390b9a9ce8c11b8af95ad35bcaa62f4759663c09c936cd8d2b511f329
     restart: unless-stopped
     logging: *logging
     command: server /data --console-address ":9001"
@@ -213,8 +218,15 @@ services:
       timeout: 3s
       retries: 5
 
+  # PostgreSQL of Keycloak: the own image reticora-keycloak-db
+  # (deploy/docker-compose/keycloak-db, E-96, A-85), the official
+  # postgres:16.16-alpine with its gosu rebuilt by the repository toolchain;
+  # same major, PGDATA and UID 70, so the volume of postgres:16.x-alpine
+  # keeps running. The release mode runs the signed image
+  # (RETICORA_KEYCLOAK_DB_IMAGE, pinned by digest); build: lives in
+  # docker-compose.override.yml.
   keycloak-db:
-    image: postgres:16-alpine
+    image: ${RETICORA_KEYCLOAK_DB_IMAGE:-reticora-keycloak-db:latest}
     restart: unless-stopped
     logging: *logging
     environment:
@@ -230,7 +242,7 @@ services:
       retries: 5
 
   keycloak:
-    image: quay.io/keycloak/keycloak:24.0
+    image: quay.io/keycloak/keycloak:26.8.2@sha256:723b1d6e254c0fc96d5cffec860c7e0744d6a3277822b865bb538cf891575e41
     restart: unless-stopped
     logging: *logging
     # `start` with an imported realm: users created via the admin console are
@@ -245,15 +257,22 @@ services:
       KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
       KC_DB_USERNAME: keycloak
       KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
-      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
-      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD must be set}
+      # The temporary master administrator of the first start (Keycloak 26;
+      # .env keeps the names KEYCLOAK_ADMIN and KEYCLOAK_ADMIN_PASSWORD that
+      # install-cloud.sh rotates).
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD must be set}
       KC_HTTP_ENABLED: "true"
       KC_HOSTNAME_STRICT: "false"
       # Required by the healthcheck below: Keycloak's /health/* endpoints are
       # disabled by default and answer 404 without this, so the container would
-      # never become healthy even though startup succeeded.
+      # never become healthy even though startup succeeded. Since Keycloak 25
+      # they are served on the management port 9000, not on 8080.
       KC_HEALTH_ENABLED: "true"
-      KC_PROXY: edge
+      # TLS ends at nginx (/realms/ proxy): Keycloak trusts its
+      # X-Forwarded-* headers for scheme and host of the issuer. Replaces
+      # KC_PROXY=edge, which Keycloak 26 no longer knows (SR-60, WP-873).
+      KC_PROXY_HEADERS: xforwarded
     # Plain HTTP with the admin console: 127.0.0.1 only (COL-08,
     # docs/betrieb/firewall-matrix.md); browsers sign in through the
     # frontend (/realms/, /resources/). An installation without a TLS domain
@@ -270,7 +289,7 @@ services:
       keycloak-db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q '200' <&3"]
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.0\\r\\n\\r\\n' >&3 && grep -q '200' <&3"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -281,19 +300,24 @@ services:
   #   docker compose --profile opensearch up -d
   # and set RETICORA_SEARCH_BACKEND=opensearch for the server (below).
   opensearch:
-    image: opensearchproject/opensearch:2.13.0
+    image: opensearchproject/opensearch:3.9.0@sha256:3b55f6b6249cfdb92b52ee59adc8a266203ba9ef9f5d82544fad6f1af2f3609e
     restart: unless-stopped
     logging: *logging
     profiles: ["opensearch"]
     environment:
       discovery.type: single-node
-      # Single-node dev/staging default; the security plugin is disabled so
-      # the internal compose network is the trust boundary. For production
-      # enable the security plugin and set RETICORA_OPENSEARCH_USERNAME /
-      # RETICORA_OPENSEARCH_PASSWORD.
-      plugins.security.disabled: "true"
-      OPENSEARCH_INITIAL_ADMIN_PASSWORD: "${RETICORA_OPENSEARCH_PASSWORD:-}"
-      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+      # Single-node default; the security plugin is disabled so the internal
+      # compose network is the trust boundary (port 9200 only on loopback).
+      # The entrypoint of the image (since 2.12) runs the demo installer of
+      # the security plugin unless both switches are set, and that installer
+      # stops the container without OPENSEARCH_INITIAL_ADMIN_PASSWORD; its
+      # demo certificates are never meant for operation (Upd-02). To enable
+      # the security plugin, mount an own security configuration and set
+      # RETICORA_OPENSEARCH_USERNAME / RETICORA_OPENSEARCH_PASSWORD.
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      DISABLE_SECURITY_PLUGIN: "true"
+      # OpenSearch reads OPENSEARCH_JAVA_OPTS only (ES_JAVA_OPTS is ignored).
+      OPENSEARCH_JAVA_OPTS: "-Xms512m -Xmx512m"
     ports:
       - "127.0.0.1:9200:9200"
     volumes:
@@ -302,12 +326,15 @@ services:
       memlock:
         soft: -1
         hard: -1
+    # OpenSearch 3 loads about 25 plugins before the HTTP port opens; the
+    # start period keeps failed checks of a slow start from counting (the
+    # service turns healthy with the first passing check).
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9200/_cluster/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 12
-      start_period: 30s
+      start_period: 180s
 
   # Malware scan of document uploads (SEC-09, E-42, WP-735): clamd for the
   # job kind document.scan of the module documents, which the release
@@ -350,7 +377,7 @@ services:
     # standalone with prebuilt registry images.
     restart: unless-stopped
     logging: *logging
-    environment:
+    environment: &server-environment
       RETICORA_PORT: "8080"
       # Runtime login reticora_runtime (TEN-03): LOGIN NOSUPERUSER NOBYPASSRLS,
       # member of reticora_app only; install-cloud.sh creates it after the
@@ -460,6 +487,17 @@ services:
       # Hourly refresh of computed attributes (JOB-02, WP-718), a system job
       # of the scheduler.
       RETICORA_WORKER_COMPUTED_REFRESH_ENABLED: "${RETICORA_WORKER_COMPUTED_REFRESH_ENABLED:-true}"
+      # Probe assignment to the collector group members every 10 s
+      # (PRB-03, WP-941), a system job of the scheduler; module monitoring.
+      RETICORA_WORKER_PROBE_ASSIGN_ENABLED: "${RETICORA_WORKER_PROBE_ASSIGN_ENABLED:-true}"
+      # Probe result ingest from the stream RETICORA_PROBE into probe_result
+      # (NFR-11, PRB-07, WP-960); module monitoring.
+      RETICORA_WORKER_PROBE_INGEST_ENABLED: "${RETICORA_WORKER_PROBE_INGEST_ENABLED:-true}"
+      # Workflows: the consumer workflow-triggers and the runs of the job
+      # kind workflow.run (OPS-02 [P3], WP-1114); module workflows.
+      RETICORA_WORKER_WORKFLOW_ENABLED: "${RETICORA_WORKER_WORKFLOW_ENABLED:-true}"
+      RETICORA_WORKER_IPAM_SCAN_APPLY_ENABLED: "${RETICORA_WORKER_IPAM_SCAN_APPLY_ENABLED:-true}"
+      RETICORA_WORKER_ALARM_CHECK_ENABLED: "${RETICORA_WORKER_ALARM_CHECK_ENABLED:-true}"
       RETICORA_PKI_DIR: "/pki"
       RETICORA_NATS_EDGE_URL: "tls://nats-edge:4222"
       # Names on the server certificate of nats-edge. A collector connects to
@@ -496,6 +534,58 @@ services:
     healthcheck:
       # /readyz also checks database, Redis, object storage, NATS and, with
       # RETICORA_SMTP_HOST, the SMTP server (OPS-01).
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/readyz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 15s
+
+  # Deployment profile monitoring (WP-869, E-162 Option 2): the server image
+  # with the environment of the service server, but only the monitoring
+  # workers run (switches RETICORA_MONITORING_WORKER_<NAME>_ENABLED in .env),
+  # so the probe load of NFR-11 does not slow the API. Not started by
+  # default: docker compose --profile monitoring up -d. Then switch the
+  # monitoring worker of the service server off
+  # (RETICORA_WORKER_MONITORING_ENABLED=false).
+  monitoring:
+    image: ${RETICORA_SERVER_IMAGE:-reticora-server:latest}
+    profiles: ["monitoring"]
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      <<: *server-environment
+      RETICORA_WORKER_WEBHOOK_DISPATCHER_ENABLED: "${RETICORA_MONITORING_WORKER_WEBHOOK_DISPATCHER_ENABLED:-false}"
+      RETICORA_WORKER_EXPORT_ENABLED: "${RETICORA_MONITORING_WORKER_EXPORT_ENABLED:-false}"
+      RETICORA_WORKER_INGEST_ENABLED: "${RETICORA_MONITORING_WORKER_INGEST_ENABLED:-false}"
+      RETICORA_WORKER_MONITORING_ENABLED: "${RETICORA_MONITORING_WORKER_MONITORING_ENABLED:-true}"
+      RETICORA_WORKER_HEALTH_ENABLED: "${RETICORA_MONITORING_WORKER_HEALTH_ENABLED:-false}"
+      RETICORA_WORKER_SCHEDULER_ENABLED: "${RETICORA_MONITORING_WORKER_SCHEDULER_ENABLED:-false}"
+      RETICORA_WORKER_JOBS_ENABLED: "${RETICORA_MONITORING_WORKER_JOBS_ENABLED:-false}"
+      RETICORA_WORKER_EVENTS_ENABLED: "${RETICORA_MONITORING_WORKER_EVENTS_ENABLED:-false}"
+      RETICORA_WORKER_NOTIFIER_ENABLED: "${RETICORA_MONITORING_WORKER_NOTIFIER_ENABLED:-false}"
+      RETICORA_WORKER_NATS_EDGE_ENABLED: "${RETICORA_MONITORING_WORKER_NATS_EDGE_ENABLED:-false}"
+      RETICORA_WORKER_CREDENTIAL_BUNDLES_ENABLED: "${RETICORA_MONITORING_WORKER_CREDENTIAL_BUNDLES_ENABLED:-false}"
+      RETICORA_WORKER_DISCOVERY_SCOPES_ENABLED: "${RETICORA_MONITORING_WORKER_DISCOVERY_SCOPES_ENABLED:-false}"
+      RETICORA_WORKER_OFFLINE_DETECTOR_ENABLED: "${RETICORA_MONITORING_WORKER_OFFLINE_DETECTOR_ENABLED:-false}"
+      RETICORA_WORKER_COMPUTED_REFRESH_ENABLED: "${RETICORA_MONITORING_WORKER_COMPUTED_REFRESH_ENABLED:-false}"
+      RETICORA_WORKER_PROBE_ASSIGN_ENABLED: "${RETICORA_MONITORING_WORKER_PROBE_ASSIGN_ENABLED:-true}"
+      RETICORA_WORKER_PROBE_INGEST_ENABLED: "${RETICORA_MONITORING_WORKER_PROBE_INGEST_ENABLED:-true}"
+      RETICORA_WORKER_WORKFLOW_ENABLED: "${RETICORA_MONITORING_WORKER_WORKFLOW_ENABLED:-false}"
+      RETICORA_WORKER_IPAM_SCAN_APPLY_ENABLED: "${RETICORA_MONITORING_WORKER_IPAM_SCAN_APPLY_ENABLED:-false}"
+      RETICORA_WORKER_ALARM_CHECK_ENABLED: "${RETICORA_MONITORING_WORKER_ALARM_CHECK_ENABLED:-true}"
+    volumes:
+      - ./secrets/session-private.pem:/etc/reticora/session/private.pem:ro
+      - ./letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/readyz || exit 1"]
       interval: 10s
       timeout: 3s
@@ -562,8 +652,8 @@ services:
       retries: 6
 
   certbot:
-    # Pinned version for reproducible deployments.
-    image: certbot/certbot:v2.11.0
+    # Pinned by version and digest (SR-60, WP-873).
+    image: certbot/certbot:v5.9.0@sha256:bc93cb710b413e6b456d622f9b0133b3e109c0a78c2ed9976af43d209b0a1805
     logging: *logging
     # Idles between renewal checks: certbot renew is a no-op until the
     # certificate is close to expiry; the real issuance runs once from

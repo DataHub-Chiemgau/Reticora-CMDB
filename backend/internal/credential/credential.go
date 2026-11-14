@@ -7,11 +7,17 @@ package credential
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
+	"net/http"
+	"slices"
+	"strings"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/observability"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 )
@@ -28,6 +34,19 @@ const (
 	KindAPIToken    = "api_token"
 	KindNUT         = "nut"
 	KindNAS         = "nas" // NAS plugin account (Synology DSM: username, password; E-68)
+	// The logins of vault connections (CRD-03, WP-893): AppRole (role_id,
+	// secret_id) and token. The collector files them under vault, no plugin
+	// reads them.
+	KindVaultAppRole = "vault_approle"
+	KindVaultToken   = "vault_token"
+	// The kinds of the probes (PRT-22, WP-967), each under its own
+	// namespace of the collector without alias: http (HTTP probes:
+	// username/password or token), gnmi (gNMI: username/password and/or
+	// client_cert/client_key, optional ca) and acs (TR-069/USP ACS:
+	// username/password or token).
+	KindHTTP = "http"
+	KindGNMI = "gnmi"
+	KindACS  = "acs"
 )
 
 var (
@@ -39,29 +58,220 @@ var (
 
 // validKinds is the set of allowed credential kinds.
 var validKinds = map[string]bool{
-	KindSNMPv2c:     true,
-	KindSNMPv3:      true,
-	KindSSHPassword: true,
-	KindSSHKey:      true,
-	KindRedfish:     true,
-	KindIPMI:        true,
-	KindWMI:         true,
-	KindAPIToken:    true,
-	KindNUT:         true,
-	KindNAS:         true,
+	KindSNMPv2c:      true,
+	KindSNMPv3:       true,
+	KindSSHPassword:  true,
+	KindSSHKey:       true,
+	KindRedfish:      true,
+	KindIPMI:         true,
+	KindWMI:          true,
+	KindAPIToken:     true,
+	KindNUT:          true,
+	KindNAS:          true,
+	KindVaultAppRole: true,
+	KindVaultToken:   true,
+	KindHTTP:         true,
+	KindGNMI:         true,
+	KindACS:          true,
+}
+
+// vaultLoginFields are the required members of the secret of a vault login
+// (AK2 of WP-893).
+var vaultLoginFields = map[string][]string{
+	KindVaultAppRole: {"role_id", "secret_id"},
+	KindVaultToken:   {"token"},
+}
+
+// checkVaultLoginSecret requires the members of a vault login as non-empty
+// strings; other kinds are not checked.
+func checkVaultLoginSecret(kind string, secret map[string]any) error {
+	for _, field := range vaultLoginFields[kind] {
+		if v, ok := secret[field].(string); !ok || v == "" {
+			return &api.FieldError{Field: "secret", Status: http.StatusUnprocessableEntity,
+				Message: "a credential of kind " + kind + " needs " + strings.Join(vaultLoginFields[kind], " and ")}
+		}
+	}
+	return nil
+}
+
+// validateSecret checks the members of a stored secret of kind (AK2 of
+// WP-967): the logins of vault connections and the probe kinds http, gnmi
+// and acs; other kinds are not checked. It applies to Create and to the
+// replacement of the secret (PUT /credentials/{id}/secret). A violation is
+// a 422 with field secret.<member> (secret for a vault login); the message
+// names the members only, never a value.
+func validateSecret(kind string, secret map[string]any) error {
+	if err := checkVaultLoginSecret(kind, secret); err != nil {
+		return err
+	}
+	switch kind {
+	case KindHTTP, KindACS:
+		return checkUserOrTokenSecret(kind, secret)
+	case KindGNMI:
+		return checkGNMISecret(secret)
+	}
+	return nil
+}
+
+func secretFieldError(member, message string) error {
+	return &api.FieldError{Field: "secret." + member, Status: http.StatusUnprocessableEntity, Message: message}
+}
+
+// secretString returns a member of the secret as a non-empty string; a
+// member of another type is an error.
+func secretString(secret map[string]any, member string) (value string, set bool, err error) {
+	v, ok := secret[member]
+	if !ok || v == nil {
+		return "", false, nil
+	}
+	s, ok := v.(string)
+	if !ok {
+		return "", false, secretFieldError(member, member+" must be a string")
+	}
+	return s, strings.TrimSpace(s) != "", nil
+}
+
+// secretPair reports whether both members of a pair are set; one member
+// without the other is an error naming the missing one.
+func secretPair(kind string, secret map[string]any, a, b string) (bool, error) {
+	_, hasA, err := secretString(secret, a)
+	if err != nil {
+		return false, err
+	}
+	_, hasB, err := secretString(secret, b)
+	if err != nil {
+		return false, err
+	}
+	switch {
+	case hasA && !hasB:
+		return false, secretFieldError(b, "a credential of kind "+kind+" with "+a+" needs "+b)
+	case hasB && !hasA:
+		return false, secretFieldError(a, "a credential of kind "+kind+" with "+b+" needs "+a)
+	}
+	return hasA && hasB, nil
+}
+
+// checkUserOrTokenSecret: http and acs carry either username and password
+// or token, not both.
+func checkUserOrTokenSecret(kind string, secret map[string]any) error {
+	userPass, err := secretPair(kind, secret, "username", "password")
+	if err != nil {
+		return err
+	}
+	_, token, err := secretString(secret, "token")
+	if err != nil {
+		return err
+	}
+	switch {
+	case userPass && token:
+		return secretFieldError("token", "a credential of kind "+kind+" has either username and password or token, not both")
+	case !userPass && !token:
+		return secretFieldError("username", "a credential of kind "+kind+" needs username and password or token")
+	}
+	return nil
+}
+
+// checkGNMISecret: gnmi carries at least one of the pairs username/password
+// and client_cert/client_key, optionally ca; certificates and the key must
+// parse as PEM.
+func checkGNMISecret(secret map[string]any) error {
+	userPass, err := secretPair(KindGNMI, secret, "username", "password")
+	if err != nil {
+		return err
+	}
+	certPair, err := secretPair(KindGNMI, secret, "client_cert", "client_key")
+	if err != nil {
+		return err
+	}
+	if !userPass && !certPair {
+		return secretFieldError("username", "a credential of kind gnmi needs username and password or client_cert and client_key")
+	}
+	if certPair {
+		cert, _, _ := secretString(secret, "client_cert")
+		if !pemCertificates(cert) {
+			return secretFieldError("client_cert", "client_cert must be a PEM encoded certificate")
+		}
+		key, _, _ := secretString(secret, "client_key")
+		if !pemPrivateKey(key) {
+			return secretFieldError("client_key", "client_key must be a PEM encoded private key")
+		}
+	}
+	ca, hasCA, err := secretString(secret, "ca")
+	if err != nil {
+		return err
+	}
+	if hasCA && !pemCertificates(ca) {
+		return secretFieldError("ca", "ca must hold PEM encoded certificates")
+	}
+	return nil
+}
+
+// pemCertificates reports whether s holds one or more PEM certificates and
+// nothing else.
+func pemCertificates(s string) bool {
+	rest := []byte(strings.TrimSpace(s))
+	n := 0
+	for len(rest) > 0 {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil || block.Type != "CERTIFICATE" {
+			return false
+		}
+		if _, err := x509.ParseCertificate(block.Bytes); err != nil {
+			return false
+		}
+		rest = []byte(strings.TrimSpace(string(rest)))
+		n++
+	}
+	return n > 0
+}
+
+// pemPrivateKey reports whether s is one PEM private key (PKCS#8, PKCS#1 or
+// SEC 1).
+func pemPrivateKey(s string) bool {
+	block, rest := pem.Decode([]byte(strings.TrimSpace(s)))
+	if block == nil || strings.TrimSpace(string(rest)) != "" {
+		return false
+	}
+	switch block.Type {
+	case "PRIVATE KEY":
+		_, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+		return err == nil
+	case "RSA PRIVATE KEY":
+		_, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+		return err == nil
+	case "EC PRIVATE KEY":
+		_, err := x509.ParseECPrivateKey(block.Bytes)
+		return err == nil
+	}
+	return false
 }
 
 // Credential is the domain model for an encrypted credential.
 type Credential struct {
-	ID             string    `json:"id"`
-	OrganizationID string    `json:"organization_id"`
-	ClientID       string    `json:"client_id,omitempty"`
-	Name           string    `json:"name"`
-	Kind           string    `json:"kind"`
-	Scope          string    `json:"scope,omitempty"`
-	KeyVersion     int       `json:"key_version"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	ClientID       string `json:"client_id,omitempty"`
+	Name           string `json:"name"`
+	Kind           string `json:"kind"`
+	Scope          string `json:"scope,omitempty"`
+	KeyVersion     int    `json:"key_version"`
+	// SecretVersion counts the secrets the credential had: 1 at creation,
+	// raised by every PUT /credentials/{id}/secret (CRD-05, WP-889).
+	SecretVersion int `json:"secret_version"`
+	// RotatedAt is the time of the last replacement of the secret; nil
+	// while the secret of the creation applies.
+	RotatedAt *time.Time `json:"rotated_at"`
+	// MaxAgeDays is the age limit of the secret in days (1–3650); nil is
+	// none. WP-897 checks it.
+	MaxAgeDays *int `json:"max_age_days"`
+	// Source is stored (an encrypted secret) or vault_ref (a reference
+	// into a vault connection, no secret; CRD-02, WP-894).
+	Source string `json:"source"`
+	// VaultRef is the reference of a vault_ref credential.
+	VaultRef  *VaultRef `json:"vault_ref,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // OrgDEK represents an organization's wrapped data encryption key.
@@ -88,7 +298,46 @@ type CreateRequest struct {
 	Scope          string `json:"scope,omitempty"`
 	// Secret is the plaintext credential data (JSON map).
 	Secret map[string]any `json:"secret"`
+	// VaultRef replaces Secret for a reference into a vault connection
+	// (WP-894); exactly one of them is sent.
+	VaultRef *VaultRef `json:"vault_ref,omitempty"`
+	// MaxAgeDays is the optional age limit of the secret (1–3650).
+	MaxAgeDays *int `json:"max_age_days,omitempty"`
 }
+
+// MetadataUpdate is a change of name and age limit (PATCH, WP-889).
+// SetMaxAge marks that max_age_days was sent (nil removes the limit).
+type MetadataUpdate struct {
+	Name       *string
+	MaxAgeDays *int
+	SetMaxAge  bool
+	// Ref changes the reference of a vault_ref credential (WP-894); any
+	// change raises secret_version.
+	Ref VaultRefUpdate
+}
+
+// SecretReplacer replaces the secret of a credential in one transaction
+// (WP-889): it locks the organization's DEK (a concurrent key rotation
+// waits), encrypts plaintext with it, raises secret_version, sets
+// rotated_at and runs inTx (the event of the replacement) before the
+// commit. PGRepository and MemoryRepository implement it.
+type SecretReplacer interface {
+	ReplaceSecret(ctx context.Context, orgID, id string, plaintext []byte, enc *crypto.EnvelopeEncryptor,
+		inTx func(ctx context.Context, cred *Credential) error) (*Credential, error)
+}
+
+// MetadataUpdater changes name and age limit of a credential without
+// touching its secret (WP-889).
+type MetadataUpdater interface {
+	UpdateMetadata(ctx context.Context, orgID, id string, u MetadataUpdate) (*Credential, error)
+}
+
+// ErrUnsupported is returned when the store cannot replace secrets or
+// change metadata.
+var ErrUnsupported = errors.New("credential store does not support this change")
+
+// MaxAgeDaysValid reports whether an age limit lies in 1–3650.
+func MaxAgeDaysValid(days int) bool { return days >= 1 && days <= 3650 }
 
 // Repository defines the storage interface for credentials and DEKs.
 type Repository interface {
@@ -123,14 +372,36 @@ type Service struct {
 	// cycles counts the bundle requests that failed on the server's side
 	// (worker credential_bundles, OPS-05); nil counts none.
 	cycles *observability.Cycles
+	// bindings is the binding service (WP-890); a copy of the service
+	// (WithCycles) shares it.
+	bindings *BindingService
+	// vaults is the vault connection service (WP-893), shared like bindings.
+	vaults *VaultService
+	// vault resolves references of connections with resolve_at server
+	// (WP-896); nil: Decrypt answers ErrVaultNotConfigured for them.
+	vault *VaultResolver
+	// rotation notifies the collectors of changes and emits vault
+	// rotations (WP-897); nil notifies none.
+	rotation *Rotation
 }
 
 // NewService creates a new credential service.
 func NewService(repo Repository, encryptor *crypto.EnvelopeEncryptor) *Service {
-	return &Service{
+	s := &Service{
 		repo:      repo,
 		encryptor: encryptor,
 	}
+	bindingRepo, ok := repo.(BindingRepository)
+	if !ok {
+		bindingRepo = newMemoryBindings()
+	}
+	s.bindings = &BindingService{creds: s, bindings: bindingRepo, groups: deviceGroupsOf(repo)}
+	vaultRepo, ok := repo.(VaultRepository)
+	if !ok {
+		vaultRepo = newMemoryVaults()
+	}
+	s.vaults = &VaultService{creds: s, vaults: vaultRepo}
+	return s
 }
 
 // Create stores a new encrypted credential. It retrieves (or creates) the org DEK,
@@ -138,6 +409,15 @@ func NewService(repo Repository, encryptor *crypto.EnvelopeEncryptor) *Service {
 func (s *Service) Create(ctx context.Context, req CreateRequest) (*Credential, error) { //nolint:gocritic // API of credential.Service used by iga, discovery and jobs (WP-301 changes jobs in parallel)
 	if !validKinds[req.Kind] {
 		return nil, ErrInvalidKind
+	}
+	if err := checkSource(&req); err != nil {
+		return nil, err
+	}
+	if req.VaultRef != nil {
+		return s.createVaultRef(ctx, &req)
+	}
+	if err := validateSecret(req.Kind, req.Secret); err != nil {
+		return nil, err
 	}
 
 	dek, err := s.getOrCreateDEK(ctx, req.OrganizationID)
@@ -164,6 +444,9 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Credential, e
 			Kind:           req.Kind,
 			Scope:          req.Scope,
 			KeyVersion:     1,
+			SecretVersion:  1,
+			MaxAgeDays:     req.MaxAgeDays,
+			Source:         SourceStored,
 			CreatedAt:      now,
 			UpdatedAt:      now,
 		},
@@ -174,6 +457,33 @@ func (s *Service) Create(ctx context.Context, req CreateRequest) (*Credential, e
 		return nil, err
 	}
 
+	return &stored.Credential, nil
+}
+
+// createVaultRef stores a reference into a vault connection: no secret,
+// no DEK (WP-894).
+func (s *Service) createVaultRef(ctx context.Context, req *CreateRequest) (*Credential, error) {
+	if err := s.checkVaultRef(ctx, req.OrganizationID, req.Kind, req.ClientID, req.VaultRef); err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	stored := &StoredCredential{Credential: Credential{
+		OrganizationID: req.OrganizationID,
+		ClientID:       req.ClientID,
+		Name:           req.Name,
+		Kind:           req.Kind,
+		Scope:          req.Scope,
+		KeyVersion:     1,
+		SecretVersion:  1,
+		MaxAgeDays:     req.MaxAgeDays,
+		Source:         SourceVaultRef,
+		VaultRef:       req.VaultRef,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}}
+	if err := s.repo.Create(ctx, stored); err != nil {
+		return nil, err
+	}
 	return &stored.Credential, nil
 }
 
@@ -191,6 +501,11 @@ func (s *Service) Decrypt(ctx context.Context, orgID, id string) (map[string]any
 	stored, err := s.repo.Get(ctx, orgID, id)
 	if err != nil {
 		return nil, err
+	}
+	if stored.Source == SourceVaultRef {
+		// A reference is read from the vault in memory, only for a
+		// connection with resolve_at server (WP-894, WP-896).
+		return s.decryptVaultRef(ctx, orgID, stored)
 	}
 
 	dek, err := s.getDEK(ctx, orgID)
@@ -216,9 +531,84 @@ func (s *Service) List(ctx context.Context, orgID string) ([]Credential, error) 
 	return s.repo.List(ctx, orgID)
 }
 
+// ReplaceSecret replaces the secret of a credential (PUT
+// /credentials/{id}/secret, CRD-05, WP-889); the new value is never
+// returned. inTx runs in the transaction of the replacement (the event
+// credential.rotated); it may be nil.
+func (s *Service) ReplaceSecret(ctx context.Context, orgID, id string, secret map[string]any,
+	inTx func(ctx context.Context, cred *Credential) error) (*Credential, error) {
+	replacer, ok := s.repo.(SecretReplacer)
+	if !ok {
+		return nil, ErrUnsupported
+	}
+	// A vault login and a probe kind keep the members of their kind
+	// (WP-893, WP-967); an unknown id
+	// is reported by the replacement.
+	if current, err := s.repo.Get(ctx, orgID, id); err == nil {
+		if current.Source == SourceVaultRef {
+			return nil, ErrVaultRefHasNoSecret
+		}
+		if loginErr := validateSecret(current.Kind, secret); loginErr != nil {
+			return nil, loginErr
+		}
+	}
+	if _, err := s.getOrCreateDEK(ctx, orgID); err != nil {
+		return nil, err
+	}
+	plaintext, err := json.Marshal(secret)
+	if err != nil {
+		return nil, err
+	}
+	// The collectors holding the credential reload their bundle after the
+	// commit (WP-897).
+	var out *Credential
+	err = s.notifyChange(ctx, orgID, func() []string { return []string{id} }, func() error {
+		var rerr error
+		out, rerr = replacer.ReplaceSecret(ctx, orgID, id, plaintext, s.encryptor, inTx)
+		return rerr
+	})
+	return out, err
+}
+
+// UpdateMetadata changes name and age limit (PATCH /credentials/{id}).
+func (s *Service) UpdateMetadata(ctx context.Context, orgID, id string, u MetadataUpdate) (*Credential, error) {
+	updater, ok := s.repo.(MetadataUpdater)
+	if !ok {
+		return nil, ErrUnsupported
+	}
+	if u.Ref.Changes() {
+		current, err := s.repo.Get(ctx, orgID, id)
+		if err != nil {
+			return nil, err
+		}
+		if refErr := checkVaultRefUpdate(current, &u.Ref); refErr != nil {
+			return nil, refErr
+		}
+		// A changed reference reaches the collectors with their next
+		// bundle, fetched after the commit (WP-897).
+		var out *Credential
+		err = s.notifyChange(ctx, orgID, func() []string { return []string{id} }, func() error {
+			var uerr error
+			out, uerr = updater.UpdateMetadata(ctx, orgID, id, u)
+			return uerr
+		})
+		return out, err
+	}
+	return updater.UpdateMetadata(ctx, orgID, id, u)
+}
+
 // Delete removes a credential.
 func (s *Service) Delete(ctx context.Context, orgID, id string) error {
-	return s.repo.Delete(ctx, orgID, id)
+	// The login of a vault connection is not deleted (WP-893): 409, in
+	// the memory store as well, where no foreign key refuses.
+	login, err := s.vaults.loginOfConnection(ctx, orgID, id)
+	if err != nil {
+		return err
+	}
+	if login {
+		return ErrCredentialIsVaultLogin
+	}
+	return credentialDeleteError(s.repo.Delete(ctx, orgID, id))
 }
 
 // RotationResult reports the outcome of a DEK rotation.
@@ -269,6 +659,9 @@ func (s *Service) RotateKeys(ctx context.Context, orgID string) (*RotationResult
 
 	// Re-encrypt every credential with the new DEK before committing the DEK
 	// swap, so a failure mid-rotation leaves the store untouched.
+	// A vault reference has no ciphertext (WP-894); Rotated counts the
+	// stored secrets only.
+	stored = slices.DeleteFunc(stored, func(c StoredCredential) bool { return c.Source == SourceVaultRef })
 	reEncrypted := make([]StoredCredential, len(stored))
 	for i := range stored {
 		cred := stored[i]

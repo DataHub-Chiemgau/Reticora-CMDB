@@ -22,20 +22,36 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/export"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/probe"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
 )
 
 // scheduledWorkers are the registered workers that run as a system job of
 // the scheduler (systemJobs): name and job kind.
 var scheduledWorkers = map[string]string{config.WorkerOfflineDetector: lifecycle.OfflineDetectorKind,
-	config.WorkerComputedRefresh: ci.RefreshJobKind}
+	config.WorkerComputedRefresh: ci.RefreshJobKind, config.WorkerProbeAssign: probe.AssignKind,
+	config.WorkerIPAMScanApply: ipam.ScanApplyKind}
+
+// monitoringWorker reports whether name is a worker of the module
+// monitoring: those run in the deployment profile monitoring (WP-869), the
+// others do not.
+func monitoringWorker(name string) bool {
+	for _, m := range server.LateModules {
+		if m.Key == server.ModuleMonitoring {
+			return slices.Contains(m.Workers, name)
+		}
+	}
+	return false
+}
 
 // testCycle is the interval of the polling workers and of the passes in
 // these tests.
@@ -83,10 +99,21 @@ func TestEveryWorkerExportsRunAndErrorMetrics(t *testing.T) {
 	}
 
 	t.Run("cycle", func(t *testing.T) {
+		// Without a database dependency in this run the cycle of these
+		// workers succeeds.
+		succeeding := []string{config.WorkerWebhookDispatcher, config.WorkerExport, config.WorkerIngest, config.WorkerMonitoring,
+			config.WorkerHealth, config.WorkerScheduler, config.WorkerJobs, config.WorkerNotifier}
 		before, since := scrapeWorkers(t, cs), float64(time.Now().Unix())
 		after := runWorkers(t, cs, built, offline, func(m map[string]workerSeries) bool {
 			for _, name := range config.WorkerNames {
 				if m[name].runs <= before[name].runs {
+					return false
+				}
+			}
+			// A scrape gathers the run counter and the last-success gauge
+			// separately: wait for the success too.
+			for _, name := range succeeding {
+				if m[name].lastSuccess < since {
 					return false
 				}
 			}
@@ -97,9 +124,7 @@ func TestEveryWorkerExportsRunAndErrorMetrics(t *testing.T) {
 				t.Errorf("%s: reticora_worker_runs_total %v (before %v), want a recorded cycle", name, after[name].runs, before[name].runs)
 			}
 		}
-		// Without a database dependency in this run the cycle succeeds.
-		for _, name := range []string{config.WorkerWebhookDispatcher, config.WorkerExport, config.WorkerIngest, config.WorkerMonitoring,
-			config.WorkerHealth, config.WorkerScheduler, config.WorkerJobs, config.WorkerNotifier} {
+		for _, name := range succeeding {
 			if after[name].errors != before[name].errors || after[name].lastSuccess < since {
 				t.Errorf("%s: errors %v -> %v, last success %v (started %v), want a cycle without error",
 					name, before[name].errors, after[name].errors, after[name].lastSuccess, since)
@@ -128,6 +153,55 @@ func TestEveryWorkerExportsRunAndErrorMetrics(t *testing.T) {
 		}
 	})
 
+	// The system job workflow.approval_sweep (WP-1099 AK5) exports its
+	// runs and errors: on the database that never answers its run fails
+	// and both counters grow.
+	t.Run("approval sweep", func(t *testing.T) {
+		d := systemJobTestDeps(t, env.cfg, true)
+		d.pool = env.pool
+		modules, err := server.ParseModules("workflows")
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.modules = modules
+		var sweep *jobs.Schedule
+		all := systemJobs(d)
+		for i := range all {
+			if all[i].Kind == workflow.ApprovalSweepKind {
+				sweep = &all[i]
+			}
+		}
+		if sweep == nil {
+			t.Fatalf("%s is not a system job with the module workflows", workflow.ApprovalSweepKind)
+		}
+		scrape := func(metric string) float64 {
+			t.Helper()
+			w := cs.do(http.MethodGet, "/metrics", "", "", "", "")
+			for _, line := range strings.Split(w.Body.String(), "\n") {
+				if v, ok := strings.CutPrefix(line, metric+" "); ok {
+					f, perr := strconv.ParseFloat(strings.TrimSpace(v), 64)
+					if perr == nil {
+						return f
+					}
+				}
+			}
+			t.Fatalf("%s not exported", metric)
+			return 0
+		}
+		runs, errs := scrape("reticora_workflow_approval_sweep_runs_total"), scrape("reticora_workflow_approval_sweep_errors_total")
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := sweep.Run(ctx); err == nil {
+			t.Fatal("approval sweep on a database that does not answer: no error")
+		}
+		if got := scrape("reticora_workflow_approval_sweep_runs_total"); got != runs+1 {
+			t.Errorf("reticora_workflow_approval_sweep_runs_total %v -> %v, want one run more", runs, got)
+		}
+		if got := scrape("reticora_workflow_approval_sweep_errors_total"); got != errs+1 {
+			t.Errorf("reticora_workflow_approval_sweep_errors_total %v -> %v, want one error more", errs, got)
+		}
+	})
+
 	// The workers that answer requests, idle and without a database: a
 	// pass succeeds while NATS answers and fails while it does not.
 	t.Run("idle request workers", func(t *testing.T) {
@@ -142,8 +216,12 @@ func TestEveryWorkerExportsRunAndErrorMetrics(t *testing.T) {
 			return slices.DeleteFunc(all, func(w server.Worker) bool { return !slices.Contains(names, w.Name) })
 		}
 		before, since := scrapeWorkers(t, cs), float64(time.Now().Unix())
+		// A scrape gathers the run counter and the last-success gauge
+		// separately, so it can see a counted run before its success: wait
+		// for both.
 		after := runWorkers(t, cs, pick(env.deps(t, false)), nil, func(m map[string]workerSeries) bool {
-			return m[names[0]].runs > before[names[0]].runs && m[names[1]].runs > before[names[1]].runs
+			return m[names[0]].runs > before[names[0]].runs && m[names[1]].runs > before[names[1]].runs &&
+				m[names[0]].lastSuccess >= since && m[names[1]].lastSuccess >= since
 		})
 		for _, name := range names {
 			if after[name].runs <= before[name].runs || after[name].errors != before[name].errors || after[name].lastSuccess < since {
@@ -337,6 +415,13 @@ func (env *workerTestEnv) systemJobs(t *testing.T) []jobs.Schedule {
 	t.Helper()
 	d := systemJobTestDeps(t, env.cfg, true)
 	d.pool = env.pool
+	// The module monitoring brings the system job of probe_assign, the
+	// module ipam that of ipam_scan_apply (WP-1063).
+	modules, err := server.ParseModules(server.ModuleMonitoring + ",ipam")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.modules = modules
 	return systemJobs(d)
 }
 
@@ -442,6 +527,16 @@ func (m evaluatingMetrics) AlertStore() monitoring.AlertStore { return m.alerts 
 
 func (m evaluatingMetrics) HealthRefresher() monitoring.HealthRefresher { return m.health }
 
+// LatestBySeries makes evaluatingMetrics a monitoring.SeriesStore (the
+// evaluator per series, WP-984) over the wrapped store; a store without
+// series yields none.
+func (m evaluatingMetrics) LatestBySeries(ctx context.Context, q *monitoring.SeriesQuery) ([]monitoring.SeriesPoint, error) {
+	if s, ok := m.MetricStore.(monitoring.SeriesStore); ok {
+		return s.LatestBySeries(ctx, q)
+	}
+	return nil, nil
+}
+
 func (h fakeHealth) RefreshHealth(context.Context) error { return h.err }
 
 // TestEveryWorkerSwitchIsDeployable covers WP-447 (OPS-02, F-289): the
@@ -449,28 +544,72 @@ func (h fakeHealth) RefreshHealth(context.Context) error { return h.err }
 // deploy/docker-compose/docker-compose.yml from .env
 // ("${RETICORA_WORKER_<NAME>_ENABLED:-true}") and in the server container
 // of deploy/k8s/base/deployment.yaml. A switch missing in either file is
-// reported (negative case).
+// TestEveryWorkerSwitchIsDeployable covers OPS-02 (WP-447, WP-869): every
+// worker switch is set in both Compose services (server with "${KEY:-true}",
+// monitoring with "${RETICORA_MONITORING_<NAME>:-…}", true only for the
+// monitoring worker) and in both Kubernetes deployments (reticora-server and
+// TestEveryWorkerSwitchIsDeployable covers OPS-02 (WP-447, WP-869): every
+// worker switch is set in both Compose services (server with "${KEY:-true}",
+// monitoring with "${RETICORA_MONITORING_<NAME>:-…}", true only for the
+// monitoring worker) and in both Kubernetes deployments (reticora-server and
+// reticora-monitoring, E-162).
 func TestEveryWorkerSwitchIsDeployable(t *testing.T) {
-	compose, k8s := deployedWorkerSwitches(t)
-	for _, name := range config.WorkerNames {
-		key := config.WorkerEnvKey(name)
-		if got, ok := compose[key]; !ok || got != "${"+key+":-true}" {
-			t.Errorf("docker-compose.yml, service server: %s = %q (set %v), want \"${%s:-true}\" (settable from .env)", key, got, ok, key)
-		}
-		if !k8s[key] {
-			t.Errorf("deploy/k8s/base/deployment.yaml, container server: %s is not set", key)
-		}
+	deployed := deployedWorkerSwitches(t)
+	for _, problem := range workerSwitchProblems(deployed) {
+		t.Error(problem)
 	}
-	// Negative case: the check reports a switch the files do not set.
-	if key := config.WorkerEnvKey("wp447_undeployed"); compose[key] != "" || k8s[key] {
+	// Negative cases: a switch the files do not set, and one missing in the
+	// monitoring deployment only, are reported.
+	if key := config.WorkerEnvKey("wp447_undeployed"); deployed.compose["server"][key] != "" || deployed.k8s["reticora-server"][key] != "" {
 		t.Errorf("negative case: %s found in the deployment files", key)
+	}
+	delete(deployed.k8s["reticora-monitoring"], config.WorkerEnvKey(config.WorkerHealth))
+	if problems := workerSwitchProblems(deployed); len(problems) != 1 || !strings.Contains(problems[0], "reticora-monitoring") {
+		t.Errorf("negative case: a switch missing in reticora-monitoring gives %v, want one problem", problems)
 	}
 }
 
+// workerSwitchProblems checks every worker switch in both Compose services
+// and both Kubernetes deployments.
+func workerSwitchProblems(deployed deployedSwitches) []string {
+	var problems []string
+	for _, name := range config.WorkerNames {
+		key := config.WorkerEnvKey(name)
+		if got, ok := deployed.compose["server"][key]; !ok || got != "${"+key+":-true}" {
+			problems = append(problems, fmt.Sprintf("docker-compose.yml, service server: %s = %q (set %v), want \"${%s:-true}\" (settable from .env)", key, got, ok, key))
+		}
+		def := "false"
+		if monitoringWorker(name) {
+			def = "true"
+		}
+		monitoringKey := "RETICORA_MONITORING_" + strings.TrimPrefix(key, "RETICORA_")
+		if got := deployed.compose["monitoring"][key]; got != "${"+monitoringKey+":-"+def+"}" {
+			problems = append(problems, fmt.Sprintf("docker-compose.yml, service monitoring: %s = %q, want \"${%s:-%s}\"", key, got, monitoringKey, def))
+		}
+		for _, deployment := range []string{"reticora-server", "reticora-monitoring"} {
+			value, ok := deployed.k8s[deployment][key]
+			switch {
+			case !ok:
+				problems = append(problems, fmt.Sprintf("deploy/k8s/base, deployment %s: %s is not set", deployment, key))
+			case deployment == "reticora-monitoring" && (value == "true") != monitoringWorker(name):
+				problems = append(problems, fmt.Sprintf("deployment reticora-monitoring: %s = %q, only the monitoring workers run there", key, value))
+			}
+		}
+	}
+	return problems
+}
+
+// deployedSwitches are the RETICORA_WORKER_*_ENABLED variables per Compose
+// service and per Kubernetes deployment, with their values.
+type deployedSwitches struct {
+	compose map[string]map[string]string
+	k8s     map[string]map[string]string
+}
+
 // deployedWorkerSwitches reads the RETICORA_WORKER_*_ENABLED variables of the
-// server in the Compose file (with their values) and in the Kubernetes
-// deployment.
-func deployedWorkerSwitches(t *testing.T) (compose map[string]string, k8s map[string]bool) {
+// Compose services server and monitoring and of the Kubernetes deployments
+// reticora-server and reticora-monitoring.
+func deployedWorkerSwitches(t *testing.T) deployedSwitches {
 	t.Helper()
 	var c struct {
 		Services map[string]struct {
@@ -478,47 +617,65 @@ func deployedWorkerSwitches(t *testing.T) (compose map[string]string, k8s map[st
 		} `yaml:"services"`
 	}
 	readDeployYAML(t, "../../../deploy/docker-compose/docker-compose.yml", &c)
-	svc, ok := c.Services["server"]
-	if !ok {
-		t.Fatal("docker-compose.yml has no service server")
-	}
-	compose = map[string]string{}
-	for k, v := range svc.Environment {
-		if strings.HasPrefix(k, "RETICORA_WORKER_") {
-			compose[k] = v
+	out := deployedSwitches{compose: map[string]map[string]string{}, k8s: map[string]map[string]string{}}
+	for _, name := range []string{"server", "monitoring"} {
+		svc, ok := c.Services[name]
+		if !ok {
+			t.Fatalf("docker-compose.yml has no service %s", name)
+		}
+		out.compose[name] = map[string]string{}
+		for k, v := range svc.Environment {
+			if strings.HasPrefix(k, "RETICORA_WORKER_") {
+				out.compose[name][k] = v
+			}
 		}
 	}
-	var d struct {
-		Kind string `yaml:"kind"`
+	type deployment struct {
+		Kind     string `yaml:"kind"`
+		Metadata struct {
+			Name string `yaml:"name"`
+		} `yaml:"metadata"`
 		Spec struct {
 			Template struct {
 				Spec struct {
 					Containers []struct {
 						Name string `yaml:"name"`
 						Env  []struct {
-							Name string `yaml:"name"`
+							Name  string `yaml:"name"`
+							Value string `yaml:"value"`
 						} `yaml:"env"`
 					} `yaml:"containers"`
 				} `yaml:"spec"`
 			} `yaml:"template"`
 		} `yaml:"spec"`
 	}
-	readDeployYAML(t, "../../../deploy/k8s/base/deployment.yaml", &d)
-	k8s = map[string]bool{}
-	for _, ctr := range d.Spec.Template.Spec.Containers {
-		if d.Kind != "Deployment" || ctr.Name != "server" {
-			continue
-		}
-		for _, e := range ctr.Env {
-			if strings.HasPrefix(e.Name, "RETICORA_WORKER_") {
-				k8s[e.Name] = true
+	for _, file := range []string{"deployment.yaml", "deployment-monitoring.yaml"} {
+		var d deployment
+		readDeployYAML(t, "../../../deploy/k8s/base/"+file, &d)
+		switches := map[string]string{}
+		for _, ctr := range d.Spec.Template.Spec.Containers {
+			if d.Kind != "Deployment" || ctr.Name != "server" {
+				continue
+			}
+			for _, e := range ctr.Env {
+				if strings.HasPrefix(e.Name, "RETICORA_WORKER_") {
+					switches[e.Name] = e.Value
+				}
 			}
 		}
+		out.k8s[d.Metadata.Name] = switches
 	}
-	if len(compose) == 0 || len(k8s) == 0 {
-		t.Fatalf("no worker switches found: compose %v, k8s %v", compose, k8s)
+	for name, m := range out.compose {
+		if len(m) == 0 {
+			t.Fatalf("no worker switches in the Compose service %s", name)
+		}
 	}
-	return compose, k8s
+	for _, name := range []string{"reticora-server", "reticora-monitoring"} {
+		if len(out.k8s[name]) == 0 {
+			t.Fatalf("no worker switches in the deployment %s", name)
+		}
+	}
+	return out
 }
 
 func readDeployYAML(t *testing.T, path string, v any) {

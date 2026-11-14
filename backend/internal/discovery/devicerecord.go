@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -39,19 +40,22 @@ type ingestBody struct {
 	Records     []DeviceRecord `json:"records"`
 	CollectorID string         `json:"collector_id"`
 	Items       []IngestItem   `json:"items"`
+	// identityRejected counts the records ingestItems refused on their own
+	// for more identity values than plugins.MaxIdentityKeys (SR-10).
+	identityRejected int
 }
 
 // readIngestItems decodes the ingest body. DeviceRecords are validated and
 // turned into ingest items; the old items contract is answered with a
 // Deprecation header. It writes the error response and returns false when the
 // body is unusable.
-func readIngestItems(w http.ResponseWriter, r *http.Request) ([]IngestItem, bool) {
+func readIngestItems(w http.ResponseWriter, r *http.Request) (items []IngestItem, identityRejected int, ok bool) {
 	// Collectors send the body gzip-compressed (Content-Encoding: gzip).
 	if strings.EqualFold(r.Header.Get("Content-Encoding"), "gzip") {
 		gz, err := gzip.NewReader(r.Body)
 		if err != nil {
 			api.WriteError(w, http.StatusBadRequest, "Bad Request", "gzip body: "+err.Error())
-			return nil, false
+			return nil, 0, false
 		}
 		defer gz.Close()
 		r.Body = io.NopCloser(io.LimitReader(gz, maxIngestBody+1))
@@ -65,17 +69,17 @@ func readIngestItems(w http.ResponseWriter, r *http.Request) ([]IngestItem, bool
 			status = http.StatusRequestEntityTooLarge
 		}
 		api.WriteError(w, status, http.StatusText(status), err.Error())
-		return nil, false
+		return nil, 0, false
 	}
 	items, status, msg := body.ingestItems()
 	if status != 0 {
 		api.WriteError(w, status, http.StatusText(status), msg)
-		return nil, false
+		return nil, 0, false
 	}
 	if len(body.Items) > 0 {
 		w.Header().Set("Deprecation", legacyIngestDeprecation)
 	}
-	return items, true
+	return items, body.identityRejected, true
 }
 
 // typedValueFields are the DeviceRecord fields that only carry a value of a
@@ -112,6 +116,15 @@ func (body *ingestBody) ingestItems() (items []IngestItem, status int, msg strin
 		var violations []string
 		items = make([]IngestItem, 0, len(body.Records))
 		for i := range body.Records {
+			// A record with more identity values than the contract allows
+			// is refused on its own, never shortened (SR-10, WP-878).
+			if n := body.Records[i].IdentityKeyCount(); n > plugins.MaxIdentityKeys {
+				body.identityRejected++
+				recordsRejected.WithLabelValues("identity_keys").Inc()
+				slog.Warn("ingest record refused: too many identity values", "record_id", body.Records[i].RecordID,
+					"identity_keys", n, "limit", plugins.MaxIdentityKeys)
+				continue
+			}
 			for _, v := range body.Records[i].Validate() {
 				if typedValueFields[v.Field] {
 					continue
@@ -125,6 +138,11 @@ func (body *ingestBody) ingestItems() (items []IngestItem, status int, msg strin
 				violations = append(violations[:maxRecordViolations], fmt.Sprintf("and %d more", len(violations)-maxRecordViolations))
 			}
 			return nil, http.StatusUnprocessableEntity, strings.Join(violations, "; ")
+		}
+		if len(items) == 0 {
+			// Every record exceeded the identity limit: an empty batch the
+			// dispatch processes as such and the answer counts.
+			return []IngestItem{}, 0, ""
 		}
 		return items, 0, ""
 	case len(body.Items) > 0:

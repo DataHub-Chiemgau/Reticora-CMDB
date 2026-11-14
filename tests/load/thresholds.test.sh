@@ -222,6 +222,10 @@ class Stub(BaseHTTPRequestHandler):
             return self.answer(200, {"data": [{"title": q["q"][0]}]})
         if parts == ["racks"]:
             return self.answer(200, {"data": [{"id": "rack-1"}]})
+        if parts == ["ipam-sections"]:
+            return self.answer(200, {"data": [{"id": "section-1"}], "total": 1})
+        if parts in (["subnets"], ["ips"]):
+            return self.answer(200, {"data": [], "total": 0})
         if parts[0] == "racks" and parts[-1] == "layout":
             with lock:
                 state["rack"] += 1

@@ -25,8 +25,22 @@ type Repository interface {
 	Conflicts(ctx context.Context, orgID string, page api.PaginationParams) ([]FieldValue, int, error)
 	// Policy returns the organization's default source-priority policy.
 	Policy(ctx context.Context, orgID string) (*SourcePolicy, error)
+	// UpsertPolicy stores the former source-priority list; PUT
+	// /reconciliation/source-policy no longer calls it (410, REC-04).
 	UpsertPolicy(ctx context.Context, policy *SourcePolicy) error
+	// SourceRankEntries returns the stored source ranks per attribute of
+	// the organization (REC-04).
+	SourceRankEntries(ctx context.Context, orgID string) ([]RankEntry, error)
+	// ReplaceSourceRanks replaces them with entries, writes the audit
+	// entry reconciliation.source_ranks_updated and returns the former and
+	// the new entries as read in the writing transaction; the effective
+	// ranks of this instance follow at once.
+	ReplaceSourceRanks(ctx context.Context, orgID, actor string, entries []RankEntry) (before, after []RankEntry, err error)
 }
+
+// AuditSourceRanksUpdated is the audit action of a change of the source
+// ranks (REC-04).
+const AuditSourceRanksUpdated = "reconciliation.source_ranks_updated"
 
 // IsProtected reports whether the field carries a protected manual override.
 // Shared helper so other modules (discovery ingest) honor the protection
@@ -55,7 +69,13 @@ type MemoryRepository struct {
 	mu       sync.RWMutex
 	values   map[string]*FieldValue // orgID/ciID/field -> value
 	policies map[string]*SourcePolicy
-	seq      int
+	// ranks are the source ranks per organization (REC-04); the memory
+	// profile knows no CI types, so only organization-wide entries apply
+	// to its decisions.
+	ranks map[string][]RankEntry
+	// audits are the source-rank audit entries (memory profile).
+	audits []RankAudit
+	seq    int
 	// authorNames resolves OverrideAuthorName in ListForCI as the
 	// PostgreSQL repository does from app_user and service_account.
 	authorNames AuthorNames
@@ -63,7 +83,7 @@ type MemoryRepository struct {
 
 // NewMemoryRepository creates an empty in-memory override repository.
 func NewMemoryRepository() *MemoryRepository {
-	return &MemoryRepository{values: map[string]*FieldValue{}, policies: map[string]*SourcePolicy{}}
+	return &MemoryRepository{values: map[string]*FieldValue{}, policies: map[string]*SourcePolicy{}, ranks: map[string][]RankEntry{}}
 }
 
 // WithAuthorNames sets the resolver of override author names (UI-15).
@@ -154,6 +174,7 @@ func (r *MemoryRepository) upsertLocked(orgID, ciID, fieldName string, mutate fu
 func (r *MemoryRepository) RecordDiscovered(_ context.Context, orgID, ciID, fieldName string, value any, source string, observedAt time.Time) (*FieldValue, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	rank := NewRankTable(r.ranks[orgID]).Rank("", fieldName, source)
 	now := time.Now().UTC()
 	if observedAt.IsZero() {
 		observedAt = now
@@ -163,7 +184,7 @@ func (r *MemoryRepository) RecordDiscovered(_ context.Context, orgID, ciID, fiel
 		fv.DiscoveredValue = value
 		fv.DiscoveredSource = source
 		fv.DiscoveredAt = &now
-		fv.DiscoveredRank = SourceRank(source)
+		fv.DiscoveredRank = rank
 		fv.ObservedAt = &observedAt
 	})
 	return r.withEffective(fv), nil
@@ -255,4 +276,54 @@ func (r *MemoryRepository) UpsertPolicy(_ context.Context, policy *SourcePolicy)
 	stored := *policy
 	r.policies[policy.OrganizationID] = &stored
 	return nil
+}
+
+// RankAudit is an audit entry of a change of the source ranks in the
+// memory profile.
+type RankAudit struct {
+	OrganizationID string
+	Actor          string
+	Before, After  []RankEntry
+}
+
+// RankAudits returns the source-rank audit entries of the memory profile.
+func (r *MemoryRepository) RankAudits() []RankAudit {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return append([]RankAudit(nil), r.audits...)
+}
+
+// SourceRankEntries returns the stored source ranks of the organization.
+func (r *MemoryRepository) SourceRankEntries(_ context.Context, orgID string) ([]RankEntry, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return append([]RankEntry{}, r.ranks[orgID]...), nil
+}
+
+// ReplaceSourceRanks replaces the source ranks of the organization. The
+// memory profile keeps no CI type catalog and accepts every type id.
+func (r *MemoryRepository) ReplaceSourceRanks(_ context.Context, orgID, actor string, entries []RankEntry) (before, after []RankEntry, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	before = append([]RankEntry{}, r.ranks[orgID]...)
+	now := time.Now().UTC()
+	after = make([]RankEntry, len(entries))
+	for i := range entries {
+		after[i] = entries[i]
+		after[i].UpdatedAt = &now
+		if api.IsUUID(actor) {
+			after[i].UpdatedBy = actor
+		}
+	}
+	sortEntries(after)
+	r.ranks[orgID] = after
+	r.audits = append(r.audits, RankAudit{OrganizationID: orgID, Actor: actor, Before: before, After: append([]RankEntry{}, after...)})
+	return before, append([]RankEntry{}, after...), nil
+}
+
+// rankTable returns the organization's rank table (no cache needed).
+func (r *MemoryRepository) rankTable(_ context.Context, orgID string) (*RankTable, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return NewRankTable(r.ranks[orgID]), nil
 }

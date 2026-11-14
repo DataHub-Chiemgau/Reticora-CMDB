@@ -64,12 +64,24 @@ func (h *Handler) ListEntitlements(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	items, err := h.entitlements.List(orgContext(r.Context(), orgID), orgID)
+	ctx := orgContext(r.Context(), orgID)
+	items, err := h.entitlements.List(ctx, orgID)
 	if err != nil {
 		api.WriteRepoError(w, err)
 		return
 	}
-	api.WriteJSON(w, http.StatusOK, api.ListResponse[entitlement.Entitlement]{Data: items, Total: len(items), Limit: len(items)})
+	// The leading plan and the time of its last change, as the schema
+	// EntitlementListResponse requires (WP-880; the detail page of WP-888).
+	plan, changed, err := h.entitlements.OrganizationPlan(ctx, orgID)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	if items == nil {
+		items = []entitlement.Entitlement{}
+	}
+	api.WriteJSON(w, http.StatusOK, entitlement.ListResponse{Data: items, Total: len(items), Limit: len(items),
+		Plan: plan, PlanChangedAt: changed})
 }
 
 // GrantEntitlement stores (or updates) an entitlement of an organization.
@@ -129,4 +141,32 @@ func (h *Handler) GrantEntitlement(w http.ResponseWriter, r *http.Request) {
 		markAudited(r.Context())
 		api.WriteJSON(w, http.StatusOK, granted)
 	}
+}
+
+// OrganizationUsage answers GET /api/v1/admin/orgs/{id}/usage (PKG-05,
+// WP-885): use, limit and origin of every quota of the organization, read
+// in its tenant context; the operator sees the counts.
+func (h *Handler) OrganizationUsage(w http.ResponseWriter, r *http.Request) {
+	orgID, ok := h.targetOrganization(w, r)
+	if !ok {
+		return
+	}
+	ctx := orgContext(r.Context(), orgID)
+	items, err := h.entitlements.Usage(ctx, orgID, true)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	plan, _, err := h.entitlements.OrganizationPlan(ctx, orgID)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, entitlement.QuotaUsageResponse{Data: items, Plan: plan})
+}
+
+// PlanMatrix answers GET /api/v1/admin/plans: the plan matrix and the
+// add-ons for the preview of a plan change (WP-885, WP-888).
+func (h *Handler) PlanMatrix(w http.ResponseWriter, _ *http.Request) {
+	api.WriteJSON(w, http.StatusOK, entitlement.PlanMatrixResponse{Data: entitlement.PlanMatrix(), Addons: entitlement.AddonCatalog()})
 }

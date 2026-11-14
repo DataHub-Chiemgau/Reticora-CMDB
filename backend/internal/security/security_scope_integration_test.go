@@ -32,7 +32,7 @@ func TestSecurityRepositoryClientScope(t *testing.T) {
 	}
 
 	ctx := f.ClientCtx(f.Client1)
-	list, total, err := repo.List(ctx, f.OrgA, security.FilterParams{}, api.PaginationParams{Limit: 100})
+	list, total, err := repo.List(ctx, f.OrgA, &security.FilterParams{}, api.PaginationParams{Limit: 100})
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}

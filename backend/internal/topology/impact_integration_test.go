@@ -340,3 +340,88 @@ func TestDependenciesDirectionAgainstPostgres(t *testing.T) {
 		t.Errorf("depth=abc: %d %s", w.Code, w.Body.String())
 	}
 }
+
+// TestImpactDualUplinkAgainstPostgres covers E-199 (WP-1026, migration
+// 000327) against PostgreSQL: the system type uplink_to is redundant. A
+// CPE with uplinks to two switches stays up while one fails, listed as
+// protected by the remaining switch (HTTP blast radius and the analyzer);
+// with both switches failed it is certainly impacted. A CPE with one
+// uplink fails with its switch as before.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestImpactDualUplinkAgainstPostgres(t *testing.T) {
+	f := scopetest.Seed(t, "b5")
+	bg := context.Background()
+	ctx := tenant.WithTenant(f.OrgCtx(f.OrgA), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	var redundant bool
+	if err := f.Admin.QueryRow(bg, `SELECT redundant FROM relationship_type WHERE organization_id IS NULL AND key = 'uplink_to'`).
+		Scan(&redundant); err != nil || !redundant {
+		t.Fatalf("system type uplink_to redundant = %v, %v; want true (migration 000327)", redundant, err)
+	}
+	sw1 := f.CI(t, f.OrgA, f.Client1, "dual-switch-1")
+	sw2 := f.CI(t, f.OrgA, f.Client1, "dual-switch-2")
+	dual := f.CI(t, f.OrgA, f.Client1, "dual-cpe")
+	single := f.CI(t, f.OrgA, f.Client1, "single-cpe")
+	if _, err := f.Admin.Exec(bg, `INSERT INTO ci_relationship (organization_id, source_ci_id, target_ci_id, rel_type) VALUES
+		($1, $2, $3, 'uplink_to'), ($1, $2, $4, 'uplink_to'), ($1, $5, $3, 'uplink_to')`, f.OrgA, dual, sw1, sw2, single); err != nil {
+		t.Fatal(err)
+	}
+	analyzer := topology.NewAnalyzer(ci.NewPGRepository(f.App), relationship.NewPGRepository(f.App)).
+		WithRelationshipTypes(relationshiptype.NewPGRepository(f.App))
+	certain := func(res *topology.ImpactResult) map[string]bool {
+		out := map[string]bool{}
+		for i := range res.Impacted {
+			if !res.Impacted[i].Heuristic {
+				out[res.Impacted[i].ID] = true
+			}
+		}
+		return out
+	}
+
+	// One switch fails.
+	one, err := analyzer.Impact(ctx, f.OrgA, []string{sw1}, topology.ImpactOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := certain(one); got[dual] || !got[single] {
+		t.Errorf("one switch: impacted %v, want the single-uplink CPE only", got)
+	}
+	var providers []topology.Provider
+	for _, p := range one.Protected {
+		if p.ID == dual {
+			providers = p.Providers
+		}
+	}
+	if len(providers) != 1 || providers[0].CIID != sw2 || providers[0].RelType != "uplink_to" {
+		t.Errorf("protected %+v, want the dual CPE kept up by switch 2", one.Protected)
+	}
+
+	// The blast radius over HTTP lists it under protected_by_redundancy.
+	mux := chi.NewRouter()
+	topology.NewHandler(ci.NewPGRepository(f.App), relationship.NewPGRepository(f.App)).
+		WithRelationshipTypes(relationshiptype.NewPGRepository(f.App)).RegisterRoutes(mux)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/cis/"+sw1+"/blast-radius", http.NoBody).WithContext(ctx))
+	var blast struct {
+		Protected []struct {
+			ID string `json:"id"`
+		} `json:"protected_by_redundancy"`
+	}
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &blast) != nil || len(blast.Protected) != 1 || blast.Protected[0].ID != dual {
+		t.Errorf("blast radius of switch 1: %d %s, want the dual CPE as protected", w.Code, w.Body.String())
+	}
+
+	// Both switches fail.
+	both, err := analyzer.Impact(ctx, f.OrgA, []string{sw1, sw2}, topology.ImpactOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := certain(both); !got[dual] || !got[single] {
+		t.Errorf("both switches: impacted %v, want both CPEs", got)
+	}
+	for _, p := range both.Protected {
+		if p.ID == dual {
+			t.Errorf("both switches failed, but the dual CPE is protected by %+v", p.Providers)
+		}
+	}
+}

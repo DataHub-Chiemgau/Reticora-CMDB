@@ -983,6 +983,8 @@ Bereits migrierte bzw. zurückgerollte Installationen betrifft die Änderung nic
 
 **Betroffene WPs:** WP-389
 
+**Nachtrag 2026-11-13 (Update-Plan Upd-08):** `TIMESCALE_IMAGE` ist jetzt `timescale/timescaledb:2.32.0-pg16@sha256:2f87efeaec6fbdd3ba4a6993b921c05d069cd8e980792cb23c7c5f32a6fe68a7`. Der Digest des Multi-Arch-Index ist gegen Docker Hub geprüft. Dieselbe Referenz steht an allen Stellen, die `timescale_image_refs` prüft, und zusätzlich in `tests/k8s/fixtures/postgres.yaml`. Die Go-Helfer werden mindestens in der Version des Basisimages neu gebaut, bei Bedarf auch neuer: `gosu` 1.20 (Pseudo-Version `v0.0.0-20261025094355-29b939aa5bd4`), das Basisimage liefert 1.19. `timescaledb-tune` bleibt bei v0.19.0, bis Go 1.27 kommt. pgBackRest 2.60.0 wird aus dem Distributions-Tarball (Release-Asset) gebaut, SHA256 `6d3ee1b5…d007`. Die Datenbanken heben ihre Erweiterung mit `scripts/ops/timescaledb-update.sh` auf 2.32.0. Die Reihenfolge bis PostgreSQL 16.16 legt E-257 fest (Phase 3).
+
 ## E-97
 
 **Thema:** Obergrenze der Dauer von Alarmregeln (MON-01)

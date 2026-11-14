@@ -1,7 +1,9 @@
 package order
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -15,7 +17,38 @@ type Handler struct {
 	repo Repository
 	// booker books the goods receipt (WP-760); nil answers 503.
 	booker Booker
+	// runs starts the approval run of a submitted order (WithRunStarter,
+	// WP-1108); nil: approve and reject are the direct routes only.
+	runs RunStarter
 }
+
+// SubmittedEvent is the trigger of the approval workflow of an order
+// (WFL-04, WP-1108).
+const SubmittedEvent = "order_submitted"
+
+// RunStarter starts the approval workflow of a submitted order (WFL-04,
+// WP-1108) without this package importing the workflow engine; the router
+// wires the adapter of the executor.
+type RunStarter interface {
+	// StartApproval starts, in the transaction of ctx, the run of the
+	// active definition with the trigger order_submitted over payload; runID
+	// is empty without such a definition. after executes the run once the
+	// transaction committed.
+	StartApproval(ctx context.Context, orgID string, payload map[string]any) (runID string, after func(ctx context.Context), err error)
+	// RunOpen reports whether the run has not ended yet.
+	RunOpen(ctx context.Context, orgID, runID string) (bool, error)
+}
+
+// WithRunStarter makes the submit start the approval workflow of the order
+// in its transaction (WP-1108).
+func (h *Handler) WithRunStarter(runs RunStarter) *Handler {
+	h.runs = runs
+	return h
+}
+
+// ErrApprovalRunOpen: approve or reject while the approval workflow of the
+// order runs (409, WP-1108).
+var ErrApprovalRunOpen = errors.New("the order is decided by its approval workflow run")
 
 // NewHandler creates a new order handler.
 func NewHandler(repo Repository) *Handler {
@@ -179,16 +212,111 @@ func (h *Handler) setStatus(w http.ResponseWriter, r *http.Request, status strin
 	api.WriteJSON(w, http.StatusOK, item)
 }
 
-// Submit handles POST /api/v1/orders/{id}/submit (draft → submitted).
-func (h *Handler) Submit(w http.ResponseWriter, r *http.Request) { h.setStatus(w, r, StatusSubmitted) }
+// Submit handles POST /api/v1/orders/{id}/submit (draft → submitted). With
+// an active definition of the trigger order_submitted the run starts in
+// the transaction of the status change (WP-1108): a start that fails
+// leaves the order in draft.
+func (h *Handler) Submit(w http.ResponseWriter, r *http.Request) {
+	if h.runs == nil {
+		h.setStatus(w, r, StatusSubmitted)
+		return
+	}
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	id := chi.URLParam(r, "id")
+	var item *Order
+	var after func(ctx context.Context)
+	err := h.repo.RunInTx(r.Context(), t.OrganizationID, func(ctx context.Context) error {
+		var serr error
+		if item, serr = h.repo.SetStatus(ctx, t.OrganizationID, id, StatusSubmitted, t.UserID); serr != nil {
+			return serr
+		}
+		runID, run, rerr := h.runs.StartApproval(ctx, t.OrganizationID, approvalPayload(item))
+		if rerr != nil {
+			return fmt.Errorf("start the approval workflow: %w", rerr)
+		}
+		if runID == "" {
+			return nil
+		}
+		if aerr := h.repo.SetApprovalRun(ctx, t.OrganizationID, id, runID); aerr != nil {
+			return aerr
+		}
+		item.ApprovalRunID, after = runID, run
+		return nil
+	})
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if after != nil {
+		after(context.WithoutCancel(r.Context()))
+	}
+	api.WriteJSON(w, http.StatusOK, item)
+}
+
+// approvalPayload is the run context of the approval workflow of an order.
+func approvalPayload(o *Order) map[string]any {
+	items := make([]any, 0, len(o.Items))
+	for i := range o.Items {
+		it := &o.Items[i]
+		items = append(items, map[string]any{"id": it.ID, "description": it.Description, "quantity": it.Quantity,
+			"unit_price": it.UnitPrice, "consumable_id": it.ConsumableID, "asset_id": it.AssetID})
+	}
+	return map[string]any{"order_id": o.ID, "order_number": o.OrderNumber, "title": o.Title, "requested_by": o.RequestedBy,
+		"total_cost": o.TotalCost, "currency": o.Currency, "client_id": o.ClientID, "items": items}
+}
 
 // Approve handles POST /api/v1/orders/{id}/approve (submitted → approved;
-// four-eyes rule, records the approver).
-func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) { h.setStatus(w, r, StatusApproved) }
+// four-eyes rule, records the approver); 409 while the approval workflow
+// of the order runs (WP-1108).
+func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
+	if h.runOpen(w, r) {
+		return
+	}
+	h.setStatus(w, r, StatusApproved)
+}
 
 // Reject handles POST /api/v1/orders/{id}/reject (submitted → rejected;
-// records the actor).
-func (h *Handler) Reject(w http.ResponseWriter, r *http.Request) { h.setStatus(w, r, StatusRejected) }
+// records the actor); 409 while the approval workflow runs (WP-1108).
+func (h *Handler) Reject(w http.ResponseWriter, r *http.Request) {
+	if h.runOpen(w, r) {
+		return
+	}
+	h.setStatus(w, r, StatusRejected)
+}
+
+// runOpen answers 409 with the run id when the approval workflow of the
+// order has not ended and reports whether it answered.
+func (h *Handler) runOpen(w http.ResponseWriter, r *http.Request) bool {
+	if h.runs == nil {
+		return false
+	}
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		return false
+	}
+	o, err := h.repo.GetByID(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, err)
+		return true
+	}
+	if o.ApprovalRunID == "" {
+		return false
+	}
+	open, err := h.runs.RunOpen(r.Context(), t.OrganizationID, o.ApprovalRunID)
+	if err != nil {
+		writeError(w, err)
+		return true
+	}
+	if !open {
+		return false
+	}
+	api.WriteError(w, http.StatusConflict, "Conflict", ErrApprovalRunOpen.Error()+" "+o.ApprovalRunID)
+	return true
+}
 
 // Place handles POST /api/v1/orders/{id}/place (approved → ordered).
 func (h *Handler) Place(w http.ResponseWriter, r *http.Request) { h.setStatus(w, r, StatusOrdered) }

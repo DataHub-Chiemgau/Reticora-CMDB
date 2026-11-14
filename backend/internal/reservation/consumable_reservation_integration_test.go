@@ -324,9 +324,9 @@ func TestConsumableReservation(t *testing.T) {
 			field  string
 			typ    string
 		}{
-			{"unknown consumable", map[string]any{"consumable_id": f.ID(), "location_id": b.bin}, http.StatusNotFound, "", ""},
-			{"unknown consumable without bin", map[string]any{"consumable_id": f.ID()}, http.StatusNotFound, "", ""},
-			{"unknown bin", map[string]any{"consumable_id": cons, "location_id": f.ID()}, http.StatusNotFound, "", ""},
+			{"unknown consumable", map[string]any{"consumable_id": f.ID(), "location_id": b.bin}, http.StatusUnprocessableEntity, "consumable_id", ""},
+			{"unknown consumable without bin", map[string]any{"consumable_id": f.ID()}, http.StatusUnprocessableEntity, "consumable_id", ""},
+			{"unknown bin", map[string]any{"consumable_id": cons, "location_id": f.ID()}, http.StatusUnprocessableEntity, "location_id", ""},
 			{"location is no bin", map[string]any{"consumable_id": cons, "location_id": b.shelf}, http.StatusUnprocessableEntity, "location_id", ""},
 			{"shortfall", map[string]any{"consumable_id": cons, "location_id": b.bin, "quantity": 3}, http.StatusConflict, "", problemInsufficientStock},
 			{"two bins without location_id", map[string]any{"quantity_item_id": two}, http.StatusUnprocessableEntity, "location_id", ""},
@@ -437,9 +437,11 @@ func TestConsumableReservationScope(t *testing.T) {
 		"own article in a client-2 bin":   {"consumable_id": ownItem, "location_id": foreign.bin},
 		"client-2 article in its own bin": {"consumable_id": foreignItem, "location_id": own.bin},
 	} {
+		// Article or bin of the body outside the scope: 422 on its field
+		// like an unknown one (SR-50, WP-879).
 		w := post(x.client1(), fields)
-		if w.Code != http.StatusNotFound {
-			t.Fatalf("client 1, %s: %d %s, want 404", name, w.Code, w.Body.String())
+		if w.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("client 1, %s: %d %s, want 422", name, w.Code, w.Body.String())
 		}
 		requireNoRawText(t, w)
 	}
@@ -483,8 +485,8 @@ func TestConsumableReservationScope(t *testing.T) {
 	if !got[ownRes] || !got[orgWideOwn.ID] || got[otherSiteRes] || got[foreignRes] {
 		t.Fatalf("site principal sees %v, want the reservations of its bins only", got)
 	}
-	if w = post(siteCtx(own.site), map[string]any{"consumable_id": ownItem, "location_id": otherSite.bin}); w.Code != http.StatusNotFound {
-		t.Fatalf("site principal reserving in a bin of another site: %d %s, want 404", w.Code, w.Body.String())
+	if w = post(siteCtx(own.site), map[string]any{"consumable_id": ownItem, "location_id": otherSite.bin}); w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("site principal reserving in a bin of another site: %d %s, want 422 (SR-50)", w.Code, w.Body.String())
 	}
 
 	// Search rows follow the client and site of the bin.

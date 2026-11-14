@@ -1,0 +1,1927 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reticora.example/api/probe-types.json",
+  "title": "Reticora monitoring probe types",
+  "description": "Register of the monitoring probe types (PRT-01, E-154): key, status, defaults, system limits, credential namespaces, collector capabilities and parameter schema. Server and collector validate probes against this contract. Times in seconds, rates in checks per second.",
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "min_interval_s",
+        "default_interval_s",
+        "max_interval_s",
+        "min_timeout_s",
+        "default_timeout_s",
+        "max_timeout_s",
+        "default_down_count",
+        "default_up_count",
+        "max_parallel_per_target",
+        "max_parallel_per_collector",
+        "max_rate_per_collector",
+        "max_probes_per_target",
+        "max_payload_bytes",
+        "max_rows",
+        "credential_namespaces",
+        "capabilities",
+        "params"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "planned",
+            "available"
+          ],
+          "description": "planned types cannot be created (422); type work packages set available."
+        },
+        "min_interval_s": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Shortest interval in seconds."
+        },
+        "default_interval_s": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Interval without override."
+        },
+        "max_interval_s": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Longest interval (default 86400)."
+        },
+        "min_timeout_s": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Shortest timeout."
+        },
+        "default_timeout_s": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Timeout without override; below default_interval_s."
+        },
+        "max_timeout_s": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Longest timeout; per probe timeout < interval."
+        },
+        "default_down_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "default_up_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20
+        },
+        "max_parallel_per_target": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Concurrent checks per target."
+        },
+        "max_parallel_per_collector": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Concurrent checks per collector."
+        },
+        "max_rate_per_collector": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Checks per second per collector."
+        },
+        "max_probes_per_target": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Probes of this type per target."
+        },
+        "max_payload_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Payload or response cap in bytes."
+        },
+        "max_rows": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Row cap per check (values, OIDs, sessions)."
+        },
+        "credential_namespaces": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "maxItems": 8,
+          "description": "Credential namespaces the type needs (none: empty)."
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "icmp",
+              "ipv6",
+              "privileged_udp_ports",
+              "time_sync"
+            ]
+          },
+          "maxItems": 8,
+          "description": "Collector capabilities the type needs (PRT-18)."
+        },
+        "params": {
+          "type": "object",
+          "description": "JSON Schema of the type parameters."
+        },
+        "templates": {
+          "type": "object",
+          "description": "Preset parameter sets of the type by name (snmp_custom, WP-997); each satisfies params."
+        }
+      }
+    }
+  },
+  "types": {
+    "icmp": {
+      "status": "available",
+      "min_interval_s": 10,
+      "default_interval_s": 30,
+      "max_interval_s": 3600,
+      "min_timeout_s": 1,
+      "default_timeout_s": 10,
+      "max_timeout_s": 10,
+      "default_down_count": 5,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 256,
+      "max_rate_per_collector": 1000,
+      "max_probes_per_target": 4,
+      "max_payload_bytes": 1472,
+      "max_rows": 1,
+      "credential_namespaces": [],
+      "capabilities": [
+        "icmp"
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "default": 3,
+            "description": "Echo requests per check."
+          },
+          "spacing_ms": {
+            "type": "integer",
+            "minimum": 200,
+            "maximum": 1000,
+            "default": 1000,
+            "description": "Gap between echo requests; (count - 1) x spacing_ms must stay below the timeout."
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 1472,
+            "default": 56,
+            "description": "ICMP payload size in bytes (at most 1452 over IPv6)."
+          },
+          "family": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "v4",
+              "v6"
+            ],
+            "default": "auto",
+            "description": "Address family: auto takes the family of an address literal, for a host name IPv6 first, then IPv4."
+          },
+          "rtt_warn_ms": {
+            "type": "number",
+            "minimum": 1,
+            "description": "Average RTT threshold for degraded; no default."
+          },
+          "loss_warn": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.5,
+            "description": "Loss threshold for degraded (fraction)."
+          }
+        }
+      }
+    },
+    "tcp": {
+      "status": "available",
+      "min_interval_s": 10,
+      "default_interval_s": 60,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 5,
+      "max_timeout_s": 30,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 2,
+      "max_parallel_per_collector": 128,
+      "max_rate_per_collector": 500,
+      "max_probes_per_target": 32,
+      "max_payload_bytes": 1024,
+      "max_rows": 1,
+      "credential_namespaces": [],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "port"
+        ],
+        "properties": {
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "description": "TCP port of the target (required)."
+          },
+          "send": {
+            "type": "string",
+            "maxLength": 512,
+            "description": "String sent after connect, at most 256 bytes after the escapes \\r, \\n, \\t and \\\\ are decoded (the escaped form may therefore be up to 512 characters). Without send nothing is sent."
+          },
+          "expect": {
+            "type": "string",
+            "maxLength": 1024,
+            "description": "RE2 regular expression matched against the answer (read at most 1 KiB or until the timeout). Without expect nothing is read."
+          },
+          "family": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "v4",
+              "v6"
+            ],
+            "default": "auto",
+            "description": "Address family of the connection."
+          },
+          "rtt_warn_ms": {
+            "type": "number",
+            "minimum": 1,
+            "description": "Connect time threshold for degraded; no default."
+          }
+        }
+      }
+    },
+    "http": {
+      "status": "available",
+      "min_interval_s": 30,
+      "default_interval_s": 60,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 10,
+      "max_timeout_s": 60,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 2,
+      "max_parallel_per_collector": 64,
+      "max_rate_per_collector": 100,
+      "max_probes_per_target": 32,
+      "max_payload_bytes": 1048576,
+      "max_rows": 1,
+      "credential_namespaces": [
+        "http"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "description": "URL to check (required): http or https with a host."
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "GET",
+              "HEAD"
+            ],
+            "default": "GET",
+            "description": "GET or HEAD; every other method is refused."
+          },
+          "expected_status": {
+            "type": "array",
+            "maxItems": 20,
+            "default": [
+              "200-399"
+            ],
+            "items": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 7
+            },
+            "description": "Expected status codes and ranges (\"200\", \"200-299\"), each 100 to 599."
+          },
+          "body_regex": {
+            "type": "string",
+            "maxLength": 1024,
+            "description": "RE2 expression the body must match (GET only), read up to max_body."
+          },
+          "max_body": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1048576,
+            "default": 65536,
+            "description": "Bytes of the body read for body_regex; the rest is cut off without error."
+          },
+          "follow_redirects": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5,
+            "default": 0,
+            "description": "Redirects followed; with 0 a redirect is the answer, a further redirect is fail redirect_limit."
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "Accept": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "User-Agent": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "Host": {
+                "type": "string",
+                "maxLength": 255
+              }
+            },
+            "description": "Request headers; only Accept, User-Agent and Host."
+          },
+          "cert_warn_days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 365,
+            "default": 21,
+            "description": "Remaining certificate lifetime below which an ok check gets the warn code cert_expiring."
+          },
+          "rtt_warn_ms": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Total time above which the probe is degraded (threshold)."
+          }
+        }
+      }
+    },
+    "snmp_status": {
+      "status": "available",
+      "min_interval_s": 30,
+      "default_interval_s": 60,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 5,
+      "max_timeout_s": 15,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 32,
+      "max_rate_per_collector": 200,
+      "max_probes_per_target": 4,
+      "max_payload_bytes": 65536,
+      "max_rows": 20,
+      "credential_namespaces": [
+        "snmp"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "checks": {
+            "type": "array",
+            "maxItems": 20,
+            "description": "OID checks (at most 20); a violated check is down or degraded after its severity.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "oid",
+                "op",
+                "value"
+              ],
+              "properties": {
+                "oid": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 128,
+                  "description": "OID of a scalar in dotted form, e.g. 1.3.6.1.2.1.1.7.0."
+                },
+                "op": {
+                  "type": "string",
+                  "enum": [
+                    "eq",
+                    "ne",
+                    "lt",
+                    "gt",
+                    "in",
+                    "regex"
+                  ],
+                  "description": "lt and gt compare numbers; in takes a comma-separated list; regex is RE2 with at most 256 characters."
+                },
+                "value": {
+                  "type": "string",
+                  "maxLength": 1024,
+                  "description": "Expected value."
+                },
+                "severity": {
+                  "type": "string",
+                  "enum": [
+                    "degraded",
+                    "down"
+                  ],
+                  "default": "down",
+                  "description": "State of a violated check."
+                }
+              }
+            }
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "default": 161,
+            "description": "UDP port of the agent; a port in the target wins over this parameter."
+          },
+          "timeout_s": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 15,
+            "description": "Timeout of one SNMP request; absent: the probe timeout divided by the attempts."
+          },
+          "retries": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2,
+            "default": 0,
+            "description": "Retries of an unanswered SNMP request within the probe timeout."
+          }
+        }
+      }
+    },
+    "snmp_if": {
+      "status": "available",
+      "min_interval_s": 60,
+      "default_interval_s": 300,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 10,
+      "max_timeout_s": 30,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 16,
+      "max_rate_per_collector": 50,
+      "max_probes_per_target": 4,
+      "max_payload_bytes": 1048576,
+      "max_rows": 1024,
+      "credential_namespaces": [
+        "snmp"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name_regex": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "RE2 expression on ifName; only matching interfaces are read."
+          },
+          "alias_regex": {
+            "type": "string",
+            "maxLength": 256,
+            "description": "RE2 expression on ifAlias."
+          },
+          "if_index": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "maxItems": 1024,
+            "description": "ifIndex list; only these interfaces."
+          },
+          "only_admin_up": {
+            "type": "boolean",
+            "default": true,
+            "description": "Only interfaces with ifAdminStatus up."
+          },
+          "max_interfaces": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1024,
+            "default": 256,
+            "description": "Interface rows read per check; more truncate the walk."
+          },
+          "critical": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "maxItems": 1024,
+            "description": "ifName of critical interfaces: admin up and oper down is down (else degraded)."
+          },
+          "util_warn": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Utilization (share 0-1, higher of in and out) for degraded."
+          },
+          "util_crit": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Utilization for down; above util_warn."
+          },
+          "errors_warn": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Errors per second (in + out) for degraded."
+          }
+        }
+      }
+    },
+    "snmp_custom": {
+      "status": "available",
+      "min_interval_s": 30,
+      "default_interval_s": 300,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 10,
+      "max_timeout_s": 15,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 16,
+      "max_rate_per_collector": 100,
+      "max_probes_per_target": 8,
+      "max_payload_bytes": 65536,
+      "max_rows": 256,
+      "credential_namespaces": [
+        "snmp"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "metrics": {
+            "type": "array",
+            "maxItems": 64,
+            "description": "Configured metrics (at most 64); exactly one of oid and column per metric.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 63,
+                  "description": "Name of the metric, ^[a-z][a-z0-9_]{0,62}$, unique within the probe."
+                },
+                "oid": {
+                  "type": "string",
+                  "maxLength": 128,
+                  "description": "OID of a scalar in dotted form."
+                },
+                "column": {
+                  "type": "string",
+                  "maxLength": 128,
+                  "description": "OID of a table column; one value per row (at most 256)."
+                },
+                "index_label": {
+                  "type": "string",
+                  "maxLength": 32,
+                  "default": "index",
+                  "description": "Label carrying the row index of a column."
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "gauge",
+                    "counter"
+                  ],
+                  "default": "gauge",
+                  "description": "counter becomes a rate per second."
+                },
+                "unit": {
+                  "type": "string",
+                  "maxLength": 16,
+                  "description": "Unit after scaling (label unit)."
+                },
+                "scale": {
+                  "type": "number",
+                  "exclusiveMinimum": 0,
+                  "default": 1,
+                  "description": "Factor applied to the value or rate."
+                },
+                "warn": {
+                  "type": "number",
+                  "description": "Threshold for degraded."
+                },
+                "crit": {
+                  "type": "number",
+                  "description": "Threshold for down."
+                },
+                "direction": {
+                  "type": "string",
+                  "enum": [
+                    "above",
+                    "below"
+                  ],
+                  "default": "above",
+                  "description": "Side of the thresholds that is violated."
+                }
+              }
+            }
+          }
+        }
+      },
+      "templates": {
+        "ups_rfc1628": {
+          "metrics": [
+            {
+              "name": "ups_battery_status",
+              "oid": "1.3.6.1.2.1.33.1.2.1.0",
+              "kind": "gauge",
+              "warn": 2,
+              "crit": 3,
+              "direction": "above"
+            },
+            {
+              "name": "ups_battery_runtime_seconds",
+              "oid": "1.3.6.1.2.1.33.1.2.3.0",
+              "kind": "gauge",
+              "scale": 60,
+              "unit": "s",
+              "warn": 600,
+              "crit": 300,
+              "direction": "below"
+            },
+            {
+              "name": "ups_battery_charge_percent",
+              "oid": "1.3.6.1.2.1.33.1.2.4.0",
+              "kind": "gauge",
+              "unit": "%",
+              "warn": 50,
+              "crit": 20,
+              "direction": "below"
+            },
+            {
+              "name": "ups_output_load_percent",
+              "oid": "1.3.6.1.2.1.33.1.4.4.1.5.1",
+              "kind": "gauge",
+              "unit": "%",
+              "warn": 80,
+              "crit": 95,
+              "direction": "above"
+            }
+          ]
+        },
+        "pdu_apc_rpdu2": {
+          "metrics": [
+            {
+              "name": "pdu_current_amps",
+              "column": "1.3.6.1.4.1.318.1.1.26.6.3.1.5",
+              "index_label": "phase",
+              "kind": "gauge",
+              "scale": 0.1,
+              "unit": "A"
+            },
+            {
+              "name": "pdu_active_power_watts",
+              "column": "1.3.6.1.4.1.318.1.1.26.6.3.1.7",
+              "index_label": "phase",
+              "kind": "gauge",
+              "scale": 10,
+              "unit": "W"
+            }
+          ]
+        }
+      }
+    },
+    "redfish": {
+      "status": "available",
+      "min_interval_s": 60,
+      "default_interval_s": 300,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 15,
+      "max_timeout_s": 60,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 8,
+      "max_rate_per_collector": 20,
+      "max_probes_per_target": 2,
+      "max_payload_bytes": 1048576,
+      "max_rows": 256,
+      "credential_namespaces": [
+        "redfish"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "default": 443,
+            "description": "HTTPS port of the Redfish service."
+          },
+          "system_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Id of the computer system (letters, digits, '.', '_', '-'); empty reads the first member of Systems."
+          },
+          "chassis_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "maxItems": 8,
+            "description": "Ids of the chassis to read; empty reads every chassis within the limit of 20 resource requests per check."
+          },
+          "temp_warn": {
+            "type": "number",
+            "minimum": -50,
+            "maximum": 200,
+            "description": "Temperature in degrees Celsius above which the probe is degraded; overrides UpperThresholdNonCritical of the device."
+          },
+          "temp_crit": {
+            "type": "number",
+            "minimum": -50,
+            "maximum": 200,
+            "description": "Temperature in degrees Celsius above which the probe is down; overrides UpperThresholdCritical of the device."
+          }
+        }
+      }
+    },
+    "bgp": {
+      "status": "available",
+      "min_interval_s": 60,
+      "default_interval_s": 60,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 10,
+      "max_timeout_s": 30,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 16,
+      "max_rate_per_collector": 50,
+      "max_probes_per_target": 2,
+      "max_payload_bytes": 1048576,
+      "max_rows": 2000,
+      "credential_namespaces": [
+        "snmp"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "peers": {
+            "type": "array",
+            "maxItems": 2000,
+            "description": "Expected peers; each must be present and established, else the probe is down.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "address"
+              ],
+              "properties": {
+                "address": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 45,
+                  "description": "Peer address (IPv4 or IPv6)."
+                },
+                "remote_as": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295,
+                  "description": "Expected AS of the peer; another is degraded."
+                },
+                "min_prefixes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Fewer received prefixes (profiles with prefix counters) is degraded."
+                }
+              }
+            }
+          },
+          "all_peers": {
+            "type": "boolean",
+            "default": false,
+            "description": "Every peer with admin status start is expected."
+          },
+          "max_peers": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2000,
+            "default": 2000,
+            "description": "Peer rows read per check; more truncate the walk."
+          }
+        }
+      }
+    },
+    "ospf": {
+      "status": "available",
+      "min_interval_s": 60,
+      "default_interval_s": 60,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 10,
+      "max_timeout_s": 30,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 16,
+      "max_rate_per_collector": 50,
+      "max_probes_per_target": 2,
+      "max_payload_bytes": 1048576,
+      "max_rows": 1000,
+      "credential_namespaces": [
+        "snmp"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "neighbors": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "router_id"
+              ],
+              "properties": {
+                "router_id": {
+                  "type": "string",
+                  "minLength": 7,
+                  "maxLength": 15,
+                  "description": "Router ID of the neighbor in dotted IPv4 form."
+                },
+                "version": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 3,
+                  "description": "OSPF version 2 or 3; absent matches either."
+                }
+              }
+            },
+            "maxItems": 1000,
+            "description": "Expected neighbors; each must be present and full, else the probe is down."
+          },
+          "min_neighbors": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "Fewer neighbors in state full is degraded."
+          },
+          "max_neighbors": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 1000,
+            "description": "Rows read per check; more truncate the walk."
+          }
+        }
+      }
+    },
+    "isis": {
+      "status": "available",
+      "min_interval_s": 60,
+      "default_interval_s": 60,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 10,
+      "max_timeout_s": 30,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 16,
+      "max_rate_per_collector": 50,
+      "max_probes_per_target": 2,
+      "max_payload_bytes": 1048576,
+      "max_rows": 1000,
+      "credential_namespaces": [
+        "snmp"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "adjacencies": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "system_id"
+              ],
+              "properties": {
+                "system_id": {
+                  "type": "string",
+                  "minLength": 12,
+                  "maxLength": 17,
+                  "description": "System ID of the neighbor, six octets (e.g. 1921.6800.1001)."
+                },
+                "level": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2,
+                  "description": "IS-IS level 1 or 2; an L1L2 adjacency serves both, absent matches any."
+                }
+              }
+            },
+            "maxItems": 1000,
+            "description": "Expected adjacencies; each must be present and up, else the probe is down."
+          },
+          "min_adjacencies": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "Fewer adjacencies up is degraded."
+          },
+          "max_adjacencies": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 1000,
+            "description": "Rows read per check; more truncate the walk."
+          }
+        }
+      }
+    },
+    "bfd": {
+      "status": "available",
+      "min_interval_s": 30,
+      "default_interval_s": 60,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 5,
+      "max_timeout_s": 30,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 16,
+      "max_rate_per_collector": 50,
+      "max_probes_per_target": 2,
+      "max_payload_bytes": 1048576,
+      "max_rows": 1000,
+      "credential_namespaces": [
+        "snmp"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sessions": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "maxItems": 1000,
+            "description": "Neighbor addresses (IPv4 or IPv6) of the expected sessions, 1 to 1000; exactly one of sessions and all."
+          },
+          "all": {
+            "type": "boolean",
+            "description": "Every session of the table is expected up (adminDown excepted); exactly one of sessions and all."
+          }
+        }
+      }
+    },
+    "optical": {
+      "status": "available",
+      "min_interval_s": 60,
+      "default_interval_s": 300,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 15,
+      "max_timeout_s": 60,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 8,
+      "max_rate_per_collector": 20,
+      "max_probes_per_target": 2,
+      "max_payload_bytes": 1048576,
+      "max_rows": 512,
+      "credential_namespaces": [
+        "snmp"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "interfaces": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "maxItems": 512,
+            "description": "Interfaces by ifName or ifIndex, 1 to 512; exactly one of interfaces and all."
+          },
+          "all": {
+            "type": "boolean",
+            "description": "Every transceiver of the device (at most 512); exactly one of interfaces and all."
+          },
+          "rx_warn_dbm": {
+            "type": "number",
+            "default": -20,
+            "description": "Rx level below which the check warns (degraded), unless the device reports thresholds."
+          },
+          "rx_crit_dbm": {
+            "type": "number",
+            "default": -25,
+            "description": "Rx level below which the check fails, unless the device reports thresholds; below -40 dBm is LOS."
+          },
+          "tx_warn_dbm": {
+            "type": "number",
+            "description": "Tx level below which the check warns; no default."
+          },
+          "tx_crit_dbm": {
+            "type": "number",
+            "description": "Tx level below which the check fails; no default."
+          }
+        }
+      }
+    },
+    "bng": {
+      "status": "available",
+      "min_interval_s": 60,
+      "default_interval_s": 60,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 10,
+      "max_timeout_s": 30,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 8,
+      "max_rate_per_collector": 20,
+      "max_probes_per_target": 2,
+      "max_payload_bytes": 1048576,
+      "max_rows": 256,
+      "credential_namespaces": [
+        "snmp"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "drop_warn_ratio": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.2,
+            "description": "Drop against the previous value of a series for degraded."
+          },
+          "drop_crit_ratio": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.5,
+            "description": "Drop against the previous value of a series for down; not below drop_warn_ratio."
+          },
+          "min_sessions": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Fewer sessions in total is down."
+          }
+        }
+      }
+    },
+    "pon": {
+      "status": "available",
+      "min_interval_s": 300,
+      "default_interval_s": 300,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 60,
+      "max_timeout_s": 60,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 4,
+      "max_rate_per_collector": 5,
+      "max_probes_per_target": 2,
+      "max_payload_bytes": 4194304,
+      "max_rows": 8192,
+      "credential_namespaces": [
+        "snmp"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "ports": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "maxItems": 64,
+            "description": "PON ports (name or ifIndex as the profile labels them); absent: every port."
+          },
+          "onu_rx_warn_dbm": {
+            "type": "number",
+            "minimum": -60,
+            "maximum": 10,
+            "default": -27,
+            "description": "ONU receive level below which the level of the ONU is reported in every run."
+          },
+          "port_offline_warn": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.1,
+            "description": "Share of offline ONUs of a port above which the probe is degraded."
+          },
+          "power_event_min": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8192,
+            "default": 8,
+            "description": "ONUs going offline with dying gasp in one run that mark a power event."
+          }
+        }
+      }
+    },
+    "dns": {
+      "status": "available",
+      "min_interval_s": 10,
+      "default_interval_s": 60,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 5,
+      "max_timeout_s": 10,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 4,
+      "max_parallel_per_collector": 64,
+      "max_rate_per_collector": 200,
+      "max_probes_per_target": 16,
+      "max_payload_bytes": 65535,
+      "max_rows": 1,
+      "credential_namespaces": [],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "qname"
+        ],
+        "properties": {
+          "qname": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 253,
+            "description": "Name to query (required); the target of the probe is the DNS server."
+          },
+          "qtype": {
+            "type": "string",
+            "enum": [
+              "A",
+              "AAAA",
+              "CNAME",
+              "MX",
+              "NS",
+              "SOA",
+              "TXT",
+              "PTR",
+              "SRV",
+              "CAA"
+            ],
+            "default": "A",
+            "description": "Record type of the question."
+          },
+          "transport": {
+            "type": "string",
+            "enum": [
+              "udp",
+              "tcp"
+            ],
+            "default": "udp",
+            "description": "UDP with EDNS0 (4096 bytes) and fallback to TCP on a truncated answer, or TCP only."
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "default": 53,
+            "description": "Port of the DNS server."
+          },
+          "rd": {
+            "type": "boolean",
+            "default": true,
+            "description": "Recursion desired."
+          },
+          "expect_rcode": {
+            "type": "string",
+            "enum": [
+              "NOERROR",
+              "FORMERR",
+              "SERVFAIL",
+              "NXDOMAIN",
+              "NOTIMP",
+              "REFUSED",
+              "YXDOMAIN",
+              "YXRRSET",
+              "NXRRSET",
+              "NOTAUTH",
+              "NOTZONE"
+            ],
+            "default": "NOERROR",
+            "description": "Expected response code."
+          },
+          "expect_contains": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            },
+            "maxItems": 10,
+            "description": "Texts every one of which must occur in an answer record (case-insensitive)."
+          },
+          "require_ad": {
+            "type": "boolean",
+            "default": false,
+            "description": "Require the AD bit of the resolver (no DNSSEC validation on the collector)."
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "degraded",
+              "down"
+            ],
+            "default": "down",
+            "description": "State of an answer mismatch: degraded (ok with warn code answer_mismatch) or down (fail)."
+          }
+        }
+      }
+    },
+    "dhcp": {
+      "status": "available",
+      "min_interval_s": 60,
+      "default_interval_s": 300,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 5,
+      "max_timeout_s": 10,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 1,
+      "max_rate_per_collector": 1,
+      "max_probes_per_target": 1,
+      "max_payload_bytes": 1500,
+      "max_rows": 1,
+      "credential_namespaces": [],
+      "capabilities": [
+        "privileged_udp_ports"
+      ],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "server": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 253,
+            "description": "DHCP server (IPv4 address or name); without it the target of the probe. In mode discover optional: the expected server identifier (option 54)."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "inform",
+              "discover",
+              "relay"
+            ],
+            "default": "inform",
+            "description": "inform: DHCPINFORM by unicast (port 68); discover: DHCPDISCOVER by broadcast on interface (port 68); relay: DHCPDISCOVER by unicast with giaddr the collector address (port 67). No mode sends DHCPREQUEST or DHCPRELEASE."
+          },
+          "interface": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 15,
+            "description": "Network interface of the broadcast (required in mode discover)."
+          },
+          "client_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Client identifier (option 61, type 0); without it type 1 with the MAC address."
+          },
+          "mac": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 17,
+            "description": "Client hardware address (chaddr); without it a locally administered address derived from the probe ID."
+          },
+          "expect_subnet": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 18,
+            "description": "IPv4 prefix the offered address must lie in; otherwise ok with warn code subnet_mismatch."
+          }
+        }
+      }
+    },
+    "stamp": {
+      "status": "available",
+      "min_interval_s": 30,
+      "default_interval_s": 60,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 5,
+      "max_timeout_s": 10,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 16,
+      "max_rate_per_collector": 20,
+      "max_probes_per_target": 4,
+      "max_payload_bytes": 1472,
+      "max_rows": 1,
+      "credential_namespaces": [],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "default": 862,
+            "description": "UDP port of the reflector (RFC 8762: 862)."
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 10,
+            "description": "Test packets per check; (count - 1) x spacing_ms + 1000 ms must be below the timeout."
+          },
+          "spacing_ms": {
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 1000,
+            "default": 100,
+            "description": "Gap between test packets."
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 44,
+            "maximum": 1472,
+            "default": 44,
+            "description": "Test packet size in bytes (44: unauthenticated packet without padding)."
+          },
+          "dscp": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 63,
+            "default": 0,
+            "description": "DSCP of the test packets."
+          },
+          "loss_warn": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Loss (fraction) above which the check is ok with threshold_exceeded (degraded)."
+          },
+          "loss_crit": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Loss (fraction) above which the check fails with threshold_exceeded."
+          },
+          "rtt_warn_ms": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Average RTT above which the check is degraded."
+          },
+          "rtt_crit_ms": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Average RTT above which the check fails."
+          },
+          "jitter_warn_ms": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Jitter above which the check is degraded."
+          },
+          "jitter_crit_ms": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Jitter above which the check fails."
+          }
+        }
+      }
+    },
+    "twamp_control": {
+      "status": "planned",
+      "min_interval_s": 10,
+      "default_interval_s": 60,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 5,
+      "max_timeout_s": 30,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 16,
+      "max_rate_per_collector": 20,
+      "max_probes_per_target": 4,
+      "max_payload_bytes": 1472,
+      "max_rows": 1,
+      "credential_namespaces": [],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "packets": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100,
+            "default": 10,
+            "description": "Test packets per check."
+          },
+          "spacing_ms": {
+            "type": "integer",
+            "minimum": 10,
+            "maximum": 1000,
+            "default": 10,
+            "description": "Gap between test packets."
+          },
+          "dscp": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 63,
+            "default": 0
+          },
+          "packet_size": {
+            "type": "integer",
+            "minimum": 44,
+            "maximum": 1472,
+            "default": 128,
+            "description": "Packet size in bytes."
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "default": 862
+          },
+          "rtt_warn_ms": {
+            "type": "number",
+            "minimum": 1,
+            "description": "RTT threshold for degraded."
+          },
+          "loss_warn": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "default": 0.5,
+            "description": "Loss threshold for degraded (fraction)."
+          }
+        }
+      }
+    },
+    "gnmi": {
+      "status": "available",
+      "min_interval_s": 10,
+      "default_interval_s": 60,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 10,
+      "max_timeout_s": 60,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 16,
+      "max_rate_per_collector": 50,
+      "max_probes_per_target": 4,
+      "max_payload_bytes": 4194304,
+      "max_rows": 10000,
+      "credential_namespaces": [
+        "gnmi"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "default": 9339,
+            "description": "gNMI port (IANA 9339; vendor ports such as 57400 or 6030 are configured)."
+          },
+          "origin": {
+            "type": "string",
+            "maxLength": 64,
+            "default": "openconfig",
+            "description": "Origin of the paths; empty sends none."
+          },
+          "encoding": {
+            "type": "string",
+            "enum": [
+              "json_ietf",
+              "proto"
+            ],
+            "description": "Encoding of the values; without it JSON_IETF, otherwise PROTO, otherwise JSON as the device offers."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "get",
+              "once"
+            ],
+            "default": "get",
+            "description": "Get (falls back to Subscribe ONCE on Unimplemented) or Subscribe ONCE. Reading only: never Set."
+          },
+          "template": {
+            "type": "string",
+            "enum": [
+              "if_oper"
+            ],
+            "description": "Predefined paths: if_oper maps oper-status as state (UP up, DOWN and LOWER_LAYER_DOWN down) and in-octets/out-octets as counters."
+          },
+          "paths": {
+            "type": "array",
+            "maxItems": 32,
+            "description": "Leaf paths mapped to values probe_gnmi_<name>; at most 32 including the template.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "name"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 512,
+                  "description": "gNMI path of a leaf; an element without keys matches every list entry."
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "description": "Value name suffix: probe_gnmi_<name>."
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "gauge",
+                    "counter",
+                    "state"
+                  ],
+                  "default": "gauge",
+                  "description": "gauge: the value; counter: rate per second; state: the text mapped by enum."
+                },
+                "enum": {
+                  "type": "object",
+                  "description": "State: value text to up, degraded or down."
+                },
+                "warn": {
+                  "type": "number",
+                  "description": "Warn threshold (degraded) of a gauge or counter rate."
+                },
+                "crit": {
+                  "type": "number",
+                  "description": "Critical threshold (down) of a gauge or counter rate."
+                },
+                "direction": {
+                  "type": "string",
+                  "enum": [
+                    "above",
+                    "below"
+                  ],
+                  "default": "above",
+                  "description": "Whether values above or below the thresholds violate them."
+                },
+                "unit": {
+                  "type": "string",
+                  "maxLength": 32,
+                  "description": "Unit of the value (for display)."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "tr069": {
+      "status": "available",
+      "min_interval_s": 300,
+      "default_interval_s": 900,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 30,
+      "max_timeout_s": 60,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 4,
+      "max_rate_per_collector": 5,
+      "max_probes_per_target": 1,
+      "max_payload_bytes": 1048576,
+      "max_rows": 10000,
+      "credential_namespaces": [
+        "acs"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "acs_url",
+          "inform_interval_s"
+        ],
+        "properties": {
+          "acs_url": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 2048,
+            "description": "Base URL of the ACS northbound API (GenieACS NBI), http or https; credentials are sent over https only."
+          },
+          "selector": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "serial": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "oui": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16
+              },
+              "product_class": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "tag": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            },
+            "description": "Structured device selection (exact matches); free query texts do not exist. Empty selects every device of the ACS (at most 10000)."
+          },
+          "parameters": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "description": "TR-069 parameter path such as Device.DeviceInfo.UpTime."
+                },
+                "warn": {
+                  "type": "number",
+                  "description": "Value beyond which the device is a warning."
+                },
+                "crit": {
+                  "type": "number",
+                  "description": "Value beyond which the device is critical."
+                },
+                "direction": {
+                  "type": "string",
+                  "enum": [
+                    "above",
+                    "below"
+                  ],
+                  "default": "above",
+                  "description": "above: values above warn/crit violate, below: values below."
+                }
+              }
+            },
+            "maxItems": 20
+          },
+          "inform_interval_s": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 604800,
+            "description": "Periodic inform interval of the devices in seconds."
+          },
+          "stale_factor": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 3,
+            "description": "Last inform older than stale_factor x inform_interval_s is stale."
+          }
+        }
+      }
+    },
+    "usp": {
+      "status": "planned",
+      "min_interval_s": 300,
+      "default_interval_s": 900,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 30,
+      "max_timeout_s": 60,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 4,
+      "max_rate_per_collector": 5,
+      "max_probes_per_target": 1,
+      "max_payload_bytes": 1048576,
+      "max_rows": 256,
+      "credential_namespaces": [
+        "acs"
+      ],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "parameters": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 256
+            },
+            "maxItems": 32
+          },
+          "inform_factor": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 3
+          }
+        }
+      }
+    },
+    "rpki_rtr": {
+      "status": "available",
+      "min_interval_s": 60,
+      "default_interval_s": 300,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 30,
+      "max_timeout_s": 120,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 4,
+      "max_rate_per_collector": 1,
+      "max_probes_per_target": 1,
+      "max_payload_bytes": 67108864,
+      "max_rows": 2000000,
+      "credential_namespaces": [],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "default": 323,
+            "description": "RTR port of the validator (RFC 6810: 323; validators also use 3323 or 8282)."
+          }
+        }
+      }
+    },
+    "rpki_roa": {
+      "status": "available",
+      "min_interval_s": 60,
+      "default_interval_s": 300,
+      "max_interval_s": 86400,
+      "min_timeout_s": 1,
+      "default_timeout_s": 1,
+      "max_timeout_s": 5,
+      "default_down_count": 3,
+      "default_up_count": 1,
+      "max_parallel_per_target": 1,
+      "max_parallel_per_collector": 64,
+      "max_rate_per_collector": 100,
+      "max_probes_per_target": 100,
+      "max_payload_bytes": 65536,
+      "max_rows": 1000,
+      "credential_namespaces": [],
+      "capabilities": [],
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "routes"
+        ],
+        "properties": {
+          "validator": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "The validator of the shared RTR session (as of an rpki_rtr probe); without host the target of the probe.",
+            "properties": {
+              "host": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 253,
+                "description": "Address or name of the validator."
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535,
+                "default": 323,
+                "description": "RTR port of the validator."
+              }
+            }
+          },
+          "routes": {
+            "type": "array",
+            "maxItems": 1000,
+            "description": "Prefix/origin AS pairs validated after RFC 6811.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "prefix",
+                "origin_as"
+              ],
+              "properties": {
+                "prefix": {
+                  "type": "string",
+                  "minLength": 3,
+                  "maxLength": 43,
+                  "description": "IPv4 or IPv6 prefix without host bits."
+                },
+                "origin_as": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 4294967295,
+                  "description": "Origin AS of the route."
+                }
+              }
+            }
+          },
+          "notfound_degraded": {
+            "type": "boolean",
+            "default": true,
+            "description": "A route without covering VRP is degraded (ok with rpki_notfound); false: up."
+          }
+        }
+      }
+    }
+  }
+}

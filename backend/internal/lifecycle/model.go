@@ -41,6 +41,10 @@ type State struct {
 	IsTerminal     bool     `json:"is_terminal"`
 	SortOrder      int      `json:"sort_order"`
 	RequiredFields []string `json:"required_fields"`
+	// LockedFields are the attribute keys and typed CI columns a CI in
+	// this state may not change (LCY-04, WP-1103): the CI service derives
+	// a readonly catalog rule per field (E-232).
+	LockedFields []string `json:"locked_fields"`
 }
 
 // Transition is a guarded edge between two states.
@@ -91,6 +95,10 @@ type StateSpec struct {
 	IsTerminal     bool     `json:"is_terminal,omitempty"`
 	SortOrder      int      `json:"sort_order,omitempty"`
 	RequiredFields []string `json:"required_fields,omitempty"`
+	// LockedFields are the fields the state locks (WP-1103): attribute
+	// keys or typed CI columns, unique, no reserved namespace and not
+	// lifecycle_state.
+	LockedFields []string `json:"locked_fields,omitempty"`
 }
 
 // TransitionSpec defines a transition inside a create/update request.

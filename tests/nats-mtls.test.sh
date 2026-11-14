@@ -82,7 +82,7 @@ elif command -v docker >/dev/null 2>&1; then
     docker run -d --name "$CONTAINER" -p "127.0.0.1:$PORT:4222" -w /etc/nats \
         -e RETICORA_NATS_EDGE_LEAF_URL=nats://127.0.0.1:1 \
         -v "$TMP/nats-edge.conf:/etc/nats/nats-edge.conf:ro" -v "$TMP/pki:/etc/nats/pki:ro" \
-        nats:2.10-alpine -c nats-edge.conf >/dev/null || { echo "docker run failed"; exit 1; }
+        nats:2.14.10-alpine@sha256:311da47e2f31c26e99c623cd78d486a1e8ab039c49b32652770bb91a4f70512e -c nats-edge.conf >/dev/null || { echo "docker run failed"; exit 1; }
 else
     echo "neither nats-server nor docker available"
     exit 1

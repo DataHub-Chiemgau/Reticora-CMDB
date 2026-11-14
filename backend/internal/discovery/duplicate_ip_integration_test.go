@@ -368,9 +368,11 @@ func TestDuplicateIPWithinVRF(t *testing.T) {
 		if len(checks) != 1 || len(checks[0]) != 3 {
 			t.Fatalf("check transactions %q, want exactly one of three statements (BEGIN, query, COMMIT)", checks)
 		}
+		// The one lookup of pinned addresses of other devices per sync
+		// (WP-914 AK4) reads the pins only (a.pinned, idx_ip_address_pinned).
 		for _, tx := range rest {
 			for _, sql := range tx {
-				if strings.Contains(sql, "address_host") {
+				if strings.Contains(sql, "address_host") && !strings.Contains(sql, "a.pinned") {
 					t.Errorf("a record or batch transaction reads address_host: %.200q", sql)
 				}
 			}

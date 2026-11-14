@@ -71,12 +71,11 @@ type RouteIntent struct {
 type PGRouteAuditor struct {
 	pool     *pgxpool.Pool
 	recorder *PGRecorder
-	now      func() time.Time
 }
 
 // NewPGRouteAuditor returns the route auditor on pool.
 func NewPGRouteAuditor(pool *pgxpool.Pool) *PGRouteAuditor {
-	return &PGRouteAuditor{pool: pool, recorder: NewPGRecorder(), now: time.Now}
+	return &PGRouteAuditor{pool: pool, recorder: NewPGRecorder()}
 }
 
 func (a *PGRouteAuditor) inOrg(ctx context.Context, orgID string, fn func(ctx context.Context, tx pgx.Tx) error) error {
@@ -144,11 +143,16 @@ func (a *PGRouteAuditor) Discard(ctx context.Context, intent *RouteIntent) error
 // intents; each organization's intents are taken with DELETE ... RETURNING
 // and recorded in one tenant transaction, so a failure keeps them for the
 // next run (retry) and an intent a completion holds is skipped. Afterwards
-// it sets RouteIntentsPending.
+// it sets RouteIntentsPending. The cutoff is read from the database clock
+// that set created_at, so a skew between the process and the database
+// never makes a young intent due.
 func (a *PGRouteAuditor) SweepRouteIntents(ctx context.Context) (int, error) {
-	cutoff := a.now().Add(-RouteIntentGrace)
+	var cutoff time.Time
 	var orgs []string
 	err := database.WithSystem(ctx, a.pool, func(ctx context.Context, tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `SELECT now() - make_interval(secs => $1)`, RouteIntentGrace.Seconds()).Scan(&cutoff); err != nil {
+			return err
+		}
 		rows, err := tx.Query(ctx, `SELECT DISTINCT organization_id::text FROM audit_route_intent WHERE created_at < $1`, cutoff)
 		if err != nil {
 			return err

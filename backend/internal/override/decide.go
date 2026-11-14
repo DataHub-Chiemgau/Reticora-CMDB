@@ -34,6 +34,12 @@ var SourceRanks = map[string]int{
 	"sweep":           20,
 }
 
+// sourceWorkflowRank is the source whose rank bounds the lifecycle locks of
+// the automation sources (WP-1103): below its static rank (SourceRanks,
+// whatever the rank table of the organization says) a locked field is a
+// conflict.
+const sourceWorkflowRank = "workflow"
+
 // SourceRank returns the REC-03 rank of source.
 func SourceRank(source string) int {
 	return SourceRanks[source]
@@ -52,6 +58,13 @@ const (
 	// the CI: automation never writes one, and the refusal is no conflict
 	// (MET-14, CI-10, OVR-02).
 	ReasonInstanceAttribute = "instance_attribute"
+	// ReasonLifecycleLocked: the lifecycle state of the CI locks the field
+	// (locked_fields, LCY-04, WP-1103, E-232). A source below the rank of
+	// the workflow (92) does not write it; a differing value is a
+	// conflict, which keeps the value in the provenance and opens the
+	// review override_conflict like an override. Sources from rank 92 on
+	// decide as before and are refused by the CI service (read_only).
+	ReasonLifecycleLocked = "lifecycle_locked"
 )
 
 // Decision is the outcome of DecideAutomatedWrite.
@@ -124,9 +137,33 @@ func RegisterMetrics(reg prometheus.Registerer) {
 //   - Otherwise a value wins with a higher rank than the stored value's
 //     source, or with the same rank and a newer source time (observed_at,
 //     REC-05, GLO-12). Provenance is compared per field.
+//
+// Both ranks are effective ranks (REC-04): the entry of the CI type for the
+// field, else the organization-wide entry, else SourceRanks, when the
+// reader keeps source ranks (rankReader); manual stays 100.
 func DecideAutomatedWrite(ctx context.Context, reader FieldReader, w *Write) Decision {
 	var fv *FieldValue
-	if reader != nil {
+	var ranks *RankTable
+	var ciTypeID string
+	var locked bool
+	if rt, ok := reader.(rankTabler); ok {
+		var err error
+		if ranks, err = rt.rankTable(ctx, w.OrganizationID); err != nil {
+			decisionFailures.Add(1)
+			slog.WarnContext(ctx, "automated write refused: source ranks unreadable",
+				"ci_id", w.CIID, "field", w.Field, "source", w.Source, "error", err)
+			return Decision{Reason: ReasonError}
+		}
+	}
+	if tr, ok := reader.(typedDecisionReader); ok {
+		var err error
+		if fv, ciTypeID, locked, err = tr.decisionState(ctx, w.OrganizationID, w.CIID, w.Field); err != nil {
+			decisionFailures.Add(1)
+			slog.WarnContext(ctx, "automated write refused: provenance unreadable",
+				"ci_id", w.CIID, "field", w.Field, "source", w.Source, "error", err)
+			return Decision{Reason: ReasonError}
+		}
+	} else if reader != nil {
 		var err error
 		if dr, ok := reader.(decisionReader); ok {
 			fv, err = dr.getForDecision(ctx, w.OrganizationID, w.CIID, w.Field)
@@ -153,23 +190,30 @@ func DecideAutomatedWrite(ctx context.Context, reader FieldReader, w *Write) Dec
 		}
 		return Decision{Conflict: true, Reason: ReasonOverrideConflict}
 	}
+	// The bound is the static REC-03 rank of the source, not the effective
+	// one of the rank table (REC-04): the sources below the workflow write
+	// past the CI service (discovery, collectors), and a table that lifts
+	// one of them must not lift it past the lock as well.
+	if locked && SourceRank(w.Source) < SourceRank(sourceWorkflowRank) {
+		if valuesEqual(w.Current, w.Value) {
+			return Decision{Reason: ReasonLifecycleLocked}
+		}
+		return Decision{Conflict: true, Reason: ReasonLifecycleLocked}
+	}
 	if isEmpty(w.Current) {
 		return Decision{Write: true, Reason: ReasonEmpty}
 	}
 
 	var currentAt *time.Time
-	currentRank := SourceRank(w.FallbackSource)
+	currentRank := ranks.Rank(ciTypeID, w.Field, w.FallbackSource)
 	if fv != nil && fv.DiscoveredSource != "" {
-		currentRank = fv.DiscoveredRank
-		if currentRank == 0 {
-			currentRank = SourceRank(fv.DiscoveredSource)
-		}
+		currentRank = storedRank(ranks, ciTypeID, w.Field, fv)
 		currentAt = fv.ObservedAt
 		if currentAt == nil {
 			currentAt = fv.DiscoveredAt
 		}
 	}
-	rank := SourceRank(w.Source)
+	rank := ranks.Rank(ciTypeID, w.Field, w.Source)
 	if rank < currentRank {
 		return Decision{Reason: ReasonLowerRank}
 	}
@@ -179,6 +223,23 @@ func DecideAutomatedWrite(ctx context.Context, reader FieldReader, w *Write) Dec
 		return Decision{Reason: ReasonStale}
 	}
 	return Decision{Write: true, Reason: ReasonAllowed}
+}
+
+// storedRank is the rank of the stored value's source: with a rank table
+// the effective rank of a known source now (REC-04: a changed policy
+// applies to stored values as well), else the rank recorded with the value
+// (a source outside REC-03, e.g. computed attributes with 100), else
+// SourceRanks.
+func storedRank(ranks *RankTable, ciTypeID, field string, fv *FieldValue) int {
+	if ranks != nil {
+		if _, known := SourceRanks[fv.DiscoveredSource]; known {
+			return ranks.Rank(ciTypeID, field, fv.DiscoveredSource)
+		}
+	}
+	if fv.DiscoveredRank != 0 {
+		return fv.DiscoveredRank
+	}
+	return SourceRank(fv.DiscoveredSource)
 }
 
 func isEmpty(v any) bool {

@@ -43,7 +43,7 @@ const appLoginLockKey = 0x349
 // existing one keeps its password. Migrating down drops reticora_app together
 // with its memberships, so the membership is checked on every call. Without
 // TEST_DATABASE_URL the test is skipped.
-func AppDSN(t *testing.T) string {
+func AppDSN(t testing.TB) string {
 	t.Helper()
 	adminDSN := os.Getenv("TEST_DATABASE_URL")
 	if adminDSN == "" {
@@ -125,7 +125,7 @@ type Fixture struct {
 // keeps ids and slugs apart from the other packages sharing the database.
 // Earlier leftovers are removed first and everything is removed again when
 // the test ends.
-func Seed(t *testing.T, tag string) *Fixture {
+func Seed(t testing.TB, tag string) *Fixture {
 	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
@@ -201,13 +201,15 @@ func Seed(t *testing.T, tag string) *Fixture {
 
 // appendOnlyTables refuse UPDATE and DELETE through a trigger (migrations
 // 000049, 000056, 000242; stock_scan, stocktake_item and stocktake of a
-// completed or cancelled stocktake since 000267). Under replica no cascade
+// completed or cancelled stocktake since 000267; alarm_transition outside
+// the alarm retention since 000313, WP-981; incident_transition likewise
+// since 000326, WP-1027). Under replica no cascade
 // runs, so the scans and items go before their stocktake.
-var appendOnlyTables = []string{"audit_log", "stock_movement", "disposal_record", "stock_scan", "stocktake_item", "stocktake"}
+var appendOnlyTables = []string{"audit_log", "stock_movement", "disposal_record", "stock_scan", "stocktake_item", "stocktake", "alarm_transition", "incident_transition"}
 
 // deleteAppendOnly removes the fixture rows of the append-only tables under
 // session_replication_role = replica, which skips their guard triggers.
-func deleteAppendOnly(t *testing.T, admin *pgxpool.Pool, orgIDs ...string) {
+func deleteAppendOnly(t testing.TB, admin *pgxpool.Pool, orgIDs ...string) {
 	t.Helper()
 	ctx := context.Background()
 	conn, err := admin.Acquire(ctx)
@@ -234,7 +236,7 @@ func deleteAppendOnly(t *testing.T, admin *pgxpool.Pool, orgIDs ...string) {
 
 // nonCascadingTables lists the tables whose foreign key to organization does
 // not cascade on delete.
-func nonCascadingTables(t *testing.T, admin *pgxpool.Pool) []string {
+func nonCascadingTables(t testing.TB, admin *pgxpool.Pool) []string {
 	t.Helper()
 	rows, err := admin.Query(context.Background(), `
 		SELECT DISTINCT quote_ident(c.relname) FROM pg_constraint k

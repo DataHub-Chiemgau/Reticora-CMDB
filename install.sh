@@ -226,11 +226,19 @@ RELEASE_LATEST_URL="https://api.github.com/repos/$RELEASE_REPOSITORY/releases/la
 # shellcheck disable=SC2034 # used by install-cloud.sh and install-vm.sh
 RELEASE_REGISTRY="ghcr.io/datahub-chiemgau"
 RELEASE_OIDC_ISSUER="https://token.actions.githubusercontent.com"
-# cosign used when none is installed: the release release.yml signs with,
-# checked against the sha256 of its cosign_checksums.txt.
-COSIGN_VERSION="v2.4.1"
-COSIGN_SHA256_AMD64="8b24b946dd5809c6bd93de08033bcf6bc0ed7d336b7785787c080f574b89249b"
-COSIGN_SHA256_ARM64="3b2e2e3854d0356c45fe6607047526ccd04742d20bd44afb5be91fa2a6e7cb4a"
+# cosign used when none (or none recent enough) is installed: the release
+# release.yml signs with, checked against the sha256 of its
+# cosign_checksums.txt.
+COSIGN_VERSION="v3.1.4"
+COSIGN_SHA256_AMD64="424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa"
+COSIGN_SHA256_ARM64="ade83b7aac62e131cacfe96d958948b2150cc9efec46a570a2649b8e27dedad2"
+# The oldest installed cosign the checks use (E-258): earlier v3 releases
+# accept a forged legacy bundle despite the identity pinning
+# (GHSA-fx35-mq7g-6g98, fixed in v3.1.3), and cosign v2 reads the Sigstore
+# bundles (v0.3) release.yml writes since cosign v3 only with an extra flag.
+# A cosign below it is not used; the pinned one is. edgecore/update
+# (MinCosignVersion) refuses the same versions.
+COSIGN_MIN_VERSION="v3.1.3"
 COSIGN_BIN=""
 SIGNATURE_TROUBLESHOOTING="see docs/troubleshooting-installation.md, 'Signature verification'"
 
@@ -276,21 +284,51 @@ latest_release_tag() {
     info "Newest release: $latest"
 }
 
-# ensure_cosign — sets COSIGN_BIN: the installed cosign, otherwise the pinned
-# release, downloaded once to RETICORA_TOOLS_DIR and checked against its
-# sha256 before every use. Without cosign nothing is installed. As root the
-# cache is /var/cache/reticora, never a directory of the invoking user.
+# cosign_version_of <cosign> — the release version 'cosign version' reports
+# (GitVersion, e.g. v3.1.4); empty when it reports none or fails.
+cosign_version_of() {
+    local out
+    out="$("$1" version 2>&1)" || out=""
+    printf '%s\n' "$out" | sed -nE 's/^GitVersion:[[:space:]]+(v?[0-9][^[:space:]]*).*$/\1/p' | sed -n 1p
+}
+
+# cosign_version_ok <version> — <version> is a release at least
+# COSIGN_MIN_VERSION (a pre-release of it is not, an unknown version neither).
+cosign_version_ok() {
+    local have min i
+    [[ "$1" =~ ^v?([0-9]+)\.([0-9]+)\.([0-9]+)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]] || return 1
+    have=("${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}")
+    [[ "$COSIGN_MIN_VERSION" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || return 1
+    min=("${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}")
+    for i in 0 1 2; do
+        if [ "$((10#${have[$i]}))" -gt "$((10#${min[$i]}))" ]; then return 0; fi
+        if [ "$((10#${have[$i]}))" -lt "$((10#${min[$i]}))" ]; then return 1; fi
+    done
+    [ -z "${have[3]}" ]
+}
+
+# ensure_cosign — sets COSIGN_BIN: the installed cosign if it is at least
+# COSIGN_MIN_VERSION, otherwise the pinned release, downloaded once to
+# RETICORA_TOOLS_DIR and checked against its sha256 before every use.
+# Without cosign nothing is installed. As root the cache is
+# /var/cache/reticora, never a directory of the invoking user.
 ensure_cosign() {
     [ -z "$COSIGN_BIN" ] || return 0
+    local installed version
     if have_cmd cosign; then
-        COSIGN_BIN="$(command -v cosign)"
-        return 0
+        installed="$(command -v cosign)"
+        version="$(cosign_version_of "$installed")"
+        if cosign_version_ok "$version"; then
+            COSIGN_BIN="$installed"
+            return 0
+        fi
+        warn "The installed cosign $installed (${version:-unknown version}) is older than $COSIGN_MIN_VERSION (GHSA-fx35-mq7g-6g98) and is not used for the signature checks; the pinned cosign $COSIGN_VERSION is used instead. Update or remove it ($SIGNATURE_TROUBLESHOOTING)."
     fi
     local arch sha dir bin
     case "$(uname -m)" in
         x86_64|amd64) arch="amd64"; sha="$COSIGN_SHA256_AMD64" ;;
         aarch64|arm64) arch="arm64"; sha="$COSIGN_SHA256_ARM64" ;;
-        *) die "cosign is required to verify the signed release artifacts and is not installed; there is no cosign $COSIGN_VERSION for $(uname -m). Install cosign and re-run ($SIGNATURE_TROUBLESHOOTING)." ;;
+        *) die "cosign is required to verify the signed release artifacts and no cosign $COSIGN_MIN_VERSION or newer is installed; there is no cosign $COSIGN_VERSION for $(uname -m). Install cosign $COSIGN_MIN_VERSION or newer and re-run ($SIGNATURE_TROUBLESHOOTING)." ;;
     esac
     dir="${RETICORA_TOOLS_DIR:-}"
     if [ -z "$dir" ] && [ "$(id -u)" -eq 0 ]; then
@@ -306,7 +344,7 @@ ensure_cosign() {
         rm -f "$bin"
         if ! curl -fsSL "https://github.com/sigstore/cosign/releases/download/$COSIGN_VERSION/cosign-linux-$arch" -o "$bin.part"; then
             rm -f "$bin.part"
-            die "cosign is required to verify the signed release artifacts; it is not installed and could not be downloaded. Install cosign and re-run ($SIGNATURE_TROUBLESHOOTING)."
+            die "cosign is required to verify the signed release artifacts; no cosign $COSIGN_MIN_VERSION or newer is installed and cosign $COSIGN_VERSION could not be downloaded. Install cosign $COSIGN_MIN_VERSION or newer and re-run ($SIGNATURE_TROUBLESHOOTING)."
         fi
         if ! printf '%s  %s\n' "$sha" "$bin.part" | sha256sum -c - >/dev/null 2>&1; then
             rm -f "$bin.part"
@@ -349,8 +387,14 @@ verify_release_image() {
         die "Signature check failed: $ref is not signed by the release workflow of $RELEASE_REPOSITORY; nothing was started ($SIGNATURE_TROUBLESHOOTING)."
     fi
     rm -f "$err"
-    digest="$(jq -r --arg image "$image" '[.[] | select((.critical.identity["docker-reference"] // "") | endswith("/" + $image))
-        | .critical.image["docker-manifest-digest"]] | unique | if length == 1 then .[0] else empty end' <<<"$out" 2>/dev/null)" || digest=""
+    # docker-reference: the repository (signatures of cosign v2) or the
+    # reference that was signed, with its tag or digest (cosign v3); a digest
+    # there must be the signed one.
+    digest="$(jq -r --arg image "$image" '[.[] | (.critical.identity["docker-reference"] // "") as $ref
+        | .critical.image["docker-manifest-digest"] as $digest
+        | select(($ref | sub("@sha256:[0-9a-f]{64}$"; "") | sub(":[^:/]+$"; "") | endswith("/" + $image))
+            and (($ref | test("@sha256:") | not) or ($ref | endswith("@" + ($digest // "")))))
+        | $digest] | unique | if length == 1 then .[0] else empty end' <<<"$out" 2>/dev/null)" || digest=""
     [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] \
         || die "Signature check failed: the verified signatures of $ref do not name $image with one digest; nothing was started ($SIGNATURE_TROUBLESHOOTING)."
     printf -v "$4" '%s@%s' "$1/$image" "$digest"

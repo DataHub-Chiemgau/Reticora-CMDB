@@ -66,6 +66,28 @@ func (s *fakeBlobStore) PresignedGetURL(_ context.Context, bucket, key string, _
 	return "https://minio.example.com/" + bucket + "/" + key + "?signature=fake", nil
 }
 
+func (s *fakeBlobStore) List(_ context.Context, bucket, prefix string) ([]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	keys := []string{}
+	for k := range s.objects {
+		if key, ok := strings.CutPrefix(k, bucket+"/"); ok && strings.HasPrefix(key, prefix) {
+			keys = append(keys, key)
+		}
+	}
+	return keys, nil
+}
+
+func (s *fakeBlobStore) DeleteAll(ctx context.Context, bucket, prefix string) (int, error) {
+	keys, _ := s.List(ctx, bucket, prefix)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, k := range keys {
+		delete(s.objects, bucket+"/"+k)
+	}
+	return len(keys), nil
+}
+
 func contentRequest(t *testing.T, mux http.Handler, method, url, contentType, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, url, strings.NewReader(body))

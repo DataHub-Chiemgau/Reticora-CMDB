@@ -9,6 +9,8 @@ import (
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 )
 
 // MemoryRepository is an in-memory implementation of Repository for development/testing.
@@ -157,4 +159,78 @@ func generateID() (string, error) {
 	// Format as UUID-like string
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
 		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
+}
+
+// ReplaceSecret implements SecretReplacer.
+func (r *MemoryRepository) ReplaceSecret(ctx context.Context, orgID, id string, plaintext []byte, enc *crypto.EnvelopeEncryptor,
+	inTx func(ctx context.Context, cred *Credential) error) (*Credential, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cred, ok := r.credentials[id]
+	if !ok || cred.OrganizationID != orgID {
+		return nil, ErrNotFound
+	}
+	if cred.Source == SourceVaultRef {
+		return nil, ErrVaultRefHasNoSecret
+	}
+	dekRow, ok := r.deks[orgID]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	dek, err := enc.UnwrapDEK(dekRow.EncryptedDEK)
+	if err != nil {
+		return nil, err
+	}
+	ciphertext, err := crypto.Encrypt(dek, plaintext)
+	if err != nil {
+		return nil, err
+	}
+	next := *cred
+	now := time.Now().UTC()
+	next.Ciphertext = ciphertext
+	next.SecretVersion = cred.SecretVersion + 1
+	next.RotatedAt = &now
+	next.UpdatedAt = now
+	out := next.Credential
+	if inTx != nil {
+		if txErr := inTx(ctx, &out); txErr != nil {
+			return nil, txErr
+		}
+	}
+	r.credentials[id] = &next
+	return &out, nil
+}
+
+// UpdateMetadata implements MetadataUpdater.
+func (r *MemoryRepository) UpdateMetadata(_ context.Context, orgID, id string, u MetadataUpdate) (*Credential, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cred, ok := r.credentials[id]
+	if !ok || cred.OrganizationID != orgID {
+		return nil, ErrNotFound
+	}
+	if u.Name != nil {
+		cred.Name = *u.Name
+	}
+	if u.SetMaxAge {
+		cred.MaxAgeDays = u.MaxAgeDays
+	}
+	// A change of the reference raises secret_version (WP-894).
+	if u.Ref.Changes() && cred.VaultRef != nil {
+		ref := *cred.VaultRef
+		if u.Ref.Path != nil {
+			ref.Path = *u.Ref.Path
+		}
+		if u.Ref.SetVersion {
+			ref.Version = u.Ref.Version
+		}
+		if u.Ref.FieldMap != nil {
+			ref.FieldMap = u.Ref.FieldMap
+		}
+		cred.VaultRef = &ref
+		cred.SecretVersion++
+	}
+	cred.UpdatedAt = time.Now().UTC()
+	out := cred.Credential
+	return &out, nil
 }

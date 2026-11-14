@@ -66,7 +66,7 @@ func redundantProviders(g *ciGraph, steps []stepRule) map[dependentType][]int32 
 // depth; a provider that is no visible CI of g is outside and counts as
 // up. Without such a reader g stays as it is. readHiddenFeeds then adds
 // the supplies the caller's scope hides.
-func (h *Handler) readFeeds(ctx context.Context, orgID string, g *ciGraph, roots []int32, depth int, rules map[string]impactRule) error {
+func (a *Analyzer) readFeeds(ctx context.Context, orgID string, g *ciGraph, roots []int32, depth int, rules map[string]impactRule) error {
 	steps := g.stepRules(rules, impactQuery{})
 	var relTypes []string
 	types := map[string]int32{}
@@ -79,17 +79,17 @@ func (h *Handler) readFeeds(ctx context.Context, orgID string, g *ciGraph, roots
 	if len(relTypes) == 0 {
 		return nil
 	}
-	if err := h.readDepthFeeds(ctx, orgID, g, roots, depth, steps, relTypes, types); err != nil {
+	if err := a.readDepthFeeds(ctx, orgID, g, roots, depth, steps, relTypes, types); err != nil {
 		return err
 	}
-	return h.readHiddenFeeds(ctx, orgID, g, steps, relTypes, types)
+	return a.readHiddenFeeds(ctx, orgID, g, steps, relTypes, types)
 }
 
 // readDepthFeeds reads the edges of readFeeds beyond the depth or the
 // node limit; types gives the number in g of each of relTypes.
-func (h *Handler) readDepthFeeds(ctx context.Context, orgID string, g *ciGraph, roots []int32, depth int,
+func (a *Analyzer) readDepthFeeds(ctx context.Context, orgID string, g *ciGraph, roots []int32, depth int,
 	steps []stepRule, relTypes []string, types map[string]int32) error {
-	reader, ok := h.relRepo.(relationship.IncidentEdgeReader)
+	reader, ok := a.relRepo.(relationship.IncidentEdgeReader)
 	if !ok {
 		return nil
 	}
@@ -145,6 +145,11 @@ func (h *Handler) readDepthFeeds(ctx context.Context, orgID string, g *ciGraph, 
 		}
 		e := ciEdge{id: rel.ID, source: end(rel.SourceCIID), target: end(rel.TargetCIID), relType: relType, origin: rel.Source}
 		if e.source == outside || e.target == outside {
+			// The analyzer names the provider beyond the depth that keeps
+			// a dependent up (WP-1025); it is a CI the caller sees.
+			if e.outsideID = rel.TargetCIID; e.target != outside {
+				e.outsideID = rel.SourceCIID
+			}
 			g.feeds = append(g.feeds, e)
 			continue
 		}
@@ -168,8 +173,8 @@ func (h *Handler) readDepthFeeds(ctx context.Context, orgID string, g *ciGraph, 
 // nor of a CI the caller does not see, so no answer names them and no walk
 // passes them. Nothing is read for an org-wide caller (the reader returns
 // nothing) or without a reader.
-func (h *Handler) readHiddenFeeds(ctx context.Context, orgID string, g *ciGraph, steps []stepRule, relTypes []string, types map[string]int32) error {
-	reader, ok := h.relRepo.(relationship.HiddenEdgeReader)
+func (a *Analyzer) readHiddenFeeds(ctx context.Context, orgID string, g *ciGraph, steps []stepRule, relTypes []string, types map[string]int32) error {
+	reader, ok := a.relRepo.(relationship.HiddenEdgeReader)
 	if !ok {
 		return nil
 	}

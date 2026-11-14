@@ -14,10 +14,21 @@ cd deploy/docker-compose
 docker compose --profile opensearch up -d
 ```
 
-The `opensearch` service runs single-node with the security plugin disabled
-(the compose network is the trust boundary) and a health-checked volume. The
-server waits for it via `depends_on: service_healthy` when the profile is
-enabled.
+The `opensearch` service runs `opensearchproject/opensearch:3.9.0` (pinned by
+version and digest, scanned by `image-scan-thirdparty`) single-node with the
+security plugin disabled (the compose network is the trust boundary, port 9200
+only on loopback) and a health-checked volume. The server waits for it via
+`depends_on: service_healthy` when the profile is enabled.
+
+The image's entrypoint runs the demo installer of the security plugin unless
+both `DISABLE_INSTALL_DEMO_CONFIG=true` and `DISABLE_SECURITY_PLUGIN=true` are
+set; without `OPENSEARCH_INITIAL_ADMIN_PASSWORD` that installer stops the
+container, and its demo certificates are never meant for operation. Compose,
+the Kubernetes component and CI therefore set both switches. To run with the
+security plugin, mount an own security configuration (certificates,
+`config.yml`, internal users) and set `RETICORA_OPENSEARCH_USERNAME` /
+`RETICORA_OPENSEARCH_PASSWORD`. The heap is set with `OPENSEARCH_JAVA_OPTS`;
+OpenSearch ignores `ES_JAVA_OPTS`.
 
 ### Kubernetes
 
@@ -71,6 +82,40 @@ curl -X POST https://<host>/api/v1/search/reindex \
   until they are replaced.
 - Duration: roughly linear in tenant size (bounded batches of 100 via the
   hybrid coordinator).
+
+## Upgrade from OpenSearch 2.x to 3.x (Upd-02)
+
+Releases up to 2026-11 shipped `opensearchproject/opensearch:2.19.7`; the
+current pin is 3.9.0 (Lucene 10, bundled JDK 25). The index holds no data of
+its own, so the supported path is a **rebuild**, not a snapshot restore:
+
+1. Optionally switch the server to `RETICORA_SEARCH_BACKEND=postgres` for the
+   maintenance window; search keeps working from PostgreSQL.
+2. Stop OpenSearch and remove its data (`docker compose --profile opensearch
+   down`, then `docker volume rm <project>_opensearchdata`; with Kubernetes
+   delete the StatefulSet and the PVC `data-opensearch-0`). Nothing is lost:
+   PostgreSQL holds every document, and a rollback to the previous release
+   rebuilds a 2.x index the same way.
+3. Deploy the new release and start OpenSearch 3.9.0 on the empty volume.
+4. Start the server with `RETICORA_SEARCH_BACKEND=opensearch`: it applies the
+   index template, the index is created on the first write.
+5. Run `POST /api/v1/search/reindex` once per tenant (see the reindex
+   runbook above) and check `GET <os>/reticora-search/_count`.
+
+An in-place start of 3.9.0 on the 2.19.7 data volume works as well for
+indexes created by 2.x (`minimum_index_compatibility_version` of 3.9.0 is
+2.0.0; checked locally on 2026-11-13: document count, a nested identifier
+query and new writes survive the switch). It is not the recommended path:
+indexes created by 1.x are not readable by 3.x, and a 3.x data volume cannot
+be opened by 2.x again. Snapshots from 2.x restore into 3.x only if their
+indexes were created by 2.x; the rebuild avoids that question.
+
+The own HTTP client of `internal/search` uses only APIs that are unchanged in
+3.x (`_index_template`, `_mapping`, `_doc`, `_search` with nested queries,
+inner hits, `docvalue_fields` and highlight). The integration tests
+`opensearch_real_integration_test.go` and
+`opensearch_real_fields_integration_test.go` run against the pinned version in
+CI.
 
 ## Monitoring & troubleshooting
 

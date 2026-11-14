@@ -16,6 +16,8 @@ export type AppPage =
   | 'dashboard'
   | 'cmdb'
   | 'topology'
+  // IPAM with sections and the subnet tree (IPM-19, WP-915).
+  | 'ipam'
   | 'racks'
   | 'discovery'
   | 'assets'
@@ -34,6 +36,8 @@ export type AppPage =
   | 'webhooks'
   | 'export'
   | 'monitoring'
+  | 'alarms'
+  | 'incidents'
   | 'audit'
   | 'security'
   | 'map'
@@ -52,6 +56,7 @@ export type AppPage =
   // Enterprise CMDB + asset/inventory extension (Phase E).
   | 'ci-types'
   | 'rules'
+  | 'source-ranks'
   | 'relationship-types'
   | 'locations'
   | 'inventory'
@@ -64,12 +69,17 @@ export type AppPage =
   | 'contracts'
   | 'suppliers'
   // Client administration (UI-14, WP-855).
-  | 'clients';
+  | 'clients'
+  // Plan and add-ons of the organization (PKG-06, WP-886).
+  | 'plan'
+  // Organization data: full export and deletion (TLC-05, TLC-06, WP-1157).
+  | 'org-data';
 
 export const pageToPath: Record<AppPage, string> = {
   dashboard: '/dashboard',
   cmdb: '/cmdb',
   topology: '/topology',
+  ipam: '/ipam',
   racks: '/racks',
   discovery: '/discovery',
   assets: '/assets',
@@ -88,6 +98,8 @@ export const pageToPath: Record<AppPage, string> = {
   webhooks: '/webhooks',
   export: '/export',
   monitoring: '/monitoring',
+  alarms: '/alarms',
+  incidents: '/incidents',
   audit: '/audit',
   security: '/security',
   map: '/map',
@@ -105,6 +117,7 @@ export const pageToPath: Record<AppPage, string> = {
   jobs: '/jobs',
   'ci-types': '/ci-types',
   rules: '/rules',
+  'source-ranks': '/source-ranks',
   'relationship-types': '/relationship-types',
   locations: '/locations',
   inventory: '/inventory',
@@ -114,6 +127,8 @@ export const pageToPath: Record<AppPage, string> = {
   contracts: '/contracts',
   suppliers: '/suppliers',
   clients: '/clients',
+  plan: '/plan',
+  'org-data': '/org-data',
 };
 
 interface CommandPaletteProps {
@@ -309,6 +324,12 @@ export function CommandPalette({
         action: () => onNavigate('topology'),
       },
       {
+        id: 'nav-ipam',
+        label: t('commandPalette.commands.ipam'),
+        keywords: ['ipam subnetz subnet ip adressen addresses section'],
+        action: () => onNavigate('ipam'),
+      },
+      {
         id: 'nav-racks',
         label: t('commandPalette.commands.racks'),
         keywords: ['racks rack schrank he units'],
@@ -391,6 +412,18 @@ export function CommandPalette({
         action: () => onNavigate('users'),
       },
       {
+        id: 'nav-plan',
+        label: t('commandPalette.commands.plan'),
+        keywords: ['plan paket add-ons limits verbrauch usage quota'],
+        action: () => onNavigate('plan'),
+      },
+      {
+        id: 'nav-org-data',
+        label: t('commandPalette.commands.orgData'),
+        keywords: ['organisation export löschung deletion daten data dsgvo gdpr'],
+        action: () => onNavigate('org-data'),
+      },
+      {
         id: 'nav-permissions',
         label: t('commandPalette.commands.permissions'),
         keywords: ['permissions berechtigungen rbac abac'],
@@ -457,6 +490,18 @@ export function CommandPalette({
         action: () => onNavigate('monitoring'),
       },
       {
+        id: 'nav-alarms',
+        label: t('commandPalette.commands.alarms'),
+        keywords: ['alarme alarms alerts ack bestätigen'],
+        action: () => onNavigate('alarms'),
+      },
+      {
+        id: 'nav-incidents',
+        label: t('commandPalette.commands.incidents'),
+        keywords: ['störungen incidents ausfall outage root cause'],
+        action: () => onNavigate('incidents'),
+      },
+      {
         id: 'nav-audit',
         label: t('commandPalette.commands.audit', 'Audit-Protokoll öffnen'),
         keywords: ['audit protokoll hash chain compliance'],
@@ -491,6 +536,12 @@ export function CommandPalette({
         label: t('commandPalette.commands.rules'),
         keywords: ['rules regeln regelkatalog validation validierung bedingung condition'],
         action: () => onNavigate('rules'),
+      },
+      {
+        id: 'nav-source-ranks',
+        label: t('commandPalette.commands.source-ranks'),
+        keywords: ['source ranks quellränge quellpriorität priority rang reconciliation abgleich'],
+        action: () => onNavigate('source-ranks'),
       },
     ];
     const writtenIds = new Set(written.map((command) => command.id));

@@ -63,8 +63,8 @@ func (l entitlementLister) List(ctx context.Context, orgID string) ([]compliance
 		return nil, err
 	}
 	out := make([]compliance.EntitlementStatus, len(ents))
-	for i, ent := range ents {
-		out[i] = compliance.EntitlementStatus{FeatureKey: ent.FeatureKey, Enabled: ent.Enabled}
+	for i := range ents {
+		out[i] = compliance.EntitlementStatus{FeatureKey: ents[i].FeatureKey, Enabled: ents[i].Enabled}
 	}
 	return out, nil
 }
@@ -289,6 +289,17 @@ func bffSources(repos *Repositories, topo *topology.Handler, jobSource graphqlbf
 	}
 	if formSource, ok := repos.CIType.(citype.FormSource); ok {
 		sources.Forms = bffForms{source: formSource, policy: formPolicy}
+	}
+	// The P3 read views at the CI (WP-1136): the batch reads of the
+	// PostgreSQL repositories; the memory profile has none.
+	if findings, ok := repos.Security.(graphqlbff.FindingBatchSource); ok {
+		sources.Findings = findings
+	}
+	if results, ok := repos.Compliance.(graphqlbff.ComplianceBatchSource); ok {
+		sources.Compliance = results
+	}
+	if runs, ok := repos.Workflow.(graphqlbff.WorkflowRunBatchSource); ok {
+		sources.WorkflowRuns = runs
 	}
 	return sources
 }

@@ -33,7 +33,9 @@ package server_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -48,8 +50,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/admp"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm/configsnap"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
@@ -62,14 +68,18 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/maintenance"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/operator"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/blob"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/crypto"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/probe"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 )
 
 // evt02Case is the production action of one event type.
@@ -169,6 +179,20 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 		t.Helper()
 		return e.Call(t, as, method, path, body)
 	}
+	// callMFA is call with a session opened with a second factor (the
+	// deletion of the organization, WP-1152).
+	callMFA := func(t *testing.T, as t6As, method, path, body string) t6Response {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		p := identity.Principal{Subject: as.User, OrganizationID: as.Org, Type: identity.PrincipalTypeUser, MFA: true,
+			Scope:       &identity.Scope{Clients: identity.ScopeSet{All: true}, Sites: identity.ScopeSet{All: true}, Teams: identity.ScopeSet{All: true}},
+			Permissions: as.Perms, Credential: "evt02-mfa"}
+		ctx := identity.WithPermissions(identity.WithPrincipal(req.Context(), p), p.Permissions)
+		w := httptest.NewRecorder()
+		e.handler.ServeHTTP(w, req.WithContext(ctx))
+		return t6Response{Code: w.Code, Body: w.Body.Bytes()}
+	}
 	// answered checks the answer of a request: refused, the request must
 	// fail; otherwise it must answer want.
 	answered := func(t *testing.T, what string, r t6Response, refused bool, want int) {
@@ -237,9 +261,34 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 		silentCollector                    string
 		reviewItem                         string
 		exportJob                          string
+		orgExportJob                       string
 		failingJob                         *jobs.Job
 		jobService                         *jobs.Service
 		warned, expired                    string
+		webhookWorkflow                    string
+		runWorkflow, failingWorkflow       string
+		approvalWorkflow                   string
+		quorumWorkflow, decidedRun         string
+		rotatedCredential, agedCredential  string
+		usageCredential, usageCollector    string
+		usageScope, usageCI                string
+		stateAddress, stateSubnet          string
+		findingCI, changedFinding          string
+		asnID                              string
+		resolvedFinding                    string
+		admpAccount                        string
+		probeGroup                         string
+		stateCollector, stateProbe         string
+		skewCollector                      string
+		failGroup, failCollector           string
+		admpSync                           *admp.Sync
+		alarms                             = alarm.NewPGService(f.App)
+		ackAlarm, sevAlarm, resAlarm       *alarm.Alarm
+		updIncident                        *alarm.Incident
+		maintWindow, maintCI               string
+		startedWindow, endedWindow         string
+		configCI, configCollector          string
+		allocParent                        string
 		hookServer                         *httptest.Server
 		hookSubscription, hookDelivery     string
 		hookDispatcher                     *webhook.Dispatcher
@@ -592,6 +641,451 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 					t.Errorf("entitlement.expired data %v, want monitoring with expired_at", data)
 				}
 			}},
+		{typ: events.CredentialRotated,
+			// PUT /credentials/{id}/secret replaces the secret (WP-889).
+			setup: func(t *testing.T) {
+				r := call(t, admin, http.MethodPost, "/api/v1/credentials",
+					`{"name":"evt02-cred","kind":"ssh_password","secret":{"username":"u","password":"evt02-old"}}`)
+				if r.Code != http.StatusCreated {
+					t.Fatalf("create credential: %d %s", r.Code, t6Short(r.Body))
+				}
+				var c struct {
+					ID string `json:"id"`
+				}
+				if err := json.Unmarshal(r.Body, &c); err != nil {
+					t.Fatal(err)
+				}
+				rotatedCredential = c.ID
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPut, "/api/v1/credentials/"+rotatedCredential+"/secret",
+					`{"secret":{"username":"u","password":"evt02-new"}}`)
+				answered(t, "PUT /credentials/{id}/secret", r, refused, http.StatusOK)
+				if refused {
+					unchanged(t, "secret_version", scalar(t, `SELECT secret_version::text FROM credential WHERE id = $1`, rotatedCredential), "1")
+				}
+				return rotatedCredential
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["source"] != "stored" || data["secret_version"] != float64(2) ||
+					data["kind"] != "ssh_password" {
+					t.Errorf("credential.rotated data %v", data)
+				}
+				for _, v := range data {
+					if s, ok := v.(string); ok && strings.Contains(s, "evt02-") {
+						t.Errorf("credential.rotated carries a secret value: %v", data)
+					}
+				}
+			}},
+		{typ: events.CredentialRotationDue,
+			// credential.age_check (WP-897): a stored secret beyond its
+			// max_age_days, once per secret_version.
+			setup: func(t *testing.T) {
+				r := call(t, admin, http.MethodPost, "/api/v1/credentials",
+					`{"name":"evt02-aged","kind":"ssh_password","max_age_days":1,"secret":{"username":"u","password":"evt02-aged"}}`)
+				if r.Code != http.StatusCreated {
+					t.Fatalf("create credential: %d %s", r.Code, t6Short(r.Body))
+				}
+				var c struct {
+					ID string `json:"id"`
+				}
+				if err := json.Unmarshal(r.Body, &c); err != nil {
+					t.Fatal(err)
+				}
+				agedCredential = c.ID
+				exec(t, `UPDATE credential SET created_at = now() - interval '3 days' WHERE id = $1`, agedCredential)
+			},
+			act: func(t *testing.T, refused bool) string {
+				_, err := credential.NewAgeCheck(f.App).Run(bg)
+				failed(t, "credential age check", err, refused)
+				if refused {
+					unchanged(t, "notices sent", noticesSent(t, events.CredentialRotationDue, "credential/"+agedCredential), "0")
+				}
+				return agedCredential
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["credential_id"] != entity || data["max_age_days"] != float64(1) || data["secret_version"] != float64(1) ||
+					data["source"] != "stored" || data["due_at"] == nil {
+					t.Errorf("credential.rotation_due data %v", data)
+				}
+				for _, v := range data {
+					if s, ok := v.(string); ok && strings.Contains(s, "evt02-") {
+						t.Errorf("credential.rotation_due carries a secret value: %v", data)
+					}
+				}
+			}},
+		{typ: events.CredentialResolutionFailed,
+			// A scope run reports an auth_failed use of a credential of the
+			// collector's bundle at a CI (WP-898).
+			setup: func(t *testing.T) {
+				r := call(t, admin, http.MethodPost, "/api/v1/credentials",
+					`{"name":"evt02-usage","kind":"ssh_password","secret":{"username":"u","password":"evt02-usage-secret"}}`)
+				if r.Code != http.StatusCreated {
+					t.Fatalf("create credential: %d %s", r.Code, t6Short(r.Body))
+				}
+				usageCredential = t6ID(r.Body)
+				usageCollector = scalar(t, `INSERT INTO collector (organization_id, name, status) VALUES ($1, 'evt02-usage', 'active')
+					RETURNING id::text`, f.OrgA)
+				usageScope = scalar(t, `INSERT INTO discovery_scope (organization_id, collector_id, name, kind, target, credential_ids)
+					VALUES ($1, $2, 'evt02-usage', 'host', '10.97.0.1', ARRAY[$3]::uuid[]) RETURNING id::text`,
+					f.OrgA, usageCollector, usageCredential)
+				usageCI = f.CI(t, f.OrgA, "", "evt02-usage-ci")
+				exec(t, `UPDATE ci SET management_ip = '10.97.0.1' WHERE id = $1`, usageCI)
+			},
+			act: func(t *testing.T, refused bool) string {
+				h := discovery.NewHandler(discovery.NewPGRepository(f.App), nil)
+				err := h.RecordCollectorScopeRun(f.OrgCtx(f.OrgA), f.OrgA, usageCollector, &discovery.ScopeResultReport{
+					ScopeID: usageScope, At: time.Now(), Result: map[string]any{"records": 1},
+					CredentialUsage: []credential.UsageReport{{Target: "10.97.0.1", Namespace: "ssh", CredentialID: usageCredential,
+						Cause: credential.UsageAuthFailed}}})
+				failed(t, "scope run with credential usage", err, refused)
+				if refused {
+					unchanged(t, "credential usage", count(t, `credential_usage WHERE credential_id = $1`, usageCredential), "0")
+				}
+				return usageCredential
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["credential_id"] != entity || data["ci_id"] != usageCI || data["namespace"] != "ssh" ||
+					data["error_class"] != "auth_failed" || data["kind"] != "ssh_password" {
+					t.Errorf("credential.resolution_failed data %v", data)
+				}
+				for _, v := range data {
+					if s, ok := v.(string); ok && strings.Contains(s, "evt02-usage-secret") {
+						t.Errorf("credential.resolution_failed carries a secret value: %v", data)
+					}
+				}
+			}},
+		{typ: events.ProbeConfigChanged,
+			// POST /monitoring/probes (WP-939): a new probe is a change of
+			// the probe configuration (E-161), in the write transaction.
+			setup: func(t *testing.T) {
+				probeGroup = scalar(t, `INSERT INTO collector_group (organization_id, client_id, name)
+					VALUES ($1, $2, 'evt02-probes') RETURNING id::text`, f.OrgA, f.Client1)
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/monitoring/probes",
+					`{"type":"icmp","target":"10.250.0.1","client_id":"`+f.Client1+`","collector_group_id":"`+probeGroup+`"}`)
+				answered(t, "POST /monitoring/probes", r, refused, http.StatusCreated)
+				if refused {
+					unchanged(t, "probes", count(t, `probe WHERE organization_id = $1`, f.OrgA), "0")
+					return ""
+				}
+				var p struct {
+					ID string `json:"id"`
+				}
+				if err := json.Unmarshal(r.Body, &p); err != nil {
+					t.Fatal(err)
+				}
+				return p.ID
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				fields, _ := data["changed_fields"].([]any)
+				if data["id"] != entity || data["client_id"] != f.Client1 || len(fields) == 0 {
+					t.Errorf("config.changed data %v", data)
+				}
+			}},
+		{typ: events.ProbeStateChanged,
+			// The worker probe-state applies a state change of the assigned
+			// collector (WP-961).
+			setup: func(t *testing.T) {
+				group := scalar(t, `INSERT INTO collector_group (organization_id, name) VALUES ($1, 'evt02-state') RETURNING id::text`, f.OrgA)
+				stateCollector = scalar(t, `INSERT INTO collector (organization_id, name, status) VALUES ($1, 'evt02-state', 'active')
+					RETURNING id::text`, f.OrgA)
+				exec(t, `UPDATE collector_group_member SET group_id = $1, last_alive_at = now() WHERE collector_id = $2`, group, stateCollector)
+				stateProbe = scalar(t, `INSERT INTO probe (organization_id, client_id, collector_group_id, type, target)
+					VALUES ($1, $2, $3, 'icmp', '10.250.2.1') RETURNING id::text`, f.OrgA, f.Client1, group)
+				exec(t, `INSERT INTO probe_assignment (probe_id, organization_id, collector_id, epoch) VALUES ($1, $2, $3, 1)`,
+					stateProbe, f.OrgA, stateCollector)
+			},
+			act: func(t *testing.T, refused bool) string {
+				a := probe.NewStateApplier(nil, probe.StreamConfig{}, f.App)
+				err := a.Apply(context.Background(), f.OrgA, stateCollector, &probewire.StateChange{ProbeID: stateProbe, Epoch: 1, Seq: 1,
+					From: probewire.StateUnknown, To: probewire.StateDown, Reason: "timeout", ObservedAt: time.Now()}, time.Now())
+				failed(t, "probe state change", err, refused)
+				if refused {
+					unchanged(t, "probe state", count(t, `probe_state WHERE probe_id = $1`, stateProbe), "0")
+					return ""
+				}
+				return stateProbe
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["probe_id"] != entity || data["client_id"] != f.Client1 || data["from"] != "unknown" ||
+					data["to"] != "down" || data["collector_id"] != stateCollector || data["late"] != false || data["notify"] != true {
+					t.Errorf("probe.state_changed data %v", data)
+				}
+			}},
+		{typ: events.CollectorClockSkew,
+			// The clock evaluation of the monitoring alive messages
+			// (WP-962): a collector 5 s ahead of the server crosses 2 s.
+			setup: func(t *testing.T) {
+				skewCollector = scalar(t, `INSERT INTO collector (organization_id, name, status) VALUES ($1, 'evt02-skew', 'active')
+					RETURNING id::text`, f.OrgA)
+			},
+			act: func(t *testing.T, refused bool) string {
+				now := time.Now()
+				err := probe.NewClockSkew(f.App).Observe(context.Background(), f.OrgA, skewCollector, &probewire.Alive{
+					CollectorTime: now.Add(5 * time.Second), QueueState: probewire.QueueOK,
+					ICMPCapability: probewire.ICMPUnprivileged, ICMPCapabilityV6: probewire.ICMPUnprivileged}, now)
+				failed(t, "collector clock skew", err, refused)
+				if refused {
+					unchanged(t, "clock offset", scalar(t, `SELECT COALESCE(clock_offset_ms::text, 'null') FROM collector_group_member
+						WHERE collector_id = $1`, skewCollector), "null")
+					return ""
+				}
+				return skewCollector
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["collector_id"] != entity || data["skew_ms"] != float64(5000) ||
+					data["offset_ms"] != float64(5000) || data["degraded"] != false || data["collector_group_id"] == nil {
+					t.Errorf("collector.clock_skew data %v", data)
+				}
+			}},
+		{typ: events.CollectorGroupFailover,
+			// The liveness sweep of probe.assign (WP-963): A's last alive
+			// message is a minute old, B is alive; A's probe moves to B.
+			setup: func(t *testing.T) {
+				failGroup = scalar(t, `INSERT INTO collector_group (organization_id, client_id, name)
+					VALUES ($1, $2, 'evt02-failover') RETURNING id::text`, f.OrgA, f.Client1)
+				for i := range 2 {
+					c := scalar(t, `INSERT INTO collector (organization_id, client_id, name, status) VALUES ($1, $2, $3, 'active')
+						RETURNING id::text`, f.OrgA, f.Client1, fmt.Sprintf("evt02-failover-%d", i))
+					exec(t, `UPDATE collector_group_member SET group_id = $1, last_alive_at = now() WHERE collector_id = $2`, failGroup, c)
+				}
+				exec(t, `INSERT INTO probe (organization_id, client_id, collector_group_id, type, target)
+					VALUES ($1, $2, $3, 'icmp', '10.250.4.1')`, f.OrgA, f.Client1, failGroup)
+				if _, err := probe.NewAssigner(f.App).RunGroup(context.Background(), f.OrgA, failGroup); err != nil {
+					t.Fatal(err)
+				}
+				failCollector = scalar(t, `SELECT a.collector_id::text FROM probe_assignment a JOIN probe p ON p.id = a.probe_id
+					WHERE p.collector_group_id = $1`, failGroup)
+				exec(t, `UPDATE collector_group_member SET last_alive_at = now() - interval '1 minute' WHERE collector_id = $1`, failCollector)
+			},
+			act: func(t *testing.T, refused bool) string {
+				_, err := probe.NewLiveness(f.App).SweepOrg(context.Background(), f.OrgA, time.Now().Add(time.Second))
+				failed(t, "collector liveness sweep", err, refused)
+				if refused {
+					unchanged(t, "member status", scalar(t, `SELECT member_status FROM collector_group_member WHERE collector_id = $1`,
+						failCollector), "healthy")
+					return ""
+				}
+				return failGroup
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["collector_group_id"] != entity || data["client_id"] != f.Client1 ||
+					data["failed_collector_id"] != failCollector || data["moved_probes"] != float64(1) {
+					t.Errorf("collector_group.failover data %v", data)
+				}
+			}},
+		{typ: events.MonitoringSuspensionChanged,
+			// The reconciliation probe.entitlement_reconcile (WP-942): a
+			// snmp_status probe without monitoring_network is paused.
+			setup: func(t *testing.T) {
+				group := scalar(t, `INSERT INTO collector_group (organization_id, client_id, name)
+					VALUES ($1, $2, 'evt02-suspend') RETURNING id::text`, f.OrgA, f.Client1)
+				exec(t, `INSERT INTO probe (organization_id, client_id, collector_group_id, type, target)
+					VALUES ($1, $2, $3, 'snmp_status', '10.250.1.1')`, f.OrgA, f.Client1, group)
+			},
+			act: func(t *testing.T, refused bool) string {
+				s := probe.NewSuspender(f.App, func(_ context.Context, _, feature string) (bool, error) {
+					return feature == entitlement.FeatureMonitoring, nil
+				})
+				_, err := s.RunOrg(context.Background(), f.OrgA)
+				failed(t, "probe suspension", err, refused)
+				if refused {
+					unchanged(t, "suspended probes", count(t, `probe WHERE organization_id = $1 AND suspended_reason IS NOT NULL`, f.OrgA), "0")
+					return ""
+				}
+				return f.OrgA
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				types, _ := data["probe_types"].([]any)
+				if entity != f.OrgA || data["paused"] != float64(1) || data["resumed"] != float64(0) || data["suspended"] != true ||
+					data["feature_key"] != entitlement.FeatureMonitoringNetwork || len(types) != 1 || types[0] != "snmp_status" {
+					t.Errorf("monitoring.suspension_changed data %v", data)
+				}
+			}},
+		{typ: events.ADMPConnectionRefreshed,
+			// The refresh admp.refresh of a connection against a fake
+			// source (WP-929): a new connection is a change.
+			setup: func(t *testing.T) {
+				cred := f.ID()
+				exec(t, `INSERT INTO credential (id, organization_id, name, kind, ciphertext) VALUES ($1, $2, 'evt02-admp', 'api_token', '\x00')`,
+					cred, f.OrgA)
+				admpAccount = scalar(t, `INSERT INTO admp_account (organization_id, client_id, name, base_url, credential_id)
+					VALUES ($1, $2, 'evt02-admp', 'https://admp.example.com/api', $3) RETURNING id::text`, f.OrgA, f.Client1, cred)
+				admpSync = admp.NewSync(&admp.SyncOptions{Accounts: e.Repos.ADMPAccounts, Cache: e.Repos.ADMP, Sources: evt02ADMP{},
+					Pool: f.App})
+			},
+			act: func(t *testing.T, refused bool) string {
+				res, err := admpSync.Refresh(f.OrgCtx(f.OrgA), f.OrgA, admp.RefreshParams{AccountID: admpAccount,
+					Kind: admp.KindConnection, ExternalID: "evt02-line"})
+				failed(t, "admp refresh", err, refused)
+				if refused {
+					unchanged(t, "admp connections", count(t, `admp_connection WHERE account_id = $1`, admpAccount), "0")
+					return ""
+				}
+				if res.Result != "ok" {
+					t.Fatalf("admp refresh result %+v", res)
+				}
+				return scalar(t, `SELECT id::text FROM admp_connection WHERE account_id = $1 AND external_id = 'evt02-line'`, admpAccount)
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["account_id"] != admpAccount || data["client_id"] != f.Client1 || data["stale"] != false {
+					t.Errorf("admp.connection.refreshed data %v", data)
+				}
+				for _, v := range data {
+					if s, ok := v.(string); ok && strings.Contains(s, "evt02 carrier") {
+						t.Errorf("admp.connection.refreshed carries connection data: %v", data)
+					}
+				}
+			}},
+		{typ: events.IPAMAddressStateChanged,
+			// PATCH /ips/{id} sets the state of an address (WP-902).
+			setup: func(t *testing.T) {
+				stateSubnet = scalar(t, `INSERT INTO subnet (organization_id, client_id, cidr) VALUES ($1, $2, '10.255.55.0/24')
+					RETURNING id::text`, f.OrgA, f.Client1)
+				stateAddress = scalar(t, `INSERT INTO ip_address (organization_id, subnet_id, address) VALUES ($1, $2, '10.255.55.7')
+					RETURNING id::text`, f.OrgA, stateSubnet)
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPatch, "/api/v1/ips/"+stateAddress, `{"state":"active"}`)
+				answered(t, "PATCH /ips/{id} state", r, refused, http.StatusOK)
+				if refused {
+					unchanged(t, "state", scalar(t, `SELECT state FROM ip_address WHERE id = $1`, stateAddress), "unknown")
+				}
+				return stateAddress
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["subnet_id"] != stateSubnet || data["client_id"] != f.Client1 ||
+					data["from"] != "unknown" || data["to"] != "active" {
+					t.Errorf("ipam.address.state_changed data %v", data)
+				}
+			}},
+		{typ: events.FindingCreated,
+			// POST /security/findings records a manual finding through the
+			// upsert (WP-1116).
+			setup: func(t *testing.T) { findingCI = f.CI(t, f.OrgA, f.Client1, "evt02-finding-ci") },
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/security/findings",
+					`{"ci_id":"`+findingCI+`","kind":"vulnerability","severity":"high","title":"evt02-finding","reference":"CVE-2024-5555"}`)
+				answered(t, "POST /security/findings", r, refused, http.StatusCreated)
+				if refused {
+					unchanged(t, "findings named evt02-finding", count(t, `security_finding WHERE organization_id = $1 AND title = 'evt02-finding'`, f.OrgA), "0")
+					return ""
+				}
+				return t6ID(r.Body)
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["ci_id"] != findingCI || data["client_id"] != f.Client1 || data["severity"] != "high" ||
+					data["status"] != "open" || data["source"] != "manual" || data["cve_ids"] == nil {
+					t.Errorf("finding.created data %v", data)
+				}
+			}},
+		{typ: events.FindingChanged,
+			// PATCH /security/findings/{id} acknowledges a finding (WP-1116).
+			setup: func(t *testing.T) {
+				changedFinding = scalar(t, `INSERT INTO security_finding (organization_id, ci_id, kind, title) VALUES ($1, $2, 'vulnerability', 'evt02-changed')
+					RETURNING id::text`, f.OrgA, f.CI(t, f.OrgA, f.Client1, "evt02-finding-changed"))
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPatch, "/api/v1/security/findings/"+changedFinding, `{"status":"acknowledged"}`)
+				answered(t, "PATCH /security/findings/{id} acknowledged", r, refused, http.StatusOK)
+				if refused {
+					unchanged(t, "finding status", scalar(t, `SELECT status FROM security_finding WHERE id = $1`, changedFinding), "open")
+				}
+				return changedFinding
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["status"] != "acknowledged" || data["client_id"] != f.Client1 || data["source"] != "manual" {
+					t.Errorf("finding.changed data %v", data)
+				}
+			}},
+		{typ: events.FindingResolved,
+			// PATCH /security/findings/{id} resolves a finding (WP-1116).
+			setup: func(t *testing.T) {
+				resolvedFinding = scalar(t, `INSERT INTO security_finding (organization_id, ci_id, kind, title) VALUES ($1, $2, 'missing_patch', 'evt02-resolved')
+					RETURNING id::text`, f.OrgA, f.CI(t, f.OrgA, f.Client1, "evt02-finding-resolved"))
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPatch, "/api/v1/security/findings/"+resolvedFinding, `{"status":"resolved"}`)
+				answered(t, "PATCH /security/findings/{id} resolved", r, refused, http.StatusOK)
+				if refused {
+					unchanged(t, "finding status", scalar(t, `SELECT status FROM security_finding WHERE id = $1`, resolvedFinding), "open")
+				}
+				return resolvedFinding
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["status"] != "resolved" || data["severity"] != "medium" {
+					t.Errorf("finding.resolved data %v", data)
+				}
+			}},
+		{typ: events.ASNChanged,
+			// POST /asns creates an AS number of a client (WP-1066).
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/asns",
+					`{"number":"AS4200000055","name":"evt02-asn","kind":"customer","client_id":"`+f.Client1+`"}`)
+				answered(t, "POST /asns", r, refused, http.StatusCreated)
+				if refused {
+					unchanged(t, "AS numbers named evt02-asn", count(t, `asn WHERE organization_id = $1 AND name = 'evt02-asn'`, f.OrgA), "0")
+					return ""
+				}
+				asnID = t6ID(r.Body)
+				return asnID
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["asn"] != float64(4200000055) || data["number"] != float64(4200000055) ||
+					data["client_id"] != f.Client1 || data["change"] != "create" {
+					t.Errorf("asn.changed data %v", data)
+				}
+			}},
+		{typ: events.IPAMSubnetChanged,
+			// POST /subnets/{id}/allocate-subnet allocates a child (WP-904).
+			setup: func(t *testing.T) {
+				allocParent = scalar(t, `INSERT INTO subnet (organization_id, client_id, cidr, is_pool) VALUES ($1, $2, '10.255.56.0/24', true)
+					RETURNING id::text`, f.OrgA, f.Client1)
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/subnets/"+allocParent+"/allocate-subnet", `{"prefix_length":26}`)
+				answered(t, "POST /subnets/{id}/allocate-subnet", r, refused, http.StatusCreated)
+				if refused {
+					unchanged(t, "allocated subnets", count(t, `subnet WHERE parent_id = $1`, allocParent), "0")
+					return ""
+				}
+				return t6ID(r.Body)
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["cidr"] != "10.255.56.0/26" || data["client_id"] != f.Client1 ||
+					data["change_kind"] != "allocated" {
+					t.Errorf("ipam.subnet.changed data %v", data)
+				}
+			}},
+		{typ: events.EntitlementChanged,
+			// The operator's plan change (WP-882): essential → standard.
+			setup: func(t *testing.T) {
+				exec(t, `UPDATE organization SET plan = 'essential' WHERE id = $1`, f.OrgA)
+			},
+			act: func(t *testing.T, refused bool) string {
+				const token = "evt02-break-glass-token-with-32-characters"
+				svc := entitlement.NewService(entitlement.NewPGRepository(f.App), entitlement.Options{Enforce: true})
+				mux := chi.NewRouter()
+				operator.NewHandler(operator.Config{BreakGlassToken: token}, nil, nil, operator.NewAuditor(f.App), f.App).
+					WithEntitlements(svc).RegisterRoutes(mux)
+				req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/orgs/"+f.OrgA+"/plan",
+					strings.NewReader(`{"plan":"standard","reason":"evt02"}`))
+				req.Header.Set(operator.BreakGlassHeader, token)
+				w := httptest.NewRecorder()
+				mux.ServeHTTP(w, req)
+				answered(t, "PUT /admin/orgs/{id}/plan", t6Response{Code: w.Code, Body: w.Body.Bytes()}, refused, http.StatusOK)
+				if refused {
+					unchanged(t, "plan", scalar(t, `SELECT plan FROM organization WHERE id = $1`, f.OrgA), "essential")
+				}
+				return f.OrgA
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["plan"] != "standard" || data["plan_before"] != "essential" {
+					t.Errorf("entitlement.changed data %v, want essential → standard of the organization", data)
+				}
+			}},
 		{typ: events.InvitationCreated,
 			act: func(t *testing.T, refused bool) string {
 				r := call(t, admin, http.MethodPost, "/api/v1/invitations", `{"email":"evt02-invitee@example.org","role_id":"`+viewerRole+`"}`)
@@ -760,6 +1254,434 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 					t.Errorf("data %v, want id %s, on_hand_total 4, min_level 5 and sku evt02-toner", data, entity)
 				}
 			}},
+		{typ: events.OrgDeletionRequested,
+			// POST /org/deletion (WP-1152): an org_admin with a second
+			// factor requests the deletion of the organization.
+			act: func(t *testing.T, refused bool) string {
+				r := callMFA(t, admin, http.MethodPost, "/api/v1/org/deletion", `{"confirm_slug":"scopetest-55-a"}`)
+				answered(t, "POST /org/deletion", r, refused, http.StatusAccepted)
+				if refused {
+					unchanged(t, "deletion_state", scalar(t, `SELECT deletion_state FROM organization WHERE id = $1`, f.OrgA), "none")
+				}
+				return f.OrgA
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["requested_by"] != admin.User || data["due_at"] == nil || data["cancelled_by"] != nil {
+					t.Errorf("org.deletion_requested data %v", data)
+				}
+			}},
+		{typ: events.OrgExportCompleted,
+			// POST /org/exports (WP-1151) queues the full export of an
+			// org_admin with a second factor; its job succeeding writes
+			// org.export_completed in the transaction of the change.
+			setup: func(t *testing.T) {
+				r := callMFA(t, admin, http.MethodPost, "/api/v1/org/exports", "")
+				if r.Code != http.StatusAccepted {
+					t.Fatalf("setup: POST /org/exports = %d %s", r.Code, t6Short(r.Body))
+				}
+				orgExportJob = t6ID(r.Body)
+				if _, err := jobs.NewService(e.Repos.Jobs).ClaimJob(bg, f.OrgA, orgExportJob); err != nil {
+					t.Fatal(err)
+				}
+			},
+			act: func(t *testing.T, refused bool) string {
+				manifest := &export.OrgExportManifest{OrganizationID: f.OrgA, JobID: orgExportJob, Format: "jsonl",
+					Tables: []export.OrgExportTable{{Name: "ci", Rows: 3, Parts: []export.OrgExportPart{{Key: "k", Bytes: 120}}}}}
+				_, err := jobs.NewService(e.Repos.Jobs).Succeed(bg, f.OrgA, orgExportJob, manifest)
+				failed(t, "complete the full export", err, refused)
+				if refused {
+					unchanged(t, "job", scalar(t, `SELECT status FROM job WHERE id = $1`, orgExportJob), string(jobs.StatusRunning))
+				}
+				return orgExportJob
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["initiated_by"] != admin.User || data["rows"] != float64(3) ||
+					data["bytes"] != float64(120) || data["expires_at"] == nil {
+					t.Errorf("org.export_completed data %v", data)
+				}
+			}},
+		{typ: events.OrgDeletionCancelled,
+			// DELETE /org/deletion (WP-1152) withdraws the request of the
+			// case before during the grace period.
+			act: func(t *testing.T, refused bool) string {
+				r := callMFA(t, admin, http.MethodDelete, "/api/v1/org/deletion", "")
+				answered(t, "DELETE /org/deletion", r, refused, http.StatusOK)
+				if refused {
+					unchanged(t, "deletion_state", scalar(t, `SELECT deletion_state FROM organization WHERE id = $1`, f.OrgA), "requested")
+				}
+				return f.OrgA
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["requested_by"] != admin.User || data["cancelled_by"] != admin.User || data["due_at"] == nil {
+					t.Errorf("org.deletion_cancelled data %v", data)
+				}
+			}},
+		{typ: events.MaintenanceScheduled,
+			// The announcement of a maintenance window to its affected
+			// client (WP-1034): one notification and one event per client.
+			setup: func(t *testing.T) {
+				maintCI = f.CI(t, f.OrgA, f.Client1, "evt02-maint-ci")
+				r := call(t, admin, http.MethodPost, "/api/v1/maintenance-windows",
+					`{"title":"evt02 maintenance","starts_at":"2030-01-01T22:00:00Z","ends_at":"2030-01-02T02:00:00Z","ci_ids":["`+maintCI+`"]}`)
+				if r.Code != http.StatusCreated {
+					t.Fatalf("create window: %d %s", r.Code, t6Short(r.Body))
+				}
+				maintWindow = t6ID(r.Body)
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/maintenance-windows/"+maintWindow+"/notify", `{"contact_roles":["technical"]}`)
+				answered(t, "POST /maintenance-windows/{id}/notify", r, refused, http.StatusOK)
+				if refused {
+					unchanged(t, "maintenance notifications", count(t, `maintenance_notification WHERE maintenance_window_id = $1`, maintWindow), "0")
+				}
+				return maintWindow
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["client_id"] != f.Client1 || data["maintenance_notification_id"] == nil ||
+					data["affected_cis"] != 1.0 || data["starts_at"] != "2030-01-01T22:00:00Z" {
+					t.Errorf("maintenance.scheduled data %v", data)
+				}
+			}},
+		{typ: events.CIConfigChanged,
+			// The ingest of the device configurations (WP-1054): a second
+			// version of the running configuration of a router.
+			setup: func(t *testing.T) {
+				configCI = f.CI(t, f.OrgA, f.Client1, "evt02-config-router")
+				exec(t, `UPDATE ci SET management_ip = '10.250.5.1' WHERE id = $1`, configCI)
+				configCollector = scalar(t, `INSERT INTO collector (organization_id, name, status) VALUES ($1, 'evt02-config', 'active')
+					RETURNING id::text`, f.OrgA)
+				if _, err := evt02ConfigIngest(t, configsnap.NewIngester(f.App, configsnap.NewPGStore(f.App), alarms), f.OrgCtx(f.OrgA), f.OrgA, configCollector, configCI, "hostname evt02\n",
+					time.Now().Add(-time.Hour)); err != nil {
+					t.Fatal(err)
+				}
+			},
+			act: func(t *testing.T, refused bool) string {
+				_, err := evt02ConfigIngest(t, configsnap.NewIngester(f.App, configsnap.NewPGStore(f.App), alarms), f.OrgCtx(f.OrgA), f.OrgA, configCollector, configCI, "hostname evt02-changed\n",
+					time.Now().Add(-time.Minute))
+				failed(t, "configuration ingest", err, refused)
+				if refused {
+					unchanged(t, "configuration versions", count(t, `config_snapshot WHERE ci_id = $1`, configCI), "1")
+					return ""
+				}
+				return configCI
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] == nil || data["id"] != data["snapshot_id"] || data["ci_id"] != entity || data["client_id"] != f.Client1 || data["hash"] == nil ||
+					data["sha256"] != data["hash"] || data["previous_sha256"] == nil || data["snapshot_id"] == nil ||
+					data["previous_snapshot_id"] == nil || data["platform"] != "ios" || data["content"] != nil {
+					t.Errorf("ci.config_changed data %v", data)
+				}
+			}},
+		{typ: events.MaintenanceStarted,
+			// The system job maintenance.boundaries (WP-1033): a window
+			// that began ten minutes ago.
+			setup: func(t *testing.T) {
+				c := f.CI(t, f.OrgA, f.Client1, "evt02-started-ci")
+				startedWindow = scalar(t, `INSERT INTO maintenance_window (organization_id, title, starts_at, ends_at)
+					VALUES ($1, 'evt02 started', now() - interval '10 minutes', now() + interval '20 hours') RETURNING id::text`, f.OrgA)
+				exec(t, `INSERT INTO maintenance_window_ci (organization_id, maintenance_window_id, ci_id) VALUES ($1, $2, $3)`,
+					f.OrgA, startedWindow, c)
+			},
+			act: func(t *testing.T, refused bool) string {
+				_, err := maintenance.NewBoundaries(f.App, maintenance.NewPGRepository(f.App), nil).RunOrg(context.Background(), f.OrgA)
+				failed(t, "maintenance boundaries", err, refused)
+				return startedWindow
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["ci_count"] != 1.0 || data["starts_at"] == nil || data["ends_at"] == nil {
+					t.Errorf("maintenance.started data %v", data)
+				}
+			}},
+		{typ: events.MaintenanceEnded,
+			// The system job maintenance.boundaries (WP-1033): a window
+			// that ended an hour ago (its start lies before the horizon).
+			setup: func(t *testing.T) {
+				endedWindow = scalar(t, `INSERT INTO maintenance_window (organization_id, title, starts_at, ends_at)
+					VALUES ($1, 'evt02 ended', now() - interval '30 hours', now() - interval '1 hour') RETURNING id::text`, f.OrgA)
+			},
+			act: func(t *testing.T, refused bool) string {
+				_, err := maintenance.NewBoundaries(f.App, maintenance.NewPGRepository(f.App), alarms).RunOrg(context.Background(), f.OrgA)
+				failed(t, "maintenance boundaries", err, refused)
+				return endedWindow
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["ci_count"] != 0.0 || data["ends_at"] == nil {
+					t.Errorf("maintenance.ended data %v", data)
+				}
+			}},
+		{typ: events.AlarmOpened,
+			// The lifecycle opens a new alarm of a rule series (WP-982).
+			act: func(t *testing.T, refused bool) string {
+				a, err := alarms.Raise(f.OrgCtx(f.OrgA), f.OrgA, evt02AlarmInput("evt02-opened", alarm.SeverityWarning))
+				failed(t, "raise alarm", err, refused)
+				if refused {
+					unchanged(t, "alarms", count(t, `alarm WHERE organization_id = $1 AND series_key = 'evt02-opened'`, f.OrgA), "0")
+					return ""
+				}
+				return a.ID
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				want := alarm.DedupKey(alarm.SourceRule, evt02AlarmSource, "evt02-opened")
+				if data["id"] != entity || data["alarm_id"] != entity || data["severity"] != "warning" || data["dedup_key"] != want {
+					t.Errorf("alarm.opened data %v", data)
+				}
+			}},
+		{typ: events.AlarmAcknowledged,
+			setup: func(t *testing.T) {
+				var err error
+				if ackAlarm, err = alarms.Raise(f.OrgCtx(f.OrgA), f.OrgA, evt02AlarmInput("evt02-ack", alarm.SeverityWarning)); err != nil {
+					t.Fatal(err)
+				}
+			},
+			act: func(t *testing.T, refused bool) string {
+				_, err := alarms.Acknowledge(f.OrgCtx(f.OrgA), f.OrgA, ackAlarm.ID, f.User, "evt02")
+				failed(t, "acknowledge alarm", err, refused)
+				if refused {
+					unchanged(t, "alarm state", scalar(t, `SELECT state FROM alarm WHERE id = $1`, ackAlarm.ID), "open")
+				}
+				return ackAlarm.ID
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["alarm_id"] != entity || data["dedup_key"] != ackAlarm.DedupKey {
+					t.Errorf("alarm.acknowledged data %v", data)
+				}
+			}},
+		{typ: events.AlarmSeverityChanged,
+			setup: func(t *testing.T) {
+				var err error
+				if sevAlarm, err = alarms.Raise(f.OrgCtx(f.OrgA), f.OrgA, evt02AlarmInput("evt02-sev", alarm.SeverityWarning)); err != nil {
+					t.Fatal(err)
+				}
+			},
+			act: func(t *testing.T, refused bool) string {
+				_, err := alarms.Raise(f.OrgCtx(f.OrgA), f.OrgA, evt02AlarmInput("evt02-sev", alarm.SeverityCritical))
+				failed(t, "raise alarm severity", err, refused)
+				if refused {
+					unchanged(t, "alarm severity", scalar(t, `SELECT severity FROM alarm WHERE id = $1`, sevAlarm.ID), "warning")
+				}
+				return sevAlarm.ID
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["alarm_id"] != entity || data["severity"] != "critical" ||
+					data["dedup_key"] != sevAlarm.DedupKey {
+					t.Errorf("alarm.severity_changed data %v", data)
+				}
+			}},
+		{typ: events.AlarmResolved,
+			setup: func(t *testing.T) {
+				var err error
+				if resAlarm, err = alarms.Raise(f.OrgCtx(f.OrgA), f.OrgA, evt02AlarmInput("evt02-res", alarm.SeverityWarning)); err != nil {
+					t.Fatal(err)
+				}
+			},
+			act: func(t *testing.T, refused bool) string {
+				_, err := alarms.Clear(f.OrgCtx(f.OrgA), f.OrgA, resAlarm.DedupKey, time.Time{}, "evt02")
+				failed(t, "clear alarm", err, refused)
+				if refused {
+					unchanged(t, "alarm state", scalar(t, `SELECT state FROM alarm WHERE id = $1`, resAlarm.ID), "open")
+				}
+				return resAlarm.ID
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["alarm_id"] != entity || data["severity"] != "warning" ||
+					data["dedup_key"] != resAlarm.DedupKey {
+					t.Errorf("alarm.resolved data %v", data)
+				}
+			}},
+		// Acknowledging an incident over the REST route (WP-1036): the
+		// incident and its root alarm in one transaction with
+		// incident.updated.
+		{typ: events.IncidentUpdated,
+			setup: func(t *testing.T) {
+				root, err := alarms.Raise(f.OrgCtx(f.OrgA), f.OrgA, evt02AlarmInput("evt02-incident", alarm.SeverityCritical))
+				if err != nil {
+					t.Fatal(err)
+				}
+				store := alarms.Store()
+				if updIncident, _, err = store.UpsertIncident(f.OrgCtx(f.OrgA), f.OrgA, &alarm.IncidentInput{
+					CauseClass: alarm.CauseTopology}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err = store.AttachAlarms(f.OrgCtx(f.OrgA), f.OrgA, updIncident.ID, []string{root.ID}, alarm.RoleRoot); err != nil {
+					t.Fatal(err)
+				}
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/monitoring/incidents/"+updIncident.ID+"/ack", `{}`)
+				answered(t, "acknowledge incident", r, refused, http.StatusOK)
+				if refused {
+					unchanged(t, "incident state", scalar(t, `SELECT state FROM incident WHERE id = $1`, updIncident.ID), "open")
+				}
+				return updIncident.ID
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["incident_id"] != entity || data["change"] != "acknowledged" ||
+					data["severity"] != "critical" || data["actor_id"] != admin.User {
+					t.Errorf("incident.updated data %v", data)
+				}
+			}},
+		// The workflow action send_webhook (WP-1096): the event is written
+		// with the succeeded step; while the outbox refuses it the run
+		// reports the failed step, which stays without its event.
+		{typ: events.WorkflowWebhook,
+			setup: func(t *testing.T) {
+				r := call(t, admin, http.MethodPost, "/api/v1/workflows", `{"name": "evt02-webhook", "trigger": {"type": "manual"},
+					"actions": [{"type": "send_webhook", "topic": "evt02.webhook", "payload": {"host": "${data.host}"}}]}`)
+				answered(t, "create workflow", r, false, http.StatusCreated)
+				var def struct {
+					ID string `json:"id"`
+				}
+				if err := json.Unmarshal(r.Body, &def); err != nil || def.ID == "" {
+					t.Fatalf("workflow %s: %v", t6Short(r.Body), err)
+				}
+				webhookWorkflow = def.ID
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/workflows/"+webhookWorkflow+"/runs", `{"context": {"data": {"host": "srv-evt02"}}}`)
+				answered(t, "run workflow", r, false, http.StatusCreated)
+				var run struct {
+					ID     string `json:"id"`
+					Status string `json:"status"`
+					Steps  []struct {
+						Status string `json:"status"`
+					} `json:"steps"`
+				}
+				if err := json.Unmarshal(r.Body, &run); err != nil || run.ID == "" || len(run.Steps) != 1 {
+					t.Fatalf("run %s: %v", t6Short(r.Body), err)
+				}
+				if refused {
+					unchanged(t, "webhook step", run.Status+"/"+run.Steps[0].Status, "failed/failed")
+					return ""
+				}
+				if run.Status != "succeeded" {
+					t.Fatalf("run %s, want succeeded", t6Short(r.Body))
+				}
+				return run.ID
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				payload, _ := data["payload"].(map[string]any)
+				if data["id"] != entity || data["run_id"] != entity || data["workflow_id"] != webhookWorkflow || data["topic"] != "evt02.webhook" ||
+					data["step_index"] != 0.0 || payload["host"] != "srv-evt02" {
+					t.Errorf("workflow.webhook data %v", data)
+				}
+			}},
+		// The status changes of a workflow run (WP-1092): the run of the
+		// router executes in the request (no job queue); each change writes
+		// its event in its transaction. While the outbox refuses the event
+		// the change is rolled back and the request fails.
+		{typ: events.WorkflowRunStarted,
+			setup: func(t *testing.T) {
+				runWorkflow = evt02Workflow(t, call, admin, "evt02-run", `[{"type": "noop"}]`)
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/workflows/"+runWorkflow+"/runs", `{"context": {}}`)
+				answered(t, "run workflow", r, refused, http.StatusCreated)
+				if refused {
+					// The run could not start: it failed without a step.
+					unchanged(t, "run that could not start", scalar(t, `SELECT status || '/' || (SELECT count(*) FROM workflow_step s WHERE s.run_id = r.id)
+						FROM workflow_run r WHERE workflow_id = $1 ORDER BY created_at DESC LIMIT 1`, runWorkflow), "failed/0")
+					return ""
+				}
+				return evt02RunID(t, r, "succeeded")
+			},
+			data: evt02RunData(&runWorkflow, "running")},
+		{typ: events.WorkflowRunSucceeded,
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/workflows/"+runWorkflow+"/runs", `{"context": {}}`)
+				answered(t, "run workflow", r, refused, http.StatusCreated)
+				if refused {
+					unchanged(t, "run whose success was refused", scalar(t, `SELECT status FROM workflow_run WHERE workflow_id = $1
+						ORDER BY created_at DESC LIMIT 1`, runWorkflow), "running")
+					return ""
+				}
+				return evt02RunID(t, r, "succeeded")
+			},
+			data: evt02RunData(&runWorkflow, "succeeded")},
+		{typ: events.WorkflowRunFailed,
+			setup: func(t *testing.T) {
+				// submit_form names no form: its step fails, so does the run.
+				failingWorkflow = evt02Workflow(t, call, admin, "evt02-run-failed", `[{"type": "submit_form", "form_id": "none"}]`)
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/workflows/"+failingWorkflow+"/runs", `{"context": {}}`)
+				answered(t, "run workflow", r, refused, http.StatusCreated)
+				if refused {
+					unchanged(t, "run whose failure was refused", scalar(t, `SELECT status FROM workflow_run WHERE workflow_id = $1
+						ORDER BY created_at DESC LIMIT 1`, failingWorkflow), "running")
+					return ""
+				}
+				return evt02RunID(t, r, "failed")
+			},
+			data: evt02RunData(&failingWorkflow, "failed")},
+		{typ: events.WorkflowRunCancelled,
+			setup: func(t *testing.T) {
+				approvalWorkflow = evt02Workflow(t, call, admin, "evt02-run-cancelled", `[{"type": "require_approval"}, {"type": "noop"}]`)
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/workflows/"+approvalWorkflow+"/runs", `{"context": {}}`)
+				answered(t, "run workflow", r, false, http.StatusCreated)
+				run := evt02RunID(t, r, "waiting_approval")
+				r = call(t, admin, http.MethodPost, "/api/v1/workflow-runs/"+run+"/cancel", "")
+				answered(t, "cancel run", r, refused, http.StatusOK)
+				if refused {
+					unchanged(t, "run whose cancel was refused", scalar(t, `SELECT status FROM workflow_run WHERE id = $1`, run), "waiting_approval")
+					return ""
+				}
+				return run
+			},
+			data: evt02RunData(&approvalWorkflow, "cancelled")},
+		// The approval model (WP-1098): the request of an approval and each
+		// decision write their event in their transaction. The admin holds
+		// workflow:approve through a role of the database (the approver
+		// circle) and may approve its own run (exclude_initiator false).
+		{typ: events.WorkflowApprovalRequested,
+			setup: func(t *testing.T) {
+				role := scalar(t, `INSERT INTO role (organization_id, name, scope, permissions) VALUES ($1, 'evt02-approvers', 'org', '["workflow:approve"]'::jsonb)
+					RETURNING id::text`, f.OrgA)
+				exec(t, `INSERT INTO role_assignment (organization_id, user_id, role_id) VALUES ($1, $2, $3)`, f.OrgA, admin.User, role)
+				quorumWorkflow = evt02Workflow(t, call, admin, "evt02-approval",
+					`[{"type": "require_approval", "exclude_initiator": false, "quorum": 1, "message": "evt02"}, {"type": "noop"}]`)
+			},
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/workflows/"+quorumWorkflow+"/runs", `{"context": {}}`)
+				answered(t, "run workflow", r, false, http.StatusCreated)
+				if refused {
+					// The request was rolled back: the step failed, the run
+					// with it, nothing waits.
+					run := evt02RunID(t, r, "failed")
+					unchanged(t, "approval step", scalar(t, `SELECT status FROM workflow_step WHERE run_id = $1 AND step_index = 0`, run), "failed")
+					return ""
+				}
+				decidedRun = evt02RunID(t, r, "waiting_approval")
+				return scalar(t, `SELECT id::text FROM workflow_step WHERE run_id = $1 AND step_index = 0`, decidedRun)
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["step_id"] != entity || data["run_id"] != decidedRun || data["step_key"] != "0" ||
+					data["quorum"] != 1.0 || data["workflow_id"] != quorumWorkflow {
+					t.Errorf("workflow.approval_requested data %v", data)
+				}
+			}},
+		{typ: events.WorkflowApprovalDecided,
+			act: func(t *testing.T, refused bool) string {
+				r := call(t, admin, http.MethodPost, "/api/v1/workflows/"+quorumWorkflow+"/runs", `{"context": {}}`)
+				answered(t, "run workflow", r, false, http.StatusCreated)
+				run := evt02RunID(t, r, "waiting_approval")
+				r = call(t, admin, http.MethodPost, "/api/v1/workflow-runs/"+run+"/approval", `{"decision": "approved"}`)
+				answered(t, "approve run", r, refused, http.StatusOK)
+				if refused {
+					unchanged(t, "run whose approval was refused", scalar(t, `SELECT status || '/' || (SELECT count(*) FROM workflow_approval a WHERE a.run_id = r.id)
+						FROM workflow_run r WHERE id = $1`, run), "waiting_approval/0")
+					return ""
+				}
+				decidedRun = evt02RunID(t, r, "succeeded")
+				return scalar(t, `SELECT id::text FROM workflow_step WHERE run_id = $1 AND step_index = 0`, decidedRun)
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["run_id"] != decidedRun || data["decision"] != "approved" || data["approver_id"] != admin.User ||
+					data["approvals"] != 1.0 || data["quorum"] != 1.0 {
+					t.Errorf("workflow.approval_decided data %v", data)
+				}
+			}},
 	}
 
 	// The table covers every type of events.Types without a frame in
@@ -840,6 +1762,47 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 				c.data(t, entity, data)
 			}
 		})
+	}
+}
+
+// evt02Workflow stores a manual workflow with actions as admin and returns
+// its id (WP-1092).
+func evt02Workflow(t *testing.T, call func(t *testing.T, as t6As, method, path, body string) t6Response, admin t6As, name, actions string) string {
+	t.Helper()
+	r := call(t, admin, http.MethodPost, "/api/v1/workflows", `{"name": "`+name+`", "trigger": {"type": "manual"}, "actions": `+actions+`}`)
+	if r.Code != http.StatusCreated {
+		t.Fatalf("create workflow %s = %d %s", name, r.Code, t6Short(r.Body))
+	}
+	var def struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(r.Body, &def); err != nil || def.ID == "" {
+		t.Fatalf("workflow %s: %v", t6Short(r.Body), err)
+	}
+	return def.ID
+}
+
+// evt02RunID returns the id of the run of a response with status want.
+func evt02RunID(t *testing.T, r t6Response, want string) string {
+	t.Helper()
+	var run struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(r.Body, &run); err != nil || run.ID == "" || run.Status != want {
+		t.Fatalf("run %s (%v), want status %s", t6Short(r.Body), err, want)
+	}
+	return run.ID
+}
+
+// evt02RunData checks the data of a workflow.run_* event (WP-1092 AK4).
+func evt02RunData(workflowID *string, status string) func(t *testing.T, entity string, data map[string]any) {
+	return func(t *testing.T, entity string, data map[string]any) {
+		t.Helper()
+		if data["id"] != entity || data["run_id"] != entity || data["workflow_id"] != *workflowID || data["status"] != status ||
+			data["trigger"] != "manual" || data["definition_version_id"] == nil {
+			t.Errorf("workflow run data %v, want run %s of %s with status %s", data, entity, *workflowID, status)
+		}
 	}
 }
 
@@ -1148,6 +2111,72 @@ func evt02ValidateValue(root map[string]any, path string, schema map[string]any,
 	return problems
 }
 
+// plannedProducers names the work package of the Phase-3 plan that will
+// produce a type of events.Phase3Types (WP-867, E-161). The producing work
+// package adds the producer case and removes its entry; before WP-1177
+// (p3-gate) the list is empty.
+var plannedProducers = map[string]string{
+	"alarm.escalated":             "WP-1146",
+	"incident.opened":             "WP-1028",
+	"incident.resolved":           "WP-1028",
+	"collector_group.unreachable": "WP-964",
+	"collector_group.reachable":   "WP-964",
+	"capacity.forecast_exceeded":  "WP-1060",
+	"sla.violated":                "WP-1049",
+	"notification.escalated":      "WP-1146",
+	"notification.acknowledged":   "WP-1146",
+}
+
+// evt02ConfigIngest stores a configuration version of ciID collected at at
+// through the configuration ingest (WP-1054).
+func evt02ConfigIngest(t *testing.T, g *configsnap.Ingester, ctx context.Context, orgID, collectorID, ciID, text string,
+	at time.Time) (configsnap.IngestResult, error) {
+	t.Helper()
+	content, err := probewire.GzipConfig(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte(text))
+	snap := &probewire.ConfigSnapshot{CIID: ciID, ManagementIP: "10.250.5.1", CollectedAt: at.UTC(), Source: probewire.ConfigSourceSSH,
+		Trigger: probewire.ConfigTriggerSchedule, Platform: "ios", SHA256: hex.EncodeToString(sum[:]), SizeBytes: int64(len(text)),
+		Content: content}
+	return g.Ingest(ctx, orgID, collectorID, snap, text)
+}
+
+// evt02AlarmSource is the rule of the alarm cases.
+const evt02AlarmSource = "11111111-1111-4111-8111-111111111111"
+
+// evt02AlarmInput is a raise of a rule series of the alarm cases.
+func evt02AlarmInput(series, severity string) *alarm.RaiseInput {
+	return &alarm.RaiseInput{SourceKind: alarm.SourceRule, SourceID: evt02AlarmSource,
+		SeriesKey: series, Severity: severity, Summary: "evt02 " + series}
+}
+
+// evt02ADMP is the fake ADMP of the admp.connection.refreshed case: one
+// connection, every account's source.
+type evt02ADMP struct{}
+
+func (evt02ADMP) For(context.Context, *admp.Account) (admp.Source, error) { return evt02ADMP{}, nil }
+func (evt02ADMP) CircuitOpen(*admp.Account) bool                          { return false }
+func (evt02ADMP) FetchConnection(_ context.Context, id string) (*admp.ConnectionData, error) {
+	return &admp.ConnectionData{ExternalID: id, Carrier: "evt02 carrier", ContractID: "V-evt02"}, nil
+}
+func (evt02ADMP) FetchService(context.Context, string) (*admp.ServiceData, error) {
+	return nil, &admp.SourceError{Class: admp.ClassNotImplemented}
+}
+func (evt02ADMP) FetchServicePorts(context.Context, string) ([]admp.PortData, error) {
+	return nil, &admp.SourceError{Class: admp.ClassNotImplemented}
+}
+func (evt02ADMP) FetchInventory(context.Context) ([]admp.InventoryPort, error) {
+	return nil, &admp.SourceError{Class: admp.ClassNotImplemented}
+}
+func (evt02ADMP) FetchPortServices(context.Context, string) ([]string, error) {
+	return nil, &admp.SourceError{Class: admp.ClassNotImplemented}
+}
+func (evt02ADMP) CheckSession(context.Context) error {
+	return &admp.SourceError{Class: admp.ClassNotImplemented}
+}
+
 // evt02CoverageProblems checks the producer cases (their types) against
 // the register (WP-246): every type of events.Types without a frame in
 // events.Payloads has exactly one case; a phase 2 type (with a frame) may
@@ -1164,11 +2193,22 @@ func evt02CoverageProblems(covered []string) []string {
 	}
 	for _, typ := range events.Types {
 		_, phase2 := events.Payloads[typ]
+		_, planned := plannedProducers[typ]
+		phase3 := slices.Contains(events.Phase3Types, typ)
 		switch n := count[typ]; {
 		case n > 1:
 			problems = append(problems, fmt.Sprintf("%d cases for %s, want one", n, typ))
+		case phase3 && n == 1 && planned:
+			problems = append(problems, typ+" has a producer case and a planned producer")
+		case phase3 && n == 0 && !planned:
+			problems = append(problems, typ+" has neither a producer case nor a planned producer")
 		case n == 0 && !phase2:
 			problems = append(problems, typ+" has no producer case")
+		}
+	}
+	for typ := range plannedProducers {
+		if !slices.Contains(events.Phase3Types, typ) {
+			problems = append(problems, fmt.Sprintf("planned producer for %q, which is no type of events.Phase3Types", typ))
 		}
 	}
 	sort.Strings(problems)
@@ -1184,23 +2224,41 @@ func evt02CoverageProblems(covered []string) []string {
 // entity and refuses one without entity_seq and one whose data lacks a
 // required field of the type's frame.
 func TestEVT02ProducerCoverageRule(t *testing.T) {
+	// base: one case per type that needs one, the phase-3 types whose
+	// producer exists (no planned entry any more) among them.
 	var base []string
 	for _, typ := range events.Types {
-		if _, phase2 := events.Payloads[typ]; !phase2 {
+		_, phase2 := events.Payloads[typ]
+		_, planned := plannedProducers[typ]
+		if !phase2 || (slices.Contains(events.Phase3Types, typ) && !planned) {
 			base = append(base, typ)
 		}
 	}
+	// A planned producer of an unknown type and a phase-3 type without case
+	// and without plan fail as well (WP-867).
+	plannedProducers["asset.exploded"] = "WP-999"
+	if problems := evt02CoverageProblems(base); len(problems) != 1 {
+		t.Errorf("unknown planned type: problems %v, want one", problems)
+	}
+	delete(plannedProducers, "asset.exploded")
+	saved := plannedProducers[events.SLAViolated]
+	delete(plannedProducers, events.SLAViolated)
+	if problems := evt02CoverageProblems(base); len(problems) != 1 {
+		t.Errorf("phase-3 type without case and plan: problems %v, want one", problems)
+	}
+	plannedProducers[events.SLAViolated] = saved
 	for name, tc := range map[string]struct {
 		cases []string
 		fails bool
 	}{
-		"phase 2 without producer":    {base, false},
-		"phase 2 with a producer":     {append(slices.Clone(base), events.StockMovement), false},
-		"type of EVT-02 without case": {base[1:], true},
-		"two cases of a type":         {append(slices.Clone(base), events.CICreated), true},
-		"two cases of a phase 2 type": {append(slices.Clone(base), events.AssetCreated, events.AssetCreated), true},
-		"unknown type":                {append(slices.Clone(base), "asset.exploded"), true},
-		"reserved type":               {append(slices.Clone(base), "maintenance.scheduled"), true},
+		"phase 2 without producer":       {base, false},
+		"phase 2 with a producer":        {append(slices.Clone(base), events.StockMovement), false},
+		"type of EVT-02 without case":    {base[1:], true},
+		"two cases of a type":            {append(slices.Clone(base), events.CICreated), true},
+		"two cases of a phase 2 type":    {append(slices.Clone(base), events.AssetCreated, events.AssetCreated), true},
+		"unknown type":                   {append(slices.Clone(base), "asset.exploded"), true},
+		"reserved type":                  {append(slices.Clone(base), "maintenance.started"), true},
+		"phase 3 with a case and a plan": {append(slices.Clone(base), events.AlarmEscalated), true},
 	} {
 		if problems := evt02CoverageProblems(tc.cases); (len(problems) != 0) != tc.fails {
 			t.Errorf("%s: problems %v, want failure %v", name, problems, tc.fails)

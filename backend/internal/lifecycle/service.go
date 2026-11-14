@@ -391,9 +391,9 @@ func guardViolations(target *State, edge *Transition, values map[string]any) []G
 }
 
 func initialKey(def *Definition) string {
-	for _, st := range def.States {
-		if st.IsInitial {
-			return st.Key
+	for i := range def.States {
+		if def.States[i].IsInitial {
+			return def.States[i].Key
 		}
 	}
 	return ""

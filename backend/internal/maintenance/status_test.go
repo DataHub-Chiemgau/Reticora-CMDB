@@ -85,7 +85,7 @@ func TestNotifyQueuesInPostgres(t *testing.T) {
 	if err := repo.Create(ctx, w); err != nil {
 		t.Fatal(err)
 	}
-	queued, err := repo.NotifyClients(ctx, f.OrgA, w.ID)
+	queued, err := repo.NotifyClients(ctx, f.OrgA, w.ID, nil)
 	if err != nil || len(queued) != 1 || queued[0].Status != NotificationPending || queued[0].SentAt != nil {
 		t.Fatalf("notify: %+v, %v", queued, err)
 	}
@@ -116,11 +116,11 @@ func TestNotifyIsIdempotentInPostgres(t *testing.T) {
 	if err := repo.Create(ctx, w); err != nil {
 		t.Fatal(err)
 	}
-	first, err := repo.NotifyClients(ctx, f.OrgA, w.ID)
+	first, err := repo.NotifyClients(ctx, f.OrgA, w.ID, nil)
 	if err != nil || len(first) != 2 {
 		t.Fatalf("first notify: %+v, %v; want one notification per client (2)", first, err)
 	}
-	second, err := repo.NotifyClients(ctx, f.OrgA, w.ID)
+	second, err := repo.NotifyClients(ctx, f.OrgA, w.ID, nil)
 	if err != nil || len(second) != 2 {
 		t.Fatalf("second notify: %+v, %v; want the two stored notifications", second, err)
 	}

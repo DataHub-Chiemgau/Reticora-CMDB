@@ -301,7 +301,8 @@ func waitForEnrollment(ctx context.Context, path string) (creds *keystore.Creden
 
 // runNATSSession runs one session with the credentials in the keystore:
 // the TLS configuration, the scope channel (edge upload), the scopes, the
-// scope suggestions, the credential bundle and the renewal check. It
+// scope suggestions, the probe assignment set, the credential bundle and
+// the renewal check. It
 // reports whether the certificate was renewed; the session is then over.
 func runNATSSession(ctx context.Context, cfg collectorConfig) (renewed bool) {
 	endpoint := natsEndpoint(cfg.ServerURL)
@@ -329,9 +330,19 @@ func runNATSSession(ctx context.Context, cfg collectorConfig) (renewed bool) {
 		defer scopeChannel.Store(nil)
 		// The collector's discovery scopes and, once, its local and its
 		// configured subnets as scope suggestions (DIS-09).
-		wg.Add(2)
+		wg.Add(3)
 		go func() { defer wg.Done(); syncScopes(sctx, nc, subject) }()
 		go func() { defer wg.Done(); reportSubnets(sctx, nc, subject, scopeSuggestions(&cfg, systemInterfaces)) }()
+		// The assignment set of the monitoring probes: on connect, on
+		// .probes.changed and every minute (PRB-11, WP-956).
+		go func() { defer wg.Done(); syncProbes(sctx, nc, subject, collectorProbes) }()
+		// The server's tests of the vault connections this collector
+		// resolves (WP-895, WP-896).
+		if vsub, verr := serveVaultTests(sctx, nc, subject); verr != nil {
+			slog.Warn("vault connection tests not served", "error", verr)
+		} else {
+			defer func() { _ = vsub.Unsubscribe() }()
+		}
 	}
 	wg.Add(1)
 	go func() {
@@ -345,7 +356,8 @@ func runNATSSession(ctx context.Context, cfg collectorConfig) (renewed bool) {
 		}
 	}()
 	// The credentials of the collector's scopes, encrypted for its key
-	// (COL-02).
+	// (COL-02); fetched again on the reload notices of the session
+	// (bundle.changed, WP-897).
 	syncBundle(sctx, nc, creds)
 	cancel()
 	wg.Wait()

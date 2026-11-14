@@ -391,3 +391,139 @@ func TestNotificationLocaleAndSubscription(t *testing.T) {
 		t.Errorf("branding of B: %+v %v, want its own name and locale", b, err)
 	}
 }
+
+// phoneFixture seeds a user with a mobile number in the vault (app_user.
+// mobile_pii_subject_id, WP-1140) and a CI contact whose vault subject
+// carries a phone; withVault false leaves the vault of the resolver unset.
+type phoneFixture struct {
+	f        *scopetest.Fixture
+	resolver *notify.PGResolver
+	user, ci string
+}
+
+func newPhoneFixture(t *testing.T) *phoneFixture {
+	t.Helper()
+	f := scopetest.Seed(t, "9d")
+	bg := context.Background()
+	key, err := crypto.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc, err := crypto.NewEnvelopeEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vault := pii.NewVault(f.App, enc)
+	pii.SetDefault(vault)
+	t.Cleanup(func() { pii.SetDefault(nil) })
+	p := &phoneFixture{f: f, user: f.AppUser(t, f.OrgA, "phone"), ci: f.CI(t, f.OrgA, f.Client1, "phone-ci")}
+	mobile, err := vault.Create(f.OrgCtx(f.OrgA), f.OrgA, pii.KindUser, pii.Data{"mobile": "+4915112345689"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.Admin.Exec(bg, `UPDATE app_user SET mobile_pii_subject_id = $2 WHERE id = $1`, p.user, mobile); err != nil {
+		t.Fatal(err)
+	}
+	subject, err := vault.Create(f.OrgCtx(f.OrgA), f.OrgA, pii.KindContact,
+		pii.Data{"name": "Bereitschaft", "email": "duty@acme.example", "phone": "+4980011122233"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	contact := f.ID()
+	if _, err = f.Admin.Exec(bg, `INSERT INTO contact (id, organization_id, client_id, pii_subject_id) VALUES ($1, $2, $3, $4)`,
+		contact, f.OrgA, f.Client1, subject); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.Admin.Exec(bg, `INSERT INTO ci_contact (organization_id, ci_id, contact_id, relationship_type, client_id)
+		VALUES ($1, $2, $3, 'escalation', $4)`, f.OrgA, p.ci, contact, f.Client1); err != nil {
+		t.Fatal(err)
+	}
+	p.resolver = notify.NewPGResolver(f.App, permission.NewPGRepository(f.App))
+	return p
+}
+
+func (p *phoneFixture) resolve(t *testing.T, a *notify.Audience) []notify.Recipient {
+	t.Helper()
+	got, err := p.resolver.Resolve(context.Background(), p.f.OrgA, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+// TestResolveUserPhoneFromVault: a user's mobile number comes from the
+// vault subject of app_user.mobile_pii_subject_id (NTF-02, WP-1140).
+func TestResolveUserPhoneFromVault(t *testing.T) {
+	p := newPhoneFixture(t)
+	got := p.resolve(t, &notify.Audience{DirectUserIDs: []string{p.user}})
+	if len(got) != 1 || got[0].UserID != p.user || got[0].Phone != "+4915112345689" {
+		t.Fatalf("recipients %+v, want the user with the mobile number", got)
+	}
+}
+
+// TestResolveContactPhoneFromVault: a contact's phone comes from its vault
+// subject (NTF-03, WP-1140).
+func TestResolveContactPhoneFromVault(t *testing.T) {
+	p := newPhoneFixture(t)
+	got := p.resolve(t, &notify.Audience{CIID: p.ci, ContactRoles: []string{"escalation"}})
+	if len(got) != 1 || got[0].Phone != "+4980011122233" || got[0].Email != "duty@acme.example" {
+		t.Fatalf("recipients %+v, want the contact with phone and e-mail", got)
+	}
+}
+
+// TestResolvePhoneEmptyWithoutVault: without a vault the numbers stay
+// empty; the user is still a recipient.
+func TestResolvePhoneEmptyWithoutVault(t *testing.T) {
+	p := newPhoneFixture(t)
+	pii.SetDefault(nil)
+	got := p.resolve(t, &notify.Audience{DirectUserIDs: []string{p.user}})
+	if len(got) != 1 || got[0].UserID != p.user || got[0].Phone != "" {
+		t.Fatalf("recipients without a vault %+v, want the user without a phone", got)
+	}
+}
+
+// TestWebhookDeliveryStoresNoPhone: a webhook delivery keeps the
+// recipients it sends, but never their phone numbers (WP-1140): the number
+// stays in the vault, so neither notification_delivery.recipients, the
+// delivery list nor the webhook body carries it, and the anonymization's
+// crypto-shredding is not undone by a copy.
+func TestWebhookDeliveryStoresNoPhone(t *testing.T) {
+	p := newPhoneFixture(t)
+	bg := context.Background()
+	recipients := p.resolve(t, &notify.Audience{DirectUserIDs: []string{p.user}})
+	if len(recipients) != 1 || recipients[0].Phone == "" {
+		t.Fatalf("recipients %+v, want the user with the mobile number", recipients)
+	}
+	key, err := crypto.GenerateMasterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc, err := crypto.NewEnvelopeEncryptor(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	channels := notify.NewPGRepository(p.f.App, notify.NewSealer(enc))
+	hook := &notify.Channel{OrganizationID: p.f.OrgA, Name: "hook", Provider: notify.ProviderWebhook, Enabled: true,
+		Config: map[string]any{"url": "https://hooks.example.org/x"}}
+	if err = channels.Create(bg, hook); err != nil {
+		t.Fatal(err)
+	}
+	store := notify.NewPGDeliveryStore(p.f.App)
+	n := notify.NewNotifier(channels, store, notify.NewPGPreferences(p.f.App), notify.NewSender(map[string]notify.Provider{}))
+	queued, err := n.Notify(bg, p.f.OrgA, &notify.Request{Category: "job", Subject: "Job fehlgeschlagen",
+		DedupKey: "phone-webhook", Recipients: recipients})
+	if err != nil || queued != 1 {
+		t.Fatalf("queued %d (%v), want the webhook delivery", queued, err)
+	}
+	var stored string
+	if err = p.f.Admin.QueryRow(bg, `SELECT recipients::text FROM notification_delivery
+		WHERE organization_id = $1 AND channel_id = $2`, p.f.OrgA, hook.ID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stored, p.user) {
+		t.Errorf("stored recipients %s, want the user", stored)
+	}
+	if strings.Contains(stored, `"phone"`) || strings.Contains(stored, "15112345689") {
+		t.Errorf("stored recipients hold the phone number: %s", stored)
+	}
+}

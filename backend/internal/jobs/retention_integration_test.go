@@ -13,6 +13,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm/configsnap"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/config"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
@@ -383,6 +385,10 @@ func (b *fakeBlobs) Get(context.Context, string, string) (io.ReadCloser, error) 
 func (b *fakeBlobs) PresignedGetURL(context.Context, string, string, blob.Download) (string, error) {
 	return "", nil
 }
+
+func (b *fakeBlobs) List(context.Context, string, string) ([]string, error) { return []string{}, nil }
+
+func (b *fakeBlobs) DeleteAll(context.Context, string, string) (int, error) { return 0, nil }
 
 func (b *fakeBlobs) Delete(_ context.Context, bucket, key string) error {
 	b.mu.Lock()
@@ -807,5 +813,202 @@ func TestRetentionDeletesOldBulkChangeSets(t *testing.T) {
 	}
 	if result, err := audit.Verify(bg, f.App, f.OrgA); err != nil || !result.Intact {
 		t.Errorf("chain of A after the run: %+v %v", result, err)
+	}
+}
+
+// TestRetentionDeletesOldConfigSnapshots covers ALR-07 (WP-1052, E-207):
+// retention.config_snapshot (daily 04:17) deletes the configuration
+// versions collected more than 400 days ago, a version 399 days old stays,
+// and the latest version of a CI stays even at 500 days, because the next
+// collection compares against it. The run is audited.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestRetentionDeletesOldConfigSnapshots(t *testing.T) {
+	f := scopetest.Seed(t, "e9")
+	bg := context.Background()
+	now := time.Now().UTC()
+	day := 24 * time.Hour
+	version := func(ciID string, age time.Duration) string {
+		t.Helper()
+		var id string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO config_snapshot (organization_id, client_id, ci_id, collected_at, source, trigger,
+			platform, sha256, size_bytes, content)
+			VALUES ($1, $2, $3, $4, 'ssh', 'schedule', 'cisco_ios', encode(sha256(gen_random_uuid()::text::bytea), 'hex'), 1, '\x00')
+			RETURNING id::text`, f.OrgA, f.Client1, ciID, now.Add(-age)).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	changing := f.CI(t, f.OrgA, f.Client1, "cfg-retention-changing")
+	quiet := f.CI(t, f.OrgA, f.Client1, "cfg-retention-quiet")
+	old := version(changing, 401*day)
+	young := version(changing, 399*day)
+	latest := version(changing, day)
+	onlyVersion := version(quiet, 500*day)
+
+	r := jobs.NewRetention(f.App, jobs.RetentionFromDays(10, 3*365, 90, 365)).WithClock(func() time.Time { return now })
+	if !slices.ContainsFunc(r.Schedules(), func(s jobs.Schedule) bool {
+		return s.Kind == jobs.RetentionConfigSnapshot && s.Spec == "17 4 * * *" && s.MaxCatchUp == 1
+	}) {
+		t.Fatalf("the schedules lack %s at 04:17", jobs.RetentionConfigSnapshot)
+	}
+	if err := r.RunConfigSnapshot(bg); err != nil {
+		t.Fatal(err)
+	}
+	exists := func(id string) bool {
+		t.Helper()
+		var n int
+		if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM config_snapshot WHERE id = $1`, id).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n == 1
+	}
+	if exists(old) {
+		t.Error("the version 401 days old stays")
+	}
+	for name, id := range map[string]string{"399 days old": young, "latest": latest, "only version, 500 days old": onlyVersion} {
+		if !exists(id) {
+			t.Errorf("version %s was deleted", name)
+		}
+	}
+	var audited int
+	if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM audit_log WHERE organization_id = $1 AND action = $2 AND changes->>'deleted' = '1'`,
+		f.OrgA, jobs.RetentionConfigSnapshot).Scan(&audited); err != nil || audited != 1 {
+		t.Errorf("audit entries of the run: %d, %v; want one with deleted 1", audited, err)
+	}
+}
+
+// TestRetentionDeletesOldWorkflowRuns covers WFL-02 (WP-1093, E-241):
+// retention.workflow_runs (daily 04:17) deletes the workflow runs that
+// ended more than 400 days ago with their steps; an IGA access request that
+// named one keeps NULL. A run that ended 399 days ago stays, and so does a
+// run created 600 days ago that still waits for its approval. The run is
+// audited.
+//
+// It runs only against PostgreSQL (TEST_DATABASE_URL, see scopetest.Seed).
+func TestRetentionDeletesOldWorkflowRuns(t *testing.T) {
+	f := scopetest.Seed(t, "ea")
+	bg := context.Background()
+	now := time.Now().UTC()
+	day := 24 * time.Hour
+	var def, version string
+	if err := f.Admin.QueryRow(bg, `WITH v AS (SELECT gen_random_uuid() AS id), d AS (
+			INSERT INTO workflow_def (organization_id, name, current_version_id) SELECT $1, 'wf-retention', id FROM v RETURNING id, current_version_id)
+		INSERT INTO workflow_def_version (id, organization_id, workflow_id, version) SELECT current_version_id, $1, id, 1 FROM d
+		RETURNING workflow_id::text, id::text`, f.OrgA).Scan(&def, &version); err != nil {
+		t.Fatal(err)
+	}
+	run := func(status string, finishedAge time.Duration) string {
+		t.Helper()
+		var finished any
+		if finishedAge > 0 {
+			finished = now.Add(-finishedAge)
+		}
+		var id string
+		if err := f.Admin.QueryRow(bg, `INSERT INTO workflow_run (organization_id, workflow_id, definition_version_id, status, trigger, created_at, finished_at)
+			VALUES ($1, $2, $3, $4, 'manual', $5, $6) RETURNING id::text`, f.OrgA, def, version, status, now.Add(-600*day), finished).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Admin.Exec(bg, `INSERT INTO workflow_step (organization_id, run_id, step_index, action_type, status) VALUES ($1, $2, 0, 'noop', 'succeeded')`,
+			f.OrgA, id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	old := run("succeeded", 401*day)
+	young := run("failed", 399*day)
+	waiting := run("waiting_approval", 0)
+	subject := f.AppUser(t, f.OrgA, "wf-retention-subject")
+	var request string
+	if err := f.Admin.QueryRow(bg, `INSERT INTO iga_access_request (organization_id, subject_user_id, entitlement, workflow_run_id)
+		VALUES ($1, $2, 'wf-retention', $3) RETURNING id::text`, f.OrgA, subject, old).Scan(&request); err != nil {
+		t.Fatal(err)
+	}
+
+	r := jobs.NewRetention(f.App, jobs.RetentionFromDays(10, 3*365, 90, 365)).WithClock(func() time.Time { return now })
+	if !slices.ContainsFunc(r.Schedules(), func(s jobs.Schedule) bool {
+		return s.Kind == jobs.RetentionWorkflowRuns && s.Spec == "17 4 * * *" && s.MaxCatchUp == 1
+	}) {
+		t.Fatalf("the schedules lack %s at 04:17", jobs.RetentionWorkflowRuns)
+	}
+	if err := r.RunWorkflowRuns(bg); err != nil {
+		t.Fatal(err)
+	}
+	count := func(sql string, args ...any) int {
+		t.Helper()
+		var n int
+		if err := f.Admin.QueryRow(bg, sql, args...).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if count(`SELECT count(*) FROM workflow_run WHERE id = $1`, old) != 0 || count(`SELECT count(*) FROM workflow_step WHERE run_id = $1`, old) != 0 {
+		t.Error("the run that ended 401 days ago stays with its steps")
+	}
+	for name, id := range map[string]string{"ended 399 days ago": young, "waiting for 600 days": waiting} {
+		if count(`SELECT count(*) FROM workflow_run WHERE id = $1`, id) != 1 {
+			t.Errorf("the run %s was deleted", name)
+		}
+	}
+	if count(`SELECT count(*) FROM iga_access_request WHERE id = $1 AND workflow_run_id IS NULL`, request) != 1 {
+		t.Error("the IGA access request still names the deleted run")
+	}
+	if n := count(`SELECT count(*) FROM audit_log WHERE organization_id = $1 AND action = $2 AND changes->>'deleted' = '1'`,
+		f.OrgA, jobs.RetentionWorkflowRuns); n != 1 {
+		t.Errorf("audit entries of the run: %d; want one with deleted 1", n)
+	}
+}
+
+// TestRetentionClearsStableConfigAlarms covers WP-1054 AK4: the daily
+// retention.config_snapshot resolves the configuration alarms whose last
+// change (last_seen_at) is more than 24 h ago with reason config_stable;
+// one changed 23 h ago stays open, as does an alarm of another source.
+func TestRetentionClearsStableConfigAlarms(t *testing.T) {
+	f := scopetest.Seed(t, "e9")
+	bg := context.Background()
+	now := time.Now().UTC()
+	svc := alarm.NewPGService(f.App)
+	raise := func(kind, series, ciID string, age time.Duration) string {
+		t.Helper()
+		ci := ciID
+		a, err := svc.Raise(f.OrgCtx(f.OrgA), f.OrgA, &alarm.RaiseInput{SourceKind: kind, SourceID: ciID, SeriesKey: series, CIID: &ci,
+			Severity: alarm.SeverityInfo, Summary: "configuration changed"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Admin.Exec(bg, `UPDATE alarm SET last_seen_at = $2 WHERE id = $1`, a.ID, now.Add(-age)); err != nil {
+			t.Fatal(err)
+		}
+		return a.ID
+	}
+	stable := raise(alarm.SourceConfig, configsnap.ConfigSeries, f.CI(t, f.OrgA, f.Client1, "cfg-alarm-stable"), 25*time.Hour)
+	recent := raise(alarm.SourceConfig, configsnap.ConfigSeries, f.CI(t, f.OrgA, f.Client1, "cfg-alarm-recent"), 23*time.Hour)
+	check := raise(alarm.SourceCheck, "state", f.CI(t, f.OrgA, f.Client1, "cfg-alarm-check"), 48*time.Hour)
+	r := jobs.NewRetention(f.App, jobs.RetentionFromDays(10, 3*365, 90, 365)).WithClock(func() time.Time { return now }).
+		WithConfigAlarms(configsnap.StableAlarms{Alarms: svc})
+	if err := r.RunConfigSnapshot(bg); err != nil {
+		t.Fatal(err)
+	}
+	state := func(id string) string {
+		t.Helper()
+		var s string
+		if err := f.Admin.QueryRow(bg, `SELECT state FROM alarm WHERE id = $1`, id).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	if s := state(stable); s != alarm.StateResolved {
+		t.Errorf("config alarm unchanged for 25 h: %s, want resolved", s)
+	}
+	var reason string
+	if err := f.Admin.QueryRow(bg, `SELECT reason FROM alarm_transition WHERE alarm_id = $1 AND to_state = 'resolved'`, stable).
+		Scan(&reason); err != nil || reason != configsnap.ReasonConfigStable {
+		t.Errorf("resolution reason %q (%v), want %s", reason, err, configsnap.ReasonConfigStable)
+	}
+	if s := state(recent); s != alarm.StateOpen {
+		t.Errorf("config alarm changed 23 h ago: %s, want open", s)
+	}
+	if s := state(check); s != alarm.StateOpen {
+		t.Errorf("check alarm: %s, want open (only config alarms end)", s)
 	}
 }

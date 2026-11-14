@@ -1,0 +1,794 @@
+// Package probewire is the wire contract between collector and server for
+// monitoring probes (PRB-05, PRB-07, PRB-11): probe specifications, the
+// paginated assignment set, check results, state changes and the monitoring
+// alive message.
+//
+// Ordering and business time follow E-175: messages are ordered by
+// (epoch, seq), never by wall-clock time. The epoch is a fencing token per
+// probe (ProbeSpec.Epoch), and per probe and epoch exactly one collector is
+// responsible; the order of a probe's messages is therefore (epoch, seq)
+// per probe. Seq is one counter per collector, shared by Result and
+// StateChange, strictly increasing and persisted with the collector's spool
+// so that it keeps rising across a restart (it never starts at 0 again).
+// The idempotency key is (probe_id, epoch, seq), applied separately to
+// results and to state changes. The business time of a result or state
+// change is observed_at, the UTC instant of the measurement on the
+// collector. The server measures the collector's clock offset through
+// Alive.CollectorTime and corrects observed_at when the offset is too large;
+// the order stays the one given by (epoch, seq).
+//
+// Sender identity: the server takes the collector identity only from the
+// authenticated edge connection (mTLS certificate and its subject prefix),
+// never from a payload field. A collector_id in a payload is informational;
+// the server rejects a message whose collector_id differs from the
+// authenticated identity, and it accepts results and state changes only for
+// probes assigned to that collector with that epoch.
+//
+// The package is shared by collector and backend and imports neither of them.
+package probewire
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
+	"net/netip"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+	"unicode/utf8"
+)
+
+// SchemaVersion is the version every message carries (<major>.<minor>).
+// A reader accepts every minor version of its major version and ignores
+// unknown fields; a different major version is rejected.
+const SchemaVersion = "1.0"
+
+// schemaMajor is the major version this package reads.
+const schemaMajor = 1
+
+// ErrUnsupportedVersion is returned by Decode for a missing, malformed or
+// unknown major schema version.
+var ErrUnsupportedVersion = errors.New("probewire: unsupported schema version")
+
+// State is the state of a probe as evaluated by the collector (PRB-05).
+type State string
+
+// Probe states.
+const (
+	StateUp       State = "up"
+	StateDegraded State = "degraded"
+	StateDown     State = "down"
+	StateUnknown  State = "unknown"
+)
+
+// States lists every valid probe state.
+var States = []State{StateUp, StateDegraded, StateDown, StateUnknown}
+
+// Valid reports whether s is one of the probe states.
+func (s State) Valid() bool {
+	for _, v := range States {
+		if s == v {
+			return true
+		}
+	}
+	return false
+}
+
+// Status is the outcome of a single check.
+type Status string
+
+// Result statuses: ok (check succeeded), fail (target answered wrong or not
+// at all) and error (the check itself could not be executed; the reason
+// code tells why, e.g. auth_failed or unsupported).
+const (
+	StatusOK    Status = "ok"
+	StatusFail  Status = "fail"
+	StatusError Status = "error"
+)
+
+// Valid reports whether s is one of the result statuses.
+func (s Status) Valid() bool {
+	return s == StatusOK || s == StatusFail || s == StatusError
+}
+
+// Label keys of a result. With them a result reports the access type it
+// used (credential ID and namespace, never the secret); the ingest (WP-960)
+// evaluates them.
+const (
+	LabelCredentialID        = "credential_id"
+	LabelCredentialNamespace = "credential_namespace"
+)
+
+// Header carries the schema version of a message.
+type Header struct {
+	SchemaVersion string `json:"schema_version"`
+}
+
+func (h *Header) header() *Header { return h }
+
+// Message is implemented by every top-level wire message.
+type Message interface {
+	header() *Header
+}
+
+// ProbeSpec is the effective configuration of one probe as the collector
+// executes it. Epoch is the fencing token of the assignment: a collector
+// checks only probes assigned to it with a valid epoch, and every result
+// and state change carries the epoch it was produced under (PRB-11).
+type ProbeSpec struct {
+	ID         string          `json:"id"`
+	Type       string          `json:"type"`
+	Target     string          `json:"target"`
+	IntervalMS int64           `json:"interval_ms"`
+	TimeoutMS  int64           `json:"timeout_ms"`
+	DownCount  int             `json:"down_count"`
+	UpCount    int             `json:"up_count"`
+	Params     json.RawMessage `json:"params,omitempty"`
+	Thresholds json.RawMessage `json:"thresholds,omitempty"`
+	ParentID   string          `json:"parent_id,omitempty"`
+	Epoch      int64           `json:"epoch"`
+	// CredentialIDs name the credentials of the probe in the collector's
+	// credential bundle (WP-948); never a secret.
+	CredentialIDs []string `json:"credential_ids,omitempty"`
+}
+
+// Assignment set paging limits (AK6): a page holds at most MaxPageProbes
+// probes and is at most MaxPageBytes large when encoded.
+const (
+	MaxPageProbes = 2000
+	MaxPageBytes  = 768 << 10
+)
+
+// AssignmentSet is one page of the versioned assignment set of a collector.
+//
+// Paging: Page counts from 1; NextPage names the following page and is empty
+// (0, omitted) on the last page. If the version of the set changes while the
+// collector is fetching it, the server answers the next page request with
+// VersionChanged set, the new Version and no probes; the collector discards
+// the pages fetched so far and starts again with page 1 of the new version.
+// A collector applies a set only after it fetched every page of one version.
+type AssignmentSet struct {
+	Header
+	CollectorID    string      `json:"collector_id"`
+	Version        int64       `json:"version"`
+	Page           int         `json:"page"`
+	NextPage       int         `json:"next_page,omitempty"`
+	VersionChanged bool        `json:"version_changed,omitempty"`
+	Probes         []ProbeSpec `json:"probes"`
+	// TrapConfig is the trap receiver configuration of the collector's
+	// group (DIS-06, WP-977); absent from a server without it.
+	TrapConfig *TrapConfig `json:"trap_config,omitempty"`
+	// Skipped are the probes assigned to the collector that the set leaves
+	// out, with the reason (WP-948, e.g. SkipCredentialMissing); on the
+	// first page only.
+	Skipped []SkippedProbe `json:"skipped,omitempty"`
+}
+
+// TrapConfig is the SNMP trap receiver of a collector group (DIS-06,
+// WP-977): on or off, the UDP port and the credentials whose communities
+// (kind snmp_v2c) and USM users (kind snmp_v3, from WP-978) the receiver
+// accepts. The credentials reach the collector in its credential bundle;
+// the set names only their ids, never a secret.
+type TrapConfig struct {
+	Enabled       bool     `json:"enabled"`
+	Port          int      `json:"port,omitempty"`
+	CredentialIDs []string `json:"credential_ids,omitempty"`
+}
+
+// DefaultTrapPort is the port of a trap configuration without one.
+const DefaultTrapPort = 162
+
+// MaxTrapCredentials bounds TrapConfig.CredentialIDs.
+const MaxTrapCredentials = 16
+
+// SkippedProbe is a probe of the set the server did not hand out.
+type SkippedProbe struct {
+	ProbeID string `json:"probe_id"`
+	Reason  string `json:"reason"`
+}
+
+// SkipCredentialMissing: a credential of the probe is not in the
+// collector's current credential bundle (WP-948).
+const SkipCredentialMissing = "credential_missing"
+
+// AssignmentRequest is the body of .probes.request (WP-948): IfNoneMatch is
+// the version the collector holds (0: none), Page the page it asks for
+// (from 1) and Version the version of the pages it fetched so far (0 on
+// page 1).
+type AssignmentRequest struct {
+	IfNoneMatch int64 `json:"if_none_match,omitempty"`
+	Page        int   `json:"page,omitempty"`
+	Version     int64 `json:"version,omitempty"`
+}
+
+// NotModified answers .probes.request when the collector holds the current
+// version (if_none_match).
+type NotModified struct {
+	NotModified bool  `json:"not_modified"`
+	Version     int64 `json:"version"`
+}
+
+// ProbesChanged is the push .probes.changed: the new version of the set.
+type ProbesChanged struct {
+	Version int64 `json:"version"`
+}
+
+// ErrProbeTooLarge is returned by Paginate when a single probe does not fit
+// into a page of MaxPageBytes.
+var ErrProbeTooLarge = errors.New("probewire: probe specification exceeds page size")
+
+// Paginate splits the probes of one set version into pages that respect
+// MaxPageProbes and MaxPageBytes. An empty set yields one empty page.
+func Paginate(collectorID string, version int64, probes []ProbeSpec) ([]AssignmentSet, error) {
+	empty, err := Encode(&AssignmentSet{CollectorID: collectorID, Version: version, Page: 1, NextPage: 1 << 30, Probes: []ProbeSpec{}})
+	if err != nil {
+		return nil, err
+	}
+	// Overhead of an empty page plus a generous allowance for the page
+	// numbers and the commas between probes.
+	overhead := len(empty) + 32
+	var pages []AssignmentSet
+	current := []ProbeSpec{}
+	size := overhead
+	flush := func() {
+		pages = append(pages, AssignmentSet{
+			Header:      Header{SchemaVersion: SchemaVersion},
+			CollectorID: collectorID,
+			Version:     version,
+			Page:        len(pages) + 1,
+			Probes:      current,
+		})
+		current = []ProbeSpec{}
+		size = overhead
+	}
+	for i := range probes {
+		p := &probes[i]
+		b, err := json.Marshal(p)
+		if err != nil {
+			return nil, err
+		}
+		n := len(b) + 1
+		if overhead+n > MaxPageBytes {
+			return nil, fmt.Errorf("%w: probe %s", ErrProbeTooLarge, p.ID)
+		}
+		if len(current) == MaxPageProbes || size+n > MaxPageBytes {
+			flush()
+		}
+		current = append(current, *p)
+		size += n
+	}
+	flush()
+	for i := range pages {
+		if i+1 < len(pages) {
+			pages[i].NextPage = i + 2
+		}
+	}
+	return pages, nil
+}
+
+// PageOf answers a page request of a collector. pages is the current
+// version of the set (from Paginate); requestedVersion is the version the
+// collector fetched its earlier pages of (0 when it starts with page 1).
+// A request for a page after the first of an outdated version yields a page
+// with VersionChanged set and NextPage 1 of the current version.
+func PageOf(pages []AssignmentSet, requestedVersion int64, page int) (AssignmentSet, bool) {
+	if len(pages) == 0 || page < 1 {
+		return AssignmentSet{}, false
+	}
+	cur := pages[0]
+	if page > 1 && requestedVersion != 0 && requestedVersion != cur.Version {
+		return AssignmentSet{
+			Header:         Header{SchemaVersion: SchemaVersion},
+			CollectorID:    cur.CollectorID,
+			Version:        cur.Version,
+			Page:           page,
+			NextPage:       1,
+			VersionChanged: true,
+			Probes:         []ProbeSpec{},
+		}, true
+	}
+	if page > len(pages) {
+		return AssignmentSet{}, false
+	}
+	return pages[page-1], true
+}
+
+// Result is the outcome of one check. Seq is the collector-wide counter
+// shared with StateChange (see the package comment); (epoch, seq) orders the
+// results of a probe, and (probe_id, epoch, seq) makes a repeated
+// transmission detectable (PRB-07). ObservedAt is the business time (E-175).
+// A collector checks every result with Validate before it batches it, so
+// that a single non-finite value cannot make the whole batch unencodable.
+//
+// Result has no free-text detail field (E-177): additional information of a
+// probe type goes into Values (numbers) or Labels (e.g. LabelCredentialID).
+type Result struct {
+	ProbeID    string             `json:"probe_id"`
+	Epoch      int64              `json:"epoch"`
+	Seq        uint64             `json:"seq"`
+	ObservedAt time.Time          `json:"observed_at"`
+	Status     Status             `json:"status"`
+	Code       string             `json:"code,omitempty"`
+	RTTMS      *float64           `json:"rtt_ms,omitempty"`
+	Loss       *float64           `json:"loss,omitempty"`
+	Value      *float64           `json:"value,omitempty"`
+	Values     map[string]float64 `json:"values,omitempty"`
+	Labels     map[string]string  `json:"labels,omitempty"`
+}
+
+// ErrInvalidResult is returned by Result.Validate and Alive.Validate.
+var ErrInvalidResult = errors.New("probewire: invalid message")
+
+// Validate checks a result before it is batched: known status, a reason
+// code that is empty or valid (ValidReason), and finite numbers only
+// (json.Marshal rejects NaN and ±Inf, which would fail the whole batch).
+func (r *Result) Validate() error {
+	if r.ProbeID == "" {
+		return fmt.Errorf("%w: probe_id is required", ErrInvalidResult)
+	}
+	if !r.Status.Valid() {
+		return fmt.Errorf("%w: status %q", ErrInvalidResult, r.Status)
+	}
+	if r.Code != "" && !ValidReason(r.Code) {
+		return fmt.Errorf("%w: code %q", ErrInvalidResult, r.Code)
+	}
+	for _, f := range []struct {
+		name string
+		v    *float64
+	}{{"rtt_ms", r.RTTMS}, {"loss", r.Loss}, {"value", r.Value}} {
+		if f.v != nil && !finite(*f.v) {
+			return fmt.Errorf("%w: %s is not finite", ErrInvalidResult, f.name)
+		}
+	}
+	for k, v := range r.Values {
+		if !finite(v) {
+			return fmt.Errorf("%w: values[%s] is not finite", ErrInvalidResult, k)
+		}
+	}
+	return nil
+}
+
+// ValidResults splits results into the valid ones, in their order, and the
+// number of rejected ones; the collector counts rejected results as loss
+// (PRB-07) instead of dropping the whole batch.
+func ValidResults(results []Result) (valid []Result, rejected int) {
+	valid = make([]Result, 0, len(results))
+	for i := range results {
+		if results[i].Validate() != nil {
+			rejected++
+			continue
+		}
+		valid = append(valid, results[i])
+	}
+	return valid, rejected
+}
+
+func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
+
+// ResultBatch bundles results for one transmission (at most 10 s or 1,000
+// results, PRB-05). MaxBatchResults is the upper bound; a full batch with
+// typical values stays below a quarter of the 1 MiB edge message size.
+// CollectorID is informational only: the server takes the sender from the
+// authenticated edge identity and rejects a batch whose CollectorID differs
+// from it (see the package comment).
+//
+// Events are the monitoring events (SNMP traps, DIS-06, WP-979) the
+// collector received since the previous batch; they ride with the results
+// (E-173) and are stored by the ingest worker in the same transaction.
+type ResultBatch struct {
+	Header
+	CollectorID string   `json:"collector_id"`
+	Results     []Result `json:"results"`
+	Events      []Event  `json:"events,omitempty"`
+}
+
+// Limits of events (WP-979 AK1, AK2).
+const (
+	// MaxBatchEvents is the maximum number of events in one ResultBatch.
+	MaxBatchEvents = 200
+	// MaxEventVarbinds and MaxEventVarbindBytes bound the varbinds of an
+	// event (names and values together); the rest is cut and the event
+	// marked Truncated.
+	MaxEventVarbinds     = 64
+	MaxEventVarbindBytes = 16 << 10
+	// MaxEventVarbindTextBytes bounds the varbinds as the server stores
+	// them: the JSON text of the jsonb column (CHECK
+	// chk_monitoring_event_varbinds, octet_length(varbinds::text)), with
+	// quotes and backslashes escaped.
+	MaxEventVarbindTextBytes = 32 << 10
+	// MaxEventTrapOIDBytes bounds trap_oid.
+	MaxEventTrapOIDBytes = 256
+)
+
+// Kinds of an Event, derived from snmpTrapOID.0 (1.3.6.1.6.3.1.1.5.1–5)
+// or the generic trap type of SNMPv1 (0–4).
+const (
+	EventColdStart   = "cold_start"
+	EventWarmStart   = "warm_start"
+	EventLinkDown    = "link_down"
+	EventLinkUp      = "link_up"
+	EventAuthFailure = "auth_failure"
+	EventOther       = "other"
+)
+
+var eventKinds = map[string]bool{EventColdStart: true, EventWarmStart: true, EventLinkDown: true,
+	EventLinkUp: true, EventAuthFailure: true, EventOther: true}
+
+// snmpGenericTraps are the standard traps by their last arc (RFC 3418)
+// resp. the generic trap type of SNMPv1 plus one.
+var snmpGenericTraps = map[string]string{"1": EventColdStart, "2": EventWarmStart, "3": EventLinkDown,
+	"4": EventLinkUp, "5": EventAuthFailure}
+
+// EventKindOfTrap derives the kind of a trap: snmpTrapOID.0 below
+// 1.3.6.1.6.3.1.1.5 or, for SNMPv1, the generic trap type 0–4 (6 is
+// enterprise specific: other).
+func EventKindOfTrap(trapOID, genericTrap string) string {
+	oid := strings.TrimPrefix(strings.TrimSpace(trapOID), ".")
+	if last, ok := strings.CutPrefix(oid, "1.3.6.1.6.3.1.1.5."); ok {
+		if k, known := snmpGenericTraps[last]; known {
+			return k
+		}
+	}
+	if n, err := strconv.Atoi(strings.TrimSpace(genericTrap)); err == nil && n >= 0 && n <= 4 {
+		return snmpGenericTraps[strconv.Itoa(n+1)]
+	}
+	return EventOther
+}
+
+// RecheckKind reports whether an event of the kind triggers an immediate
+// check of the probes of its source (link down/up, cold/warm start).
+func RecheckKind(kind string) bool {
+	switch kind {
+	case EventLinkDown, EventLinkUp, EventColdStart, EventWarmStart:
+		return true
+	}
+	return false
+}
+
+// Event is a monitoring event of the collector: an SNMP trap received in
+// the monitoring mode (WP-979). ID is a UUIDv7 the collector assigns, so a
+// repeated delivery is detected; SourceIP is the sender of the trap.
+type Event struct {
+	ID         string            `json:"id"`
+	Kind       string            `json:"kind"`
+	SourceIP   string            `json:"source_ip"`
+	TrapOID    string            `json:"trap_oid,omitempty"`
+	Varbinds   map[string]string `json:"varbinds,omitempty"`
+	Truncated  bool              `json:"truncated,omitempty"`
+	ObservedAt time.Time         `json:"observed_at"`
+}
+
+// Validate checks an event: a UUID, a known kind, an IP address without
+// zone as source, at most MaxEventVarbinds varbinds of at most
+// MaxEventVarbindBytes (and MaxEventVarbindTextBytes as stored), names,
+// values and trap_oid valid UTF-8 without control characters (text and
+// jsonb cannot hold NUL).
+func (e *Event) Validate() error {
+	if !isUUID(e.ID) {
+		return fmt.Errorf("%w: event id is no UUID", ErrInvalidResult)
+	}
+	if !eventKinds[e.Kind] {
+		return fmt.Errorf("%w: event kind %q", ErrInvalidResult, e.Kind)
+	}
+	if a, err := netip.ParseAddr(e.SourceIP); err != nil || a.Zone() != "" {
+		return fmt.Errorf("%w: event source_ip", ErrInvalidResult)
+	}
+	if e.ObservedAt.IsZero() {
+		return fmt.Errorf("%w: event observed_at", ErrInvalidResult)
+	}
+	if len(e.Varbinds) > MaxEventVarbinds || varbindBytes(e.Varbinds) > MaxEventVarbindBytes ||
+		varbindTextBytes(e.Varbinds) > MaxEventVarbindTextBytes || len(e.TrapOID) > MaxEventTrapOIDBytes {
+		return fmt.Errorf("%w: event varbinds above the limit", ErrInvalidResult)
+	}
+	if !ValidEventText(e.TrapOID) {
+		return fmt.Errorf("%w: event trap_oid", ErrInvalidResult)
+	}
+	for k, v := range e.Varbinds {
+		if k == "" || !ValidEventText(k) || !ValidEventText(v) {
+			return fmt.Errorf("%w: event varbind", ErrInvalidResult)
+		}
+	}
+	return nil
+}
+
+// ValidEventText reports whether s is valid UTF-8 without control
+// characters (C0, DEL, C1), as an event stores it.
+func ValidEventText(s string) bool {
+	if !utf8.ValidString(s) {
+		return false
+	}
+	for _, r := range s {
+		if r < 0x20 || (r >= 0x7f && r < 0xa0) {
+			return false
+		}
+	}
+	return true
+}
+
+func varbindBytes(v map[string]string) int {
+	n := 0
+	for k, x := range v {
+		n += len(k) + len(x)
+	}
+	return n
+}
+
+// varbindTextBytes is an upper bound of the JSON text of the varbinds as
+// PostgreSQL renders jsonb: braces, per entry two quoted strings, ": "
+// and ", ", quotes and backslashes escaped (control characters are not
+// allowed).
+func varbindTextBytes(v map[string]string) int {
+	n := 2
+	for k, x := range v {
+		n += varbindEntryText(k, x)
+	}
+	return n
+}
+
+func varbindEntryText(k, v string) int {
+	return escapedLen(k) + escapedLen(v) + 8
+}
+
+func escapedLen(s string) int {
+	return len(s) + strings.Count(s, `"`) + strings.Count(s, `\`)
+}
+
+// LimitVarbinds returns at most MaxEventVarbinds varbinds of at most
+// MaxEventVarbindBytes and MaxEventVarbindTextBytes (in the order of the
+// names) and whether some were cut; a varbind whose name or value is no
+// valid event text (ValidEventText) is left out as well.
+func LimitVarbinds(v map[string]string) (map[string]string, bool) {
+	names := make([]string, 0, len(v))
+	for k := range v {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	out := map[string]string{}
+	size, text, cut := 0, 2, false
+	for _, k := range names {
+		if k == "" || !ValidEventText(k) || !ValidEventText(v[k]) {
+			cut = true
+			continue
+		}
+		if len(out) >= MaxEventVarbinds || size+len(k)+len(v[k]) > MaxEventVarbindBytes ||
+			text+varbindEntryText(k, v[k]) > MaxEventVarbindTextBytes {
+			cut = true
+			continue
+		}
+		out[k] = v[k]
+		size += len(k) + len(v[k])
+		text += varbindEntryText(k, v[k])
+	}
+	return out, cut
+}
+
+func isUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch i {
+		case 8, 13, 18, 23:
+			if c != '-' {
+				return false
+			}
+		default:
+			if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// MaxBatchResults is the maximum number of results in one ResultBatch.
+const MaxBatchResults = 1000
+
+// StateChange reports a state transition of one probe (PRB-05). It carries
+// sequence number, epoch, reason, timestamp and the last result. Seq comes
+// from the same collector-wide counter as Result.Seq; the server applies the
+// changes of a probe in (epoch, seq) order and ignores repeats of
+// (probe_id, epoch, seq). The sender is the authenticated edge identity.
+type StateChange struct {
+	Header
+	ProbeID    string    `json:"probe_id"`
+	Epoch      int64     `json:"epoch"`
+	Seq        uint64    `json:"seq"`
+	From       State     `json:"from"`
+	To         State     `json:"to"`
+	Reason     string    `json:"reason,omitempty"`
+	ObservedAt time.Time `json:"observed_at"`
+	LastResult *Result   `json:"last_result,omitempty"`
+}
+
+// Alive is the monitoring alive message a collector sends every 10 s
+// (PRB-10): clock, configuration version, load figures and buffer state.
+// CollectorTime is the collector's wall clock when sending; the server
+// derives the clock offset from it (E-175, PRB-09). The sender is the
+// authenticated edge identity.
+//
+// QueueResults and QueueStates are the entries of the two probe spools
+// (result bundles and state changes, WP-954), Dropped the entries or
+// results lost for good and DroppedByReason the losses per reason of the
+// spool (max_bytes, compacted, quarantined). Skipped counts the checks left
+// out for lack of budget (limit_exceeded), Overrun the starts left out
+// because the previous check of the probe was still running (WP-951).
+// ICMPCapability is the ICMP socket of IPv4, ICMPCapabilityV6 that of IPv6.
+// ProbeCapabilities is the capability report of the collector (PRT-18,
+// WP-966); a collector without it leaves the stored report unchanged.
+type Alive struct {
+	Header
+	CollectorTime    time.Time        `json:"collector_time"`
+	ConfigVersion    int64            `json:"config_version"`
+	Probes           int              `json:"probes"`
+	ResultsPerS      float64          `json:"results_per_s"`
+	QueueState       string           `json:"queue_state"`
+	QueueResults     int64            `json:"queue_results"`
+	QueueStates      int64            `json:"queue_states"`
+	Dropped          int64            `json:"dropped"`
+	DroppedByReason  map[string]int64 `json:"dropped_by_reason,omitempty"`
+	Skipped          int64            `json:"skipped"`
+	Overrun          int64            `json:"overrun"`
+	ICMPCapability   string           `json:"icmp_capability"`
+	ICMPCapabilityV6 string           `json:"icmp_capability_v6,omitempty"`
+	// ProbeCapabilities is the capability report (WP-966).
+	ProbeCapabilities *ProbeCapabilities `json:"probe_capabilities,omitempty"`
+	// TrapsReceived counts the SNMP traps the receiver took since the
+	// start, TrapsDropped the traps it dropped by reason (community,
+	// from WP-978 also the USM reasons); DIS-06, WP-977.
+	TrapsReceived int64            `json:"traps_received"`
+	TrapsDropped  map[string]int64 `json:"traps_dropped,omitempty"`
+}
+
+// Reasons of Alive.TrapsDropped.
+const (
+	// TrapDropCommunity: a v1/v2c trap with a community of no configured
+	// snmp_v2c credential.
+	TrapDropCommunity = "community"
+)
+
+// ProbeCapabilities is what a collector can execute (PRT-18, WP-966): the
+// ICMP socket per address family (CapabilityUnprivileged, CapabilityRaw or
+// CapabilityNone), whether it may bind the privileged UDP ports 67 and 68
+// (DHCP), whether its system clock is synchronized (TimeSynchronized,
+// TimeUnsynchronized or TimeUnknown) and the probe types its executor
+// register implements, as detected at DetectedAt. The collector sends it
+// with every heartbeat and alive message; the server stores it at the
+// collector and assigns a probe only to a member that can execute it.
+type ProbeCapabilities struct {
+	ICMP4      string    `json:"icmp4"`
+	ICMP6      string    `json:"icmp6"`
+	UDP67      bool      `json:"udp_67"`
+	UDP68      bool      `json:"udp_68"`
+	TimeSync   string    `json:"time_sync"`
+	ProbeTypes []string  `json:"probe_types"`
+	DetectedAt time.Time `json:"detected_at"`
+}
+
+// Values of ProbeCapabilities.ICMP4 and ICMP6.
+const (
+	CapabilityUnprivileged = "unprivileged"
+	CapabilityRaw          = "raw"
+	CapabilityNone         = "none"
+)
+
+// Values of ProbeCapabilities.TimeSync.
+const (
+	TimeSynchronized   = "synchronized"
+	TimeUnsynchronized = "unsynchronized"
+	TimeUnknown        = "unknown"
+)
+
+// Capability keys of the type register (TypeDef.Capabilities, PRT-18).
+const (
+	NeedICMP               = "icmp"
+	NeedIPv6               = "ipv6"
+	NeedPrivilegedUDPPorts = "privileged_udp_ports"
+	NeedTimeSync           = "time_sync"
+)
+
+// Implements reports whether the report lists the probe type.
+func (c *ProbeCapabilities) Implements(typ string) bool {
+	for _, t := range c.ProbeTypes {
+		if t == typ {
+			return true
+		}
+	}
+	return false
+}
+
+// ICMP returns the ICMP capability of an address family (4 or 6).
+func (c *ProbeCapabilities) ICMP(family int) string {
+	if family == 6 {
+		return c.ICMP6
+	}
+	return c.ICMP4
+}
+
+// Equal reports whether two reports name the same capabilities; the
+// detection time is not compared.
+func (c *ProbeCapabilities) Equal(o *ProbeCapabilities) bool {
+	if c == nil || o == nil {
+		return c == o
+	}
+	if c.ICMP4 != o.ICMP4 || c.ICMP6 != o.ICMP6 || c.UDP67 != o.UDP67 || c.UDP68 != o.UDP68 ||
+		c.TimeSync != o.TimeSync || len(c.ProbeTypes) != len(o.ProbeTypes) {
+		return false
+	}
+	for i := range c.ProbeTypes {
+		if c.ProbeTypes[i] != o.ProbeTypes[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// AliveReply is the server's answer to an alive message: ServerTime is
+// the server's clock when it answered. With the round trip time the
+// collector measured it shows the clock offset; the server evaluates the
+// offset itself (WP-962).
+type AliveReply struct {
+	ServerTime time.Time `json:"server_time"`
+}
+
+// Queue states of Alive.QueueState.
+const (
+	QueueOK       = "ok"
+	QueueBacklog  = "backlog"
+	QueueOverflow = "overflow"
+)
+
+// ICMP capabilities of Alive.ICMPCapability.
+const (
+	ICMPRaw          = "raw"
+	ICMPUnprivileged = "unprivileged"
+	ICMPUnavailable  = "unavailable"
+)
+
+// Validate checks that the load figures are finite and not negative.
+func (a *Alive) Validate() error {
+	if !finite(a.ResultsPerS) || a.ResultsPerS < 0 {
+		return fmt.Errorf("%w: results_per_s must be finite and not negative", ErrInvalidResult)
+	}
+	return nil
+}
+
+// Encode marshals a message, setting its schema version when unset.
+func Encode(m Message) ([]byte, error) {
+	if h := m.header(); h.SchemaVersion == "" {
+		h.SchemaVersion = SchemaVersion
+	}
+	return json.Marshal(m)
+}
+
+// Decode unmarshals a message. Unknown fields are ignored; a missing or
+// unknown major schema version yields ErrUnsupportedVersion.
+func Decode(data []byte, m Message) error {
+	var h Header
+	if err := json.Unmarshal(data, &h); err != nil {
+		return err
+	}
+	major, ok := majorOf(h.SchemaVersion)
+	if !ok || major != schemaMajor {
+		return fmt.Errorf("%w: %q", ErrUnsupportedVersion, h.SchemaVersion)
+	}
+	return json.Unmarshal(data, m)
+}
+
+func majorOf(v string) (int, bool) {
+	maj, minor, found := strings.Cut(v, ".")
+	if !found {
+		return 0, false
+	}
+	n, err := strconv.Atoi(maj)
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	if _, err := strconv.Atoi(minor); err != nil {
+		return 0, false
+	}
+	return n, true
+}

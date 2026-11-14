@@ -251,3 +251,219 @@ func TestMigrationRanksFollowTheRankTable(t *testing.T) {
 		t.Errorf("migration 000093 ranks %d sources, the table %d", n, len(SourceRanks))
 	}
 }
+
+// rankStub is a reader with source ranks per attribute (rankReader): the
+// provenance of one field, the CI type of the CI and the stored entries.
+type rankStub struct {
+	fv      *FieldValue
+	ciType  string
+	entries []RankEntry
+	// locked: the lifecycle state of the CI locks the field (WP-1103).
+	locked bool
+}
+
+func (s rankStub) Get(context.Context, string, string, string) (*FieldValue, error) {
+	if s.fv == nil {
+		return nil, ErrNotFound
+	}
+	return s.fv, nil
+}
+
+func (s rankStub) decisionState(context.Context, string, string, string) (*FieldValue, string, bool, error) {
+	return s.fv, s.ciType, s.locked, nil
+}
+
+func (s rankStub) rankTable(context.Context, string) (*RankTable, error) {
+	return NewRankTable(s.entries), nil
+}
+
+// TestEffectiveRankTypeBeforeOrg covers WP-1105 (REC-04): the entry of the
+// CI's type wins over the organization-wide entry, which wins over the
+// REC-03 table; the decision uses it for the incoming source and for the
+// source of the stored value.
+func TestEffectiveRankTypeBeforeOrg(t *testing.T) {
+	const server, switchType = "00000000-0000-4000-8000-0000000000a1", "00000000-0000-4000-8000-0000000000a2"
+	table := NewRankTable([]RankEntry{
+		{CITypeID: server, AttributeKey: "firmware_version", Source: "snmp", Rank: 70},
+		{AttributeKey: "firmware_version", Source: "snmp", Rank: 90},
+	})
+	for _, c := range []struct {
+		ciType, field, source string
+		rank                  int
+		origin                string
+	}{
+		{server, "firmware_version", "snmp", 70, OriginType},
+		{switchType, "firmware_version", "snmp", 90, OriginOrg},
+		{"", "firmware_version", "snmp", 90, OriginOrg},
+		{server, "os_version", "snmp", 80, OriginDefault},
+		{server, "firmware_version", "agent", 85, OriginDefault},
+	} {
+		if rank, origin := table.Effective(c.ciType, c.field, c.source); rank != c.rank || origin != c.origin {
+			t.Errorf("Effective(%q, %q, %q) = %d %s, want %d %s", c.ciType, c.field, c.source, rank, origin, c.rank, c.origin)
+		}
+	}
+	observed := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	stored := &FieldValue{DiscoveredSource: "agent", DiscoveredRank: 85, ObservedAt: &observed}
+	newer := observed.Add(time.Hour)
+	w := func() *Write {
+		return &Write{OrganizationID: "org", CIID: "ci", Field: "firmware_version", Value: "2.0", Source: "snmp", ObservedAt: newer, Current: "1.0"}
+	}
+	// On a server snmp ranks 70 < agent 85; on a switch the org entry 90 wins.
+	if d := DecideAutomatedWrite(context.Background(), rankStub{fv: stored, ciType: server, entries: []RankEntry{
+		{CITypeID: server, AttributeKey: "firmware_version", Source: "snmp", Rank: 70},
+		{AttributeKey: "firmware_version", Source: "snmp", Rank: 90}}}, w()); d.Write || d.Reason != ReasonLowerRank {
+		t.Errorf("server: %+v, want lower_rank", d)
+	}
+	if d := DecideAutomatedWrite(context.Background(), rankStub{fv: stored, ciType: switchType, entries: []RankEntry{
+		{CITypeID: server, AttributeKey: "firmware_version", Source: "snmp", Rank: 70},
+		{AttributeKey: "firmware_version", Source: "snmp", Rank: 90}}}, w()); !d.Write {
+		t.Errorf("switch: %+v, want a write", d)
+	}
+	// The stored value's source is ranked by the policy as well: agent
+	// lowered to 50 loses to snmp 80.
+	if d := DecideAutomatedWrite(context.Background(), rankStub{fv: stored, entries: []RankEntry{
+		{AttributeKey: "firmware_version", Source: "agent", Rank: 50}}}, w()); !d.Write {
+		t.Errorf("lowered agent: %+v, want a write", d)
+	}
+}
+
+// TestEffectiveRankFallsBackToTable: without entries, or without a rank
+// reader, the REC-03 table decides; a stored value of a source outside
+// REC-03 keeps its recorded rank.
+func TestEffectiveRankFallsBackToTable(t *testing.T) {
+	var none *RankTable
+	if r, o := none.Effective("t", "f", "snmp"); r != 80 || o != OriginDefault {
+		t.Errorf("nil table: %d %s", r, o)
+	}
+	if r, o := NewRankTable(nil).Effective("t", "f", "redfish"); r != 90 || o != OriginDefault {
+		t.Errorf("empty table: %d %s", r, o)
+	}
+	observed := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	w := &Write{OrganizationID: "org", CIID: "ci", Field: "model", Value: "x", Source: "snmp", ObservedAt: observed.Add(time.Hour), Current: "y"}
+	stored := &FieldValue{DiscoveredSource: "agent", DiscoveredRank: 85, ObservedAt: &observed}
+	if d := DecideAutomatedWrite(context.Background(), rankStub{fv: stored}, w); d.Write || d.Reason != ReasonLowerRank {
+		t.Errorf("snmp over agent without entries: %+v, want lower_rank", d)
+	}
+	if d := DecideAutomatedWrite(context.Background(), stubReader{fv: stored}, w); d.Write || d.Reason != ReasonLowerRank {
+		t.Errorf("snmp over agent without rank reader: %+v, want lower_rank", d)
+	}
+	computed := &FieldValue{DiscoveredSource: "computed", DiscoveredRank: 100, ObservedAt: &observed}
+	if d := DecideAutomatedWrite(context.Background(), rankStub{fv: computed, entries: []RankEntry{
+		{AttributeKey: "model", Source: "snmp", Rank: 99}}}, w); d.Write {
+		t.Errorf("snmp 99 over a computed value: %+v, want no write", d)
+	}
+}
+
+// TestManualNotConfigurable: manual, override and manual_override stay
+// 100 whatever the table says, no automation source ranks 100, and a
+// manual override is never replaced.
+func TestManualNotConfigurable(t *testing.T) {
+	table := NewRankTable([]RankEntry{{AttributeKey: "f", Source: "manual", Rank: 1}, {AttributeKey: "f", Source: "import", Rank: 99}})
+	for _, source := range []string{"manual", "override", "manual_override"} {
+		if IsConfigurableSource(source) {
+			t.Errorf("%s is configurable", source)
+		}
+		if r, o := table.Effective("", "f", source); r != 100 || o != OriginDefault {
+			t.Errorf("%s: %d %s, want 100 default", source, r, o)
+		}
+	}
+	if err := validateRankEntries([]RankEntry{{AttributeKey: "f", Source: "manual", Rank: 50}}); err == nil || err.Field != "entries[0].source" {
+		t.Errorf("manual entry: %v, want a source error", err)
+	}
+	if err := validateRankEntries([]RankEntry{{AttributeKey: "f", Source: "snmp", Rank: 100}}); err == nil || err.Field != "entries[0].rank" {
+		t.Errorf("rank 100: %v, want a rank error", err)
+	}
+	if err := validateRankEntries([]RankEntry{{AttributeKey: "f", Source: "snmp", Rank: 5}, {AttributeKey: "f", Source: "snmp", Rank: 6}}); err == nil {
+		t.Error("duplicate entries accepted")
+	}
+	at := time.Now()
+	overridden := &FieldValue{OverrideValue: "manual", OverrideAt: &at, DiscoveredSource: "snmp"}
+	d := DecideAutomatedWrite(context.Background(), rankStub{fv: overridden, entries: []RankEntry{{AttributeKey: "f", Source: "import", Rank: 99}}},
+		&Write{OrganizationID: "org", CIID: "ci", Field: "f", Value: "auto", Source: "import", ObservedAt: at, Current: "manual"})
+	if d.Write || !d.Conflict {
+		t.Errorf("import 99 against a manual override: %+v, want a conflict without write", d)
+	}
+}
+
+// TestSameEffectiveRankNeedsNewerObservedAt: an equal effective rank wins
+// only with a newer source time (REC-05).
+func TestSameEffectiveRankNeedsNewerObservedAt(t *testing.T) {
+	observed := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	stored := &FieldValue{DiscoveredSource: "agent", DiscoveredRank: 85, ObservedAt: &observed}
+	reader := rankStub{fv: stored, entries: []RankEntry{{AttributeKey: "firmware_version", Source: "snmp", Rank: 85}}}
+	w := &Write{OrganizationID: "org", CIID: "ci", Field: "firmware_version", Value: "2", Source: "snmp", ObservedAt: observed, Current: "1"}
+	if d := DecideAutomatedWrite(context.Background(), reader, w); d.Write || d.Reason != ReasonStale {
+		t.Errorf("same rank, same time: %+v, want stale", d)
+	}
+	w.ObservedAt = observed.Add(time.Second)
+	if d := DecideAutomatedWrite(context.Background(), reader, w); !d.Write {
+		t.Errorf("same rank, newer time: %+v, want a write", d)
+	}
+}
+
+// TestRankCacheSkipsStaleFill: a rank table read before an invalidation
+// (a PUT committed while the read ran) is not cached after it; a read
+// after the invalidation is.
+func TestRankCacheSkipsStaleFill(t *testing.T) {
+	c := newRankCache(time.Now)
+	_, gen, ok := c.get("org")
+	if ok {
+		t.Fatal("empty cache returned a table")
+	}
+	c.invalidate("org")
+	if c.putIfGeneration("org", gen, NewRankTable(nil)) {
+		t.Fatal("a table read before the invalidation was cached")
+	}
+	if _, _, ok = c.get("org"); ok {
+		t.Fatal("the stale table is served from the cache")
+	}
+	_, gen, _ = c.get("org")
+	if !c.putIfGeneration("org", gen, NewRankTable(nil)) {
+		t.Fatal("a table read after the invalidation was not cached")
+	}
+	if _, _, ok = c.get("org"); !ok {
+		t.Fatal("the fresh table is not cached")
+	}
+}
+
+// TestLifecycleLockedDecision: a field the lifecycle state locks (WP-1103
+// AK5) is a conflict with reason lifecycle_locked for a source below rank
+// 92 with a differing value, no write with an equal one; the workflow
+// (rank 92) and the import decide as before.
+func TestLifecycleLockedDecision(t *testing.T) {
+	stub := rankStub{locked: true, ciType: "type-1"}
+	for _, tc := range []struct {
+		source  string
+		value   any
+		want    Decision
+		comment string
+	}{
+		{"snmp", "SN-2", Decision{Conflict: true, Reason: ReasonLifecycleLocked}, "differing value of snmp"},
+		{"agent", "SN-1", Decision{Reason: ReasonLifecycleLocked}, "equal value of the agent"},
+		{"workflow", "SN-2", Decision{Write: true, Reason: ReasonAllowed}, "workflow decides as before"},
+		{"import", "SN-2", Decision{Write: true, Reason: ReasonAllowed}, "import decides as before"},
+	} {
+		got := DecideAutomatedWrite(context.Background(), stub, &Write{OrganizationID: "org", CIID: "ci", Field: "serial_number",
+			Value: tc.value, Current: "SN-1", Source: tc.source, FallbackSource: "snmp", ObservedAt: time.Now()})
+		if got != tc.want {
+			t.Errorf("%s: %+v, want %+v", tc.comment, got, tc.want)
+		}
+	}
+	// A rank table that lifts a discovery source above the workflow does
+	// not lift it past the lock: discovery writes past the CI service.
+	lifted := rankStub{locked: true, ciType: "type-1", entries: []RankEntry{
+		{AttributeKey: "serial_number", Source: "redfish", Rank: 95},
+		{CITypeID: "type-1", AttributeKey: "serial_number", Source: "snmp", Rank: 99},
+	}}
+	for _, source := range []string{"redfish", "snmp"} {
+		if got := DecideAutomatedWrite(context.Background(), lifted, &Write{OrganizationID: "org", CIID: "ci", Field: "serial_number",
+			Value: "SN-2", Current: "SN-1", Source: source, FallbackSource: "snmp", ObservedAt: time.Now()}); got != (Decision{Conflict: true, Reason: ReasonLifecycleLocked}) {
+			t.Errorf("%s lifted to rank >= 92: %+v, want a lifecycle_locked conflict", source, got)
+		}
+	}
+	stub.locked = false
+	if got := DecideAutomatedWrite(context.Background(), stub, &Write{OrganizationID: "org", CIID: "ci", Field: "serial_number",
+		Value: "SN-2", Current: "SN-1", Source: "snmp", FallbackSource: "snmp", ObservedAt: time.Now()}); got.Reason == ReasonLifecycleLocked {
+		t.Errorf("unlocked field: %+v", got)
+	}
+}

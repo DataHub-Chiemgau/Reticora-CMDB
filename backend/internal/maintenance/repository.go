@@ -3,12 +3,16 @@ package maintenance
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"sync"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
+
+// errWindowNotFound is an unknown or invisible window (404, F-367).
+var errWindowNotFound = fmt.Errorf("maintenance window not found: %w", api.ErrNotFound)
 
 // Repository stores maintenance windows and notifications.
 type Repository interface {
@@ -17,10 +21,19 @@ type Repository interface {
 	Create(ctx context.Context, w *Window) error
 	Update(ctx context.Context, orgID, id string, req UpdateWindowRequest) (*Window, error)
 	Delete(ctx context.Context, orgID, id string) error
-	// NotifyClients derives the affected clients from the window's CIs and
-	// records one notification per client. Returns the notifications.
-	NotifyClients(ctx context.Context, orgID, windowID string) ([]Notification, error)
+	// NotifyClients announces the window to the clients of plan (nil: the
+	// clients of the window's own CIs), one notification of the channel
+	// notify per client; a client with a pending or sent notification is
+	// not announced again, a failed one anew. Returns the notifications of
+	// the clients.
+	NotifyClients(ctx context.Context, orgID, windowID string, plan *NotifyPlan) ([]Notification, error)
 	ListNotifications(ctx context.Context, orgID, windowID string) ([]Notification, error)
+	// ActiveWindows returns the windows active at at: starts_at <= at <
+	// ends_at and not cancelled (ALR-11, WP-1033), with their CIs.
+	ActiveWindows(ctx context.Context, orgID string, at time.Time) ([]Window, error)
+	// WindowsBetween returns the windows that are not cancelled and
+	// overlap [from, to), with their CIs, ordered by starts_at.
+	WindowsBetween(ctx context.Context, orgID string, from, to time.Time) ([]Window, error)
 }
 
 // MemoryRepository is the in-memory implementation (tests, --no-db).
@@ -78,10 +91,36 @@ func (r *MemoryRepository) GetByID(_ context.Context, orgID, id string) (*Window
 	defer r.mu.RUnlock()
 	w, ok := r.wins[id]
 	if !ok || w.OrganizationID != orgID {
-		return nil, fmt.Errorf("maintenance window not found")
+		return nil, errWindowNotFound
 	}
 	cp := *w
 	return &cp, nil
+}
+
+// ActiveWindows implements Repository.
+func (r *MemoryRepository) ActiveWindows(_ context.Context, orgID string, at time.Time) ([]Window, error) {
+	return r.between(orgID, at, at.Add(time.Nanosecond)), nil
+}
+
+// WindowsBetween implements Repository.
+func (r *MemoryRepository) WindowsBetween(_ context.Context, orgID string, from, to time.Time) ([]Window, error) {
+	return r.between(orgID, from, to), nil
+}
+
+func (r *MemoryRepository) between(orgID string, from, to time.Time) []Window {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := []Window{}
+	for _, w := range r.wins {
+		if w.OrganizationID != orgID || w.Status == "cancelled" || !w.StartsAt.Before(to) || !w.EndsAt.After(from) {
+			continue
+		}
+		cp := *w
+		cp.CIIDs = slices.Clone(w.CIIDs)
+		out = append(out, cp)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].StartsAt.Before(out[j].StartsAt) })
+	return out
 }
 
 func (r *MemoryRepository) Create(_ context.Context, w *Window) error {
@@ -103,7 +142,7 @@ func (r *MemoryRepository) Update(_ context.Context, orgID, id string, req Updat
 	defer r.mu.Unlock()
 	w, ok := r.wins[id]
 	if !ok || w.OrganizationID != orgID {
-		return nil, fmt.Errorf("maintenance window not found")
+		return nil, errWindowNotFound
 	}
 	if req.Title != nil {
 		w.Title = *req.Title
@@ -124,31 +163,41 @@ func (r *MemoryRepository) Delete(_ context.Context, orgID, id string) error {
 	defer r.mu.Unlock()
 	w, ok := r.wins[id]
 	if !ok || w.OrganizationID != orgID {
-		return fmt.Errorf("maintenance window not found")
+		return errWindowNotFound
 	}
 	delete(r.wins, id)
 	delete(r.notif, id)
 	return nil
 }
 
-func (r *MemoryRepository) NotifyClients(_ context.Context, orgID, windowID string) ([]Notification, error) {
+func (r *MemoryRepository) NotifyClients(_ context.Context, orgID, windowID string, plan *NotifyPlan) ([]Notification, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	w, ok := r.wins[windowID]
 	if !ok || w.OrganizationID != orgID {
-		return nil, fmt.Errorf("maintenance window not found")
+		return nil, errWindowNotFound
 	}
-	seen := map[string]bool{}
-	var out []Notification
-	for _, ciID := range w.CIIDs {
-		clientID := r.ciClient[ciID]
-		if clientID == "" || seen[clientID] {
-			continue
+	var clients []string
+	if plan != nil {
+		for i := range plan.Clients {
+			clients = append(clients, plan.Clients[i].ClientID)
 		}
-		seen[clientID] = true
-		// One notification per window, client and channel (F-235): a
-		// repeated announcement returns the stored one.
-		if stored := r.findNotification(windowID, clientID, "webhook"); stored != nil {
+	} else {
+		for _, ciID := range w.CIIDs {
+			if clientID := r.ciClient[ciID]; clientID != "" && !slices.Contains(clients, clientID) {
+				clients = append(clients, clientID)
+			}
+		}
+	}
+	var out []Notification
+	for _, clientID := range clients {
+		// Without the notification chain nothing delivers: a stored
+		// notification stays pending and is returned (F-235).
+		if stored := r.findNotification(windowID, clientID, ChannelNotify); stored != nil {
+			if stored.Status == NotificationFailed {
+				// A new announcement gets a new id, like PostgreSQL.
+				stored.ID, stored.Status, stored.SentAt = r.nextID("mn"), NotificationPending, nil
+			}
 			out = append(out, *stored)
 			continue
 		}
@@ -157,7 +206,7 @@ func (r *MemoryRepository) NotifyClients(_ context.Context, orgID, windowID stri
 			OrganizationID: orgID,
 			WindowID:       windowID,
 			ClientID:       clientID,
-			Channel:        "webhook",
+			Channel:        ChannelNotify,
 			Status:         NotificationPending,
 			CreatedAt:      time.Now().UTC(),
 		}

@@ -51,7 +51,8 @@ type WriteRow struct {
 }
 
 // Writer writes the rows of one entity (ci: WP-302; location: this
-// package; asset, contract, consumable, relationship: WP-776). Write runs
+// package; asset, contract, consumable, relationship: WP-776; subnet and
+// ip_address: WP-920). Write runs
 // in the transaction of the row (the context carries it, so the
 // repositories join it); a failed row and a dry run roll it back. An
 // error is a failure the report does not explain (write_failed); a refusal
@@ -137,6 +138,9 @@ var EntityPaths = map[string]string{
 	"contract":     "/api/v1/contracts",
 	"consumable":   "/api/v1/consumables",
 	"relationship": "/api/v1/relationships",
+	// IPAM (IPM-09, WP-920): module and feature ipam.
+	"subnet":     "/api/v1/subnets",
+	"ip_address": "/api/v1/ips",
 }
 
 // EntityWritePermissions are the write rights of the entities (the right
@@ -149,6 +153,8 @@ var EntityWritePermissions = map[string]identity.Permission{
 	"contract":     identity.PermContractWrite,
 	"consumable":   identity.PermStockWrite,
 	"relationship": identity.PermRelationshipWrite,
+	"subnet":       identity.PermIPAMWrite,
+	"ip_address":   identity.PermIPAMWrite,
 }
 
 // rowProgressEvery is the number of rows after which a run reports its

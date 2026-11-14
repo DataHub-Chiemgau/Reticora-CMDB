@@ -5,6 +5,7 @@
  * 7807 errors, idempotency).
  */
 import {
+  API_MAX_LIMIT,
   ApiError,
   assetApi,
   buildQuery as qs,
@@ -1741,4 +1742,498 @@ export async function collectCIs(
     }
   }
   return { cis, total };
+}
+
+// ─── IPAM sections and subnet tree (IPM-01, IPM-03, IPM-10, IPM-20, WP-915) ─
+
+export type IPAMSection = components['schemas']['IPAMSection'];
+export type IPAMSectionCreate = components['schemas']['CreateIPAMSectionRequest'];
+export type IPAMSectionUpdate = components['schemas']['UpdateIPAMSectionRequest'];
+export type IPAMSectionPermission = components['schemas']['IPAMSectionPermission'];
+export type IPAMSectionLevel = IPAMSectionPermission['level'];
+export type Subnet = components['schemas']['Subnet'];
+export type SubnetUsage = components['schemas']['SubnetUsage'];
+
+/**
+ * SubnetQuery are the filters of GET /subnets the IPAM page sets (WP-909):
+ * the section, one level of the tree (parent_id root or the id of the
+ * parent), VRF, client, site, the text q and contains (the chain of subnets
+ * that contain an address, narrowest first).
+ */
+export interface SubnetQuery {
+  section_id?: string;
+  parent_id?: string;
+  vrf_id?: string;
+  client_id?: string;
+  site_id?: string;
+  q?: string;
+  contains?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export const ipamApi = {
+  listSections(
+    params: { limit?: number; offset?: number } = {},
+  ): Promise<PaginatedResponse<IPAMSection>> {
+    return fetchAPI(`/ipam-sections${qs(params)}`);
+  },
+  createSection(data: IPAMSectionCreate): Promise<IPAMSection> {
+    return fetchAPI('/ipam-sections', { method: 'POST', body: JSON.stringify(data) });
+  },
+  updateSection(id: string, data: IPAMSectionUpdate): Promise<IPAMSection> {
+    return fetchAPI(`/ipam-sections/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  /** deleteSection: the default section and a section with subnets are 409. */
+  deleteSection(id: string): Promise<void> {
+    return fetchAPI(`/ipam-sections/${id}`, { method: 'DELETE' });
+  },
+  listPermissions(sectionId: string): Promise<PaginatedResponse<IPAMSectionPermission>> {
+    return fetchAPI(`/ipam-sections/${sectionId}/permissions${qs({ limit: API_MAX_LIMIT })}`);
+  },
+  createPermission(
+    sectionId: string,
+    data: { team_id: string; level: IPAMSectionLevel },
+  ): Promise<IPAMSectionPermission> {
+    return fetchAPI(`/ipam-sections/${sectionId}/permissions`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+  updatePermission(
+    sectionId: string,
+    id: string,
+    level: IPAMSectionLevel,
+  ): Promise<IPAMSectionPermission> {
+    return fetchAPI(`/ipam-sections/${sectionId}/permissions/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ level }),
+    });
+  },
+  deletePermission(sectionId: string, id: string): Promise<void> {
+    return fetchAPI(`/ipam-sections/${sectionId}/permissions/${id}`, { method: 'DELETE' });
+  },
+  /** listSubnets reads one page (at most API_MAX_LIMIT) of GET /subnets. */
+  listSubnets(params: SubnetQuery): Promise<PaginatedResponse<Subnet>> {
+    return fetchAPI(`/subnets${qs({ limit: API_MAX_LIMIT, ...params })}`);
+  },
+  subnetUsage(id: string): Promise<SubnetUsage> {
+    return fetchAPI(`/subnets/${id}/usage`);
+  },
+  // ─── Subnet detail (IPM-03, IPM-05, IPM-07, IPM-19, WP-916) ───────────────
+  getSubnet(id: string): Promise<Subnet> {
+    return fetchAPI(`/subnets/${id}`);
+  },
+  createSubnet(data: SubnetCreate): Promise<Subnet> {
+    return fetchAPI('/subnets', { method: 'POST', body: JSON.stringify(data) });
+  },
+  updateSubnet(id: string, data: SubnetUpdate): Promise<Subnet> {
+    return fetchAPI(`/subnets/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  deleteSubnet(id: string): Promise<void> {
+    return fetchAPI(`/subnets/${id}`, { method: 'DELETE' });
+  },
+  /** subnetAddresses reads one page (at most API_MAX_LIMIT) of the addresses of a subnet. */
+  subnetAddresses(
+    id: string,
+    params: { limit?: number; offset?: number } = {},
+  ): Promise<PaginatedResponse<IPAddress>> {
+    return fetchAPI(`/subnets/${id}/addresses${qs({ limit: API_MAX_LIMIT, ...params })}`);
+  },
+  /** allSubnetAddresses reads every address of a subnet page by page (the address map). */
+  allSubnetAddresses(id: string): Promise<IPAddress[]> {
+    return fetchAllPages(`/subnets/${id}/addresses`);
+  },
+  /** allocateAddress stores the next free host address (409 subnet-exhausted when full). */
+  allocateAddress(id: string, data: IPAllocate): Promise<IPAddress> {
+    return fetchAPI(`/subnets/${id}/allocate`, { method: 'POST', body: JSON.stringify(data) });
+  },
+  /** allocateSubnet stores the next free child of the prefix length. */
+  allocateSubnet(id: string, data: SubnetAllocate): Promise<Subnet> {
+    return fetchAPI(`/subnets/${id}/allocate-subnet`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+  /** createReservation stores an address of type reserved (NET-09). */
+  createReservation(id: string, data: IPReservationCreate): Promise<IPAddress> {
+    return fetchAPI(`/subnets/${id}/reservations`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+  /** deleteReservation releases a reservation of the subnet. */
+  deleteReservation(id: string, ipId: string): Promise<void> {
+    return fetchAPI(`/subnets/${id}/reservations/${ipId}`, { method: 'DELETE' });
+  },
+  /** getIPAddress reads one address (a search hit ?address=<id> of the subnet detail). */
+  getIPAddress(id: string): Promise<IPAddress> {
+    return fetchAPI(`/ips/${id}`);
+  },
+  // ─── Address dialog (IPM-13, IPM-14, IPM-19, WP-917) ──────────────────────
+  /** createIPAddress stores an address (origin manual); 422 names ci_id, role or vrf_id. */
+  createIPAddress(data: IPAddressCreate): Promise<IPAddress> {
+    return fetchAPI('/ips', { method: 'POST', body: JSON.stringify(data) });
+  },
+  /** updateIPAddress changes the fields sent; ci_id or interface_id "" clears them. */
+  updateIPAddress(id: string, data: IPAddressUpdate): Promise<IPAddress> {
+    return fetchAPI(`/ips/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  /** ipHistory reads one page of the change history of an address (IPM-08). */
+  ipHistory(
+    id: string,
+    params: { limit?: number; offset?: number } = {},
+  ): Promise<PaginatedResponse<IPAMChange>> {
+    return fetchAPI(`/ips/${id}/history${qs({ limit: IPAM_HISTORY_PAGE, ...params })}`);
+  },
+  /** subnetHistory reads one page of the change history of a subnet (IPM-08). */
+  subnetHistory(
+    id: string,
+    params: { limit?: number; offset?: number } = {},
+  ): Promise<PaginatedResponse<IPAMChange>> {
+    return fetchAPI(`/subnets/${id}/history${qs({ limit: IPAM_HISTORY_PAGE, ...params })}`);
+  },
+  /** ciInterfaces reads the network interfaces of a CI (NET-01), at most API_MAX_LIMIT. */
+  ciInterfaces(ciId: string): Promise<PaginatedResponse<NetworkInterface>> {
+    return fetchAPI(`/cis/${ciId}/interfaces${qs({ limit: API_MAX_LIMIT })}`);
+  },
+  // ─── Network section of the CI detail (IPM-13, WP-919) ────────────────────
+  /** ciAddresses reads every address bound to a CI (GET /cis/{id}/addresses, IPM-13) page by page. */
+  ciAddresses(ciId: string): Promise<CIAddress[]> {
+    return fetchAllPages(`/cis/${ciId}/addresses`);
+  },
+  /** deleteIPAddress removes an address; the network section releases a failed assignment with it. */
+  deleteIPAddress(id: string): Promise<void> {
+    return fetchAPI(`/ips/${id}`, { method: 'DELETE' });
+  },
+  getVRF(id: string): Promise<IPAMVRF> {
+    return fetchAPI(`/vrfs/${id}`);
+  },
+  getVLAN(id: string): Promise<VLAN> {
+    return fetchAPI(`/vlans/${id}`);
+  },
+  /** listVLANs reads one page (at most API_MAX_LIMIT) of the VLAN catalog. */
+  listVLANs(
+    params: { site_id?: string; limit?: number; offset?: number } = {},
+  ): Promise<PaginatedResponse<VLAN>> {
+    return fetchAPI(`/vlans${qs({ limit: API_MAX_LIMIT, ...params })}`);
+  },
+  // ─── VLANs with domains, VRFs, nameserver sets (IPM-05–07, WP-918) ──────
+  createVLAN(data: VLANCreate): Promise<VLAN> {
+    return fetchAPI('/vlans', { method: 'POST', body: JSON.stringify(data) });
+  },
+  updateVLAN(id: string, data: VLANUpdate): Promise<VLAN> {
+    return fetchAPI(`/vlans/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  deleteVLAN(id: string): Promise<void> {
+    return fetchAPI(`/vlans/${id}`, { method: 'DELETE' });
+  },
+  /** listVLANDomains reads one page (at most API_MAX_LIMIT) of the VLAN domains. */
+  listVLANDomains(
+    params: { limit?: number; offset?: number } = {},
+  ): Promise<PaginatedResponse<VLANDomain>> {
+    return fetchAPI(`/vlan-domains${qs({ limit: API_MAX_LIMIT, ...params })}`);
+  },
+  /** listDomainVLANs reads one page of the VLANs of a domain (the domain filter). */
+  listDomainVLANs(
+    domainId: string,
+    params: { limit?: number; offset?: number } = {},
+  ): Promise<PaginatedResponse<VLAN>> {
+    return fetchAPI(`/vlan-domains/${domainId}/vlans${qs({ limit: API_MAX_LIMIT, ...params })}`);
+  },
+  createVLANDomain(data: VLANDomainCreate): Promise<VLANDomain> {
+    return fetchAPI('/vlan-domains', { method: 'POST', body: JSON.stringify(data) });
+  },
+  updateVLANDomain(id: string, data: VLANDomainUpdate): Promise<VLANDomain> {
+    return fetchAPI(`/vlan-domains/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  deleteVLANDomain(id: string): Promise<void> {
+    return fetchAPI(`/vlan-domains/${id}`, { method: 'DELETE' });
+  },
+  /** listVRFs reads one page (at most API_MAX_LIMIT) of the VRFs with RD, RT and sections. */
+  listVRFs(params: { limit?: number; offset?: number } = {}): Promise<PaginatedResponse<IPAMVRF>> {
+    return fetchAPI(`/vrfs${qs({ limit: API_MAX_LIMIT, ...params })}`);
+  },
+  createVRF(data: VRFCreate): Promise<IPAMVRF> {
+    return fetchAPI('/vrfs', { method: 'POST', body: JSON.stringify(data) });
+  },
+  updateVRF(id: string, data: VRFUpdate): Promise<IPAMVRF> {
+    return fetchAPI(`/vrfs/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  /** deleteVRF: the default VRF and a VRF with subnets are refused (409). */
+  deleteVRF(id: string): Promise<void> {
+    return fetchAPI(`/vrfs/${id}`, { method: 'DELETE' });
+  },
+  createNameserverSet(data: NameserverSetCreate): Promise<NameserverSet> {
+    return fetchAPI('/nameserver-sets', { method: 'POST', body: JSON.stringify(data) });
+  },
+  updateNameserverSet(id: string, data: NameserverSetUpdate): Promise<NameserverSet> {
+    return fetchAPI(`/nameserver-sets/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  /** deleteNameserverSet: a set subnets use is refused (409). */
+  deleteNameserverSet(id: string): Promise<void> {
+    return fetchAPI(`/nameserver-sets/${id}`, { method: 'DELETE' });
+  },
+  /** listNameserverSets reads one page (at most API_MAX_LIMIT) of the nameserver sets. */
+  listNameserverSets(
+    params: { limit?: number; offset?: number } = {},
+  ): Promise<PaginatedResponse<NameserverSet>> {
+    return fetchAPI(`/nameserver-sets${qs({ limit: API_MAX_LIMIT, ...params })}`);
+  },
+};
+
+export type IPAddress = components['schemas']['IPAddress'];
+export type IPAddressState = components['schemas']['IPAddressState'];
+export type IPAddressType = components['schemas']['IPAddressType'];
+export type IPAddressRole = components['schemas']['IPAddressRole'];
+export type IPAddressOrigin = components['schemas']['IPAddressOrigin'];
+export type IPAddressCreate = components['schemas']['CreateIPAddressRequest'];
+export type IPAddressUpdate = components['schemas']['UpdateIPAddressRequest'];
+/** IPAMChange is one row of the IPAM change history (IPM-08). */
+export type IPAMChange = components['schemas']['IPAMChange'];
+export type NetworkInterface = components['schemas']['NetworkInterface'];
+/** CIAddress is an address of a CI with interface name and subnet CIDR (IPM-13). */
+export type CIAddress = components['schemas']['CIAddress'];
+/** IPAM_HISTORY_PAGE is the page size of the history list of an address or subnet. */
+export const IPAM_HISTORY_PAGE = 25;
+export type IPAllocate = components['schemas']['IPAllocateRequest'];
+export type SubnetAllocate = components['schemas']['SubnetAllocateRequest'];
+export type IPReservationCreate = components['schemas']['IPReservationCreateRequest'];
+export type SubnetCreate = components['schemas']['CreateSubnetRequest'];
+export type SubnetUpdate = components['schemas']['UpdateSubnetRequest'];
+export type VLAN = components['schemas']['VLAN'];
+/** IPAMVRF is a VRF with route distinguisher, route targets and sections (IPM-07). */
+export type IPAMVRF = components['schemas']['VRF'];
+export type NameserverSet = components['schemas']['NameserverSet'];
+export type NameserverSetCreate = components['schemas']['CreateNameserverSetRequest'];
+export type NameserverSetUpdate = components['schemas']['UpdateNameserverSetRequest'];
+export type VLANCreate = components['schemas']['CreateVLANRequest'];
+export type VLANUpdate = components['schemas']['UpdateVLANRequest'];
+export type VLANDomain = components['schemas']['VLANDomain'];
+export type VLANDomainCreate = components['schemas']['CreateVLANDomainRequest'];
+export type VLANDomainUpdate = components['schemas']['UpdateVLANDomainRequest'];
+export type VRFCreate = components['schemas']['CreateVRFRequest'];
+export type VRFUpdate = components['schemas']['UpdateVRFRequest'];
+
+/** IP_ADDRESS_STATES are the states of an address (IPM-04), labels ipam.states.*. */
+export const IP_ADDRESS_STATES = [
+  'active',
+  'offline',
+  'unknown',
+] as const satisfies readonly IPAddressState[];
+/** IP_ADDRESS_TYPES are the types of an address (NET-03), labels ipam.types.*. */
+export const IP_ADDRESS_TYPES = [
+  'discovered',
+  'reserved',
+  'static',
+  'dhcp',
+] as const satisfies readonly IPAddressType[];
+/** IP_ADDRESS_ROLES are the roles at a device (IPM-13), labels ipam.roles.*. */
+export const IP_ADDRESS_ROLES = [
+  'primary',
+  'secondary',
+  'vip',
+  'anycast',
+  'loopback',
+  'management',
+] as const satisfies readonly IPAddressRole[];
+/** IP_ADDRESS_ORIGINS are the origins of an address row (IPM-14), labels ipam.origins.*. */
+export const IP_ADDRESS_ORIGINS = [
+  'manual',
+  'discovery',
+  'scan',
+  'import',
+] as const satisfies readonly IPAddressOrigin[];
+/** IPAM_CHANGE_SOURCES are the sources of a history row (IPM-08), labels ipam.history.sources.*. */
+export const IPAM_CHANGE_SOURCES = [
+  'manual',
+  'discovery',
+  'scan',
+  'import',
+  'allocation',
+] as const satisfies readonly IPAMChange['source'][];
+
+/** PROBLEM_SUBNET_EXHAUSTED is the problem type of a full subnet (IPM-03). */
+export const PROBLEM_SUBNET_EXHAUSTED = 'urn:reticora:problem:subnet-exhausted';
+
+// ─── Subnet scan and PTR check (IPM-11, IPM-12, WP-1065) ────────────────────
+
+export type SubnetScan = components['schemas']['SubnetScan'];
+export type SubnetScanUpdate = components['schemas']['SubnetScanUpdate'];
+export type CollectorGroup = components['schemas']['CollectorGroup'];
+export type PTRMismatch = components['schemas']['PTRMismatch'];
+export type IPAMPTRMode = components['schemas']['IPAMPTRMode'];
+export type PTRStatus = PTRMismatch['ptr_status'];
+
+/** PTR_MODES are the DNS reverse check modes of a section (IPM-12), labels ipam.ptr.modes.*. */
+export const PTR_MODES = ['off', 'report', 'adopt'] as const satisfies readonly IPAMPTRMode[];
+/** PTR_STATUSES are the kinds of a PTR deviation (IPM-12), labels ipam.ptr.statuses.*. */
+export const PTR_STATUSES = ['mismatch', 'missing'] as const satisfies readonly PTRStatus[];
+/** SCAN_TARGET_STATES are the target counters of a scan run, labels ipam.scan.targetStates.*. */
+export const SCAN_TARGET_STATES = [
+  'active',
+  'offline',
+  'unknown',
+  'none',
+] as const satisfies readonly (keyof SubnetScan['target_states'])[];
+
+/** The scan of a subnet, its collector groups and the PTR deviations (Konvention 27). */
+export const ipamScanApi = {
+  getScan(subnetId: string): Promise<SubnetScan> {
+    return fetchAPI(`/subnets/${subnetId}/scan`);
+  },
+  updateScan(subnetId: string, data: SubnetScanUpdate): Promise<SubnetScan> {
+    return fetchAPI(`/subnets/${subnetId}/scan`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  /** Every collector group in the caller's scope (monitoring:read, WP-947). */
+  collectorGroups(): Promise<CollectorGroup[]> {
+    return fetchAllPages<CollectorGroup>('/collector-groups');
+  },
+  /** The hosts the scan found (origin scan, type discovered) of a subnet, one page. */
+  newHosts(subnetId: string): Promise<PaginatedResponse<IPAddress>> {
+    return fetchAPI(
+      `/ips${qs({ subnet_id: subnetId, origin: 'scan', type: 'discovered', limit: API_MAX_LIMIT })}`,
+    );
+  },
+  /** One page of the PTR deviations (cursor pages, API-02). */
+  ptrMismatches(params: {
+    section_id?: string;
+    subnet_id?: string;
+    status?: PTRStatus;
+    cursor?: string;
+    limit?: number;
+  }): Promise<PaginatedResponse<PTRMismatch>> {
+    return fetchAPI(`/ipam/ptr-mismatches${qs({ limit: 50, ...params })}`);
+  },
+};
+
+// ─── Credentials at the CI (CRD-01, CRD-04, CRD-06, CRD-07, WP-923) ─────────
+
+export type CredentialBinding = components['schemas']['CredentialBinding'];
+export type CredentialBindingCreate = components['schemas']['CredentialBindingCreate'];
+export type CredentialBindingUpdate = components['schemas']['CredentialBindingUpdate'];
+/** One entry of PUT /cis/{id}/credentials (replaces every CI binding). */
+export type CICredentialBindingEntry =
+  components['schemas']['CICredentialBindingsReplace']['bindings'][number];
+export type EffectiveCredential = components['schemas']['EffectiveCredential'];
+export type EffectiveCredentialSet = components['schemas']['EffectiveCredentialSet'];
+export type CredentialOrigin = components['schemas']['CredentialOrigin'];
+export type CredentialUsage = components['schemas']['CredentialUsage'];
+export type CredentialNamespace = CredentialBinding['namespace'];
+export type CredentialErrorClass = NonNullable<CredentialUsage['last_error_class']>;
+export type VaultConnection = components['schemas']['VaultConnection'];
+export type CredentialVaultRef = components['schemas']['CredentialVaultRef'];
+type MonitoringGroupRef = components['schemas']['MonitoringGroup'];
+
+/** CREDENTIAL_ORIGINS are the levels of CRD-04, labels credentials.binding.origins.*. */
+export const CREDENTIAL_ORIGINS = [
+  'probe',
+  'ci',
+  'device_group',
+  'subnet',
+  'scope',
+  'client',
+  'org',
+] as const satisfies readonly CredentialOrigin[];
+
+/** CREDENTIAL_ERROR_CLASSES are the error classes of CRD-06, labels credentials.binding.errorClasses.*. */
+export const CREDENTIAL_ERROR_CLASSES = [
+  'auth_failed',
+  'timeout',
+  'unreachable',
+  'tls',
+  'vault_unreachable',
+  'vault_denied',
+  'vault_not_found',
+  'field_missing',
+] as const satisfies readonly CredentialErrorClass[];
+
+/** The bindings of credentials to targets (/credential-bindings, WP-890). */
+export const credentialBindingApi = {
+  list(
+    params: {
+      credential_id?: string;
+      target_kind?: CredentialBinding['target_kind'];
+      target_id?: string;
+      limit?: number;
+      cursor?: string;
+    } = {},
+  ): Promise<PaginatedResponse<CredentialBinding>> {
+    return fetchAPI(`/credential-bindings${qs({ limit: API_MAX_LIMIT, ...params })}`);
+  },
+  get(id: string): Promise<CredentialBinding> {
+    return fetchAPI(`/credential-bindings/${encodeURIComponent(id)}`);
+  },
+  create(data: CredentialBindingCreate): Promise<CredentialBinding> {
+    return fetchAPI('/credential-bindings', { method: 'POST', body: JSON.stringify(data) });
+  },
+  update(id: string, data: CredentialBindingUpdate): Promise<CredentialBinding> {
+    return fetchAPI(`/credential-bindings/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+  remove(id: string): Promise<void> {
+    return fetchAPI(`/credential-bindings/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  },
+};
+
+/** The bindings with target ci of a CI (GET/PUT /cis/{id}/credentials; writing needs credential:bind). */
+export const ciCredentials = {
+  list(ciId: string): Promise<{ data: CredentialBinding[] }> {
+    return fetchAPI(`/cis/${encodeURIComponent(ciId)}/credentials`);
+  },
+  /** replace sets every binding of the CI at once; a refused entry keeps the former ones. */
+  replace(
+    ciId: string,
+    bindings: CICredentialBindingEntry[],
+  ): Promise<{ data: CredentialBinding[] }> {
+    return fetchAPI(`/cis/${encodeURIComponent(ciId)}/credentials`, {
+      method: 'PUT',
+      body: JSON.stringify({ bindings }),
+    });
+  },
+};
+
+/** The effective credential per namespace with origin and overridden candidates (CRD-04, WP-891). */
+export function ciEffectiveCredentials(ciId: string): Promise<EffectiveCredentialSet> {
+  return fetchAPI(`/cis/${encodeURIComponent(ciId)}/credentials/effective`);
+}
+
+/** The usage of a credential at one CI per namespace (CRD-06, WP-898). */
+export function credentialUsage(
+  credentialId: string,
+  ciId: string,
+): Promise<PaginatedResponse<CredentialUsage>> {
+  return fetchAPI(
+    `/credentials/${encodeURIComponent(credentialId)}/usage${qs({ ci_id: ciId, limit: API_MAX_LIMIT })}`,
+  );
+}
+
+/** The vault connections a vault reference can use (credential:read, WP-893). */
+export const vaultConnectionApi = {
+  list(): Promise<VaultConnection[]> {
+    return fetchAllPages<VaultConnection>('/vault-connections');
+  },
+};
+
+/**
+ * credentialOriginTarget names the target of a binding the resolution
+ * reports: the group name of a device_group, the CIDR of a subnet.
+ */
+export async function credentialOriginTarget(bindingId: string): Promise<string | undefined> {
+  const binding = await credentialBindingApi.get(bindingId);
+  if (binding.target_kind === 'device_group') {
+    const group = await fetchAPI<MonitoringGroupRef>(
+      `/monitoring/groups/${encodeURIComponent(binding.target_id)}`,
+    );
+    return group.name;
+  }
+  if (binding.target_kind === 'subnet') {
+    const subnet = await fetchAPI<{ cidr: string }>(
+      `/subnets/${encodeURIComponent(binding.target_id)}`,
+    );
+    return subnet.cidr;
+  }
+  return undefined;
 }

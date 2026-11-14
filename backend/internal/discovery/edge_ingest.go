@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 )
 
 // The collectors' data path over the edge (COL-08): an enrolled collector
@@ -31,6 +33,16 @@ const (
 	// MetricsSuffix carries the collector's metric samples (sweep
 	// reachability, UPS values, SNMP polls and traps; MON-02).
 	MetricsSuffix = ".metrics"
+	// ProbeStateSuffix, ProbeResultsSuffix and ProbeAliveSuffix carry the
+	// monitoring probes' state changes, result batches and alive messages
+	// (PRB-05, E-173, WP-959); served once WithEdgeProbes set a handler.
+	ProbeStateSuffix   = ".probe.state"
+	ProbeResultsSuffix = ".probe.results"
+	ProbeAliveSuffix   = ".probe.alive"
+	// ConfigSuffix carries the running configuration of a device
+	// (probewire.ConfigSnapshot, ALR-07, WP-1053/WP-1054); served once
+	// WithEdgeConfig set an ingest.
+	ConfigSuffix = ".config"
 	// edgeDataQueue spreads the requests over the server instances: each
 	// is processed once.
 	edgeDataQueue = "reticora-edge-data"
@@ -71,6 +83,95 @@ type EdgeReply struct {
 	// with their CI and those without a CI (POST /monitoring/metrics).
 	Ingested   *int `json:"ingested,omitempty"`
 	Unassigned *int `json:"unassigned,omitempty"`
+	// Outcome and SnapshotID answer a configuration (.config, WP-1054):
+	// stored (202) or unchanged (200) and the version.
+	Outcome    string `json:"outcome,omitempty"`
+	SnapshotID string `json:"snapshot_id,omitempty"`
+}
+
+// ConfigOutcome is what the configuration ingest did with a snapshot:
+// Status is the HTTP status of the answer (202 stored, 200 unchanged, 404
+// for a CI outside the collector's scope or with another management
+// address, 409 for a version older than the latest one).
+type ConfigOutcome struct {
+	Status     int
+	Outcome    string
+	SnapshotID string
+	Error      string
+}
+
+// ConfigIngester stores a checked configuration snapshot of a collector in
+// the scope of ctx (configsnap.Ingester, WP-1054); text is its decompressed
+// content.
+type ConfigIngester interface {
+	IngestConfig(ctx context.Context, orgID, collectorID string, snap *probewire.ConfigSnapshot, text string) (ConfigOutcome, error)
+}
+
+// WithEdgeConfig serves .config with configs (ALR-07, WP-1054); features
+// checks the feature monitoring_network (nil: every organization is
+// entitled). Without it the subject is not served and the collectors keep
+// the configurations they did not deliver.
+func (h *Handler) WithEdgeConfig(configs ConfigIngester, features FeatureStatus) *Handler {
+	h.configs, h.configFeatures = configs, features
+	return h
+}
+
+// EdgeConfig stores a configuration snapshot a collector sent over the
+// edge (.config, ALR-07, WP-1054); the snapshots of an unknown or disabled
+// collector are refused. It runs in the system context of the edge
+// dispatcher (the organization of the subject).
+func (h *Handler) EdgeConfig(ctx context.Context, orgID, collectorID string, data []byte) EdgeReply {
+	ctx = systemContext(ctx, orgID)
+	if err := h.checkCollector(ctx, orgID, collectorID); err != nil {
+		return edgeRefusal(err)
+	}
+	return h.edgeConfig(ctx, orgID, collectorID, data)
+}
+
+// edgeConfig answers a configuration snapshot of a collector the caller
+// checked: 403 with the problem type without monitoring_network, 400 for a
+// message whose schema version, fields, size (2 MiB) or SHA-256 of the
+// decompressed content do not hold (nothing stored), then the ingest in the
+// collector's scope. Neither the content nor a secret goes into a log.
+func (h *Handler) edgeConfig(ctx context.Context, orgID, collectorID string, data []byte) EdgeReply {
+	if h.configs == nil {
+		return EdgeReply{Status: http.StatusServiceUnavailable, Error: "configuration ingest unavailable"}
+	}
+	if h.configFeatures != nil {
+		_, status, err := h.configFeatures.Status(ctx, orgID, entitlement.FeatureMonitoringNetwork)
+		if err != nil {
+			return EdgeReply{Status: http.StatusInternalServerError, Error: "entitlement lookup failed"}
+		}
+		if status == entitlement.StatusNotEntitled {
+			refusal := &entitlement.FeatureNotEntitledError{FeatureKey: entitlement.FeatureMonitoringNetwork}
+			slog.Warn("edge configuration refused", "organization_id", orgID, "collector_id", collectorID, "feature", refusal.FeatureKey)
+			return EdgeReply{Status: http.StatusForbidden, Type: refusal.ProblemType(), Error: refusal.Error()}
+		}
+	}
+	var snap probewire.ConfigSnapshot
+	if err := probewire.Decode(data, &snap); err != nil {
+		return EdgeReply{Status: http.StatusBadRequest, Error: "invalid configuration snapshot"}
+	}
+	if err := snap.Validate(); err != nil {
+		return EdgeReply{Status: http.StatusBadRequest, Error: "invalid configuration snapshot: " + strings.TrimPrefix(err.Error(), probewire.ErrInvalidConfig.Error()+": ")}
+	}
+	if !api.IsUUID(snap.CIID) {
+		return EdgeReply{Status: http.StatusBadRequest, Error: "invalid configuration snapshot: ci_id is no uuid"}
+	}
+	text, err := snap.Text()
+	if err != nil {
+		return EdgeReply{Status: http.StatusBadRequest, Error: "invalid configuration snapshot: " + strings.TrimPrefix(err.Error(), probewire.ErrInvalidConfig.Error()+": ")}
+	}
+	ctx, err = h.collectorScopeContext(ctx, orgID, collectorID)
+	if err != nil {
+		return edgeRefusal(err)
+	}
+	out, err := h.configs.IngestConfig(ctx, orgID, collectorID, &snap, text)
+	if err != nil {
+		slog.Error("edge configuration ingest failed", "organization_id", orgID, "collector_id", collectorID, "ci_id", snap.CIID, "error", err)
+		return EdgeReply{Status: http.StatusInternalServerError, Error: "configuration ingest failed"}
+	}
+	return EdgeReply{Status: out.Status, Outcome: out.Outcome, SnapshotID: out.SnapshotID, Error: out.Error}
 }
 
 // MetricsIngester stores the metric samples of an organization like
@@ -97,6 +198,25 @@ func (h *Handler) WithEdgeMetrics(metrics MetricsIngester, features FeatureStatu
 	return h
 }
 
+// EdgeProbes takes the monitoring probe messages of a collector the edge
+// dispatcher checked (probe.Edge, WP-959): it answers with a reply the
+// dispatcher sends as JSON. Workers is the number of handlers per instance
+// that serve the probe subjects in parallel (RETICORA_PROBE_EDGE_WORKERS).
+type EdgeProbes interface {
+	ProbeState(ctx context.Context, orgID, collectorID string, data []byte) any
+	ProbeResults(ctx context.Context, orgID, collectorID string, data []byte) any
+	ProbeAlive(ctx context.Context, orgID, collectorID string, data []byte) any
+	Workers() int
+}
+
+// WithEdgeProbes serves the probe subjects .probe.state, .probe.results and
+// .probe.alive with probes (E-173). Without it the subjects are not served
+// and the collectors keep their probe messages in the spool.
+func (h *Handler) WithEdgeProbes(probes EdgeProbes) *Handler {
+	h.probes = probes
+	return h
+}
+
 // edgeLicense returns the license state; without a checker every
 // organization counts as licensed.
 func (h *Handler) edgeLicense(ctx context.Context, orgID string) (state, problemType string, err error) {
@@ -108,25 +228,75 @@ func (h *Handler) edgeLicense(ctx context.Context, orgID string) (state, problem
 
 // checkCollector fails for a collector that may not deliver over the edge:
 // api.ErrNotFound for an unknown collector, ErrCollectorDisabled for a
-// disabled one (COL-04). The edge grants the subject tree when the
-// collector connects; a collector disabled later still holds it.
+// disabled one (COL-04), ErrOrgPendingDeletion while its organization is
+// in the grace period of its deletion (TLC-06, WP-1153). The edge grants
+// the subject tree when the collector connects; a collector disabled
+// later, or one whose organization's deletion was requested later, still
+// holds it, so every data request is checked.
 func (h *Handler) checkCollector(ctx context.Context, orgID, collectorID string) error {
-	status, err := h.repo.CollectorStatus(ctx, orgID, collectorID)
+	return h.checkCollectorFor(ctx, orgID, collectorID, false)
+}
+
+// collectorAccessReader is a repository that reads the status of a
+// collector and the deletion state of its organization in one query
+// (PGRepository).
+type collectorAccessReader interface {
+	CollectorAccess(ctx context.Context, orgID, collectorID string) (status string, pendingDeletion bool, err error)
+}
+
+// checkCollectorFor is checkCollector; heartbeat lets a heartbeat pass the
+// grace period, so the collector learns that it is paused.
+func (h *Handler) checkCollectorFor(ctx context.Context, orgID, collectorID string, heartbeat bool) error {
+	var status string
+	var pending bool
+	var err error
+	if acc, ok := h.repo.(collectorAccessReader); ok {
+		status, pending, err = acc.CollectorAccess(ctx, orgID, collectorID)
+	} else {
+		status, err = h.repo.CollectorStatus(ctx, orgID, collectorID)
+	}
 	if err != nil {
 		return err
 	}
 	if status == CollectorDisabled {
 		return ErrCollectorDisabled
 	}
+	if pending && !heartbeat {
+		return ErrOrgPendingDeletion
+	}
+	return nil
+}
+
+// ErrCollectorPaused refuses the monitoring channel of a paused collector
+// (ENT-07, WP-948).
+var ErrCollectorPaused = errors.New("collector is paused")
+
+// CheckCollectorChannel checks a collector before its monitoring channel
+// reads anything (WP-948): an unknown collector is api.ErrNotFound, a
+// disabled one ErrCollectorDisabled, a paused one ErrCollectorPaused; a
+// lookup error is returned as it is (the caller refuses, fail-closed).
+func (h *Handler) CheckCollectorChannel(ctx context.Context, orgID, collectorID string) error {
+	status, err := h.repo.CollectorStatus(ctx, orgID, collectorID)
+	switch {
+	case err != nil:
+		return err
+	case status == CollectorDisabled:
+		return ErrCollectorDisabled
+	case status == CollectorPaused:
+		return ErrCollectorPaused
+	}
 	return nil
 }
 
 // edgeRefusal answers a request of a collector checkCollector refused:
-// 403 for a disabled, 404 for an unknown collector.
+// 403 for a disabled, 404 for an unknown collector, 423 while the
+// organization is pending deletion.
 func edgeRefusal(err error) EdgeReply {
 	switch {
 	case errors.Is(err, ErrCollectorDisabled):
 		return EdgeReply{Status: http.StatusForbidden, Error: err.Error()}
+	case errors.Is(err, ErrOrgPendingDeletion):
+		return EdgeReply{Status: http.StatusLocked, Type: api.ProblemOrgPendingDeletion, Error: err.Error()}
 	case errors.Is(err, api.ErrNotFound):
 		return EdgeReply{Status: http.StatusNotFound, Error: "collector not found"}
 	}
@@ -161,7 +331,7 @@ func (h *Handler) edgeIngest(ctx context.Context, orgID, collectorID string, dat
 	if status != 0 {
 		return EdgeReply{Status: status, Error: msg}
 	}
-	received := len(items)
+	received := len(items) + body.identityRejected
 	items, rejected := admitObservedAt(items, time.Now().UTC())
 	// The records of a client-bound collector are processed in its client
 	// (F-406/F-407, DIS-05): its scope carries them to the consumer, a
@@ -179,6 +349,7 @@ func (h *Handler) edgeIngest(ctx context.Context, orgID, collectorID string, dat
 	}
 	// Records that fail are listed in the reply; only when no record was
 	// accepted does the request fail as a whole (WP-481).
+	resp.RejectedIdentityLimit = body.identityRejected
 	if err = resp.finish(received, rejected, withRecordErrors(err, outside)); err != nil {
 		var se *collectorScopeError
 		if errors.As(err, &se) {
@@ -340,6 +511,8 @@ func (h *Handler) EdgeHeartbeat(ctx context.Context, orgID, collectorID string, 
 		return EdgeReply{Status: code, Error: err.Error()}
 	}
 	recordSpoolReport(ctx, orgID, collectorID, req.Spool)
+	recordVaultReport(req.Vault)
+	h.RecordProbeCapabilities(ctx, orgID, collectorID, req.ProbeCapabilities)
 	reply := EdgeReply{Status: http.StatusNoContent, CollectorStatus: status}
 	if state, _, lerr := h.edgeLicense(ctx, orgID); lerr == nil && state != LicenseNotEntitled {
 		reply.LicenseStatus = state
@@ -441,55 +614,169 @@ func (h *Handler) collectorContext(ctx context.Context, orgID, collectorID strin
 	return tenant.WithTenant(ctx, tenant.TenantInfo{OrganizationID: orgID, ClientID: col.ClientID}), col, nil
 }
 
+// edgeHandler answers an edge data request of a checked collector; the
+// reply is sent as JSON.
+type edgeHandler func(ctx context.Context, orgID, collectorID string, data []byte) any
+
+// edgeReplying adapts a handler answering with an EdgeReply.
+func edgeReplying(handle func(ctx context.Context, orgID, collectorID string, data []byte) EdgeReply) edgeHandler {
+	return func(ctx context.Context, orgID, collectorID string, data []byte) any {
+		return handle(ctx, orgID, collectorID, data)
+	}
+}
+
+// probeSuffixes are the suffixes the probe handler pool serves.
+var probeSuffixes = []string{ProbeStateSuffix, ProbeResultsSuffix, ProbeAliveSuffix}
+
 // edgeHandlers are the handlers of the edge data subjects by suffix; they
 // run only for a collector the dispatcher checked. .metrics is served once
-// the metrics ingest is set (WithEdgeMetrics).
-func (h *Handler) edgeHandlers() map[string]func(ctx context.Context, orgID, collectorID string, data []byte) EdgeReply {
-	handlers := map[string]func(ctx context.Context, orgID, collectorID string, data []byte) EdgeReply{
-		IngestSuffix:    h.edgeIngest,
-		HeartbeatSuffix: h.EdgeHeartbeat,
+// the metrics ingest is set (WithEdgeMetrics), the probe suffixes once a
+// probe handler is set (WithEdgeProbes).
+func (h *Handler) edgeHandlers() map[string]edgeHandler {
+	handlers := map[string]edgeHandler{
+		IngestSuffix:    edgeReplying(h.edgeIngest),
+		HeartbeatSuffix: edgeReplying(h.EdgeHeartbeat),
 	}
 	if h.metrics != nil {
-		handlers[MetricsSuffix] = h.edgeMetrics
+		handlers[MetricsSuffix] = edgeReplying(h.edgeMetrics)
+	}
+	if h.configs != nil {
+		handlers[ConfigSuffix] = edgeReplying(h.edgeConfig)
+	}
+	if h.probes != nil {
+		handlers[ProbeStateSuffix] = h.probes.ProbeState
+		handlers[ProbeResultsSuffix] = h.probes.ProbeResults
+		handlers[ProbeAliveSuffix] = h.probes.ProbeAlive
 	}
 	return handlers
 }
 
-// ServeCollectorEdge answers the ingest, heartbeat and metrics requests of
-// the collectors on nc until ctx ends. A request of an unknown or disabled
-// collector is refused before its handler runs, whatever the suffix, so
-// nothing of it is persisted (COL-04).
+// serveEdgeRequest answers one edge data request: a request of an unknown
+// or disabled collector is refused before its handler runs (COL-04), as is
+// every request but the heartbeat while the organization is pending
+// deletion (423, TLC-06).
+func (h *Handler) serveEdgeRequest(ctx context.Context, msg *nats.Msg, suffix string, handle edgeHandler) {
+	var reply any = EdgeReply{Status: http.StatusBadRequest, Error: "invalid subject"}
+	if orgID, collectorID, ok := subjectCollector(msg.Subject, suffix); ok {
+		sctx := systemContext(ctx, orgID)
+		if cerr := h.checkCollectorFor(sctx, orgID, collectorID, suffix == HeartbeatSuffix); cerr != nil {
+			slog.Warn("collector edge request refused", "organization_id", orgID, "collector_id", collectorID,
+				"suffix", suffix, "error", cerr)
+			reply = edgeRefusal(cerr)
+		} else {
+			reply = handle(sctx, orgID, collectorID, msg.Data)
+		}
+	}
+	raw, _ := json.Marshal(reply)
+	if msg.Reply != "" {
+		if rerr := msg.Respond(raw); rerr != nil {
+			slog.Error("collector edge reply", "error", rerr)
+		}
+	}
+}
+
+// ServeCollectorEdge answers the ingest, heartbeat, metrics and probe
+// requests of the collectors on nc until ctx ends. A request of an unknown
+// or disabled collector is refused before its handler runs, whatever the
+// suffix, so nothing of it is persisted (COL-04). nats.go calls the
+// callbacks of a subscription one after another; the probe subjects
+// therefore run on a pool of EdgeProbes.Workers handlers per instance
+// (ChanQueueSubscribe, NFR-11).
 func (h *Handler) ServeCollectorEdge(ctx context.Context, nc *nats.Conn) error {
 	handlers := h.edgeHandlers()
 	subs := make([]*nats.Subscription, 0, len(handlers))
+	defer func() {
+		for _, sub := range subs {
+			_ = sub.Unsubscribe()
+		}
+	}()
+	var probeMsgs chan *nats.Msg
+	var probeSubs []*nats.Subscription
+	if h.probes != nil {
+		workers := max(h.probes.Workers(), 1)
+		probeMsgs = make(chan *nats.Msg, probePending)
+		for range workers {
+			go h.serveProbeMessages(ctx, probeMsgs, handlers)
+		}
+	}
 	for suffix, handle := range handlers {
-		sub, err := nc.QueueSubscribe("collector.*.*"+suffix, edgeDataQueue, func(msg *nats.Msg) {
-			reply := EdgeReply{Status: http.StatusBadRequest, Error: "invalid subject"}
-			if orgID, collectorID, ok := subjectCollector(msg.Subject, suffix); ok {
-				sctx := systemContext(ctx, orgID)
-				if cerr := h.checkCollector(sctx, orgID, collectorID); cerr != nil {
-					slog.Warn("collector edge request refused", "organization_id", orgID, "collector_id", collectorID,
-						"suffix", suffix, "error", cerr)
-					reply = edgeRefusal(cerr)
-				} else {
-					reply = handle(sctx, orgID, collectorID, msg.Data)
-				}
+		subject := "collector.*.*" + suffix
+		if slices.Contains(probeSuffixes, suffix) {
+			sub, err := nc.ChanQueueSubscribe(subject, edgeDataQueue, probeMsgs)
+			if err != nil {
+				return fmt.Errorf("subscribe %s: %w", suffix, err)
 			}
-			raw, _ := json.Marshal(reply)
-			if msg.Reply != "" {
-				if rerr := msg.Respond(raw); rerr != nil {
-					slog.Error("collector edge reply", "error", rerr)
-				}
-			}
+			subs = append(subs, sub)
+			probeSubs = append(probeSubs, sub)
+			continue
+		}
+		sub, err := nc.QueueSubscribe(subject, edgeDataQueue, func(msg *nats.Msg) {
+			h.serveEdgeRequest(ctx, msg, suffix, handle)
 		})
 		if err != nil {
 			return fmt.Errorf("subscribe %s: %w", suffix, err)
 		}
 		subs = append(subs, sub)
 	}
-	<-ctx.Done()
-	for _, sub := range subs {
-		_ = sub.Unsubscribe()
+	if len(probeSubs) > 0 {
+		watchProbeDrops(ctx, probeSubs)
+		return nil
 	}
+	<-ctx.Done()
 	return nil
+}
+
+// probePending is the buffer of the probe handler pool, as many messages
+// as a callback subscription keeps pending by default: nats.go hands a
+// channel subscription its messages without blocking and drops one the
+// full channel cannot take (slow consumer), and the queue group does not
+// send it to another instance. The collector repeats a dropped request
+// only after its request timeout, so the buffer is sized for the resync
+// burst of NFR-11, not for the pool.
+const probePending = nats.DefaultSubPendingMsgsLimit
+
+// probeDropCheck is how often watchProbeDrops looks for dropped messages.
+const probeDropCheck = 10 * time.Second
+
+// watchProbeDrops logs the probe messages a full buffer dropped (slow
+// consumer) until ctx ends; the collectors repeat them after their
+// request timeout.
+func watchProbeDrops(ctx context.Context, subs []*nats.Subscription) {
+	ticker := time.NewTicker(probeDropCheck)
+	defer ticker.Stop()
+	reported := make([]int, len(subs))
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			for i, sub := range subs {
+				dropped, err := sub.Dropped()
+				if err != nil || dropped <= reported[i] {
+					continue
+				}
+				slog.Warn("probe edge dropped messages: handler pool overloaded (slow consumer)",
+					"subject", sub.Subject, "dropped", dropped-reported[i], "pending_limit", probePending)
+				reported[i] = dropped
+			}
+		}
+	}
+}
+
+// serveProbeMessages is one handler of the probe pool: it answers the
+// messages of the probe subjects until ctx ends.
+func (h *Handler) serveProbeMessages(ctx context.Context, msgs <-chan *nats.Msg, handlers map[string]edgeHandler) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case msg := <-msgs:
+			for _, suffix := range probeSuffixes {
+				if strings.HasSuffix(msg.Subject, suffix) {
+					h.serveEdgeRequest(ctx, msg, suffix, handlers[suffix])
+					break
+				}
+			}
+		}
+	}
 }

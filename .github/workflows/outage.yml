@@ -47,7 +47,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
 
       # SMTP scenario (WP-449, F-135): Mailpit and RETICORA_SMTP_HOST go
       # into the override that the installer merges for its source build,

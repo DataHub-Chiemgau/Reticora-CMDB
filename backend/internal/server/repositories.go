@@ -2,9 +2,13 @@ package server
 
 import (
 	"context"
+	"errors"
+	"slices"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/admp"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/agent"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ai"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/assignment"
@@ -43,6 +47,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/override"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/privacy"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/probe"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/rack"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationshiptype"
@@ -54,6 +59,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/stocktake"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenantapi"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/topology"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/training"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
@@ -67,6 +73,18 @@ import (
 func MemoryRepositories() Repositories {
 	assets := asset.NewMemoryRepository()
 	discoveryRepo := discovery.NewMemoryRepository()
+	cis := ci.NewMemoryRepository()
+	// The memory probes read client and site of a CI from the CI store
+	// (WP-939); the memory collector groups count their probes and mirror
+	// their groups into the probe store (WP-947).
+	probes := probe.NewMemoryRepository().WithCIs(func(ctx context.Context, orgID, id string) (string, string, bool) {
+		item, err := cis.GetByID(ctx, orgID, id)
+		if err != nil {
+			return "", "", false
+		}
+		return item.ClientID, item.SiteID, true
+	})
+	discoveryRepo.WithGroupProbes(memoryGroupProbes{probes: probes})
 	// Seed the system CI types so name-based ingest works in --no-db mode just
 	// like against the migrated database (migration 000021 seeds them there).
 	for _, typ := range []string{
@@ -77,7 +95,8 @@ func MemoryRepositories() Repositories {
 		discoveryRepo.SeedCIType(typ, typ)
 	}
 	lifecycleStates := lifecycle.NewMemoryStateStore()
-	cis := ci.NewMemoryRepository()
+	// Compliance rules read the open findings as inputs (CMP-02, WP-1125).
+	securityFindings := security.NewMemoryRepository()
 	users := user.NewMemoryRepository()
 	serviceAccounts := user.NewMemoryServiceAccounts()
 	// Consumable movements book on the stock per bin of the same store
@@ -88,6 +107,11 @@ func MemoryRepositories() Repositories {
 	// API-01).
 	labelLookup := labels.NewMemoryRepository(assetLabels{repo: assets}, consumableLabels{repo: consumables},
 		locationLabels{repo: locationTree})
+	// The ADMP cache takes the client of an account from the account store
+	// (WP-928).
+	admpAccounts := admp.NewMemoryAccountRepository()
+	slaRepo := sla.NewMemoryRepository()
+	ciTypes := citype.NewMemoryRepository()
 	return Repositories{
 		CI: cis,
 		// Graph walks pass only through visible, not deleted CIs (IMP-07),
@@ -96,7 +120,7 @@ func MemoryRepositories() Repositories {
 		Webhook:           webhook.NewMemoryRepository(),
 		WebhookDeliveries: webhook.NewMemoryDeliveryStore(),
 		Discovery:         discoveryRepo,
-		CIType:            citype.NewMemoryRepository(),
+		CIType:            ciTypes,
 		Import:            importer.NewMemoryRepository(),
 		Supplier:          contract.NewMemoryRepository(),
 		Contract:          contract.NewMemoryContracts(),
@@ -117,50 +141,80 @@ func MemoryRepositories() Repositories {
 			}
 			return "", false
 		}),
-		History:           history.NewMemoryRepository(),
-		SavedView:         savedview.NewMemoryRepository(),
-		FilterQuery:       nil, // memory mode: query engine requires SQL; endpoint reports 501
-		LifecycleStates:   lifecycleStates,
-		LifecycleResolver: lifecycleStates,
-		Asset:             assets,
-		Assignment:        assignment.NewMemoryRepository(),
-		Document:          document.NewMemoryRepository(),
-		Stocktake:         stocktake.NewMemoryRepository(assets),
-		Consumable:        consumables,
-		Order:             order.NewMemoryRepository(),
-		Maintenance:       maintenance.NewMemoryRepository(),
-		Disposal:          disposal.NewMemoryRepository(),
-		Key:               keymgmt.NewMemoryRepository(),
-		Training:          training.NewMemoryRepository(),
-		Desk:              desk.NewMemoryRepository(),
-		Location:          location.NewMemoryRepository(),
-		Agent:             agent.NewMemoryRepository(),
-		Security:          security.NewMemoryRepository(),
-		Ticket:            ticket.NewMemoryRepository(),
-		User:              users,
-		Credential:        credential.NewMemoryRepository(),
-		Entitlement:       entitlement.NewMemoryRepository(),
-		TenantHierarchy:   tenantapi.NewMemoryRepository(),
-		Rack:              rack.NewMemoryRepository(),
-		Contact:           contact.NewMemoryRepository(),
-		IPAM:              ipam.NewMemoryRepository(),
-		Metrics:           monitoring.NewMemoryMetricStore(),
-		Permission:        permission.NewMemoryRepository(),
-		FieldGrants:       permission.NewMemoryFieldGrants(),
-		APIKeys:           identity.NewMemoryAPIKeyStore(),
-		ServiceAccounts:   serviceAccounts,
-		SLA:               sla.NewMemoryRepository(),
-		Form:              form.NewMemoryRepository(),
-		Workflow:          workflow.NewMemoryRepository(),
-		Compliance:        compliance.NewMemoryRepository(),
-		IGA:               iga.NewMemoryRepository(),
-		Search:            search.NewMemoryRepository(),
-		AI:                ai.NewMemoryRepository(),
-		ExportJobs:        export.NewMemoryJobRepository(),
-		Jobs:              jobs.NewMemoryRepository(),
-		Privacy:           privacy.NewMemoryRepository(),
+		History:             history.NewMemoryRepository(),
+		SavedView:           savedview.NewMemoryRepository(),
+		FilterQuery:         nil, // memory mode: query engine requires SQL; endpoint reports 501
+		LifecycleStates:     lifecycleStates,
+		LifecycleResolver:   lifecycleStates,
+		Asset:               assets,
+		Assignment:          assignment.NewMemoryRepository(),
+		Document:            document.NewMemoryRepository(),
+		Stocktake:           stocktake.NewMemoryRepository(assets),
+		Consumable:          consumables,
+		Order:               order.NewMemoryRepository(),
+		Maintenance:         maintenance.NewMemoryRepository(),
+		Disposal:            disposal.NewMemoryRepository(),
+		Key:                 keymgmt.NewMemoryRepository(),
+		Training:            training.NewMemoryRepository(),
+		Desk:                desk.NewMemoryRepository(),
+		Location:            location.NewMemoryRepository(),
+		Agent:               agent.NewMemoryRepository(),
+		Security:            securityFindings,
+		Ticket:              ticket.NewMemoryRepository(),
+		User:                users,
+		Credential:          credential.NewMemoryRepository(),
+		ADMPAccounts:        admpAccounts,
+		ADMP:                admp.NewMemoryRepository(admpAccounts),
+		Entitlement:         entitlement.NewMemoryRepository(),
+		TenantHierarchy:     tenantapi.NewMemoryRepository(),
+		Rack:                rack.NewMemoryRepository(),
+		Contact:             contact.NewMemoryRepository(),
+		IPAM:                ipam.NewMemoryRepository(),
+		Metrics:             monitoring.NewMemoryMetricStore(),
+		Probes:              probes,
+		Alarms:              alarm.NewService(alarm.NewMemoryStore(), nil, &alarm.LogSink{}),
+		Permission:          permission.NewMemoryRepository(),
+		FieldGrants:         permission.NewMemoryFieldGrants(),
+		APIKeys:             identity.NewMemoryAPIKeyStore(),
+		ServiceAccounts:     serviceAccounts,
+		SLA:                 slaRepo,
+		AvailabilityTargets: sla.NewMemoryAvailabilityRepository(memoryTargetObjects{cis: cis, types: ciTypes}, slaRepo),
+		Form:                form.NewMemoryRepository(),
+		Workflow:            workflow.NewMemoryRepository(),
+		Compliance:          compliance.NewMemoryRepository().WithFindings(securityFindings),
+		IGA:                 iga.NewMemoryRepository(),
+		Search:              search.NewMemoryRepository(),
+		AI:                  ai.NewMemoryRepository(),
+		ExportJobs:          export.NewMemoryJobRepository(),
+		Jobs:                jobs.NewMemoryRepository(),
+		Privacy:             privacy.NewMemoryRepository(),
 	}
 }
+
+// memoryGroupProbes answers the memory collector groups from the memory
+// probe store (--no-db, WP-947) and mirrors their groups into it.
+type memoryGroupProbes struct{ probes *probe.MemoryRepository }
+
+func (m memoryGroupProbes) ProbeClient(ctx context.Context, orgID, probeID string) (clientID string, ok bool, err error) {
+	p, err := m.probes.Get(ctx, probeID)
+	if errors.Is(err, probe.ErrNotFound) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return p.ClientID, p.OrganizationID == orgID, nil
+}
+
+func (m memoryGroupProbes) CountGroupProbes(ctx context.Context, _, groupID string) (int, error) {
+	return m.probes.Count(ctx, &probe.ListFilter{CollectorGroupID: groupID})
+}
+
+func (m memoryGroupProbes) AddCollectorGroup(orgID, id, clientID string) {
+	m.probes.AddCollectorGroup(orgID, id, clientID)
+}
+
+func (m memoryGroupProbes) RemoveCollectorGroup(id string) { m.probes.RemoveCollectorGroup(id) }
 
 // PostgresRepositories returns the PostgreSQL-backed implementations. The
 // audit recorder is passed to the CI repository so history is written inside
@@ -172,6 +226,12 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 	// override recomputes them in its own (WP-717).
 	types := citype.NewPGRepository(pool)
 	cis := ci.NewPGRepositoryWithAudit(pool, recorder).WithEvents(events.NewOutbox()).WithComputed(types)
+	// The management address of a CI follows its management IP in the
+	// CI's transaction (WP-913); router.go attaches the review queue of
+	// the duplicate check.
+	ipamRepo := ipam.NewPGRepository(pool).WithEvents(events.NewOutbox())
+	management := ipam.NewManagementSync(ipamRepo, nil)
+	cis.WithManagementSync(management)
 	movements := movement.NewService(movement.NewPGRepository(pool))
 	assignments := assignment.NewService(pool, movements, events.NewOutbox())
 	return Repositories{
@@ -184,41 +244,47 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		Asset:             asset.NewPGRepository(pool).WithEvents(events.NewOutbox()),
 		Assignment:        assignment.NewPGRepository(pool),
 		// The assignment service books over the movement service (WP-275).
-		AssignmentService: assignments,
-		Document:          document.NewPGRepository(pool),
-		Stocktake:         stocktake.NewPGRepository(pool),
-		Consumable:        consumable.NewPGRepository(pool),
-		Order:             order.NewPGRepository(pool),
-		Maintenance:       maintenance.NewPGRepository(pool),
-		Disposal:          disposal.NewPGRepository(pool),
-		Key:               keymgmt.NewPGRepository(pool),
-		Training:          training.NewPGRepository(pool),
-		Desk:              desk.NewPGRepository(pool),
-		Location:          location.NewPGRepository(pool),
-		Agent:             agent.NewPGRepository(pool),
-		Security:          security.NewPGRepository(pool),
-		Ticket:            ticket.NewPGRepository(pool).WithEvents(events.NewOutbox()),
-		User:              user.NewPGRepository(pool),
-		Credential:        credential.NewPGRepository(pool),
-		Entitlement:       entitlement.NewPGRepository(pool),
-		TenantHierarchy:   tenantapi.NewPGRepository(pool),
-		Rack:              rack.NewPGRepository(pool),
-		Contact:           contact.NewPGRepository(pool),
-		IPAM:              ipam.NewPGRepository(pool),
-		Metrics:           monitoring.NewPGMetricStore(pool),
-		Permission:        permission.NewPGRepository(pool),
-		FieldGrants:       permission.NewPGFieldGrants(pool),
-		APIKeys:           identity.NewPGAPIKeyStore(pool),
-		ServiceAccounts:   user.NewPGServiceAccounts(pool),
-		Invitations:       user.NewPGInvitations(pool),
-		SLA:               sla.NewPGRepository(pool),
-		Form:              form.NewPGRepository(pool),
-		Workflow:          workflow.NewPGRepository(pool),
-		Compliance:        compliance.NewPGRepository(pool),
-		IGA:               iga.NewPGRepository(pool),
-		Search:            search.NewPGRepository(pool),
-		AI:                ai.NewPGRepository(pool),
-		ExportJobs:        export.NewPGJobRepository(pool),
+		AssignmentService:   assignments,
+		Document:            document.NewPGRepository(pool),
+		Stocktake:           stocktake.NewPGRepository(pool),
+		Consumable:          consumable.NewPGRepository(pool),
+		Order:               order.NewPGRepository(pool),
+		Maintenance:         maintenance.NewPGRepository(pool),
+		Disposal:            disposal.NewPGRepository(pool),
+		Key:                 keymgmt.NewPGRepository(pool),
+		Training:            training.NewPGRepository(pool),
+		Desk:                desk.NewPGRepository(pool),
+		Location:            location.NewPGRepository(pool),
+		Agent:               agent.NewPGRepository(pool),
+		Security:            security.NewPGRepository(pool),
+		Ticket:              ticket.NewPGRepository(pool).WithEvents(events.NewOutbox()),
+		User:                user.NewPGRepository(pool),
+		Credential:          credential.NewPGRepository(pool),
+		ADMPAccounts:        admp.NewPGAccountRepository(pool),
+		ADMP:                admp.NewPGRepository(pool),
+		Entitlement:         entitlement.NewPGRepository(pool),
+		TenantHierarchy:     tenantapi.NewPGRepository(pool),
+		Rack:                rack.NewPGRepository(pool),
+		Contact:             contact.NewPGRepository(pool),
+		IPAM:                ipamRepo,
+		IPAMManagement:      management,
+		Metrics:             monitoring.NewPGMetricStore(pool),
+		Probes:              probe.NewPGRepository(pool),
+		Alarms:              alarm.NewPGService(pool),
+		Permission:          permission.NewPGRepository(pool),
+		FieldGrants:         permission.NewPGFieldGrants(pool),
+		APIKeys:             identity.NewPGAPIKeyStore(pool),
+		ServiceAccounts:     user.NewPGServiceAccounts(pool),
+		Invitations:         user.NewPGInvitations(pool),
+		SLA:                 sla.NewPGRepository(pool),
+		AvailabilityTargets: sla.NewPGAvailabilityRepository(pool),
+		Form:                form.NewPGRepository(pool),
+		Workflow:            workflow.NewPGRepository(pool),
+		Compliance:          compliance.NewPGRepository(pool),
+		IGA:                 iga.NewPGRepository(pool),
+		Search:              search.NewPGRepository(pool),
+		AI:                  ai.NewPGRepository(pool),
+		ExportJobs:          export.NewPGJobRepository(pool),
 		Jobs: jobs.NewPGRepository(pool).WithReadCondition(importer.JobKind, importer.JobReadSQL()).
 			WithReadCondition(labels.BatchJobKind, labels.JobReadSQL),
 		Privacy:          privacy.NewPGRepository(pool),
@@ -245,6 +311,19 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		LifecycleGuards:   lifecycle.NewPGGuards(pool),
 		Availability:      reservation.NewPGAvailability(pool),
 	}
+}
+
+// WireMaintenanceSuppression makes an alarm of a CI in an active
+// maintenance window open suppressed (ALR-11, WP-1033): the window CIs and
+// the CIs their graph impact certainly affects. Only with the module
+// maintenance: its system job maintenance.boundaries releases the alarms
+// again, without it nothing would.
+func (r *Repositories) WireMaintenanceSuppression() {
+	if r.Alarms == nil || r.Maintenance == nil {
+		return
+	}
+	r.Alarms.WithMaintenance(maintenance.NewActive(r.Maintenance,
+		topology.NewAnalyzer(r.CI, r.Relationship).WithRelationshipTypes(r.RelationshipType).WithCITypes(r.CIType)))
 }
 
 // memoryLabelPage is the page the memory label sources list with: every
@@ -301,4 +380,44 @@ func (l locationLabels) Entries(ctx context.Context, orgID string) ([]labels.Ent
 		out = append(out, labels.Entry{Object: labels.Object{ID: it.ID, Name: it.Name}, Codes: []string{it.Barcode}})
 	}
 	return out, nil
+}
+
+// memoryTargetObjects answers the CI of an availability target from the
+// memory CI and type stores (--no-db, WP-1048): client and site of the CI
+// and whether its type or one of its ancestors is a service type.
+type memoryTargetObjects struct {
+	cis   ci.Repository
+	types citype.Repository
+}
+
+func (m memoryTargetObjects) ObjectCI(ctx context.Context, orgID, ciID string) (sla.ObjectCI, bool, error) {
+	item, err := m.cis.GetByID(ctx, orgID, ciID)
+	if err != nil {
+		return sla.ObjectCI{}, false, nil
+	}
+	out := sla.ObjectCI{}
+	if item.ClientID != "" {
+		c := item.ClientID
+		out.ClientID = &c
+	}
+	if item.SiteID != "" {
+		s := item.SiteID
+		out.SiteID = &s
+	}
+	typeID := item.CITypeID
+	for range 32 {
+		if typeID == "" {
+			break
+		}
+		typ, terr := m.types.GetByID(ctx, orgID, typeID)
+		if terr != nil {
+			break
+		}
+		if slices.Contains(sla.ServiceTypeKeys, typ.Key) {
+			out.Service = true
+			break
+		}
+		typeID = typ.ParentTypeID
+	}
+	return out, true, nil
 }

@@ -2,7 +2,7 @@ import { ArrowRight, MapPin } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router';
 import { siteApi } from '../api/client';
 import type { Site } from '../api/client';
 import { Panel } from '../components/spatial/Panel';

@@ -5,13 +5,17 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"mime"
+	"mime/multipart"
 	"mime/quotedprintable"
 	"net"
 	"net/mail"
 	"net/smtp"
+	"net/textproto"
 	"strconv"
 	"strings"
 	"time"
@@ -178,6 +182,16 @@ type Mail struct {
 	To       []string
 	Subject  string
 	Body     string
+	// Attachments are sent as parts of a multipart/mixed message after
+	// the text (the table counts of the deletion protocol, WP-1156).
+	Attachments []Attachment
+}
+
+// Attachment is a file part of a mail: name, media type and content.
+type Attachment struct {
+	Name        string
+	ContentType string
+	Data        []byte
 }
 
 // Send delivers m and returns its Message-ID.
@@ -323,17 +337,78 @@ func (s *SMTPSender) compose(from *mail.Address, to []*mail.Address, m *Mail) (m
 	header("Date", s.now().UTC().Format(time.RFC1123Z))
 	header("Message-ID", msgID)
 	header("MIME-Version", "1.0")
+	if len(m.Attachments) > 0 {
+		if err := writeMultipart(&b, header, m); err != nil {
+			return "", nil, err
+		}
+		return msgID, b.Bytes(), nil
+	}
 	header("Content-Type", "text/plain; charset=utf-8")
 	header("Content-Transfer-Encoding", "quoted-printable")
 	b.WriteString("\r\n")
-	qp := quotedprintable.NewWriter(&b)
-	if _, err := qp.Write([]byte(strings.ReplaceAll(m.Body, "\n", "\r\n"))); err != nil {
-		return "", nil, err
-	}
-	if err := qp.Close(); err != nil {
+	if err := writeQuotedText(&b, m.Body); err != nil {
 		return "", nil, err
 	}
 	return msgID, b.Bytes(), nil
+}
+
+// writeQuotedText writes body as quoted-printable with CRLF line ends.
+func writeQuotedText(b *bytes.Buffer, body string) error {
+	qp := quotedprintable.NewWriter(b)
+	if _, err := qp.Write([]byte(strings.ReplaceAll(body, "\n", "\r\n"))); err != nil {
+		return err
+	}
+	return qp.Close()
+}
+
+// writeMultipart writes the text and the attachments of m as
+// multipart/mixed; the attachments in base64 with their file name.
+func writeMultipart(b *bytes.Buffer, header func(k, v string), m *Mail) error {
+	mw := multipart.NewWriter(b)
+	header("Content-Type", mime.FormatMediaType("multipart/mixed", map[string]string{"boundary": mw.Boundary()}))
+	b.WriteString("\r\n")
+	text, err := mw.CreatePart(textproto.MIMEHeader{
+		"Content-Type":              {"text/plain; charset=utf-8"},
+		"Content-Transfer-Encoding": {"quoted-printable"},
+	})
+	if err != nil {
+		return err
+	}
+	qp := quotedprintable.NewWriter(text)
+	if _, err = qp.Write([]byte(strings.ReplaceAll(m.Body, "\n", "\r\n"))); err != nil {
+		return err
+	}
+	if cerr := qp.Close(); cerr != nil {
+		return cerr
+	}
+	for _, a := range m.Attachments {
+		if strings.ContainsAny(a.Name, "\r\n\"") {
+			return fmt.Errorf("attachment name with a line break or quote")
+		}
+		contentType := a.ContentType
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		part, perr := mw.CreatePart(textproto.MIMEHeader{
+			"Content-Type":              {contentType},
+			"Content-Transfer-Encoding": {"base64"},
+			"Content-Disposition":       {mime.FormatMediaType("attachment", map[string]string{"filename": a.Name})},
+		})
+		if perr != nil {
+			return perr
+		}
+		encoded := base64.StdEncoding.EncodeToString(a.Data)
+		for len(encoded) > 76 {
+			if _, perr = part.Write([]byte(encoded[:76] + "\r\n")); perr != nil {
+				return perr
+			}
+			encoded = encoded[76:]
+		}
+		if _, perr = part.Write([]byte(encoded + "\r\n")); perr != nil {
+			return perr
+		}
+	}
+	return mw.Close()
 }
 
 // EmailProvider delivers e-mail channels: central_smtp over the
@@ -477,5 +552,83 @@ func (m InvitationMailer) SendInvitation(ctx context.Context, inv *InvitationMai
 	text := brand.Mail(locale, Render(events.InvitationCreated, locale, map[string]any{
 		"organization_name": inv.OrganizationName, "expires_at": inv.ExpiresAt.UTC().Format(time.RFC3339), "link": inv.Link}))
 	_, err := m.Sender.Send(ctx, &Mail{FromName: brand.SenderName, To: []string{inv.To}, Subject: text.Subject, Body: text.Body})
+	return err
+}
+
+// ErrNoCentralSMTP: the installation has no central SMTP server; mails
+// that only it may send (the deletion protocol) cannot be delivered.
+var ErrNoCentralSMTP = errors.New("no central SMTP server is configured")
+
+// PurgeProtocolMail is the deletion protocol of an organization (TLC-06,
+// WP-1156) for the address of its requester: the times, the total hash
+// over the protocol and the id of its operator_audit entry; the counts per
+// table and object kind are the text attachment. It holds no personal
+// value of the organization.
+type PurgeProtocolMail struct {
+	To     string
+	Locale string
+	// AuditID is the id of the operator_audit entry org.purged.
+	AuditID      int64
+	Hash         string
+	RequestedAt  time.Time
+	DueAt        time.Time
+	PurgeStarted time.Time
+	PurgeEnded   time.Time
+	Rows         int64
+	Objects      int64
+	// Counts is the text attachment: one line per table and object kind.
+	Counts string
+}
+
+// OrgPurgeProtocolMailer sends the deletion protocol over the central SMTP
+// server of the installation (like SignupMailer): the organization, its
+// users and its channels are gone, so no channel of the organization can
+// carry it. A nil Sender is ErrNoCentralSMTP.
+type OrgPurgeProtocolMailer struct {
+	Sender *SMTPSender
+}
+
+// purgeProtocolTexts are subject, body and attachment name per language.
+var purgeProtocolTexts = map[string]struct{ subject, body, file string }{
+	LocaleDE: {
+		subject: "Reticora: Löschprotokoll Ihrer Organisation",
+		body: "Die von Ihnen beantragte Löschung der Organisation ist abgeschlossen.\n\n" +
+			"Antrag: %s\nFällig: %s\nBeginn der Löschung: %s\nEnde der Löschung: %s\n" +
+			"Gelöschte Zeilen: %d\nGelöschte Objekte: %d\n\n" +
+			"Gesamthash (SHA-256): %s\nEintrag im Betreiberprotokoll (operator_audit): %d\n\n" +
+			"Die Zählungen und Hashes je Tabelle und Objektart stehen im Anhang. " +
+			"Sicherungen (Backups) enthalten die Daten noch, bis ihre Aufbewahrungsfrist abläuft; danach sind sie dort ebenfalls gelöscht.\n" +
+			"Diese Adresse wurde nur für den Versand dieses Protokolls aufbewahrt und ist jetzt gelöscht.\n",
+		file: "loeschprotokoll.txt",
+	},
+	LocaleEN: {
+		subject: "Reticora: deletion protocol of your organization",
+		body: "The deletion of the organization you requested is complete.\n\n" +
+			"Requested: %s\nDue: %s\nPurge started: %s\nPurge ended: %s\n" +
+			"Rows deleted: %d\nObjects deleted: %d\n\n" +
+			"Total hash (SHA-256): %s\nEntry of the operator audit (operator_audit): %d\n\n" +
+			"The counts and hashes per table and object kind are attached. " +
+			"Backups still hold the data until their retention ends; then it is gone there as well.\n" +
+			"This address was kept only to send this protocol and is deleted now.\n",
+		file: "deletion-protocol.txt",
+	},
+}
+
+// SendPurgeProtocol sends p to its address in its language (German unless
+// it is English).
+func (m OrgPurgeProtocolMailer) SendPurgeProtocol(ctx context.Context, p *PurgeProtocolMail) error {
+	if m.Sender == nil {
+		return ErrNoCentralSMTP
+	}
+	locale := LocaleDE
+	if strings.HasPrefix(strings.ToLower(p.Locale), "en") {
+		locale = LocaleEN
+	}
+	text := purgeProtocolTexts[locale]
+	stamp := func(t time.Time) string { return t.UTC().Format(time.RFC3339) }
+	body := fmt.Sprintf(text.body, stamp(p.RequestedAt), stamp(p.DueAt), stamp(p.PurgeStarted), stamp(p.PurgeEnded),
+		p.Rows, p.Objects, p.Hash, p.AuditID)
+	_, err := m.Sender.Send(ctx, &Mail{To: []string{p.To}, Subject: text.subject, Body: body,
+		Attachments: []Attachment{{Name: text.file, ContentType: "text/plain; charset=utf-8", Data: []byte(p.Counts)}}})
 	return err
 }

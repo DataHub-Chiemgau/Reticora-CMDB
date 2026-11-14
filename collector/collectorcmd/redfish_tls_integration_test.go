@@ -335,7 +335,7 @@ func TestRedfishTLSScopeIntegration(t *testing.T) {
 			if len(passes) != 1 || passes[0].scope == nil || passes[0].scope.ID != scope.ID {
 				t.Fatalf("discovery passes = %+v, want the one server scope", passes)
 			}
-			records, errs := runPass(context.Background(), cfg, nil, &passes[0], []string{"redfish"}, &hostCache{})
+			records, errs, _ := runPass(context.Background(), cfg, nil, &passes[0], []string{"redfish"}, &hostCache{})
 			requests := bmc.received()
 
 			if bmc.hellos.Load() == 0 {
@@ -360,8 +360,8 @@ func TestRedfishTLSScopeIntegration(t *testing.T) {
 				}
 				// The plugin's collection fails with the certificate error
 				// before it sends anything.
-				_, err := plug.Collect(context.Background(), "127.0.0.1",
-					plugins.CredentialsFor("redfish", collectorBundle.resolve(scope.CredentialIDs)))
+				resolved, _ := collectorBundle.resolve(scope.CredentialIDs)
+				_, err := plug.Collect(context.Background(), "127.0.0.1", plugins.CredentialsFor("redfish", resolved))
 				if err == nil || !strings.Contains(err.Error(), "certificate") {
 					t.Errorf("Collect error = %v, want the certificate error", err)
 				}
@@ -430,7 +430,7 @@ func TestAuditRedfishUntrustedCertificateReported(t *testing.T) {
 			installRedfishTLSBundle(t)
 			collectorScopes.set([]collectorScope{scope}, nil)
 			passes := discoveryPasses(&collectorConfig{})
-			_, errs := runPass(context.Background(), &collectorConfig{}, nil, &passes[0], []string{"redfish"}, &hostCache{})
+			_, errs, _ := runPass(context.Background(), &collectorConfig{}, nil, &passes[0], []string{"redfish"}, &hostCache{})
 			if n := len(bmc.received()); n != 0 {
 				t.Fatalf("%d requests reached the untrusted target", n)
 			}

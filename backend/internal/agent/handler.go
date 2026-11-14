@@ -43,9 +43,11 @@ type CITypeResolver interface {
 	LookupCITypeID(ctx context.Context, orgID, nameOrID string) (string, error)
 }
 
-// FindingRecorder records a security finding for a CI (patch posture feed).
+// FindingRecorder records a security finding for a CI (patch posture
+// feed): the upsert on the fingerprint, so a repeated inventory report
+// updates the finding instead of adding one (SEC-02, WP-1116).
 type FindingRecorder interface {
-	Create(ctx context.Context, f *security.Finding) error
+	Upsert(ctx context.Context, f *security.Finding) (security.UpsertResult, error)
 }
 
 // Handler provides HTTP handlers for the endpoint-agent surface.
@@ -626,13 +628,15 @@ func (h *Handler) queueOverrideConflicts(ctx context.Context, item *ci.Item, con
 
 // recordFindings turns software inventory entries that are marked vulnerable
 // (the feed matcher tags them with a "vulnerable" vendor flag) into security
-// findings attached to the endpoint CI.
+// findings attached to the endpoint CI, with source agent. The upsert keys
+// them by the CVE id the flag carries, else by package and version, so a
+// repeated inventory report updates them (SEC-02, WP-1116).
 func (h *Handler) recordFindings(ctx context.Context, orgID, ciID string, software []SoftwareItem) {
 	for _, sw := range software {
 		if !isVulnerable(sw) {
 			continue
 		}
-		_ = h.findings.Create(ctx, &security.Finding{
+		f := &security.Finding{
 			OrganizationID:   orgID,
 			CIID:             ciID,
 			Kind:             "vulnerability",
@@ -640,8 +644,14 @@ func (h *Handler) recordFindings(ctx context.Context, orgID, ciID string, softwa
 			Title:            "Vulnerable software: " + sw.Name + " " + sw.Version,
 			PackageName:      sw.Name,
 			InstalledVersion: sw.Version,
-			Reference:        sw.Vendor,
-		})
+			Source:           security.SourceAgent,
+		}
+		if cve := strings.ToUpper(sw.Vendor); strings.HasPrefix(cve, "CVE-") {
+			f.Reference, f.CVEIDs = cve, []string{cve}
+		}
+		if _, err := h.findings.Upsert(ctx, f); err != nil {
+			slog.WarnContext(ctx, "agent finding not recorded", "ci_id", ciID, "error", err)
+		}
 	}
 }
 

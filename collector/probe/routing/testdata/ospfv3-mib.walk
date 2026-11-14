@@ -1,0 +1,9 @@
+# OSPFV3-MIB (RFC 5643) ospfv3NbrTable of a router with two OSPFv3
+# neighbors (WP-1002), both full. Index ospfv3NbrIfIndex +
+# ospfv3NbrIfInstId + ospfv3NbrRtrId (192.0.2.4 = 3221225988, 192.0.2.5 =
+# 3221225989); ospfv3NbrState .8, ospfv3NbrEvents .9 below ospfv3NbrEntry
+# 1.3.6.1.2.1.191.1.9.1.
+.1.3.6.1.2.1.191.1.9.1.8.5.0.3221225988 = INTEGER: full(8)
+.1.3.6.1.2.1.191.1.9.1.8.6.0.3221225989 = INTEGER: full(8)
+.1.3.6.1.2.1.191.1.9.1.9.5.0.3221225988 = Counter32: 4
+.1.3.6.1.2.1.191.1.9.1.9.6.0.3221225989 = Counter32: 9

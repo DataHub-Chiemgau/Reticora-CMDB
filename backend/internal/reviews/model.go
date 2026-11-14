@@ -36,12 +36,17 @@ const (
 	// database, at most one open item per CI.
 	KindSerialMismatch = "serial_mismatch"
 	KindDuplicateIP    = "duplicate_ip"
+	// KindIPBindingConflict: discovery observed a pinned address at
+	// another device than the one it is bound to (IPM-14, E-216); one
+	// open item per address and observed interface.
+	KindIPBindingConflict = "ip_binding_conflict"
 )
 
 // Kinds lists the review types in REC-08 order.
 var Kinds = []string{
 	KindUnclassifiedDevice, KindAmbiguousIdentity, KindConflictingValues, KindProbableDuplicate, KindOverrideConflict,
 	KindResurrectedDevice, KindUnlicensedCI, KindScopeSuggested, KindSerialMismatch, KindDuplicateIP, KindUnknownRelationship,
+	KindIPBindingConflict,
 }
 
 // Statuses of a review item.
@@ -69,7 +74,8 @@ const (
 //   - new creates a CI from the observation;
 //   - accept applies what the item proposes (the observed values, the
 //     suggested scope; for a duplicate_ip from a reservation conflict:
-//     releases the reservation, E-53);
+//     releases the reservation, E-53; for an ip_binding_conflict: binds
+//     the pinned address to the observed interface and releases the pin);
 //   - dismiss closes the item without a change.
 var AllowedActions = map[string][]string{
 	KindUnclassifiedDevice:  {ActionNew, ActionDismiss},
@@ -83,6 +89,7 @@ var AllowedActions = map[string][]string{
 	KindSerialMismatch:      {ActionDismiss},
 	KindDuplicateIP:         {ActionAccept, ActionDismiss},
 	KindUnknownRelationship: {ActionAccept, ActionDismiss},
+	KindIPBindingConflict:   {ActionAccept, ActionDismiss},
 }
 
 // Allowed reports whether action resolves an item of kind.

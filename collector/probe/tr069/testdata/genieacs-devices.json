@@ -1,0 +1,38 @@
+[
+  {
+    "_id": "00259E-HG8245-CPE0001",
+    "_lastInform": "2026-11-14T07:55:00.000Z",
+    "_deviceId": {"_Manufacturer": "Huawei", "_OUI": "00259E", "_ProductClass": "HG8245", "_SerialNumber": "CPE0001"},
+    "_tags": ["berlin"],
+    "Device": {
+      "DeviceInfo": {
+        "UpTime": {"_value": 86400, "_type": "xsd:unsignedInt", "_timestamp": "2026-11-14T07:55:00.000Z"},
+        "MemoryStatus": {"Free": {"_value": 51200, "_type": "xsd:unsignedInt"}}
+      }
+    }
+  },
+  {
+    "_id": "00259E-HG8245-CPE0002",
+    "_lastInform": "2026-11-14T06:00:00.000Z",
+    "_deviceId": {"_Manufacturer": "Huawei", "_OUI": "00259E", "_ProductClass": "HG8245", "_SerialNumber": "CPE0002"},
+    "_tags": ["berlin"],
+    "Device": {
+      "DeviceInfo": {
+        "UpTime": {"_value": 7200, "_type": "xsd:unsignedInt"},
+        "MemoryStatus": {"Free": {"_value": 40960, "_type": "xsd:unsignedInt"}}
+      }
+    }
+  },
+  {
+    "_id": "A0B1C2-FritzBox-CPE0003",
+    "_lastInform": "2026-11-14T07:58:30.000Z",
+    "_deviceId": {"_Manufacturer": "AVM", "_OUI": "A0B1C2", "_ProductClass": "FritzBox", "_SerialNumber": "CPE0003"},
+    "_tags": ["munich"],
+    "Device": {
+      "DeviceInfo": {
+        "UpTime": {"_value": "120", "_type": "xsd:unsignedInt"},
+        "MemoryStatus": {"Free": {"_value": 1024, "_type": "xsd:unsignedInt"}}
+      }
+    }
+  }
+]

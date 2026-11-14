@@ -970,7 +970,13 @@ func typeChainSetsTx(ctx context.Context, tx pgx.Tx, id string, override *setOve
 		EXISTS (SELECT 1 FROM metamodel_rule m WHERE m.is_active AND (m.ci_type_id = c.id
 			OR m.attribute_set_id IN (SELECT cs.attribute_set_id FROM `+assignments+` cs
 				JOIN attribute_set s ON s.id = cs.attribute_set_id AND s.is_active
-				WHERE cs.ci_type_id = c.id)))
+				WHERE cs.ci_type_id = c.id))),
+		CASE WHEN c.id = $1::uuid THEN COALESCE((
+			SELECT jsonb_agg(jsonb_build_object('model', d.key, 'state', ls.key, 'initial', ls.is_initial, 'fields', ls.locked_fields)
+				ORDER BY ls.sort_order, ls.key)
+			FROM lifecycle_state ls JOIN lifecycle_definition d ON d.id = ls.definition_id
+			WHERE ls.definition_id = lifecycle_model_effective($1::uuid, 'ci') AND jsonb_array_length(ls.locked_fields) > 0), '[]'::jsonb)
+		ELSE '[]'::jsonb END
 		FROM ci_type_ancestors($1::uuid) c ORDER BY c.level`, args...)
 	if err != nil {
 		return nil, nil, scope, fmt.Errorf("read ci type chain: %w", err)
@@ -982,10 +988,10 @@ func typeChainSetsTx(ctx context.Context, tx pgx.Tx, id string, override *setOve
 	var levels []level
 	for rows.Next() {
 		var lv level
-		var defs, setDefs []byte
+		var defs, setDefs, locks []byte
 		var setIDs []string
 		var ruled bool
-		if err = rows.Scan(&lv.typ.ID, &defs, &setDefs, &setIDs, &ruled); err != nil {
+		if err = rows.Scan(&lv.typ.ID, &defs, &setDefs, &setIDs, &ruled, &locks); err != nil {
 			rows.Close()
 			return nil, nil, scope, fmt.Errorf("scan ci type chain: %w", err)
 		}
@@ -1004,6 +1010,14 @@ func typeChainSetsTx(ctx context.Context, tx pgx.Tx, id string, override *setOve
 		scope.types = append(scope.types, lv.typ.ID)
 		scope.sets = append(scope.sets, setIDs...)
 		scope.active = scope.active || ruled
+		if len(locks) > 2 {
+			// The locked fields of the effective lifecycle model of the
+			// type (WP-1103), read with the chain.
+			if err = json.Unmarshal(locks, &scope.locks); err != nil {
+				rows.Close()
+				return nil, nil, scope, fmt.Errorf("decode lifecycle locks: %w", err)
+			}
+		}
 		levels = append(levels, lv)
 	}
 	rows.Close()

@@ -33,6 +33,15 @@ func Validate(schema JSONMap, value any) error {
 
 func validateValue(schema JSONMap, value any, path string, fields *[]FieldError) {
 	typ, _ := schema["type"].(string)
+	// A signature field (format signature, WP-1101) holds a document id, a
+	// string whatever type the schema names; which document it may be
+	// (PNG or JPEG of the organization, readable for the submitter) is
+	// checked by ValidateSubmission (conditions.go, checkSignatures), its
+	// place in the schema by ValidateSignatureFields.
+	if format, _ := schema["format"].(string); format == FormatSignature && value != nil && !matchesType("string", value) {
+		add(fields, path, "expected string")
+		return
+	}
 	if typ != "" && !matchesType(typ, value) {
 		add(fields, path, "expected "+typ)
 		return

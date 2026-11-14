@@ -43,6 +43,11 @@ var tenantGuardAllowlist = map[string]string{
 // TestWithSystemCallersAreListed fails for every other caller, for entries
 // that match no call any more and for entries without a reason.
 var withSystemCallers = map[string]string{
+	// Global vulnerability catalog (SEC-02, WP-1117): importers and jobs
+	// without a tenant scope read the catalog (vuln_*), which belongs to no
+	// organization; a request reads it in its tenant transaction.
+	"internal/vulnfeed/pg_repository.go": "global vulnerability catalog read without a tenant scope",
+
 	// Offline audit chain verification (AUD-04): lists every organization
 	// to verify each chain in its tenant transaction.
 	"cmd/audit-verify/main.go": "organizations whose audit chain the operator tool verifies",
@@ -73,6 +78,13 @@ var withSystemCallers = map[string]string{
 	// with certificates to revoke; the revocation runs in their tenant
 	// transaction.
 	"internal/discovery/natsedge.go": "organizations with superseded collector certificates",
+
+	// Purge of deleted organizations (TLC-06, WP-1154): finds the
+	// organizations whose grace period ended, whose purge runs or whose
+	// reminder is due (organization_system_select); each is purged and
+	// reminded in its tenant transaction.
+	"internal/tenantapi/purge.go":          "organizations due for their purge or a deletion reminder",
+	"internal/tenantapi/purge_protocol.go": "the deletion state of an organization whose protocol is still to be sent (WP-1156)",
 
 	// Collector enrollment: the code names its organization, so it is
 	// looked up before any tenant is known (system exception
@@ -137,6 +149,10 @@ var withSystemCallers = map[string]string{
 	// Operator listing: lists every organization for the platform operator.
 	"internal/operator/handler.go": "organization listing of the platform operator",
 
+	// Trial end (WP-884, PKG-03): lists the organizations whose trial has
+	// ended; each plan change runs in that organization's transaction.
+	"internal/operator/trial_end.go": "organizations whose trial has ended",
+
 	// Derivation root (SEC-06): reads the system table platform_secret,
 	// which has no organization.
 	"internal/platform/crypto/derivation_store.go": "derivation root in platform_secret",
@@ -172,6 +188,11 @@ var systemWriteCallers = map[string]string{
 	// The derivation root of the installation (SEC-06, WP-459): created at
 	// the first start, rewrapped by rotation.master_key (platform_secret).
 	"internal/platform/crypto/derivation_store.go": "derivation root in platform_secret",
+	// The global vulnerability catalog (SEC-02, WP-1117): the importers
+	// replace advisories with their ranges and store the sync state of the
+	// feeds (vuln_source, vuln_advisory, vuln_affected,
+	// rls.SystemCatalogTables).
+	"internal/vulnfeed/pg_repository.go": "global vulnerability catalog (vuln_*)",
 }
 
 // adminPoolCallers lists the files that may call NewAdminPool, the pool

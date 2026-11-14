@@ -54,7 +54,12 @@ after the initial administrator and before the server starts
 - the service account `service-account-reticora-server-admin` holds the
   client roles `manage-users`, `view-users` and `query-users` of
   `realm-management`; missing ones are added, drifted client settings are
-  reset, an unchanged client is not written.
+  reset, an unchanged client is not written;
+- the client has the default client scope `kc-admin-api`: Keycloak 26.8.2
+  accepts a token at the admin REST API only with its audience and scope
+  and gives it to `admin-cli` and `security-admin-console` only; without it
+  every admin call of the server answers 401 (self-signup
+  `keycloak: create user: status 401`, MFA binding at the sign-in).
 
 The realm files do not carry the client: the production realm ships without
 users (the service account is one), and `start --import-realm` skips an
@@ -98,7 +103,7 @@ an installation only through the installer: every run of `install-cloud.sh`
 (`apply_realm_settings`, before the initial administrator is created):
 
 - **User profile:** declares the attributes of the realm file that are
-  missing (`organization_id`, admin only). Keycloak 24 drops undeclared
+  missing (`organization_id`, admin only). Keycloak drops undeclared
   attributes: without it the installer's administrator would be created
   without organization.
 - **Roles and groups:** creates the missing realm roles (`mfa_required`,
@@ -131,6 +136,45 @@ see Sign-out) and all other realm settings are
 left alone; the server's admin client and the realm's SMTP server are the
 installer's (see Server admin client and realm SMTP). A failing call aborts the installer with this section as the hint;
 check the Keycloak log and re-run the installer.
+
+### Keycloak version (SR-60, WP-873)
+
+The stack runs Keycloak 26 (`quay.io/keycloak/keycloak:26.8.2`, pinned by
+digest in `deploy/docker-compose/docker-compose.yml`). An installation of an
+earlier release (Keycloak 24) is upgraded by the next `install-cloud.sh`
+run: Keycloak 26 migrates `keycloak-db` on its first start, then the
+installer applies the realm settings as above.
+`tests/keycloak-realm-upgrade.test.sh` runs the realm of step 1 on
+Keycloak 24 and every later step on Keycloak 26 on the same database.
+
+`keycloak-db` runs the own image `reticora-keycloak-db`
+(`deploy/docker-compose/keycloak-db`, E-96, A-85): the official
+`postgres:16.16-alpine`, pinned by digest, with its `gosu` rebuilt by the
+repository's Go toolchain. Major version, data directory and UID 70 are the
+vendor's, so the `keycloakdb` volume of an earlier installation
+(`postgres:16.15-alpine` or `16.16-alpine`) keeps running after the next
+installer run, which builds the image (`--build-from-source`) or verifies
+and pins the signed one (`RETICORA_KEYCLOAK_DB_IMAGE`, release mode);
+`tests/keycloak-db-image.test.sh` checks both predecessors.
+Changes of the version that the compose file carries:
+
+- `KC_PROXY=edge` no longer exists; `KC_PROXY_HEADERS=xforwarded` lets
+  Keycloak take scheme and host of the issuer from the `/realms/` proxy of
+  nginx, as before.
+- The temporary master administrator of the first start comes from
+  `KC_BOOTSTRAP_ADMIN_USERNAME` and `KC_BOOTSTRAP_ADMIN_PASSWORD`; `.env`
+  keeps `KEYCLOAK_ADMIN` and `KEYCLOAK_ADMIN_PASSWORD`, which the installer
+  rotates as before.
+- `/health/ready` is served on the management port 9000, not on 8080; the
+  compose healthcheck probes 9000 inside the container (the port is not
+  published).
+- The claims `sub` and `auth_time` of the access token come from the client
+  scope `basic` (Keycloak 25). The migration gives it to every existing
+  client; the realm file lists it among the default client scopes of
+  `reticora-app`, so a fresh installation issues the same tokens.
+- The admin REST API accepts only tokens with the client scope
+  `kc-admin-api` (Keycloak 26.8.2); the installer adds it to the server's
+  admin client (see Server admin client and realm SMTP).
 
 ## Policies (AUT-09, CH26)
 
@@ -287,7 +331,7 @@ page "You are already authenticated as different user".
 
 - The organization of a user is the user attribute `organization_id` (the
   organization UUID, CH26/AUT-09). It is declared in the realm's user profile
-  (Keycloak 24 drops undeclared attributes) and only administrators may view
+  (Keycloak drops undeclared attributes) and only administrators may view
   or edit it. The `organization_id` mapper on the `reticora-app` client emits
   it into the ID token; a login without it is rejected. Group names are never
   used to pick the organization.

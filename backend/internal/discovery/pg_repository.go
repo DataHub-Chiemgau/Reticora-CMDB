@@ -3,22 +3,26 @@ package discovery
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -38,6 +42,7 @@ const collectorSelectColumns = `
 	COALESCE(cert_fingerprint, ''),
 	cert_not_after,
 	config,
+	probe_capabilities,
 	created_at,
 	updated_at
 `
@@ -190,6 +195,11 @@ func collectorError(err error) error {
 		return &api.FieldError{Field: "site_id", Message: "site not found", Status: http.StatusUnprocessableEntity}
 	case "collector_site_client":
 		return &api.FieldError{Field: "site_id", Message: "the site belongs to another client", Status: http.StatusUnprocessableEntity}
+	case "collector_group_member_client_rule", "probe_collector_group_client":
+		// The collector's group follows its move (000308): a shared group
+		// of the old client, or probes of the old client in its own group,
+		// refuse the move to another client.
+		return &api.FieldError{Field: "site_id", Message: "the collector's group or its probes belong to another client", Status: http.StatusUnprocessableEntity}
 	}
 	return err
 }
@@ -223,6 +233,37 @@ func (r *PGRepository) Heartbeat(ctx context.Context, orgID, collectorID string)
 	return status, err
 }
 
+// StoreProbeCapabilities implements ProbeCapabilityStore: the report is
+// written only when it differs from the stored one in anything but its
+// detection time.
+func (r *PGRepository) StoreProbeCapabilities(ctx context.Context, orgID, collectorID string, caps *probewire.ProbeCapabilities) (bool, error) {
+	if !audit.IsUUID(collectorID) {
+		return false, api.ErrNotFound
+	}
+	changed := false
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var stored *probewire.ProbeCapabilities
+		err := tx.QueryRow(ctx, `SELECT probe_capabilities FROM collector WHERE id = $1 AND organization_id = $2 FOR UPDATE`,
+			collectorID, orgID).Scan(&stored)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return api.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("read probe capabilities: %w", err)
+		}
+		if stored.Equal(caps) {
+			return nil
+		}
+		if _, err := tx.Exec(ctx, `UPDATE collector SET probe_capabilities = $3 WHERE id = $1 AND organization_id = $2`,
+			collectorID, orgID, caps); err != nil {
+			return fmt.Errorf("write probe capabilities: %w", err)
+		}
+		changed = true
+		return nil
+	})
+	return changed, err
+}
+
 // CollectorStatus implements Repository.
 func (r *PGRepository) CollectorStatus(ctx context.Context, orgID, collectorID string) (string, error) {
 	if !audit.IsUUID(collectorID) {
@@ -237,6 +278,27 @@ func (r *PGRepository) CollectorStatus(ctx context.Context, orgID, collectorID s
 		return err
 	})
 	return status, err
+}
+
+// CollectorAccess returns the status of a collector of the organization
+// and whether the organization is in the grace period of its deletion
+// (deletion_state requested or purging, TLC-06), in one query; an unknown
+// collector fails with api.ErrNotFound. checkCollector reads it for every
+// edge data request.
+func (r *PGRepository) CollectorAccess(ctx context.Context, orgID, collectorID string) (status string, pending bool, err error) {
+	if !audit.IsUUID(collectorID) {
+		return "", false, api.ErrNotFound
+	}
+	err = database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		qerr := tx.QueryRow(ctx, `SELECT c.status, COALESCE(o.deletion_state IN ('requested', 'purging'), false)
+			FROM collector c LEFT JOIN organization o ON o.id = c.organization_id
+			WHERE c.id = $1 AND c.organization_id = $2`, collectorID, orgID).Scan(&status, &pending)
+		if errors.Is(qerr, pgx.ErrNoRows) {
+			return api.ErrNotFound
+		}
+		return qerr
+	})
+	return status, pending, err
 }
 
 // UpdateCollector implements Repository.
@@ -321,6 +383,7 @@ func scanCollector(scanner collectorScanner) (*Collector, error) {
 		&item.CertFingerprint,
 		&certNotAfter,
 		&item.Config,
+		&item.ProbeCapabilities,
 		&createdAt,
 		&updatedAt,
 	); err != nil {
@@ -1582,4 +1645,621 @@ func (r *PGRepository) DefaultVRF(ctx context.Context, orgID string) (string, er
 		return tx.QueryRow(ctx, `SELECT COALESCE(default_vrf_of($1)::text, '')`, orgID).Scan(&id)
 	})
 	return id, err
+}
+
+// --- collector groups (WP-947) -------------------------------------------------------------
+
+var _ CollectorGroupRepository = (*PGRepository)(nil)
+
+const collectorGroupColumns = `g.id::text, g.organization_id::text, COALESCE(g.client_id::text, ''), COALESCE(g.site_id::text, ''),
+	g.name, g.mode, extract(epoch FROM g.liveness_timeout)::int, COALESCE(g.anchor_probe_id::text, ''), g.status,
+	g.status_changed_at, g.created_at, g.updated_at, g.trap_config`
+
+func scanCollectorGroup(row pgx.Row) (*CollectorGroup, error) {
+	g := &CollectorGroup{Members: []CollectorGroupMember{}}
+	err := row.Scan(&g.ID, &g.OrganizationID, &g.ClientID, &g.SiteID, &g.Name, &g.Mode, &g.LivenessTimeoutS, &g.AnchorProbeID,
+		&g.Status, &g.StatusChangedAt, &g.CreatedAt, &g.UpdatedAt, &g.TrapConfig)
+	normalizeTrapConfig(&g.TrapConfig)
+	return g, err
+}
+
+// checkTrapCredentials accepts the credentials of a trap configuration
+// only when every one is visible in the organization, of kind snmp_v2c or
+// snmp_v3 and org-wide or of the group's client (WP-977 AK2).
+func checkTrapCredentials(ctx context.Context, tx pgx.Tx, orgID, groupClient string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	var ok int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM credential c
+		WHERE c.organization_id = $1 AND c.id = ANY ($2::uuid[]) AND c.kind = ANY ($3::text[])
+		  AND (c.client_id IS NULL OR c.client_id::text = $4)`, orgID, ids, trapCredentialKinds, groupClient).Scan(&ok); err != nil {
+		return fmt.Errorf("read trap credentials: %w", err)
+	}
+	if ok != len(ids) {
+		return errTrapCredentials
+	}
+	return nil
+}
+
+// TrapBundleCredentials returns the credentials of the collector's bundle
+// that come from the trap configuration of its group (WP-977): the
+// credentials of an enabled trap_config of kind snmp_v2c or snmp_v3,
+// org-wide or of the group's client; one statement in tx, sorted.
+func TrapBundleCredentials(ctx context.Context, tx pgx.Tx, orgID, collectorID string) ([]string, error) {
+	rows, err := tx.Query(ctx, `SELECT DISTINCT c.id::text FROM collector_group_member m
+		JOIN collector_group g ON g.organization_id = m.organization_id AND g.id = m.group_id
+		CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(g.trap_config->'credential_ids', '[]'::jsonb)) AS x (id)
+		JOIN credential c ON c.organization_id = m.organization_id AND c.id::text = x.id
+		WHERE m.organization_id = $1 AND m.collector_id = $2 AND COALESCE((g.trap_config->>'enabled')::boolean, false)
+		  AND c.kind = ANY ($3::text[]) AND (c.client_id IS NULL OR c.client_id = g.client_id)
+		ORDER BY 1`, orgID, collectorID, trapCredentialKinds)
+	if err != nil {
+		return nil, fmt.Errorf("read trap bundle credentials: %w", err)
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
+}
+
+// collectorGroupWriteError maps the constraints of collector_group and
+// collector_group_member.
+func collectorGroupWriteError(err error) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return err
+	}
+	switch pgErr.ConstraintName {
+	case "collector_group_member_client_rule", "collector_group_member_collector_key", "collector_group_member_collector_fkey":
+		return errCollectorOfOtherClient
+	case "collector_group_client_fkey":
+		return errGroupClient
+	case "collector_group_site_fkey", "collector_group_site_client":
+		return errGroupSite
+	case "collector_group_anchor_probe_fkey":
+		return errAnchorProbe
+	case "probe_collector_group_fkey":
+		return &CollectorGroupInUseError{Probes: 1}
+	case "collector_group_name_check":
+		return &api.FieldError{Field: "name", Status: http.StatusUnprocessableEntity, Message: "name must not be blank and at most 200 characters"}
+	case "collector_group_mode_check":
+		return &api.FieldError{Field: "mode", Status: http.StatusUnprocessableEntity, Message: "mode must be distributed or failover"}
+	case "collector_group_liveness_timeout_check":
+		return &api.FieldError{Field: "liveness_timeout_s", Status: http.StatusUnprocessableEntity, Message: "liveness_timeout_s must be between 20 and 300"}
+	case "collector_group_member_weight_check":
+		return &api.FieldError{Field: "weight", Status: http.StatusUnprocessableEntity, Message: "weight must be at least 1"}
+	}
+	return err
+}
+
+// loadMembers reads the members of the groups with the number of probes
+// assigned to each in one statement and files them into the groups.
+func loadMembers(ctx context.Context, tx pgx.Tx, orgID string, groups []*CollectorGroup) error {
+	if len(groups) == 0 {
+		return nil
+	}
+	ids := make([]string, len(groups))
+	byID := make(map[string]*CollectorGroup, len(groups))
+	for i, g := range groups {
+		ids[i] = g.ID
+		byID[g.ID] = g
+	}
+	rows, err := tx.Query(ctx, `SELECT m.group_id::text, m.collector_id::text, m.priority, m.weight, m.member_status,
+			m.last_alive_at, m.clock_offset_ms, m.capacity_hint, m.config_version,
+			(SELECT count(*) FROM probe_assignment a WHERE a.organization_id = m.organization_id AND a.collector_id = m.collector_id)::int
+		FROM collector_group_member m
+		WHERE m.organization_id = $1 AND m.group_id = ANY ($2::uuid[])
+		ORDER BY m.priority, m.collector_id`, orgID, ids)
+	if err != nil {
+		return fmt.Errorf("read collector group members: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var m CollectorGroupMember
+		if err := rows.Scan(&m.GroupID, &m.CollectorID, &m.Priority, &m.Weight, &m.MemberStatus, &m.LastAliveAt,
+			&m.ClockOffsetMS, &m.CapacityHint, &m.ConfigVersion, &m.AssignedProbes); err != nil {
+			return fmt.Errorf("scan collector group member: %w", err)
+		}
+		if g := byID[m.GroupID]; g != nil {
+			g.Members = append(g.Members, m)
+		}
+	}
+	return rows.Err()
+}
+
+func getCollectorGroupTx(ctx context.Context, tx pgx.Tx, orgID, id string, lock bool) (*CollectorGroup, error) {
+	if !api.IsUUID(id) {
+		return nil, ErrCollectorGroupNotFound
+	}
+	query := `SELECT ` + collectorGroupColumns + ` FROM collector_group g WHERE g.organization_id = $1 AND g.id = $2`
+	if lock {
+		query += ` FOR UPDATE`
+	}
+	g, err := scanCollectorGroup(tx.QueryRow(ctx, query, orgID, id))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrCollectorGroupNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read collector group: %w", err)
+	}
+	return g, nil
+}
+
+// ListCollectorGroups implements CollectorGroupRepository.
+func (r *PGRepository) ListCollectorGroups(ctx context.Context, orgID string, f CollectorGroupFilter, page api.PaginationParams) ([]CollectorGroup, int, error) {
+	out := []CollectorGroup{}
+	for _, id := range []string{f.ClientID, f.SiteID} {
+		if id != "" && !api.IsUUID(id) {
+			return out, 0, nil
+		}
+	}
+	var total int
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		const where = ` FROM collector_group g WHERE g.organization_id = $1
+			AND ($2 = '' OR g.client_id::text = $2) AND ($3 = '' OR g.site_id::text = $3)`
+		if err := tx.QueryRow(ctx, `SELECT count(*)`+where, orgID, f.ClientID, f.SiteID).Scan(&total); err != nil {
+			return fmt.Errorf("count collector groups: %w", err)
+		}
+		rows, err := tx.Query(ctx, `SELECT `+collectorGroupColumns+where+` ORDER BY g.name, g.id LIMIT $4 OFFSET $5`,
+			orgID, f.ClientID, f.SiteID, page.Limit, page.Offset)
+		if err != nil {
+			return fmt.Errorf("list collector groups: %w", err)
+		}
+		var groups []*CollectorGroup
+		for rows.Next() {
+			g, scanErr := scanCollectorGroup(rows)
+			if scanErr != nil {
+				rows.Close()
+				return fmt.Errorf("scan collector group: %w", scanErr)
+			}
+			groups = append(groups, g)
+		}
+		rows.Close()
+		if err = rows.Err(); err != nil {
+			return fmt.Errorf("list collector groups: %w", err)
+		}
+		if werr := loadMembers(ctx, tx, orgID, groups); werr != nil {
+			return werr
+		}
+		for _, g := range groups {
+			out = append(out, *g)
+		}
+		return nil
+	})
+	return out, total, err
+}
+
+// GetCollectorGroup implements CollectorGroupRepository.
+func (r *PGRepository) GetCollectorGroup(ctx context.Context, orgID, id string) (*CollectorGroup, error) {
+	var out *CollectorGroup
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		out, err = readCollectorGroup(ctx, tx, orgID, id)
+		return err
+	})
+	return out, err
+}
+
+// readCollectorGroup reads a group with its members.
+func readCollectorGroup(ctx context.Context, tx pgx.Tx, orgID, id string) (*CollectorGroup, error) {
+	g, err := getCollectorGroupTx(ctx, tx, orgID, id, false)
+	if err != nil {
+		return nil, err
+	}
+	if werr := loadMembers(ctx, tx, orgID, []*CollectorGroup{g}); werr != nil {
+		return nil, werr
+	}
+	return g, nil
+}
+
+// checkAnchorProbe accepts no anchor or a visible probe of the group's
+// client (any probe of the organization for an org-wide group).
+func checkAnchorProbe(ctx context.Context, tx pgx.Tx, orgID, clientID, probeID string) error {
+	if probeID == "" {
+		return nil
+	}
+	if !api.IsUUID(probeID) {
+		return errAnchorProbe
+	}
+	var probeClient string
+	err := tx.QueryRow(ctx, `SELECT COALESCE(client_id::text, '') FROM probe WHERE organization_id = $1 AND id = $2`,
+		orgID, probeID).Scan(&probeClient)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return errAnchorProbe
+	}
+	if err != nil {
+		return fmt.Errorf("read anchor probe: %w", err)
+	}
+	if clientID != "" && probeClient != clientID {
+		return errAnchorProbe
+	}
+	return nil
+}
+
+// CreateCollectorGroup implements CollectorGroupRepository.
+func (r *PGRepository) CreateCollectorGroup(ctx context.Context, in *CollectorGroup) (*CollectorGroup, error) {
+	var out *CollectorGroup
+	err := database.WithRequestTenant(ctx, r.pool, in.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
+		orgID := in.OrganizationID
+		if in.ClientID != "" {
+			var visible bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM client WHERE organization_id = $1 AND id = $2)`,
+				orgID, in.ClientID).Scan(&visible); err != nil {
+				return fmt.Errorf("read client: %w", err)
+			}
+			if !visible {
+				return errGroupClient
+			}
+		}
+		if err := checkAnchorProbe(ctx, tx, orgID, in.ClientID, in.AnchorProbeID); err != nil {
+			return err
+		}
+		g, err := scanCollectorGroup(tx.QueryRow(ctx, `INSERT INTO collector_group AS g
+				(organization_id, client_id, site_id, name, mode, liveness_timeout, anchor_probe_id)
+			VALUES ($1, $2, $3, $4, $5, make_interval(secs => $6), $7) RETURNING `+collectorGroupColumns,
+			orgID, nilIfEmpty(in.ClientID), nilIfEmpty(in.SiteID), in.Name, in.Mode, in.LivenessTimeoutS, nilIfEmpty(in.AnchorProbeID)))
+		if err != nil {
+			return collectorGroupWriteError(err)
+		}
+		out = g
+		return nil
+	})
+	return out, err
+}
+
+// UpdateCollectorGroup implements CollectorGroupRepository.
+func (r *PGRepository) UpdateCollectorGroup(ctx context.Context, orgID, id string, u *CollectorGroupUpdate) (*CollectorGroup, error) {
+	var out *CollectorGroup
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		g, err := getCollectorGroupTx(ctx, tx, orgID, id, true)
+		if err != nil {
+			return err
+		}
+		if werr := u.apply(g); werr != nil {
+			return werr
+		}
+		if u.AnchorProbeID != nil {
+			if werr := checkAnchorProbe(ctx, tx, orgID, g.ClientID, g.AnchorProbeID); werr != nil {
+				return werr
+			}
+		}
+		storedTrap, configured, err := storedTrapConfig(ctx, tx, orgID, id)
+		if err != nil {
+			return err
+		}
+		// The first configuration of a group also changes the set, even
+		// when it equals the default: the set then carries trap_config,
+		// which replaces RETICORA_SNMP_TRAP_LISTEN (AK5).
+		trapChanged := u.TrapConfig != nil && (!configured || !sameTrapConfig(&storedTrap, u.TrapConfig))
+		if trapChanged {
+			if werr := checkTrapCredentials(ctx, tx, orgID, g.ClientID, u.TrapConfig.CredentialIDs); werr != nil {
+				return werr
+			}
+		}
+		tag, err := tx.Exec(ctx, `UPDATE collector_group SET name = $3, mode = $4, liveness_timeout = make_interval(secs => $5),
+				anchor_probe_id = $6, trap_config = COALESCE($7, trap_config) WHERE organization_id = $1 AND id = $2`,
+			orgID, id, g.Name, g.Mode, g.LivenessTimeoutS, nilIfEmpty(g.AnchorProbeID), u.TrapConfig)
+		if err != nil {
+			return collectorGroupWriteError(err)
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrCollectorGroupNotFound
+		}
+		if trapChanged {
+			if werr := r.raiseGroupConfig(ctx, tx, orgID, id); werr != nil {
+				return werr
+			}
+		}
+		out, err = readCollectorGroup(ctx, tx, orgID, id)
+		return err
+	})
+	return out, err
+}
+
+// storedTrapConfig reads the stored trap configuration of a group and
+// whether it was ever configured (TrapConfigured).
+func storedTrapConfig(ctx context.Context, tx pgx.Tx, orgID, id string) (probewire.TrapConfig, bool, error) {
+	var c probewire.TrapConfig
+	var configured bool
+	if err := tx.QueryRow(ctx, `SELECT trap_config, `+TrapConfiguredSQL+` FROM collector_group g WHERE g.organization_id = $1 AND g.id = $2`,
+		orgID, id).Scan(&c, &configured); err != nil {
+		return c, false, fmt.Errorf("read trap configuration: %w", err)
+	}
+	normalizeTrapConfig(&c)
+	return c, configured, nil
+}
+
+// raiseGroupConfig raises the config_version of every member of the group
+// (a changed trap configuration, WP-977 AK2) and, once committed, tells
+// each member on the internal NATS: .probes.changed with its new version
+// (the assignment set carries the configuration) and .bundle.changed (its
+// bundle holds the trap credentials). Without the bus the members learn it
+// on their next periodic fetch.
+func (r *PGRepository) raiseGroupConfig(ctx context.Context, tx pgx.Tx, orgID, groupID string) error {
+	return r.raiseConfigVersions(ctx, tx, orgID, `UPDATE collector_group_member SET config_version = config_version + 1
+		WHERE organization_id = $1 AND group_id = $2 RETURNING collector_id::text, config_version`, groupID)
+}
+
+// raiseMemberConfig is raiseGroupConfig for one collector that joined a
+// group or moved into another (WP-977): the trap configuration of its new
+// group reaches it with a new version, and the distribution's cache of the
+// former version (built with the former group's configuration) is not
+// served again.
+func (r *PGRepository) raiseMemberConfig(ctx context.Context, tx pgx.Tx, orgID, collectorID string) error {
+	return r.raiseConfigVersions(ctx, tx, orgID, `UPDATE collector_group_member SET config_version = config_version + 1
+		WHERE organization_id = $1 AND collector_id = $2 RETURNING collector_id::text, config_version`, collectorID)
+}
+
+// raiseConfigVersions runs query (an UPDATE of collector_group_member
+// returning collector id and new version) and sends the notices once
+// committed.
+func (r *PGRepository) raiseConfigVersions(ctx context.Context, tx pgx.Tx, orgID, query, arg string) error {
+	rows, err := tx.Query(ctx, query, orgID, arg)
+	if err != nil {
+		return fmt.Errorf("raise config versions: %w", err)
+	}
+	type version struct {
+		collector string
+		version   int64
+	}
+	raised, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (version, error) {
+		var v version
+		scanErr := row.Scan(&v.collector, &v.version)
+		return v, scanErr
+	})
+	if err != nil {
+		return fmt.Errorf("raise config versions: %w", err)
+	}
+	if r.bus == nil || len(raised) == 0 {
+		return nil
+	}
+	bus := r.bus
+	database.AfterCommit(database.ContextWithTx(ctx, tx), func(context.Context) {
+		for _, v := range raised {
+			subject := "collector." + orgID + "." + v.collector
+			raw, _ := json.Marshal(probewire.ProbesChanged{Version: v.version})
+			if perr := bus.Publish(subject+ProbesChangedSuffix, raw); perr != nil {
+				slog.Warn("probes changed notice failed", "organization_id", orgID, "collector_id", v.collector, "error", perr)
+			}
+			if perr := bus.Publish(subject+credential.BundleChangedSuffix, []byte(`{}`)); perr != nil {
+				slog.Warn("bundle changed notice failed", "organization_id", orgID, "collector_id", v.collector, "error", perr)
+			}
+		}
+	})
+	return nil
+}
+
+// groupProbeCount counts every probe of the group, also those outside the
+// caller's client and site scope (probe.site_id follows the CI, which may
+// lie at another site than the group): the rules "no delete with probes"
+// and "the last member stays" protect the probes, not the caller's view.
+// The scope is widened for the count only (app_scope_widen, migration
+// 000139; pattern probe Ancestors, ipam heldAddresses); only the number
+// leaves it.
+func groupProbeCount(ctx context.Context, tx pgx.Tx, orgID, groupID string) (int, error) {
+	var n int
+	err := widenedScope(ctx, tx, func() error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM probe WHERE organization_id = $1 AND collector_group_id = $2`,
+			orgID, groupID).Scan(&n)
+	})
+	if err != nil {
+		return 0, fmt.Errorf("count probes of the collector group: %w", err)
+	}
+	return n, nil
+}
+
+// widenedScope runs fn with the client, site and team scope of the
+// transaction widened and restores it afterwards.
+func widenedScope(ctx context.Context, tx pgx.Tx, fn func() error) error {
+	var previous string
+	if err := tx.QueryRow(ctx, `SELECT app_scope_widen()::text`).Scan(&previous); err != nil {
+		return fmt.Errorf("widen scope: %w", err)
+	}
+	err := fn()
+	if _, restoreErr := tx.Exec(ctx, `SELECT app_scope_restore($1::text[])`, previous); restoreErr != nil && err == nil {
+		err = fmt.Errorf("restore scope: %w", restoreErr)
+	}
+	return err
+}
+
+// DeleteCollectorGroup implements CollectorGroupRepository.
+func (r *PGRepository) DeleteCollectorGroup(ctx context.Context, orgID, id string) error {
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := getCollectorGroupTx(ctx, tx, orgID, id, true); err != nil {
+			return err
+		}
+		n, err := groupProbeCount(ctx, tx, orgID, id)
+		if err != nil {
+			return err
+		}
+		if n > 0 {
+			return &CollectorGroupInUseError{Probes: n}
+		}
+		tag, err := tx.Exec(ctx, `DELETE FROM collector_group WHERE organization_id = $1 AND id = $2`, orgID, id)
+		if err != nil {
+			return collectorGroupWriteError(err)
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrCollectorGroupNotFound
+		}
+		return nil
+	})
+}
+
+// leaveAllowed refuses the departure of the last member of a group with
+// probes; the group row is locked first, so concurrent departures wait.
+func leaveAllowed(ctx context.Context, tx pgx.Tx, orgID, groupID string) error {
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM collector_group WHERE organization_id = $1 AND id = $2 FOR UPDATE`, orgID, groupID); err != nil {
+		return fmt.Errorf("lock collector group: %w", err)
+	}
+	var members int
+	if err := widenedScope(ctx, tx, func() error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM collector_group_member WHERE organization_id = $1 AND group_id = $2`,
+			orgID, groupID).Scan(&members)
+	}); err != nil {
+		return fmt.Errorf("count collector group members: %w", err)
+	}
+	if members > 1 {
+		return nil
+	}
+	n, err := groupProbeCount(ctx, tx, orgID, groupID)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return ErrLastMemberWithProbes
+	}
+	return nil
+}
+
+// AddCollectorGroupMember implements CollectorGroupRepository. A move locks
+// the target and the current group in the order of their ids (opposite
+// moves G1→G2 and G2→G1 do not deadlock), then the membership row: the
+// group the collector leaves is the one it is in when the move writes.
+func (r *PGRepository) AddCollectorGroupMember(ctx context.Context, orgID, groupID string, in *CollectorGroupMemberInput) (*CollectorGroup, error) {
+	var out *CollectorGroup
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		g, err := getCollectorGroupTx(ctx, tx, orgID, groupID, false)
+		if err != nil {
+			return err
+		}
+		current, err := membershipGroup(ctx, tx, orgID, in.CollectorID, false)
+		if err != nil {
+			return err
+		}
+		if werr := lockCollectorGroups(ctx, tx, orgID, groupID, current); werr != nil {
+			return werr
+		}
+		var collectorClient string
+		err = tx.QueryRow(ctx, `SELECT COALESCE(client_id::text, '') FROM collector WHERE organization_id = $1 AND id = $2`,
+			orgID, in.CollectorID).Scan(&collectorClient)
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && collectorClient != g.ClientID) {
+			return errCollectorOfOtherClient
+		}
+		if err != nil {
+			return fmt.Errorf("read collector: %w", err)
+		}
+		locked, err := membershipGroup(ctx, tx, orgID, in.CollectorID, true)
+		if err != nil {
+			return err
+		}
+		if locked != current {
+			// A concurrent move changed the group between the read and
+			// the locks; the client repeats the request.
+			return errConcurrentMemberMove
+		}
+		if current == "" {
+			priority, weight := 0, DefaultMemberWeight
+			if in.Priority != nil {
+				priority = *in.Priority
+			}
+			if in.Weight != nil {
+				weight = *in.Weight
+			}
+			if _, err = tx.Exec(ctx, `INSERT INTO collector_group_member (group_id, collector_id, organization_id, priority, weight)
+				VALUES ($1, $2, $3, $4, $5)`, groupID, in.CollectorID, orgID, priority, weight); err != nil {
+				return collectorGroupWriteError(err)
+			}
+		} else {
+			if current != groupID {
+				// The move: the collector leaves its group in this
+				// transaction.
+				if werr := leaveAllowed(ctx, tx, orgID, current); werr != nil {
+					return werr
+				}
+			}
+			tag, uerr := tx.Exec(ctx, `UPDATE collector_group_member SET group_id = $3,
+					priority = COALESCE($4, CASE WHEN group_id = $3 THEN priority ELSE 0 END),
+					weight = COALESCE($5, CASE WHEN group_id = $3 THEN weight ELSE 100 END)
+				WHERE organization_id = $1 AND collector_id = $2 AND group_id = $6`,
+				orgID, in.CollectorID, groupID, in.Priority, in.Weight, current)
+			if uerr != nil {
+				return collectorGroupWriteError(uerr)
+			}
+			if tag.RowsAffected() == 0 {
+				// The membership lies outside the caller's write scope.
+				return errCollectorOfOtherClient
+			}
+		}
+		if current != groupID {
+			// Joined or moved: the configuration of the new group (trap
+			// receiver) applies to the collector.
+			if werr := r.raiseMemberConfig(ctx, tx, orgID, in.CollectorID); werr != nil {
+				return werr
+			}
+		}
+		out, err = readCollectorGroup(ctx, tx, orgID, groupID)
+		return err
+	})
+	return out, err
+}
+
+// membershipGroup returns the group of the collector, empty without one;
+// lock takes the membership row FOR UPDATE.
+func membershipGroup(ctx context.Context, tx pgx.Tx, orgID, collectorID string, lock bool) (string, error) {
+	query := `SELECT group_id::text FROM collector_group_member WHERE organization_id = $1 AND collector_id = $2`
+	if lock {
+		query += ` FOR UPDATE`
+	}
+	var group string
+	err := tx.QueryRow(ctx, query, orgID, collectorID).Scan(&group)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read membership: %w", err)
+	}
+	return group, nil
+}
+
+// lockCollectorGroups locks the target group and the collector's current
+// group (if another) in the order of their ids; a missing target is 404.
+func lockCollectorGroups(ctx context.Context, tx pgx.Tx, orgID, target, current string) error {
+	ids := []string{target}
+	if current != "" && current != target {
+		ids = append(ids, current)
+	}
+	rows, err := tx.Query(ctx, `SELECT id::text FROM collector_group WHERE organization_id = $1 AND id = ANY ($2::uuid[])
+		ORDER BY id FOR UPDATE`, orgID, ids)
+	if err != nil {
+		return fmt.Errorf("lock collector groups: %w", err)
+	}
+	locked, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return fmt.Errorf("lock collector groups: %w", err)
+	}
+	if !slices.Contains(locked, target) {
+		return ErrCollectorGroupNotFound
+	}
+	return nil
+}
+
+// RemoveCollectorGroupMember implements CollectorGroupRepository.
+func (r *PGRepository) RemoveCollectorGroupMember(ctx context.Context, orgID, groupID, collectorID string) error {
+	if !api.IsUUID(collectorID) {
+		return ErrCollectorGroupMemberNotFound
+	}
+	return database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		if _, err := getCollectorGroupTx(ctx, tx, orgID, groupID, true); err != nil {
+			return err
+		}
+		var member bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM collector_group_member
+			WHERE organization_id = $1 AND group_id = $2 AND collector_id = $3)`, orgID, groupID, collectorID).Scan(&member); err != nil {
+			return fmt.Errorf("read membership: %w", err)
+		}
+		if !member {
+			return ErrCollectorGroupMemberNotFound
+		}
+		if err := leaveAllowed(ctx, tx, orgID, groupID); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `DELETE FROM collector_group_member WHERE organization_id = $1 AND group_id = $2 AND collector_id = $3`,
+			orgID, groupID, collectorID)
+		if err != nil {
+			return collectorGroupWriteError(err)
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrCollectorGroupMemberNotFound
+		}
+		return nil
+	})
 }

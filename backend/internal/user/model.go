@@ -23,16 +23,23 @@ func SurrogateDisplayName(userID string) string {
 
 // User represents an application user.
 type User struct {
-	ID             string    `json:"id"`
-	OrganizationID string    `json:"organization_id"`
-	Email          string    `json:"email"`
-	DisplayName    string    `json:"display_name"`
-	AvatarURL      string    `json:"avatar_url,omitempty"`
-	Status         string    `json:"status"`
-	ExternalID     string    `json:"external_id,omitempty"`
-	LastLoginAt    string    `json:"last_login_at,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string `json:"id"`
+	OrganizationID string `json:"organization_id"`
+	Email          string `json:"email"`
+	DisplayName    string `json:"display_name"`
+	AvatarURL      string `json:"avatar_url,omitempty"`
+	Status         string `json:"status"`
+	ExternalID     string `json:"external_id,omitempty"`
+	LastLoginAt    string `json:"last_login_at,omitempty"`
+	// MobileMasked is the mobile number shown as country code, three
+	// digits and the last two (WP-1140); empty without a number.
+	MobileMasked string    `json:"mobile_masked,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	// MobileSubjectID is the vault surrogate of the number; never sent.
+	MobileSubjectID string `json:"-"`
+	// Mobile is the plaintext number, read only for the data export.
+	Mobile string `json:"-"`
 }
 
 // Team represents a group of users.
@@ -108,6 +115,9 @@ type UpdateUserRequest struct {
 	DisplayName *string `json:"display_name,omitempty"`
 	Status      *string `json:"status,omitempty"`
 	AvatarURL   *string `json:"avatar_url,omitempty"`
+	// Mobile is the mobile number in E.164 (blanks and hyphens removed);
+	// an empty value clears it (WP-1140).
+	Mobile *string `json:"mobile,omitempty"`
 }
 
 // CreateTeamRequest is the payload for creating a team.

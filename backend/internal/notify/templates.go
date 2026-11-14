@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
@@ -75,9 +76,94 @@ type Text struct {
 // render renders the subject and the text of an event from its data.
 type render func(d map[string]any) Text
 
+// WorkflowNotification is the template of the workflow action
+// send_notification (WP-1095); no event subscription renders it.
+const WorkflowNotification = "workflow.notification"
+
+// DirectTemplates are the templates of the direct notifications
+// (directCategories), which no subscription renders.
+var DirectTemplates = []string{WorkflowNotification}
+
 // Templates are the texts of the events of Subscriptions by event type and
 // template locale.
 var Templates = map[string]map[string]render{
+	// The workflow action send_notification (NTF-05 [P3], WP-1095): subject
+	// and text come from the action, the template names the workflow.
+	WorkflowNotification: {
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Workflow: " + str(d, "subject"),
+				str(d, "body") + "\n\nGesendet vom Workflow " + str(d, "workflow_name") + " (Lauf " + str(d, "run_id") + ")."}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Workflow: " + str(d, "subject"),
+				str(d, "body") + "\n\nSent by the workflow " + str(d, "workflow_name") + " (run " + str(d, "run_id") + ")."}
+		},
+	},
+	// Alarms and incidents (WP-987): CI, severity, summary, value and the
+	// link (only with a configured frontend); the resolution names the
+	// duration.
+	events.AlarmOpened: {
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Alarm " + severityLabel(d, LocaleDE) + ": " + alarmSubject(d),
+				"Alarm geöffnet" + onCI(d, LocaleDE) + ".\nSchwere: " + severityLabel(d, LocaleDE) +
+					"\nZusammenfassung: " + orDash(str(d, "summary")) + valueLine(d, "Wert") + linkLine(d, "Details")}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Alarm " + severityLabel(d, LocaleEN) + ": " + alarmSubject(d),
+				"Alarm opened" + onCI(d, LocaleEN) + ".\nSeverity: " + severityLabel(d, LocaleEN) +
+					"\nSummary: " + orDash(str(d, "summary")) + valueLine(d, "Value") + linkLine(d, "Details")}
+		},
+	},
+	events.AlarmSeverityChanged: {
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Alarm eskaliert auf " + severityLabel(d, LocaleDE) + ": " + alarmSubject(d),
+				"Alarm eskaliert" + onCI(d, LocaleDE) + ".\nSchwere: " + severityLabel(d, LocaleDE) +
+					"\nZusammenfassung: " + orDash(str(d, "summary")) + valueLine(d, "Wert") + linkLine(d, "Details")}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Alarm escalated to " + severityLabel(d, LocaleEN) + ": " + alarmSubject(d),
+				"Alarm escalated" + onCI(d, LocaleEN) + ".\nSeverity: " + severityLabel(d, LocaleEN) +
+					"\nSummary: " + orDash(str(d, "summary")) + valueLine(d, "Value") + linkLine(d, "Details")}
+		},
+	},
+	events.AlarmResolved: {
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Alarm aufgelöst: " + alarmSubject(d),
+				"Alarm aufgelöst" + onCI(d, LocaleDE) + ".\nSchwere: " + severityLabel(d, LocaleDE) +
+					"\nZusammenfassung: " + orDash(str(d, "summary")) + valueLine(d, "Wert") +
+					"\nDauer: " + alarmDuration(d) + linkLine(d, "Details")}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Alarm resolved: " + alarmSubject(d),
+				"Alarm resolved" + onCI(d, LocaleEN) + ".\nSeverity: " + severityLabel(d, LocaleEN) +
+					"\nSummary: " + orDash(str(d, "summary")) + valueLine(d, "Value") +
+					"\nDuration: " + alarmDuration(d) + linkLine(d, "Details")}
+		},
+	},
+	events.IncidentOpened: {
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Störung " + severityLabel(d, LocaleDE) + incidentOn(d),
+				"Störung geöffnet" + onCI(d, LocaleDE) + ".\nSchwere: " + severityLabel(d, LocaleDE) +
+					causeLine(d, "Ursache") + linkLine(d, "Details")}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Incident " + severityLabel(d, LocaleEN) + incidentOn(d),
+				"Incident opened" + onCI(d, LocaleEN) + ".\nSeverity: " + severityLabel(d, LocaleEN) +
+					causeLine(d, "Cause") + linkLine(d, "Details")}
+		},
+	},
+	events.IncidentResolved: {
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Störung aufgelöst" + incidentOn(d),
+				"Störung aufgelöst" + onCI(d, LocaleDE) + ".\nSchwere: " + severityLabel(d, LocaleDE) +
+					causeLine(d, "Ursache") + linkLine(d, "Details")}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Incident resolved" + incidentOn(d),
+				"Incident resolved" + onCI(d, LocaleEN) + ".\nSeverity: " + severityLabel(d, LocaleEN) +
+					causeLine(d, "Cause") + linkLine(d, "Details")}
+		},
+	},
 	events.ReviewCreated: {
 		LocaleDE: func(d map[string]any) Text {
 			return Text{"Neues Review-Item: " + str(d, "kind"),
@@ -126,6 +212,36 @@ var Templates = map[string]map[string]render{
 				"The licence of " + str(d, "feature") + " expired on " + str(d, "expired_at") + "."}
 		},
 	},
+	events.MonitoringSuspensionChanged: {
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Monitoring-Prüfungen pausiert oder fortgesetzt",
+				"Wegen einer Änderung des Lizenzumfangs (" + strList(d["features"]) + ") wurden " + fmt.Sprint(d["paused"]) +
+					" Prüfungen pausiert und " + fmt.Sprint(d["resumed"]) + " fortgesetzt. Die Einstellungen bleiben erhalten."}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Monitoring checks paused or resumed",
+				"Because the licensed scope changed (" + strList(d["features"]) + "), " + fmt.Sprint(d["paused"]) +
+					" checks were paused and " + fmt.Sprint(d["resumed"]) + " resumed. Their configuration is kept."}
+		},
+	},
+	events.EntitlementChanged: {
+		LocaleDE: func(d map[string]any) Text {
+			if before := str(d, "plan_before"); before != "" {
+				return Text{"Paket geändert: " + str(d, "plan"),
+					"Das Paket Ihrer Organisation wurde von " + before + " auf " + str(d, "plan") + " umgestellt. Geändert: " + strList(d["changed"]) + "."}
+			}
+			return Text{"Lizenzumfang geändert",
+				"Der Lizenzumfang Ihrer Organisation (Paket " + str(d, "plan") + ") wurde angepasst. Geändert: " + strList(d["changed"]) + "."}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			if before := str(d, "plan_before"); before != "" {
+				return Text{"Plan changed: " + str(d, "plan"),
+					"The plan of your organization was changed from " + before + " to " + str(d, "plan") + ". Changed: " + strList(d["changed"]) + "."}
+			}
+			return Text{"Licence scope changed",
+				"The licence scope of your organization (plan " + str(d, "plan") + ") was adjusted. Changed: " + strList(d["changed"]) + "."}
+		},
+	},
 	events.InvitationCreated: {
 		LocaleDE: func(d map[string]any) Text {
 			return Text{"Einladung zu Reticora",
@@ -144,6 +260,40 @@ var Templates = map[string]map[string]render{
 		LocaleEN: func(d map[string]any) Text {
 			return Text{"Export ready (" + str(d, "format") + ")",
 				"Your export (" + str(d, "format") + ", " + fmt.Sprint(d["row_count"]) + " rows) is ready for download."}
+		},
+	},
+	events.OrgDeletionRequested: {
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Löschung der Organisation beantragt",
+				"Die Löschung der Organisation wurde beantragt. Sie wird am " + str(d, "due_at") +
+					" endgültig ausgeführt; bis dahin ist die Organisation schreibgeschützt und der Antrag kann widerrufen werden."}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Deletion of the organization requested",
+				"The deletion of the organization was requested. It is carried out for good at " + str(d, "due_at") +
+					"; until then the organization is read-only and the request can be cancelled."}
+		},
+	},
+	events.OrgDeletionCancelled: {
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Löschung der Organisation widerrufen",
+				"Der Antrag auf Löschung der Organisation (fällig am " + str(d, "due_at") + ") wurde widerrufen; die Organisation ist wieder beschreibbar."}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Deletion of the organization cancelled",
+				"The request to delete the organization (due at " + str(d, "due_at") + ") was cancelled; the organization can be written again."}
+		},
+	},
+	events.OrgExportCompleted: {
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Vollexport der Organisation fertig",
+				"Der Vollexport der Organisation (" + fmt.Sprint(d["rows"]) + " Zeilen, " + fmt.Sprint(d["bytes"]) +
+					" Bytes) steht bis " + str(d, "expires_at") + " zum Download bereit. Der Download verlangt eine Anmeldung mit MFA."}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Full export of the organization ready",
+				"The full export of the organization (" + fmt.Sprint(d["rows"]) + " rows, " + fmt.Sprint(d["bytes"]) +
+					" bytes) can be downloaded until " + str(d, "expires_at") + ". The download needs a sign-in with MFA."}
 		},
 	},
 	events.JobFailed: {
@@ -243,6 +393,68 @@ var Templates = map[string]map[string]render{
 			return Text{"Warranty expiring: " + str(d, "name"),
 				"The warranty of asset " + str(d, "name") + " (" + str(d, "inventory_no") + ") ends on " + str(d, "due_date") +
 					", " + fmt.Sprint(d["days_left"]) + " days left."}
+		},
+	},
+	events.MaintenanceScheduled: {
+		// A maintenance window announced to an affected client (WP-1034):
+		// title, time span and the number of affected CIs and services.
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Geplante Wartung: " + str(d, "title"),
+				"Für den Zeitraum " + str(d, "starts_at") + " bis " + str(d, "ends_at") + " ist die Wartung „" + str(d, "title") +
+					"“ geplant. Betroffen sind " + fmt.Sprint(d["affected_cis"]) + " Komponenten und " +
+					fmt.Sprint(d["services"]) + " Dienste."}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Scheduled maintenance: " + str(d, "title"),
+				"The maintenance \"" + str(d, "title") + "\" is scheduled from " + str(d, "starts_at") + " to " + str(d, "ends_at") +
+					". It affects " + fmt.Sprint(d["affected_cis"]) + " components and " + fmt.Sprint(d["services"]) + " services."}
+		},
+	},
+	// A failed workflow run (WP-1147): definition, failed step, error with
+	// masked URLs and the link to the run.
+	events.WorkflowRunFailed: {
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Workflow fehlgeschlagen: " + runName(d),
+				"Der Lauf " + str(d, "run_id") + " des Workflows " + runName(d) + " ist fehlgeschlagen." +
+					"\nSchritt: " + orDash(str(d, "failed_step")) + "\nFehler: " + orDash(runErrorText(str(d, "error"))) +
+					linkLine(d, "Lauf")}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Workflow run failed: " + runName(d),
+				"Run " + str(d, "run_id") + " of workflow " + runName(d) + " has failed." +
+					"\nStep: " + orDash(str(d, "failed_step")) + "\nError: " + orDash(runErrorText(str(d, "error"))) +
+					linkLine(d, "Run")}
+		},
+	},
+	// An availability target missed its goal (WP-1147): target, measured
+	// availability, period and the link to the target.
+	events.SLAViolated: {
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Verfügbarkeitsziel verfehlt: " + slaTarget(d),
+				"Das Verfügbarkeitsziel " + slaTarget(d) + " (" + percent(d, "target_percent", LocaleDE) + ") wurde im Zeitraum " +
+					orDash(str(d, "period")) + " verfehlt.\nGemessene Verfügbarkeit: " + percent(d, "actual_percent", LocaleDE) +
+					linkLine(d, "Details")}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Availability target missed: " + slaTarget(d),
+				"The availability target " + slaTarget(d) + " (" + percent(d, "target_percent", LocaleEN) + ") was missed in period " +
+					orDash(str(d, "period")) + ".\nMeasured availability: " + percent(d, "actual_percent", LocaleEN) +
+					linkLine(d, "Details")}
+		},
+	},
+	// A new configuration version of a CI (WP-1147): CI, time, the number
+	// of changed lines and the link to the diff. Never the configuration
+	// itself: no hash, no line of the configuration.
+	events.CIConfigChanged: {
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Konfiguration geändert: " + alarmSubject(map[string]any{"ci_name": str(d, "ci_name"), "id": str(d, "ci_id")}), //nolint:misspell // German text
+				"Die Konfiguration" + onCI(d, LocaleDE) + " hat sich geändert.\nZeitpunkt: " + orDash(configTime(d)) + //nolint:misspell // German text
+					"\nGeänderte Zeilen: " + changedLines(d) + linkLine(d, "Diff")}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Configuration changed: " + alarmSubject(map[string]any{"ci_name": str(d, "ci_name"), "id": str(d, "ci_id")}),
+				"The configuration" + onCI(d, LocaleEN) + " has changed.\nTime: " + orDash(configTime(d)) +
+					"\nChanged lines: " + changedLines(d) + linkLine(d, "Diff")}
 		},
 	},
 	events.StockBelowMinimum: {
@@ -425,4 +637,165 @@ func quantity(d map[string]any, key, locale string) string {
 		return n + " " + unit
 	}
 	return n
+}
+
+// strList joins a list of the event data (a JSON array) with commas.
+func strList(v any) string {
+	var parts []string
+	switch list := v.(type) {
+	case []any:
+		for _, item := range list {
+			parts = append(parts, fmt.Sprint(item))
+		}
+	case []string:
+		parts = list
+	}
+	if len(parts) == 0 {
+		return "–"
+	}
+	return strings.Join(parts, ", ")
+}
+
+// severityLabels are the severities of alarms and incidents per locale.
+var severityLabels = map[string]map[string]string{
+	LocaleDE: {"critical": "kritisch", "warning": "Warnung", "info": "Info"},
+	LocaleEN: {"critical": "critical", "warning": "warning", "info": "info"},
+}
+
+// severityLabel names the severity of an alarm or incident.
+func severityLabel(d map[string]any, locale string) string {
+	if l, ok := severityLabels[locale][str(d, "severity")]; ok {
+		return l
+	}
+	return orDash(str(d, "severity"))
+}
+
+// alarmSubject is the CI name of an alarm, else its summary, else its id.
+func alarmSubject(d map[string]any) string {
+	for _, k := range []string{"ci_name", "summary", "id"} {
+		if v := oneLine(str(d, k)); v != "" {
+			return v
+		}
+	}
+	return "–"
+}
+
+// onCI names the CI of an alarm or incident ("on CI x"); nothing without.
+func onCI(d map[string]any, locale string) string {
+	name := oneLine(str(d, "ci_name"))
+	if name == "" {
+		return ""
+	}
+	if locale == LocaleEN {
+		return " on " + name
+	}
+	return " auf " + name
+}
+
+// incidentOn is ": <CI name>" of an incident's root CI; nothing without.
+func incidentOn(d map[string]any) string {
+	if name := oneLine(str(d, "ci_name")); name != "" {
+		return ": " + name
+	}
+	return ""
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "–"
+	}
+	return s
+}
+
+// valueLine is the line of the measured value; nothing without one.
+func valueLine(d map[string]any, label string) string {
+	v, ok := d["value"].(float64)
+	if !ok {
+		return ""
+	}
+	return "\n" + label + ": " + strconv.FormatFloat(v, 'g', -1, 64)
+}
+
+// causeLine is the line of the cause class of an incident; nothing without.
+func causeLine(d map[string]any, label string) string {
+	if c := str(d, "cause_class"); c != "" {
+		return "\n" + label + ": " + c
+	}
+	return ""
+}
+
+// linkLine is the line of the link; nothing without a configured frontend.
+func linkLine(d map[string]any, label string) string {
+	if l := str(d, "link"); l != "" {
+		return "\n" + label + ": " + l
+	}
+	return ""
+}
+
+// alarmDuration is the time from opened_at to resolved_at of an alarm,
+// rounded to the second; "–" when one is missing.
+func alarmDuration(d map[string]any) string {
+	opened, err1 := time.Parse(time.RFC3339Nano, str(d, "opened_at"))
+	resolved, err2 := time.Parse(time.RFC3339Nano, str(d, "resolved_at"))
+	if err1 != nil || err2 != nil || resolved.Before(opened) {
+		return "–"
+	}
+	return resolved.Sub(opened).Round(time.Second).String()
+}
+
+// runName is the name of the workflow of a run, else its id.
+func runName(d map[string]any) string {
+	if n := oneLine(str(d, "workflow_name")); n != "" {
+		return n
+	}
+	return orDash(str(d, "workflow_id"))
+}
+
+// slaTarget names an availability target: its name, else its id.
+func slaTarget(d map[string]any) string {
+	for _, k := range []string{"name", "target_name", "id"} {
+		if v := oneLine(str(d, k)); v != "" {
+			return v
+		}
+	}
+	return "–"
+}
+
+// percent formats a percentage of the data with up to three decimals in
+// the notation of the locale; "–" without one.
+func percent(d map[string]any, key, locale string) string {
+	v, ok := d[key].(float64)
+	if !ok {
+		return "–"
+	}
+	s := strconv.FormatFloat(v, 'f', -1, 64)
+	if i := strings.IndexByte(s, '.'); i >= 0 && len(s)-i-1 > 3 {
+		s = strconv.FormatFloat(v, 'f', 3, 64)
+	}
+	if locale == LocaleDE {
+		s = strings.ReplaceAll(s, ".", ",")
+	}
+	return s + " %"
+}
+
+// configTime is the time of a configuration version: when it was
+// captured, else when the event occurred.
+func configTime(d map[string]any) string {
+	for _, k := range []string{"captured_at", "collected_at", "occurred_at"} {
+		if v := str(d, k); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// changedLines is the number of changed lines of a configuration version;
+// "–" when the event does not name it.
+func changedLines(d map[string]any) string {
+	for _, k := range []string{"changed_lines", "lines_changed"} {
+		if v, ok := d[k].(float64); ok {
+			return strconv.FormatFloat(v, 'f', -1, 64)
+		}
+	}
+	return "–"
 }

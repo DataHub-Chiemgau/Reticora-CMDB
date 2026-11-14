@@ -37,6 +37,7 @@ on:
       - 'tests/backup-*.sh'
       - 'tests/nats-mtls.test.sh'
       - 'tests/keycloak-realm-upgrade.test.sh'
+      - 'tests/keycloak-db-image.test.sh'
       - 'tests/keycloak/**'
       - 'frontend/e2e/onboarding.spec.ts'
       - 'frontend/e2e/fixtures/**'
@@ -74,8 +75,8 @@ jobs:
     env:
       # cosign of the installers' signature checks (E-31, release.yml);
       # checksum from its cosign_checksums.txt.
-      COSIGN_VERSION: v2.4.1
-      COSIGN_SHA256: 8b24b946dd5809c6bd93de08033bcf6bc0ed7d336b7785787c080f574b89249b
+      COSIGN_VERSION: v3.1.4
+      COSIGN_SHA256: 424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa
     steps:
       - uses: actions/checkout@v4
 
@@ -118,7 +119,7 @@ jobs:
       - name: install-cloud.sh Let's Encrypt issuance (placeholder, deploy hook)
         run: sudo ./tests/install-cloud-acme.test.sh
 
-      # WP-440 (F-288): besides the stubs, a real compose project (redis:7-alpine)
+      # WP-440 (F-288): besides the stubs, a real compose project (redis:7.4.12-alpine)
       # with a scaled service and a one-off container; fails without Docker.
       - name: TLS origin of the WebKit real-stack projects (setup-tls-origin.sh, stubs, WP-646)
         run: ./tests/e2e-real-tls-origin.test.sh
@@ -169,7 +170,7 @@ jobs:
       # starts. The real cosign check runs in the ci.yml job cosign-verify.
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
           cache-dependency-path: collector/go.sum
 
       - name: Collector self-update with two versions (COL-06)
@@ -448,7 +449,7 @@ jobs:
       - uses: actions/setup-go@v5
         if: matrix.platform == 'ubuntu-24.04'
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
           cache-dependency-path: collector/go.sum
 
       - uses: actions/setup-node@v4
@@ -684,7 +685,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
           cache-dependency-path: collector/go.sum
 
       - uses: actions/setup-node@v4
@@ -944,7 +945,7 @@ jobs:
 
   # INS-02/TEC-09 (WP-420, F-033/F-034/F-035): the TLS-domain path against a
   # real ACME server. Pebble with challtestsrv (tests/fixtures/pebble/)
-  # issues, certbot/certbot:v2.11.0 requests and renews, the installer runs
+  # issues, certbot/certbot:v5.9.0 requests and renews, the installer runs
   # with RETICORA_TLS_DOMAIN, RETICORA_ACME_SERVER and the CA bundles: first
   # installation, re-run without a new order, key and chain readable for
   # nginx (uid 101) after the issuance and after a forced renewal, both
@@ -994,7 +995,7 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26.10"
+          go-version: "1.26.11"
           cache-dependency-path: collector/go.sum
 
       - uses: actions/setup-node@v4
@@ -1073,18 +1074,26 @@ jobs:
       - name: Make installer scripts executable
         run: chmod +x install.sh install-cloud.sh install-vm.sh tests/*.sh
 
-      # Keycloak 24 on its own: admin password, client secret and redirect URL
+      # Keycloak of docker-compose.yml on its own: admin password, client secret and redirect URL
       # rotated between the installer's Keycloak steps.
-      - name: Keycloak rotation of the installer (Keycloak 24)
+      - name: Keycloak rotation of the installer
         run: ./tests/install-reinstall.test.sh
 
       # AUT-09/SEC-07 (WP-428, F-061): --import-realm skips the realm an
       # earlier release imported (the one before WP-044); the installer
       # applies policies, MFA flow, roles, groups, acr scope and the declared
       # organization_id, creates the administrator in it, keeps stricter
-      # values and changes nothing on a re-run.
-      - name: Keycloak realm upgrade from the realm before WP-044 (Keycloak 24)
+      # values and changes nothing on a re-run. Step 1 runs Keycloak 24, the
+      # later steps Keycloak 26 on the same database (SR-60, WP-873).
+      - name: Keycloak realm upgrade from the realm before WP-044 (Keycloak 24 to 26)
         run: ./tests/keycloak-realm-upgrade.test.sh
+
+      # E-96, A-85: keycloak-db runs the own image reticora-keycloak-db; the
+      # volume of the vendor images it replaces (postgres:16.15-alpine and
+      # 16.16-alpine) keeps running on it (PostgreSQL 16.16, UID 70, data and
+      # password kept), and a fresh volume initializes.
+      - name: keycloak-db on the own image takes over the volume of the vendor image
+        run: ./tests/keycloak-db-image.test.sh
 
       # Local build of the checked-out state in every run (E-69).
       - name: First installation
@@ -1128,10 +1137,13 @@ jobs:
             curl -fsS "$kc/realms/master/protocol/openid-connect/token" -d grant_type=password -d client_id=admin-cli \
               --data-urlencode "username=$admin" --data-urlencode "password=$1" | jq -r .access_token
           }
-          # The rotated admin password works, the old one no longer.
+          # The rotated admin password works, the old one no longer: Keycloak
+          # 26.8 answers wrong user credentials with 400 invalid_grant (before
+          # 26.8 with 401), never with a token.
           token="$(admin_token "$(value KEYCLOAK_ADMIN_PASSWORD "$env_file")")"
-          [ "$(status "$kc/realms/master/protocol/openid-connect/token" -d grant_type=password -d client_id=admin-cli \
-            --data-urlencode "username=$admin" --data-urlencode "password=$(value KEYCLOAK_ADMIN_PASSWORD "$RUNNER_TEMP/env.first")")" = 401 ]
+          old_login="$(curl -s "$kc/realms/master/protocol/openid-connect/token" -d grant_type=password -d client_id=admin-cli \
+            --data-urlencode "username=$admin" --data-urlencode "password=$(value KEYCLOAK_ADMIN_PASSWORD "$RUNNER_TEMP/env.first")")"
+          jq -e '.error == "invalid_grant" and (has("access_token") | not)' <<<"$old_login" >/dev/null
           api() { curl -fsS -H "Authorization: Bearer $token" -H 'Content-Type: application/json' "$@"; }
           client="$(api "$kc/admin/realms/reticora/clients?clientId=reticora-app" | jq '.[0]')"
           jq -e '.redirectUris | index("http://127.0.0.1:3000/auth/callback")' <<<"$client" >/dev/null
@@ -1205,8 +1217,8 @@ jobs:
       packages: read
     env:
       # Only for the wait; the installer brings its own, checked cosign.
-      COSIGN_VERSION: v2.4.1
-      COSIGN_SHA256: 8b24b946dd5809c6bd93de08033bcf6bc0ed7d336b7785787c080f574b89249b
+      COSIGN_VERSION: v3.1.4
+      COSIGN_SHA256: 424e2c97d0b45fd7a6b608a87f090f35633f4c23ece5f092d48bba11aaf4bbfa
       REGISTRY: ghcr.io/datahub-chiemgau
     steps:
       - uses: actions/checkout@v4
@@ -1243,7 +1255,7 @@ jobs:
             gh release view "$GITHUB_REF_NAME" --json assets -q '.assets[].name' 2>/dev/null \
               | grep -qx 'SHA256SUMS.sigstore.json' || return 1
             local image
-            for image in reticora-server reticora-frontend reticora-postgres; do
+            for image in reticora-server reticora-frontend reticora-postgres reticora-keycloak-db; do
               "$RUNNER_TEMP/cosign" verify "$REGISTRY/$image:$GITHUB_REF_NAME" \
                 --certificate-identity-regexp "$identity" \
                 --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null 2>&1 || return 1
@@ -1276,13 +1288,14 @@ jobs:
             echo "FAIL: the default path reported an unverified installation"
             exit 1
           fi
-          for image in server frontend postgres; do
-            grep -qE "^RETICORA_${image^^}_IMAGE=${REGISTRY//./\\.}/reticora-${image}@sha256:[0-9a-f]{64}$" "$env_file"
+          for image in server frontend postgres keycloak-db; do
+            var="RETICORA_${image^^}_IMAGE"
+            grep -qE "^${var//-/_}=${REGISTRY//./\\.}/reticora-${image}@sha256:[0-9a-f]{64}$" "$env_file"
             grep -q "Signed image verified: reticora-${image}@sha256:" "$log"
           done
           grep -qx "RETICORA_IMAGE_TAG=$GITHUB_REF_NAME" "$env_file"
           [ -f deploy/docker-compose/docker-compose.override.yml.disabled ]
-          for image in reticora-server reticora-frontend reticora-postgres; do
+          for image in reticora-server reticora-frontend reticora-postgres reticora-keycloak-db; do
             if [ -n "$(docker images -q "$image:latest")" ]; then
               echo "FAIL: $image:latest was built locally"
               exit 1

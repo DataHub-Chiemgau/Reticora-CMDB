@@ -120,3 +120,60 @@ func TestCredentialKindNASMigration(t *testing.T) {
 		t.Fatalf("down without a nas credential: %v", err)
 	}
 }
+
+// TestCredentialKindProbesMigration covers WP-967 AK1 and AK6 (migration
+// 000312): the CHECK constraint of credential.kind accepts http, gnmi and
+// acs and still refuses unknown kinds; the down migration aborts with a
+// message while a credential of one of these kinds exists and reverts
+// without one. Both down runs are rolled back.
+func TestCredentialKindProbesMigration(t *testing.T) {
+	f := scopetest.Seed(t, "15")
+	bg := context.Background()
+	repo := credential.NewPGRepository(f.App)
+	orgCtx := f.OrgCtx(f.OrgA)
+
+	var created []*credential.StoredCredential
+	for _, kind := range []string{credential.KindHTTP, credential.KindGNMI, credential.KindACS} {
+		c := &credential.StoredCredential{
+			Credential: credential.Credential{OrganizationID: f.OrgA, Name: "probe-" + kind, Kind: kind, KeyVersion: 1},
+			Ciphertext: []byte("ciphertext"),
+		}
+		if err := repo.Create(orgCtx, c); err != nil {
+			t.Fatalf("create kind %s: %v", kind, err)
+		}
+		created = append(created, c)
+	}
+	unknown := &credential.StoredCredential{
+		Credential: credential.Credential{OrganizationID: f.OrgA, Name: "probe-https", Kind: "https", KeyVersion: 1},
+		Ciphertext: []byte("ciphertext"),
+	}
+	if err := repo.Create(orgCtx, unknown); err == nil {
+		t.Fatal("the constraint accepted the unknown kind https")
+	}
+
+	down, err := os.ReadFile("../../migrations/000312_credential_kind_probes.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	revert := func() error {
+		tx, beginErr := f.Admin.Begin(bg)
+		if beginErr != nil {
+			t.Fatal(beginErr)
+		}
+		defer func() { _ = tx.Rollback(bg) }()
+		_, execErr := tx.Exec(bg, string(down))
+		return execErr
+	}
+	const refusal = "credentials of kind http, gnmi or acs; migration 000312 cannot be reverted"
+	for i, c := range created {
+		if err = revert(); err == nil || !strings.Contains(err.Error(), refusal) {
+			t.Fatalf("down with %d probe credentials left: %v, want the refusal", len(created)-i, err)
+		}
+		if err = repo.Delete(orgCtx, f.OrgA, c.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = revert(); err != nil {
+		t.Fatalf("down without a probe credential: %v", err)
+	}
+}

@@ -20,6 +20,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
@@ -440,14 +441,19 @@ func checkCredentials(ctx context.Context, tx pgx.Tx, s *Scope) error {
 	if len(s.CredentialIDs) == 0 {
 		return nil
 	}
-	var known, usable int
-	if err := tx.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE client_id IS NULL OR client_id = $3::uuid)
+	var known, usable, logins int
+	if err := tx.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE client_id IS NULL OR client_id = $3::uuid),
+			count(*) FILTER (WHERE kind IN (`+vaultLoginKinds+`))
 		FROM credential WHERE organization_id = $1 AND id = ANY($2::uuid[])`,
-		s.OrganizationID, s.CredentialIDs, nilIfEmpty(s.ClientID)).Scan(&known, &usable); err != nil {
+		s.OrganizationID, s.CredentialIDs, nilIfEmpty(s.ClientID)).Scan(&known, &usable, &logins); err != nil {
 		return err
 	}
 	if known != len(s.CredentialIDs) {
 		return fieldError("credential_ids", "unknown credential")
+	}
+	if logins != 0 {
+		// The vault logins (WP-893) are used by vault connections only.
+		return fieldError("credential_ids", "a vault login is not a credential of a discovery scope")
 	}
 	if usable != known {
 		return fieldError("credential_ids", "the credential belongs to another client")
@@ -455,17 +461,30 @@ func checkCredentials(ctx context.Context, tx pgx.Tx, s *Scope) error {
 	return nil
 }
 
+// vaultLoginKinds are the credential kinds of the vault logins (WP-893),
+// as an SQL list: they log a vault connection in and are no credential of a
+// scope; a collector receives one only as the login of a vault reference it
+// resolves (WP-894).
+const vaultLoginKinds = `'vault_approle', 'vault_token'`
+
 // scopeCredentials returns the effective credentials of the collector's
 // enabled scopes by scope id (E-67, transition rule option A): a scope with
 // credential_ids uses those, a scope without them the organization-wide
 // credentials and those of its client; either way only credentials that are
 // organization-wide or of the scope's client, which also drops the foreign
-// ones of scopes bound before F-264. The credential bundle holds their union.
+// ones of scopes bound before F-264, and never a vault login. The credential
+// bundle holds their union.
+// The collector takes the first credential of a namespace; the order is that
+// of the resolution (CRD-04, E-219, WP-891): an explicit list by id (scope
+// level), otherwise the client's credentials before the organization-wide
+// ones (client > org), each by id.
 func scopeCredentials(ctx context.Context, tx pgx.Tx, orgID, collectorID string) (map[string][]string, error) {
-	rows, err := tx.Query(ctx, `SELECT s.id::text, COALESCE(array_agg(c.id::text ORDER BY c.id) FILTER (WHERE c.id IS NOT NULL), '{}')
+	rows, err := tx.Query(ctx, `SELECT s.id::text, COALESCE(array_agg(c.id::text
+		ORDER BY (cardinality(s.credential_ids) > 0 OR c.client_id IS NULL), c.id) FILTER (WHERE c.id IS NOT NULL), '{}')
 		FROM discovery_scope s
 		LEFT JOIN credential c ON c.organization_id = s.organization_id
 			AND (c.client_id IS NULL OR c.client_id = s.client_id)
+			AND c.kind NOT IN (`+vaultLoginKinds+`)
 			AND (cardinality(s.credential_ids) = 0 OR c.id = ANY (s.credential_ids))
 		WHERE s.organization_id = $1 AND s.collector_id = $2 AND s.enabled
 		GROUP BY s.id`, orgID, collectorID)
@@ -614,6 +633,101 @@ func (r *PGRepository) RecordScopeRun(ctx context.Context, orgID, id string, run
 		}
 		return err
 	})
+}
+
+// RecordScopeRunUsage implements ScopeRunUsageRecorder: the run and the
+// credential usage it reports in one transaction (CRD-06, WP-898).
+func (r *PGRepository) RecordScopeRunUsage(ctx context.Context, orgID, collectorID, scopeID string, run *ScopeRun,
+	usage []credential.UsageReport) (credential.UsageOutcome, error) {
+	var out credential.UsageOutcome
+	result, err := json.Marshal(run.Result)
+	if err != nil {
+		return out, err
+	}
+	err = database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var scopeClient *string
+		qerr := tx.QueryRow(ctx, `UPDATE discovery_scope SET last_run_at = $3, last_result = $4, next_run_at = $5
+			WHERE id = $1 AND organization_id = $2 RETURNING client_id::text`, scopeID, orgID, run.At, result,
+			nilIfZero(run.NextRun)).Scan(&scopeClient)
+		if errors.Is(qerr, pgx.ErrNoRows) {
+			return fmt.Errorf("not found")
+		}
+		if qerr != nil {
+			return qerr
+		}
+		var uerr error
+		out, uerr = recordScopeUsage(ctx, tx, orgID, collectorID, scopeID, deref(scopeClient), run.At, usage)
+		return uerr
+	})
+	return out, err
+}
+
+// RecordScopeUsage implements ScopeRunUsageRecorder: the credential usage
+// of a scope pass of an ad-hoc discovery job (JOB-01), which does not
+// count as a run of the scope. A scope of another collector is not found.
+func (r *PGRepository) RecordScopeUsage(ctx context.Context, orgID, collectorID, scopeID string, at time.Time,
+	usage []credential.UsageReport) (credential.UsageOutcome, error) {
+	var out credential.UsageOutcome
+	if !audit.IsUUID(scopeID) {
+		return out, fmt.Errorf("not found")
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var scopeClient *string
+		qerr := tx.QueryRow(ctx, `SELECT client_id::text FROM discovery_scope
+			WHERE id = $1 AND organization_id = $2 AND collector_id = $3`, scopeID, orgID, collectorID).Scan(&scopeClient)
+		if errors.Is(qerr, pgx.ErrNoRows) {
+			return fmt.Errorf("not found")
+		}
+		if qerr != nil {
+			return qerr
+		}
+		var uerr error
+		out, uerr = recordScopeUsage(ctx, tx, orgID, collectorID, scopeID, deref(scopeClient), at, usage)
+		return uerr
+	})
+	return out, err
+}
+
+// recordScopeUsage checks the usage against the part of the bundle
+// VerifyBundleTarget seals for the collector now that belongs to the
+// reporting scope (the effective credentials of that scope and its
+// per-device targets) and records it. A credential of another scope of the
+// collector (possibly of another client) is rejected.
+func recordScopeUsage(ctx context.Context, tx pgx.Tx, orgID, collectorID, scopeID, scopeClient string, at time.Time,
+	usage []credential.UsageReport) (credential.UsageOutcome, error) {
+	var collectorClient *string
+	if err := tx.QueryRow(ctx, `SELECT client_id::text FROM collector WHERE id = $1 AND organization_id = $2`,
+		collectorID, orgID).Scan(&collectorClient); err != nil {
+		return credential.UsageOutcome{}, err
+	}
+	perScope, err := scopeCredentials(ctx, tx, orgID, collectorID)
+	if err != nil {
+		return credential.UsageOutcome{}, err
+	}
+	bundle := credential.UsageBundle{CredentialIDs: map[string]bool{}}
+	for _, id := range perScope[scopeID] {
+		bundle.CredentialIDs[id] = true
+	}
+	targets, err := credential.ResolveCollector(ctx, tx, orgID, collectorID, deref(collectorClient), credential.NewPGDeviceGroupSource(nil))
+	if err != nil {
+		return credential.UsageOutcome{}, err
+	}
+	for i := range targets {
+		if targets[i].ScopeID != scopeID {
+			continue
+		}
+		bundle.CredentialIDs[targets[i].CredentialID] = true
+		bundle.Targets = append(bundle.Targets, targets[i])
+	}
+	return credential.RecordUsage(ctx, tx, &credential.UsageInput{OrganizationID: orgID, ScopeID: scopeID,
+		ScopeClientID: scopeClient, Bundle: bundle, Entries: usage, At: at})
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
 
 func nilIfZero(t time.Time) any {

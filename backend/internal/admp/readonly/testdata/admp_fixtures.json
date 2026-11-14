@@ -1,0 +1,250 @@
+{
+  "_comment": "Answers of ADMP API 9.14.0 per operationId (docs/plan/phase3/ADMP-API). The documentation has no examples; the bodies are built from components.schemas (E-255). Answers without schema in the documentation are marked assumed: A-86. Values named *canary* must never appear in a decoded result, a cache row, a log or an error.",
+  "postV1UserAuthentication": {
+    "status": 200,
+    "headers": {
+      "Content-Type": "application/json",
+      "Set-Cookie": "AuthToken=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiZXhwIjoxOTI0OTkyMDAwfQ.c2lnbmF0dXJlLWNhbmFyeQ; Path=/; HttpOnly"
+    },
+    "body": {"message": "Login successful"}
+  },
+  "getV1UserAuthentication": {
+    "status": 200,
+    "headers": {"Content-Type": "application/json"},
+    "body": {
+      "id": 42,
+      "organizationId": 7,
+      "ldapDN": "CN=ldap-dn-canary,OU=Service,DC=example,DC=net",
+      "ldapCN": "ldap-cn-canary",
+      "ldapEmail": "ldap-email-canary@example.net",
+      "ldapUsername": "ldap-username-canary",
+      "anwUser": false
+    }
+  },
+  "getV1InfrastructureAccessnodepicker": {
+    "_comment": "The documentation answers 200 without schema; assumed AccessNode[] with modules[].ports[] after components.schemas (A-86).",
+    "assumed": "A-86",
+    "status": 200,
+    "headers": {"Content-Type": "application/json"},
+    "body": [
+      {
+        "id": 3,
+        "organizationId": 7,
+        "typeId": 1,
+        "name": "olt-traunstein-01",
+        "url": "ssh://url-canary.example.net:22",
+        "username": "node-username-canary",
+        "password": "node-password-canary",
+        "iv": "node-iv-canary",
+        "snmpVersion": null,
+        "organization": {"id": 7, "name": "organization-canary", "netzbetreiberNummer": 1, "shortName": "ORG", "groupName": "group-canary-node"},
+        "type": {"id": 1, "name": "Keymile MileGate", "protocol": "KEYMILE_SSH", "vendorId": 1},
+        "modules": [
+          {
+            "id": 30,
+            "nodeId": 3,
+            "unitIndex": 2,
+            "typeId": 4,
+            "gponMaxONTs": null,
+            "technologiesAvailable": ["VDSL"],
+            "extra": {"extra": "module-extra-canary"},
+            "ports": [
+              {"id": 301, "moduleId": 30, "portIndex": 1, "extra": {"note": "port-extra-canary"}},
+              {"id": 302, "moduleId": 30, "portIndex": 2, "extra": null}
+            ]
+          }
+        ]
+      },
+      {
+        "id": 4,
+        "organizationId": 7,
+        "typeId": 2,
+        "name": "dslam-siegsdorf",
+        "url": "udp://url-canary-2.example.net:161",
+        "username": null,
+        "password": "node-password-canary-2",
+        "iv": "node-iv-canary-2",
+        "snmpVersion": "V2C",
+        "modules": [
+          {
+            "id": 40,
+            "nodeId": 4,
+            "unitIndex": 1,
+            "typeId": 5,
+            "gponMaxONTs": null,
+            "technologiesAvailable": null,
+            "extra": null,
+            "ports": [
+              {"id": 401, "moduleId": 40, "portIndex": 7, "extra": null}
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "getV1InfrastructurePort:portIdDienstIds": {
+    "_comment": "The documentation has responses {} (\"Returns all dienstIds\"); assumed a JSON array of whole numbers (A-86).",
+    "assumed": "A-86",
+    "status": 200,
+    "headers": {"Content-Type": "application/json"},
+    "body": [815, 816]
+  },
+  "getV1Dienst:idPropertiesPublic": {
+    "status": 200,
+    "headers": {"Content-Type": "application/json"},
+    "body": [
+      {"id": 11, "dienstId": 815, "timestamp": 1700000000, "isPublic": true, "key": "bandwidth_down", "orderIndex": 2, "title": "Downstream", "description": "description-canary", "value": 1000, "input": {"dataType": "DOUBLE", "type": "freeform", "origin": "input-canary"}, "label": "Bandbreite down"},
+      {"id": 12, "dienstId": 815, "timestamp": 1700000001, "isPublic": true, "key": "technology", "orderIndex": 1, "title": "Technologie", "description": null, "value": "FTTH", "input": null, "label": ""},
+      {"id": 13, "dienstId": 815, "timestamp": 1700000002, "isPublic": true, "key": "static_ip", "orderIndex": null, "title": null, "description": null, "value": true, "input": null, "label": "Feste IP"},
+      {"id": 14, "dienstId": 815, "timestamp": 1700000003, "isPublic": true, "key": "note", "orderIndex": 4, "title": "Notiz", "description": null, "value": null, "input": null, "label": "Notiz"},
+      {"id": 15, "dienstId": 815, "timestamp": 1700000004, "isPublic": true, "key": "vlan", "orderIndex": 5, "title": "VLAN", "description": null, "value": {"outer": 7, "inner": 100}, "input": null, "label": "VLAN"},
+      {"id": 16, "dienstId": 815, "timestamp": 1700000005, "isPublic": true, "key": "ports", "orderIndex": 6, "title": "Ports", "description": null, "value": [1, "two", false], "input": null, "label": "Ports"},
+      {"id": 17, "dienstId": 815, "timestamp": 1700000006, "isPublic": false, "key": "internal", "orderIndex": 7, "title": "Intern", "description": null, "value": "internal-canary", "input": null, "label": "Intern"}
+    ]
+  },
+  "getV1Dienst:id": {
+    "status": 200,
+    "headers": {"Content-Type": "application/json"},
+    "body": {
+      "id": 815,
+      "anschlussId": 4711,
+      "templateId": 3,
+      "template": {"id": 3, "name": "FTTH 1000", "organizationId": 7},
+      "gebucht": 1700000000000,
+      "bereitstellung": 1700100000,
+      "bereitgestellt": 1700200000,
+      "gekuendigt": null,
+      "abschaltung": null,
+      "abgeschaltet": null,
+      "anschluss": {
+        "id": 4711,
+        "netzbetreiberId": 9,
+        "vertragId": "V-contract-canary",
+        "created": 1690000000,
+        "removed": null,
+        "strasse": "street-canary",
+        "hausnummer": "1",
+        "hausnummerzusatz": null,
+        "plz": "83278",
+        "ort": "town-canary"
+      },
+      "properties": [
+        {"id": 1, "dienstId": 815, "timestamp": 1700000000, "isPublic": true, "key": "bandwidth", "orderIndex": 1, "title": "Bandbreite", "description": null, "value": "property-canary", "input": null}
+      ],
+      "actions": []
+    }
+  },
+  "getV1Dienst:id#816": {
+    "_comment": "Second service of port 301 (WP-1077): connection 4713, template only by id, no embedded relations.",
+    "status": 200,
+    "headers": {"Content-Type": "application/json"},
+    "body": {
+      "id": 816,
+      "anschlussId": 4713,
+      "templateId": 5,
+      "gebucht": 1700000000,
+      "bereitstellung": null,
+      "bereitgestellt": null,
+      "gekuendigt": null,
+      "abschaltung": null,
+      "abgeschaltet": null
+    }
+  },
+  "getV1Anschluss:id#4711": {
+    "_comment": "Business connection (WP-1075): holder Gewerblich, netzbetreiber embedded with relations that are dropped while decoding.",
+    "status": 200,
+    "headers": {"Content-Type": "application/json"},
+    "body": {
+      "id": 4711,
+      "netzbetreiberId": 9,
+      "vertragId": "V-2024-0815",
+      "created": 1690000000,
+      "removed": null,
+      "strasse": "Bahnhofstraße",
+      "hausnummer": "12",
+      "hausnummerzusatz": "a",
+      "plz": "83278",
+      "ort": "Traunstein",
+      "netzbetreiber": {
+        "id": 9,
+        "name": "Netz Chiemgau GmbH",
+        "netzbetreiberNummer": 4711,
+        "shortName": "NCG",
+        "groupName": "group-canary",
+        "authUsers": [
+          {"id": 1, "organizationId": 9, "ldapDN": "CN=carrier-ldap-canary", "ldapCN": "carrier-cn-canary", "ldapEmail": "carrier-mail-canary@example.net", "ldapUsername": "carrier-user-canary", "anwUser": false}
+        ],
+        "accessNodes": [
+          {"id": 3, "organizationId": 9, "typeId": 1, "name": "carrier-node-canary", "url": "ssh://carrier-url-canary.example.net", "username": "carrier-node-user-canary", "password": "carrier-node-password-canary", "iv": "carrier-iv-canary", "snmpVersion": null}
+        ],
+        "anschlüsse": [],
+        "dienstTemplates": []
+      },
+      "inhaber": [
+        {"id": 21, "anschlussId": 4711, "typ": "Gewerblich", "titel": null, "name": "Muster Bau GmbH", "vorname": null, "geburtsdatum": null, "registerinstanz": "Amtsgericht Traunstein", "registernummer": "HRB 1234", "strasse": "Bahnhofstraße", "hausnummer": "12", "hausnummerzusatz": "a", "plz": "83278", "ort": "Traunstein",
+         "anschluss": {"id": 4711, "netzbetreiberId": 9, "vertragId": "holder-anschluss-canary", "created": 1, "removed": null, "strasse": null, "hausnummer": null, "hausnummerzusatz": null, "plz": null, "ort": null}}
+      ],
+      "dienste": [
+        {"id": 815, "anschlussId": 4711, "templateId": 3, "gebucht": null, "bereitstellung": null, "bereitgestellt": null, "gekuendigt": null, "abschaltung": null, "abgeschaltet": null, "properties": [{"id": 2, "dienstId": 815, "timestamp": 1700000000, "isPublic": true, "key": "dienst-canary", "orderIndex": null, "title": null, "description": null, "value": null, "input": null}]}
+      ],
+      "actions": [
+        {"anschlussId": 4711, "actionId": 1, "action": {"id": 1, "name": "action-canary", "listable": false, "label": "action-label-canary", "description": "action-description-canary", "expectsImmidiateResult": false, "messageTargetModule": "module-canary", "messageProcedure": "procedure-canary", "requiredAuthorizationId": 1}}
+      ]
+    }
+  },
+  "getV1Anschluss:id#4712": {
+    "_comment": "Private connection (WP-1075, WP-1076): two holders Privat in reverse id order, without netzbetreiber; geburtsdatum is never decoded.",
+    "status": 200,
+    "headers": {"Content-Type": "application/json"},
+    "body": {
+      "id": 4712,
+      "netzbetreiberId": 9,
+      "vertragId": "V-2024-0816",
+      "created": 1690000000000,
+      "removed": 1700000000,
+      "strasse": "Hauptstraße",
+      "hausnummer": "3",
+      "hausnummerzusatz": null,
+      "plz": "83313",
+      "ort": "Siegsdorf",
+      "inhaber": [
+        {"id": 32, "anschlussId": 4712, "typ": "Privat", "titel": null, "name": "Mustermann", "vorname": "Max", "geburtsdatum": -123456789, "registerinstanz": null, "registernummer": null, "strasse": "Hauptstraße", "hausnummer": "3", "hausnummerzusatz": null, "plz": "83313", "ort": "Siegsdorf"},
+        {"id": 31, "anschlussId": 4712, "typ": "Privat", "titel": "Dr.", "name": "Musterfrau", "vorname": "Erika", "geburtsdatum": 315532800, "registerinstanz": null, "registernummer": null, "strasse": "Hauptstraße", "hausnummer": "3", "hausnummerzusatz": null, "plz": "83313", "ort": "Siegsdorf"}
+      ]
+    }
+  },
+  "getV1Anschluss:id#4713": {
+    "_comment": "Connection without the relations inhaber and netzbetreiber (A-86: whether ADMP embeds them is not documented).",
+    "status": 200,
+    "headers": {"Content-Type": "application/json"},
+    "body": {
+      "id": 4713,
+      "netzbetreiberId": 9,
+      "vertragId": null,
+      "created": 1690000000,
+      "removed": null,
+      "strasse": "Seestraße",
+      "hausnummer": "7",
+      "hausnummerzusatz": null,
+      "plz": "83346",
+      "ort": "Bergen"
+    }
+  },
+  "getV1Anschluss:id": {
+    "_comment": "Any other id: 404 NamedError.",
+    "status": 404,
+    "headers": {"Content-Type": "application/json"},
+    "body": {"name": "NotFoundError", "message": "Anschluss not found"}
+  },
+  "getV1OrganizationByIds": {
+    "_comment": "Two organizations; the client takes the one with the id it asked for.",
+    "status": 200,
+    "headers": {"Content-Type": "application/json"},
+    "body": [
+      {"id": 8, "name": "Andere Netz AG", "netzbetreiberNummer": null, "shortName": "ANA", "groupName": "group-canary-2"},
+      {"id": 9, "name": "Netz Chiemgau GmbH", "netzbetreiberNummer": 4711, "shortName": "NCG", "groupName": "group-canary",
+       "authUsers": [{"id": 1, "organizationId": 9, "ldapDN": "CN=byids-ldap-canary", "ldapCN": "byids-cn-canary", "ldapEmail": "byids-mail-canary@example.net", "ldapUsername": "byids-user-canary", "anwUser": false}],
+       "accessNodes": [{"id": 3, "organizationId": 9, "typeId": 1, "name": "byids-node-canary", "url": "ssh://byids-url-canary.example.net", "username": "byids-node-user-canary", "password": "byids-node-password-canary", "iv": "byids-iv-canary", "snmpVersion": null}]}
+    ]
+  }
+}

@@ -73,11 +73,24 @@ const CI_DETAIL_PANELS: Unused[] = [
   { method: 'GET', path: '/lifecycle-models', why: DETAIL_PANEL },
   // The allowed transitions of the lifecycle section (called from WP-724 on).
   { method: 'GET', path: /^\/cis\/[^/]+\/lifecycle-transitions$/, why: DETAIL_PANEL },
+  // The network section: interfaces, addresses and the VRFs (WP-919).
+  { method: 'GET', path: /^\/cis\/[^/]+\/interfaces$/, why: DETAIL_PANEL },
+  { method: 'GET', path: /^\/cis\/[^/]+\/addresses$/, why: DETAIL_PANEL },
+  { method: 'GET', path: '/vrfs', why: DETAIL_PANEL },
+  // The credential section: bindings, effective credentials and the
+  // credentials the binding dialog offers (WP-923).
+  { method: 'GET', path: /^\/cis\/[^/]+\/credentials$/, why: DETAIL_PANEL },
+  { method: 'GET', path: /^\/cis\/[^/]+\/credentials\/effective$/, why: DETAIL_PANEL },
+  { method: 'GET', path: '/credentials', why: DETAIL_PANEL },
 ];
 
 export const UNUSED: Record<string, Unused[]> = {
   'ci.spec.ts': CI_DETAIL_PANELS,
   'keyboard.spec.ts': CI_DETAIL_PANELS,
+  // The network section of the CI detail is the subject there (WP-919).
+  'ipam.spec.ts': CI_DETAIL_PANELS,
+  // The credential section of the CI detail is the subject there (WP-923).
+  'credentials.spec.ts': CI_DETAIL_PANELS,
   // The provenance panel is the subject of conflict.spec.ts; it has a handler.
   'conflict.spec.ts': CI_DETAIL_PANELS.filter((u) => !String(u.path).includes('provenance')),
   // ABN-01 (c) (WP-330): the templates and the provenance of the reference
@@ -104,8 +117,8 @@ export const KNOWN_DEVIATIONS: Record<string, Deviation[]> = {};
 
 // Every product module is licensed in the mocked tenant, so the navigation
 // and the command palette show all pages: every key of the plan matrix
-// (ENT-06 in the version of E-44) and the add-ons, as the server's
-// entitlement.FeatureKeys (WP-244).
+// (ENT-06 in the version of E-44 and E-151) and the add-ons, as the server's
+// entitlement.FeatureKeys (WP-244, WP-862).
 export const FEATURES = [
   'cmdb_core',
   'discovery',
@@ -129,14 +142,54 @@ export const FEATURES = [
   'export_datev',
   'internal_orders',
   'monitoring',
+  'ipam',
+  'monitoring_network',
+  'credential_vault',
+  'notifications_sms_pager',
+  'workflows',
+  'compliance_findings',
+  'monitoring_access',
+  'monitoring_analytics',
+  'compliance_automation',
   'endpoint_agent',
-  'workflow_forms',
-  'compliance',
   'iga',
   'ai',
+  'admp',
 ];
 
 export const ORG_ID = '00000000-0000-0000-0000-0000000000aa';
+
+// The add-ons no plan includes; their rows carry origin addon (PKG-01, WP-880).
+const ADDON_KEYS = new Set(['iga', 'ai', 'admp']);
+
+/**
+ * entitlements is the body of GET /entitlements (EntitlementListResponse)
+ * for an organization of the given plan: one row per feature with its origin
+ * and the leading plan with plan_changed_at at the top (PKG-01, WP-880).
+ * enabled decides per feature whether it is switched on (default: all).
+ */
+export function entitlements(
+  plan: 'essential' | 'standard' | 'pro' | 'enterprise',
+  features: readonly string[],
+  enabled: (featureKey: string) => boolean = () => true,
+  organizationId: string = ORG_ID,
+) {
+  return {
+    ...list(
+      features.map((feature_key) => ({
+        organization_id: organizationId,
+        feature_key,
+        plan,
+        enabled: enabled(feature_key),
+        limits: {},
+        source: 'manual',
+        origin: ADDON_KEYS.has(feature_key) ? 'addon' : 'plan',
+      })),
+    ),
+    plan,
+    plan_changed_at: null,
+  };
+}
 
 function ciType(id: string, key: string, de: string, en: string, system = true) {
   return {
@@ -200,17 +253,50 @@ const DEFAULTS: Handler[] = [
   { path: '/modules', reply: () => ({ body: { data: [] } }) },
   {
     path: '/entitlements',
+    reply: () => ({ body: entitlements('enterprise', FEATURES) }),
+  },
+  // Usage and plan matrix of the page "Paket und Add-ons" (WP-885, WP-886).
+  {
+    path: '/entitlements/usage',
     reply: () => ({
-      body: list(
-        FEATURES.map((feature_key) => ({
-          organization_id: ORG_ID,
-          feature_key,
-          plan: 'enterprise',
-          enabled: true,
-          limits: {},
-          source: 'manual',
-        })),
-      ),
+      body: {
+        plan: 'enterprise',
+        data: [
+          { quota: 'max_cis', used: 3, limit: 50000, origin: 'plan' },
+          { quota: 'max_users', used: 2, limit: null, origin: 'plan' },
+          { quota: 'max_storage_mb', used: null, limit: null, origin: 'plan' },
+        ],
+      },
+    }),
+  },
+  {
+    path: '/entitlements/plans',
+    reply: () => ({
+      body: {
+        data: [
+          { plan: 'essential', features: ['cmdb_core'], quota_defaults: { max_cis: 500 } },
+          {
+            plan: 'standard',
+            features: ['cmdb_core', 'monitoring'],
+            quota_defaults: { max_cis: 2500 },
+          },
+          {
+            plan: 'pro',
+            features: ['cmdb_core', 'monitoring', 'workflows'],
+            quota_defaults: { max_cis: 10000 },
+          },
+          {
+            plan: 'enterprise',
+            features: ['cmdb_core', 'monitoring', 'workflows', 'monitoring_analytics'],
+            quota_defaults: { max_cis: 50000 },
+          },
+        ],
+        addons: [
+          { key: 'iga', phase: 'A', description_key: 'addons.iga.description' },
+          { key: 'ai', phase: 'A', description_key: 'addons.ai.description' },
+          { key: 'admp', phase: 'A', description_key: 'addons.admp.description' },
+        ],
+      },
     }),
   },
   // The effective rights of the signed-in administrator (signIn): the review
@@ -221,6 +307,23 @@ const DEFAULTS: Handler[] = [
       body: {
         user_id: '00000000-0000-0000-0000-000000000001',
         permissions: ['ci:read', 'discovery:read', 'review:resolve'],
+      },
+    }),
+  },
+  // The session claims (GET /me) of the signed-in administrator: the whole
+  // organization (cls and sts null), so the IPAM tabs offer the writes of
+  // VRFs, VLAN domains and nameserver sets (WP-918).
+  {
+    path: '/me',
+    reply: () => ({
+      body: {
+        sub: '00000000-0000-0000-0000-000000000001',
+        org: '00000000-0000-0000-0000-0000000000aa',
+        scopes: [],
+        iat: 1767225600,
+        exp: 1893456000,
+        cls: null,
+        sts: null,
       },
     }),
   },

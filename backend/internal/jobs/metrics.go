@@ -59,6 +59,12 @@ func (c *backlogCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.oldest
 }
 
+// dbClock is implemented by repositories whose job timestamps come from
+// the database clock (PGRepository).
+type dbClock interface {
+	DBNow(ctx context.Context) (time.Time, error)
+}
+
 // maxBacklogScan bounds the queued jobs one scrape reads.
 const maxBacklogScan = 10000
 
@@ -71,7 +77,15 @@ func (c *backlogCollector) Collect(ch chan<- prometheus.Metric) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
+	// The age is measured against the clock that stamped created_at: the
+	// database's, when the repository has one, so a clock offset between
+	// server and database does not bend it.
 	now := time.Now().UTC()
+	if clock, ok := repo.(dbClock); ok {
+		if dbNow, err := clock.DBNow(ctx); err == nil {
+			now = dbNow.UTC()
+		}
+	}
 	// Every queued job counts, also one whose next attempt is not due yet.
 	queued, err := repo.QueuedDue(ctx, now.Add(100*365*24*time.Hour), maxBacklogScan)
 	if err != nil {

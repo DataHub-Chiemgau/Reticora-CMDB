@@ -11,12 +11,13 @@ import {
   DRAFT_ID,
   FORM_BUILDER_HANDLERS,
   FORM_TYPE_ID,
+  IPAM_DETAIL,
   RULE_HANDLERS,
   TEMPLATE_ID,
   TEMPLATE_PERMISSIONS,
   TOPOLOGY_TOO_LARGE,
 } from './support/a11y-fixtures';
-import { AT, EMPTY_LIST, ORG_ID, list, mockBackend, signIn } from './support/backend';
+import { AT, EMPTY_LIST, ORG_ID, entitlements, list, mockBackend, signIn } from './support/backend';
 import type { Handler } from './support/backend';
 
 // UI-18/NFR-07 (WP-193, WP-522, WP-631): every route of the router
@@ -575,6 +576,47 @@ const STOCKTAKE_HANDLERS: Handler[] = [
   },
 ];
 
+// WP-1115: the source ranks of serial numbers; snmp has an organization-wide
+// entry, every other source its system rank.
+const RANK_SOURCES_A11Y = [
+  ['import', 95],
+  ['workflow', 92],
+  ['redfish', 90],
+  ['ipmi', 90],
+  ['agent', 85],
+  ['snmp', 70],
+  ['api', 75],
+  ['integration', 75],
+  ['wmi', 70],
+  ['ssh', 60],
+  ['nas', 60],
+  ['sweep', 20],
+] as const;
+const SOURCE_RANKS: Handler = {
+  path: '/reconciliation/source-ranks',
+  reply: () => ({
+    body: {
+      entries: [{ attribute_key: 'a11y_serial', source: 'snmp', rank: 70, updated_at: AT }],
+      effective: [
+        {
+          attribute_key: 'a11y_serial',
+          ranks: RANK_SOURCES_A11Y.map(([source, rank]) => ({
+            source,
+            rank,
+            origin: source === 'snmp' ? 'org' : 'default',
+          })),
+        },
+      ],
+    },
+  }),
+};
+const SOURCE_RANK_PERMISSIONS: Handler = {
+  path: '/me/permissions',
+  reply: () => ({
+    body: { user_id: 'a11y-user', permissions: ['discovery:read', 'reconciliation:manage'] },
+  }),
+};
+
 const RELATIONSHIP_TYPES: Handler = {
   path: '/relationship-types',
   reply: () => ({
@@ -604,6 +646,53 @@ const RELATIONSHIP_TYPES: Handler = {
 };
 
 // WP-817: a system tag and an own tag with a color in the tag catalog.
+// The form of the fixtures in the editor (WP-1133): the definition and its
+// one version.
+const FORM_EDIT_ID = 'ee000000-0000-4000-8000-000000000001';
+const FORM_EDIT_SCHEMA = {
+  type: 'object',
+  properties: { name: { type: 'string', title: 'Name' } },
+  required: ['name'],
+};
+const FORM_EDIT_HANDLERS: Handler[] = [
+  {
+    path: `/forms/${FORM_EDIT_ID}`,
+    reply: () => ({
+      body: {
+        id: FORM_EDIT_ID,
+        organization_id: ORG_ID,
+        name: M.form,
+        description: 'New employee',
+        schema: FORM_EDIT_SCHEMA,
+        ui_hints: { order: ['name'], fields: { name: { label: { de: 'Name', en: 'Name' } } } },
+        active: true,
+        version: 1,
+        schema_version: 1,
+        current_version_id: 'ee000000-0000-4000-8000-0000000000a1',
+        created_at: AT,
+        updated_at: AT,
+      },
+    }),
+  },
+  {
+    path: `/forms/${FORM_EDIT_ID}/versions`,
+    reply: () => ({
+      body: list([
+        {
+          id: 'ee000000-0000-4000-8000-0000000000a1',
+          organization_id: ORG_ID,
+          form_id: FORM_EDIT_ID,
+          version: 1,
+          schema: FORM_EDIT_SCHEMA,
+          ui_hints: { order: ['name'] },
+          created_by: '00000000-0000-0000-0000-000000000001',
+          created_at: AT,
+        },
+      ]),
+    }),
+  },
+];
+
 const TAG_HANDLERS: Handler[] = [
   {
     path: '/tags',
@@ -863,6 +952,16 @@ const ROUTES: A11yRoute[] = [
     ready: (page) => page.locator('section h1'),
   },
   {
+    // The operator area (WP-887) without an operator session: its own
+    // sign-in. The organization list and detail behind it are checked with
+    // axe in operator.spec.ts (WP-888).
+    path: '/operator/*',
+    url: '/operator',
+    signedIn: false,
+    ready: (page) =>
+      page.getByRole('button', { name: /als operator anmelden|sign in as operator/i }),
+  },
+  {
     path: '/onboarding',
     url: '/onboarding',
     signedIn: false,
@@ -918,6 +1017,14 @@ const ROUTES: A11yRoute[] = [
       await selects.nth(1).selectOption({ label: M.room });
     },
   },
+  // IPAM (WP-915): the section, its subnet tree and the usage bar.
+  { path: '/ipam', url: '/ipam', ready: text(M.ipamSubnet) },
+  // WP-916: head with usage, actions, address map and address list.
+  {
+    path: '/ipam/subnets/:id',
+    url: `/ipam/subnets/${IPAM_DETAIL}`,
+    ready: (page) => page.getByRole('group', { name: new RegExp(M.ipamDetail) }),
+  },
   { path: '/racks', url: '/racks', ready: text(M.ci) },
   { path: '/discovery', url: '/discovery', ready: text(M.collector) },
   { path: '/assets', url: '/assets', ready: text(M.asset) },
@@ -941,6 +1048,12 @@ const ROUTES: A11yRoute[] = [
     path: '/clients',
     url: '/clients',
     ready: (page) => page.locator('#main-content tr').filter({ hasText: 'a11y-client' }),
+  },
+  {
+    // WP-886: plan, comparison, add-ons, usage bars and expiry.
+    path: '/plan',
+    url: '/plan',
+    ready: (page) => page.getByRole('progressbar', { name: 'CIs' }),
   },
   { path: '/saved-views', url: '/saved-views', ready: text(M.savedView) },
   {
@@ -1038,6 +1151,15 @@ const ROUTES: A11yRoute[] = [
     handlers: [TEMPLATE_PERMISSIONS, ...RULE_HANDLERS],
     ready: (page) => page.locator('#main-content tr').filter({ hasText: M.rule }),
   },
+  {
+    // WP-1115: the source ranks per attribute with an organization-wide
+    // entry (origin Org), system ranks and the edit buttons of a holder of
+    // reconciliation:manage.
+    path: '/source-ranks',
+    url: '/source-ranks',
+    handlers: [SOURCE_RANK_PERMISSIONS, SOURCE_RANKS],
+    ready: (page) => page.locator('#main-content tr').filter({ hasText: 'a11y_serial' }),
+  },
   { path: '/assignments', url: '/assignments', ready: text(M.assignment) },
   {
     // WP-808: the contract list with the expiry overview (a deadline in 7
@@ -1133,6 +1255,19 @@ const ROUTES: A11yRoute[] = [
   },
   { path: '/slas', url: '/slas', ready: text(M.sla) },
   { path: '/forms', url: '/forms', ready: text(M.form) },
+  // WP-1133: the form editor, empty and for the form of the fixtures with
+  // its versions.
+  {
+    path: '/forms/new',
+    url: '/forms/new',
+    ready: (page) => page.locator('#main-content').getByRole('heading', { level: 3 }).first(),
+  },
+  {
+    path: '/forms/:id/edit',
+    url: `/forms/${FORM_EDIT_ID}/edit`,
+    handlers: FORM_EDIT_HANDLERS,
+    ready: (page) => page.locator('#main-content').getByRole('group', { name: /\(name\)$/ }),
+  },
   { path: '/workflows', url: '/workflows', ready: text(M.workflow) },
   { path: '/compliance', url: '/compliance', ready: text(M.compliance) },
   { path: '/iga', url: '/iga', ready: text(M.iga) },
@@ -1159,8 +1294,27 @@ const ROUTES: A11yRoute[] = [
     ready: (page) => page.locator('#main-content td', { hasText: 'a11y-import-srv' }),
   },
   { path: '/monitoring', url: '/monitoring', ready: text(M.alert) },
+  // WP-1157: the organization data (full export and deletion).
+  {
+    path: '/org-data',
+    url: '/org-data',
+    ready: (page) => page.locator('#main-content h1').first(),
+  },
+  // WP-1080: the monitoring settings (profiles, groups, auto_ping).
+  {
+    path: '/monitoring/settings',
+    url: '/monitoring/settings',
+    ready: (page) => page.locator('#main-content h1').first(),
+  },
+  { path: '/alarms', url: '/alarms', ready: text(M.alarm) },
+  { path: '/incidents', url: '/incidents', ready: text(M.incident) },
   { path: '/audit', url: '/audit', ready: text(M.audit) },
-  { path: '/security', url: '/security', ready: text(M.compliance) },
+  // The JSON preview of the report is a collapsed section since WP-1135.
+  {
+    path: '/security',
+    url: '/security',
+    ready: (page: Page) => page.getByTestId('report-preview'),
+  },
   // Unknown paths fall back to the CI list.
   { path: '*', url: '/a11y-unknown-route', ready: text(M.ci) },
 ];
@@ -1331,18 +1485,7 @@ const FLOW_HANDLERS: Handler[] = [
   },
   {
     path: '/entitlements',
-    reply: () => ({
-      body: list(
-        ['assets_basic', 'stock'].map((feature_key) => ({
-          organization_id: ORG_ID,
-          feature_key,
-          plan: 'standard',
-          enabled: true,
-          limits: {},
-          source: 'manual',
-        })),
-      ),
-    }),
+    reply: () => ({ body: entitlements('standard', ['assets_basic', 'stock']) }),
   },
 ];
 
@@ -1354,16 +1497,7 @@ const SCAN_HANDLERS: Handler[] = [
   {
     path: '/entitlements',
     reply: () => ({
-      body: list(
-        ['assets_basic', 'stock', 'barcode', 'signature'].map((feature_key) => ({
-          organization_id: ORG_ID,
-          feature_key,
-          plan: 'standard',
-          enabled: true,
-          limits: {},
-          source: 'manual',
-        })),
-      ),
+      body: entitlements('standard', ['assets_basic', 'stock', 'barcode', 'signature']),
     }),
   },
 ];

@@ -1,0 +1,34 @@
+{
+  "resultsPerPage": 2,
+  "startIndex": 2,
+  "totalResults": 3,
+  "format": "NVD_CVE",
+  "version": "2.0",
+  "timestamp": "2026-11-13T08:00:01.000",
+  "vulnerabilities": [
+    {
+      "cve": {
+        "id": "CVE-2026-1003",
+        "sourceIdentifier": "cve@mitre.org",
+        "published": "2026-10-05T07:00:00.000",
+        "lastModified": "2026-10-06T07:30:00.000",
+        "vulnStatus": "Modified",
+        "descriptions": [{"lang": "en", "value": "A path traversal in AVM FRITZ!OS."}],
+        "metrics": {},
+        "configurations": [
+          {
+            "nodes": [
+              {
+                "operator": "OR",
+                "negate": false,
+                "cpeMatch": [
+                  {"vulnerable": true, "criteria": "cpe:2.3:o:avm:fritz\\!os:*:*:*:*:*:*:*:*", "versionEndIncluding": "7.57", "matchCriteriaId": "C1"}
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

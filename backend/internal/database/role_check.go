@@ -21,6 +21,12 @@ const DefaultOwnerRole = "reticora_owner"
 // (AUD-04, WP-680).
 const AuditSealerRole = "reticora_audit_sealer"
 
+// OrgPurgerRole owns org_purge_batch (migration 000356, TLC-06, WP-1154),
+// the only way past the append-only triggers: it deletes the rows of an
+// organization in purging. No login of the application may reach it, or the
+// runtime could delete audit entries and ledgers.
+const OrgPurgerRole = "reticora_org_purger"
+
 // Querier is what VerifyRoleContract needs; *pgxpool.Pool, *pgx.Conn and
 // pgx.Tx satisfy it.
 type Querier interface {
@@ -124,6 +130,11 @@ SELECT format('role %s reaches the audit sealer role %s%s; the runtime could rew
   FROM reachable JOIN pg_roles r ON r.oid = reachable.oid
  WHERE r.rolname = '` + AuditSealerRole + `'
 UNION ALL
+SELECT format('role %s reaches the org purger role %s%s; the runtime could delete audit entries and ledgers',
+              reachable.start, r.rolname, CASE WHEN reachable.inherited THEN ' (inherited)' ELSE ' via SET ROLE' END)
+  FROM reachable JOIN pg_roles r ON r.oid = reachable.oid
+ WHERE r.rolname = '` + OrgPurgerRole + `'
+UNION ALL
 SELECT format('owner role %s does not exist', $1::text)
  WHERE NOT EXISTS (SELECT 1 FROM owner)
 UNION ALL
@@ -172,7 +183,7 @@ ORDER BY msg`
 //
 //   - neither session_user nor current_user is SUPERUSER or BYPASSRLS, and no
 //     role reachable from them, inherited or by SET ROLE, is;
-//   - neither of them reaches AuditSealerRole;
+//   - neither of them reaches AuditSealerRole or OrgPurgerRole;
 //   - current_user can SET ROLE ownerRole but does not inherit it, and has no
 //     CREATE on schema public of its own; ownerRole has it;
 //   - every tenant table current_user can read or write (organization and

@@ -131,6 +131,14 @@ describe('withScope', () => {
     expect(withScope('/users')).toBe('/users');
   });
 
+  it('scopes the incident list by client only (WP-1045)', () => {
+    useScopeStore.setState({ clientId: CLIENT_A, siteId: SITE_A1 });
+    expect(withScope('/monitoring/incidents?state=open%2Cacknowledged&limit=200')).toBe(
+      `/monitoring/incidents?state=open%2Cacknowledged&limit=200&client_id=${CLIENT_A}`,
+    );
+    expect(withScope('/monitoring/incidents/abc')).toBe('/monitoring/incidents/abc');
+  });
+
   it('leaves lists unchanged without a selection', () => {
     expect(withScope('/cis?limit=10')).toBe('/cis?limit=10');
   });

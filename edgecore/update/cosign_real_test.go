@@ -17,17 +17,140 @@
 //
 // A missing variable fails the test; it is never skipped.
 //
+// TestCosignVerifierWithLegacyReleaseBundle (E-258) needs only COSIGN_BIN:
+// releases signed with cosign v2 (legacy bundle) stay verifiable with the
+// cosign the updater requires (MinCosignVersion or newer). Its fixture is
+// the signed SHA256SUMS of the published release v1.0.0-rc.1 (testdata).
+//
 // Retest: cd edgecore && COSIGN_BIN=… RELEASE_ARTIFACT=… RELEASE_BUNDLE=… \
 // go test -tags cosignreal -count=1 -run '^TestCosignVerifierWithRealCosign$' ./update/
+// cd edgecore && COSIGN_BIN=… go test -tags cosignreal -count=1 \
+// -run '^TestCosignVerifierWithLegacyReleaseBundle$' ./update/
 package update
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+// legacyRelease is the fixture of TestCosignVerifierWithLegacyReleaseBundle:
+// SHA256SUMS and SOURCE_COMMIT of the release v1.0.0-rc.1 with the bundles
+// release.yml wrote with cosign v2.4.1 (2026-11-10), as published.
+const (
+	legacyRelease         = "testdata/legacy-release-v1.0.0-rc.1"
+	legacyReleaseTag      = "v1.0.0-rc.1"
+	legacyReleaseIdentity = `^https://github\.com/DataHub-Chiemgau/Reticora-CMDB/\.github/workflows/release\.yml@refs/tags/v1\.0\.0-rc\.1$`
+)
+
+// TestCosignVerifierWithLegacyReleaseBundle: the real cosign (at least
+// MinCosignVersion) verifies the legacy bundle of an already published
+// release for the pinned release identity and for exactly its tag; the
+// manifest changed by one byte, the bundle of another file and the identity
+// of another tag are refused.
+func TestCosignVerifierWithLegacyReleaseBundle(t *testing.T) {
+	cosignBin := requireEnv(t, "COSIGN_BIN")
+	version, err := CheckCosignVersion(t.Context(), cosignBin, nil)
+	if err != nil {
+		t.Fatalf("COSIGN_BIN: %v", err)
+	}
+	artifact := filepath.Join(legacyRelease, "SHA256SUMS")
+	bundle := artifact + ".sigstore.json"
+	foreign := filepath.Join(legacyRelease, "SOURCE_COMMIT.sigstore.json")
+	t.Logf("cosign %s (%s), legacy release %s", cosignBin, version, legacyReleaseTag)
+
+	// The fixture is a legacy bundle (cosign v2: base64Signature, cert,
+	// rekorBundle), not a Sigstore bundle (mediaType).
+	raw, err := os.ReadFile(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatalf("legacy bundle: %v", err)
+	}
+	for _, key := range []string{"base64Signature", "cert", "rekorBundle"} {
+		if _, ok := fields[key]; !ok {
+			t.Fatalf("the fixture %s is no legacy bundle: no %s", bundle, key)
+		}
+	}
+	if _, ok := fields["mediaType"]; ok {
+		t.Fatalf("the fixture %s is a Sigstore bundle, not a legacy one", bundle)
+	}
+
+	t.Run("legacy bundle with the pinned release identity is accepted", func(t *testing.T) {
+		if err := (CosignVerifier{Binary: cosignBin}).Verify(t.Context(), artifact, bundle); err != nil {
+			t.Fatalf("the legacy release was refused: %v", err)
+		}
+	})
+
+	t.Run("legacy bundle with the identity of exactly its tag is accepted", func(t *testing.T) {
+		v := CosignVerifier{Binary: cosignBin, IdentityRegexp: legacyReleaseIdentity}
+		if err := v.Verify(t.Context(), artifact, bundle); err != nil {
+			t.Fatalf("the legacy release was refused for its tag: %v", err)
+		}
+	})
+
+	t.Run("manifest changed by one byte is refused", func(t *testing.T) {
+		original, err := os.ReadFile(artifact)
+		if err != nil {
+			t.Fatal(err)
+		}
+		changed := append([]byte(nil), original...)
+		changed[len(changed)/2] ^= 0x01
+		path := filepath.Join(t.TempDir(), "SHA256SUMS")
+		if err := os.WriteFile(path, changed, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := (CosignVerifier{Binary: cosignBin}).Verify(t.Context(), path, bundle); err == nil {
+			t.Fatal("a manifest changed by one byte was accepted")
+		} else {
+			t.Logf("refused: %v", err)
+		}
+	})
+
+	t.Run("bundle of another file is refused", func(t *testing.T) {
+		if err := (CosignVerifier{Binary: cosignBin}).Verify(t.Context(), artifact, foreign); err == nil {
+			t.Fatal("the manifest was accepted with the bundle of SOURCE_COMMIT")
+		} else {
+			t.Logf("refused: %v", err)
+		}
+	})
+
+	t.Run("identity of another tag is refused", func(t *testing.T) {
+		v := CosignVerifier{Binary: cosignBin, IdentityRegexp: strings.Replace(legacyReleaseIdentity, `rc\.1`, `rc\.2`, 1)}
+		err := v.Verify(t.Context(), artifact, bundle)
+		if err == nil || !isIdentityRefusal(err) {
+			t.Fatalf("not refused for the identity of v1.0.0-rc.2: %v", err)
+		}
+		t.Logf("refused: %v", err)
+	})
+}
+
+// identityRefusals are the messages of cosign's refusal for the signer
+// identity. cosign v3 checks a Sigstore bundle (v0.3) with sigstore-go
+// ("failed to verify certificate identity: no matching CertificateIdentity
+// found, last error: expected SAN value to match regex …") and a legacy
+// bundle (cosign v2) on its old path, worded as in cosign v2 ("none of the
+// expected identities matched what was in the certificate"). Both name the
+// identity; a load, network or signature error matches neither.
+var identityRefusals = []string{
+	"no matching CertificateIdentity found",
+	"none of the expected identities matched",
+}
+
+// isIdentityRefusal reports whether err is cosign's refusal for the identity.
+func isIdentityRefusal(err error) bool {
+	for _, msg := range identityRefusals {
+		if strings.Contains(err.Error(), msg) {
+			return true
+		}
+	}
+	return false
+}
 
 // otherIdentityRegexp is a signer no bundle of this repository carries.
 const otherIdentityRegexp = `^https://github\.com/reticora-invalid/other-repository/\.github/workflows/release\.yml@refs/tags/v.+$`
@@ -93,7 +216,7 @@ func TestCosignVerifierWithRealCosign(t *testing.T) {
 			t.Fatalf("the signature was accepted for the identity %s", otherIdentityRegexp)
 		}
 		// The refusal names the identity, not a load or network error.
-		if !strings.Contains(err.Error(), "none of the expected identities matched") {
+		if !isIdentityRefusal(err) {
 			t.Fatalf("refused, but not for the identity: %v", err)
 		}
 		t.Logf("refused: %v", err)

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -88,6 +89,8 @@ type p2Scenario struct {
 	// for client 2) and one of organization B hidden for its client
 	// (WP-858).
 	hiddenTypes [2]string
+	// ipam is the scenario of the rights per IPAM section (WP-910).
+	ipam *ipamSectionScenario
 }
 
 // p2Prefix starts every name of the P2 scenario.
@@ -271,6 +274,9 @@ func newP2Scenario(t *testing.T, m *channelMatrix, blobs blob.Store) *p2Scenario
 			t.Fatalf("setup: rebuild of the search index: %v", err)
 		}
 	}
+	// The rights per IPAM section (WP-910), after the rebuild: the
+	// triggers index subnets and addresses as they are written.
+	s.ipam = newIPAMSectionScenario(t, m)
 	return s
 }
 
@@ -538,13 +544,13 @@ func (m *channelMatrix) p2Rows(rows map[string]matrixRow) {
 		var out []matrixProbe
 		until := time.Now().UTC().AddDate(0, 1, 0).Format(time.RFC3339)
 		// A reservation writes its asset (the active reservation): an
-		// asset the principal may not write, in the body or in the path, is
-		// not found (404, OpenAPI createReservation), like an unknown one;
-		// the team principal writes the assets of its team only.
+		// asset the principal may not write is, like an unknown one, a 422
+		// on asset_id in the body (SR-50, WP-879) and 404 in the path; the
+		// team principal writes the assets of its team only.
 		for i := range 3 {
 			team := map[int]string{0: m.team}[i]
 			id := s.freshAsset(t, m, i, team)
-			want := writeSeen[i].status(p, http.StatusCreated)
+			want := bodyRef(writeSeen[i].status(p, http.StatusCreated))
 			out = append(out, matrixProbe{name: fmt.Sprintf("asset of side %d", i+1), method: http.MethodPost, path: "/api/v1/reservations",
 				body: map[string]any{"asset_id": id, "reserved_until": until}, want: want,
 				after: m.count(want == http.StatusCreated, `SELECT count(*) FROM reservation WHERE asset_id = $1`, id)})
@@ -557,7 +563,7 @@ func (m *channelMatrix) p2Rows(rows map[string]matrixRow) {
 		return append(out, matrixProbe{method: http.MethodPost, path: "/api/v1/assets/" + unknownID + "/reserve",
 			body: map[string]any{"reserved_until": until, "assignee_id": p.user}, want: http.StatusNotFound},
 			matrixProbe{name: "unknown asset", method: http.MethodPost, path: "/api/v1/reservations",
-				body: map[string]any{"asset_id": unknownID, "reserved_until": until}, want: http.StatusNotFound})
+				body: map[string]any{"asset_id": unknownID, "reserved_until": until}, want: http.StatusUnprocessableEntity})
 	}
 	rows["reservation"] = reservation
 
@@ -603,7 +609,8 @@ func (m *channelMatrix) p2Rows(rows map[string]matrixRow) {
 		// a document outside the scope is not found (404); the team
 		// principal sees a document whose links name no team but may not
 		// write it (403, migration 000217); a target outside the scope is
-		// not found first (WP-851, 404) like an unknown one.
+		// refused first like an unknown one (422 on entity_id, SR-50,
+		// WP-879; 404 before).
 		for i := range 3 {
 			for j := range 3 {
 				doc := m.create(t, s.owners[i], "/api/v1/documents", map[string]any{"title": m.name(p2Prefix + "-ldoc"), "file_name": "x.txt"})
@@ -611,8 +618,10 @@ func (m *channelMatrix) p2Rows(rows map[string]matrixRow) {
 				target := s.freshAsset(t, m, j, "")
 				want := http.StatusCreated
 				switch {
-				case !s.located[i][p.kind] || !s.located[j][p.kind]:
+				case !s.located[i][p.kind]:
 					want = http.StatusNotFound
+				case !s.located[j][p.kind]:
+					want = http.StatusUnprocessableEntity
 				case !p.scope.Teams.All:
 					want = http.StatusForbidden
 				}
@@ -690,12 +699,13 @@ func (m *channelMatrix) p2Rows(rows map[string]matrixRow) {
 		var out []matrixProbe
 		for i := range 3 {
 			// A receipt of an article into a bin of its side: an article
-			// outside the scope is not found (404), a bin outside it is a
-			// 422 on to_location_id like an unknown location.
+			// outside the scope is a 422 on consumable_id (SR-50, WP-879), a
+			// bin outside it a 422 on to_location_id, each like an unknown
+			// one.
 			want, show := http.StatusCreated, []string(nil)
 			switch {
 			case !s.byClient[i][p.kind]:
-				want = http.StatusNotFound
+				want, show = http.StatusUnprocessableEntity, []string{`"field":"consumable_id"`}
 			case !s.located[i][p.kind]:
 				want, show = http.StatusUnprocessableEntity, []string{`"field":"to_location_id"`}
 			}
@@ -704,10 +714,10 @@ func (m *channelMatrix) p2Rows(rows map[string]matrixRow) {
 				body: map[string]any{"movement_type": "receipt", "consumable_id": s.consumables[i].id, "to_location_id": s.binLocs[i], "quantity": 1, "reason": reason},
 				want: want, show: show, after: m.count(want == http.StatusCreated, `SELECT count(*) FROM stock_movement WHERE reason = $1`, reason)})
 			// A transfer of an asset to the room of its side: an asset the
-			// principal may not write is not found (404).
+			// principal may not write is a 422 on asset_id (SR-50, WP-879).
 			id := s.freshAsset(t, m, i, map[int]string{0: m.team}[i])
 			reason = m.name(p2Prefix + "-transfer")
-			want = writeSeen[i].status(p, http.StatusCreated)
+			want = bodyRef(writeSeen[i].status(p, http.StatusCreated))
 			out = append(out, matrixProbe{name: fmt.Sprintf("transfer of side %d", i+1), method: http.MethodPost, path: "/api/v1/stock-movements",
 				body: map[string]any{"movement_type": "transfer", "asset_id": id, "to_location_id": s.rooms[i], "reason": reason},
 				want: want, after: m.count(want == http.StatusCreated, `SELECT count(*) FROM stock_movement WHERE reason = $1`, reason)})
@@ -910,6 +920,8 @@ func (m *channelMatrix) p2Rows(rows map[string]matrixRow) {
 	// type of A; multi: client 2 does not), an org-wide one sees all.
 	clientSeen := [3]seen{m.allA, m.allA.without("client"), m.onlyB}
 	hiddenOf := [3][]string{{s.hiddenTypes[0]}, {}, {s.hiddenTypes[1]}}
+	rows["ipam-section"] = m.ipamSectionRow()
+
 	rows["client-hidden-ci-types"] = matrixRow{
 		read: func(p *channelPrincipal) []matrixProbe {
 			var out []matrixProbe
@@ -1098,4 +1110,191 @@ func newAssetStatus(p *channelPrincipal, org, client, team string) int {
 		return http.StatusCreated
 	}
 	return http.StatusForbidden
+}
+
+// bodyRef is the answer to a reference of the body: 422 where the object of
+// a path would be 404, like an unknown id (SR-50, WP-879).
+func bodyRef(status int) int {
+	if status == http.StatusNotFound {
+		return http.StatusUnprocessableEntity
+	}
+	return status
+}
+
+// ipamSectionScenario is the scenario of the channel ipam-section (IPM-10,
+// WP-910, E-214). Organization A has the teams A (the user of the scope
+// principals is its member) and B (the other user is its member) and
+// three sections, each with a subnet of client 1 at site 1 and an address:
+// X with an entry of team A (write), Y with entries of team A (read) and
+// team B (write), Z without entries. Organization B has its section with
+// a subnet and an address. CI ci1 has an interface with an address in the
+// subnets of X and Y (network projection of the topology). Section W had
+// an entry of team C, which was deleted afterwards: without entries it
+// stays restricted (acl_enabled, E-256), so no principal reads or writes
+// its subnet and address until it is released explicitly. Section V went
+// the same way and was then released explicitly by the org-wide
+// administrator (PATCH /api/v1/ipam-sections/{id} with acl_enabled=false):
+// it is read and written again like Z. Index 0 is X, 1 Y, 2 Z, 3 the
+// section of organization B, 4 W, 5 V.
+type ipamSectionScenario struct {
+	teamA, teamB string
+	sections     [6]string
+	cidrs        [6]string
+	orgs         [6]string
+	clients      [6]string
+	sites        [6]string
+	// subnets and addresses carry the principals that read them; writers
+	// are the principals that write the subnets and addresses of a section.
+	subnets, addresses [6]object
+	writers            [6]seen
+	seq                int
+}
+
+// newIPAMSectionScenario writes the sections, subnets and addresses
+// through the API, then the entries: the section writes take the rights
+// as they are when the request comes.
+func newIPAMSectionScenario(t *testing.T, m *channelMatrix) *ipamSectionScenario {
+	t.Helper()
+	f := m.f
+	s := &ipamSectionScenario{
+		orgs:    [6]string{f.OrgA, f.OrgA, f.OrgA, f.OrgB, f.OrgA, f.OrgA},
+		clients: [6]string{f.Client1, f.Client1, f.Client1, m.clientB, f.Client1, f.Client1},
+		sites:   [6]string{m.site1, m.site1, m.site1, m.siteB, m.site1, m.site1},
+	}
+	s.teamA = m.scalar(t, `INSERT INTO team (organization_id, name) VALUES ($1, 'chmp2 ipam team a') RETURNING id::text`, f.OrgA)
+	s.teamB = m.scalar(t, `INSERT INTO team (organization_id, name) VALUES ($1, 'chmp2 ipam team b') RETURNING id::text`, f.OrgA)
+	m.exec(t, `INSERT INTO team_member (organization_id, team_id, user_id) VALUES ($1, $2, $3), ($1, $4, $5)`,
+		f.OrgA, s.teamA, m.userA, s.teamB, m.otherA)
+	owners := [6]*channelPrincipal{m.org, m.org, m.org, m.orgB, m.org, m.org}
+	names := [6]string{"x", "y", "z", "b", "w", "v"}
+	onlyTeamA := m.one.without("other-user")
+	read := [6]seen{onlyTeamA, m.one, m.one, m.onlyB, {}, m.one}
+	s.writers = [6]seen{onlyTeamA, seenBy("other-user"), m.one, m.onlyB, {}, m.one}
+	for i := range 6 {
+		p := owners[i]
+		s.sections[i] = m.create(t, p, "/api/v1/ipam-sections", map[string]any{"name": p2Prefix + "-section-" + names[i]})
+		s.cidrs[i] = fmt.Sprintf("10.250.%d.0/24", i+1)
+		subnet := m.create(t, p, "/api/v1/subnets", map[string]any{"cidr": s.cidrs[i], "client_id": s.clients[i], "site_id": s.sites[i],
+			"section_id": s.sections[i], "name": p2Prefix + "-subnet-" + names[i]})
+		s.subnets[i] = object{subnet, read[i]}
+		s.addresses[i] = object{m.create(t, p, "/api/v1/ips", map[string]any{"address": fmt.Sprintf("10.250.%d.10", i+1),
+			"subnet_id": subnet}), read[i]}
+	}
+	nic := m.create(t, m.org, "/api/v1/cis/"+m.ci1.id+"/interfaces", map[string]any{"name": p2Prefix + "-ipam0"})
+	for i := range 2 {
+		m.create(t, m.org, "/api/v1/ips", map[string]any{"address": fmt.Sprintf("10.250.%d.20", i+1), "subnet_id": s.subnets[i].id,
+			"interface_id": nic})
+	}
+	grant := func(p *channelPrincipal, section int, team, level string) {
+		m.create(t, p, "/api/v1/ipam-sections/"+s.sections[section]+"/permissions", map[string]any{"team_id": team, "level": level})
+	}
+	grant(m.org, 0, s.teamA, "write")
+	grant(m.otherUserP, 1, s.teamB, "write")
+	grant(m.otherUserP, 1, s.teamA, "read")
+	// W and V: the only team with an entry is deleted; the cascade removes
+	// the entry, the section stays restricted (E-256).
+	for i, name := range map[int]string{4: "c", 5: "d"} {
+		team := m.scalar(t, `INSERT INTO team (organization_id, name) VALUES ($1, $2) RETURNING id::text`, f.OrgA, "chmp2 ipam team "+name)
+		m.exec(t, `INSERT INTO team_member (organization_id, team_id, user_id) VALUES ($1, $2, $3)`, f.OrgA, team, m.userA)
+		grant(m.org, i, team, "write")
+		m.exec(t, `DELETE FROM team WHERE id = $1`, team)
+		if n := m.scalar(t, `SELECT count(*)::text FROM ipam_section_permission WHERE section_id = $1`, s.sections[i]); n != "0" {
+			t.Fatalf("setup: %s entries of section %s left after its team was deleted", n, names[i])
+		}
+		if m.scalar(t, `SELECT acl_enabled::text FROM ipam_section WHERE id = $1`, s.sections[i]) != "true" {
+			t.Fatalf("setup: section %s opened when its last team was deleted", names[i])
+		}
+	}
+	// V: released explicitly by the org-wide administrator.
+	if code, resp := m.env.call(m.org, http.MethodPatch, "/api/v1/ipam-sections/"+s.sections[5], map[string]any{"acl_enabled": false}); code != http.StatusOK {
+		t.Fatalf("setup: release of section V: %d %s", code, trim(resp))
+	}
+	if m.scalar(t, `SELECT acl_enabled::text FROM ipam_section WHERE id = $1`, s.sections[4]) != "true" {
+		t.Fatal("setup: the release of V opened W")
+	}
+	return s
+}
+
+// ipamSectionRow is the channel ipam-section: the subnets and addresses of
+// a section with entries are read by the principals of a team with an
+// entry and written by those of a team with level write, on every channel
+// (lists, details, addresses of a subnet, search, GraphQL search, network
+// projection of the topology); a section without entries behaves as
+// before. A write the principal may read but not write is 404 (PATCH,
+// DELETE) or 403 (POST of an address, row level security); a subnet it
+// cannot read is 400 for POST /ips (subnet not found) and 404 otherwise.
+func (m *channelMatrix) ipamSectionRow() matrixRow {
+	s := m.p2.ipam
+	get := func(path string, want int) matrixProbe {
+		return matrixProbe{method: http.MethodGet, path: path, want: want}
+	}
+	list := func(p *channelPrincipal, path string, objs ...object) matrixProbe {
+		show, hide := listed(p, objs...)
+		return matrixProbe{method: http.MethodGet, path: path, want: http.StatusOK, show: show, hide: hide}
+	}
+	return matrixRow{
+		read: func(p *channelPrincipal) []matrixProbe {
+			out := []matrixProbe{list(p, "/api/v1/subnets?limit=200", s.subnets[:]...), list(p, "/api/v1/ips?limit=200", s.addresses[:]...)}
+			for i := range 6 {
+				sub, addr := s.subnets[i], s.addresses[i]
+				out = append(out, get("/api/v1/subnets/"+sub.id, sub.seen.status(p, http.StatusOK)),
+					get("/api/v1/ips/"+addr.id, addr.seen.status(p, http.StatusOK)))
+				addrs := get("/api/v1/subnets/"+sub.id+"/addresses", sub.seen.status(p, http.StatusOK))
+				if sub.seen[p.kind] {
+					addrs.show = []string{addr.id}
+				}
+				out = append(out, addrs, list(p, "/api/v1/search?limit=100&q="+url.QueryEscape(s.cidrs[i]), sub))
+				show, hide := listed(p, sub)
+				out = append(out, matrixProbe{name: "searchEverything", method: http.MethodPost, path: "/bff/graphql",
+					body: map[string]any{"query": `{ searchEverything(q: "` + s.cidrs[i] + `", first: 100) { total hits { entityId } } }`},
+					want: http.StatusOK, show: show, hide: append(hide, `"errors"`)})
+			}
+			// The network projection of ci1: the subnets of X and Y it
+			// hangs off, each only where it is readable.
+			topo := get("/api/v1/topology?root_ci_id="+m.ci1.id+"&include=network", m.ci1.seen.status(p, http.StatusOK))
+			if m.ci1.seen[p.kind] {
+				for i := range 2 {
+					if s.subnets[i].seen[p.kind] {
+						topo.show = append(topo.show, "subnet:"+s.subnets[i].id)
+					} else {
+						topo.hide = append(topo.hide, s.subnets[i].id)
+					}
+				}
+			}
+			return append(out, topo, get("/api/v1/subnets/"+unknownID, http.StatusNotFound))
+		},
+		write: func(t *testing.T, p *channelPrincipal) []matrixProbe {
+			var out []matrixProbe
+			for i := range 6 {
+				sub := s.subnets[i]
+				written := object{sub.id, s.writers[i]}
+				note := m.name(p2Prefix + "-ipam")
+				out = append(out, matrixProbe{name: "section " + fmt.Sprint(i), method: http.MethodPatch, path: "/api/v1/subnets/" + sub.id,
+					body: map[string]any{"description": note}, want: s.writers[i].status(p, http.StatusOK),
+					after: m.unchanged(written, p, `SELECT COALESCE(description, '') <> $2 FROM subnet WHERE id = $1`, note)})
+
+				s.seq++
+				fresh := m.scalar(t, `INSERT INTO subnet (organization_id, client_id, site_id, cidr, section_id, name)
+					VALUES ($1, $2, $3, $4::cidr, $5, $6) RETURNING id::text`, s.orgs[i], s.clients[i], s.sites[i],
+					fmt.Sprintf("10.251.%d.0/24", s.seq), s.sections[i], m.name(p2Prefix+"-ipam-del"))
+				deleted := s.writers[i].status(p, http.StatusNoContent)
+				out = append(out, matrixProbe{name: "section " + fmt.Sprint(i), method: http.MethodDelete, path: "/api/v1/subnets/" + fresh,
+					want: deleted, after: m.count(deleted != http.StatusNoContent, `SELECT count(*) FROM subnet WHERE id = $1`, fresh)})
+
+				address := fmt.Sprintf("10.250.%d.%d", i+1, 100+s.seq)
+				created := http.StatusBadRequest
+				switch {
+				case s.writers[i][p.kind]:
+					created = http.StatusCreated
+				case sub.seen[p.kind]:
+					created = http.StatusForbidden
+				}
+				out = append(out, matrixProbe{name: "section " + fmt.Sprint(i), method: http.MethodPost, path: "/api/v1/ips",
+					body: map[string]any{"address": address, "subnet_id": sub.id}, want: created,
+					after: m.count(created == http.StatusCreated, `SELECT count(*) FROM ip_address WHERE subnet_id = $1 AND address = $2::inet`,
+						sub.id, address)})
+			}
+			return out
+		},
+	}
 }

@@ -152,8 +152,10 @@ func seedRBA03(t *testing.T) (context.Context, *pgxpool.Pool) {
 		`INSERT INTO user_custom_role (user_id, custom_role_id, scope_type) VALUES ('`+rbaUserBroken+`', '`+rbaCustomRole+`', 'client')`,
 		// Standard role at site 1 (client 1).
 		`INSERT INTO role_assignment (organization_id, user_id, role_id, scope_site_id) VALUES ('`+rbaOrg+`', '`+rbaUserSiteRA+`', '`+rbaRoleTech+`', '`+rbaSite1+`')`,
-		// Sites of organization B and an unknown site: grant nothing.
-		`INSERT INTO role_assignment (organization_id, user_id, role_id, scope_site_id) VALUES ('`+rbaOrg+`', '`+rbaUserSiteB+`', '`+rbaRoleTech+`', '`+rbaSiteB+`')`,
+		// Sites of organization B and an unknown site: grant nothing. A role
+		// assignment at a site of organization B cannot exist since migration
+		// 000287 (WP-876, SR-03): its composite foreign key refuses it (see
+		// "site of another organization or unknown site grants nothing").
 		`INSERT INTO user_custom_role (user_id, custom_role_id, scope_type, scope_id) VALUES ('`+rbaUserSiteB+`', '`+rbaCustomRole+`', 'site', '`+rbaSiteB+`')`,
 		`INSERT INTO user_custom_role (user_id, custom_role_id, scope_type, scope_id) VALUES ('`+rbaUserSiteGone+`', '`+rbaCustomRole+`', 'site', '`+rbaUnknownSite+`')`,
 		// E-70: client role in client 1 beside a site role at site 1 (client
@@ -260,6 +262,17 @@ func TestAccessGrantsResolveScopesFromRoleAssignments(t *testing.T) {
 	})
 
 	t.Run("site of another organization or unknown site grants nothing", func(t *testing.T) {
+		admin, err := database.NewMaintenancePool(ctx, os.Getenv("TEST_DATABASE_URL"))
+		if err != nil {
+			t.Fatalf("maintenance pool: %v", err)
+		}
+		defer admin.Close()
+		_, err = admin.Exec(ctx, `INSERT INTO role_assignment (organization_id, user_id, role_id, scope_site_id) VALUES ($1, $2, $3, $4)`,
+			rbaOrg, rbaUserSiteB, rbaRoleTech, rbaSiteB)
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "23503" || pgErr.ConstraintName != "role_assignment_scope_site_id_fkey" {
+			t.Fatalf("role assignment at a site of another organization: %v, want 23503 on role_assignment_scope_site_id_fkey", err)
+		}
 		for _, user := range []string{rbaUserSiteB, rbaUserSiteGone} {
 			grants, err := repo.AccessGrants(ctx, rbaOrg, user)
 			if err != nil {

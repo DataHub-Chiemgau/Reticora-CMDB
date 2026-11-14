@@ -104,6 +104,11 @@ func (h *Handler) syncInterfaces(ctx context.Context, orgID, ciID string, item *
 			return err
 		}
 	}
+	for i := range res.BindingConflicts {
+		if _, err = h.ReviewService().OpenUnlessDismissed(ctx, bindingConflictReview(orgID, &res.BindingConflicts[i]), "conflict"); err != nil {
+			return err
+		}
+	}
 	// The written addresses join the duplicate check of the ingest call
 	// once the record's or batch's transaction has committed (NET-06,
 	// WP-300); a rolled back record contributes nothing.
@@ -192,6 +197,31 @@ func reservationConflictReview(orgID, ciID string, c *ipam.ReservationConflict) 
 			"conflict":          c.ReservationIPID + "/" + c.InterfaceID,
 		},
 		CandidateCIIDs: []string{ciID},
+	}
+}
+
+// bindingConflictReview is the ip_binding_conflict item of a pinned address
+// of one CI that discovery observed at an interface of another CI in the
+// same VRF (IPM-14, E-216). Its object is the address row and the observed
+// interface, so that repeated observations keep one open item per pair and
+// a dismissal holds for that pair; both CIs are candidates.
+func bindingConflictReview(orgID string, c *ipam.BindingConflict) *ReviewItem {
+	return &ReviewItem{
+		OrganizationID: orgID,
+		Kind:           reviews.KindIPBindingConflict,
+		Status:         ReviewStatusOpen,
+		ObjectKey:      "ipbind:" + c.IPAddressID + "/" + c.ObservedInterfaceID,
+		Payload: map[string]any{
+			"address":               c.Address,
+			"vrf_id":                c.VRFID,
+			"ip_address_id":         c.IPAddressID,
+			"pinned_ci_id":          c.PinnedCIID,
+			"pinned_interface_id":   c.PinnedInterfaceID,
+			"observed_ci_id":        c.ObservedCIID,
+			"observed_interface_id": c.ObservedInterfaceID,
+			"conflict":              c.IPAddressID + "/" + c.ObservedInterfaceID,
+		},
+		CandidateCIIDs: []string{c.PinnedCIID, c.ObservedCIID},
 	}
 }
 

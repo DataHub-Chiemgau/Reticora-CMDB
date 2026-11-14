@@ -33,7 +33,7 @@ func buildV2Trap(community, trapOID string, extraOID, extraValue string) []byte 
 
 func TestParseV2Trap(t *testing.T) {
 	pkt := buildV2Trap("public", "1.3.6.1.6.3.1.1.5.3", "1.3.6.1.2.1.2.2.1.1.2", "2")
-	ev, err := parseTrap(pkt)
+	ev, err := parseTrap(pkt, nil)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -60,7 +60,7 @@ func TestParseTrapRejectsGarbage(t *testing.T) {
 		{0x30},
 		[]byte("not an snmp packet at all"),
 	} {
-		if _, err := parseTrap(pkt); err == nil {
+		if _, err := parseTrap(pkt, nil); err == nil {
 			t.Fatalf("expected error for %v", pkt)
 		}
 	}
@@ -102,7 +102,7 @@ func TestTrapReceiverEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	if _, err := conn.Write(buildV2Trap("public", "1.3.6.1.6.3.1.1.5.3", "1.3.6.1.2.1.1.3.0", "12345")); err != nil {
 		t.Fatalf("write: %v", err)
@@ -171,15 +171,83 @@ func TestBerIntStringSignExtension(t *testing.T) {
 func BenchmarkParseV2Trap(b *testing.B) {
 	pkt := buildV2Trap("public", "1.3.6.1.6.3.1.1.5.3", "1.3.6.1.2.1.2.2.1.1.2", "2")
 	for i := 0; i < b.N; i++ {
-		if _, err := parseTrap(pkt); err != nil {
+		if _, err := parseTrap(pkt, nil); err != nil {
 			b.Fatal(err)
 		}
 	}
 }
 
+// TestParseTrapDispatchesByVersion covers WP-978 AK1: v1/v2c stay with the
+// BER decoder (community), version 3 goes to parseV3Trap (user); a v3 trap
+// at the receiver from an unknown user is dropped and counted, and a user
+// added to the credentials applies without a restart.
+func TestParseTrapDispatchesByVersion(t *testing.T) {
+	ev, err := parseTrap(buildV2Trap("public", "1.3.6.1.6.3.1.1.5.4", "1.3.6.1.2.1.1.3.0", "1"), nil)
+	if err != nil || ev.Community != "public" || ev.User != "" {
+		t.Fatalf("v2c: %+v, %v", ev, err)
+	}
+	s := defaultSender()
+	raw := buildV3Trap(t, &s)
+	known := trapUserCreds("trapuser", "sha256", v3AuthPass, "aes", v3PrivPass)
+	ev, err = parseTrap(raw, usmOf(known))
+	if err != nil || ev.User != "trapuser" || ev.Community != "" {
+		t.Fatalf("v3: %+v, %v", ev, err)
+	}
+
+	var mu sync.Mutex
+	var got []TrapEvent
+	drops := map[string]int{}
+	users := []map[string]string{trapUserCreds("other", "sha256", v3AuthPass, "aes", v3PrivPass)}
+	rcv := &TrapReceiver{ListenAddr: "127.0.0.1:0", Community: "public",
+		Sink:   func(_ context.Context, ev TrapEvent) { mu.Lock(); got = append(got, ev); mu.Unlock() }, //nolint:gocritic // signature of Sink
+		OnDrop: func(reason string) { mu.Lock(); drops[reason]++; mu.Unlock() },
+		USM:    &TrapUSM{Users: func() []map[string]string { mu.Lock(); defer mu.Unlock(); return users }},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = rcv.Run(ctx) }()
+	var addr net.Addr
+	for i := 0; i < 50 && addr == nil; i++ {
+		addr = rcv.LocalAddr()
+		time.Sleep(10 * time.Millisecond)
+	}
+	if addr == nil {
+		t.Fatal("receiver did not start")
+	}
+	conn, err := net.Dial("udp", addr.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	waitFor := func(cond func() bool) {
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) {
+			mu.Lock()
+			ok := cond()
+			mu.Unlock()
+			if ok {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	_, _ = conn.Write(raw) // user unknown to this receiver
+	waitFor(func() bool { return drops[TrapDropUnknownUser] == 1 })
+	mu.Lock()
+	users = append(users, known)
+	mu.Unlock()
+	_, _ = conn.Write(raw)
+	waitFor(func() bool { return len(got) == 1 })
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 1 || got[0].User != "trapuser" || got[0].SourceIP != "127.0.0.1" || drops[TrapDropUnknownUser] != 1 {
+		t.Fatalf("events %+v, drops %v", got, drops)
+	}
+}
+
 func ExampleTrapEvent() {
 	pkt := buildV2Trap("public", "1.3.6.1.6.3.1.1.5.3", "1.3.6.1.2.1.2.2.1.1.2", "2")
-	ev, _ := parseTrap(pkt)
+	ev, _ := parseTrap(pkt, nil)
 	fmt.Println(ev.Community, ev.TrapOID, ev.Variables["1.3.6.1.2.1.2.2.1.1.2"])
 	// Output: public 1.3.6.1.6.3.1.1.5.3 2
 }

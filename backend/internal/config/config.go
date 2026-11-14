@@ -44,6 +44,14 @@ type Config struct {
 	// E-56). 1 processes the ingest of an organization serially as before.
 	// Every instance must use the same value.
 	IngestLanes int
+	// ProbeStreamMaxBytes bounds the JetStream stream RETICORA_PROBE that
+	// takes the collectors' probe state changes and results
+	// (RETICORA_PROBE_STREAM_MAX_BYTES, default 5 GiB; E-173, WP-959).
+	ProbeStreamMaxBytes int64
+	// ProbeEdgeWorkers is the number of handlers per instance that answer
+	// the probe edge subjects in parallel (RETICORA_PROBE_EDGE_WORKERS,
+	// default and minimum 8; NFR-11, WP-959).
+	ProbeEdgeWorkers int
 
 	// Cache / Rate-Limiting / Idempotency
 	RedisURL string
@@ -201,12 +209,47 @@ type Config struct {
 	RetentionHistoryDays    int // ci_change, entity_change, location_change, 3 years
 	RetentionSoftDeleteDays int // soft-deleted CIs, 90 days
 	RetentionReviewItemDays int // resolved review items, 1 year
+	// RetentionWorkflowRunDays keeps ended workflow runs with their steps
+	// (WFL-02, E-241: 400 days by default, at least 30; WP-1093).
+	RetentionWorkflowRunDays int
 
 	// Retention of the event stream RETICORA_EVENTS (EVT-01, NFR-06): the
 	// age and size its messages are kept; published outbox rows keep their
 	// data as long. An age below MinEventsMaxAge is a start error.
 	EventsMaxAge   time.Duration
 	EventsMaxBytes int64
+
+	// ProbeAssignTick is the interval of the system job probe.assign
+	// (RETICORA_PROBE_ASSIGN_TICK, default 5 s, 1–30 s; PRB-03, PRB-10,
+	// WP-963): every tick sweeps the members without monitoring alive
+	// message and assigns the collector groups.
+	ProbeAssignTick time.Duration
+
+	// ADMPCacheTTLDays is the TTL of a fetched ADMP entry (ADM-03, E-243,
+	// WP-929): admp.expire removes it with its personal surrogates after
+	// it (RETICORA_ADMP_CACHE_TTL_DAYS, 1 to 3650, default 30).
+	ADMPCacheTTLDays int
+
+	// Vulnerability feeds (SEC-02, WP-1118): the CSAF providers
+	// (RETICORA_VULNFEED_CSAF_PROVIDERS, comma separated https URLs of
+	// provider-metadata.json or aggregator.json; default the CSAF provider
+	// of the BSI) and the interval of vulnfeed.csaf
+	// (RETICORA_VULNFEED_CSAF_INTERVAL, default 6 h). In the air-gapped
+	// profile the import runs only with an explicitly set list (E-235).
+	VulnfeedCSAFProviders []string
+	VulnfeedCSAFInterval  time.Duration
+	// NVD 2.0 and CISA KEV (WP-1119): the API key of the installation
+	// (RETICORA_VULNFEED_NVD_API_KEY, deployment secret, only the header
+	// apiKey), the interval of vulnfeed.nvd (RETICORA_VULNFEED_NVD_INTERVAL,
+	// default 2 h) and the KEV catalog (RETICORA_VULNFEED_KEV_URL, default
+	// the CISA feed). Not in the air-gapped profile (VulnfeedNVDEnabled).
+	VulnfeedNVDAPIKey   string
+	VulnfeedNVDInterval time.Duration
+	VulnfeedKEVURL      string
+	// VulnfeedBundlePublicKey replaces the embedded public key of the
+	// offline bundles (RETICORA_VULNFEED_BUNDLE_PUBLIC_KEY, base64 Ed25519,
+	// WP-1120); empty keeps vulnfeed.DefaultBundlePublicKey.
+	VulnfeedBundlePublicKey string
 
 	// Search
 	SearchBackend      string
@@ -225,7 +268,8 @@ type Config struct {
 	// Modules lists the enabled late modules (RETICORA_MODULES, WP-214):
 	// empty is the release default G2 (WP-830), every module with phase P2
 	// on and the modules of P3, P4 and the add-ons [A] off (E-03), like the
-	// phase value P2; "all" switches them all on, a comma list of module
+	// phase value P2; "all" switches them all on, the phase value P3 the
+	// modules of P2 and P3 (release G3, WP-863), a comma list of module
 	// keys only the modules named (server.ParseModules).
 	Modules string
 
@@ -256,7 +300,10 @@ func Load() *Config {
 		DatabaseURL: l.str("RETICORA_DATABASE_URL", "postgres://localhost:5432/reticora?sslmode=disable"),
 		NATSUrl:     l.str("RETICORA_NATS_URL", "nats://localhost:4222"),
 		IngestLanes: l.integer("RETICORA_INGEST_LANES", DefaultIngestLanes),
-		RedisURL:    l.str("RETICORA_REDIS_URL", "redis://localhost:6379"),
+
+		ProbeStreamMaxBytes: l.int64("RETICORA_PROBE_STREAM_MAX_BYTES", DefaultProbeStreamMaxBytes),
+		ProbeEdgeWorkers:    l.integer("RETICORA_PROBE_EDGE_WORKERS", MinProbeEdgeWorkers),
+		RedisURL:            l.str("RETICORA_REDIS_URL", "redis://localhost:6379"),
 
 		S3Endpoint:  l.str("RETICORA_S3_ENDPOINT", "localhost:9000"),
 		S3Bucket:    l.str("RETICORA_S3_BUCKET", "reticora"),
@@ -320,15 +367,24 @@ func Load() *Config {
 		SMTPFrom:     l.str("RETICORA_SMTP_FROM", ""),
 		SMTPTLS:      l.str("RETICORA_SMTP_TLS", "starttls"),
 
-		RetentionAuditYears:     l.integer("RETICORA_RETENTION_AUDIT_YEARS", MinRetentionAuditYears),
-		RetentionHistoryDays:    l.integer("RETICORA_RETENTION_HISTORY_DAYS", MinRetentionHistoryDays),
-		RetentionSoftDeleteDays: l.integer("RETICORA_RETENTION_SOFT_DELETE_DAYS", MinRetentionSoftDeleteDays),
-		RetentionReviewItemDays: l.integer("RETICORA_RETENTION_REVIEW_ITEM_DAYS", MinRetentionReviewItemDays),
-		EventsMaxAge:            l.duration("RETICORA_EVENTS_MAX_AGE", DefaultEventsMaxAge),
-		EventsMaxBytes:          l.int64("RETICORA_EVENTS_MAX_BYTES", DefaultEventsMaxBytes),
-		EgressAllowPrivate:      l.boolean("RETICORA_EGRESS_ALLOW_PRIVATE", false),
-		PreAuthRateLimitRPM:     l.integer("RETICORA_PREAUTH_RATE_LIMIT_RPM", 20),
-		TrustedProxies:          l.str("RETICORA_TRUSTED_PROXIES", "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"),
+		RetentionAuditYears:      l.integer("RETICORA_RETENTION_AUDIT_YEARS", MinRetentionAuditYears),
+		RetentionHistoryDays:     l.integer("RETICORA_RETENTION_HISTORY_DAYS", MinRetentionHistoryDays),
+		RetentionSoftDeleteDays:  l.integer("RETICORA_RETENTION_SOFT_DELETE_DAYS", MinRetentionSoftDeleteDays),
+		RetentionReviewItemDays:  l.integer("RETICORA_RETENTION_REVIEW_ITEM_DAYS", MinRetentionReviewItemDays),
+		RetentionWorkflowRunDays: l.integer("RETICORA_RETENTION_WORKFLOW_RUN_DAYS", DefaultRetentionWorkflowRunDays),
+		EventsMaxAge:             l.duration("RETICORA_EVENTS_MAX_AGE", DefaultEventsMaxAge),
+		EventsMaxBytes:           l.int64("RETICORA_EVENTS_MAX_BYTES", DefaultEventsMaxBytes),
+		ProbeAssignTick:          l.duration("RETICORA_PROBE_ASSIGN_TICK", DefaultProbeAssignTick),
+		ADMPCacheTTLDays:         l.integer("RETICORA_ADMP_CACHE_TTL_DAYS", DefaultADMPCacheTTLDays),
+		VulnfeedCSAFProviders:    splitList(l.str("RETICORA_VULNFEED_CSAF_PROVIDERS", "")),
+		VulnfeedCSAFInterval:     l.duration("RETICORA_VULNFEED_CSAF_INTERVAL", DefaultVulnfeedCSAFInterval),
+		VulnfeedNVDAPIKey:        strings.TrimSpace(l.str("RETICORA_VULNFEED_NVD_API_KEY", "")),
+		VulnfeedNVDInterval:      l.duration("RETICORA_VULNFEED_NVD_INTERVAL", DefaultVulnfeedNVDInterval),
+		VulnfeedKEVURL:           strings.TrimSpace(l.str("RETICORA_VULNFEED_KEV_URL", "")),
+		VulnfeedBundlePublicKey:  strings.TrimSpace(l.str("RETICORA_VULNFEED_BUNDLE_PUBLIC_KEY", "")),
+		EgressAllowPrivate:       l.boolean("RETICORA_EGRESS_ALLOW_PRIVATE", false),
+		PreAuthRateLimitRPM:      l.integer("RETICORA_PREAUTH_RATE_LIMIT_RPM", 20),
+		TrustedProxies:           l.str("RETICORA_TRUSTED_PROXIES", "127.0.0.0/8,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"),
 
 		SearchBackend:      l.str("RETICORA_SEARCH_BACKEND", "postgres"),
 		OpenSearchURL:      l.str("RETICORA_OPENSEARCH_URL", ""),
@@ -359,6 +415,7 @@ func Load() *Config {
 		cfg.workers[name] = l.boolean(WorkerEnvKey(name), true)
 	}
 	cfg.warnings = l.checkWorkerSwitches(cfg.workers)
+	cfg.warnings = append(cfg.warnings, moduleAliasWarnings(cfg.Modules)...)
 	if cfg.OpsAlertToken != "" && cfg.OpsAlertOrgID == "" {
 		cfg.warnings = append(cfg.warnings, "RETICORA_OPS_ALERT_TOKEN is set without RETICORA_OPS_ALERT_ORG_ID: "+
 			"the Alertmanager bridge answers 404 (E-75)")
@@ -443,14 +500,31 @@ const (
 	MinRetentionHistoryDays    = 3 * 365
 	MinRetentionSoftDeleteDays = 90
 	MinRetentionReviewItemDays = 365
+	// DefaultRetentionWorkflowRunDays and MinRetentionWorkflowRunDays bound
+	// the retention of ended workflow runs (E-241, WP-1093).
+	DefaultRetentionWorkflowRunDays = 400
+	MinRetentionWorkflowRunDays     = 30
+)
+
+// DefaultADMPCacheTTLDays and MaxADMPCacheTTLDays bound the TTL of the
+// ADMP cache (E-243, WP-929).
+const (
+	DefaultADMPCacheTTLDays = 30
+	MaxADMPCacheTTLDays     = 3650
 )
 
 // Retention of the event stream RETICORA_EVENTS (EVT-01): 30 days and
 // 10 GB by default; the events are kept at least 30 days (NFR-06).
 const (
-	DefaultEventsMaxAge   = 30 * 24 * time.Hour
-	MinEventsMaxAge       = 30 * 24 * time.Hour
-	DefaultEventsMaxBytes = int64(10) << 30
+	DefaultEventsMaxAge = 30 * 24 * time.Hour
+	// DefaultProbeAssignTick, MinProbeAssignTick and MaxProbeAssignTick
+	// bound RETICORA_PROBE_ASSIGN_TICK (WP-963): above 30 s the failover
+	// of a member could exceed 60 s (PRB-03).
+	DefaultProbeAssignTick = 5 * time.Second
+	MinProbeAssignTick     = time.Second
+	MaxProbeAssignTick     = 30 * time.Second
+	MinEventsMaxAge        = 30 * 24 * time.Hour
+	DefaultEventsMaxBytes  = int64(10) << 30
 )
 
 // Ingest lanes per organization (RETICORA_INGEST_LANES, WP-334): the
@@ -460,6 +534,15 @@ const (
 const (
 	DefaultIngestLanes = 4
 	MaxIngestLanes     = 16
+)
+
+// Probe edge (WP-959): the byte limit of the stream RETICORA_PROBE
+// (probe.DefaultStreamMaxBytes) and the bounds of the handler pool per
+// instance (probe.DefaultEdgeWorkers).
+const (
+	DefaultProbeStreamMaxBytes = int64(5) << 30
+	MinProbeEdgeWorkers        = 8
+	MaxProbeEdgeWorkers        = 256
 )
 
 // Background workers with an independent operator switch (OPS-02). The
@@ -490,6 +573,32 @@ const (
 	// attribute.computed_refresh of the scheduler: the hourly refresh of
 	// computed attributes (JOB-02 [P2], WP-718).
 	WorkerComputedRefresh = "computed_refresh"
+	// WorkerProbeAssign runs as the system job probe.assign of the
+	// scheduler: the assignment of the probes to the members of their
+	// collector group every 5 s (RETICORA_PROBE_ASSIGN_TICK), after the
+	// liveness sweep of the members (PRB-03, PRB-10, PRB-11, WP-941,
+	// WP-963; module monitoring).
+	WorkerProbeAssign = "probe_assign"
+	// WorkerProbeIngest consumes the probe result batches of the stream
+	// RETICORA_PROBE and writes them to probe_result (NFR-11, PRB-07,
+	// WP-960; module monitoring).
+	WorkerProbeIngest = "probe_ingest"
+	// WorkerWorkflow runs the workflows (OPS-02 [P3], WP-1114; module
+	// workflows): the durable consumer workflow-triggers of the event
+	// triggers and the consumer of the job kind workflow.run. Switched off,
+	// the instance still queues runs (jobs.Queue.Declare), another instance
+	// executes them.
+	WorkerWorkflow = "workflow"
+	// WorkerIPAMScanApply runs as the system job ipam.scan.apply of the
+	// scheduler: every minute the probe states of the subnet scan become
+	// address states, last_seen_at and new hosts (IPM-11, WP-1063; module
+	// ipam).
+	WorkerIPAMScanApply = "ipam_scan_apply"
+	// WorkerAlarmCheck consumes probe.state_changed of the stream
+	// RETICORA_EVENTS (durable consumer reticora-alarm-check) and opens or
+	// resolves the alarms of the probe states (ALR-02, MON-04, WP-986;
+	// module monitoring).
+	WorkerAlarmCheck = "alarm_check"
 )
 
 // WorkerNames lists every registered worker.
@@ -508,6 +617,11 @@ var WorkerNames = []string{
 	WorkerDiscoveryScopes,
 	WorkerOfflineDetector,
 	WorkerComputedRefresh,
+	WorkerProbeAssign,
+	WorkerProbeIngest,
+	WorkerWorkflow,
+	WorkerIPAMScanApply,
+	WorkerAlarmCheck,
 }
 
 // OfflineDetectorAlias is the former switch of the offline detector (WP-157).
@@ -557,6 +671,62 @@ var s3Keys = []string{"RETICORA_S3_ENDPOINT", "RETICORA_S3_ACCESS_KEY", "RETICOR
 // weak identity (F-282).
 const natsIngestWarning = "RETICORA_NATS_URL is not set: the discovery ingest runs in the request without identity locks; " +
 	"several instances can duplicate devices with a weak identity, so run one instance or configure NATS (docs/betrieb/ingest-spuren.md)"
+
+// DefaultVulnfeedCSAFInterval is the default of
+// RETICORA_VULNFEED_CSAF_INTERVAL (WP-1118).
+const DefaultVulnfeedCSAFInterval = 6 * time.Hour
+
+// DefaultVulnfeedNVDInterval is the default of
+// RETICORA_VULNFEED_NVD_INTERVAL (WP-1119).
+const DefaultVulnfeedNVDInterval = 2 * time.Hour
+
+// VulnfeedNVDEnabled reports whether the NVD and KEV import may run: never
+// in the air-gapped profile (only the offline bundle, WP-1120).
+func (c *Config) VulnfeedNVDEnabled() bool { return !c.AirGapped }
+
+// MinVulnfeedInterval is the shortest interval of a vulnerability feed.
+const MinVulnfeedInterval = 5 * time.Minute
+
+// VulnfeedCSAFExplicit reports whether RETICORA_VULNFEED_CSAF_PROVIDERS
+// was set explicitly (the air-gapped profile runs the CSAF import only
+// then, E-235).
+func (c *Config) VulnfeedCSAFExplicit() bool { return c.explicit["RETICORA_VULNFEED_CSAF_PROVIDERS"] }
+
+// vulnfeedErrors refuses a CSAF provider without HTTPS and an interval
+// below MinVulnfeedInterval (WP-1118 AK4).
+func (c *Config) vulnfeedErrors() []error {
+	var errs []error
+	for _, p := range c.VulnfeedCSAFProviders {
+		u, err := url.Parse(p)
+		if err != nil || !strings.EqualFold(u.Scheme, "https") || u.Hostname() == "" || u.User != nil {
+			errs = append(errs, fmt.Errorf("RETICORA_VULNFEED_CSAF_PROVIDERS: %q is no absolute https URL with a host", p))
+		}
+	}
+	if c.VulnfeedKEVURL != "" {
+		u, err := url.Parse(c.VulnfeedKEVURL)
+		if err != nil || !strings.EqualFold(u.Scheme, "https") || u.Hostname() == "" || u.User != nil {
+			errs = append(errs, fmt.Errorf("RETICORA_VULNFEED_KEV_URL is no absolute https URL with a host"))
+		}
+	}
+	if c.VulnfeedNVDInterval < MinVulnfeedInterval {
+		errs = append(errs, fmt.Errorf("RETICORA_VULNFEED_NVD_INTERVAL must be at least %s, got %s", MinVulnfeedInterval, c.VulnfeedNVDInterval))
+	}
+	if c.VulnfeedCSAFInterval < MinVulnfeedInterval {
+		errs = append(errs, fmt.Errorf("RETICORA_VULNFEED_CSAF_INTERVAL must be at least %s, got %s", MinVulnfeedInterval, c.VulnfeedCSAFInterval))
+	}
+	return errs
+}
+
+// splitList splits a comma separated list and drops empty entries.
+func splitList(raw string) []string {
+	var out []string
+	for _, item := range strings.Split(raw, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
 
 // IsDevelopment reports whether the local development defaults apply.
 func (c *Config) IsDevelopment() bool { return c.Environment == EnvDevelopment }
@@ -642,10 +812,14 @@ func (c *Config) Validate(noDB bool) error {
 		{"RETICORA_RETENTION_HISTORY_DAYS", c.RetentionHistoryDays, MinRetentionHistoryDays},
 		{"RETICORA_RETENTION_SOFT_DELETE_DAYS", c.RetentionSoftDeleteDays, MinRetentionSoftDeleteDays},
 		{"RETICORA_RETENTION_REVIEW_ITEM_DAYS", c.RetentionReviewItemDays, MinRetentionReviewItemDays},
+		{"RETICORA_RETENTION_WORKFLOW_RUN_DAYS", c.RetentionWorkflowRunDays, MinRetentionWorkflowRunDays},
 	} {
 		if r.value < r.min {
 			errs = append(errs, fmt.Errorf("%s must be at least %d (NFR-06), got %d", r.key, r.min, r.value))
 		}
+	}
+	if c.ProbeAssignTick < MinProbeAssignTick || c.ProbeAssignTick > MaxProbeAssignTick {
+		errs = append(errs, fmt.Errorf("RETICORA_PROBE_ASSIGN_TICK must be between %s and %s, got %s", MinProbeAssignTick, MaxProbeAssignTick, c.ProbeAssignTick))
 	}
 	if c.EventsMaxAge < MinEventsMaxAge {
 		errs = append(errs, fmt.Errorf("RETICORA_EVENTS_MAX_AGE must be at least 30d (NFR-06), got %s", c.EventsMaxAge))
@@ -653,11 +827,22 @@ func (c *Config) Validate(noDB bool) error {
 	if c.EventsMaxBytes <= 0 {
 		errs = append(errs, fmt.Errorf("RETICORA_EVENTS_MAX_BYTES must be positive, got %d", c.EventsMaxBytes))
 	}
+	if c.ADMPCacheTTLDays < 1 || c.ADMPCacheTTLDays > MaxADMPCacheTTLDays {
+		errs = append(errs, fmt.Errorf("RETICORA_ADMP_CACHE_TTL_DAYS must be between 1 and %d, got %d", MaxADMPCacheTTLDays, c.ADMPCacheTTLDays))
+	}
+	errs = append(errs, c.vulnfeedErrors()...)
 	if c.RateLimitOrgRPM < c.RateLimitRPM {
 		errs = append(errs, fmt.Errorf("RETICORA_RATE_LIMIT_ORG_RPM (%d) must not be below RETICORA_RATE_LIMIT_RPM (%d)", c.RateLimitOrgRPM, c.RateLimitRPM))
 	}
 	if c.IngestLanes < 1 || c.IngestLanes > MaxIngestLanes {
 		errs = append(errs, fmt.Errorf("RETICORA_INGEST_LANES must be between 1 and %d, got %d", MaxIngestLanes, c.IngestLanes))
+	}
+	if c.ProbeStreamMaxBytes <= 0 {
+		errs = append(errs, fmt.Errorf("RETICORA_PROBE_STREAM_MAX_BYTES must be positive, got %d", c.ProbeStreamMaxBytes))
+	}
+	if c.ProbeEdgeWorkers < MinProbeEdgeWorkers || c.ProbeEdgeWorkers > MaxProbeEdgeWorkers {
+		errs = append(errs, fmt.Errorf("RETICORA_PROBE_EDGE_WORKERS must be between %d and %d, got %d",
+			MinProbeEdgeWorkers, MaxProbeEdgeWorkers, c.ProbeEdgeWorkers))
 	}
 	if c.RateLimitRPM <= 0 {
 		errs = append(errs, fmt.Errorf("RETICORA_RATE_LIMIT_RPM must be positive, got %d", c.RateLimitRPM))
@@ -779,9 +964,24 @@ func hostPort(addr string) bool {
 	return err == nil && n >= 1 && n <= 65535
 }
 
+// ModuleAliasAlerting is the former key of the module monitoring
+// (WP-863, E-160); server.ParseModules accepts it, Load reports it.
+const ModuleAliasAlerting = "alerting"
+
+// moduleAliasWarnings reports the former module keys in RETICORA_MODULES.
+func moduleAliasWarnings(spec string) []string {
+	var warnings []string
+	for _, key := range strings.Split(spec, ",") {
+		if strings.TrimSpace(key) == ModuleAliasAlerting {
+			warnings = append(warnings, "RETICORA_MODULES: module alerting is deprecated: use monitoring")
+		}
+	}
+	return warnings
+}
+
 // documentsEnabled reports whether RETICORA_MODULES switches the module
 // documents on, read like server.ParseModules: the empty release default
-// G2 (WP-830), "all", the phase value P2 or the key documents. Since
+// G2 (WP-830), "all", the phase values P2 and P3 or the key documents. Since
 // WP-853 (SR-57) the empty default counts as well: a deployment that leaves
 // RETICORA_MODULES unset runs documents and needs clamd, otherwise every
 // upload would stay pending_scan without a hint at the start.
@@ -792,7 +992,7 @@ func (c *Config) documentsEnabled() bool {
 	}
 	for _, key := range strings.Split(spec, ",") {
 		switch strings.TrimSpace(key) {
-		case "documents", "P2":
+		case "documents", "P2", "P3":
 			return true
 		}
 	}

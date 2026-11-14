@@ -4,6 +4,11 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"slices"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
@@ -13,6 +18,30 @@ import (
 type Handler struct {
 	repo Repository
 	exec *Executor
+	// quota admits an active definition (max_workflow_definitions,
+	// WithQuota, WP-1112); nil admits all.
+	quota DefinitionQuota
+}
+
+// WithQuota checks max_workflow_definitions when a definition is created
+// active or switched on (WFL-08): above the limit 403 entitlement-limit.
+func (h *Handler) WithQuota(q DefinitionQuota) *Handler {
+	h.quota = q
+	return h
+}
+
+// allowActive checks the definition quota; a refusal is answered.
+func (h *Handler) allowActive(w http.ResponseWriter, r *http.Request, orgID string) bool {
+	if h.quota == nil {
+		return true
+	}
+	if err := h.quota.AllowActiveDefinition(r.Context(), orgID); err != nil {
+		if !api.WriteEntitlementError(w, err) {
+			writeWorkflowError(w, r, err)
+		}
+		return false
+	}
+	return true
 }
 
 func NewHandler(repo Repository, exec *Executor) *Handler { return &Handler{repo: repo, exec: exec} }
@@ -22,10 +51,15 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/workflows/{id}", h.GetDefinition)
 	r.Patch("/api/v1/workflows/{id}", h.UpdateDefinition)
 	r.Delete("/api/v1/workflows/{id}", h.DeleteDefinition)
+	r.Get("/api/v1/workflows/{id}/versions", h.ListVersions)
+	r.Get("/api/v1/workflows/{id}/versions/{version}", h.GetVersion)
 	r.Post("/api/v1/workflows/{id}/runs", h.TriggerRun)
 	r.Get("/api/v1/workflow-runs", h.ListRuns)
 	r.Get("/api/v1/workflow-runs/{id}", h.GetRun)
 	r.Post("/api/v1/workflow-runs/{id}/approval", h.ApproveRun)
+	r.Post("/api/v1/workflow-runs/{id}/cancel", h.CancelRun)
+	r.Post("/api/v1/workflow-runs/{id}/retry", h.RetryRun)
+	r.Get("/api/v1/workflow-approvals", h.ListApprovals)
 }
 func org(w http.ResponseWriter, r *http.Request) (tenant.TenantInfo, bool) {
 	t := tenant.FromContext(r.Context())
@@ -42,7 +76,7 @@ func org(w http.ResponseWriter, r *http.Request) (tenant.TenantInfo, bool) {
 // api.WriteRepoError; no table, constraint, policy or SQLSTATE text reaches
 // the client (API-03, F-047), the log keeps it.
 func writeWorkflowError(w http.ResponseWriter, r *http.Request, err error) {
-	for _, rule := range []error{ErrTriggerMismatch, ErrNotWaiting, ErrInvalidDecision, ErrInvalidAction} {
+	for _, rule := range []error{ErrTriggerMismatch, ErrNotWaiting, ErrInvalidDecision, ErrInvalidAction, ErrInvalidApproval} {
 		if errors.Is(err, rule) {
 			api.WriteError(w, 400, "Bad Request", rule.Error())
 			return
@@ -53,11 +87,60 @@ func writeWorkflowError(w http.ResponseWriter, r *http.Request, err error) {
 		api.WriteError(w, 404, "Not Found", ErrNotFound.Error())
 	case errors.Is(err, ErrRunNotFound):
 		api.WriteError(w, 404, "Not Found", ErrRunNotFound.Error())
+	case errors.Is(err, ErrCINotFound):
+		api.WriteError(w, 404, "Not Found", ErrCINotFound.Error())
+	case errors.Is(err, ErrVersionNotFound):
+		api.WriteError(w, 404, "Not Found", ErrVersionNotFound.Error())
+	case errors.Is(err, ErrRunNotCancellable):
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrRunNotCancellable.Error())
+	case errors.Is(err, ErrRunNotRetryable):
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrRunNotRetryable.Error())
+	case errors.Is(err, ErrNotApprover):
+		api.WriteError(w, http.StatusForbidden, "Forbidden", ErrNotApprover.Error())
+	case errors.Is(err, ErrAlreadyDecided):
+		api.WriteError(w, http.StatusConflict, "Conflict", ErrAlreadyDecided.Error())
+	case errors.Is(err, ErrPreconditionFailed):
+		api.WritePreconditionFailed(w, ErrPreconditionFailed.Error())
 	case api.WriteFieldError(w, err):
 	default:
 		slog.WarnContext(r.Context(), "workflow request failed", "error", err)
 		api.WriteRepoError(w, err)
 	}
+}
+
+// validateWrite checks trigger, conditions and actions a create or a PATCH
+// sends: filter and conditions after MET-45 (WP-1087), cron and time zone
+// of a schedule (WP-1091), the send_webhook actions (WP-1096) and the
+// require_approval actions (WP-1098); each refusal is a 422 on its field.
+func validateWrite(trigger JSONMap, conditions, actions []JSONMap) error {
+	if err := ValidateSchedule(trigger); err != nil {
+		return err
+	}
+	if err := ValidateDefinition(trigger, conditions); err != nil {
+		return err
+	}
+	// send_webhook names a topic and no target of its own (E-231,
+	// WP-1096).
+	if err := validateActions(actions); err != nil {
+		return err
+	}
+	// The trigger form_submitted and request_form (WP-1102).
+	if err := validateFormWrite(trigger, actions); err != nil {
+		return err
+	}
+	// The "when" of the actions (WP-1108).
+	if err := validateActionConditions(actions); err != nil {
+		return err
+	}
+	// order_decision only with the trigger order_submitted (WP-1108).
+	if err := validateOrderWrite(trigger, actions); err != nil {
+		return err
+	}
+	// wait_until (WP-1109).
+	if err := validateWaitActions(actions); err != nil {
+		return err
+	}
+	return validateApprovalActions(actions)
 }
 
 func (h *Handler) ListDefinitions(w http.ResponseWriter, r *http.Request) {
@@ -87,6 +170,7 @@ func (h *Handler) GetDefinition(w http.ResponseWriter, r *http.Request) {
 		writeWorkflowError(w, r, err)
 		return
 	}
+	w.Header().Set("ETag", api.ETag(int64(item.Version)))
 	api.WriteJSON(w, 200, item)
 }
 func (h *Handler) CreateDefinition(w http.ResponseWriter, r *http.Request) {
@@ -103,9 +187,23 @@ func (h *Handler) CreateDefinition(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, 400, "Bad Request", "name, trigger and actions are required")
 		return
 	}
+	// The shorthand of a lifecycle trigger is stored as its filter (WP-1104).
+	var nerr error
+	if req.Trigger, nerr = normalizeTrigger(req.Trigger); nerr != nil {
+		api.WriteFieldError(w, nerr)
+		return
+	}
+	if err := validateWrite(req.Trigger, req.Conditions, req.Actions); err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
 	active := true
 	if req.Active != nil {
 		active = *req.Active
+	}
+	// An inactive definition does not count (WFL-08).
+	if active && !h.allowActive(w, r, t.OrganizationID) {
+		return
 	}
 	item := &Definition{OrganizationID: t.OrganizationID, Name: req.Name, Description: req.Description, Trigger: req.Trigger, Conditions: req.Conditions, Actions: req.Actions, Active: active}
 	if err := h.repo.CreateDefinition(r.Context(), item); err != nil {
@@ -123,16 +221,49 @@ func (h *Handler) UpdateDefinition(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// If-Match names the version the change is based on (API-07); the
+	// repository checks it on the locked row.
+	version, sent, parseErr := api.ParseIfMatch(r)
+	if parseErr != nil {
+		api.WritePreconditionFailed(w, parseErr.Error())
+		return
+	}
 	var req UpdateDefinitionRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, 400, "Bad Request", err.Error())
 		return
 	}
+	var nerr error
+	if req.Trigger, nerr = normalizeTrigger(req.Trigger); nerr != nil {
+		api.WriteFieldError(w, nerr)
+		return
+	}
+	if err := validateWrite(req.Trigger, req.Conditions, req.Actions); err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
+	if sent {
+		req.IfMatch = &version
+	}
+	// Switching a definition on counts against max_workflow_definitions
+	// (WFL-08); an active one stays admitted.
+	if req.Active != nil && *req.Active && h.quota != nil {
+		current, gerr := h.repo.GetDefinition(r.Context(), t.OrganizationID, id)
+		if gerr != nil {
+			writeWorkflowError(w, r, gerr)
+			return
+		}
+		if !current.Active && !h.allowActive(w, r, t.OrganizationID) {
+			return
+		}
+	}
+	req.CreatedBy = t.UserID
 	item, err := h.repo.UpdateDefinition(r.Context(), t.OrganizationID, id, &req)
 	if err != nil {
 		writeWorkflowError(w, r, err)
 		return
 	}
+	w.Header().Set("ETag", api.ETag(int64(item.Version)))
 	api.WriteJSON(w, 200, item)
 }
 func (h *Handler) DeleteDefinition(w http.ResponseWriter, r *http.Request) {
@@ -150,6 +281,56 @@ func (h *Handler) DeleteDefinition(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(204)
 }
+
+// ListVersions handles GET /api/v1/workflows/{id}/versions: the stored
+// versions of a definition, newest first (WFL-02, API-06). A definition of
+// another organization is 404 (TEN-04).
+func (h *Handler) ListVersions(w http.ResponseWriter, r *http.Request) {
+	t, ok := org(w, r)
+	if !ok {
+		return
+	}
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
+	if !ok {
+		return
+	}
+	page, ok := api.ParseOffsetPage(w, r)
+	if !ok {
+		return
+	}
+	items, total, err := h.repo.ListVersions(r.Context(), t.OrganizationID, id, page)
+	if err != nil {
+		writeWorkflowError(w, r, err)
+		return
+	}
+	api.WriteJSON(w, 200, api.ListResponse[DefinitionVersion]{Data: items, Total: total, Limit: page.Limit, Offset: page.Offset, HasMore: page.Offset+len(items) < total})
+}
+
+// GetVersion handles GET /api/v1/workflows/{id}/versions/{version}.
+func (h *Handler) GetVersion(w http.ResponseWriter, r *http.Request) {
+	t, ok := org(w, r)
+	if !ok {
+		return
+	}
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrNotFound.Error())
+	if !ok {
+		return
+	}
+	// The version column is an integer: a number outside 1..MaxInt32
+	// names no version (404, not a database error).
+	number, err := strconv.ParseInt(chi.URLParam(r, "version"), 10, 32)
+	if err != nil || number < 1 {
+		api.WriteError(w, 404, "Not Found", ErrVersionNotFound.Error())
+		return
+	}
+	item, err := h.repo.GetVersion(r.Context(), t.OrganizationID, id, int(number))
+	if err != nil {
+		writeWorkflowError(w, r, err)
+		return
+	}
+	api.WriteJSON(w, 200, item)
+}
+
 func (h *Handler) TriggerRun(w http.ResponseWriter, r *http.Request) {
 	t, ok := org(w, r)
 	if !ok {
@@ -182,26 +363,68 @@ func (h *Handler) TriggerRun(w http.ResponseWriter, r *http.Request) {
 	}
 	api.WriteJSON(w, 201, run)
 }
+
+// ListRuns handles GET /api/v1/workflow-runs (WP-1092 AK3): filters
+// workflow_id, ci_id, status, trigger and from/to on created_at (RFC 3339),
+// newest first with the keyset cursor on (created_at, id).
 func (h *Handler) ListRuns(w http.ResponseWriter, r *http.Request) {
 	t, ok := org(w, r)
 	if !ok {
 		return
 	}
-	// The filter reaches SQL only as a UUID (F-047); an unknown definition
-	// or one of another organization lists nothing alike.
-	workflowID := r.URL.Query().Get("workflow_id")
-	if workflowID != "" && !api.IsUUID(workflowID) {
-		api.WriteFieldError(w, &api.FieldError{Field: "workflow_id", Message: "must be a UUID"})
+	filter, err := parseRunFilter(r.URL.Query())
+	if err != nil {
+		api.WriteFieldError(w, err)
 		return
 	}
-	page := api.ParsePagination(r)
-	items, total, err := h.repo.ListRuns(r.Context(), t.OrganizationID, workflowID, r.URL.Query().Get("status"), page)
+	page, ok := api.ParseNewestFirstPage(w, r)
+	if !ok {
+		return
+	}
+	items, total, err := h.repo.ListRuns(r.Context(), t.OrganizationID, &filter, page)
 	if err != nil {
 		writeWorkflowError(w, r, err)
 		return
 	}
-	api.WriteJSON(w, 200, api.ListResponse[Run]{Data: items, Total: total, Limit: page.Limit, Offset: page.Offset, HasMore: page.Offset+page.Limit < total})
+	api.WriteJSON(w, 200, api.NewestFirstPage(items, total, page, runPosition))
 }
+
+// parseRunFilter reads the filters of the run list. The filters reach SQL
+// only as UUIDs, a known status or a time (F-047); an unknown definition or
+// CI, or one of another organization, lists nothing alike. workflow_id
+// keeps its 400 of WP-021, the filters of WP-1092 answer 422.
+func parseRunFilter(q url.Values) (RunFilter, error) {
+	f := RunFilter{WorkflowID: q.Get("workflow_id"), CIID: q.Get("ci_id"), Status: q.Get("status"), Trigger: q.Get("trigger")}
+	if f.WorkflowID != "" && !api.IsUUID(f.WorkflowID) {
+		return f, &api.FieldError{Field: "workflow_id", Message: "must be a UUID"}
+	}
+	if f.CIID != "" && !api.IsUUID(f.CIID) {
+		return f, &api.FieldError{Field: "ci_id", Message: "must be a UUID", Status: http.StatusUnprocessableEntity}
+	}
+	if f.Status != "" && !slices.Contains(runStatuses, f.Status) {
+		return f, &api.FieldError{Field: "status", Message: "must be one of " + strings.Join(runStatuses, ", "), Status: http.StatusUnprocessableEntity}
+	}
+	if err := api.RejectNUL("trigger", f.Trigger); err != nil {
+		return f, err
+	}
+	for _, bound := range []struct {
+		name string
+		into **time.Time
+	}{{"from", &f.From}, {"to", &f.To}} {
+		raw := q.Get(bound.name)
+		if raw == "" {
+			continue
+		}
+		at, perr := time.Parse(time.RFC3339Nano, raw)
+		if perr != nil {
+			return f, &api.FieldError{Field: bound.name, Message: "must be an RFC 3339 time", Status: http.StatusUnprocessableEntity}
+		}
+		at = at.UTC()
+		*bound.into = &at
+	}
+	return f, nil
+}
+
 func (h *Handler) GetRun(w http.ResponseWriter, r *http.Request) {
 	t, ok := org(w, r)
 	if !ok {
@@ -218,6 +441,51 @@ func (h *Handler) GetRun(w http.ResponseWriter, r *http.Request) {
 	}
 	api.WriteJSON(w, 200, run)
 }
+
+// CancelRun handles POST /api/v1/workflow-runs/{id}/cancel (WP-1092 AK1):
+// a pending or waiting run ends as cancelled; a running or ended run is
+// 409.
+func (h *Handler) CancelRun(w http.ResponseWriter, r *http.Request) {
+	t, ok := org(w, r)
+	if !ok {
+		return
+	}
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrRunNotFound.Error())
+	if !ok {
+		return
+	}
+	run, err := h.exec.Cancel(r.Context(), t.OrganizationID, id)
+	if err != nil {
+		writeWorkflowError(w, r, err)
+		return
+	}
+	api.WriteJSON(w, 200, run)
+}
+
+// RetryRun handles POST /api/v1/workflow-runs/{id}/retry (WP-1092 AK2): a
+// failed run continues at its failed step; any other run is 409.
+func (h *Handler) RetryRun(w http.ResponseWriter, r *http.Request) {
+	t, ok := org(w, r)
+	if !ok {
+		return
+	}
+	id, ok := api.ParseUUIDParam(w, r, "id", ErrRunNotFound.Error())
+	if !ok {
+		return
+	}
+	run, err := h.exec.Retry(r.Context(), t.OrganizationID, id)
+	if err != nil {
+		writeWorkflowError(w, r, err)
+		return
+	}
+	api.WriteJSON(w, 200, run)
+}
+
+// ApproveRun handles POST /api/v1/workflow-runs/{id}/approval (WP-1098
+// AK4): the decision of the calling user, who must be in the approver
+// circle of the waiting step (403 otherwise, also for the excluded
+// initiator); a second decision is 409. The answer is the run with
+// approvals and quorum of the step.
 func (h *Handler) ApproveRun(w http.ResponseWriter, r *http.Request) {
 	t, ok := org(w, r)
 	if !ok {
@@ -232,10 +500,10 @@ func (h *Handler) ApproveRun(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, 400, "Bad Request", err.Error())
 		return
 	}
-	run, err := h.exec.Approve(r.Context(), t.OrganizationID, id, req.Decision, req.Comment)
+	res, err := h.exec.Decide(r.Context(), t.OrganizationID, id, req.Decision, req.Comment)
 	if err != nil {
 		writeWorkflowError(w, r, err)
 		return
 	}
-	api.WriteJSON(w, 200, run)
+	api.WriteJSON(w, 200, res)
 }

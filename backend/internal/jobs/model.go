@@ -6,6 +6,7 @@
 package jobs
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -159,6 +160,13 @@ type Kind struct {
 	// other kind runs to its end and a cancel is refused
 	// (ErrNotCancellable); a queued job of every kind can be cancelled.
 	Cancellable bool
+	// Failed, when set, is called once a job of the kind failed for good:
+	// after its last attempt, also when the reaper or a takeover failed it
+	// because its worker was lost. It lets the kind close what the job's
+	// worker could not (WP-1088: a workflow run left running). It runs
+	// best effort after the change is stored, with the context of the
+	// caller that failed the job.
+	Failed func(ctx context.Context, job *Job)
 }
 
 // ExponentialBackoff doubles base per failed attempt up to limit.
@@ -176,6 +184,8 @@ func ExponentialBackoff(base, limit time.Duration) func(int) time.Duration {
 type Filter struct {
 	Kind   string
 	Status Status
+	// ExcludeKinds are left out (kinds the caller may not read, WP-1158).
+	ExcludeKinds []string
 }
 
 // Errors of the job model.

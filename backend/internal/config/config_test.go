@@ -59,9 +59,9 @@ func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range append(append([]string{
 		"RETICORA_ENVIRONMENT", "RETICORA_RATE_LIMIT_RPM", "RETICORA_RATE_LIMIT_ORG_RPM", "RETICORA_METRICS_TENANT_LABEL", "RETICORA_NATS_URL",
-		"RETICORA_INGEST_LANES", "RETICORA_INVITATION_ACCEPT_URL", "RETICORA_SIGNUP_VERIFY_URL", "RETICORA_EVENTS_MAX_AGE",
+		"RETICORA_INGEST_LANES", "RETICORA_PROBE_STREAM_MAX_BYTES", "RETICORA_PROBE_EDGE_WORKERS", "RETICORA_INVITATION_ACCEPT_URL", "RETICORA_SIGNUP_VERIFY_URL", "RETICORA_EVENTS_MAX_AGE",
 		"RETICORA_EVENTS_MAX_BYTES", "RETICORA_DOCUMENT_MAX_UPLOAD_MB", "RETICORA_DOCUMENT_UPLOAD_CONCURRENCY",
-		"RETICORA_DOCUMENT_UPLOAD_TIMEOUT", "RETICORA_CLAMD_ADDR", "RETICORA_CLAMD_TIMEOUT", "RETICORA_MODULES",
+		"RETICORA_DOCUMENT_UPLOAD_TIMEOUT", "RETICORA_CLAMD_ADDR", "RETICORA_CLAMD_TIMEOUT", "RETICORA_MODULES", "RETICORA_RETENTION_WORKFLOW_RUN_DAYS",
 	}, requiredOutsideDevelopment...), s3Keys...) {
 		t.Setenv(key, "")
 	}
@@ -213,6 +213,9 @@ func TestValidateRejectsInvalidSettings(t *testing.T) {
 		{"no ingest lane", map[string]string{"RETICORA_INGEST_LANES": "0"}, false, "RETICORA_INGEST_LANES must be between 1 and 16, got 0"},
 		{"too many ingest lanes", map[string]string{"RETICORA_INGEST_LANES": "17"}, false, "RETICORA_INGEST_LANES must be between 1 and 16, got 17"},
 		{"unparsable ingest lanes", map[string]string{"RETICORA_INGEST_LANES": "x"}, false, "RETICORA_INGEST_LANES has an invalid value"},
+		{"too few probe edge workers", map[string]string{"RETICORA_PROBE_EDGE_WORKERS": "4"}, false, "RETICORA_PROBE_EDGE_WORKERS must be between 8 and 256, got 4"},
+		{"too many probe edge workers", map[string]string{"RETICORA_PROBE_EDGE_WORKERS": "257"}, false, "RETICORA_PROBE_EDGE_WORKERS must be between 8 and 256, got 257"},
+		{"no probe stream bytes", map[string]string{"RETICORA_PROBE_STREAM_MAX_BYTES": "0"}, false, "RETICORA_PROBE_STREAM_MAX_BYTES must be positive"},
 		{"no upload size", map[string]string{"RETICORA_DOCUMENT_MAX_UPLOAD_MB": "0"}, false, "RETICORA_DOCUMENT_MAX_UPLOAD_MB must be positive"},
 		{"negative upload size", map[string]string{"RETICORA_DOCUMENT_MAX_UPLOAD_MB": "-1"}, false, "RETICORA_DOCUMENT_MAX_UPLOAD_MB must be positive"},
 		{"no upload concurrency", map[string]string{"RETICORA_DOCUMENT_UPLOAD_CONCURRENCY": "0"}, false,
@@ -246,7 +249,7 @@ func TestValidateRejectsInvalidSettings(t *testing.T) {
 // and RETICORA_NATS_URL; without the module, and in development with the
 // default localhost:3310, the start passes.
 func TestValidateDocumentScanner(t *testing.T) {
-	for _, modules := range []string{"", " ", "documents", "P2", "all", "inventory, documents"} {
+	for _, modules := range []string{"", " ", "documents", "P2", "P3", "all", "inventory, documents"} {
 		clearEnv(t)
 		setAll(t, productionEnv)
 		t.Setenv("RETICORA_CLAMD_ADDR", "")
@@ -484,6 +487,24 @@ func TestEventsStreamRetentionSetting(t *testing.T) {
 	t.Setenv("RETICORA_EVENTS_MAX_BYTES", "")
 	if err := Load().Validate(false); err == nil || !strings.Contains(err.Error(), "RETICORA_EVENTS_MAX_AGE must be at least 30d") {
 		t.Errorf("production with 7 days: %v", err)
+	}
+}
+
+// TestWorkflowRunRetentionSetting covers WP-1093 (WFL-02, E-241):
+// RETICORA_RETENTION_WORKFLOW_RUN_DAYS keeps ended workflow runs 400 days by
+// default; a value below 30 days is a start error.
+func TestWorkflowRunRetentionSetting(t *testing.T) {
+	clearEnv(t)
+	if cfg := Load(); cfg.RetentionWorkflowRunDays != 400 || cfg.Validate(true) != nil {
+		t.Fatalf("default: %d days, %v; want 400", cfg.RetentionWorkflowRunDays, cfg.Validate(true))
+	}
+	t.Setenv("RETICORA_RETENTION_WORKFLOW_RUN_DAYS", "30")
+	if cfg := Load(); cfg.RetentionWorkflowRunDays != 30 || cfg.Validate(true) != nil {
+		t.Errorf("30 days: %d, %v", cfg.RetentionWorkflowRunDays, cfg.Validate(true))
+	}
+	t.Setenv("RETICORA_RETENTION_WORKFLOW_RUN_DAYS", "29")
+	if err := Load().Validate(true); err == nil || !strings.Contains(err.Error(), "RETICORA_RETENTION_WORKFLOW_RUN_DAYS must be at least 30") {
+		t.Errorf("29 days: %v, want a start error", err)
 	}
 }
 
@@ -773,5 +794,97 @@ func TestPprofAddrSetting(t *testing.T) {
 				t.Fatalf("Validate() = %v, want an error containing %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// TestModuleAliasAlertingIsReported covers WP-863 (E-160): the former module
+// key alerting is accepted (server.ParseModules) and reported as a
+// configuration warning.
+func TestModuleAliasAlertingIsReported(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("RETICORA_MODULES", "P2, alerting")
+	found := false
+	for _, w := range Load().Warnings() {
+		if strings.Contains(w, "module alerting is deprecated: use monitoring") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("warnings %v lack the alias alerting", Load().Warnings())
+	}
+	t.Setenv("RETICORA_MODULES", "monitoring")
+	for _, w := range Load().Warnings() {
+		if strings.Contains(w, "alerting") {
+			t.Errorf("unexpected warning %q", w)
+		}
+	}
+}
+
+// TestVulnfeedCSAFProvidersMustBeHTTPS covers WP-1118 AK4: a provider
+// URL without HTTPS (or without host, with user info) refuses the start;
+// a list of https URLs is split at commas and marked explicit.
+func TestVulnfeedCSAFProvidersMustBeHTTPS(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("RETICORA_VULNFEED_CSAF_PROVIDERS", "")
+	t.Setenv("RETICORA_VULNFEED_CSAF_INTERVAL", "")
+	cfg := Load()
+	if len(cfg.VulnfeedCSAFProviders) != 0 || cfg.VulnfeedCSAFExplicit() || cfg.VulnfeedCSAFInterval != DefaultVulnfeedCSAFInterval {
+		t.Fatalf("defaults: %v explicit %v interval %s", cfg.VulnfeedCSAFProviders, cfg.VulnfeedCSAFExplicit(), cfg.VulnfeedCSAFInterval)
+	}
+	for _, bad := range []string{"http://csaf.example/.well-known/csaf/provider-metadata.json", "ftp://csaf.example/x",
+		"https:///no-host", "https://reader:secret1@csaf.example/provider-metadata.json", "csaf.example/provider-metadata.json"} {
+		t.Setenv("RETICORA_VULNFEED_CSAF_PROVIDERS", "https://ok.example/provider-metadata.json,"+bad)
+		err := Load().Validate(true)
+		if err == nil || !strings.Contains(err.Error(), "RETICORA_VULNFEED_CSAF_PROVIDERS") {
+			t.Errorf("%s: %v, want a start error naming RETICORA_VULNFEED_CSAF_PROVIDERS", bad, err)
+		}
+	}
+	t.Setenv("RETICORA_VULNFEED_CSAF_PROVIDERS", " https://a.example/provider-metadata.json , https://b.example/aggregator.json ")
+	cfg = Load()
+	if err := cfg.Validate(true); err != nil {
+		t.Fatalf("https providers: %v", err)
+	}
+	if len(cfg.VulnfeedCSAFProviders) != 2 || cfg.VulnfeedCSAFProviders[1] != "https://b.example/aggregator.json" || !cfg.VulnfeedCSAFExplicit() {
+		t.Fatalf("providers %v explicit %v", cfg.VulnfeedCSAFProviders, cfg.VulnfeedCSAFExplicit())
+	}
+	t.Setenv("RETICORA_VULNFEED_CSAF_INTERVAL", "1m")
+	if err := Load().Validate(true); err == nil || !strings.Contains(err.Error(), "RETICORA_VULNFEED_CSAF_INTERVAL") {
+		t.Fatalf("1 min interval: %v", err)
+	}
+}
+
+// TestVulnfeedNVDDisabledWhenAirGapped covers WP-1119 AK2 and AK6: the
+// NVD and KEV import runs only outside the air-gapped profile; the API key
+// is read from RETICORA_VULNFEED_NVD_API_KEY, the interval defaults to
+// 2 h, a non-https KEV URL refuses the start and the key appears in no
+// start error.
+func TestVulnfeedNVDDisabledWhenAirGapped(t *testing.T) {
+	clearEnv(t)
+	for _, k := range []string{"RETICORA_AIR_GAPPED", "RETICORA_VULNFEED_NVD_API_KEY", "RETICORA_VULNFEED_NVD_INTERVAL", "RETICORA_VULNFEED_KEV_URL"} {
+		t.Setenv(k, "")
+	}
+	cfg := Load()
+	if !cfg.VulnfeedNVDEnabled() || cfg.VulnfeedNVDInterval != DefaultVulnfeedNVDInterval || cfg.VulnfeedNVDAPIKey != "" || cfg.VulnfeedKEVURL != "" {
+		t.Fatalf("defaults: enabled %v interval %s key %q kev %q", cfg.VulnfeedNVDEnabled(), cfg.VulnfeedNVDInterval,
+			cfg.VulnfeedNVDAPIKey, cfg.VulnfeedKEVURL)
+	}
+	t.Setenv("RETICORA_AIR_GAPPED", "true")
+	if Load().VulnfeedNVDEnabled() {
+		t.Fatal("NVD import enabled in the air-gapped profile")
+	}
+	t.Setenv("RETICORA_AIR_GAPPED", "")
+	t.Setenv("RETICORA_VULNFEED_NVD_API_KEY", " nvd-key-in-env ")
+	t.Setenv("RETICORA_VULNFEED_KEV_URL", "http://kev.example/kev.json")
+	t.Setenv("RETICORA_VULNFEED_NVD_INTERVAL", "1m")
+	cfg = Load()
+	if cfg.VulnfeedNVDAPIKey != "nvd-key-in-env" {
+		t.Fatalf("key %q", cfg.VulnfeedNVDAPIKey)
+	}
+	err := cfg.Validate(true)
+	if err == nil || !strings.Contains(err.Error(), "RETICORA_VULNFEED_KEV_URL") || !strings.Contains(err.Error(), "RETICORA_VULNFEED_NVD_INTERVAL") {
+		t.Fatalf("validate: %v", err)
+	}
+	if strings.Contains(err.Error(), "nvd-key-in-env") {
+		t.Fatalf("the API key is in the start error: %v", err)
 	}
 }

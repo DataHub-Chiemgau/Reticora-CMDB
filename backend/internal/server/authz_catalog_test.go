@@ -113,10 +113,13 @@ var unroutedKeys = map[string]string{
 	"asset:move": "checked in the handler (WP-756)",
 }
 
-// unroutedUntil are the phase-2 keys of WP-245 whose first route a later
-// work package registers, with that package (E-106). A key leaves the list
-// with its first route.
-var unroutedUntil = map[string]string{}
+// unroutedUntil are the keys whose first route a later work package
+// registers, with that package (E-106, E-161). A key leaves the list with its
+// first route. The phase-3 keys of WP-866 gate scaffold routes only until
+// their domain work packages register them.
+var unroutedUntil = map[string]string{
+	"escalation:manage": "WP-1145 (escalation policies)",
+}
 
 // TestRBA01KeysGateTheirActions covers WP-068 and WP-363 (RBA-01): the
 // actions RBA-01 names are gated by exactly their key, location:* replaces
@@ -190,11 +193,15 @@ func TestRBA01KeysGateTheirActions(t *testing.T) {
 		t.Errorf("unroutedKeys %v, want entitlement:manage, saved_view:manage and asset:move only", unroutedKeys)
 	}
 	for key := range unroutedUntil {
-		if !slices.Contains(p2Keys, key) {
-			t.Errorf("unroutedUntil lists %s, which is no phase-2 key of WP-245", key)
+		if !slices.Contains(p2Keys, key) && !slices.Contains(p3ActionKeys, key) {
+			t.Errorf("unroutedUntil lists %s, which is no phase-2 key of WP-245 or phase-3 key of WP-866", key)
 		}
 	}
 }
+
+// p3ActionKeys are the action keys of phase 3 (RBA-05, E-161, WP-866).
+var p3ActionKeys = []string{"alert:acknowledge", "workflow:approve", "admp:read", "escalation:manage", "org:export", "org:delete",
+	"credential:bind", "vault:manage", "admp:holder_read", "admp:manage"}
 
 // p2Keys are the module and action keys of phase 2 (RBA-05, E-106).
 var p2Keys = []string{
@@ -339,6 +346,42 @@ func TestAuditT2RBA01KeysGateCITypesAndNotificationChannels(t *testing.T) {
 			if twin, ok := normalized[strings.ReplaceAll(p.Key, "_", "")]; ok {
 				t.Errorf("permission catalogue holds %q next to the RBA-01 key %q", k, twin)
 			}
+		}
+	}
+}
+
+// TestP3KeysGateTheirActions covers WP-866 (RBA-05, E-161): the findings
+// routes require finding:*, the acknowledgement of alarms, incidents and
+// notification escalations alert:acknowledge, the escalation chains
+// escalation:manage for reading and writing, IPAM/ASN ipam:*, ADMP
+// admp:read; no registered route requires security:*.
+func TestP3KeysGateTheirActions(t *testing.T) {
+	for _, tc := range []struct{ method, path, want string }{
+		{"GET", "/api/v1/security/findings", "finding:read"},
+		{"PATCH", "/api/v1/security/findings/x", "finding:write"},
+		{"POST", "/api/v1/monitoring/alarms/x/ack", "alert:acknowledge"},
+		{"POST", "/api/v1/monitoring/alarms/x/unack", "alert:acknowledge"},
+		{"POST", "/api/v1/monitoring/incidents/x/ack", "alert:acknowledge"},
+		{"POST", "/api/v1/notification-escalations/x/acknowledge", "alert:acknowledge"},
+		{"GET", "/api/v1/escalation-policies", "escalation:manage"},
+		{"POST", "/api/v1/escalation-policies", "escalation:manage"},
+		{"GET", "/api/v1/notification-escalations/x", "escalation:manage"},
+		{"GET", "/api/v1/ipam-sections", "ipam:read"},
+		{"POST", "/api/v1/asns", "ipam:write"},
+		{"GET", "/api/v1/asn-ranges/x/usage", "ipam:read"},
+		{"PATCH", "/api/v1/bgp-peerings/x", "ipam:write"},
+		{"GET", "/api/v1/nat-translations", "ipam:read"},
+		{"GET", "/api/v1/ipam/ptr-mismatches", "ipam:read"},
+		{"GET", "/api/v1/admp/connections/x", "admp:read"},
+		{"GET", "/api/v1/monitoring/alarms", "monitoring:read"},
+	} {
+		if got, access := PermissionForRoute(tc.method, tc.path); string(got) != tc.want || access != routeProtected {
+			t.Errorf("%s %s requires %q (access %v), want %q", tc.method, tc.path, got, access, tc.want)
+		}
+	}
+	for _, op := range routeTable(t, testRouter(t)) {
+		if required, _ := PermissionForRoute(op.Method, op.Path); strings.HasPrefix(string(required), "security:") {
+			t.Errorf("%s %s requires the replaced key %s", op.Method, op.Path, required)
 		}
 	}
 }

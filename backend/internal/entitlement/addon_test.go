@@ -57,3 +57,19 @@ func TestAddonsNeedTheirOwnEntitlement(t *testing.T) {
 		}
 	}
 }
+
+// TestAddonCatalogCoversAddons covers CH14 and PKG-03 (WP-883): the catalog
+// lists exactly Addons, each with phase A and its i18n key.
+func TestAddonCatalogCoversAddons(t *testing.T) {
+	catalog := AddonCatalog()
+	var keys []string
+	for _, a := range catalog {
+		keys = append(keys, a.Key)
+		if a.Phase != "A" || a.DescriptionKey != "addons."+a.Key+".description" {
+			t.Errorf("catalog entry %+v", a)
+		}
+	}
+	if !slices.Equal(keys, Addons) {
+		t.Errorf("catalog keys %v, want %v", keys, Addons)
+	}
+}

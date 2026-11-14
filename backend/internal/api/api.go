@@ -34,6 +34,16 @@ type PaginationParams struct {
 	CursorError error
 }
 
+// ParseLimit reads only limit, for an answer that is capped but not paged
+// (no offset, no cursor) and has a default of its own: empty, malformed or
+// not positive is def, a larger value is capped at MaxPageLimit (API-02).
+func ParseLimit(r *http.Request, def int) int {
+	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 {
+		return min(n, MaxPageLimit)
+	}
+	return def
+}
+
 // ParsePagination extracts pagination parameters from the request query
 // (API-02): limit (default 50, at most 200; a larger value is capped),
 // offset and the signed cursor. An offset cursor sets Offset; a keyset

@@ -56,7 +56,51 @@
         "ticket.sla_breached",
         "metamodel.published",
         "document.scanned",
-        "import.completed"
+        "import.completed",
+        "probe.state_changed",
+        "alarm.opened",
+        "alarm.acknowledged",
+        "alarm.escalated",
+        "alarm.severity_changed",
+        "alarm.resolved",
+        "incident.opened",
+        "incident.updated",
+        "incident.resolved",
+        "collector_group.unreachable",
+        "collector_group.reachable",
+        "collector_group.failover",
+        "collector.clock_skew",
+        "config.changed",
+        "ci.config_changed",
+        "monitoring.suspension_changed",
+        "capacity.forecast_exceeded",
+        "sla.violated",
+        "maintenance.scheduled",
+        "maintenance.started",
+        "maintenance.ended",
+        "workflow.run_started",
+        "workflow.run_succeeded",
+        "workflow.run_failed",
+        "workflow.run_cancelled",
+        "workflow.approval_requested",
+        "workflow.approval_decided",
+        "workflow.webhook",
+        "finding.created",
+        "finding.changed",
+        "finding.resolved",
+        "notification.escalated",
+        "notification.acknowledged",
+        "entitlement.changed",
+        "org.export_completed",
+        "org.deletion_requested",
+        "org.deletion_cancelled",
+        "ipam.subnet.changed",
+        "ipam.address.state_changed",
+        "asn.changed",
+        "credential.rotated",
+        "credential.rotation_due",
+        "credential.resolution_failed",
+        "admp.connection.refreshed"
       ]
     },
     "org_id": {
@@ -84,7 +128,18 @@
     },
     "data": {
       "type": "object",
-      "description": "The event data; for ci.* the CI, for ci.changed with changed_fields; for a phase 2 type the frame of its $defs entry."
+      "description": "The event data; for ci.* the CI, for ci.changed with changed_fields; for a phase 2 type the frame of its $defs entry. entitlement.warning carries feature, valid_until and days_left, or, when the workflow worker delays runs above the hourly limit (WFL-08, WP-1112), feature, quota (max_workflow_runs_per_hour), limit and delayed_until."
+    },
+    "origin": {
+      "type": "object",
+      "description": "The workflow run whose execution wrote the event (WP-1090); absent for every other writer. Such an event starts workflow runs only of definitions with trigger.allow_workflow_origin, up to trigger depth 3.",
+      "required": ["kind", "depth"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string", "enum": ["workflow_run"] },
+        "run_id": { "type": "string", "format": "uuid", "description": "The workflow run." },
+        "depth": { "type": "integer", "minimum": 0, "description": "Trigger depth of the run: 0 for a run not started by an event of a run." }
+      }
     }
   },
   "dependentRequired": {
@@ -466,6 +521,798 @@
         "properties": {
           "data": {
             "$ref": "#/$defs/import.completed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "probe.state_changed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/probe.state_changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "alarm.opened"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/alarm.opened"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "alarm.acknowledged"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/alarm.acknowledged"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "alarm.escalated"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/alarm.escalated"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "alarm.severity_changed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/alarm.severity_changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "alarm.resolved"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/alarm.resolved"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "incident.opened"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/incident.opened"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "incident.updated"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/incident.updated"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "incident.resolved"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/incident.resolved"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "collector_group.unreachable"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/collector_group.unreachable"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "collector_group.reachable"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/collector_group.reachable"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "collector_group.failover"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/collector_group.failover"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "collector.clock_skew"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/collector.clock_skew"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "config.changed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/config.changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "ci.config_changed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/ci.config_changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "monitoring.suspension_changed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/monitoring.suspension_changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "capacity.forecast_exceeded"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/capacity.forecast_exceeded"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "sla.violated"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/sla.violated"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "maintenance.scheduled"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/maintenance.scheduled"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "maintenance.started"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/maintenance.started"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "maintenance.ended"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/maintenance.ended"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "workflow.run_started"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/workflow.run_started"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "workflow.run_succeeded"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/workflow.run_succeeded"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "workflow.run_failed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/workflow.run_failed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "workflow.run_cancelled"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/workflow.run_cancelled"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "workflow.approval_requested"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/workflow.approval_requested"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "workflow.approval_decided"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/workflow.approval_decided"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "workflow.webhook"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/workflow.webhook"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "finding.created"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/finding.created"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "finding.changed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/finding.changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "finding.resolved"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/finding.resolved"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "notification.escalated"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/notification.escalated"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "notification.acknowledged"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/notification.acknowledged"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "entitlement.changed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/entitlement.changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "org.export_completed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/org.export_completed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "org.deletion_requested"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/org.deletion_requested"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "org.deletion_cancelled"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/org.deletion_cancelled"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "ipam.subnet.changed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/ipam.subnet.changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "ipam.address.state_changed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/ipam.address.state_changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "asn.changed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/asn.changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "credential.rotated"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/credential.rotated"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "credential.rotation_due"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/credential.rotation_due"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "credential.resolution_failed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/credential.resolution_failed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "type": {
+            "const": "admp.connection.refreshed"
+          }
+        },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["entity_id", "entity_seq"],
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/admp.connection.refreshed"
           }
         }
       }
@@ -1748,6 +2595,2451 @@
           "skipped": 17,
           "failed": 3,
           "initiated_by": "88888888-8888-4888-8888-888888888888"
+        }
+      ]
+    },
+    "probe.state_changed": {
+      "description": "Data of probe.state_changed. entity_id: the probe. Origin: EVT-03 [P3], E-161. Producer: WP-961. one state change of a probe, never one result (E-161). suppressed_by and root_incident_id name the root of a consequential outage.",
+      "type": "object",
+      "required": ["id", "from", "to"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The probe."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object belongs to; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "from": {
+          "type": "string",
+          "enum": ["up", "degraded", "down", "unknown"],
+          "description": "State before the change."
+        },
+        "to": {
+          "type": "string",
+          "enum": ["up", "degraded", "down", "unknown"],
+          "description": "State after the change."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Reason code of the state (e.g. timeout, collector_unreachable, parent_down)."
+        },
+        "suppressed_by": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The root alarm that suppresses the notification of this change."
+        },
+        "root_incident_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident of the root cause of a consequential outage."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "from": "up",
+          "to": "unknown",
+          "reason": "timeout",
+          "suppressed_by": "99999999-9999-4999-8999-999999999999",
+          "root_incident_id": "99999999-9999-4999-8999-999999999999"
+        }
+      ]
+    },
+    "alarm.opened": {
+      "description": "Data of alarm.opened. entity_id: the alarm. Origin: EVT-03 [P3], E-161. Producer: WP-982. AlarmData is the data of the alarm.* types (ALR-01, ALR-02).",
+      "type": "object",
+      "required": ["id", "alarm_id", "dedup_key", "severity"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The alarm."
+        },
+        "alarm_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The alarm (same as id; the name of ALR-01)."
+        },
+        "dedup_key": {
+          "type": "string",
+          "description": "Deduplication key of the alarm: source, source id and series."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object belongs to; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["info", "warning", "critical"],
+          "description": "Severity."
+        },
+        "incident_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident the alarm belongs to; absent before the correlation."
+        },
+        "source_kind": {
+          "type": "string",
+          "enum": ["rule", "check", "collector", "config", "capacity", "sla"],
+          "description": "Source of the alarm (WP-987)."
+        },
+        "summary": {
+          "type": "string",
+          "description": "Summary of the alarm for the notification texts, at most 500 characters (WP-987)."
+        },
+        "value": {
+          "type": "number",
+          "description": "Measured value of a rule alarm; absent for the other sources (WP-987)."
+        },
+        "suppressed_reason": {
+          "type": "string",
+          "enum": ["maintenance", "symptom", "flapping"],
+          "description": "Why the alarm is suppressed; a suppressed alarm notifies nobody (WP-987). Absent when it is not suppressed."
+        },
+        "after_maintenance": {
+          "type": "boolean",
+          "description": "true on the alarm.opened of an alarm still open at the end of the maintenance window that suppressed it (notify_after_maintenance, WP-1033); absent otherwise."
+        },
+        "opened_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the alarm opened; absent for an alarm that never opened (WP-987)."
+        },
+        "resolved_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the alarm was resolved; only on alarm.resolved (WP-987)."
+        },
+        "actions": {
+          "type": "object",
+          "description": "Follow-up actions of the alarm (MON-04, WP-988): the actions of its alert rule, the defaults for the other sources. notify.enabled false notifies nobody, webhook.enabled false reaches no webhook subscription; the event stays in the outbox and the stream. Absent is both on.",
+          "additionalProperties": false,
+          "properties": {
+            "notify": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled"],
+              "properties": { "enabled": { "type": "boolean" } }
+            },
+            "webhook": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled"],
+              "properties": { "enabled": { "type": "boolean" } }
+            },
+            "ticket": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The ticket action of the rule (WP-1040); absent is off.",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "priority": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+                "category": { "type": "string", "maxLength": 100 },
+                "reporter_id": { "type": "string", "format": "uuid" },
+                "close_on_resolve": { "type": "boolean" }
+              }
+            }
+          }
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "alarm_id": "11111111-1111-4111-8111-111111111111",
+          "dedup_key": "rule:55555555-5555-4555-8555-555555555555:ifInErrors/eth0",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "severity": "critical",
+          "incident_id": "99999999-9999-4999-8999-999999999999",
+          "source_kind": "rule",
+          "summary": "if errors: ifInErrors critical (value 42)",
+          "value": 42,
+          "opened_at": "2026-11-09T10:00:00Z",
+          "actions": { "notify": { "enabled": true }, "webhook": { "enabled": false } }
+        }
+      ]
+    },
+    "alarm.acknowledged": {
+      "description": "Data of alarm.acknowledged. entity_id: the alarm. Origin: EVT-03 [P3], E-161. Producer: WP-982. AlarmData is the data of the alarm.* types (ALR-01, ALR-02).",
+      "type": "object",
+      "required": ["id", "alarm_id", "dedup_key", "severity"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The alarm."
+        },
+        "alarm_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The alarm (same as id; the name of ALR-01)."
+        },
+        "dedup_key": {
+          "type": "string",
+          "description": "Deduplication key of the alarm: source, source id and series."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object belongs to; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["info", "warning", "critical"],
+          "description": "Severity."
+        },
+        "incident_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident the alarm belongs to; absent before the correlation."
+        },
+        "source_kind": {
+          "type": "string",
+          "enum": ["rule", "check", "collector", "config", "capacity", "sla"],
+          "description": "Source of the alarm (WP-987)."
+        },
+        "summary": {
+          "type": "string",
+          "description": "Summary of the alarm for the notification texts, at most 500 characters (WP-987)."
+        },
+        "value": {
+          "type": "number",
+          "description": "Measured value of a rule alarm; absent for the other sources (WP-987)."
+        },
+        "suppressed_reason": {
+          "type": "string",
+          "enum": ["maintenance", "symptom", "flapping"],
+          "description": "Why the alarm is suppressed; a suppressed alarm notifies nobody (WP-987). Absent when it is not suppressed."
+        },
+        "after_maintenance": {
+          "type": "boolean",
+          "description": "true on the alarm.opened of an alarm still open at the end of the maintenance window that suppressed it (notify_after_maintenance, WP-1033); absent otherwise."
+        },
+        "opened_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the alarm opened; absent for an alarm that never opened (WP-987)."
+        },
+        "resolved_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the alarm was resolved; only on alarm.resolved (WP-987)."
+        },
+        "actions": {
+          "type": "object",
+          "description": "Follow-up actions of the alarm (MON-04, WP-988): the actions of its alert rule, the defaults for the other sources. notify.enabled false notifies nobody, webhook.enabled false reaches no webhook subscription; the event stays in the outbox and the stream. Absent is both on.",
+          "additionalProperties": false,
+          "properties": {
+            "notify": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled"],
+              "properties": { "enabled": { "type": "boolean" } }
+            },
+            "webhook": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled"],
+              "properties": { "enabled": { "type": "boolean" } }
+            },
+            "ticket": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The ticket action of the rule (WP-1040); absent is off.",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "priority": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+                "category": { "type": "string", "maxLength": 100 },
+                "reporter_id": { "type": "string", "format": "uuid" },
+                "close_on_resolve": { "type": "boolean" }
+              }
+            }
+          }
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "alarm_id": "11111111-1111-4111-8111-111111111111",
+          "dedup_key": "rule:55555555-5555-4555-8555-555555555555:ifInErrors/eth0",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "severity": "critical",
+          "incident_id": "99999999-9999-4999-8999-999999999999"
+        }
+      ]
+    },
+    "alarm.escalated": {
+      "description": "Data of alarm.escalated. entity_id: the alarm. Origin: EVT-03 [P3], E-161. Producer: WP-1146. AlarmData is the data of the alarm.* types (ALR-01, ALR-02).",
+      "type": "object",
+      "required": ["id", "alarm_id", "dedup_key", "severity"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The alarm."
+        },
+        "alarm_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The alarm (same as id; the name of ALR-01)."
+        },
+        "dedup_key": {
+          "type": "string",
+          "description": "Deduplication key of the alarm: source, source id and series."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object belongs to; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["info", "warning", "critical"],
+          "description": "Severity."
+        },
+        "incident_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident the alarm belongs to; absent before the correlation."
+        },
+        "source_kind": {
+          "type": "string",
+          "enum": ["rule", "check", "collector", "config", "capacity", "sla"],
+          "description": "Source of the alarm (WP-987)."
+        },
+        "summary": {
+          "type": "string",
+          "description": "Summary of the alarm for the notification texts, at most 500 characters (WP-987)."
+        },
+        "value": {
+          "type": "number",
+          "description": "Measured value of a rule alarm; absent for the other sources (WP-987)."
+        },
+        "suppressed_reason": {
+          "type": "string",
+          "enum": ["maintenance", "symptom", "flapping"],
+          "description": "Why the alarm is suppressed; a suppressed alarm notifies nobody (WP-987). Absent when it is not suppressed."
+        },
+        "after_maintenance": {
+          "type": "boolean",
+          "description": "true on the alarm.opened of an alarm still open at the end of the maintenance window that suppressed it (notify_after_maintenance, WP-1033); absent otherwise."
+        },
+        "opened_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the alarm opened; absent for an alarm that never opened (WP-987)."
+        },
+        "resolved_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the alarm was resolved; only on alarm.resolved (WP-987)."
+        },
+        "actions": {
+          "type": "object",
+          "description": "Follow-up actions of the alarm (MON-04, WP-988): the actions of its alert rule, the defaults for the other sources. notify.enabled false notifies nobody, webhook.enabled false reaches no webhook subscription; the event stays in the outbox and the stream. Absent is both on.",
+          "additionalProperties": false,
+          "properties": {
+            "notify": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled"],
+              "properties": { "enabled": { "type": "boolean" } }
+            },
+            "webhook": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled"],
+              "properties": { "enabled": { "type": "boolean" } }
+            },
+            "ticket": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The ticket action of the rule (WP-1040); absent is off.",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "priority": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+                "category": { "type": "string", "maxLength": 100 },
+                "reporter_id": { "type": "string", "format": "uuid" },
+                "close_on_resolve": { "type": "boolean" }
+              }
+            }
+          }
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "alarm_id": "11111111-1111-4111-8111-111111111111",
+          "dedup_key": "rule:55555555-5555-4555-8555-555555555555:ifInErrors/eth0",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "severity": "critical",
+          "incident_id": "99999999-9999-4999-8999-999999999999"
+        }
+      ]
+    },
+    "alarm.severity_changed": {
+      "description": "Data of alarm.severity_changed. entity_id: the alarm. Origin: EVT-03 [P3], E-161. Producer: WP-982. AlarmData is the data of the alarm.* types (ALR-01, ALR-02).",
+      "type": "object",
+      "required": ["id", "alarm_id", "dedup_key", "severity"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The alarm."
+        },
+        "alarm_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The alarm (same as id; the name of ALR-01)."
+        },
+        "dedup_key": {
+          "type": "string",
+          "description": "Deduplication key of the alarm: source, source id and series."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object belongs to; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["info", "warning", "critical"],
+          "description": "Severity."
+        },
+        "incident_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident the alarm belongs to; absent before the correlation."
+        },
+        "source_kind": {
+          "type": "string",
+          "enum": ["rule", "check", "collector", "config", "capacity", "sla"],
+          "description": "Source of the alarm (WP-987)."
+        },
+        "summary": {
+          "type": "string",
+          "description": "Summary of the alarm for the notification texts, at most 500 characters (WP-987)."
+        },
+        "value": {
+          "type": "number",
+          "description": "Measured value of a rule alarm; absent for the other sources (WP-987)."
+        },
+        "suppressed_reason": {
+          "type": "string",
+          "enum": ["maintenance", "symptom", "flapping"],
+          "description": "Why the alarm is suppressed; a suppressed alarm notifies nobody (WP-987). Absent when it is not suppressed."
+        },
+        "after_maintenance": {
+          "type": "boolean",
+          "description": "true on the alarm.opened of an alarm still open at the end of the maintenance window that suppressed it (notify_after_maintenance, WP-1033); absent otherwise."
+        },
+        "opened_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the alarm opened; absent for an alarm that never opened (WP-987)."
+        },
+        "resolved_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the alarm was resolved; only on alarm.resolved (WP-987)."
+        },
+        "actions": {
+          "type": "object",
+          "description": "Follow-up actions of the alarm (MON-04, WP-988): the actions of its alert rule, the defaults for the other sources. notify.enabled false notifies nobody, webhook.enabled false reaches no webhook subscription; the event stays in the outbox and the stream. Absent is both on.",
+          "additionalProperties": false,
+          "properties": {
+            "notify": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled"],
+              "properties": { "enabled": { "type": "boolean" } }
+            },
+            "webhook": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled"],
+              "properties": { "enabled": { "type": "boolean" } }
+            },
+            "ticket": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The ticket action of the rule (WP-1040); absent is off.",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "priority": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+                "category": { "type": "string", "maxLength": 100 },
+                "reporter_id": { "type": "string", "format": "uuid" },
+                "close_on_resolve": { "type": "boolean" }
+              }
+            }
+          }
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "alarm_id": "11111111-1111-4111-8111-111111111111",
+          "dedup_key": "rule:55555555-5555-4555-8555-555555555555:ifInErrors/eth0",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "severity": "critical",
+          "incident_id": "99999999-9999-4999-8999-999999999999"
+        }
+      ]
+    },
+    "alarm.resolved": {
+      "description": "Data of alarm.resolved. entity_id: the alarm. Origin: EVT-03 [P3], E-161. Producer: WP-982. AlarmData is the data of the alarm.* types (ALR-01, ALR-02).",
+      "type": "object",
+      "required": ["id", "alarm_id", "dedup_key", "severity"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The alarm."
+        },
+        "alarm_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The alarm (same as id; the name of ALR-01)."
+        },
+        "dedup_key": {
+          "type": "string",
+          "description": "Deduplication key of the alarm: source, source id and series."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object belongs to; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["info", "warning", "critical"],
+          "description": "Severity."
+        },
+        "incident_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident the alarm belongs to; absent before the correlation."
+        },
+        "source_kind": {
+          "type": "string",
+          "enum": ["rule", "check", "collector", "config", "capacity", "sla"],
+          "description": "Source of the alarm (WP-987)."
+        },
+        "summary": {
+          "type": "string",
+          "description": "Summary of the alarm for the notification texts, at most 500 characters (WP-987)."
+        },
+        "value": {
+          "type": "number",
+          "description": "Measured value of a rule alarm; absent for the other sources (WP-987)."
+        },
+        "suppressed_reason": {
+          "type": "string",
+          "enum": ["maintenance", "symptom", "flapping"],
+          "description": "Why the alarm is suppressed; a suppressed alarm notifies nobody (WP-987). Absent when it is not suppressed."
+        },
+        "after_maintenance": {
+          "type": "boolean",
+          "description": "true on the alarm.opened of an alarm still open at the end of the maintenance window that suppressed it (notify_after_maintenance, WP-1033); absent otherwise."
+        },
+        "opened_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the alarm opened; absent for an alarm that never opened (WP-987)."
+        },
+        "resolved_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the alarm was resolved; only on alarm.resolved (WP-987)."
+        },
+        "actions": {
+          "type": "object",
+          "description": "Follow-up actions of the alarm (MON-04, WP-988): the actions of its alert rule, the defaults for the other sources. notify.enabled false notifies nobody, webhook.enabled false reaches no webhook subscription; the event stays in the outbox and the stream. Absent is both on.",
+          "additionalProperties": false,
+          "properties": {
+            "notify": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled"],
+              "properties": { "enabled": { "type": "boolean" } }
+            },
+            "webhook": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["enabled"],
+              "properties": { "enabled": { "type": "boolean" } }
+            },
+            "ticket": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The ticket action of the rule (WP-1040); absent is off.",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "priority": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+                "category": { "type": "string", "maxLength": 100 },
+                "reporter_id": { "type": "string", "format": "uuid" },
+                "close_on_resolve": { "type": "boolean" }
+              }
+            }
+          }
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "alarm_id": "11111111-1111-4111-8111-111111111111",
+          "dedup_key": "rule:55555555-5555-4555-8555-555555555555:ifInErrors/eth0",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "severity": "critical",
+          "incident_id": "99999999-9999-4999-8999-999999999999",
+          "source_kind": "rule",
+          "summary": "if errors: ifInErrors critical (value 42)",
+          "value": 42,
+          "opened_at": "2026-11-09T10:00:00Z",
+          "resolved_at": "2026-11-09T10:25:00Z"
+        }
+      ]
+    },
+    "incident.opened": {
+      "description": "Data of incident.opened. entity_id: the incident. Origin: EVT-03 [P3], E-161. Producer: WP-1028. the incident with its root CI and cause class.",
+      "type": "object",
+      "required": ["id", "severity"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident."
+        },
+        "root_ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI of the root cause; absent for a network outage of a collector group."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["info", "warning", "critical"],
+          "description": "Severity."
+        },
+        "cause_class": {
+          "type": "string",
+          "description": "Cause class (topology, collector_unreachable, config_change, unknown)."
+        },
+        "incident_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident (same as id); set on incident.updated of a user action (WP-1036)."
+        },
+        "change": {
+          "type": "string",
+          "enum": ["acknowledged", "root_changed"],
+          "description": "The kind of the change of incident.updated of a user action (WP-1036)."
+        },
+        "root_alarm_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The root alarm after the change; absent without root."
+        },
+        "actor_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The acting user of incident.updated (WP-1036); absent for the system."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "root_ci_id": "99999999-9999-4999-8999-999999999999",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "severity": "critical",
+          "cause_class": "topology"
+        }
+      ]
+    },
+    "incident.updated": {
+      "description": "Data of incident.updated. entity_id: the incident. Origin: EVT-03 [P3], E-161. Producer: WP-1036. the incident with its root CI and cause class.",
+      "type": "object",
+      "required": ["id", "severity"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident."
+        },
+        "root_ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI of the root cause; absent for a network outage of a collector group."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["info", "warning", "critical"],
+          "description": "Severity."
+        },
+        "cause_class": {
+          "type": "string",
+          "description": "Cause class (topology, collector_unreachable, config_change, unknown)."
+        },
+        "incident_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident (same as id); set on incident.updated of a user action (WP-1036)."
+        },
+        "change": {
+          "type": "string",
+          "enum": ["acknowledged", "root_changed"],
+          "description": "The kind of the change of incident.updated of a user action (WP-1036)."
+        },
+        "root_alarm_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The root alarm after the change; absent without root."
+        },
+        "actor_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The acting user of incident.updated (WP-1036); absent for the system."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "root_ci_id": "99999999-9999-4999-8999-999999999999",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "severity": "critical",
+          "cause_class": "topology",
+          "incident_id": "11111111-1111-4111-8111-111111111111",
+          "change": "root_changed",
+          "root_alarm_id": "55555555-5555-4555-8555-555555555555",
+          "actor_id": "66666666-6666-4666-8666-666666666666"
+        }
+      ]
+    },
+    "incident.resolved": {
+      "description": "Data of incident.resolved. entity_id: the incident. Origin: EVT-03 [P3], E-161. Producer: WP-1028. the incident with its root CI and cause class.",
+      "type": "object",
+      "required": ["id", "severity"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident."
+        },
+        "root_ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI of the root cause; absent for a network outage of a collector group."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["info", "warning", "critical"],
+          "description": "Severity."
+        },
+        "cause_class": {
+          "type": "string",
+          "description": "Cause class (topology, collector_unreachable, config_change, unknown)."
+        },
+        "incident_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident (same as id); set on incident.updated of a user action (WP-1036)."
+        },
+        "change": {
+          "type": "string",
+          "enum": ["acknowledged", "root_changed"],
+          "description": "The kind of the change of incident.updated of a user action (WP-1036)."
+        },
+        "root_alarm_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The root alarm after the change; absent without root."
+        },
+        "actor_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The acting user of incident.updated (WP-1036); absent for the system."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "root_ci_id": "99999999-9999-4999-8999-999999999999",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "severity": "critical",
+          "cause_class": "topology"
+        }
+      ]
+    },
+    "collector_group.unreachable": {
+      "description": "Data of collector_group.unreachable. entity_id: the collector group. Origin: EVT-03 [P3], E-161. Producer: WP-964. the group, its scope and the root event of a network outage.",
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The collector group."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "root_event_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The root event of the network outage (collector_group.unreachable)."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "root_event_id": "99999999-9999-4999-8999-999999999999"
+        }
+      ]
+    },
+    "collector_group.reachable": {
+      "description": "Data of collector_group.reachable. entity_id: the collector group. Origin: EVT-03 [P3], E-161. Producer: WP-964. the group, its scope and the root event of a network outage.",
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The collector group."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "root_event_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The root event of the network outage (collector_group.unreachable)."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "root_event_id": "99999999-9999-4999-8999-999999999999"
+        }
+      ]
+    },
+    "collector_group.failover": {
+      "description": "Data of collector_group.failover. entity_id: the collector group. Origin: EVT-03 [P3], E-161. Producer: WP-963. a member of the group stopped its monitoring alive messages; its probes moved to the remaining healthy members.",
+      "type": "object",
+      "required": ["id", "collector_group_id", "failed_collector_id", "moved_probes"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The collector group."
+        },
+        "collector_group_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The collector group (same as id)."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "failed_collector_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The member set down after the liveness timeout of its group."
+        },
+        "moved_probes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of probes that moved from the failed member to the remaining healthy members."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "collector_group_id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "failed_collector_id": "99999999-9999-4999-8999-999999999999",
+          "moved_probes": 1000
+        }
+      ]
+    },
+    "collector.clock_skew": {
+      "description": "Data of collector.clock_skew. entity_id: the collector. Origin: EVT-03 [P3], E-161. Producer: WP-962. a collector whose clock deviates from the server.",
+      "type": "object",
+      "required": ["id", "collector_id", "skew_ms", "offset_ms", "degraded"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The collector."
+        },
+        "collector_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The collector (same as id, the name of WP-962 AK3)."
+        },
+        "collector_group_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The group of the collector."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "skew_ms": {
+          "type": "integer",
+          "description": "Deviation of the collector clock in milliseconds (collector − server, median of the last six alive messages)."
+        },
+        "offset_ms": {
+          "type": "integer",
+          "description": "Same as skew_ms (the name of WP-962 AK3): collector − server in milliseconds."
+        },
+        "degraded": {
+          "type": "boolean",
+          "description": "true when the deviation crossed 60 s: the member is degraded and its timestamps are corrected; false for the warning from 2 s."
+        },
+        "resolved": {
+          "type": "boolean",
+          "description": "true when the deviation stayed below 2 s for six alive messages; absent otherwise."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "collector_id": "11111111-1111-4111-8111-111111111111",
+          "collector_group_id": "99999999-9999-4999-8999-999999999999",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "skew_ms": 2500,
+          "offset_ms": 2500,
+          "degraded": false
+        }
+      ]
+    },
+    "config.changed": {
+      "description": "Data of config.changed. entity_id: the probe. Origin: EVT-03 [P3], E-161. Producer: WP-939. a change of the configuration of a probe, never of a device (E-161).",
+      "type": "object",
+      "required": ["id", "changed_fields"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The probe."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object belongs to; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "changed_fields": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The changed settings."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "changed_fields": ["interval_s"]
+        }
+      ]
+    },
+    "ci.config_changed": {
+      "description": "Data of ci.config_changed. entity_id: the CI. Origin: EVT-03 [P3], E-161. Producer: WP-1054. a new configuration version of a device.",
+      "type": "object",
+      "required": ["id", "ci_id", "hash"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The configuration version."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "hash": {
+          "type": "string",
+          "description": "Hash of the masked configuration."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "hash": "sha256:ab12"
+        }
+      ]
+    },
+    "monitoring.suspension_changed": {
+      "description": "Data of monitoring.suspension_changed. entity_id: the organization. Origin: EVT-03 [P3], E-161. Producer: WP-942. monitoring functions of the organization were suspended or resumed because their feature was lost or regained.",
+      "type": "object",
+      "required": ["feature_key", "suspended"],
+      "additionalProperties": true,
+      "properties": {
+        "feature_key": {
+          "type": "string",
+          "description": "The feature key whose functions changed."
+        },
+        "suspended": {
+          "type": "boolean",
+          "description": "true: suspended, false: resumed."
+        }
+      },
+      "examples": [
+        {
+          "feature_key": "monitoring_network",
+          "suspended": true
+        }
+      ]
+    },
+    "capacity.forecast_exceeded": {
+      "description": "Data of capacity.forecast_exceeded. entity_id: the forecast. Origin: EVT-03 [P3], E-161. Producer: WP-1060. a forecast reaches its threshold within the horizon.",
+      "type": "object",
+      "required": ["id", "ci_id", "metric", "threshold_at"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The forecast."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "metric": {
+          "type": "string",
+          "description": "The forecast metric."
+        },
+        "threshold_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the threshold is reached."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "metric": "if_in_utilization",
+          "threshold_at": "2026-12-01T00:00:00Z"
+        }
+      ]
+    },
+    "sla.violated": {
+      "description": "Data of sla.violated. entity_id: the availability target. Origin: EVT-03 [P3], E-161. Producer: WP-1049. an availability target missed its goal in a period.",
+      "type": "object",
+      "required": ["id", "period", "target_percent", "actual_percent"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The availability target."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "period": {
+          "type": "string",
+          "description": "The period (e.g. 2026-11)."
+        },
+        "target_percent": {
+          "type": "number",
+          "description": "The goal in percent."
+        },
+        "actual_percent": {
+          "type": "number",
+          "description": "The availability reached in percent."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "period": "2026-11",
+          "target_percent": 99.5,
+          "actual_percent": 99.5
+        }
+      ]
+    },
+    "maintenance.scheduled": {
+      "description": "Data of maintenance.scheduled. entity_id: the maintenance window. Origin: EVT-03 [P3], MGT-04. Producer: WP-1034. the window, its scope and its time span.",
+      "type": "object",
+      "required": ["id", "starts_at", "ends_at"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The maintenance window."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "starts_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Start of the window."
+        },
+        "ends_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "End of the window."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "starts_at": "2026-12-01T22:00:00Z",
+          "ends_at": "2026-12-01T22:00:00Z"
+        }
+      ]
+    },
+    "maintenance.started": {
+      "description": "Data of maintenance.started. entity_id: the maintenance window. Origin: EVT-03 [P3], MGT-04. Producer: WP-1033. the window, its scope and its time span.",
+      "type": "object",
+      "required": ["id", "starts_at", "ends_at"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The maintenance window."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "starts_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Start of the window."
+        },
+        "ends_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "End of the window."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "starts_at": "2026-12-01T22:00:00Z",
+          "ends_at": "2026-12-01T22:00:00Z"
+        }
+      ]
+    },
+    "maintenance.ended": {
+      "description": "Data of maintenance.ended. entity_id: the maintenance window. Origin: EVT-03 [P3], MGT-04. Producer: WP-1033. the window, its scope and its time span.",
+      "type": "object",
+      "required": ["id", "starts_at", "ends_at"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The maintenance window."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "starts_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Start of the window."
+        },
+        "ends_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "End of the window."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "starts_at": "2026-12-01T22:00:00Z",
+          "ends_at": "2026-12-01T22:00:00Z"
+        }
+      ]
+    },
+    "workflow.run_started": {
+      "description": "Data of workflow.run_started. entity_id: the workflow run. Origin: EVT-03 [P3], WFL-02. Producer: WP-1092. the run, its workflow and the object of its trigger.",
+      "type": "object",
+      "required": ["id", "workflow_id", "status"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The workflow run."
+        },
+        "workflow_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The workflow definition."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object concerns; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["running", "succeeded", "failed", "cancelled"],
+          "description": "Status of the run."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "workflow_id": "55555555-5555-4555-8555-555555555555",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "status": "running"
+        }
+      ]
+    },
+    "workflow.run_succeeded": {
+      "description": "Data of workflow.run_succeeded. entity_id: the workflow run. Origin: EVT-03 [P3], WFL-02. Producer: WP-1092. the run, its workflow and the object of its trigger.",
+      "type": "object",
+      "required": ["id", "workflow_id", "status"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The workflow run."
+        },
+        "workflow_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The workflow definition."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object concerns; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["running", "succeeded", "failed", "cancelled"],
+          "description": "Status of the run."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "workflow_id": "55555555-5555-4555-8555-555555555555",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "status": "running"
+        }
+      ]
+    },
+    "workflow.run_failed": {
+      "description": "Data of workflow.run_failed. entity_id: the workflow run. Origin: EVT-03 [P3], WFL-02. Producer: WP-1092. the run, its workflow and the object of its trigger.",
+      "type": "object",
+      "required": ["id", "workflow_id", "status"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The workflow run."
+        },
+        "workflow_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The workflow definition."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object concerns; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["running", "succeeded", "failed", "cancelled"],
+          "description": "Status of the run."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "workflow_id": "55555555-5555-4555-8555-555555555555",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "status": "running"
+        }
+      ]
+    },
+    "workflow.run_cancelled": {
+      "description": "Data of workflow.run_cancelled. entity_id: the workflow run. Origin: EVT-03 [P3], WFL-02. Producer: WP-1092. the run, its workflow and the object of its trigger.",
+      "type": "object",
+      "required": ["id", "workflow_id", "status"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The workflow run."
+        },
+        "workflow_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The workflow definition."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object concerns; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["running", "succeeded", "failed", "cancelled"],
+          "description": "Status of the run."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "workflow_id": "55555555-5555-4555-8555-555555555555",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "status": "running"
+        }
+      ]
+    },
+    "workflow.approval_requested": {
+      "description": "Data of workflow.approval_requested. entity_id: the approval. Origin: EVT-03 [P3], WFL-04. Producer: WP-1098. one approval step of a run.",
+      "type": "object",
+      "required": ["id", "run_id", "step_key"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The approval."
+        },
+        "run_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The workflow run."
+        },
+        "step_key": {
+          "type": "string",
+          "description": "The step of the workflow definition."
+        },
+        "decision": {
+          "type": "string",
+          "enum": ["approved", "rejected"],
+          "description": "The decision; absent while requested."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "run_id": "55555555-5555-4555-8555-555555555555",
+          "step_key": "approve_handover",
+          "decision": "approved",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444"
+        }
+      ]
+    },
+    "workflow.approval_decided": {
+      "description": "Data of workflow.approval_decided. entity_id: the approval. Origin: EVT-03 [P3], WFL-04. Producer: WP-1098. one approval step of a run.",
+      "type": "object",
+      "required": ["id", "run_id", "step_key"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The approval."
+        },
+        "run_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The workflow run."
+        },
+        "step_key": {
+          "type": "string",
+          "description": "The step of the workflow definition."
+        },
+        "decision": {
+          "type": "string",
+          "enum": ["approved", "rejected"],
+          "description": "The decision; absent while requested."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "run_id": "55555555-5555-4555-8555-555555555555",
+          "step_key": "approve_handover",
+          "decision": "approved",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444"
+        }
+      ]
+    },
+    "workflow.webhook": {
+      "description": "Data of workflow.webhook. entity_id: the workflow run. Origin: EVT-03 [P3], WFL-02. Producer: WP-1096. the send_webhook action of a run (WFL-02); the action adds its fields.",
+      "type": "object",
+      "required": ["id", "workflow_id"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The workflow run."
+        },
+        "workflow_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The workflow definition."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object concerns; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "workflow_id": "55555555-5555-4555-8555-555555555555",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444"
+        }
+      ]
+    },
+    "finding.created": {
+      "description": "Data of finding.created. entity_id: the finding. Origin: EVT-03 [P3], SEC-02. Producer: WP-1116. the finding of a CI with its severity.",
+      "type": "object",
+      "required": ["id", "severity"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The finding."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object concerns; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "critical"],
+          "description": "Severity of the finding."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "severity": "low"
+        }
+      ]
+    },
+    "finding.changed": {
+      "description": "Data of finding.changed. entity_id: the finding. Origin: EVT-03 [P3], SEC-02. Producer: WP-1116. the finding of a CI with its severity.",
+      "type": "object",
+      "required": ["id", "severity"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The finding."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object concerns; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "critical"],
+          "description": "Severity of the finding."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "severity": "low"
+        }
+      ]
+    },
+    "finding.resolved": {
+      "description": "Data of finding.resolved. entity_id: the finding. Origin: EVT-03 [P3], SEC-02. Producer: WP-1116. the finding of a CI with its severity.",
+      "type": "object",
+      "required": ["id", "severity"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The finding."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the object concerns; absent without CI."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["low", "medium", "high", "critical"],
+          "description": "Severity of the finding."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "severity": "low"
+        }
+      ]
+    },
+    "notification.escalated": {
+      "description": "Data of notification.escalated. entity_id: the notification escalation. Origin: EVT-03 [P3], NTF-02. Producer: WP-1146. one step of an escalation chain.",
+      "type": "object",
+      "required": ["id", "step"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The notification escalation."
+        },
+        "alarm_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The alarm that is escalated."
+        },
+        "incident_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident that is escalated."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "step": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The step of the escalation policy."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "alarm_id": "55555555-5555-4555-8555-555555555555",
+          "incident_id": "55555555-5555-4555-8555-555555555555",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "step": 1
+        }
+      ]
+    },
+    "notification.acknowledged": {
+      "description": "Data of notification.acknowledged. entity_id: the notification escalation. Origin: EVT-03 [P3], NTF-02. Producer: WP-1146. one step of an escalation chain.",
+      "type": "object",
+      "required": ["id", "step"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The notification escalation."
+        },
+        "alarm_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The alarm that is escalated."
+        },
+        "incident_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The incident that is escalated."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "step": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The step of the escalation policy."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "alarm_id": "55555555-5555-4555-8555-555555555555",
+          "incident_id": "55555555-5555-4555-8555-555555555555",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "step": 1
+        }
+      ]
+    },
+    "entitlement.changed": {
+      "description": "Data of entitlement.changed. entity_id: the organization. Origin: EVT-03 [P3], PKG-02. Producer: WP-882. a change of plan, add-on or quota of the organization.",
+      "type": "object",
+      "required": ["id", "plan", "changed"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The organization."
+        },
+        "plan": {
+          "type": "string",
+          "enum": ["essential", "standard", "pro", "enterprise"],
+          "description": "The plan after the change."
+        },
+        "plan_before": {
+          "type": "string",
+          "enum": ["essential", "standard", "pro", "enterprise"],
+          "description": "The plan before a plan change (WP-882); absent when the plan stayed."
+        },
+        "addon": {
+          "type": "string",
+          "description": "The add-on booked or cancelled (WP-883); absent for a plan change."
+        },
+        "changed": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The feature keys and quotas that changed."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "plan": "essential",
+          "plan_before": "pro",
+          "changed": ["monitoring_network"]
+        }
+      ]
+    },
+    "org.export_completed": {
+      "description": "Data of org.export_completed. entity_id: the export. Origin: EVT-03 [P3], TLC-05. Producer: WP-1151. the full export of the organization is ready for download.",
+      "type": "object",
+      "required": ["id", "rows", "bytes", "expires_at"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The export."
+        },
+        "initiated_by": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Surrogate of the user who started the export."
+        },
+        "rows": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Rows of all exported tables."
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Bytes of all exported objects (table parts and document ZIPs)."
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "End of the download period (24 h)."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "initiated_by": "22222222-2222-4222-8222-222222222222",
+          "rows": 1234,
+          "bytes": 567890,
+          "expires_at": "2026-12-01T22:00:00Z"
+        }
+      ]
+    },
+    "org.deletion_requested": {
+      "description": "Data of org.deletion_requested. entity_id: the organization. Origin: EVT-03 [P3], TLC-06. Producer: WP-1152. the deletion request of the organization.",
+      "type": "object",
+      "required": ["id", "due_at"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The organization."
+        },
+        "requested_by": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The user who requested the deletion."
+        },
+        "due_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The end of the 30-day grace period, after which the purge runs."
+        },
+        "cancelled_by": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The user who cancelled the request (org.deletion_cancelled only)."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "requested_by": "22222222-2222-4222-8222-222222222222",
+          "due_at": "2026-12-01T22:00:00Z"
+        }
+      ]
+    },
+    "org.deletion_cancelled": {
+      "description": "Data of org.deletion_cancelled. entity_id: the organization. Origin: EVT-03 [P3], TLC-06. Producer: WP-1152. the deletion request of the organization.",
+      "type": "object",
+      "required": ["id", "due_at"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The organization."
+        },
+        "requested_by": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The user who requested the deletion."
+        },
+        "due_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "The end of the 30-day grace period, after which the purge runs."
+        },
+        "cancelled_by": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The user who cancelled the request (org.deletion_cancelled only)."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "requested_by": "22222222-2222-4222-8222-222222222222",
+          "due_at": "2026-12-01T22:00:00Z",
+          "cancelled_by": "22222222-2222-4222-8222-222222222222"
+        }
+      ]
+    },
+    "ipam.subnet.changed": {
+      "description": "Data of ipam.subnet.changed. entity_id: the subnet. Origin: EVT-03 [P3], IPM-02. Producer: WP-904. a subnet was created, changed, allocated or deleted.",
+      "type": "object",
+      "required": ["id", "cidr", "change_kind"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The subnet."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "cidr": {
+          "type": "string",
+          "description": "The prefix of the subnet."
+        },
+        "change_kind": {
+          "type": "string",
+          "enum": ["created", "updated", "allocated", "deleted"],
+          "description": "Kind of the change."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "cidr": "10.20.0.0/24",
+          "change_kind": "created"
+        }
+      ]
+    },
+    "ipam.address.state_changed": {
+      "description": "Data of ipam.address.state_changed. entity_id: the IP address. Origin: EVT-03 [P3], IPM-04. Producer: WP-902. the state of an IP address changed.",
+      "type": "object",
+      "required": ["id", "to"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The IP address."
+        },
+        "subnet_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Subnet of the address; absent without subnet."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the address is bound to."
+        },
+        "from": {
+          "type": "string",
+          "enum": ["active", "offline", "unknown"],
+          "description": "State before the change."
+        },
+        "to": {
+          "type": "string",
+          "enum": ["active", "offline", "unknown"],
+          "description": "State after the change (IPM-04: active, offline, unknown)."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "subnet_id": "55555555-5555-4555-8555-555555555555",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "site_id": "44444444-4444-4444-8444-444444444444",
+          "from": "unknown",
+          "to": "active"
+        }
+      ]
+    },
+    "asn.changed": {
+      "description": "Data of asn.changed. entity_id: the AS number record. Origin: EVT-03 [P3], IPM-15. Producer: WP-1066. an AS number was created, assigned or released.",
+      "type": "object",
+      "required": ["id", "asn"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The AS number record."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "asn": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The AS number."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "asn": 64512
+        }
+      ]
+    },
+    "credential.rotated": {
+      "description": "Data of credential.rotated. entity_id: the credential. Origin: EVT-03 [P3], CRD-05. Producer: WP-889. the credential and its client; never a secret.",
+      "type": "object",
+      "required": ["id", "kind"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The credential."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "kind": {
+          "type": "string",
+          "description": "Kind of the credential (snmp_v3, ssh, api_token, …)."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Reason of a failed resolution or the due date of a rotation."
+        },
+        "secret_version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Version of the secret after a rotation (WP-889)."
+        },
+        "source": {
+          "type": "string",
+          "enum": ["stored", "vault"],
+          "description": "Where the secret lives: stored in Reticora or referenced in a vault (WP-889, WP-894)."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "kind": "snmp_v3",
+          "reason": "vault_unreachable"
+        }
+      ]
+    },
+    "credential.rotation_due": {
+      "description": "Data of credential.rotation_due. entity_id: the credential. Origin: EVT-03 [P3], CRD-05. Producer: WP-897. the credential and its client; never a secret.",
+      "type": "object",
+      "required": ["id", "credential_id", "kind"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The credential."
+        },
+        "credential_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The credential (the same as id; WP-897)."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "kind": {
+          "type": "string",
+          "description": "Kind of the credential (snmp_v3, ssh, api_token, …)."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Reason of a failed resolution or the due date of a rotation."
+        },
+        "secret_version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Version of the secret after a rotation (WP-889)."
+        },
+        "source": {
+          "type": "string",
+          "enum": ["stored", "vault"],
+          "description": "Where the secret lives: stored in Reticora or referenced in a vault (WP-889, WP-894)."
+        },
+        "max_age_days": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Age limit of the secret in days (WP-897)."
+        },
+        "due_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the secret reached its age limit: COALESCE(rotated_at, created_at) + max_age_days (WP-897)."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "credential_id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "kind": "snmp_v3",
+          "secret_version": 2,
+          "source": "stored",
+          "max_age_days": 90,
+          "due_at": "2026-11-01T08:00:00Z"
+        }
+      ]
+    },
+    "credential.resolution_failed": {
+      "description": "Data of credential.resolution_failed. entity_id: the credential. Origin: EVT-03 [P3], CRD-06. Producer: WP-898. the credential and its client; never a secret.",
+      "type": "object",
+      "required": ["id", "kind", "credential_id", "error_class"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The credential."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "kind": {
+          "type": "string",
+          "description": "Kind of the credential (snmp_v3, ssh, api_token, …)."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Reason of a failed resolution or the due date of a rotation."
+        },
+        "secret_version": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Version of the secret after a rotation (WP-889)."
+        },
+        "source": {
+          "type": "string",
+          "enum": ["stored", "vault"],
+          "description": "Where the secret lives: stored in Reticora or referenced in a vault (WP-889, WP-894)."
+        },
+        "credential_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The credential whose use failed (same as id; CRD-06, WP-898)."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The CI the collector used the credential for (WP-898)."
+        },
+        "namespace": {
+          "type": "string",
+          "enum": ["snmp", "ssh", "redfish", "ipmi", "wmi", "api", "nut", "nas"],
+          "description": "Protocol namespace of the use (WP-898)."
+        },
+        "error_class": {
+          "type": "string",
+          "enum": ["auth_failed", "vault_unreachable", "vault_denied", "vault_not_found"],
+          "description": "Error class of the failed use: the target refused the login or the vault reference could not be resolved (WP-898)."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "kind": "snmp_v3",
+          "reason": "auth_failed",
+          "credential_id": "11111111-1111-4111-8111-111111111111",
+          "ci_id": "22222222-2222-4222-8222-222222222222",
+          "namespace": "snmp",
+          "error_class": "auth_failed"
+        }
+      ]
+    },
+    "admp.connection.refreshed": {
+      "description": "Data of admp.connection.refreshed. entity_id: the ADMP connection. Origin: EVT-03 [P3], ADM-03. Producer: WP-929. the read-only copy of an ADMP connection was refreshed; never the holder in plain text.",
+      "type": "object",
+      "required": ["id", "stale"],
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The ADMP connection."
+        },
+        "account_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The ADMP account of the connection."
+        },
+        "ci_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The port CI of the connection."
+        },
+        "stale": {
+          "type": "boolean",
+          "description": "The refresh failed; the copy is the last known state (ADM-03)."
+        },
+        "client_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Client of the object; absent without client."
+        },
+        "site_id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Site of the object; absent without site."
+        }
+      },
+      "examples": [
+        {
+          "id": "11111111-1111-4111-8111-111111111111",
+          "account_id": "55555555-5555-4555-8555-555555555555",
+          "client_id": "33333333-3333-4333-8333-333333333333",
+          "stale": false
         }
       ]
     }

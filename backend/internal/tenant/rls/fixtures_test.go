@@ -65,7 +65,25 @@ type matrixTable struct {
 // catalog (cross-column checks, patterns). "@uuid" is a fresh UUID, "@text"
 // a fresh text, "@seq" the running number of the synthesized row.
 var matrixOverrides = map[string]map[string]string{
-	"asset_movement":       {"asset_id": "@uuid"},
+	"asset_movement": {"asset_id": "@uuid"},
+	// An alert rule has at least one stage (alert_rule_stage_check, WP-985).
+	"alert_rule": {"warning_condition": `{"op":"gt","field":"value","value":1}`},
+	// An availability target of a CI names the CI (availability_target_object_check, WP-1048).
+	"availability_target": {"scope_kind": "ci", "ci_id": "@uuid"},
+	// One target column per target kind (credential_binding_target_check, WP-890).
+	"credential_binding": {"target_kind": "ci", "ci_id": "@uuid"},
+	// A stored credential carries its ciphertext (credential_source_ciphertext_check, WP-894).
+	"credential": {"ciphertext": `\x00`},
+	// A nameserver set holds 1 to 8 servers (nameserver_set_servers_check, WP-905).
+	"nameserver_set": {"servers": "{10.0.0.53}"},
+	// A port is matched by rule, manually or not at all
+	// (admp_service_port_matched_by_check, WP-928); a connection has a
+	// private address surrogate or a business address, not both
+	// (admp_connection_address_check): the synthesized row has the text.
+	"admp_service_port": {"matched_by": "none"},
+	// A port of the inventory likewise (admp_access_port_matched_by_check, WP-1073).
+	"admp_access_port":     {"matched_by": "none"},
+	"admp_connection":      {"address_text": "@text"},
 	"stock_movement":       {"asset_id": "@uuid"},
 	"disposal_record":      {"asset_id": "@uuid"},
 	"assignment":           {"asset_id": "@uuid"},
@@ -120,13 +138,36 @@ var matrixOverrides = map[string]map[string]string{
 	// A snapshot row names exactly the object of its item_kind, the first
 	// kind is asset (stocktake_item_object_check, WP-848).
 	"stocktake_item": {"asset_id": "@uuid"},
+	// A probe has a registered type and a CI or a client
+	// (probe_client_required, WP-935); a profile names exactly the target
+	// of its level, client_id is the scope (monitoring_profile_level_target_check).
+	"probe":              {"type": "icmp", "ci_id": "@uuid"},
+	"monitoring_profile": {"level": "group", "group_id": "@uuid", "probe_type": "icmp", "params": "{}"},
+	// A suppression names a registered probe type (WP-949).
+	"probe_autocreate_suppression": {"probe_type": "icmp"},
+	// A configuration version names its platform and a SHA-256 in hex
+	// (config_snapshot_platform_check, config_snapshot_sha256_check, WP-1052).
+	"config_snapshot": {"platform": "cisco_ios", "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+	// AS numbers are unique per organization, AS number ranges do not
+	// overlap (asn_number_key, asn_range_no_overlap, WP-1066).
+	"asn":       {"number": "@seq"},
+	"asn_range": {"range_start": "@seq", "range_end": "@seq"},
+	// A NAT translation names exactly one inside and one outside side
+	// (nat_translation_inside_check, nat_translation_outside_check, WP-1071).
+	"nat_translation": {"inside_address_id": "@uuid", "outside_address_id": "@uuid"},
+	// A product mapping names the pattern of its match kind
+	// (cpe_mapping_pattern_check, WP-1121).
+	"cpe_mapping": {"match_kind": "sys_object_id", "sys_object_id_prefix": "@text", "products": "{matrix}"},
 }
 
 var anyArrayCheck = regexp.MustCompile(`^CHECK \(\((\w+) = ANY \(\(?ARRAY\['([^']*)'`)
 
 // loadMatrixTables returns every tenant table the application role can
 // access: tables of schema public with RLS and an organization column (plus
-// organization itself), without the view-protected hypertables.
+// organization itself), without the view-protected hypertables. The
+// sub-select of the rights per IPAM section (SELECT ipam_section_denied(…),
+// WP-910) reads no other row of the table's scope: without entries it is
+// empty, so it does not make a table inherited.
 func loadMatrixTables(ctx context.Context, t *testing.T, pool *pgxpool.Pool) []*matrixTable {
 	t.Helper()
 	rows, err := pool.Query(ctx, `
@@ -136,7 +177,8 @@ func loadMatrixTables(ctx context.Context, t *testing.T, pool *pgxpool.Pool) []*
 		       has_table_privilege('reticora_app', c.oid, 'UPDATE'),
 		       has_table_privilege('reticora_app', c.oid, 'DELETE'),
 		       EXISTS (SELECT 1 FROM pg_policies p WHERE p.schemaname = 'public' AND p.tablename = c.relname
-		                  AND (COALESCE(p.qual, '') || COALESCE(p.with_check, '')) ~ '\mSELECT\M')
+		                  AND regexp_replace(COALESCE(p.qual, '') || COALESCE(p.with_check, ''),
+		                                     'SELECT ipam_section_denied\(', '', 'g') ~ '\mSELECT\M')
 		  FROM pg_class c
 		 WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'p') AND c.relrowsecurity
 		   AND (c.relname = 'organization' OR EXISTS (SELECT 1 FROM pg_attribute a

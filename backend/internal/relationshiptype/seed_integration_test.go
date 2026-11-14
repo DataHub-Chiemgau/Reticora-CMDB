@@ -55,7 +55,7 @@ func TestRelationshipTypeSeedsFollowREL01(t *testing.T) {
 		"runs_on":           {true, "hosting", relationshiptype.ImpactSourceDependsOnTarget, false},
 		"member_of_cluster": {true, "logical", relationshiptype.ImpactSourceDependsOnTarget, true},
 		"depends_on":        {true, "logical", relationshiptype.ImpactSourceDependsOnTarget, false},
-		"uplink_to":         {true, "network", relationshiptype.ImpactSourceDependsOnTarget, false},
+		"uplink_to":         {true, "network", relationshiptype.ImpactSourceDependsOnTarget, true}, // redundant since WP-1026 (E-199)
 	} {
 		got, ok := byKey[key]
 		if !ok || !got.IsSystem || got.Directed != want.directed || got.Category != want.category ||

@@ -122,6 +122,10 @@ type auditScopeRun struct {
 		ErrorCount int        `json:"error_count"`
 		Errors     []runError `json:"errors"`
 	} `json:"result"`
+	// CredentialUsage is the usage of the run (WP-898); Raw the report as
+	// sent.
+	CredentialUsage []credentialUse `json:"credential_usage"`
+	Raw             []byte          `json:"-"`
 }
 
 // auditCaptureScopeRuns connects the scope channel to a NATS server and
@@ -139,6 +143,7 @@ func auditCaptureScopeRuns(t *testing.T) func() []auditScopeRun {
 	sub, err := nc.Subscribe(subject+".scopes.result", func(m *nats.Msg) {
 		var r auditScopeRun
 		if json.Unmarshal(m.Data, &r) == nil {
+			r.Raw = slices.Clone(m.Data)
 			mu.Lock()
 			runs = append(runs, r)
 			mu.Unlock()

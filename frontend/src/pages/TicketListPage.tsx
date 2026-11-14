@@ -1,7 +1,7 @@
 import { Plus, Search, Ticket } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { useTicketList, useCreateTicket, useUpdateTicket, useDeleteTicket } from '../api/hooks';
 import { ApiError, type TicketCreateRequest } from '../api/client';
 import { useEntitlements } from '../hooks/useEntitlements';

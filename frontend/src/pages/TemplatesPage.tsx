@@ -26,7 +26,7 @@ import {
   Rocket,
 } from 'lucide-react';
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import {
   isDraftItem,

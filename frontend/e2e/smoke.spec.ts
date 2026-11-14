@@ -1,10 +1,10 @@
 import {
+  entitlements,
   expect,
   FEATURES,
   list,
   mainNavigation,
   mockBackend,
-  ORG_ID,
   problem,
   signIn,
   test,
@@ -23,16 +23,7 @@ function entitlementsWithout(feature: string) {
   return {
     path: '/entitlements',
     reply: () => ({
-      body: list(
-        FEATURES.map((feature_key) => ({
-          organization_id: ORG_ID,
-          feature_key,
-          plan: 'essential',
-          enabled: feature_key !== feature,
-          limits: {},
-          source: 'manual',
-        })),
-      ),
+      body: entitlements('essential', FEATURES, (featureKey) => featureKey !== feature),
     }),
   };
 }

@@ -2,9 +2,11 @@ package user
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -142,6 +144,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	// Privacy (GDPR Art. 15 / 17)
 	r.Get("/api/v1/users/{id}/data-export", h.ExportData)
 	r.Post("/api/v1/users/{id}/anonymize", h.Anonymize)
+	// The own account (WP-1140): only the mobile number, no right needed.
+	r.Patch("/api/v1/me", h.UpdateMe)
 
 	// Teams
 	r.Get("/api/v1/teams", h.ListTeams)
@@ -276,6 +280,9 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !normalizeMobileRequest(w, &req) {
+		return
+	}
 	deactivate := req.Status != nil && !statusIsActive(*req.Status)
 	// Self-deactivation would revoke the caller's own sessions and can lock
 	// the organization out when the caller is its last admin; it is refused
@@ -292,7 +299,7 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "user not found")
+		writeUserWriteError(w, err)
 		return
 	}
 	// Second revocation after the commit: covers tokens refreshed between
@@ -410,8 +417,9 @@ func (h *Handler) ExportData(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// The plaintext of the mobile number appears only here (WP-1140).
 	api.WriteJSON(w, http.StatusOK, map[string]any{
-		"user":        u,
+		"user":        exportedUser{User: u, Mobile: u.Mobile},
 		"contacts":    contacts,
 		"roles":       roles,
 		"tickets":     map[string]any{"reported": reported, "assigned": assignedTickets},
@@ -984,4 +992,104 @@ func writeAssignmentError(w http.ResponseWriter, r *http.Request, key, value str
 		slog.ErrorContext(r.Context(), "role assignment failed", key, value, "error", err)
 		api.WriteRepoError(w, err)
 	}
+}
+
+// exportedUser is the account of the data export: the user with the
+// plaintext of the mobile number (GDPR Art. 15, WP-1140).
+type exportedUser struct {
+	*User
+	Mobile string `json:"mobile,omitempty"`
+}
+
+// normalizeMobileRequest checks and normalizes the mobile number of an
+// update (E.164 after removing blanks and hyphens; empty clears it); an
+// invalid number is answered with 422 field mobile.
+func normalizeMobileRequest(w http.ResponseWriter, req *UpdateUserRequest) bool {
+	if req.Mobile == nil {
+		return true
+	}
+	number, err := NormalizeMobile(*req.Mobile)
+	if err != nil {
+		write422(w, "mobile", ErrMobileInvalid.Error())
+		return false
+	}
+	req.Mobile = &number
+	return true
+}
+
+// writeUserWriteError answers a failed user write: no vault 503, a refused
+// value 422 with its field, anything else as the unknown user (404).
+func writeUserWriteError(w http.ResponseWriter, err error) {
+	var fieldErr *api.FieldError
+	switch {
+	case errors.Is(err, ErrNoVault):
+		api.WriteError(w, http.StatusServiceUnavailable, "Service Unavailable", ErrNoVault.Error())
+	case errors.As(err, &fieldErr):
+		api.WriteFieldError(w, fieldErr)
+	default:
+		api.WriteError(w, http.StatusNotFound, "Not Found", "user not found")
+	}
+}
+
+// meFields are the members PATCH /api/v1/me accepts.
+var meFields = map[string]bool{"mobile": true}
+
+// UpdateMe handles PATCH /api/v1/me (WP-1140): the signed-in user changes
+// the mobile number of the own account; any other member is 422 with its
+// field. An empty body {} changes nothing and answers the own account with
+// mobile_masked, without user:read. A principal without a user account
+// (service account, API key without owner) has no own account (403).
+func (h *Handler) UpdateMe(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	if t.UserID == "" {
+		api.WriteError(w, http.StatusForbidden, "Forbidden", "the principal has no user account")
+		return
+	}
+	var body map[string]json.RawMessage
+	if err := api.ReadJSON(r, &body); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "the body must be a JSON object")
+		return
+	}
+	keys := make([]string, 0, len(body))
+	for k := range body {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if !meFields[k] {
+			write422(w, k, "only mobile can be changed here")
+			return
+		}
+	}
+	var req UpdateUserRequest
+	if raw, ok := body["mobile"]; ok {
+		var number *string
+		if err := json.Unmarshal(raw, &number); err != nil {
+			write422(w, "mobile", "mobile must be a string")
+			return
+		}
+		empty := ""
+		if number == nil {
+			number = &empty
+		}
+		req.Mobile = number
+	}
+	if !normalizeMobileRequest(w, &req) {
+		return
+	}
+	item, err := h.repo.UpdateUserTx(r.Context(), t.OrganizationID, t.UserID, req, nil)
+	if err != nil {
+		writeUserWriteError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, item)
+}
+
+// write422 answers 422 naming the field (RFC 7807, no internal text).
+func write422(w http.ResponseWriter, field, message string) {
+	api.WriteFieldError(w, &api.FieldError{Field: field, Message: message, Status: http.StatusUnprocessableEntity})
 }

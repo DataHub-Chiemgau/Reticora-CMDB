@@ -7,7 +7,12 @@
 // Usage: fakesnmp (-community <community> | -v3-user <user>
 // -v3-auth-password … -v3-priv-password … [-v3-auth-protocol SHA256]
 // [-v3-priv-protocol AES]) [-listen 127.0.0.161:161] [-sysname …]
-// [-sysdescr …] [-sysobjectid …] [-requests <file>]
+// [-sysdescr …] [-sysobjectid …] [-requests <file>] [-walk <file> …]
+//
+// -walk may be given several times: the variables of each walk file
+// (snmpwalk -On, fakesnmp.LoadWalk) are served in addition to the system
+// group; sysDescr, sysObjectID and sysName come from the flags, a later
+// walk overrides an earlier one (WP-992).
 //
 // The collector's SNMP plugin queries port 161, so the fake binds it; an
 // unprivileged process needs net.ipv4.ip_unprivileged_port_start <= 161.
@@ -58,7 +63,14 @@ func run() error {
 	sysDescr := flag.String("sysdescr", "Reticora SNMP fake", "sysDescr.0")
 	sysObjectID := flag.String("sysobjectid", ".1.3.6.1.4.1.8072.3.2.10", "sysObjectID.0")
 	requests := flag.String("requests", "", "file the received requests are appended to (JSON lines)")
+	var walks walkFiles
+	flag.Var(&walks, "walk", "walk file (snmpwalk -On) whose variables the fake serves; may be repeated")
 	flag.Parse()
+
+	extra, err := loadWalks(walks)
+	if err != nil {
+		return err
+	}
 
 	var v3 *fakesnmp.V3
 	if *v3User != "" {
@@ -76,9 +88,9 @@ func run() error {
 	var mu sync.Mutex
 	var out *os.File
 	if *requests != "" {
-		f, err := os.OpenFile(*requests, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-		if err != nil {
-			return err
+		f, openErr := os.OpenFile(*requests, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if openErr != nil {
+			return openErr
 		}
 		defer f.Close()
 		out = f
@@ -96,11 +108,10 @@ func run() error {
 		},
 	}
 	var agent *fakesnmp.Agent
-	var err error
 	if v3 != nil {
-		agent, err = fakesnmp.ListenV3(*listen, v3, cfg)
+		agent, err = fakesnmp.ListenV3(*listen, v3, cfg, extra...)
 	} else {
-		agent, err = fakesnmp.Listen(*listen, cfg)
+		agent, err = fakesnmp.Listen(*listen, cfg, extra...)
 	}
 	if err != nil {
 		return fmt.Errorf("listen %s: %w (a port below 1024 needs net.ipv4.ip_unprivileged_port_start <= the port)", *listen, err)
@@ -113,4 +124,34 @@ func run() error {
 	}()
 	fmt.Printf("fakesnmp listening on %s\n", agent.Addr())
 	return agent.Serve()
+}
+
+// walkFiles collects the repeated -walk flag.
+type walkFiles []string
+
+func (w *walkFiles) String() string { return strings.Join(*w, ",") }
+
+func (w *walkFiles) Set(path string) error {
+	*w = append(*w, path)
+	return nil
+}
+
+// loadWalks reads the walk files in order; the system group of the flags
+// (sysDescr, sysObjectID, sysName) is not taken from a walk.
+func loadWalks(paths []string) ([]gosnmp.SnmpPDU, error) {
+	var out []gosnmp.SnmpPDU
+	for _, path := range paths {
+		pdus, err := fakesnmp.LoadWalkFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("-walk %w", err)
+		}
+		for _, pdu := range pdus {
+			switch pdu.Name {
+			case fakesnmp.OIDSysDescr, fakesnmp.OIDSysObjectID, fakesnmp.OIDSysName:
+				continue
+			}
+			out = append(out, pdu)
+		}
+	}
+	return out, nil
 }

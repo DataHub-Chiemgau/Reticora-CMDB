@@ -578,8 +578,13 @@ func (h *Handler) Link(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// An unknown entity type answers 422, a target outside the scope or
-	// missing 404 (WP-267), a quarantined document 409 (WP-733).
+	// missing 422 on entity_id like an unknown one (SR-50; 404 before, WP-267),
+	// a quarantined document 409 (WP-733).
 	if err := h.repo.LinkDocument(r.Context(), link); err != nil {
+		if errors.Is(err, ErrTargetNotFound) {
+			api.WriteFieldError(w, &api.FieldError{Field: "entity_id", Message: "not found", Status: http.StatusUnprocessableEntity})
+			return
+		}
 		if errors.Is(err, ErrQuarantined) {
 			api.WriteProblem(w, http.StatusConflict, ProblemQuarantined, "Document Quarantined",
 				"the document is quarantined and cannot be linked")
@@ -665,6 +670,11 @@ func ownsStorageKey(orgID, docID, key string) bool {
 	if blob.CheckOrgKey(orgID, key) == nil {
 		return strings.HasPrefix(key, blob.OrgKey(orgID, "documents", docID)+"/")
 	}
-	legacy := "documents/" + orgID + "/" + docID + "/"
+	legacy := LegacyPrefix(orgID) + docID + "/"
 	return strings.HasPrefix(key, legacy) && !strings.Contains(key, "..")
 }
+
+// LegacyPrefix is the prefix of the document versions of an organization
+// stored before migration 000066 (documents/<org>/<doc>/…); they are still
+// read, and the purge of a deleted organization removes them (WP-1155).
+func LegacyPrefix(orgID string) string { return "documents/" + orgID + "/" }

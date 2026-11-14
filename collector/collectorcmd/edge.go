@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/probe"
 )
 
 // The data path over the edge (COL-08): once the collector holds its
@@ -26,7 +28,39 @@ const (
 	edgeHeartbeatSuffix = ".heartbeat"
 	edgeMetricsSuffix   = ".metrics"
 	edgeRequestTimeout  = 60 * time.Second
+	// The monitoring probes (PRB-05, E-173, WP-955): state changes one by
+	// one, result batches and the monitoring alive message (WP-957) from
+	// the persistent probe spool; they never use the metric buffer.
+	edgeProbeStateSuffix   = ".probe.state"
+	edgeProbeResultsSuffix = ".probe.results"
+	edgeProbeAliveSuffix   = ".probe.alive"
 )
+
+// probeEdgeSuffixes maps the message kinds of the probe uplink to the edge
+// subjects.
+var probeEdgeSuffixes = map[string]string{
+	probe.KindState:   edgeProbeStateSuffix,
+	probe.KindResults: edgeProbeResultsSuffix,
+	probe.KindAlive:   edgeProbeAliveSuffix,
+}
+
+// sendProbeViaEdge is the sender of the probe engine: it sends a message of
+// the uplink on its edge subject. Without the edge channel the data stay in
+// the probe spool (probe.ErrNoEdge); there is no HTTP fallback (F-046).
+func sendProbeViaEdge(ctx context.Context, kind string, data []byte) ([]byte, error) {
+	suffix, ok := probeEdgeSuffixes[kind]
+	if !ok {
+		return nil, fmt.Errorf("unknown probe message kind %q", kind)
+	}
+	raw, err := edgeRequest(ctx, suffix, data)
+	switch {
+	case errors.Is(err, errNoEdge):
+		return nil, probe.ErrNoEdge
+	case errors.Is(err, errEdgeTooLarge):
+		return nil, probe.ErrTooLarge
+	}
+	return raw, err
+}
 
 // errNoEdge reports that the edge channel cannot take the request; the
 // caller falls back to HTTP.

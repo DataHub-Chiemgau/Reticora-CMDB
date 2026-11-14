@@ -82,7 +82,7 @@ func startSNMPFake(t *testing.T, value string) {
 	if err != nil {
 		t.Skipf("cannot bind udp 127.0.0.1:161: %v", err)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 
 	go func() {
 		buf := make([]byte, 4096)
@@ -98,7 +98,7 @@ func startSNMPFake(t *testing.T, value string) {
 			resp = append(resp, buf[:n]...) // echo the request (contains "public")
 			resp = append(resp, 0x04, byte(len(value)))
 			resp = append(resp, value...)
-			conn.WriteToUDP(resp, addr)
+			_, _ = conn.WriteToUDP(resp, addr)
 		}
 	}()
 }
@@ -327,8 +327,8 @@ func oidLess(a, b string) bool {
 	pa, pb := strings.Split(strings.TrimPrefix(a, "."), "."), strings.Split(strings.TrimPrefix(b, "."), ".")
 	for i := 0; i < len(pa) && i < len(pb); i++ {
 		var x, y int
-		fmt.Sscan(pa[i], &x)
-		fmt.Sscan(pb[i], &y)
+		_, _ = fmt.Sscan(pa[i], &x)
+		_, _ = fmt.Sscan(pb[i], &y)
 		if x != y {
 			return x < y
 		}
@@ -567,4 +567,16 @@ func TestPollInterfacesWalksTableWithLimit(t *testing.T) {
 			t.Errorf("samples = %v, want none", got)
 		}
 	})
+}
+
+// TestApplyProfileHuaweiNamesVendorAndProfileOnly covers WP-1005 AK3: the
+// embedded Huawei profile (prefix 1.3.6.1.4.1.2011, every Huawei product)
+// gives discovery the vendor and the profile name, never a model.
+func TestApplyProfileHuaweiNamesVendorAndProfileOnly(t *testing.T) {
+	p := &Plugin{}
+	result := plugins.Result{Attributes: map[string]any{}}
+	p.applyProfile(&result, "1.3.6.1.4.1.2011.2.224.67")
+	if result.Manufacturer != "Huawei" || result.Attributes["profile"] != "huawei-vrp-snmp" || result.Model != "" {
+		t.Fatalf("result %+v, want manufacturer Huawei, profile huawei-vrp-snmp and no model", result)
+	}
 }

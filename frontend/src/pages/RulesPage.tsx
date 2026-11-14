@@ -21,7 +21,7 @@
  */
 import { ListChecks, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import {

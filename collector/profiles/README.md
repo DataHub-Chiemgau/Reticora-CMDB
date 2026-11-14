@@ -67,3 +67,125 @@ here and fails for a value without a catalog template.
 `catalog` names the entry of the confirmed CH30 profile list (E-21) a
 profile covers; `TestProfileListCoversCH30` checks the list,
 `TestEmbeddedProfileData` validates every shipped file.
+
+## Monitoring section `monitor` (PRT-20)
+
+Vendor-dependent probe types (routing v2 tables, BFD, optics, BNG, PON) read
+their SNMP tables from the profile of the device instead of a release
+(E-187 option 1: SNMP with standard MIBs as the core, vendor MIBs through
+this section, gNMI as an alternative source). The key below `monitor` is a
+probe type of the register (`api/probe-types.json`); each type lists its
+tables by logical name:
+
+- `columns`: logical column name → column OID (numeric, a leading dot is
+  allowed),
+- `index`: `int`, `ipv4`, `ipv6`, `inet` (InetAddressType + InetAddress) or
+  `composite:[kind,kind,…]`,
+- `enums`: logical column → raw value (an integer in decimal form, without
+  leading zeros or sign `+`) → `up`, `degraded`, `down` or a raw value name,
+- `scale` (finite factor above 0; default 1) and `unit`,
+- `threshold_columns`: logical threshold → logical column holding it,
+- `patterns`: logical quantity → RE2 expression on the entity name and
+  description of a row (optical: `rx`, `tx`; an invalid expression refuses
+  the profile).
+
+The shipped `cisco.yaml` maps `bfd` onto CISCO-IETF-BFD-MIB (table
+`sessions` with `state`, `diag`, `addr_type`, `addr`) and `optical` onto
+CISCO-ENTITY-SENSOR-MIB (table `sensors` with `type`, `scale`,
+`precision`, `value`, `status`; table `thresholds` with `severity`
+mapped to `degraded`/`down`, `relation`, `value`).
+
+Example: the peers of a BGP4-V2 table with an `inet` index and the state
+`established` (6) as `up`:
+
+```yaml
+- name: example-bgp4v2
+  vendor: Example
+  ciType: router
+  sysObjectIds:
+  - 1.3.6.1.4.1.99999
+  monitor:
+    bgp:
+      tables:
+        peers:
+          index: inet
+          columns:
+            state: 1.3.6.1.4.1.99999.5.1.2.1.13
+            remote_as: 1.3.6.1.4.1.99999.5.1.2.1.10
+            established_time: 1.3.6.1.4.1.99999.5.1.2.1.16
+          enums:
+            state:
+              "1": idle
+              "2": connect
+              "3": active
+              "6": up
+        prefixes:
+          index: composite:[inet, int, int]
+          columns:
+            prefixes: 1.3.6.1.4.1.99999.5.1.6.1.3
+```
+
+### `monitor.pon` (WP-1007)
+
+The pon type (PRT-11) has no standard MIB; its source is this section only
+(without it a probe is `error`/`unsupported`). It maps the logical model
+OLT → PON port → ONU:
+
+- table `onus` (required): one row per ONU, the first index part is the
+  PON port (its ifIndex), the rest the ONU on the port; columns `status`
+  (enum on `online`/`offline` or `up`/`down`; a value mapped to neither
+  skips the row), `sn` (serial number; eight
+  octets are shown as vendor letters plus hex), `rx_onu` and `rx_olt`
+  (receive levels at the ONU and at the OLT, reported apart; `scale`
+  converts them to dBm, values outside −60 to +10 dBm count as no level), `last_down_cause` (enum on `los`,
+  `dying_gasp` or `other`) and optionally `distance` (metres);
+- table `ports` (optional): column `name` per port ifIndex (e.g. ifName);
+  without it the port label is its ifIndex.
+
+Example (levels in hundredths of dBm):
+
+```yaml
+- name: example-olt
+  vendor: Example
+  ciType: switch
+  sysObjectIds:
+  - 1.3.6.1.4.1.99997.1
+  monitor:
+    pon:
+      tables:
+        onus:
+          index: composite:[int,int]
+          scale: 0.01
+          unit: dBm
+          columns:
+            status: 1.3.6.1.4.1.99997.2.1.1.2
+            sn: 1.3.6.1.4.1.99997.2.1.1.3
+            rx_onu: 1.3.6.1.4.1.99997.2.1.1.4
+            rx_olt: 1.3.6.1.4.1.99997.2.1.1.5
+            last_down_cause: 1.3.6.1.4.1.99997.2.1.1.6
+          enums:
+            status: {"1": online, "2": offline}
+            last_down_cause: {"1": los, "2": dying_gasp, "3": other}
+        ports:
+          index: int
+          columns:
+            name: 1.3.6.1.2.1.31.1.1.1.1
+```
+
+At most 8192 ONUs are read per OLT; the tests of the core use
+`collector/probe/testdata/generic-pon-profile.yaml`. The vendor profiles
+follow in WP-1008 and WP-1009.
+
+Every profile is validated when it is loaded, also without `ciType`: an
+unknown probe type, an invalid OID, an unknown index kind, an enum or a
+threshold on an unknown column, a raw enum value that is no integer, or a
+scale of 0 or below, NaN or infinite refuse the profile with
+its name and the path of the failing value
+(`monitor.bgp.tables.peers.index`); `LoadDir` names the file.
+`Registry.MonitorFor(probeType, sysObjectID, sysDescr)` picks the profile
+like the classification (longest sysObjectID prefix; a matching
+`sysDescrPattern` beats a longer prefix) among the profiles with a section
+for the type and returns its name; without a match the type uses its
+standard-MIB core. A profile in `RETICORA_PROFILES_DIR` with the name of a
+shipped profile replaces it, its `monitor` section included, without a
+collector release.

@@ -9,12 +9,12 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
-	"slices"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -50,21 +50,10 @@ func (c *Config) group() string {
 	return c.Group
 }
 
-// mfaMethods are amr values (RFC 8176) that mean more than one factor.
-var mfaMethods = []string{"mfa", "otp", "totp", "hwk", "swk", "webauthn", "sms"}
-
-// MFASatisfied reports whether the login used a second factor.
+// MFASatisfied reports whether the login used a second factor: the rule of
+// identity.MFASatisfied with the configured acr values.
 func (c *Config) MFASatisfied(amr []string, acr string) bool {
-	for _, m := range amr {
-		if slices.Contains(mfaMethods, strings.ToLower(m)) {
-			return true
-		}
-	}
-	acrValues := c.MFAACRValues
-	if len(acrValues) == 0 {
-		acrValues = []string{"2"}
-	}
-	return acr != "" && slices.Contains(acrValues, acr)
+	return identity.MFASatisfied(amr, acr, c.MFAACRValues...)
 }
 
 // Identity is the authenticated operator of a request.
@@ -124,13 +113,20 @@ func (h *Handler) authenticate(r *http.Request) (Identity, bool) {
 }
 
 // heldResponse holds a response back until its audit entry is written.
+// under is the writer of the connection: http.ResponseController reaches
+// it through Unwrap for the deadlines of a long request (the bundle
+// import, WP-1120); the body stays held.
 type heldResponse struct {
 	header http.Header
 	status int
 	body   bytes.Buffer
+	under  http.ResponseWriter
 }
 
 func (h *heldResponse) Header() http.Header { return h.header }
+
+// Unwrap returns the writer of the connection (http.ResponseController).
+func (h *heldResponse) Unwrap() http.ResponseWriter { return h.under }
 
 func (h *heldResponse) WriteHeader(code int) {
 	if h.status == 0 {
@@ -186,7 +182,7 @@ func (h *Handler) Middleware(next http.Handler) http.Handler {
 			}
 			return
 		}
-		held := &heldResponse{header: w.Header().Clone()}
+		held := &heldResponse{header: w.Header().Clone(), under: w}
 		audited := false
 		ctx := context.WithValue(context.WithValue(r.Context(), identityKey{}, op), auditedKey{}, &audited)
 		next.ServeHTTP(held, r.WithContext(ctx))

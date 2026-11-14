@@ -66,60 +66,94 @@ var resourceTables = map[string][]string{
 	// Types of earlier recorders that entries in the log still carry.
 	"contact":    {"contact"},
 	"credential": {"credential"},
-	"document":   {"document"},
-	"ticket":     {"ticket"},
+	// Credential bindings (WP-890).
+	"credential_binding": {"credential_binding"},
+	// Vault connections (WP-893).
+	"vault_connection": {"vault_connection"},
+	// ADMP accounts (WP-925).
+	"admp_account": {"admp_account"},
+	// Rights per IPAM section (WP-910): the entry is visible where the
+	// row is under the team scope of its policy.
+	"ipam_section_permission": {"ipam_section_permission"},
+	// Reads of the holder of an ADMP connection (WP-1076): resource_id is
+	// the connection.
+	"admp_holder": {"admp_connection"},
+	"document":    {"document"},
+	"ticket":      {"ticket"},
+	// Ack and un-ack of an alarm (WP-983): the entry is visible where the
+	// alarm is, under the client and site of its row.
+	"alarm": {"alarm"},
+	// Status changes of a workflow run (WP-1092): the entry is visible
+	// where the run is.
+	"workflow_run": {"workflow_run"},
 
 	// Route audit (the first route segment): the route's resource_id is
 	// its first id parameter or the id of the created row, so the tables
 	// are those of the route snapshot register (route_snapshot.go) under
 	// this segment.
-	"agents":                    {"endpoint_agent", "agent_enrollment_token"},
-	"ai":                        {"ai_conversation"},
-	"api-keys":                  {"api_key"},
-	"asset-locations":           {"asset_location"},
-	"assets":                    {"asset"},
-	"assignments":               {"stock_movement"}, // the id of an assignment is that of its movement (WP-747, WP-843)
-	"attribute-definitions":     {"attribute_definition"},
-	"attribute-sets":            {"attribute_set"},
-	"buildings":                 {"building"},
-	"cables":                    {"cable"},
-	"ci-contacts":               {"ci_contact"},
-	"ci-types":                  {"ci_type"},
-	"cis":                       {"ci"},
-	"clients":                   {"client"},
-	"collectors":                {"collector", "collector_enrollment_code"},
-	"compliance":                {"compliance_rule"},
-	"consumables":               {"consumable"},
-	"contacts":                  {"contact"},
-	"contracts":                 {"contract"},
-	"credentials":               {"credential"},
-	"desk-bookings":             {"desk_booking"},
-	"desks":                     {"desk"},
-	"discovery":                 {"discovery_job", "review_item"},
-	"discovery-scopes":          {"discovery_scope"},
-	"disposal-records":          {"disposal_record"},
-	"documents":                 {"document"},
-	"export":                    {"export_job"},
-	"exports":                   {"export_job"},
-	"forms":                     {"form_def"},
-	"history":                   {"job"},
-	"import-profiles":           {"import_profile"},
-	"imports":                   {"job"},
-	"iga":                       {"iga_connector", "iga_access_request", "iga_access_review", "iga_lifecycle_policy", "iga_drift_finding", "iga_provisioning_task"},
-	"inventory":                 {"consumable"},
-	"invitations":               {"user_invitation"},
-	"ip-addresses":              {"ip_address"},
-	"ips":                       {"ip_address"},
-	"jobs":                      {"job"},
-	"layouts":                   {"form_layout"},
-	"keys":                      {"key_item"},
-	"labels":                    {"job"},
-	"lifecycle-definitions":     {"lifecycle_definition"},
-	"lifecycle-models":          {"lifecycle_definition"},
-	"locations":                 {"location"},
-	"maintenance-windows":       {"maintenance_window"},
-	"metamodel":                 {"metamodel_draft"},
-	"monitoring":                {"alert_rule"},
+	// The only writes below /admp are the accounts (WP-925).
+	"admp":                  {"admp_account"},
+	"agents":                {"endpoint_agent", "agent_enrollment_token"},
+	"ai":                    {"ai_conversation"},
+	"api-keys":              {"api_key"},
+	"asset-locations":       {"asset_location"},
+	"assets":                {"asset"},
+	"assignments":           {"stock_movement"}, // the id of an assignment is that of its movement (WP-747, WP-843)
+	"attribute-definitions": {"attribute_definition"},
+	"attribute-sets":        {"attribute_set"},
+	"buildings":             {"building"},
+	"cables":                {"cable"},
+	"ci-contacts":           {"ci_contact"},
+	"ci-types":              {"ci_type"},
+	"cis":                   {"ci"},
+	"clients":               {"client"},
+	"collectors":            {"collector", "collector_enrollment_code"},
+	"collector-groups":      {"collector_group"}, // collector groups (WP-947)
+	"compliance":            {"compliance_rule"},
+	"consumables":           {"consumable"},
+	"contacts":              {"contact"},
+	"contracts":             {"contract"},
+	"credentials":           {"credential"},
+	"credential-bindings":   {"credential_binding"},
+	"vault-connections":     {"vault_connection"},
+	"desk-bookings":         {"desk_booking"},
+	"desks":                 {"desk"},
+	"discovery":             {"discovery_job", "review_item"},
+	"discovery-scopes":      {"discovery_scope"},
+	"disposal-records":      {"disposal_record"},
+	"documents":             {"document"},
+	"export":                {"export_job"},
+	"exports":               {"export_job"},
+	"forms":                 {"form_def"},
+	"history":               {"job"},
+	"import-profiles":       {"import_profile"},
+	"imports":               {"job"},
+	"iga":                   {"iga_connector", "iga_access_request", "iga_access_review", "iga_lifecycle_policy", "iga_drift_finding", "iga_provisioning_task"},
+	"inventory":             {"consumable"},
+	"invitations":           {"user_invitation"},
+	"ip-addresses":          {"ip_address"},
+	"ips":                   {"ip_address"},
+	"ipam-sections":         {"ipam_section", "ipam_section_permission"}, // IPAM sections (WP-900) and their rights (WP-910)
+	"nameserver-sets":       {"nameserver_set"},                          // nameserver sets (WP-905)
+	"vlan-domains":          {"vlan_domain"},                             // VLAN domains (WP-906)
+	"asns":                  {"asn"},                                     // AS numbers (WP-1066)
+	"asn-ranges":            {"asn_range", "asn"},                        // AS number ranges (WP-1066), allocated AS numbers (WP-1067)
+	"nat-translations":      {"nat_translation"},                         // NAT translations (WP-1071)
+	"bgp-peerings":          {"bgp_peering"},                             // BGP peerings (WP-1068)
+	"jobs":                  {"job"},
+	"layouts":               {"form_layout"},
+	"keys":                  {"key_item"},
+	"labels":                {"job"},
+	"lifecycle-definitions": {"lifecycle_definition"},
+	"lifecycle-models":      {"lifecycle_definition"},
+	"locations":             {"location"},
+	"maintenance-windows":   {"maintenance_window"},
+	"metamodel":             {"metamodel_draft"},
+	// Alert rules, the probe definitions (WP-939), the monitoring
+	// profiles and groups (WP-946) and the incidents (WP-1036); the member
+	// routes name the group as resource_id (monitoring_group_member has no
+	// id of its own).
+	"monitoring":                {"alert_rule", "probe", "alarm", "monitoring_profile", "monitoring_group", "incident", "availability_target"},
 	"mounts":                    {"rack_mount"},
 	"network-interfaces":        {"network_interface"},
 	"notification-channels":     {"notification_channel"},
@@ -163,6 +197,9 @@ var resourceTables = map[string][]string{
 	// erasures name no row a scope could place.
 	"notifications": nil,
 	"privacy":       nil,
+	// The own account (PATCH /me, WP-1140) names no row a scope could
+	// place; restricted principals do not see the entries.
+	"me": nil,
 	// The field permissions (WP-726) are the organization's configuration
 	// of who sees which field; only a holder of field_permission:manage
 	// for the whole organization reads them, and an object grant names an

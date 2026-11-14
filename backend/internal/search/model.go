@@ -397,4 +397,7 @@ var ReadPermission = map[string]string{
 	"compliance":  "compliance:read",
 	"location":    "location:read",
 	"reservation": "reservation:read", // RBA-05, E-106 (WP-245)
+	// Subnets and IP addresses (IPM-20, WP-909, migration 000303).
+	"subnet":     "ipam:read",
+	"ip_address": "ipam:read",
 }

@@ -90,7 +90,7 @@ func UnnamedAttributesUnreadable(policy *FieldPolicy, kind ObjectKind, typeIDs [
 func (p *FieldPolicy) readableForTypes(kind ObjectKind, types, keys []string) bool {
 	for _, t := range types {
 		for _, key := range keys {
-			if !p.Level(kind, t, key, ObjectRef{}).Readable() {
+			if !p.listReadable(kind, t, key, ObjectRef{}) {
 				return false
 			}
 		}
@@ -106,10 +106,19 @@ func (p *FieldPolicy) readableForTypes(kind ObjectKind, types, keys []string) bo
 // type or kind, which a check of the whole namespace covers. Without a
 // restriction it is empty.
 func (p *FieldPolicy) NamedFieldKeys(kind ObjectKind) []string {
-	if p == nil || p.unrestricted {
+	if p == nil {
 		return nil
 	}
+	// A computed attribute with asset sources may close (SR-58).
 	var out []string
+	if kind == KindCI && p.computedHidden() {
+		for attr := range p.idx.computed {
+			out = append(out, NamespaceAttributes+"."+attr)
+		}
+	}
+	if p.unrestricted {
+		return sortedUnique(out)
+	}
 	for i := range p.roles {
 		key := p.roles[i].key
 		if key == "" {

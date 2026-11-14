@@ -9,9 +9,11 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// Handler exposes the retention policy and the erasure workflow.
+// Handler exposes the retention policy, the erasure workflow and the
+// rights of a single person (report and erasure, SEC-05 [P3], WP-1158).
 type Handler struct {
-	svc *Service
+	svc      *Service
+	subjects *SubjectService
 }
 
 // NewHandler creates the privacy handler.
@@ -19,11 +21,22 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
+// WithSubjects serves the report and the erasure of a person; without it
+// the routes answer 503.
+func (h *Handler) WithSubjects(subjects *SubjectService) *Handler {
+	h.subjects = subjects
+	return h
+}
+
 // RegisterRoutes mounts the privacy routes on the given router.
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/privacy/retention", h.GetRetention)
 	r.Put("/api/v1/privacy/retention", h.PutRetention)
 	r.Post("/api/v1/privacy/erasure", h.RunErasure)
+	// The rights of a person (SEC-05 [P3], WP-1158): jobs with user:manage
+	// through the segment privacy.
+	r.Post("/api/v1/privacy/subjects/report", h.subjects.Report)
+	r.Post("/api/v1/privacy/subjects/erase", h.subjects.Erase)
 }
 
 func (h *Handler) org(w http.ResponseWriter, r *http.Request) (string, bool) {

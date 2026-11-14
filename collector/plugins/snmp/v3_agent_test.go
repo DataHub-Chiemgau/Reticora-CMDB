@@ -49,7 +49,7 @@ func startV3Agent(t *testing.T, user, authPass, privPass string, mib []gosnmp.Sn
 	if err = a.params.InitSecurityKeys(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 	go a.serve()
 	return a
 }
@@ -180,7 +180,7 @@ func startRFC3414Agent(t *testing.T, report string, stale int32) *rfc3414Agent {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 	a := &rfc3414Agent{port: conn.LocalAddr().(*net.UDPAddr).Port}
 	a.stale.Store(stale)
 	reportTo := func(req *gosnmp.SnmpPacket, flags gosnmp.SnmpV3MsgFlags, counter string) []byte {
@@ -268,8 +268,9 @@ func TestAuditSNMPv3AuthFailureReported(t *testing.T) {
 
 			// Control: the agent answers the engine discovery and rejects the
 			// authenticated request; a plain gosnmp client gets an error
-			// (gosnmp v1.43 discards the unauthenticated report as "not
-			// authentic").
+			// (gosnmp discards the unauthenticated report as "not
+			// authentic"; since v1.47, GHSA-w96x-5v55-24xx, its engine
+			// discovery also requires an engine ID of 5-32 bytes).
 			raw := &gosnmp.GoSNMP{Target: target, Port: uint16(agent.port), Version: gosnmp.Version3, Timeout: time.Second, Retries: 0,
 				SecurityModel: gosnmp.UserSecurityModel, MsgFlags: gosnmp.AuthPriv, Logger: gosnmp.NewLogger(nil),
 				SecurityParameters: &gosnmp.UsmSecurityParameters{UserName: "reticora", AuthenticationProtocol: gosnmp.SHA256,

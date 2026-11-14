@@ -25,7 +25,7 @@ const readmePath = "../../../docs/README.md"
 
 // modulesWithoutPages are the late modules without a navigation page: the
 // GPS history (LOC-09) has no UI of its own (WP-706).
-var modulesWithoutPages = []string{"gps"}
+var modulesWithoutPages = []string{"gps", "ipam", "admp", "escalation"}
 
 // TestG2DefaultEnablesP2ModulesOnly covers API-06 and RBA-05 (WP-830,
 // E-03, SEQ-01): without RETICORA_MODULES the release default G2 switches
@@ -65,8 +65,8 @@ func TestG2DefaultEnablesP2ModulesOnly(t *testing.T) {
 			t.Errorf("module %s is not a P2 module", key)
 		}
 	}
-	for _, key := range []string{"maintenance", "workflows", "compliance", "findings", "alerting", "keys",
-		"trainings", "desks", "gps", "agents", "iga", "ai"} {
+	for _, key := range []string{"maintenance", "workflows", "compliance", "findings", "monitoring", "ipam", "admp",
+		"escalation", "org_lifecycle", "keys", "trainings", "desks", "gps", "agents", "iga", "ai"} {
 		if g2.Enabled(key) {
 			t.Errorf("module %s (P3, P4 or [A]) is on in the G2 default", key)
 		}
@@ -100,8 +100,10 @@ func TestG2DefaultEnablesP2ModulesOnly(t *testing.T) {
 		t.Error("the reservation sweeper (module inventory) does not start with the G2 default")
 	}
 	for _, name := range config.WorkerNames {
-		if name != config.WorkerMonitoring && !g2.WorkerAllowed(name) {
-			t.Errorf("worker %s is switched off by a module in the G2 default", name)
+		p3 := slices.Contains(p3Workers, name)
+		if g2.WorkerAllowed(name) == p3 {
+			t.Errorf("worker %s: allowed %v in the G2 default, want %v (only the workers of the P3 modules are off)",
+				name, g2.WorkerAllowed(name), !p3)
 		}
 	}
 
@@ -191,8 +193,8 @@ func TestAccessRequestRunsFollowWorkflowsModule(t *testing.T) {
 
 // TestLateRoutesAreMarkedInSpecification covers the parity rule of WP-214:
 // every documented operation of a late module carries x-phase with the
-// module's phase, and no other path does. Each operation of a P2 module
-// carries x-feature (path or operation level) equal to the key of the org
+// module's phase, and no other path does. Each operation of a P2 or P3
+// module (WP-863) carries x-feature (path or operation level) equal to the key of the org
 // gate, entitlement.RequiredFeature; an ungated operation carries none, and
 // any x-feature elsewhere names the key of the org gate as well (WP-706,
 // E-38, E-44).
@@ -225,7 +227,7 @@ func TestLateRoutesAreMarkedInSpecification(t *testing.T) {
 		gate, gated := entitlement.RequiredFeature(op.Method, op.Path)
 		feature, hasFeature := features[op]
 		switch {
-		case late && m.Phase == PhaseP2 && gated && feature != gate:
+		case late && (m.Phase == PhaseP2 || m.Phase == PhaseP3) && gated && feature != gate:
 			t.Errorf("%s (module %s): x-feature %q, the org gate requires %q", op, m.Key, feature, gate)
 		case hasFeature && !gated:
 			t.Errorf("%s: x-feature %q on an operation the org gate does not gate", op, feature)
@@ -503,8 +505,59 @@ func TestPhaseValueSwitchesOnTheP2Modules(t *testing.T) {
 	if !combined.Enabled("gps") || !combined.Enabled("disposal") || combined.Enabled("keys") {
 		t.Errorf("P2,gps enables %v", combined.EnabledKeys())
 	}
-	if _, err = ParseModules("P3"); err == nil {
-		t.Error("the phase value P3 is accepted")
+	if _, err = ParseModules("P4"); err == nil {
+		t.Error("the phase value P4 is accepted")
+	}
+}
+
+// TestPhaseValueP3SwitchesOnTheP2AndP3Modules covers release G3 (WP-863,
+// E-160, E-170): the phase value P3 switches on every module with phase P2
+// or P3 and combines with module keys; the former key alerting stands for
+// monitoring; the P3 prefixes of the register map routes to their module.
+func TestPhaseValueP3SwitchesOnTheP2AndP3Modules(t *testing.T) {
+	g3, err := ParseModules(PhaseP3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range LateModules {
+		if g3.Enabled(m.Key) != (m.Phase == PhaseP2 || m.Phase == PhaseP3) {
+			t.Errorf("G3: module %s (%s) enabled = %v", m.Key, m.Phase, g3.Enabled(m.Key))
+		}
+	}
+	combined, err := ParseModules("P3,keys")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !combined.Enabled("keys") || !combined.Enabled(ModuleMonitoring) || combined.Enabled("gps") {
+		t.Errorf("P3,keys enables %v", combined.EnabledKeys())
+	}
+	alias, err := ParseModules("alerting")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := alias.EnabledKeys(); !slices.Equal(got, []string{ModuleMonitoring}) {
+		t.Errorf("RETICORA_MODULES=alerting enables %v, want [monitoring]", got)
+	}
+	for route, want := range map[string]string{
+		"/api/v1/cis/{id}/addresses":              "ipam",
+		"/api/v1/cis/{id}/configs":                ModuleMonitoring,
+		"/api/v1/cis/{id}/availability":           ModuleMonitoring,
+		"/api/v1/cis/{id}/credentials/effective":  ModuleMonitoring,
+		"/api/v1/network-interfaces/{id}/admp":    "admp",
+		"/api/v1/collector-groups/{id}":           ModuleMonitoring,
+		"/api/v1/monitoring/alerts/{id}":          ModuleMonitoring,
+		"/api/v1/subnets/{id}/scan":               "ipam",
+		"/api/v1/notification-callbacks/{org_id}": "escalation",
+		"/api/v1/org/exports":                     "org_lifecycle",
+	} {
+		if m, ok := ModuleForRoute(route); !ok || m.Key != want {
+			t.Errorf("%s belongs to %q, want %s", route, m.Key, want)
+		}
+	}
+	for _, core := range []string{"/api/v1/cis/{id}", "/api/v1/monitoring/metrics", "/api/v1/subnets/{id}", "/api/v1/org"} {
+		if m, ok := ModuleForRoute(core); ok {
+			t.Errorf("%s belongs to module %s, want core", core, m.Key)
+		}
 	}
 }
 
@@ -650,5 +703,121 @@ func TestBFFFollowsTheModuleGate(t *testing.T) {
 	}
 	if body := query(inventory); code(body) != "" {
 		t.Errorf("asset with inventory on: %v, want null without error", body)
+	}
+}
+
+// TestEveryP3PrefixIsDocumented covers WP-864 (API-06, E-160): every prefix
+// of a P3 module has at least one documented operation, implemented or a
+// scaffold with x-status: planned.
+func TestEveryP3PrefixIsDocumented(t *testing.T) {
+	documented, err := speccheck.Load(filepath.Clean(specPath))
+	if err != nil {
+		t.Fatalf("load spec: %v", err)
+	}
+	for _, m := range LateModules {
+		if m.Phase != PhaseP3 {
+			continue
+		}
+		for _, prefix := range m.Prefixes {
+			found := false
+			for _, op := range documented {
+				if mod, ok := ModuleForRoute(op.Path); ok && mod.Key == m.Key && prefixSegments(prefix, strings.Split(op.Path, "/")) >= 0 {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("module %s: prefix %s has no documented operation", m.Key, prefix)
+			}
+		}
+	}
+}
+
+// TestP3ModulePrefixesAreGated covers WP-865 (PKG-08, ENT-05, E-151, E-160):
+// every prefix and sub-path of a P3 module has a feature key in the org
+// gate, except the module org_lifecycle (core, TLC-05, TLC-06) and the
+// public provider callback /api/v1/notification-callbacks (WP-1146).
+func TestP3ModulePrefixesAreGated(t *testing.T) {
+	p3 := 0
+	for _, m := range LateModules {
+		if m.Phase != PhaseP3 || m.Key == "org_lifecycle" {
+			continue
+		}
+		p3++
+		for _, prefix := range m.Prefixes {
+			concrete := strings.ReplaceAll(prefix, "{id}", "x1")
+			for _, path := range []string{concrete, concrete + "/x2"} {
+				for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPatch, http.MethodDelete} {
+					feature, gated := entitlement.RequiredFeature(method, path)
+					if prefix == "/api/v1/notification-callbacks" {
+						if gated {
+							t.Errorf("%s %s: the provider callback has the feature %s", method, path, feature)
+						}
+						continue
+					}
+					if !gated || feature == "" {
+						t.Errorf("module %s: %s %s has no feature key in the org gate", m.Key, method, path)
+					}
+				}
+			}
+		}
+	}
+	if p3 == 0 {
+		t.Fatal("no P3 module in LateModules")
+	}
+	for path, want := range map[string]string{
+		"/api/v1/cis/x1/credentials":           entitlement.FeatureMonitoring,
+		"/api/v1/cis/x1/credentials/effective": entitlement.FeatureMonitoring,
+		"/api/v1/cis/x1/addresses":             entitlement.FeatureIPAM,
+		"/api/v1/cis/x1/configs":               entitlement.FeatureMonitoringNetwork,
+		"/api/v1/network-interfaces/x1/admp":   entitlement.FeatureADMP,
+	} {
+		if got, _ := entitlement.RequiredFeature(http.MethodGet, path); got != want {
+			t.Errorf("GET %s: %q, want %q", path, got, want)
+		}
+	}
+}
+
+// p3Workers are the workers of the P3 modules (OPS-02 [P3], WP-869). A work
+// package that adds a worker of a P3 module (WP-980 monitoring, WP-1114
+// workflow) adds its name here, in LateModules[].Workers, in both
+// deployments (TestEveryWorkerSwitchIsDeployable) and in docs/ops/workers.md.
+var p3Workers = []string{config.WorkerMonitoring, config.WorkerProbeAssign, config.WorkerProbeIngest, config.WorkerWorkflow,
+	config.WorkerAlarmCheck}
+
+// TestP3WorkersBelongToTheirModule covers OPS-02 [P3] (WP-869, E-162):
+// every worker of a P3 module is listed in LateModules[].Workers of a P3
+// module, is a registered worker switch and does not start in the release
+// G2; every worker a P3 module lists is a worker of p3Workers.
+func TestP3WorkersBelongToTheirModule(t *testing.T) {
+	g2, err := ParseModules("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := map[string]string{}
+	for _, m := range LateModules {
+		if m.Phase != PhaseP3 {
+			continue
+		}
+		for _, w := range m.Workers {
+			listed[w] = m.Key
+			if !slices.Contains(p3Workers, w) {
+				t.Errorf("module %s lists the worker %s, which is no P3 worker of p3Workers", m.Key, w)
+			}
+		}
+	}
+	for _, w := range p3Workers {
+		if _, ok := listed[w]; !ok {
+			t.Errorf("P3 worker %s is listed by no P3 module", w)
+		}
+		if !slices.Contains(config.WorkerNames, w) {
+			t.Errorf("P3 worker %s is no registered worker switch", w)
+		}
+		if g2.WorkerAllowed(w) {
+			t.Errorf("P3 worker %s starts in the release G2", w)
+		}
+	}
+	if g3, _ := ParseModules(PhaseP3); !g3.WorkerAllowed(config.WorkerMonitoring) {
+		t.Error("the monitoring worker does not start in the release G3")
 	}
 }

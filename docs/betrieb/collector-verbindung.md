@@ -11,8 +11,9 @@ nichts ankommt. Ports und Freigaben: [Firewall-Matrix](firewall-matrix.md).
 
 ## Der einzige Lieferweg: mTLS-NATS auf Port 4222
 
-Records, Heartbeats und Messwerte gehen ausschließlich über die
-mTLS-Verbindung des Collectors zum NATS-Endpunkt `nats-edge`:
+Records, Heartbeats, Messwerte und die Probe-Nachrichten des Monitorings
+gehen ausschließlich über die mTLS-Verbindung des Collectors zum
+NATS-Endpunkt `nats-edge`:
 
 - Endpunkt: `tls://<Host der Server-URL>:4222`; `RETICORA_NATS_URL`
   überschreibt ihn. Die Server-URL ist `RETICORA_SERVER_URL` oder, wenn
@@ -161,6 +162,283 @@ wieder (`collector.metrics.resumed`). Ein Neustart prüft sofort. Diese
 Messwerte zählen nicht als Verlust. Discovery und Inventar sind nicht
 betroffen.
 
+## Probe-Wire-Vertrag (`edgecore/probewire`)
+
+Für das Monitoring der Phase 3 tauschen Collector und Server Nachrichten im
+gemeinsamen Paket `edgecore/probewire` aus (das Paket importiert weder
+`backend/` noch `collector/`):
+
+| Nachricht | Inhalt |
+|---|---|
+| `AssignmentSet` | Seite des versionierten Zuweisungssatzes eines Collectors mit `ProbeSpec` je Probe (Typ, Ziel, Intervall, Timeout, Down-/Up-Count, Parameter, Schwellen, Elternprobe, Epoche) |
+| `ResultBatch` | Bündel von höchstens 1.000 Ergebnissen (`Result`: Probe, Epoche, Sequenz, `observed_at`, Status `ok`/`fail`/`error`, Code, RTT, Verlust, Werte, Labels) |
+| `StateChange` | Zustandswechsel einer Probe (`up`, `degraded`, `down`, `unknown`) mit Epoche, Sequenz, Grund, `observed_at` und letztem Ergebnis |
+| `Alive` | Lebenszeichen alle 10 s mit Uhrzeit des Collectors, Konfigurationsversion, Lastzahlen, Pufferstand, Verlusten und ICMP-Fähigkeit |
+
+**Version.** Jede Nachricht trägt `schema_version` (`<major>.<minor>`, derzeit
+`1.0`). Unbekannte Felder werden ignoriert; eine unbekannte Hauptversion
+weist der Empfänger ab (`ErrUnsupportedVersion`).
+
+**Reihenfolge und Fachzeit (E-175).** Die Reihenfolge ergibt sich aus
+(`epoch`, `seq`), nie aus der Uhrzeit. Die Epoche ist das Fencing-Token der
+Zuweisung und gilt je Probe; je Probe und Epoche ist genau ein Collector
+zuständig, die Ordnung gilt daher je Probe über (`epoch`, `seq`). Die
+Sequenz ist ein Zähler je Collector, den `Result` und `StateChange`
+gemeinsam nutzen; sie steigt streng monoton, wird mit dem Puffer des
+Collectors persistiert und beginnt nach einem Neustart nicht wieder bei 0.
+Der Idempotenzschlüssel ist (`probe_id`, `epoch`, `seq`), getrennt für
+Ergebnisse und für Zustandswechsel: Eine wiederholte Übertragung ist
+erkennbar und erzeugt keine Doppelzeilen. Fachzeit ist `observed_at`, der
+UTC-Zeitpunkt der Messung am Collector. Über `Alive.collector_time` misst
+der Server die Uhrabweichung und korrigiert `observed_at` erst ab 60 s
+Abweichung.
+
+**Absender.** Die Identität des Collectors stammt allein aus der
+authentifizierten Edge-Verbindung (mTLS-Zertifikat und sein
+Subject-Präfix), nie aus einem Feld der Nachricht. `collector_id` in einer
+Nachricht ist nur informativ; der Server weist eine Nachricht ab, deren
+`collector_id` von der authentifizierten Identität abweicht, und nimmt
+Ergebnisse und Zustandswechsel nur für Probes an, die diesem Collector mit
+dieser Epoche zugewiesen sind.
+
+**Gültige Werte.** Der Collector prüft jedes Ergebnis vor dem Bündeln
+(`Result.Validate`: bekannter Status, gültiger Code, nur endliche Zahlen).
+Ein ungültiges Ergebnis, etwa mit NaN, wird verworfen und als Verlust
+gezählt, statt das ganze Bündel unkodierbar zu machen (`ValidResults`).
+
+**Ergebnisse.** Ein `Result` hat kein Freitextfeld; Zusatzinformationen
+eines Typs laufen über `values` (Zahlen) und `labels`. Die Labels
+`credential_id` und `credential_namespace` nennen die genutzte Zugangsart
+(ID und Namespace, nie das Geheimnis). Gründe und Warncodes stehen in
+`edgecore/probewire/reason.go` (`collector_unreachable`, `parent_down`,
+`limit_exceeded`, `unsupported`, `config`, `auth_failed`, `timeout`,
+`refused`, `icmp_unavailable`, `unreachable`, `tls`; Warncodes
+`threshold_exceeded`, `cert_expiring`).
+
+**Abruf des Zuweisungssatzes.** Der Satz wird seitenweise geliefert: höchstens
+2.000 Probes und 768 KiB je Seite. `page` zählt ab 1, `next_page` nennt die
+nächste Seite und fehlt auf der letzten. Ändert sich die Version des Satzes
+während des Abrufs, trägt die Antwort auf die nächste Seite
+`version_changed: true` mit der neuen Version und ohne Probes; der Collector
+verwirft die bisher geholten Seiten und beginnt mit Seite 1 der neuen
+Version. Übernommen wird ein Satz erst, wenn alle Seiten einer Version
+vorliegen.
+
+## Probe-Subjects am Edge (E-173)
+
+Zustandswechsel, Ergebnisse und Lebenszeichen des Monitorings gehen per
+Request/Reply über dieselbe mTLS-Verbindung wie Records und Messwerte, im
+Subject-Baum des Collectors (`collector.<org>.<id>.>`):
+
+| Subject | Nachricht | Antwort |
+|---|---|---|
+| `collector.<org>.<id>.probe.state` | ein `StateChange` | `{"status":202,"seq":<seq>}` nach dem PubAck des Streams |
+| `collector.<org>.<id>.probe.results` | ein `ResultBatch` (1 bis 1.000 Ergebnisse) | `{"status":202,"seq":<höchste seq des Bündels>}` nach dem PubAck |
+| `collector.<org>.<id>.probe.alive` | ein `Alive` | `{"status":200,"server_time":"…"}` (`AliveReply`); gespeichert werden `last_alive_at` und die Uhrabweichung des Gruppenmitglieds (siehe unten) |
+
+- **Identität.** Organisation und Collector stammen aus dem Subject, also
+  aus der authentifizierten Edge-Identität. Ein unbekannter Collector
+  erhält 404, ein gesperrter 403, bevor die Nachricht gelesen wird
+  (COL-04). Nennt eine Nachricht eine andere `collector_id`, antwortet der
+  Server 422 (`collector_id: invalid`).
+- **Annahme.** Der Server prüft Größe (höchstens 256 KiB, sonst 413),
+  `schema_version` (andere Hauptversion: 400) und die Felder (422 mit dem
+  Feld). Gültige Zustandswechsel und Bündel legt er im JetStream-Stream
+  `RETICORA_PROBE` ab (`probe.state.<org>.<id>` bzw.
+  `probe.results.<org>.<id>`) und antwortet erst nach dem PubAck. Eine
+  Bestätigung heißt also: Die Nachricht ist persistent angenommen, der
+  Collector darf seinen Spool bis zur gemeldeten `seq` freigeben.
+- **Doppelversand.** Die Nachrichten-ID ist
+  `<collector>:<art>:<epoch>:<seq_from>-<seq_to>` mit `<art>` = `state`
+  oder `results` (bei einem Zustandswechsel `seq_from = seq_to`, bei einem
+  Bündel mit mehreren Epochen die höchste). JetStream dedupliziert über den
+  ganzen Stream; die Art trennt Zustandswechsel und Ergebnisse, deren
+  Zähler getrennt laufen (WP-952) und gleiche `seq` tragen können.
+  Ein Doppelversand innerhalb von 2 min ergibt eine Stream-Nachricht und
+  wird ebenfalls mit 202 bestätigt (`duplicate: true`); danach
+  dedupliziert die Datenbank über (`probe_id`, `epoch`, `seq`) (PRB-07).
+- **Kein Monitoring.** Ohne Feature `monitoring` antworten alle drei
+  Subjects 403 mit Problemtyp `feature-not-entitled`; der Collector pausiert
+  dann seinen Uplink, die Daten bleiben im Spool (WP-955).
+- **Störung.** Bestätigt der Stream nicht (NATS oder Stream nicht
+  verfügbar, Stream voll), antwortet der Server 503; der Collector
+  wiederholt mit Backoff, nichts geht verloren.
+
+Stream, Grenzen und Handler-Pool: [`docs/ops/workers.md`](../ops/workers.md#probe-edge-and-stream-reticora_probe-wp-959).
+
+## Uhrzeit des Collectors (PRB-09, WP-962)
+
+**Der Collector-Host braucht eine synchronisierte Uhr: NTP oder chrony
+(`timedatectl` zeigt `System clock synchronized: yes`).** Zeitstempel von
+Messungen sind die UTC-Zeit am Collector (`observed_at`); die Reihenfolge
+der Daten eines Collectors ergibt sich aus Epoche und Sequenz, nicht aus der
+Uhrzeit (E-175).
+
+- **Messung.** Jedes Lebenszeichen (`.probe.alive`, alle 10 s) ergibt
+  `Abweichung = collector_time − Empfangszeit am Server` (positiv: die Uhr
+  des Collectors geht vor). Der Fehler ist die Einweglaufzeit der Nachricht
+  (typisch unter 100 ms). Gespeichert wird der Median der letzten sechs Werte
+  als `collector_group_member.clock_offset_ms`, dazu `last_alive_at`. Die
+  sechs Werte liegen im Speicher der Server-Instanz; nach einem Neustart
+  oder Instanzwechsel beginnt die Glättung neu. Offene Warnung, `degraded`
+  und die Zähler der Rückkehr stehen dagegen in der Mitgliedszeile
+  (`clock_skew_warned`, `clock_skew_calm`, `clock_skew_settle`,
+  `member_status`) und werden unter deren Zeilensperre gelesen: Bei mehreren
+  Server-Instanzen entsteht jedes Ereignis genau einmal, ein Neustart
+  verliert keine offene Warnung.
+- **Metrik.** `reticora_collector_clock_offset_seconds{collector_id}` zeigt
+  den Median in Sekunden.
+- **Warnung ab 2 s.** Eine Log-Warnung (höchstens alle 5 min je Collector)
+  und beim Überschreiten genau ein Ereignis `collector.clock_skew` mit
+  `collector_id`, `collector_group_id`, `client_id`, `site_id`, `offset_ms`
+  (Median) und `degraded: false`; `id` und `skew_ms` tragen dieselben Werte
+  (Vertrag aus E-161).
+- **Ab 60 s `degraded`.** Das Gruppenmitglied wird `degraded`, bleibt aber
+  zuweisbar; beim Überschreiten entsteht genau ein weiteres Ereignis mit
+  `degraded: true`. Solange es `degraded` ist, korrigieren Ingest und
+  Zustandsanwendung die Zeitstempel seiner Ergebnisse und Zustandswechsel
+  um die gemessene Abweichung (`observed_at − Abweichung`) und vermerken den
+  angewandten Wert in `clock_offset_ms` der Zeile (`probe_result`,
+  `probe_state_change`; ohne Korrektur NULL). Eine erneut zugestellte
+  Ergebnis-Nachricht (Redelivery, erneuter Upload) wird auch dann nur einmal
+  geschrieben, wenn sich die Korrektur dazwischen geändert hat: Bis 24 h nach
+  dem letzten Lebenszeichen als `degraded` (`clock_corrected_at`) prüft der
+  Ingest Ergebnisse dieses Collectors auf dieselbe Probe, Epoche, Sequenz und
+  unkorrigierte Messzeit (Korrekturen bis 24 h).
+- **Rückkehr.** Bleibt der Median sechs Lebenszeichen lang unter 30 s, wird
+  das Mitglied wieder `healthy` (keine Korrektur mehr); bleibt er sechs
+  Lebenszeichen lang unter 2 s, nachdem es wieder `healthy` ist, meldet ein
+  Ereignis `collector.clock_skew` mit `resolved: true` das Ende der Warnung.
+
+## Zuweisungssatz: `.probes.request` und `.probes.changed` (WP-948)
+
+Der Collector holt seine Probes über Request/Reply auf
+`collector.<org>.<id>.probes.request`; der Server bedient das Subject im
+Worker `probe_assign` (Schalter `RETICORA_WORKER_PROBE_ASSIGN_ENABLED`, mit
+NATS und Datenbank).
+
+- **Anfrage** (`probewire.AssignmentRequest`): `if_none_match` (die Version,
+  die der Collector hält), `page` (ab 1) und `version` (die Version der
+  bisher geholten Seiten, auf Seite 1 leer).
+- **Version** ist `collector_group_member.config_version` des Collectors. Sie
+  steigt bei jeder Änderung seiner Zuweisungen (WP-941), einer zugewiesenen
+  Probe (WP-939), eines Profils oder einer Monitoring-Gruppe in deren
+  Wirkungsbereich (WP-946) und einer Credential-Bindung einer zugewiesenen
+  Probe (Trigger `credential_binding_probe_version`). Gleiche Version →
+  `{"not_modified": true, "version": n}`.
+- **Inhalt** (`probewire.AssignmentSet`): alle dem Collector zugewiesenen
+  und eingeschalteten Probes mit effektiven Werten, Epoche je Probe und
+  `credential_ids` (nur IDs, nie ein Geheimnis). Gesperrte Probes (WP-942)
+  haben ihre Zuweisung verloren und fehlen deshalb. Das Credential-Bundle
+  des Collectors enthält die an seine Probes gebundenen Zugangsdaten
+  (außer Tresor-Logins und Zugangsdaten eines anderen Kunden als dem der
+  Probe). Eine Probe, deren Zugangsdaten nicht im aktuellen Bundle stehen,
+  fehlt und steht auf Seite 1 in `skipped` mit `credential_missing`.
+- **Last:** Seite 1 einer neuen Version kostet drei Abfragen für den Satz
+  (Probes mit ihren Credential-IDs, Gruppen und Profile) plus Prüfung des
+  Collectors und Version, jede weitere Seite nur Prüfung und Version; die
+  Freischaltungen kommen aus dem Cache des Entitlement-Dienstes.
+- **Paging:** höchstens 2.000 Probes und 768 KiB je Seite; `next_page` nennt
+  die nächste Seite. Ändert sich die Version zwischen zwei Seiten, antwortet
+  der Server mit `version_changed: true`, und der Collector beginnt mit
+  Seite 1 neu. Die Seiten einer Version hält der Server eine Minute vor.
+- **Änderungshinweis:** Nach jedem Commit, der Versionen erhöht hat, sendet
+  der Server `collector.<org>.<id>.probes.changed` mit `{"version": n}`.
+  Verpasst der Collector den Hinweis, sieht er die neue Version beim nächsten
+  Abruf über `if_none_match`.
+- **Ablehnungen** vor jedem Lesen: unbekannter Collector 404, deaktivierter
+  oder pausierter 403, Organisation ohne Feature `monitoring` 403 mit
+  Problemtyp `feature-not-entitled`. Ein Fehler bei diesen Prüfungen weist
+  ebenfalls ab (500, fail-closed) und zählt als fehlgeschlagener Zyklus des
+  Workers.
+
+## ICMP und ICMPv6 (Ping-Probes, WP-953)
+
+Der Collector pingt über **einen** ICMP-Socket je Adressfamilie für den
+ganzen Prozess (`collector/probe/icmp_mux.go`), nicht über einen Socket je
+Ping: Ein Leser je Socket ordnet jede Echo-Antwort über (Ziel, ID, Sequenz)
+der wartenden Anfrage zu, auf einem unprivilegierten Socket, dessen ID der
+Kernel umschreibt, über (Ziel, Sequenz); die ersten 8 Byte der Nutzlast
+tragen zusätzlich ein Kennzeichen der Anfrage, sodass eine verspätete
+Antwort nie eine spätere Anfrage mit derselben Sequenz beantwortet (bei
+`size` unter 8 sendet der Collector 8 Byte). Link-Local-Ziele
+mit Zone (`fe80::1%eth0`) gehen über die Schnittstelle der Zone. Eine
+Prüfung des Typs `icmp` sendet standardmäßig 3 Echo-Anfragen im Abstand
+von 1 s innerhalb des Timeouts (`count` 1–5, `spacing_ms` 200–1000 ms,
+`size` höchstens 1472 Byte über IPv4 und 1452 Byte über IPv6, `family`
+`auto`, `v4` oder `v6`; alle Parameter in der Tabelle in
+[monitoring-probes.md](monitoring-probes.md)) und
+meldet `rtt_ms` (Mittel), `rtt_min_ms`, `rtt_max_ms`, `jitter_ms` und
+`loss`; ohne Antwort `fail` mit `timeout`. Auch der Sweep der Discovery
+pingt über diesen Socket.
+
+**Fähigkeiten.** Je Familie in dieser Reihenfolge:
+
+1. Unprivilegierter Datagram-Socket (`udp4` bzw. `udp6`): Linux erlaubt
+   ihn den Gruppen in `net.ipv4.ping_group_range`; der Schalter gilt auch
+   für ICMPv6. Docker setzt in Containern mit eigenem Netz-Namespace den
+   ganzen Bereich; bei Host-Netz gilt der Wert des Hosts
+   (`sysctl -w net.ipv4.ping_group_range="0 2147483647"`).
+2. Raw-Socket (`ip4:icmp` bzw. `ip6:ipv6-icmp`): braucht `CAP_NET_RAW`
+   (Unit von `install-vm.sh`: `AmbientCapabilities=CAP_NET_RAW`).
+
+Ohne beides ist ICMP der Familie aus: Ping-Probes melden `error` mit
+`icmp_unavailable` (Zustand `unknown`, nicht `down`), der Sweep arbeitet
+mit TCP und ARP. Fällt ein Socket aus (z. B. Netzwechsel), öffnet der
+nächste Ping ihn neu; wartende Anfragen enden spätestens mit ihrem
+Timeout.
+
+**Firewall.** Im Kundennetz müssen vom Collector zu den Zielen ICMP Echo
+Request (Typ 8) und zurück Echo Reply (Typ 0) erlaubt sein, für IPv6
+ICMPv6 Echo Request (Typ 128) und Echo Reply (Typ 129). Diese Pakete
+verlassen das Kundennetz nicht ([Firewall-Matrix](firewall-matrix.md)).
+
+## Konfigurationen per SSH (`.config`, WP-1053)
+
+Der Collector liest die Running-Config der Geräte, für die das Bundle einen
+Zieleintrag mit Namespace `ssh` führt (Zugangsdaten je Gerät oder aus dem
+Tresor über `credentialsForTarget`), und meldet geänderte Stände auf
+`collector.<org>.<id>.config` (ALR-07, E-207). Speicher und Ereignis
+`ci.config_changed` sind Sache des Servers (WP-1052, WP-1054).
+
+- Zeitplan: `RETICORA_CONFIG_INTERVAL` (Standard `24h`, mindestens `1h`,
+  `0` schaltet ab), höchstens `RETICORA_CONFIG_PARALLEL` (Standard 4)
+  Abrufe gleichzeitig. Der Startzeitpunkt je CI liegt fest über das
+  Intervall verteilt (Hash der CI-ID) und bleibt über Neustarts gleich.
+- Plattformen: `cisco_ios` (IOS/IOS-XE), `cisco_nxos`, `junos`,
+  `routeros` und `huawei_vrp`. Erkannt wird über das SSH-Banner (`ROSSSH`,
+  `HUAWEI`), sonst über `show version` (`NX-OS`, `Cisco IOS`, `JUNOS`).
+  Gelesen wird mit `show running-config`,
+  `show configuration | display set | no-more`, `/export terse` bzw.
+  `display current-configuration`. Die Befehle stehen fest im Code
+  (`ConfigCommands` des SSH-Plugins), höchstens 2 MiB Ausgabe, gepinnte
+  Host-Keys wie bei der Inventarisierung. Andere Plattformen ergeben
+  `unsupported_platform` ohne weiteren Befehl. Die erkannte Plattform wird
+  je CI gespeichert; schlägt ein Abruf mit ihr fehl, wird sie verworfen und
+  beim nächsten Lauf neu erkannt (getauschtes Gerät).
+- Vor dem Hash normalisiert der Collector Zeilenenden und entfernt
+  flüchtige Zeilen (Zeitstempel, `Building configuration...`,
+  `ntp clock-period` u. a.), dann ersetzt er jedes Geheimnis durch
+  `<masked>`: Passwörter und Secrets, SNMP-Communities (auch von Trap- und
+  Inform-Zielen) und -Schlüssel, TACACS+-/RADIUS-Schlüssel (auch
+  `server-private`), Pre-Shared-Keys (auch in Keyrings), Key-Strings,
+  Authentifizierungsschlüssel (auch NTP unter Junos, BGP `tcp-md5-key` und
+  OSPF `auth-key` unter RouterOS) und private Schlüsselblöcke. SHA-256 über den
+  maskierten Text; `masked_count` zählt die Ersetzungen.
+- Gesendet wird `probewire.ConfigSnapshot` (Inhalt gzip) nur, wenn sich der
+  Hash gegenüber dem zuletzt vom Server bestätigten Stand des CIs geändert
+  hat. Bestätigter Hash und Plattform je CI stehen in
+  `<RETICORA_SPOOL_DIR>/config/state.json`; ohne Verbindung wartet je CI der
+  jüngste Stand in `<RETICORA_SPOOL_DIR>/config/pending/` (Rechte 0600)
+  und geht nach der Verbindung zuerst. Ein neuerer Stand ersetzt einen
+  wartenden (`config_superseded`). Über 2 MiB oder über der
+  Nachrichtengröße des Edge (1 MiB): kein Versand (`config_too_large`).
+- Antwortet der Server mit 403 „feature not entitled“, pausieren Abruf und
+  Versand eine Stunde; 404 (CI unbekannt oder außerhalb des Scopes) und
+  andere dauerhafte Ablehnungen (4xx außer 403, 408 und 429) verwerfen den
+  Stand mit Warnung, damit er die Stände anderer CIs nicht blockiert. Logs nennen CI-ID, Plattform,
+  Hash-Präfix und `masked_count`, nie Inhalt oder Geheimnis.
+
 ## Log-Ereignisse
 
 | Ereignis | Stufe | Bedeutung | Abhilfe |
@@ -181,6 +459,12 @@ betroffen.
 | `collector.spool.split` | INFO | Zu großer gespoolter Batch in Teile zerlegt | – |
 | `collector.metrics.not_licensed` | WARN, einmal | Monitoring nicht im Plan; keine Messwerte | Plan erweitern (optional) |
 | `collector.metrics.resumed` | INFO | Monitoring lizenziert, Messwerte laufen wieder | – |
+| `collector.config.changed`, `collector.config.sent` | INFO | Geänderte Konfiguration gepuffert bzw. vom Server bestätigt (CI, Plattform, Hash-Präfix, `masked_count`) | – |
+| `collector.config.unsupported_platform` | WARN | Gerät keiner der fünf Plattformen | – (nicht unterstützt) |
+| `collector.config.too_large` | WARN | Konfiguration über 2 MiB bzw. über der Nachrichtengröße | – |
+| `collector.config.not_licensed` | WARN, einmal | Konfigurationserkennung nicht im Plan; Abruf pausiert eine Stunde | Plan erweitern (optional) |
+| `collector.config.discarded` | WARN | Server kennt das CI nicht oder es liegt außerhalb des Scopes; Stand verworfen | Bundle-Ziel bzw. CI prüfen |
+| `collector.config.failed` | WARN | Abruf fehlgeschlagen (Verbindung, Anmeldung, Host-Key) | Zugangsdaten, `RETICORA_SSH_KNOWN_HOSTS` prüfen |
 
 Erfolg zeigt `collector NATS endpoint connected over mTLS` und
 `heartbeat completed` mit `transport` `edge`.

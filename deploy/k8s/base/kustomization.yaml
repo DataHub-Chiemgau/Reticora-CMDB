@@ -18,6 +18,9 @@ kind: Kustomization
 # ConfigMap or one of its keys the pod stays in CreateContainerConfigError.
 resources:
   - deployment.yaml
+  # Deployment profile monitoring (WP-869, E-162): the monitoring workers in
+  # pods of their own.
+  - deployment-monitoring.yaml
   - service.yaml
   - serviceaccount.yaml
   - hpa.yaml

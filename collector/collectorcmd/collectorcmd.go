@@ -40,9 +40,12 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/ssh"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/sweep"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/wmi"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/probe"
+	rfprobe "github.com/DataHub-Chiemgau/Reticora-CMDB/collector/probe/redfish"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/profiles"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/buffer"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/keystore"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/transport"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/update"
 )
@@ -95,6 +98,20 @@ type collectorConfig struct {
 	// SpoolMaxAge drops buffered messages older than this on enqueue, but
 	// never before 24 h; 0 = keep forever.
 	SpoolMaxAge time.Duration
+	// ProbeSpoolMaxBytes is the budget of the probe spool below SpoolDir
+	// (probe-state and probe-results together, state changes 10 %;
+	// RETICORA_PROBE_SPOOL_MAX_BYTES, default 2 GiB; PRB-07, WP-954).
+	ProbeSpoolMaxBytes int64
+	// ProbeSyncRate is the most probe result messages per second the
+	// uplink sends, also while it synchronizes a backlog
+	// (RETICORA_PROBE_SYNC_RATE, default 5; PRB-07, WP-955).
+	ProbeSyncRate int
+	// ConfigInterval is the schedule of the running-configuration reads
+	// over SSH (RETICORA_CONFIG_INTERVAL, default 24 h, at least 1 h, 0
+	// off; ALR-07, WP-1053); ConfigParallel bounds the concurrent reads
+	// (RETICORA_CONFIG_PARALLEL, default 4).
+	ConfigInterval time.Duration
+	ConfigParallel int
 	// TrapListenAddr enables the SNMP trap receiver when set (e.g. ":162").
 	// Traps are normalized into metric events and sent to the monitoring
 	// ingest so existing alert rules can fire on them (spec §9).
@@ -179,7 +196,11 @@ func Main() {
 	}
 
 	collectorCfg := loadCollectorConfig()
-	pluginRegistry["redfish"] = redfish.New(redfish.WithTLSScopes(collectorCfg.RedfishTLSScopes...))
+	redfishPlugin := redfish.New(redfish.WithTLSScopes(collectorCfg.RedfishTLSScopes...))
+	pluginRegistry["redfish"] = redfishPlugin
+	// The probe type redfish polls through the same instance, so the TLS
+	// exceptions of the discovery apply to it as well (WP-998 AK3).
+	rfprobe.Configure(redfishPlugin)
 	pluginRegistry["wmi"] = wmi.New(wmi.WithTLSScopes(collectorCfg.WMITLSScopes...))
 	pluginRegistry["nas"] = nas.New(nas.WithTLSScopes(collectorCfg.NASTLSScopes...))
 	pluginRegistry["sweep"] = newSweep(&collectorCfg)
@@ -249,15 +270,36 @@ func Main() {
 		go runUpdateLoop(ctx, collectorCfg.UpdateInterval, newUpdateChecker(&collectorCfg), confirmed, restart)
 	}
 	go runAgentRelay(ctx, collectorCfg, uploader)
+	// The monitoring probes: scheduler, state machine, probe spool and
+	// uplink over the edge (WP-955). The engine starts with the saved
+	// assignment set and takes the sets of the NATS session (WP-956), so
+	// it is attached before the session starts.
+	// The capability report (PRT-18, WP-966): at the start and every
+	// 15 min, sent with every heartbeat and alive message. The executors
+	// consult the same report (dhcp ports, stamp time synchronization).
+	probe.UseCapabilities(&uploader.capabilities)
+	go probe.RunCapabilityRefresh(ctx, &probe.CapabilityDetector{}, func(r probewire.ProbeCapabilities) {
+		uploader.capabilities.Set(&r)
+	})
+	engineDone := make(chan struct{})
+	if engine := startProbeEngine(&collectorCfg, uploader); engine != nil {
+		collectorProbes.attach(engine, collectorCfg.SpoolDir, newEnvPollDeprecation(&collectorCfg, nil))
+		go func() { defer close(engineDone); engine.Run(ctx) }()
+	} else {
+		close(engineDone)
+	}
 	// The collector's mTLS channel to the NATS endpoint (COL-08); a
 	// collector enrolled after its start takes the identity over from it.
 	go runNATS(ctx, collectorCfg, uploader.adoptIdentity)
-	if collectorCfg.TrapListenAddr != "" {
-		go runTrapReceiver(ctx, collectorCfg, uploader)
-	}
+	// The SNMP trap receiver: configured by the server per collector group
+	// with every assignment set, RETICORA_SNMP_TRAP_LISTEN until then
+	// (DIS-06, WP-977).
+	collectorTraps.start(ctx, &collectorCfg, uploader)
 	if collectorCfg.MetricsInterval > 0 {
 		go runMetricsLoop(ctx, collectorCfg, uploader)
 	}
+	// The running configurations over SSH (ALR-07, WP-1053).
+	startConfigReads(ctx, &collectorCfg)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -269,6 +311,48 @@ func Main() {
 		slog.Info("collector restarting into the update", "version", version)
 	}
 	cancel()
+	// The engine bundles its pending results and saves the counters of the
+	// state machine before the process ends (PRB-07); a check that does not
+	// return in time does not hold up the shutdown.
+	select {
+	case <-engineDone:
+	case <-time.After(engineStopTimeout):
+		slog.Warn("probe engine did not stop in time; pending results may be lost", "event", "collector.probe.stop_timeout")
+	}
+	// The values read from vaults are overwritten before the process ends
+	// (WP-895).
+	collectorVault.close()
+}
+
+// engineStopTimeout bounds the wait for the probe engine at shutdown.
+const engineStopTimeout = 5 * time.Second
+
+// startProbeEngine opens the probe engine below the spool directory: its
+// state changes and results go from the persistent probe spool over the
+// edge (sendProbeViaEdge), never through the metric buffer. A refusal as
+// not licensed pauses the metric samples as well and vice versa ends with
+// an accepted message. Without a spool directory there is no engine.
+func startProbeEngine(cfg *collectorConfig, up *uploader) *probe.Engine {
+	if cfg.SpoolDir == "" {
+		slog.Warn("probe engine not started: no spool directory", "event", "collector.probe.disabled")
+		return nil
+	}
+	engine, err := probe.NewEngine(&probe.EngineConfig{SpoolDir: cfg.SpoolDir, SpoolMaxBytes: cfg.ProbeSpoolMaxBytes,
+		Send: sendProbeViaEdge, SyncRate: cfg.ProbeSyncRate})
+	if err != nil {
+		slog.Error("probe engine not started", "event", "collector.probe.disabled", "error", err)
+		return nil
+	}
+	engine.Uplink.OnNotLicensed = func() { up.monitoringNotLicensed(time.Now()) }
+	engine.Uplink.OnLicensed = up.monitoringLicensed
+	// The alive message carries the report of the heartbeat (WP-966) and
+	// the trap counters (WP-977).
+	engine.Capabilities = &up.capabilities
+	engine.TrapStats = collectorTraps.stats
+	// Traps of the monitoring mode become events of the engine and check
+	// the probes of their sender at once (WP-979).
+	collectorTraps.setMonitor(engine.OnTrap)
+	return engine
 }
 
 // spoolTopic is the buffer topic under which discovery result batches are
@@ -297,6 +381,9 @@ type uploader struct {
 	// droppedSamples counts the metric samples and traps dropped since the
 	// last heartbeat the server accepted (E-79: counted, not spooled).
 	droppedSamples atomic.Int64
+	// capabilities is the capability report the heartbeat and the alive
+	// message of the probe engine carry (PRT-18, WP-966).
+	capabilities probe.Capabilities
 	// monitoringRefusedAt is the time (Unix nanoseconds) the server last
 	// refused metric samples because monitoring is not licensed; 0 while
 	// they are sent (edge.go monitoringPaused).
@@ -505,6 +592,7 @@ func runDueDiscovery(ctx context.Context, cfg *collectorConfig, up *uploader, sc
 		scope   *collectorScope
 		records int
 		errs    []runError
+		usage   []credentialUse
 		next    time.Time
 	}
 	var outcomes []scopeOutcome
@@ -515,9 +603,10 @@ func runDueDiscovery(ctx context.Context, cfg *collectorConfig, up *uploader, sc
 		if len(due) == 0 {
 			continue
 		}
-		passRecords, errs := runPass(ctx, cfg, up, &pass, due, hosts)
+		passRecords, errs, usage := runPass(ctx, cfg, up, &pass, due, hosts)
 		records = append(records, passRecords...)
-		outcomes = append(outcomes, scopeOutcome{scope: pass.scope, records: len(passRecords), errs: errs, next: pass.nextRun(sched)})
+		outcomes = append(outcomes, scopeOutcome{scope: pass.scope, records: len(passRecords), errs: errs, usage: usage,
+			next: pass.nextRun(sched)})
 	}
 	if len(outcomes) == 0 {
 		return 0
@@ -528,21 +617,24 @@ func runDueDiscovery(ctx context.Context, cfg *collectorConfig, up *uploader, sc
 		if uploadErr != nil && o.records > 0 {
 			errs = append(errs, *uploadErr)
 		}
-		reportScopeRun(ctx, o.scope, now, o.records, errs, o.next)
+		reportScopeRun(ctx, o.scope, now, o.records, errs, o.usage, o.next)
 	}
 	slog.Info("discovery completed", "duration_ms", time.Since(now).Milliseconds(), "total_records", len(records))
 	return len(records)
 }
 
 // runPass runs the protocols of a pass, the sweep first, and returns its
-// records, tagged with its scope, and its run errors (DIS-08).
-func runPass(ctx context.Context, cfg *collectorConfig, up *uploader, pass *discoveryPass, protocols []string, hosts *hostCache) ([]plugins.DeviceRecord, []runError) {
+// records, tagged with its scope, its run errors (DIS-08) and the
+// credentials it used per target and namespace (CRD-06, WP-898).
+func runPass(ctx context.Context, cfg *collectorConfig, up *uploader, pass *discoveryPass, protocols []string,
+	hosts *hostCache) ([]plugins.DeviceRecord, []runError, []credentialUse) {
 	slog.Info("discovery started", "pass", pass.key, "protocols", protocols)
 	// Only the credentials of this pass (COL-02, DIS-09); every plugin
 	// receives the namespace of its protocol.
-	passCreds := credentialsFor(cfg, pass.scope)
+	passCreds, passRefs := credentialsForPass(cfg, pass.scope)
 	var passRecords []plugins.DeviceRecord
 	var errs []runError
+	var usage []credentialUse
 	if pass.truncated {
 		slog.Warn("discovery scope truncated", "event", "discovery.scope.truncated", "scope_id", pass.scope.ID,
 			"target", pass.scope.Target, "limit", maxScopeAddresses)
@@ -560,15 +652,35 @@ func runPass(ctx context.Context, cfg *collectorConfig, up *uploader, pass *disc
 		targets := pass.targetsFor(protocol, hosts)
 		slog.Info("running discovery plugin", "protocol", protocol, "targets", len(targets))
 		creds := plugins.CredentialsFor(protocol, passCreds)
-		hits, err := plug.Probe(ctx, targets, creds)
-		var probeErrs *plugins.ProbeErrors
-		if errors.As(err, &probeErrs) {
+		// Per device: the target credentials of the bundle, otherwise the
+		// scope's (CRD-04, WP-892).
+		credsOf := func(ip string) map[string]string {
+			if collectorBundle.targetKey(pass.scope, ip, "") == "" {
+				return creds
+			}
+			c, _ := credentialsForTarget(cfg, pass.scope, ip, "")
+			return plugins.CredentialsFor(protocol, c)
+		}
+		// The credential a device uses in the namespace of the protocol
+		// (WP-898), resolved like credsOf.
+		namespace := plugins.CredentialNamespace(protocol)
+		refOf := func(ip string) credentialRef {
+			if collectorBundle.targetKey(pass.scope, ip, "") == "" {
+				return passRefs[namespace]
+			}
+			_, refs := credentialsForTarget(cfg, pass.scope, ip, "")
+			return refs[namespace]
+		}
+		hits, probeErrs, failed, ok := probeByCredentials(ctx, protocol, plug, pass.scope, targets, creds, credsOf)
+		errs = append(errs, failed...)
+		if probeErrs != nil {
 			// Targets the probe could not check go with protocol, target
 			// and cause into the scope run (DIS-08).
-			errs = append(errs, probeTargetErrors(protocol, probeErrs)...)
-		} else if err != nil {
-			slog.Error("discovery plugin error", "event", "discovery.plugin.failed", "protocol", protocol, "error", err)
-			errs = append(errs, runError{Protocol: protocol, Cause: plugins.ErrorCause(err), Message: err.Error()})
+			probeFailed := probeTargetErrors(protocol, probeErrs)
+			usage = append(usage, credentialUses(namespace, nil, probeFailed, refOf)...)
+			errs = append(errs, probeFailed...)
+		}
+		if !ok {
 			continue
 		}
 		if pass.scope != nil && pass.scope.Kind == "host" && ctx.Err() == nil {
@@ -580,17 +692,154 @@ func runPass(ctx context.Context, cfg *collectorConfig, up *uploader, pass *disc
 			uploadSamples(ctx, up, reachabilitySamples(hosts.get(pass.key), reachable))
 			hosts.set(pass.key, reachable)
 		}
-		collected, failed := collectHits(ctx, protocol, plug, hits, creds)
-		errs = append(errs, failed...)
+		collected, collectFailed := collectHits(ctx, protocol, plug, hits, credsOf)
+		usage = append(usage, credentialUses(namespace, hits, collectFailed, refOf)...)
+		errs = append(errs, collectFailed...)
 		if protocol == "power" {
-			// UPS and PDU readings of the power devices (MON-02).
-			uploadSamples(ctx, up, pollPowerValues(ctx, hits, plugins.CredentialsFor("snmp", passCreds)))
+			// UPS and PDU readings of the power devices (MON-02), each
+			// with the SNMP credentials of its device.
+			uploadSamples(ctx, up, pollPowerByTarget(ctx, cfg, pass.scope, hits, plugins.CredentialsFor("snmp", passCreds)))
 		}
 		slog.Info("discovery plugin completed", "protocol", protocol, "probed", len(hits), "records", len(collected))
 		passRecords = append(passRecords, collected...)
 	}
 	tagRecords(passRecords, pass.scope)
-	return passRecords, errs
+	return passRecords, errs, usage
+}
+
+// credentialUse is an entry of the credential usage of a scope run (CRD-06,
+// WP-898): the bundle credential a target used in a namespace, the CI when
+// the bundle named it, and whether the use succeeded; never a value of the
+// secret.
+type credentialUse struct {
+	Target       string `json:"target"`
+	CIID         string `json:"ci_id,omitempty"`
+	Namespace    string `json:"namespace"`
+	CredentialID string `json:"credential_id"`
+	OK           bool   `json:"ok"`
+	Cause        string `json:"cause,omitempty"`
+}
+
+// usageCauses are the causes of a failed use the server stores
+// (credential_usage_error_class_check); a failure with another cause says
+// nothing about the credential and is not reported as usage.
+var usageCauses = map[string]bool{"auth_failed": true, "timeout": true, "unreachable": true, "tls": true}
+
+// maxReportedUsage bounds the usage entries of one run report
+// (credential.MaxUsageEntries of the server).
+const maxReportedUsage = 1000
+
+// credentialUses returns the usage entries of a protocol in a pass: a
+// success for every hit without a failure, a failure for every failed
+// target with a cause of usageCauses; only for targets that used a bundle
+// credential in the namespace (refOf). It also names that credential in
+// each failure (runError.CredentialID).
+func credentialUses(namespace string, hits []plugins.Result, failed []runError, refOf func(ip string) credentialRef) []credentialUse {
+	var out []credentialUse
+	failedAt := map[string]bool{}
+	for i := range failed {
+		f := &failed[i]
+		if f.Target == "" {
+			continue
+		}
+		failedAt[f.Target] = true
+		ref := refOf(f.Target)
+		if ref.ID == "" {
+			continue
+		}
+		f.CredentialID = ref.ID
+		if usageCauses[f.Cause] {
+			out = append(out, credentialUse{Target: f.Target, CIID: ref.CIID, Namespace: namespace, CredentialID: ref.ID, Cause: f.Cause})
+		}
+	}
+	for i := range hits {
+		if failedAt[hits[i].IP] {
+			continue
+		}
+		if ref := refOf(hits[i].IP); ref.ID != "" {
+			out = append(out, credentialUse{Target: hits[i].IP, CIID: ref.CIID, Namespace: namespace, CredentialID: ref.ID, OK: true})
+		}
+	}
+	return out
+}
+
+// probeByCredentials runs the probe of a protocol: the targets without a
+// target credential in one call with the scope's credentials (as before
+// WP-892), every group of targets with the same target credentials in a
+// call of its own with them (CRD-04). It returns the hits, the targets the
+// probe could not check, the run errors of failed calls and false when no
+// call succeeded.
+func probeByCredentials(ctx context.Context, protocol string, plug plugins.Plugin, scope *collectorScope, targets []string,
+	scopeCreds map[string]string, credsOf func(ip string) map[string]string) ([]plugins.Result, *plugins.ProbeErrors, []runError, bool) {
+	var plain []string
+	groups := map[string][]string{}
+	var keys []string
+	for _, tg := range targets {
+		key := collectorBundle.targetKey(scope, tg, "")
+		if key == "" {
+			plain = append(plain, tg)
+			continue
+		}
+		if _, seen := groups[key]; !seen {
+			keys = append(keys, key)
+		}
+		groups[key] = append(groups[key], tg)
+	}
+	type call struct {
+		targets []string
+		creds   map[string]string
+	}
+	var calls []call
+	switch {
+	case len(keys) == 0:
+		// No target credentials: the one call of before.
+		calls = append(calls, call{targets: targets, creds: scopeCreds})
+	case len(plain) > 0:
+		calls = append(calls, call{targets: plain, creds: scopeCreds})
+	}
+	for _, key := range keys {
+		group := groups[key]
+		slog.Info("probing targets with their own credentials", "protocol", protocol, "targets", len(group), "origin", "target")
+		calls = append(calls, call{targets: group, creds: credsOf(group[0])})
+	}
+	var hits []plugins.Result
+	var probeErrs *plugins.ProbeErrors
+	var failed []runError
+	ok := false
+	for _, c := range calls {
+		found, err := plug.Probe(ctx, c.targets, c.creds)
+		var pe *plugins.ProbeErrors
+		switch {
+		case errors.As(err, &pe):
+			if probeErrs == nil {
+				probeErrs = &plugins.ProbeErrors{}
+			}
+			probeErrs.Targets = append(probeErrs.Targets, pe.Targets...)
+		case err != nil:
+			slog.Error("discovery plugin error", "event", "discovery.plugin.failed", "protocol", protocol, "error", err)
+			failed = append(failed, runError{Protocol: protocol, Cause: plugins.ErrorCause(err), Message: err.Error()})
+			continue
+		}
+		ok = true
+		hits = append(hits, found...)
+	}
+	return hits, probeErrs, failed, ok
+}
+
+// pollPowerByTarget polls the UPS and PDU readings of the power hits, each
+// with the SNMP credentials of its device: the target credential of the
+// bundle, otherwise the scope's (CRD-04, WP-892).
+func pollPowerByTarget(ctx context.Context, cfg *collectorConfig, scope *collectorScope, hits []plugins.Result, scopeSNMP map[string]string) []plugins.MetricSample {
+	var samples []plugins.MetricSample
+	for i := range hits {
+		creds := scopeSNMP
+		if collectorBundle.targetKey(scope, hits[i].IP, "") != "" {
+			c, _ := credentialsForTarget(cfg, scope, hits[i].IP, "")
+			creds = plugins.CredentialsFor("snmp", c)
+		}
+		samples = append(samples, pollPowerValues(ctx, hits[i:i+1], creds)...)
+	}
+	return samples
 }
 
 // probeTargetErrors returns the run errors of the targets a probe could not
@@ -704,10 +953,12 @@ func expandCIDR(subnet string) (targets []string, truncated bool) {
 const collectParallelism = 16
 
 // collectHits runs Collect for every target that answered the probe
-// (DIS-03) and returns its DeviceRecords and the targets whose collection
+// (DIS-03), each with the credentials credsOf returns for its address (nil:
+// none; WP-892: the target credentials of the bundle, otherwise the
+// scope's), and returns its DeviceRecords and the targets whose collection
 // failed (DIS-08). When Collect fails, the probe hit is reported instead,
 // so a reachable device is never lost.
-func collectHits(ctx context.Context, protocol string, plug plugins.Plugin, hits []plugins.Result, creds map[string]string) ([]plugins.DeviceRecord, []runError) {
+func collectHits(ctx context.Context, protocol string, plug plugins.Plugin, hits []plugins.Result, credsOf func(ip string) map[string]string) ([]plugins.DeviceRecord, []runError) {
 	out := make([]plugins.DeviceRecord, len(hits))
 	failures := make([]*runError, len(hits))
 	sem := make(chan struct{}, collectParallelism)
@@ -720,6 +971,10 @@ func collectHits(ctx context.Context, protocol string, plug plugins.Plugin, hits
 			defer wg.Done()
 			defer func() { <-sem }()
 			probedAt := time.Now()
+			var creds map[string]string
+			if credsOf != nil {
+				creds = credsOf(hit.IP)
+			}
 			rec, err := plug.Collect(ctx, hit.IP, creds)
 			if err != nil || rec == nil {
 				if err != nil {
@@ -1281,9 +1536,12 @@ func runHeartbeatLoop(ctx context.Context, cfg collectorConfig, up *uploader, on
 // that fails reports the same losses again.
 func (u *uploader) heartbeat(ctx context.Context, cfg collectorConfig) (status string, ok bool) {
 	report := u.spoolReport(ctx)
-	status, ok = postHeartbeat(ctx, u.client, cfg, report)
+	vaultChanges := currentVaultReport()
+	status, ok = postHeartbeat(ctx, u.client, cfg, &heartbeatBody{Spool: report, Vault: vaultChanges,
+		ProbeCapabilities: u.capabilities.Report()})
 	if ok {
 		u.ackLoss(ctx, report)
+		vaultChanges.ack()
 	}
 	return status, ok
 }
@@ -1321,6 +1579,12 @@ type spoolReport struct {
 
 type heartbeatBody struct {
 	Spool *spoolReport `json:"spool,omitempty"`
+	// Vault carries the vault version changes (WP-897); omitted while
+	// there are none.
+	Vault *vaultReport `json:"vault,omitempty"`
+	// ProbeCapabilities is the capability report of the collector
+	// (PRT-18, WP-966); omitted before the first detection.
+	ProbeCapabilities *probewire.ProbeCapabilities `json:"probe_capabilities,omitempty"`
 }
 
 func (u *uploader) spoolReport(ctx context.Context) *spoolReport {
@@ -1365,8 +1629,8 @@ var heartbeatSkipLogged atomic.Bool
 // edge takes organization and collector from the certificate; the HTTP
 // path needs them in cfg. A refused heartbeat is an error with the reason
 // (collector.heartbeat.refused): the server does not see the collector.
-func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig, spool *spoolReport) (status string, ok bool) {
-	body, err := json.Marshal(heartbeatBody{Spool: spool})
+func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig, hb *heartbeatBody) (status string, ok bool) {
+	body, err := json.Marshal(hb)
 	if err != nil {
 		slog.Error("encode heartbeat failed", "error", err)
 		return "", false
@@ -1421,18 +1685,11 @@ func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig
 	return resp.Header.Get(LicenseStatusHeader), true
 }
 
-// runTrapReceiver receives SNMP traps and forwards them as metric events to
-// the monitoring ingest, so the existing alert rules can fire on traps (e.g.
-// "any linkDown trap → critical alert"). Without the edge a trap waits in
-// the bounded metric buffer; it is not spooled to disk like discovery
-// results, which would delay alerts past the point where they are useful.
-func runTrapReceiver(ctx context.Context, cfg collectorConfig, up *uploader) {
-	if err := newTrapReceiver(cfg, up).Run(ctx); err != nil {
-		slog.Error("snmp trap receiver stopped", "error", err)
-	}
-}
-
-// newTrapReceiver builds the trap receiver. Traps arrive from any device,
+// newTrapReceiver builds the trap receiver of RETICORA_SNMP_TRAP_LISTEN
+// (the fallback of trapManager, WP-977). It forwards the traps as metric
+// events to the monitoring ingest, so the existing alert rules can fire on
+// traps (e.g. "any linkDown trap → critical alert"); without the edge a
+// trap waits in the bounded metric buffer. Traps arrive from any device,
 // so only the locally configured community applies, never one of a server
 // scope (COL-02).
 func newTrapReceiver(cfg collectorConfig, up *uploader) *snmp.TrapReceiver {
@@ -1463,6 +1720,49 @@ type interfacePoller interface {
 // family (power.Plugin).
 type pduPoller interface {
 	PDUValues(ctx context.Context, target string, creds map[string]string, family string) ([]plugins.MetricSample, error)
+}
+
+// envPollDeprecation announces the end of the environment metric poll
+// (MON-03, WP-976 AK6): while the poll runs (MetricsInterval > 0, the
+// default included) and the collector holds an assignment set with at least
+// one probe, it logs collector.metrics.env_poll_deprecated once per set
+// version. The server-side probe types (snmp_if, snmp_custom, redfish)
+// replace the poll; switching it off with an assignment is WP-999. run
+// creates the notice with newEnvPollDeprecation, and the adoption of the
+// assignment set (probeAssignment, WP-956) reports every applied version to
+// observe.
+type envPollDeprecation struct {
+	mu      sync.Mutex
+	logged  map[int64]bool
+	logger  *slog.Logger
+	enabled func() time.Duration
+}
+
+// newEnvPollDeprecation returns the notice for the poll interval of cfg.
+func newEnvPollDeprecation(cfg *collectorConfig, logger *slog.Logger) *envPollDeprecation {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &envPollDeprecation{logged: map[int64]bool{}, logger: logger,
+		enabled: func() time.Duration { return cfg.MetricsInterval }}
+}
+
+// observe takes an applied assignment set: its version and the number of
+// its probes. It reports whether it logged.
+func (d *envPollDeprecation) observe(version int64, probes int) bool {
+	if probes == 0 || d.enabled() <= 0 {
+		return false
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.logged[version] {
+		return false
+	}
+	d.logged[version] = true
+	d.logger.Warn("the metric poll of the environment is deprecated: configure the probes on the server",
+		"event", "collector.metrics.env_poll_deprecated", "config_version", version, "probes", probes,
+		"interval", d.enabled().String(), "probe_types", "snmp_if, snmp_custom, redfish")
+	return true
 }
 
 // defaultMetricsInterval is the interval of the standard poll (MON-02).
@@ -1768,6 +2068,10 @@ func loadCollectorConfig() collectorConfig {
 		SpoolDir:           envOrDefault("RETICORA_SPOOL_DIR", "/var/lib/reticora-collector/spool"),
 		SpoolMaxBytes:      int64EnvOrDefault("RETICORA_SPOOL_MAX_BYTES", 1<<30), // 1 GiB default cap
 		SpoolMaxAge:        durationEnvOrDefault("RETICORA_SPOOL_MAX_AGE", 72*time.Hour),
+		ProbeSpoolMaxBytes: int64EnvOrDefault("RETICORA_PROBE_SPOOL_MAX_BYTES", probe.DefaultOutboxMaxBytes),
+		ProbeSyncRate:      int(int64EnvOrDefault("RETICORA_PROBE_SYNC_RATE", probe.DefaultSyncRate)),
+		ConfigInterval:     configIntervalFromEnv(os.Getenv("RETICORA_CONFIG_INTERVAL")),
+		ConfigParallel:     configParallelFromEnv(os.Getenv("RETICORA_CONFIG_PARALLEL")),
 		TrapListenAddr:     os.Getenv("RETICORA_SNMP_TRAP_LISTEN"),
 		MetricsInterval:    durationEnvOrDefault("RETICORA_METRICS_INTERVAL", defaultMetricsInterval),
 		PollMetrics:        pollMetricsFromEnv(os.Getenv("RETICORA_SNMP_POLL_METRICS")),
@@ -1836,6 +2140,12 @@ func boolEnv(key string) bool {
 func newSweep(cfg *collectorConfig) *sweep.Plugin {
 	p := sweep.New()
 	p.Concurrency = cfg.SweepConcurrency
+	// The sweep pings over the shared ICMP socket of the process (WP-953
+	// AK6); without the capability it keeps its own pinger, which then
+	// reports that ICMP is unavailable.
+	if mux := probe.DefaultMux(); mux.Available(4) {
+		p.Pinger = probe.SweepPinger{Mux: mux}
+	}
 	return p
 }
 

@@ -170,6 +170,16 @@ func (r *MemoryRepository) Create(_ context.Context, def *Definition) error {
 	if def.AppliesTo == "" {
 		def.AppliesTo = "asset"
 	}
+	// Like PostgreSQL and Update: the field lists of a state are arrays,
+	// never null.
+	for i := range def.States {
+		if def.States[i].RequiredFields == nil {
+			def.States[i].RequiredFields = []string{}
+		}
+		if def.States[i].LockedFields == nil {
+			def.States[i].LockedFields = []string{}
+		}
+	}
 	stored := *def
 	r.defs[def.ID] = &stored
 	return nil
@@ -191,11 +201,12 @@ func (r *MemoryRepository) Update(_ context.Context, def *Definition, expectedVe
 		return ErrVersionMismatch
 	}
 	ids := map[string]string{}
-	for _, st := range d.States {
-		ids[st.Key] = st.ID
+	for i := range d.States {
+		ids[d.States[i].Key] = d.States[i].ID
 	}
 	states := make([]State, 0, len(def.States))
-	for _, st := range def.States {
+	for i := range def.States {
+		st := def.States[i]
 		st.DefinitionID = d.ID
 		st.ID = ids[st.Key]
 		if st.ID == "" {
@@ -204,6 +215,9 @@ func (r *MemoryRepository) Update(_ context.Context, def *Definition, expectedVe
 		}
 		if st.RequiredFields == nil {
 			st.RequiredFields = []string{}
+		}
+		if st.LockedFields == nil {
+			st.LockedFields = []string{}
 		}
 		states = append(states, st)
 		ids[st.Key] = st.ID

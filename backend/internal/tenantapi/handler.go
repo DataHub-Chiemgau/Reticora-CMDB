@@ -158,6 +158,19 @@ func validateOrganization(req *UpdateOrganizationRequest) error {
 			return err
 		}
 	}
+	// settings.monitoring.auto_ping switches the automatic ping probes
+	// (MON-02, WP-949): a bool; anything else is 400 with the field.
+	if raw, ok := req.Settings["monitoring"]; ok && raw != nil {
+		m, isObject := raw.(map[string]any)
+		if !isObject {
+			return &FieldError{Field: "settings.monitoring", Message: "must be an object"}
+		}
+		if v, has := m["auto_ping"]; has {
+			if _, isBool := v.(bool); !isBool {
+				return &FieldError{Field: "settings.monitoring.auto_ping", Message: "must be true or false"}
+			}
+		}
+	}
 	if req.Locale != nil {
 		canonical, err := canonicalLocale(*req.Locale)
 		if err != nil {
@@ -275,6 +288,10 @@ func (h *Handler) DeleteClient(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.repo.DeleteClient(r.Context(), orgID, chi.URLParam(r, "id")); err != nil {
+		// A client still in use is 409 id; anything else not found.
+		if api.WriteFieldError(w, err) {
+			return
+		}
 		api.WriteError(w, http.StatusNotFound, "Not Found", "client not found")
 		return
 	}

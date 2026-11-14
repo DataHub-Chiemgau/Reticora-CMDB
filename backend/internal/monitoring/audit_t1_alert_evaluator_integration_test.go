@@ -11,9 +11,9 @@ package monitoring_test
 // Two organizations each have an enabled rule (gt 50, duration 0) and a
 // sample of 99. The evaluator on PostgreSQL lists the rules under
 // app.system, evaluates each in its organization's tenant transaction and
-// fires each rule exactly once (second run: no new event), without worker
-// errors. The system flag only reads: a write under app.system fails or
-// changes no row.
+// opens exactly one alarm per organization (second run: no new alarm,
+// WP-984), without worker errors. The system flag only reads: a write under
+// app.system fails or changes no row.
 //
 // Retest:
 //   cd backend && TEST_DATABASE_URL=postgres://reticora:reticora@localhost:55432/audit_db_01?sslmode=disable \
@@ -21,10 +21,10 @@ package monitoring_test
 
 import (
 	"context"
-	"sync"
 	"testing"
 	"time"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
@@ -46,8 +46,10 @@ func TestAuditT1AlertEvaluatorPerOrganization(t *testing.T) {
 	rules := map[string]string{}
 	for _, org := range []string{f.OrgA, f.OrgB} {
 		var id string
-		if err := f.Admin.QueryRow(bg, `INSERT INTO alert_rule (organization_id, name, metric_name, condition, threshold, duration)
-			VALUES ($1, 't1-alert', 't1_alert_metric', 'gt', 50, '0 seconds') RETURNING id::text`, org).Scan(&id); err != nil {
+		if err := f.Admin.QueryRow(bg, `INSERT INTO alert_rule (organization_id, name, metric_name, condition, threshold, severity, duration,
+			                        warning_condition)
+			VALUES ($1, 't1-alert', 't1_alert_metric', 'gt', 50, 'warning', '0 seconds',
+			        '{"op":"gt","field":"value","value":50}') RETURNING id::text`, org).Scan(&id); err != nil {
 			t.Fatalf("seed rule: %v", err)
 		}
 		rules[org] = id
@@ -58,15 +60,9 @@ func TestAuditT1AlertEvaluatorPerOrganization(t *testing.T) {
 		}
 	}
 
-	var mu sync.Mutex
-	events := map[string]int{}
-	ev := monitoring.NewEvaluator(store, store.AlertStore(), monitoring.NotifierFunc(func(_ context.Context, e *monitoring.AlertEvent) {
-		mu.Lock()
-		defer mu.Unlock()
-		if rules[e.Rule.OrgID] == e.Rule.ID {
-			events[e.Rule.OrgID]++
-		}
-	}))
+	// The state of a series is its alarm (WP-984): each organization gets
+	// exactly one open alarm, and the second run adds none.
+	ev := monitoring.NewEvaluator(store, store.AlertStore(), alarm.NewRuleSink(alarm.NewPGService(f.App)))
 	errorsBefore := testutil.ToFloat64(observability.WorkerErrors.WithLabelValues("monitoring"))
 	ev.Evaluate(bg)
 	ev.Evaluate(bg)
@@ -74,18 +70,22 @@ func TestAuditT1AlertEvaluatorPerOrganization(t *testing.T) {
 		t.Errorf("worker_errors_total{monitoring} rose from %v to %v during the evaluation", errorsBefore, after)
 	}
 	for org, id := range rules {
-		var fired *time.Time
-		if err := f.Admin.QueryRow(bg, `SELECT last_fired_at FROM alert_rule WHERE id = $1`, id).Scan(&fired); err != nil {
+		var open, all int
+		if err := f.Admin.QueryRow(bg, `SELECT count(*) FILTER (WHERE state = 'open'), count(*) FROM alarm
+			WHERE organization_id = $1 AND source_kind = 'rule' AND source_id = $2`, org, id).Scan(&open, &all); err != nil {
 			t.Fatal(err)
 		}
-		if fired == nil {
-			t.Errorf("rule of organization %s: last_fired_at not set by the evaluator (MarkFired in the organization's transaction)", org)
+		if open != 1 || all != 1 {
+			t.Errorf("rule of organization %s: %d open of %d alarms over two runs, want exactly one (written in the organization's transaction)",
+				org, open, all)
 		}
-		mu.Lock()
-		n := events[org]
-		mu.Unlock()
-		if n != 1 {
-			t.Errorf("rule of organization %s fired %d times over two runs, want exactly once", org, n)
+		var opened int
+		if err := f.Admin.QueryRow(bg, `SELECT count(*) FROM alarm_transition tr JOIN alarm a ON a.id = tr.alarm_id
+			WHERE a.organization_id = $1 AND a.source_id = $2 AND tr.to_state = 'open'`, org, id).Scan(&opened); err != nil {
+			t.Fatal(err)
+		}
+		if opened != 1 {
+			t.Errorf("rule of organization %s opened %d times, want once", org, opened)
 		}
 	}
 

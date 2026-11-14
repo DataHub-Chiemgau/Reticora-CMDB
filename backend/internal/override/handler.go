@@ -3,7 +3,11 @@ package override
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
@@ -149,6 +153,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/reconciliation/conflicts", h.Conflicts)
 	r.Get("/api/v1/reconciliation/source-policy", h.GetPolicy)
 	r.Put("/api/v1/reconciliation/source-policy", h.UpsertPolicy)
+	r.Get("/api/v1/reconciliation/source-ranks", h.GetSourceRanks)
+	r.Put("/api/v1/reconciliation/source-ranks", h.PutSourceRanks)
 }
 
 func (h *Handler) dispatch(r *http.Request, orgID, event string, payload any) {
@@ -377,52 +383,189 @@ func (h *Handler) Conflicts(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetPolicy handles GET /api/v1/reconciliation/source-policy
+// sourcePolicyDeprecatedAt is the day PUT /reconciliation/source-ranks
+// replaced the source-priority list (REC-04, E-233): GET source-policy
+// answers with Deprecation (RFC 9745) and a successor link; OpenAPI
+// carries the same date (x-deprecated-at).
+var sourcePolicyDeprecatedAt = time.Date(2026, time.November, 12, 0, 0, 0, 0, time.UTC)
+
+// sourceRanksPath is the successor of /reconciliation/source-policy.
+const sourceRanksPath = "/api/v1/reconciliation/source-ranks"
+
+// GetPolicy handles GET /api/v1/reconciliation/source-policy, deprecated
+// since the source ranks per attribute (REC-04): it lists the built-in
+// priorities (DefaultPriorities), which no write decision reads.
 func (h *Handler) GetPolicy(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-	policy, err := h.repo.Policy(r.Context(), t.OrganizationID)
-	if err != nil {
-		api.WriteRepoError(w, err)
-		return
-	}
-	api.WriteJSON(w, http.StatusOK, policy)
+	w.Header().Set("Deprecation", "@"+strconv.FormatInt(sourcePolicyDeprecatedAt.Unix(), 10))
+	w.Header().Set("Link", "<"+sourceRanksPath+">; rel=\"successor-version\"")
+	api.WriteJSON(w, http.StatusOK, &SourcePolicy{
+		OrganizationID: t.OrganizationID, Name: "default",
+		Priorities: append([]string{}, DefaultPriorities...), IsDefault: true,
+	})
 }
 
-// UpsertPolicy handles PUT /api/v1/reconciliation/source-policy
+// UpsertPolicy handles PUT /api/v1/reconciliation/source-policy: gone
+// (410) since the source ranks per attribute (REC-04, E-233); the table
+// source_priority_policy is no longer written.
 func (h *Handler) UpsertPolicy(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-	var policy SourcePolicy
-	if err := api.ReadJSON(r, &policy); err != nil {
-		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+	w.Header().Set("Link", "<"+sourceRanksPath+">; rel=\"successor-version\"")
+	api.WriteError(w, http.StatusGone, "Gone", "the source-priority policy is replaced by the source ranks per attribute; use PUT "+sourceRanksPath)
+}
+
+// GetSourceRanks handles GET /api/v1/reconciliation/source-ranks (REC-04):
+// the stored entries of the organization and, per requested attribute_key
+// (repeatable or comma-separated), the effective ranks of every automation
+// source with their origin (type, org, default). ci_type_id narrows the
+// entries to that type and the organization-wide ones and resolves the
+// effective ranks for it.
+func (h *Handler) GetSourceRanks(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-	if len(policy.Priorities) == 0 {
-		api.WriteFieldError(w, &api.FieldError{Field: "priorities", Message: "priorities must not be empty"})
+	query := r.URL.Query()
+	// Stored type ids are lower case (uuid::text); an id in upper case
+	// names the same type.
+	ciTypeID := strings.ToLower(query.Get("ci_type_id"))
+	if ciTypeID != "" && !api.IsUUID(ciTypeID) {
+		api.WriteFieldError(w, &api.FieldError{Field: "ci_type_id", Message: "must be a UUID"})
 		return
 	}
-	// PostgreSQL stores no NUL in text or jsonb; reject it before SQL (F-047).
-	if err := api.RejectNUL("name", policy.Name); err != nil {
+	var keys []string
+	for _, raw := range query["attribute_key"] {
+		for _, k := range strings.Split(raw, ",") {
+			if k = strings.TrimSpace(k); k != "" {
+				keys = append(keys, k)
+			}
+		}
+	}
+	if err := api.RejectNUL("attribute_key", keys...); err != nil {
 		api.WriteFieldError(w, err)
 		return
 	}
-	if err := api.RejectNUL("priorities", policy.Priorities...); err != nil {
-		api.WriteFieldError(w, err)
-		return
-	}
-	policy.OrganizationID = t.OrganizationID
-	policy.IsDefault = true
-	if err := h.repo.UpsertPolicy(r.Context(), &policy); err != nil {
+	entries, err := h.repo.SourceRankEntries(r.Context(), t.OrganizationID)
+	if err != nil {
 		api.WriteRepoError(w, err)
 		return
 	}
-	h.dispatch(r, t.OrganizationID, "reconciliation.policy_changed", policy)
-	api.WriteJSON(w, http.StatusOK, policy)
+	api.WriteJSON(w, http.StatusOK, rankResponse(entries, ciTypeID, keys))
+}
+
+// rankResponse filters entries by type and attributes and adds the
+// effective table per attribute.
+func rankResponse(entries []RankEntry, ciTypeID string, keys []string) SourceRanksResponse {
+	table := NewRankTable(entries)
+	wanted := map[string]bool{}
+	for _, k := range keys {
+		wanted[k] = true
+	}
+	out := SourceRanksResponse{Entries: []RankEntry{}, Effective: []EffectiveRanks{}}
+	for i := range entries {
+		e := entries[i]
+		if len(wanted) > 0 && !wanted[e.AttributeKey] {
+			continue
+		}
+		if ciTypeID != "" && e.CITypeID != "" && e.CITypeID != ciTypeID {
+			continue
+		}
+		out.Entries = append(out.Entries, e)
+	}
+	seen := map[string]bool{}
+	for _, k := range keys {
+		if !seen[k] {
+			seen[k] = true
+			out.Effective = append(out.Effective, table.EffectiveFor(ciTypeID, k))
+		}
+	}
+	return out
+}
+
+// PutSourceRanks handles PUT /api/v1/reconciliation/source-ranks: it
+// replaces the source ranks of the organization (REC-04). At most
+// MaxRankEntries entries; a source that is not an automation source
+// (manual, override, manual_override, unknown), a rank outside 1-99, a
+// duplicate entry or an unknown CI type is 422 on its field. The audit
+// entry reconciliation.source_ranks_updated is written in the transaction;
+// after the commit reconciliation.policy_changed goes out with the changed
+// attribute keys.
+func (h *Handler) PutSourceRanks(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	var req ReplaceSourceRanksRequest
+	if err := api.ReadJSON(r, &req); err != nil {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", err.Error())
+		return
+	}
+	if err := validateRankEntries(req.Entries); err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
+	// before and after are both read in the writing transaction, so the
+	// event and the answer match the audit entry even under a concurrent
+	// PUT.
+	before, after, err := h.repo.ReplaceSourceRanks(r.Context(), t.OrganizationID, t.UserID, req.Entries)
+	if err != nil {
+		if !api.WriteFieldError(w, err) {
+			api.WriteRepoError(w, err)
+		}
+		return
+	}
+	if changed := changedAttributes(before, after); len(changed) > 0 {
+		h.dispatch(r, t.OrganizationID, "reconciliation.policy_changed", map[string]any{"attribute_keys": changed})
+	}
+	api.WriteJSON(w, http.StatusOK, rankResponse(after, "", nil))
+}
+
+// validateRankEntries checks the entries of PUT source-ranks; the error
+// names the field of the first violation (422).
+func validateRankEntries(entries []RankEntry) *api.FieldError {
+	if entries == nil {
+		return &api.FieldError{Field: "entries", Message: "is required (an empty list removes every entry)", Status: http.StatusUnprocessableEntity}
+	}
+	if len(entries) > MaxRankEntries {
+		return &api.FieldError{Field: "entries", Message: fmt.Sprintf("at most %d entries", MaxRankEntries), Status: http.StatusUnprocessableEntity}
+	}
+	seen := map[rankKey]bool{}
+	for i := range entries {
+		e := &entries[i]
+		field := func(name string) string { return fmt.Sprintf("entries[%d].%s", i, name) }
+		e.AttributeKey = strings.TrimSpace(e.AttributeKey)
+		switch {
+		case e.AttributeKey == "" || len(e.AttributeKey) > 200:
+			return &api.FieldError{Field: field("attribute_key"), Message: "must be 1 to 200 characters", Status: http.StatusUnprocessableEntity}
+		case strings.ContainsRune(e.AttributeKey, 0):
+			return &api.FieldError{Field: field("attribute_key"), Message: "must not contain NUL characters", Status: http.StatusUnprocessableEntity}
+		case SourceRank(e.Source) >= 100:
+			return &api.FieldError{Field: field("source"), Message: "manual sources rank 100 and are not configurable", Status: http.StatusUnprocessableEntity}
+		case !IsConfigurableSource(e.Source):
+			return &api.FieldError{Field: field("source"), Message: "must be an automation source: " + strings.Join(ConfigurableSources, ", "), Status: http.StatusUnprocessableEntity}
+		case e.Rank < 1 || e.Rank > 99:
+			return &api.FieldError{Field: field("rank"), Message: "must be between 1 and 99 (manual ranks 100)", Status: http.StatusUnprocessableEntity}
+		case e.CITypeID != "" && !api.IsUUID(e.CITypeID):
+			return &api.FieldError{Field: field("ci_type_id"), Message: "must be a UUID", Status: http.StatusUnprocessableEntity}
+		}
+		// Stored type ids are lower case (uuid::text): an id in upper case
+		// is the same type for the type check and the duplicate check.
+		e.CITypeID = strings.ToLower(e.CITypeID)
+		e.UpdatedBy, e.UpdatedAt = "", nil
+		if seen[e.key()] {
+			return &api.FieldError{Field: field("source"), Message: "duplicate entry for this CI type, attribute and source", Status: http.StatusUnprocessableEntity}
+		}
+		seen[e.key()] = true
+	}
+	return nil
 }

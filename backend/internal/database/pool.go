@@ -288,6 +288,24 @@ func WithTenant(ctx context.Context, pool *pgxpool.Pool, scope *TenantScope, fn 
 	return runTenantTx(ctx, pool, scope, beginTenantSQL(scope), fn)
 }
 
+// WithTenantSnapshot is WithTenant for a long reader that needs one
+// consistent state of the organization, e.g. the full export of TLC-05
+// (WP-1149): the transaction is REPEATABLE READ and READ ONLY. The options
+// stand in the BEGIN, before the GUCs are set in the same round trip
+// (beginTenantSnapshotSQL): SET TRANSACTION ISOLATION LEVEL is no longer
+// allowed after the first query of the transaction. A context that already
+// carries a transaction is refused (ErrSnapshotInTx), joining it would not
+// give one snapshot.
+func WithTenantSnapshot(ctx context.Context, pool *pgxpool.Pool, scope *TenantScope, fn func(ctx context.Context, tx pgx.Tx) error) error {
+	if err := scope.Validate(); err != nil {
+		return err
+	}
+	if v := ctx.Value(txKey{}); v != nil {
+		return ErrSnapshotInTx
+	}
+	return runTenantTx(ctx, pool, scope, beginTenantSnapshotSQL(scope), fn)
+}
+
 // runTenantTx opens a tenant transaction with begin (the statement that
 // opens it and sets the GUCs of scope), runs fn and commits on success; see
 // WithTenant. scope is validated.
@@ -340,14 +358,16 @@ func beginTenantSnapshotSQL(scope *TenantScope) string {
 	return "BEGIN ISOLATION LEVEL REPEATABLE READ, READ ONLY; SELECT " + tenantGUCsSQL(scope)
 }
 
-// tenantGUCsSQL is the select list that sets the five GUCs of scope
-// transaction-locally.
+// tenantGUCsSQL is the select list that sets the six GUCs of scope
+// transaction-locally: organization, user, client, site and team scope and
+// the kind of principal (WP-910).
 func tenantGUCsSQL(scope *TenantScope) string {
 	return "set_config('" + OrgGUC + "', " + quoteLiteral(scope.OrgID) + ", true), " +
 		"set_config('" + UserGUC + "', " + quoteLiteral(scope.UserID) + ", true), " +
 		"set_config('" + ClientScopeGUC + "', " + quoteLiteral(scope.Clients.gucValue()) + ", true), " +
 		"set_config('" + SiteScopeGUC + "', " + quoteLiteral(scope.Sites.gucValue()) + ", true), " +
-		"set_config('" + TeamScopeGUC + "', " + quoteLiteral(scope.Teams.gucValue()) + ", true)"
+		"set_config('" + TeamScopeGUC + "', " + quoteLiteral(scope.Teams.gucValue()) + ", true), " +
+		"set_config('" + PrincipalTypeGUC + "', " + quoteLiteral(scope.PrincipalType) + ", true)"
 }
 
 // quoteLiteral renders s as an escape string constant: backslashes and

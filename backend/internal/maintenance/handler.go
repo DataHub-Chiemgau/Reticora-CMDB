@@ -1,7 +1,11 @@
 package maintenance
 
 import (
+	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,11 +18,24 @@ import (
 // Handler provides HTTP handlers for the maintenance window module.
 type Handler struct {
 	repo Repository
+	// finder computes the recipients over the configuration graph
+	// (WP-1034); without it a notification reaches the clients of the
+	// window's own CIs and the impact preview answers 501.
+	finder *RecipientFinder
 }
 
 // NewHandler creates a new maintenance handler.
 func NewHandler(repo Repository) *Handler {
 	return &Handler{repo: repo}
+}
+
+// WithAnalyzer lets the handler find the recipients of a window over the
+// graph impact of its CIs (topology.Analyzer, MGT-04).
+func (h *Handler) WithAnalyzer(analyzer ImpactAnalyzer) *Handler {
+	if analyzer != nil {
+		h.finder = NewRecipientFinder(h.repo, analyzer)
+	}
+	return h
 }
 
 // RegisterRoutes registers maintenance routes on the given mux.
@@ -28,6 +45,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/maintenance-windows/{id}", h.Get)
 	r.Patch("/api/v1/maintenance-windows/{id}", h.Update)
 	r.Delete("/api/v1/maintenance-windows/{id}", h.Delete)
+	r.Get("/api/v1/maintenance-windows/{id}/impact", h.Impact)
 	r.Post("/api/v1/maintenance-windows/{id}/notify", h.Notify)
 	r.Get("/api/v1/maintenance-windows/{id}/notifications", h.ListNotifications)
 }
@@ -58,7 +76,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	item, err := h.repo.GetByID(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "maintenance window not found")
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, item)
@@ -138,7 +156,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	item, err := h.repo.Update(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), req)
 	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "maintenance window not found")
+		api.WriteRepoError(w, err)
 		return
 	}
 	api.WriteJSON(w, http.StatusOK, item)
@@ -151,27 +169,99 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.repo.Delete(r.Context(), t.OrganizationID, chi.URLParam(r, "id")); err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "maintenance window not found")
+		api.WriteRepoError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// Notify handles POST /api/v1/maintenance-windows/{id}/notify — derives the
-// affected clients from the window's CIs and records one notification each.
+// recipientOptions reads include_heuristic and categories of the query.
+func recipientOptions(r *http.Request) (RecipientOptions, error) {
+	q := r.URL.Query()
+	opts := RecipientOptions{}
+	if v := q.Get("include_heuristic"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return opts, &api.FieldError{Field: "include_heuristic", Message: "must be true or false", Status: http.StatusUnprocessableEntity}
+		}
+		opts.IncludeHeuristic = b
+	}
+	for _, c := range strings.Split(q.Get("categories"), ",") {
+		if c = strings.TrimSpace(c); c != "" {
+			opts.Categories = append(opts.Categories, c)
+		}
+	}
+	if err := opts.Validate(); err != nil {
+		return opts, err
+	}
+	return opts, nil
+}
+
+// Impact handles GET /api/v1/maintenance-windows/{id}/impact: the clients,
+// sites and services the window affects over the graph (MGT-04, WP-1034),
+// in the scope of the caller.
+func (h *Handler) Impact(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	if h.finder == nil {
+		api.WriteError(w, http.StatusNotImplemented, "Not Implemented", "the impact preview needs the configuration graph")
+		return
+	}
+	opts, err := recipientOptions(r)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	preview, err := h.finder.Recipients(r.Context(), t.OrganizationID, chi.URLParam(r, "id"), opts)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, preview)
+}
+
+// Notify handles POST /api/v1/maintenance-windows/{id}/notify: it finds the
+// affected clients over the graph (include_heuristic, categories) and
+// announces the window to each in one transaction (maintenance.scheduled);
+// the notification chain delivers it to the client's contacts of
+// contact_roles and its users with maintenance:read. The statuses follow
+// the deliveries.
 func (h *Handler) Notify(w http.ResponseWriter, r *http.Request) {
 	t := tenant.FromContext(r.Context())
 	if t.OrganizationID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
 		return
 	}
-	notifications, err := h.repo.NotifyClients(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
-	if err != nil {
-		api.WriteError(w, http.StatusNotFound, "Not Found", "maintenance window not found")
+	var req NotifyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid request body")
 		return
 	}
-	// notified counts deliveries; queued counts notifications that wait for
-	// the notification chain (pending).
+	opts := RecipientOptions{IncludeHeuristic: req.IncludeHeuristic, Categories: req.Categories}
+	if err := opts.Validate(); err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	id := chi.URLParam(r, "id")
+	var plan *NotifyPlan
+	if h.finder != nil {
+		preview, err := h.finder.Recipients(r.Context(), t.OrganizationID, id, opts)
+		if err != nil {
+			api.WriteRepoError(w, err)
+			return
+		}
+		plan = &NotifyPlan{Clients: preview.Clients, ContactRoles: req.ContactRoles}
+	}
+	notifications, err := h.repo.NotifyClients(r.Context(), t.OrganizationID, id, plan)
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	// notified counts the notifications a channel delivered; queued those
+	// still waiting for a delivery (pending) or failed.
 	sent := 0
 	for i := range notifications {
 		if notifications[i].Status == NotificationSent {
@@ -179,7 +269,7 @@ func (h *Handler) Notify(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	api.WriteJSON(w, http.StatusOK, map[string]any{
-		"notified": sent, "queued": len(notifications) - sent, "notifications": notifications,
+		"notified": sent, "queued": len(notifications) - sent, "notifications": api.NonNilSlice(notifications),
 	})
 }
 

@@ -164,3 +164,15 @@ func TestOffsetCursorAndListResponse(t *testing.T) {
 		t.Error("a list without more rows got a cursor")
 	}
 }
+
+// TestParseLimit: an unpaged capped answer reads limit with its own
+// default; empty, malformed and non-positive values give the default, a
+// value above MaxPageLimit is capped.
+func TestParseLimit(t *testing.T) {
+	for query, want := range map[string]int{"": 20, "?limit=": 20, "?limit=x": 20, "?limit=0": 20, "?limit=-3": 20,
+		"?limit=7": 7, "?limit=200": 200, "?limit=900": MaxPageLimit} {
+		if got := ParseLimit(httptest.NewRequest("GET", "/x"+query, nil), 20); got != want {
+			t.Errorf("ParseLimit(%q) = %d, want %d", query, got, want)
+		}
+	}
+}

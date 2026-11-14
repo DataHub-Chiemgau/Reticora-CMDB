@@ -119,9 +119,10 @@ var tableRules = map[string]tableRule{
 	"webhook_subscription": {Exclude: []string{"secret", "previous_secret", "headers"}},
 	"webhook_delivery":     {Exclude: []string{"payload", "response_body"}},
 	"notification_channel": {Exclude: []string{"config_ciphertext", "config_dek"}},
-	"credential":           {Exclude: []string{"ciphertext"}},
-	"iga_connector":        {Exclude: []string{"config"}},
-	"collector":            {Exclude: []string{"config"}},
+	// The reference of a vault_ref credential (WP-894) is named, not shown.
+	"credential":    {Exclude: []string{"ciphertext", "vault_path", "vault_version", "field_map"}},
+	"iga_connector": {Exclude: []string{"config"}},
+	"collector":     {Exclude: []string{"config"}},
 }
 
 // alwaysExcluded are bookkeeping columns of every table.
@@ -143,6 +144,11 @@ func excluded(table, column string) bool {
 	}
 	return false
 }
+
+// referenceColumns are personal fields whose snapshot value is already a
+// vault reference {"$pii": <subject>} built by the select of the register
+// (app_user.mobile, WP-1140); they keep it instead of the row surrogate.
+var referenceColumns = map[string]bool{"app_user.mobile": true}
 
 // personal reports whether column of table holds personal data.
 func personal(table, column string) bool {
@@ -199,7 +205,7 @@ func (s *RouteSnapshot) ValueChanges(table string, before, after map[string]any)
 		if reflect.DeepEqual(oldV, newV) {
 			continue
 		}
-		if personal(table, c) {
+		if personal(table, c) && !referenceColumns[table+"."+c] {
 			oldV, newV = surrogate(oldV, rowID), surrogate(newV, rowID)
 		}
 		out = append(out, map[string]any{"field": c, "old": bounded(oldV), "new": bounded(newV)})
@@ -346,6 +352,17 @@ func crud(m map[string]RouteSnapshot, collection, table string, methods ...strin
 	}
 }
 
+// mobileReferenceSelect is the row of app_user with the mobile number as
+// field mobile holding the PII reference {"$pii": <subject>} instead of the
+// column mobile_pii_subject_id (WP-1140 AK5). The reference names the
+// user's own mobile subject, which is its anchor: a change (new subject,
+// former one deleted) or the anonymization shreds it, so the reference
+// resolves nothing after that. The snapshot is SQL and never sees the
+// plaintext, so no separate value subject is sealed.
+const mobileReferenceSelect = `(to_jsonb(t) - 'mobile_pii_subject_id') || jsonb_build_object('mobile',
+	CASE WHEN t.mobile_pii_subject_id IS NULL THEN NULL
+	ELSE jsonb_build_object('$pii', t.mobile_pii_subject_id::text) END)`
+
 // routeSnapshots is the register: every audited write route without a
 // domain recorder (server.domainRecordedRoutes) has an entry
 // (TestEveryWriteRouteHasASnapshotEntry).
@@ -354,31 +371,119 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	const v1 = "/api/v1/"
 	all := []string{"POST", "PATCH", "DELETE"}
 	for collection, table := range map[string]string{
-		"assets": "asset", "buildings": "building", "cables": "cable", "clients": "client",
+		"asns": "asn", "asn-ranges": "asn_range", // AS numbers and ranges (WP-1066)
+		"nat-translations": "nat_translation", "bgp-peerings": "bgp_peering", "assets": "asset", "buildings": "building", "cables": "cable", "clients": "client",
 		"compliance/rules": "compliance_rule", "consumables": "consumable",
 		"contacts": "contact", "contracts": "contract", "desks": "desk", "discovery-scopes": "discovery_scope",
 		"forms": "form_def", "iga/connectors": "iga_connector", "inventory/items": "consumable",
-		"ip-addresses": "ip_address", "ips": "ip_address", "keys": "key_item", "maintenance-windows": "maintenance_window",
-		"monitoring/alerts": "alert_rule", "notification-channels": "notification_channel", "orders": "internal_order",
+		"ip-addresses": "ip_address", "ips": "ip_address", "ipam-sections": "ipam_section", "keys": "key_item", "maintenance-windows": "maintenance_window",
+		"monitoring/alerts": "alert_rule", "nameserver-sets": "nameserver_set", "notification-channels": "notification_channel", "orders": "internal_order",
 		"racks": "rack", "relationships": "ci_relationship", "roles": "custom_role", "rooms": "room",
 		"saved-views": "saved_view", "sites": "site", "slas": "sla", "business-calendars": "business_calendar", "stocktakes": "stocktake", "subnets": "subnet",
-		"suppliers": "supplier", "teams": "team", "tickets": "ticket", "trainings": "training", "vlans": "vlan", "vrfs": "vrf",
+		"suppliers": "supplier", "teams": "team", "tickets": "ticket", "trainings": "training", "vlans": "vlan", "vlan-domains": "vlan_domain", "vrfs": "vrf",
 		"workflows": "workflow_def",
 	} {
 		crud(m, v1+collection, table, all...)
 	}
+	// The allocation of the next free AS number of a range (WP-1067)
+	// creates an asn row.
+	m["POST "+v1+"asn-ranges/{id}/allocate"] = created("asn")
 	// DELETE /documents/{id} records document.deleted in its transaction
 	// (WP-732).
 	crud(m, v1+"documents", "document", "POST", "PATCH")
 	// DELETE /users/{id} records user.deleted in its transaction (F-393).
 	crud(m, v1+"users", "app_user", "POST", "PATCH")
+	// The mobile number of a user (WP-1140) is a vault subject: the entry
+	// shows its surrogate as reference {"$pii": <subject>} (a new subject per
+	// change, the former one deleted), never the number. PATCH /me changes
+	// the own account (only mobile).
+	userWithMobile := RouteSnapshot{Table: "app_user", Keys: []SnapshotKey{{"id", "id"}}, Select: mobileReferenceSelect}
+	m["PATCH "+v1+"users/{id}"] = userWithMobile
+	m["PATCH "+v1+"me"] = RouteSnapshot{Table: "app_user", Keys: []SnapshotKey{{"id", "$user"}}, Select: mobileReferenceSelect}
 	crud(m, v1+"collectors", "collector", "POST", "PATCH")
-	crud(m, v1+"credentials", "credential", "DELETE")
+	// PATCH changes name and max_age_days; PUT .../secret replaces the
+	// secret (WP-889): the entry shows secret_version and rotated_at, the
+	// ciphertext stays excluded.
+	crud(m, v1+"credentials", "credential", "DELETE", "PATCH")
 	m["POST "+v1+"credentials/"] = created("credential")
+	m["PUT "+v1+"credentials/{id}/secret"] = row("credential")
+	// The scan configuration of a subnet (IPM-11, WP-1062).
+	m["PATCH "+v1+"subnets/{id}/scan"] = row("subnet")
+	// Credential bindings (WP-890). PUT /cis/{id}/credentials replaces the
+	// whole set of the CI (possibly with none); the entry names the CI, the
+	// bindings are read through GET /cis/{id}/credentials.
+	crud(m, v1+"credential-bindings", "credential_binding", "PATCH", "DELETE")
+	m["POST "+v1+"credential-bindings/"] = created("credential_binding")
+	m["PUT "+v1+"cis/{id}/credentials"] = noValues("replaces the set of bindings of the CI, which may be empty")
+	// Vault connections (WP-893): the row holds no secret, the login is a
+	// credential named by auth_credential_id.
+	crud(m, v1+"vault-connections", "vault_connection", "PATCH", "DELETE")
+	m["POST "+v1+"vault-connections/"] = created("vault_connection")
+	// The test of a connection (WP-896) starts a job that liest nur: it
+	// logs in and reads the test entry, nothing is written.
+	m["POST "+v1+"vault-connections/{id}/test"] = noValues("liest nur: the job vault.test logs in and reads the test entry; it changes no row")
+	// ADMP accounts (WP-925): the row holds no secret, the login is the
+	// credential credential_id names.
+	crud(m, v1+"admp/accounts", "admp_account", "PATCH", "DELETE")
+	m["POST "+v1+"admp/accounts/"] = created("admp_account")
+	// Probe definitions (PRB-01, WP-939); config.changed goes to the
+	// outbox in the write transaction.
+	crud(m, v1+"monitoring/probes", "probe", all...)
+	// Monitoring profiles and groups (PRB-01, WP-946): the profile and the
+	// group row; adding members shows the members of the group, removing
+	// one the member row. No outbox event.
+	crud(m, v1+"monitoring/profiles", "monitoring_profile", all...)
+	crud(m, v1+"monitoring/groups", "monitoring_group", all...)
+	m["POST "+v1+"monitoring/groups/{id}/members"] = RouteSnapshot{Table: "monitoring_group", Keys: []SnapshotKey{{"id", "id"}},
+		Select: `jsonb_build_object('id', t.id, 'organization_id', t.organization_id, 'members',
+			(SELECT COALESCE(jsonb_agg(m.ci_id ORDER BY m.ci_id), '[]'::jsonb)
+			   FROM monitoring_group_member m WHERE m.organization_id = t.organization_id AND m.group_id = t.id))`}
+	m["DELETE "+v1+"monitoring/groups/{id}/members/{ci_id}"] = RouteSnapshot{Table: "monitoring_group_member",
+		Keys: []SnapshotKey{{"group_id", "id"}, {"ci_id", "ci_id"}}}
+	// Availability targets (ALR-06, WP-1048).
+	crud(m, v1+"monitoring/sla/targets", "availability_target", all...)
+	// The alarm settings of the organization (WP-1030): the row of the
+	// organization, absent while the defaults apply.
+	// The severity weights of the compliance score (WP-1127): the row of
+	// the organization, absent while the defaults apply.
+	// The inactive rule a template creates (WP-1130); its description
+	// names template and version.
+	m["POST "+v1+"compliance/rule-templates/{key}/instantiate"] = created("compliance_rule")
+	// The report job (SEC-04, WP-1129): the job row; the stored report
+	// writes compliance.report.generated in its own transaction.
+	m["POST "+v1+"compliance/reports"] = created("job")
+	m["PUT "+v1+"compliance/settings"] = RouteSnapshot{Table: "compliance_settings",
+		Keys: []SnapshotKey{{"organization_id", "$org"}}}
+	m["PUT "+v1+"monitoring/alarm-settings"] = RouteSnapshot{Table: "alarm_settings",
+		Keys: []SnapshotKey{{"organization_id", "$org"}}}
+	// Acknowledging an incident and setting its root by hand (WP-1036):
+	// the incident row (state, root, manual_root); the root alarm keeps its
+	// own transition.
+	m["POST "+v1+"monitoring/incidents/{id}/ack"] = row("incident")
+	m["POST "+v1+"monitoring/incidents/{id}/root"] = row("incident")
+	// The ticket linked to an incident (WP-1039): the link row of the
+	// ticket and the incident.
+	m["POST "+v1+"monitoring/incidents/{id}/tickets/{ticket_id}"] = RouteSnapshot{Table: "ticket_link",
+		Keys: []SnapshotKey{{"ticket_id", "ticket_id"}, {"incident_id", "id"}}}
+	// The manual ticket of an incident (WP-1040): the ticket created, by
+	// the id of the answer.
+	m["POST "+v1+"monitoring/incidents/{id}/ticket"] = RouteSnapshot{Table: "ticket", Keys: []SnapshotKey{{"id", "@ticket_id"}}}
+	// Collector groups (PRB-03, WP-947): the group row; adding or moving a
+	// member shows the members of the group, removing one the member row.
+	crud(m, v1+"collector-groups", "collector_group", all...)
+	m["POST "+v1+"collector-groups/{id}/members"] = RouteSnapshot{Table: "collector_group", Keys: []SnapshotKey{{"id", "id"}},
+		Select: `jsonb_build_object('id', t.id, 'organization_id', t.organization_id, 'members',
+			(SELECT COALESCE(jsonb_agg(jsonb_build_object('collector_id', m.collector_id, 'priority', m.priority,
+				'weight', m.weight) ORDER BY m.collector_id), '[]'::jsonb)
+			   FROM collector_group_member m WHERE m.organization_id = t.organization_id AND m.group_id = t.id))`}
+	m["DELETE "+v1+"collector-groups/{id}/members/{collector_id}"] = RouteSnapshot{Table: "collector_group_member",
+		Keys: []SnapshotKey{{"group_id", "id"}, {"collector_id", "collector_id"}}}
 	crud(m, v1+"webhooks", "webhook_subscription", "POST", "DELETE")
 	crud(m, v1+"lifecycle-definitions", "lifecycle_definition", "POST", "DELETE")
 	crud(m, v1+"lifecycle-models", "lifecycle_definition", all...)
 	crud(m, v1+"security/findings", "security_finding", "POST", "PATCH")
+	// The product mapping of the version match (SEC-02, WP-1122).
+	crud(m, v1+"security/cpe-mappings", "cpe_mapping", all...)
 	crud(m, v1+"invitations", "user_invitation", "POST", "DELETE")
 	crud(m, v1+"network-interfaces", "network_interface", "PATCH", "DELETE")
 	crud(m, v1+"rack-mounts", "rack_mount", "PATCH", "DELETE")
@@ -428,6 +533,9 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	} {
 		m[route] = created(table)
 	}
+	// The address and the subnet of an allocation (IPM-03, WP-904).
+	m["POST /api/v1/subnets/{id}/allocate"] = created("ip_address")
+	m["POST /api/v1/subnets/{id}/allocate-subnet"] = created("subnet")
 	// The ticket a review item opens (WP-291).
 	m["POST /api/v1/review-items/{id}/ticket"] = created("ticket")
 	// The snapshot job: the answer names it as job_id.
@@ -494,6 +602,8 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		"POST /api/v1/training-assignments/{id}/complete":  "training_assignment",
 		"POST /api/v1/webhooks/{id}/rotate-secret":         "webhook_subscription",
 		"POST /api/v1/workflow-runs/{id}/approval":         "workflow_run",
+		"POST /api/v1/workflow-runs/{id}/cancel":           "workflow_run",
+		"POST /api/v1/workflow-runs/{id}/retry":            "workflow_run",
 	} {
 		m[route] = row(table)
 	}
@@ -504,6 +614,12 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	// The released IP reservation of the subnet (NET-09, WP-299).
 	m["DELETE /api/v1/subnets/{id}/reservations/{ip_id}"] = RouteSnapshot{Table: "ip_address",
 		Keys: []SnapshotKey{{"id", "ip_id"}, {"subnet_id", "id"}}}
+	// The rights per IPAM section (IPM-10, WP-910): the entry of the team.
+	m["POST /api/v1/ipam-sections/{id}/permissions"] = created("ipam_section_permission")
+	for _, method := range []string{"PATCH", "DELETE"} {
+		m[method+" /api/v1/ipam-sections/{id}/permissions/{permission_id}"] = RouteSnapshot{Table: "ipam_section_permission",
+			Keys: []SnapshotKey{{"id", "permission_id"}, {"section_id", "id"}}}
+	}
 	// The removed object link of the ticket (WP-764).
 	m["DELETE /api/v1/tickets/{id}/links/{link_id}"] = RouteSnapshot{Table: "ticket_link",
 		Keys: []SnapshotKey{{"id", "link_id"}, {"ticket_id", "id"}}}
@@ -526,6 +642,13 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		Select: `to_jsonb(t) || jsonb_build_object('test_report', t.test_report - 'violations')`}
 	m["POST /api/v1/tickets/{id}/sla"] = RouteSnapshot{Table: "ticket_sla", Keys: []SnapshotKey{{"ticket_id", "id"}}}
 	// The tags of an asset are its rows of asset_tag_link (WP-755).
+	// The control assignment of a rule (WP-1128) lives in
+	// compliance_rule_control: the snapshot names the assigned controls,
+	// so the entry shows them old and new.
+	m["PUT /api/v1/compliance/rules/{id}/controls"] = RouteSnapshot{Table: "compliance_rule", Keys: []SnapshotKey{{"id", "id"}},
+		Select: `jsonb_build_object('id', t.id, 'organization_id', t.organization_id, 'control_ids',
+			(SELECT COALESCE(jsonb_agg(rc.control_id ORDER BY rc.control_id), '[]'::jsonb) FROM compliance_rule_control rc
+			  WHERE rc.organization_id = t.organization_id AND rc.rule_id = t.id))`}
 	m["PUT /api/v1/assets/{id}/tags"] = RouteSnapshot{Table: "asset", Keys: []SnapshotKey{{"id", "id"}},
 		Select: `jsonb_build_object('id', t.id, 'organization_id', t.organization_id, 'tags',
 			(SELECT COALESCE(jsonb_agg(g.key ORDER BY g.key), '[]'::jsonb) FROM asset_tag_link l
@@ -538,6 +661,12 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	}
 	// Settings of the organization and of the acting user.
 	m["PATCH /api/v1/org"] = RouteSnapshot{Table: "organization", Keys: []SnapshotKey{{"id", "$org"}}}
+	// The deletion request of the organization and its cancel change the
+	// deletion columns of the organization row (TLC-06, WP-1152).
+	m["POST /api/v1/org/deletion"] = RouteSnapshot{Table: "organization", Keys: []SnapshotKey{{"id", "$org"}}}
+	m["DELETE /api/v1/org/deletion"] = RouteSnapshot{Table: "organization", Keys: []SnapshotKey{{"id", "$org"}}}
+	// The start of a full export is its job (TLC-05, WP-1151).
+	m["POST /api/v1/org/exports"] = RouteSnapshot{Table: "job", Keys: []SnapshotKey{{"id", "@job_id"}}}
 	m["PUT /api/v1/privacy/retention"] = RouteSnapshot{Table: "privacy_retention_policy", Keys: []SnapshotKey{{"organization_id", "$org"}}}
 	m["PUT /api/v1/reconciliation/source-policy"] = RouteSnapshot{Table: "source_priority_policy",
 		Keys: []SnapshotKey{{"organization_id", "$org"}}, Where: "t.is_default"}
@@ -559,6 +688,9 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 		"POST /api/v1/imports/preview":                 "reads the head of an import file; creates no job and changes no data",
 		"POST /api/v1/maintenance-windows/{id}/notify": "sends notices; the window is unchanged",
 		"POST /api/v1/privacy/erasure":                 "erasure of personal data, which must not enter the audit",
+		"PUT /api/v1/reconciliation/source-ranks":      "replaces every rank entry of the organization; the domain audit reconciliation.source_ranks_updated records before and after (REC-04)",
+		"POST /api/v1/privacy/subjects/report":         "starts the report about a person; its values must not enter the audit, the job records id, mode and counts",
+		"POST /api/v1/privacy/subjects/erase":          "starts the erasure of a person; its values must not enter the audit, the job records id, mode and counts",
 		"POST /api/v1/search/reindex":                  "rebuilds the search index; no business data changes",
 		"POST /api/v1/webhooks/{id}/test":              "test delivery; the subscription is unchanged",
 	} {

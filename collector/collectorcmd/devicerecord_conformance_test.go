@@ -344,6 +344,35 @@ func TestDeviceRecordSchemaAndGoValidationAgree(t *testing.T) {
 	if rec := (plugins.DeviceRecord{}); len(rec.Validate()) == 0 {
 		t.Error("Validate accepted an empty record")
 	}
+	// SR-10 (WP-878): the identity cap is not part of Validate; the server
+	// refuses a record over it on its own (rejected_identity_limit). Schema
+	// and IdentityKeyCount must agree on the count and on the limit.
+	withIdentityValues := func(n int) plugins.DeviceRecord {
+		rec := valid()
+		rec.Identity.SerialNumber = "SN-1"
+		rec.Interfaces = nil
+		for len(rec.Interfaces)+2 < n { // serial number and target_ip count too
+			i := len(rec.Interfaces)
+			rec.Interfaces = append(rec.Interfaces, plugins.DeviceInterface{
+				Name: fmt.Sprintf("eth%d", i),
+				MAC:  fmt.Sprintf("02:00:00:00:%02x:%02x", i>>8, i&0xff),
+			})
+		}
+		return rec
+	}
+	for _, n := range []int{plugins.MaxIdentityKeys, plugins.MaxIdentityKeys + 1} {
+		rec := withIdentityValues(n)
+		if got := rec.IdentityKeyCount(); got != n {
+			t.Fatalf("IdentityKeyCount = %d, want %d", got, n)
+		}
+		if got := identityValueCount(toJSONDoc(t, rec).(map[string]any)); got != n {
+			t.Errorf("schema check counts %d identity values, IdentityKeyCount %d", got, n)
+		}
+		problems := schema.validate(toJSONDoc(t, rec))
+		if over := n > plugins.MaxIdentityKeys; over != (len(problems) > 0) {
+			t.Errorf("%d identity values: schema problems %v, want rejected = %v", n, problems, over)
+		}
+	}
 }
 
 type fixturePlugin struct {
@@ -501,6 +530,23 @@ func (s *jsonSchema) check(schema map[string]any, v any, path string) []string {
 			if !matched {
 				fail("matches none of anyOf")
 			}
+		case "x-max-identity-keys":
+			// SR-10 (WP-878): the vendor keyword bounds the distinct identity
+			// values of a record. It must name the limit the server enforces,
+			// and the check counts the values as the schema description lists
+			// them, independently of DeviceRecord.IdentityKeyCount.
+			if path != "$" {
+				s.t.Fatalf("schema keyword %q is only supported at the root, found at %s", key, path)
+			}
+			limit, ok := rule.(float64)
+			if !ok || limit != float64(plugins.MaxIdentityKeys) {
+				s.t.Fatalf("schema %s = %v, want plugins.MaxIdentityKeys = %d", key, rule, plugins.MaxIdentityKeys)
+			}
+			if obj, ok := v.(map[string]any); ok {
+				if n := identityValueCount(obj); float64(n) > limit {
+					fail("%d identity values, more than %v", n, limit)
+				}
+			}
 		default:
 			if !annotationKeywords[key] {
 				s.t.Fatalf("schema keyword %q at %s is not supported by this check", key, path)
@@ -508,6 +554,42 @@ func (s *jsonSchema) check(schema map[string]any, v any, path string) []string {
 		}
 	}
 	return out
+}
+
+// identityValueCount counts the distinct identity values of a JSON record
+// as x-max-identity-keys defines them: serial number, hardware UUID, every
+// MAC of identity and interfaces, every IP of the interfaces and target_ip.
+// Values compare trimmed and in lower case; empty values do not count.
+func identityValueCount(rec map[string]any) int {
+	seen := map[string]bool{}
+	add := func(kind string, v any) {
+		if str, ok := v.(string); ok {
+			if str = strings.ToLower(strings.TrimSpace(str)); str != "" {
+				seen[kind+":"+str] = true
+			}
+		}
+	}
+	if identity, ok := rec["identity"].(map[string]any); ok {
+		add("serial", identity["serial_number"])
+		add("uuid", identity["hardware_uuid"])
+		add("mac", identity["primary_mac"])
+	}
+	add("ip", rec["target_ip"])
+	interfaces, _ := rec["interfaces"].([]any)
+	for _, raw := range interfaces {
+		ifc, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		add("mac", ifc["mac"])
+		ips, _ := ifc["ips"].([]any)
+		for _, rawIP := range ips {
+			if ip, ok := rawIP.(map[string]any); ok {
+				add("ip", ip["address"])
+			}
+		}
+	}
+	return len(seen)
 }
 
 func hasType(v any, want string) bool {

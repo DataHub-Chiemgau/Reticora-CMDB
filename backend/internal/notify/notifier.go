@@ -313,7 +313,7 @@ func (n *Notifier) Notify(ctx context.Context, orgID string, req *Request) (int,
 				if key == "" {
 					continue
 				}
-				window, timeZone, perr := n.bundled(ctx, orgID, req, ch.Kind, r, prefs)
+				window, timeZone, perr := n.bundled(ctx, orgID, req, ch.Kind, &r, prefs)
 				if perr != nil {
 					return 0, perr
 				}

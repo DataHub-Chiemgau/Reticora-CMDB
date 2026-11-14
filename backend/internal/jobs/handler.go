@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -55,13 +56,51 @@ type APIHandler struct {
 	// bulkKinds are the kinds whose revert needs the permission of the
 	// kind, also from the creator, within RevertWindow (WP-305).
 	bulkKinds map[string]bool
+	// readKinds name the permission without which a job of the kind is
+	// not seen at all (404 on read, left out of the list), also by its
+	// creator: its result or parameters hold personal values (WP-1158).
+	readKinds map[string]identity.Permission
 	now       func() time.Time
 }
 
 // NewAPIHandler creates the job API on svc.
 func NewAPIHandler(svc *Service) *APIHandler {
 	return &APIHandler{svc: svc, kindPermissions: map[string]identity.Permission{}, reverters: map[string]Reverter{},
-		bulkKinds: map[string]bool{}, now: func() time.Time { return time.Now().UTC() }}
+		bulkKinds: map[string]bool{}, readKinds: map[string]identity.Permission{},
+		now: func() time.Time { return time.Now().UTC() }}
+}
+
+// WithReadKind makes the jobs of kind visible only to a principal with
+// perm (WP-1158): without it GET /jobs/{id}, its result and its revert or
+// cancel answer 404 and GET /jobs leaves the kind out, also for the creator
+// whose right was withdrawn. job:read alone does not reveal the result.
+func (h *APIHandler) WithReadKind(kind string, perm identity.Permission) *APIHandler {
+	h.readKinds[kind] = perm
+	return h
+}
+
+// hiddenKinds lists the kinds of WithReadKind the caller lacks the
+// permission of, sorted.
+func (h *APIHandler) hiddenKinds(r *http.Request) []string {
+	p, ok := identity.PrincipalFromContext(r.Context())
+	var out []string
+	for kind, perm := range h.readKinds {
+		if !ok || !p.Has(perm) {
+			out = append(out, kind)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// readable reports whether the caller may see a job of kind at all.
+func (h *APIHandler) readable(r *http.Request, kind string) bool {
+	perm, ok := h.readKinds[kind]
+	if !ok {
+		return true
+	}
+	p, found := identity.PrincipalFromContext(r.Context())
+	return found && p.Has(perm)
 }
 
 // WithBulkKind marks kind as a bulk kind (BLK-02, WP-305): its revert
@@ -114,6 +153,11 @@ func (h *APIHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := api.ParsePagination(r)
+	filter.ExcludeKinds = h.hiddenKinds(r)
+	if filter.Kind != "" && !h.readable(r, filter.Kind) {
+		api.WriteJSON(w, http.StatusOK, api.ListResponse[Job]{Data: []Job{}, Limit: page.Limit, Offset: page.Offset})
+		return
+	}
 	items, total, err := h.svc.List(r.Context(), orgID, filter, page)
 	if err != nil {
 		api.WriteRepoError(w, err)
@@ -154,7 +198,7 @@ func notFound(w http.ResponseWriter) {
 func (h *APIHandler) job(w http.ResponseWriter, r *http.Request, orgID string) (*Job, bool) {
 	job, err := h.svc.Get(r.Context(), orgID, chi.URLParam(r, "id"))
 	switch {
-	case errors.Is(err, ErrNotFound) || (err == nil && !visibleTo(r, job)):
+	case errors.Is(err, ErrNotFound) || (err == nil && (!visibleTo(r, job) || !h.readable(r, job.Kind))):
 		notFound(w)
 		return nil, false
 	case err != nil:
@@ -204,7 +248,7 @@ func (h *APIHandler) Result(w http.ResponseWriter, r *http.Request) {
 // needs the permission of the kind also from the creator (WP-305): a
 // creator whose right was withdrawn changes no CI through it.
 func (h *APIHandler) mayControl(r *http.Request, job *Job, revert bool) int {
-	if !visibleTo(r, job) {
+	if !visibleTo(r, job) || !h.readable(r, job.Kind) {
 		return http.StatusNotFound
 	}
 	creatorMay := !revert || !h.bulkKinds[job.Kind]

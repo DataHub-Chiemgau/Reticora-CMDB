@@ -1,7 +1,7 @@
 import { Braces, Network, Pencil, Tags } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
 import type { TFunction } from 'i18next';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { ApiError } from '../api/client';
 import type { CI, CIAssetFacts, TopologyGraphData } from '../api/client';
@@ -32,13 +32,19 @@ import {
   LifecycleSection,
   ImpactSection,
   CIMetricsSection,
+  CIMonitoringSection,
   CIHistorySection,
   DetailRow,
   formatDate,
   formatDateTime,
   useLocationNames,
 } from '../components/cmdb/CIDetailSections';
+import { CIFindingsSection } from '../components/cmdb/CIFindingsSection';
+import { CIComplianceSection } from '../components/cmdb/CIComplianceSection';
+import { CIRunsSection } from '../components/cmdb/CIRunsSection';
 import { CIRelationshipsCard } from '../components/cmdb/CIRelationshipsCard';
+import { NetworkSection } from '../components/cmdb/NetworkSection';
+import { CredentialBindingSection } from '../components/cmdb/CredentialBindingSection';
 import { ScopeBanner } from '../components/ScopeBanner';
 import { CITemplatesSection } from '../components/metamodel/CITemplatesSection';
 
@@ -212,7 +218,18 @@ export function CIDetailPage() {
               {t(getStatusTranslationKey(ci.status))}
             </Badge>
             <Badge variant="info">{typeLabel}</Badge>
-            {ci.health ? (
+            {ci.health === 'warning' || ci.health === 'critical' ? (
+              // The degraded health links to the alarms of the CI (WP-991).
+              <Link
+                to={`/alarms?ci_id=${encodeURIComponent(ci.id)}`}
+                className="rounded focus-visible:outline-2 focus-visible:outline-offset-2"
+                title={t('ci.healthAlarms', 'Alarme des CIs anzeigen')}
+              >
+                <Badge variant={healthBadgeVariant(ci.health)}>
+                  {t(`ci.healthState.${ci.health}`)}
+                </Badge>
+              </Link>
+            ) : ci.health ? (
               <Badge variant={healthBadgeVariant(ci.health)}>
                 {t(`ci.healthState.${ci.health}`)}
               </Badge>
@@ -357,6 +374,16 @@ export function CIDetailPage() {
         </div>
       </div>
 
+      {/* Network (IPM-13, UI-14, WP-919): interfaces with their addresses
+          and the management IP, after the neighbors and in full width;
+          only with ipam:read, otherwise neither shown nor read. */}
+      <NetworkSection ciId={ci.id} managementIp={ci.management_ip} />
+
+      {/* Credentials (CRD-07, UI-14, WP-923): the effective credential per
+          namespace with origin and usage, and binding one to the CI; only
+          with credential:read, otherwise neither shown nor read. */}
+      <CredentialBindingSection ciId={ci.id} clientId={ci.client_id} />
+
       {/* Advanced sections (progressive disclosure, spec §18): instance
           fields, lifecycle, impact analysis, then provenance, metrics and
           history live behind expandable sections so the simple view stays
@@ -374,7 +401,13 @@ export function CIDetailPage() {
         <LifecycleSection entityType="cis" entityId={ci.id} currentState={ci.lifecycle_state} />
         <ImpactSection ciId={ci.id} />
         <ProvenanceSection ciId={ci.id} />
+        <CIMonitoringSection ciId={ci.id} clientId={ci.client_id} />
         <CIMetricsSection ciId={ci.id} />
+        {/* Findings, compliance and automations (WP-1137): one BFF query on
+            the first expand, each section only with its module. */}
+        <CIFindingsSection ciId={ci.id} />
+        <CIComplianceSection ciId={ci.id} />
+        <CIRunsSection ciId={ci.id} />
         <CIHistorySection ciId={ci.id} />
       </div>
 

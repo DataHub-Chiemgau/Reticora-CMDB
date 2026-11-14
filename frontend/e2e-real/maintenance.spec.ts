@@ -34,7 +34,8 @@ import {
  *
  * Test → requirement IDs proven:
  *  M1 A plans a window in the UI with the CI of client 1 and the CI of client 2 and clicks
- *     „Kunden benachrichtigen“; after a reload the window's notifications show one row per
+ *     „Kunden benachrichtigen“ while quiet hours of A's admin hold the notify deliveries back
+ *     (WP-1034 delivers at once otherwise); after a reload the window's notifications show one row per
  *     client with the status „ausstehend“; the database holds exactly two
  *     maintenance_notification rows of the window (one per client) with status pending and
  *     sent_at NULL; a second click adds no row ............... MGT-04, NTF-05, NFR-04
@@ -84,6 +85,25 @@ function local(d: Date): string {
 /** windowCard is the table row of the maintenance page that shows the window `title`. */
 function windowCard(page: Page, title: string) {
   return page.locator('#main-content').getByRole('row').filter({ hasText: title });
+}
+
+/** hm formats the UTC wall time of d as HH:MM (quiet hours of a notification preference). */
+function hm(d: Date): string {
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+}
+
+/**
+ * deferredDeliveries reads the notify deliveries of the window's notifications
+ * (data.maintenance_notification_id, WP-1034) with whether the notifier has put
+ * them off past the next half hour (quiet hours).
+ */
+function deferredDeliveries(windowId: string): { status: string; deferred: boolean }[] {
+  return dbRows<{ status: string; deferred: boolean }>(
+    `SELECT d.status, d.next_attempt_at > now() + interval '30 minutes' AS deferred
+       FROM notification_delivery d
+       JOIN maintenance_notification n ON d.data->>'maintenance_notification_id' = n.id::text
+      WHERE n.maintenance_window_id = '${uuid(windowId)}'`,
+  );
 }
 
 /** storedNotifications reads the notifications of one window from the stack database. */
@@ -145,6 +165,19 @@ test.describe('maintenance announcement (MGT-04, NTF-05, NFR-04)', () => {
     const start = new Date(Date.now() + 7 * 24 * 3600_000);
     const end = new Date(start.getTime() + 2 * 3600_000);
 
+    // Since WP-1034 the announcement goes out at once through notify: the in-app
+    // delivery to A's admin (maintenance:read in both clients) is sent on the next tick
+    // of the notifier worker (5 s), after which the page shows „versendet“. The status
+    // „ausstehend“ is only deterministic while the delivery is held back: quiet hours of
+    // the recipient around now (the category maintenance is not critical, NTF-03) keep
+    // it pending until their end, hours after this test.
+    const now = Date.now();
+    await ok(w.rq, w.a.token, 'PUT', '/notifications/preferences', {
+      time_zone: 'UTC',
+      quiet_start: hm(new Date(now - 3600_000)),
+      quiet_end: hm(new Date(now + 3 * 3600_000)),
+    });
+
     await page.goto('/maintenance');
     await expect(
       page.getByText('Wartungen planen und betroffene Kunden benachrichtigen.'),
@@ -189,6 +222,27 @@ test.describe('maintenance announcement (MGT-04, NTF-05, NFR-04)', () => {
     await expect(
       page.getByText('2 Benachrichtigungen vorgemerkt – Versand ausstehend', { exact: true }),
     ).toBeVisible();
+
+    // The chain queued the deliveries and the notifier put them off (quiet hours): from
+    // here on nothing is delivered before the checks below, whatever the timing.
+    // One in-app delivery per notification at least (A's admin reads both clients).
+    let deliveries: { status: string; deferred: boolean }[] = [];
+    await expect
+      .poll(
+        () => {
+          deliveries = deferredDeliveries(win.id);
+          return (
+            deliveries.length >= 2 && deliveries.every((d) => d.status === 'pending' && d.deferred)
+          );
+        },
+        {
+          message:
+            'the notify deliveries of the window are queued and held back by the quiet hours',
+          timeout: 30_000,
+        },
+      )
+      .toBe(true);
+    expect(deliveries.length, JSON.stringify(deliveries)).toBeGreaterThanOrEqual(2);
 
     // After a reload the page shows the stored status per client.
     await page.reload();

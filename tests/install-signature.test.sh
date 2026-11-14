@@ -7,7 +7,8 @@
 # --build-from-source):
 #
 #   - install-cloud.sh release mode (the default): reticora-server,
-#     reticora-frontend and reticora-postgres pass 'cosign verify' against the
+#     reticora-frontend, reticora-postgres and reticora-keycloak-db pass
+#     'cosign verify' against the
 #     release workflow identity and are pinned by digest in .env before
 #     anything starts, nothing is built; the release is --release, the tag of
 #     the checkout or the newest release, and the checkout must be its signed
@@ -27,9 +28,16 @@
 # cosign, curl and docker are stubbed, git is real (local repositories). The cosign
 # stub accepts a bundle only for the content, signer identity and OIDC issuer
 # it records — what the real check of a Fulcio certificate guarantees — and
-# rejects unknown flags. Optional: RETICORA_TEST_COSIGN=<cosign v2.4.1 binary>
-# also checks the pinned cosign checksum and runs the installers' verify and
-# verify-blob command lines against the real cosign (CI: install-smoke.yml).
+# rejects unknown flags. It signs like cosign v3 (Sigstore bundle v0.3, the
+# image signature names the signed digest) and reads the legacy bundles and
+# image signatures of releases signed with cosign v2 (E-258); 'cosign
+# version' reports FAKE_COSIGN_VERSION (default v3.1.4). An installed cosign
+# below COSIGN_MIN_VERSION is not used. Optional:
+# RETICORA_TEST_COSIGN=<cosign v3.1.4 binary> also checks the pinned cosign
+# checksum, runs the installers' verify and verify-blob command lines
+# against the real cosign and verifies the legacy bundle of the published
+# release v1.0.0-rc.1 (edgecore/update/testdata) with it (CI:
+# install-smoke.yml).
 #
 # Tools: python3 with PyYAML (release.yml steps), git, jq, openssl.
 #
@@ -141,6 +149,8 @@ cat > "$STUB_COSIGN/cosign" <<'STUB'
 # Fake cosign: a bundle (blob) or a registry record (image) is a valid
 # signature only for the sha256, signer identity and issuer it records.
 printf 'cosign %s\n' "$*" >> "$FAKE_LOG"
+if [ "$*" = version ] && [ -n "${FAKE_COSIGN_VERSION_RC:-}" ]; then echo "Error: broken cosign" >&2; exit "$FAKE_COSIGN_VERSION_RC"; fi
+if [ "$*" = version ]; then printf 'GitVersion:    %s\nGitCommit:     fake\n' "${FAKE_COSIGN_VERSION:-v3.1.4}"; exit 0; fi
 if [ -n "${FAKE_COSIGN_RC:-}" ]; then echo "Error: verification failed (forced)" >&2; exit "$FAKE_COSIGN_RC"; fi
 cmd="$1"; shift
 bundle="" regexp="" exact="" issuer="" pos=()
@@ -156,7 +166,10 @@ while [ "$#" -gt 0 ]; do
     esac
     shift
 done
-field() { sed -n "s/^$1=//p" "$2" | head -n 1; }
+# A bundle is JSON (Sigstore bundle v0.3 or legacy), a registry record lines.
+field() {
+    if [ "$(head -c 1 "$2")" = "{" ]; then jq -r --arg k "$1" '.fake[$k] // empty' "$2"; else sed -n "s/^$1=//p" "$2" | head -n 1; fi
+}
 signer_ok() {
     local id iss
     id="$(field identity "$1")"; iss="$(field issuer "$1")"
@@ -175,7 +188,8 @@ case "$cmd" in
     verify-blob)
         [ "${#pos[@]}" -eq 1 ] && [ -n "$bundle" ] || { echo "Error: usage" >&2; exit 2; }
         [ -f "$bundle" ] || { echo "Error: reading $bundle: no such file or directory" >&2; exit 1; }
-        grep -qx 'fake-sigstore-bundle' "$bundle" || { echo "Error: invalid bundle" >&2; exit 1; }
+        jq -e '(.mediaType == "application/vnd.dev.sigstore.bundle.v0.3+json" or has("base64Signature")) and (.fake | type == "object")' \
+            "$bundle" >/dev/null 2>&1 || { echo "Error: invalid bundle" >&2; exit 1; }
         if [ "$(field sha256 "$bundle")" != "$(sha256sum "${pos[0]}" | cut -d' ' -f1)" ]; then
             echo "Error: invalid signature when validating ASN.1 encoded signature" >&2; exit 1
         fi
@@ -187,14 +201,21 @@ case "$cmd" in
         rec="$FAKE_REGISTRY/$(printf '%s' "${pos[0]}" | tr '/:@' '___')"
         [ -f "$rec" ] || { echo "Error: no signatures found" >&2; exit 1; }
         signer_ok "$rec"
-        printf '[{"critical":{"identity":{"docker-reference":"%s"},"image":{"docker-manifest-digest":"%s"},"type":"cosign container image signature"},"optional":null}]\n' \
-            "$(field reference "$rec")" "$(field digest "$rec")"
+        # cosign v2 signatures name the repository, cosign v3 signatures the
+        # signed reference (with the digest) and the type of the new format.
+        type="cosign container image signature"
+        case "$(field reference "$rec")" in *@*) type="https://sigstore.dev/cosign/sign/v1" ;; esac
+        printf '[{"critical":{"identity":{"docker-reference":"%s"},"image":{"docker-manifest-digest":"%s"},"type":"%s"},"optional":null}]\n' \
+            "$(field reference "$rec")" "$(field digest "$rec")" "$type"
         ;;
     sign-blob)
         # The release workflow: Fulcio certificate of its run (repository, ref).
         [ "${#pos[@]}" -eq 1 ] && [ -n "$bundle" ] || { echo "Error: usage" >&2; exit 2; }
-        printf 'fake-sigstore-bundle\nidentity=https://github.com/%s/.github/workflows/release.yml@%s\nissuer=https://token.actions.githubusercontent.com\nsha256=%s\n' \
-            "$GITHUB_REPOSITORY" "$GITHUB_REF" "$(sha256sum "${pos[0]}" | cut -d' ' -f1)" > "$bundle"
+        # cosign v3: a Sigstore bundle v0.3.
+        jq -cn --arg identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@$GITHUB_REF" \
+            --arg sha256 "$(sha256sum "${pos[0]}" | cut -d' ' -f1)" \
+            '{mediaType: "application/vnd.dev.sigstore.bundle.v0.3+json",
+              fake: {identity: $identity, issuer: "https://token.actions.githubusercontent.com", sha256: $sha256}}' > "$bundle"
         ;;
     *) echo "Error: unknown command $cmd" >&2; exit 2 ;;
 esac
@@ -392,7 +413,8 @@ wf = yaml.safe_load(open(sys.argv[1]))
 job = wf["jobs"]["images"]
 problems = []
 listed = {e["image"] for e in job["strategy"]["matrix"]["include"]}
-for image in ("reticora-server", "reticora-collector", "reticora-frontend", "reticora-postgres"):
+for image in ("reticora-server", "reticora-collector", "reticora-frontend", "reticora-postgres",
+              "reticora-keycloak-db"):
     if image not in listed:
         problems.append(f"{image} is not in the image matrix")
 steps = job["steps"]
@@ -411,9 +433,9 @@ print("; ".join(problems))
 PY
 )"
 if [ -z "$images" ]; then
-    ok "release.yml: every image (reticora-postgres included) passes cosign verify and verify-attestation --type spdxjson after signing"
+    ok "release.yml: every image (reticora-postgres and reticora-keycloak-db included) passes cosign verify and verify-attestation --type spdxjson after signing"
 else
-    fail "release.yml: every image (reticora-postgres included) passes cosign verify and verify-attestation --type spdxjson after signing" "$images"
+    fail "release.yml: every image (reticora-postgres and reticora-keycloak-db included) passes cosign verify and verify-attestation --type spdxjson after signing" "$images"
 fi
 RELEASES="$TMP_ROOT/releases"
 mkdir -p "$RELEASES/$TAG"
@@ -428,12 +450,16 @@ variant() {
     fi
     printf '%s' "$root"
 }
-# resign <root> <identity> — every bundle of the release signed by <identity>.
+# resign <root> <identity> [legacy] — every bundle of the release signed by
+# <identity>; with "legacy" as cosign v2 did (legacy bundle, E-258).
 resign() {
     local b f
     for b in "$1/$TAG"/*.sigstore.json; do
         f="${b%.sigstore.json}"
-        printf 'fake-sigstore-bundle\nidentity=%s\nissuer=%s\nsha256=%s\n' "$2" "$ISSUER" "$(sha256sum "$f" | cut -d' ' -f1)" > "$b"
+        jq -cn --arg identity "$2" --arg issuer "$ISSUER" --arg sha256 "$(sha256sum "$f" | cut -d' ' -f1)" --arg legacy "${3:-}" \
+            '(if $legacy == "legacy" then {base64Signature: "fake", cert: "fake", rekorBundle: {}}
+              else {mediaType: "application/vnd.dev.sigstore.bundle.v0.3+json"} end)
+             + {fake: {identity: $identity, issuer: $issuer, sha256: $sha256}}' > "$b"
     done
 }
 sums_line() { awk -v n="$2" '$2 == n { print $1 }' "$1/$TAG/SHA256SUMS"; }
@@ -458,16 +484,20 @@ cat > "$LATEST_JSON" <<JSON
 JSON
 
 # Images: a registry record per <registry>/<image>:<tag> (digest, signer,
-# docker-reference of the signature).
+# docker-reference of the signature: release.yml signs <image>@<digest> with
+# cosign v3, which names exactly that; with "legacy" the repository, as
+# cosign v2 did).
 REGISTRY="$TMP_ROOT/registry"
 IMAGE_REGISTRY="ghcr.io/datahub-chiemgau"
-make_registry() { # <dir> <image tag> <release tag of the signature>
-    local image n=0
+make_registry() { # <dir> <image tag> <release tag of the signature> [legacy]
+    local image digest n=0
     mkdir -p "$1"
-    for image in reticora-server reticora-frontend reticora-postgres reticora-collector; do
+    for image in reticora-server reticora-frontend reticora-postgres reticora-collector reticora-keycloak-db; do
         n=$((n + 1))
-        printf 'digest=sha256:%s\nidentity=%s\nissuer=%s\nreference=%s\n' "$(printf '%064d' "$n")" \
-            "$(identity_of "$3")" "$ISSUER" "$IMAGE_REGISTRY/$image" > "$1/$(printf '%s' "$IMAGE_REGISTRY/$image:$2" | tr '/:@' '___')"
+        digest="sha256:$(printf '%064d' "$n")"
+        printf 'digest=%s\nidentity=%s\nissuer=%s\nreference=%s\n' "$digest" \
+            "$(identity_of "$3")" "$ISSUER" "$IMAGE_REGISTRY/$image$( [ "${4:-}" = legacy ] || printf '@%s' "$digest")" \
+            > "$1/$(printf '%s' "$IMAGE_REGISTRY/$image:$2" | tr '/:@' '___')"
     done
 }
 make_registry "$REGISTRY" "$TAG" "$TAG"
@@ -729,6 +759,16 @@ installed vm-older && RC=97
 expect "install-vm.sh --release: the signed files of another release (v1.2.2) do not pass as $TAG" 1 \
     "Signature check failed" "$OUT"
 
+# E-258: a release signed with cosign v2 (legacy bundles, e.g. v1.0.0-rc.1)
+# is installed with the same command line.
+root="$(variant legacy)"
+resign "$root" "$(identity_of "$TAG")" legacy
+OUT="$(vm vm-legacy "$P_ALL" RETICORA_COLLECTOR_RELEASE="$TAG" FAKE_RELEASES="$root" -- provide_collector_systemd)"; RC=$?
+installed vm-legacy || RC=98
+jq -e 'has("base64Signature") and (has("mediaType") | not)' "$root/$TAG/SHA256SUMS.sigstore.json" >/dev/null || RC=93
+expect "install-vm.sh --release: a release with legacy bundles (cosign v2) is verified and installed" 0 \
+    "Collector $TAG verified" "$OUT"
+
 OUT="$(vm vm-rc1 "$P_ALL" RETICORA_COLLECTOR_RELEASE="$TAG" FAKE_COSIGN_RC=1 -- provide_collector_systemd)"; RC=$?
 installed vm-rc1 && RC=97
 expect "install-vm.sh --release: cosign verify-blob rc 1 stops before the copy" 1 "Signature check failed" "$OUT"
@@ -741,7 +781,34 @@ expect "install-vm.sh --release: without cosign (not installed, download fails) 
 OUT="$(vm vm-badcosign "$P_NOCOSIGN" RETICORA_COLLECTOR_RELEASE="$TAG" FAKE_COSIGN_DOWNLOAD="$STUB_COSIGN/cosign" -- provide_collector_systemd)"; RC=$?
 installed vm-badcosign && RC=97
 expect "install-vm.sh --release: a downloaded cosign with another checksum is not used" 1 \
-    "The downloaded cosign v2.4.1 does not match its published sha256 checksum" "$OUT"
+    "The downloaded cosign v3.1.4 does not match its published sha256 checksum" "$OUT"
+
+# E-258 (GHSA-fx35-mq7g-6g98): an installed cosign below COSIGN_MIN_VERSION
+# (v2.4.1 of earlier installations) is not used, the pinned one is; here its
+# download is the stub, which the pin refuses, so nothing is verified with
+# the old cosign and nothing is installed.
+OUT="$(vm vm-oldcosign "$P_ALL" RETICORA_COLLECTOR_RELEASE="$TAG" FAKE_COSIGN_VERSION=v2.4.1 FAKE_COSIGN_DOWNLOAD="$STUB_COSIGN/cosign" -- provide_collector_systemd)"; RC=$?
+installed vm-oldcosign && RC=97
+grep -q '^cosign verify' "$(case_dir vm-oldcosign)/calls" && RC=96
+grep -qx "curl https://github.com/sigstore/cosign/releases/download/v3.1.4/cosign-linux-$ARCH" "$(case_dir vm-oldcosign)/calls" || RC=95
+expect "install-vm.sh --release: an installed cosign v2.4.1 is not used (warning), the pinned v3.1.4 is fetched instead" 1 \
+    "is older than v3\.1\.3 \(GHSA-fx35-mq7g-6g98\) and is not used.*The downloaded cosign v3\.1\.4 does not match" \
+    "$(printf '%s' "$OUT" | tr '\n' ' ')"
+OUT="$(vm vm-brokencosign "$P_ALL" RETICORA_COLLECTOR_RELEASE="$TAG" FAKE_COSIGN_VERSION_RC=3 FAKE_COSIGN_DOWNLOAD="$STUB_COSIGN/cosign" -- provide_collector_systemd)"; RC=$?
+installed vm-brokencosign && RC=97
+grep -q '^cosign verify' "$(case_dir vm-brokencosign)/calls" && RC=96
+expect "install-vm.sh --release: an installed cosign whose 'cosign version' fails is not used (unknown version), the pinned one is fetched" 1 \
+    "\(unknown version\) is older than v3\.1\.3.*The downloaded cosign v3\.1\.4 does not match" "$(printf '%s' "$OUT" | tr '\n' ' ')"
+OUT="$(vm vm-v313 "$P_ALL" RETICORA_COLLECTOR_RELEASE="$TAG" FAKE_COSIGN_VERSION=v3.1.3 -- provide_collector_systemd)"; RC=$?
+installed vm-v313 || RC=98
+grep -q '^curl https://github.com/sigstore/' "$(case_dir vm-v313)/calls" && RC=96
+expect "install-vm.sh --release: an installed cosign v3.1.3 (the minimum) is used without a download" 0 \
+    "Collector $TAG verified" "$OUT" "is older than"
+OUT="$(vm vm-versions "$P_ALL" -- 'for v in v3.1.3 v3.1.4 v3.2.0 v4.0.0 3.1.10 v3.1.4+build.1 v3.1.2 v3.1.3-rc.1 v3.0.6 v2.6.5 v2.4.1 devel "" v3.1; do
+    if cosign_version_ok "$v"; then printf "%s:ok " "$v"; else printf "%s:no " "$v"; fi; done')"; RC=$?
+want_versions="v3.1.3:ok v3.1.4:ok v3.2.0:ok v4.0.0:ok 3.1.10:ok v3.1.4+build.1:ok v3.1.2:no v3.1.3-rc.1:no v3.0.6:no v2.6.5:no v2.4.1:no devel:no :no v3.1:no "
+[ "$OUT" = "$want_versions" ] || RC=94
+expect "cosign_version_ok: releases from v3.1.3 on pass; older ones, pre-releases of v3.1.3 and unknown versions do not" 0 "" "$OUT"
 
 OUT="$(sandbox vm-notag "$P_ALL" bash "$REPO_ROOT/install-vm.sh" --release main --non-interactive 2>&1)"; RC=$?
 expect "install-vm.sh --release accepts only a version tag" 1 "--release expects a version tag" "$OUT"
@@ -885,27 +952,28 @@ cloud() {
     sandbox "$name" "$path" "${vars[@]}" bash -c 'set -euo pipefail; set -- ${T_ARGS:-}; . "$0"; NON_INTERACTIVE=1
         [ -z "${T_CHECKOUT:-}" ] || SCRIPT_DIR="$T_CHECKOUT"
         ENV_FILE="$CASE/.env"; OVERRIDE_FILE="$CASE/override.yml"; : > "$OVERRIDE_FILE"
-        printf "RETICORA_IMAGE_REGISTRY=x\nRETICORA_SERVER_IMAGE=\nRETICORA_FRONTEND_IMAGE=\nRETICORA_POSTGRES_IMAGE=\nRETICORA_HTTP_BIND=127.0.0.1\n" > "$ENV_FILE"
+        printf "RETICORA_IMAGE_REGISTRY=x\nRETICORA_SERVER_IMAGE=\nRETICORA_FRONTEND_IMAGE=\nRETICORA_POSTGRES_IMAGE=\nRETICORA_KEYCLOAK_DB_IMAGE=\nRETICORA_HTTP_BIND=127.0.0.1\n" > "$ENV_FILE"
         compose_cmd() { printf "compose %s\n" "$*" >> "$FAKE_LOG"; }
         RETICORA_IMAGE_REGISTRY="${T_REGISTRY-ghcr.io/datahub-chiemgau}"; RETICORA_IMAGE_TAG="${T_TAG:-v1.2.3}"; RETICORA_TLS_DOMAIN=""
         '"$1" "$CLOUD_DIR/harness.sh" 2>&1
 }
-pinned() { grep -c -E "^RETICORA_(SERVER|FRONTEND|POSTGRES)_IMAGE=ghcr\.io/datahub-chiemgau/reticora-(server|frontend|postgres)@sha256:[0-9]{64}$" "$(case_dir "$1")/.env"; }
+pinned() { grep -c -E "^RETICORA_(SERVER|FRONTEND|POSTGRES|KEYCLOAK_DB)_IMAGE=ghcr\.io/datahub-chiemgau/reticora-(server|frontend|postgres|keycloak-db)@sha256:[0-9]{64}$" "$(case_dir "$1")/.env"; }
 compose_calls() { grep '^compose' "$(case_dir "$1")/calls"; }
 
 OUT="$(cloud cl-ok "$P_ALL" -- provide_images)"; RC=$?
 env_file="$(case_dir cl-ok)/.env"
-if [ "$(pinned cl-ok)" -eq 3 ] \
+if [ "$(pinned cl-ok)" -eq 4 ] \
     && grep -qx "RETICORA_SERVER_IMAGE=$IMAGE_REGISTRY/reticora-server@sha256:$(printf '%064d' 1)" "$env_file" \
     && grep -qx "RETICORA_POSTGRES_IMAGE=$IMAGE_REGISTRY/reticora-postgres@sha256:$(printf '%064d' 3)" "$env_file" \
+    && grep -qx "RETICORA_KEYCLOAK_DB_IMAGE=$IMAGE_REGISTRY/reticora-keycloak-db@sha256:$(printf '%064d' 5)" "$env_file" \
     && grep -qx 'RETICORA_HTTP_BIND=127.0.0.1' "$env_file" && [ "$(stat -c %a "$env_file")" = 600 ] \
-    && [ "$(compose_calls cl-ok)" = "compose pull server frontend postgres" ] \
+    && [ "$(compose_calls cl-ok)" = "compose pull server frontend postgres keycloak-db" ] \
     && [ -f "$(case_dir cl-ok)/override.yml.disabled" ] && [ ! -e "$(case_dir cl-ok)/override.yml" ]; then :; else RC=91; fi
-expect "install-cloud.sh release mode: server, frontend and postgres verified, pinned by digest in .env, pulled — nothing built" 0 \
-    "Signed image verified: reticora-postgres@sha256:" "$OUT"
+expect "install-cloud.sh release mode: server, frontend, postgres and keycloak-db verified, pinned by digest in .env, pulled — nothing built" 0 \
+    "Signed image verified: reticora-keycloak-db@sha256:" "$OUT"
 calls="$(cat "$(case_dir cl-ok)/calls")"
-if [ "$(grep -cE "^cosign verify $IMAGE_REGISTRY/reticora-(server|frontend|postgres):$TAG " <<<"$calls")" -eq 3 ] \
-    && [ "$(grep -cF -- ":$TAG $SIGNER_ARGS" <<<"$calls")" -eq 3 ]; then
+if [ "$(grep -cE "^cosign verify $IMAGE_REGISTRY/reticora-(server|frontend|postgres|keycloak-db):$TAG " <<<"$calls")" -eq 4 ] \
+    && [ "$(grep -cF -- ":$TAG $SIGNER_ARGS" <<<"$calls")" -eq 4 ]; then
     ok "install-cloud.sh release mode: cosign verify pins the release identity of the tag and the GitHub Actions issuer"
 else
     fail "install-cloud.sh release mode: cosign verify pins the release identity of the tag and the GitHub Actions issuer" "$calls"
@@ -932,6 +1000,18 @@ reg="$TMP_ROOT/registry-swap"; cp -r "$REGISTRY" "$reg"
 cp "$(record "$reg" reticora-frontend "$TAG")" "$(record "$reg" reticora-server "$TAG")"
 cloud_refused cl-swap "install-cloud.sh release mode: the signed frontend image under the server name stops" \
     "do not name reticora-server with one digest" FAKE_REGISTRY="$reg"
+# E-258: a cosign v3 signature names <image>@<digest>; another digest there
+# than the signed one is refused, signatures of cosign v2 (repository only,
+# releases up to v1.0.0-rc.1) still pass.
+reg="$TMP_ROOT/registry-refdigest"; cp -r "$REGISTRY" "$reg"
+sed -i "s|^reference=.*|reference=$IMAGE_REGISTRY/reticora-server@sha256:$(printf '%064d' 9)|" "$(record "$reg" reticora-server "$TAG")"
+cloud_refused cl-refdigest "install-cloud.sh release mode: a signature whose reference names another digest stops" \
+    "do not name reticora-server with one digest" FAKE_REGISTRY="$reg"
+reg="$TMP_ROOT/registry-legacy"; make_registry "$reg" "$TAG" "$TAG" legacy
+OUT="$(cloud cl-legacy "$P_ALL" FAKE_REGISTRY="$reg" -- provide_images)"; RC=$?
+[ "$(pinned cl-legacy)" -eq 4 ] || RC=91
+expect "install-cloud.sh release mode: images signed with cosign v2 (legacy signature) are verified and pinned" 0 \
+    "Signed image verified: reticora-server@sha256:$(printf '%064d' 1)" "$OUT"
 CLOUD_PATH="$P_NOCOSIGN" cloud_refused cl-nocosign "install-cloud.sh release mode: without cosign nothing is pulled or started" \
     "cosign is required to verify the signed release artifacts"
 
@@ -972,8 +1052,9 @@ expect "install-cloud.sh release mode: a failed verification stops before compos
 OUT="$(cloud cl-src "$P_ALL" T_ARGS=--build-from-source -- "$CLOUD_MAIN")"; RC=$?
 calls="$(cat "$(case_dir cl-src)/calls")"
 { grep -qx 'compose build server frontend' <<<"$calls" && grep -qx 'compose build postgres' <<<"$calls" \
+    && grep -qx 'compose build keycloak-db' <<<"$calls" \
     && ! grep -qE '^(cosign|curl)' <<<"$calls"; } || RC=86
-expect "install-cloud.sh --build-from-source: 'not signature-verified' at the start, then server, frontend and postgres are built" 0 \
+expect "install-cloud.sh --build-from-source: 'not signature-verified' at the start, then server, frontend, postgres and keycloak-db are built" 0 \
     "Local source build: the images are built from this checkout and are not signature-verified \(--build-from-source\)" "$OUT"
 
 # The default of a real configuration (E-69, Option 1): an .env of an earlier
@@ -992,16 +1073,16 @@ CLOUD_DEFAULT="$LEGACY_ENV"'preflight() { :; }; ensure_session_key() { :; }; con
     bootstrap_tls_cert() { :; }; issue_tls_certificate() { :; }; verify_stack() { :; }; gc_images() { :; }
     print_summary() { :; }; start_stack() { printf "start_stack\n" >> "$FAKE_LOG"; }; main'
 api_called() { grep -qx 'curl https://api.github.com/repos/DataHub-Chiemgau/Reticora-CMDB/releases/latest' "$(case_dir "$1")/calls"; }
-release_env() { # <case> — .env names the signed release and pins its three images
+release_env() { # <case> — .env names the signed release and pins its four images
     local f; f="$(case_dir "$1")/.env"
-    grep -qx "RETICORA_IMAGE_REGISTRY=$IMAGE_REGISTRY" "$f" && grep -qx "RETICORA_IMAGE_TAG=$TAG" "$f" && [ "$(pinned "$1")" -eq 3 ]
+    grep -qx "RETICORA_IMAGE_REGISTRY=$IMAGE_REGISTRY" "$f" && grep -qx "RETICORA_IMAGE_TAG=$TAG" "$f" && [ "$(pinned "$1")" -eq 4 ]
 }
 OUT="$(cloud cl-default "$P_ALL" T_CHECKOUT="$CO_TAG" -- "$CLOUD_DEFAULT")"; RC=$?
 calls="$(cat "$(case_dir cl-default)/calls")"
 order="$(grep -E '^(cosign verify|compose|start_stack)' <<<"$calls" | cut -d' ' -f1-2 | uniq | tr '\n' ',')"
 { [ "$order" = "cosign verify-blob,cosign verify,compose pull,start_stack," ] && release_env cl-default \
-    && [ "$(grep -cE "^cosign verify $IMAGE_REGISTRY/reticora-(server|frontend|postgres):$TAG " <<<"$calls")" -eq 3 ] \
-    && [ "$(grep -cF -- ":$TAG $SIGNER_ARGS" <<<"$calls")" -eq 3 ] \
+    && [ "$(grep -cE "^cosign verify $IMAGE_REGISTRY/reticora-(server|frontend|postgres|keycloak-db):$TAG " <<<"$calls")" -eq 4 ] \
+    && [ "$(grep -cF -- ":$TAG $SIGNER_ARGS" <<<"$calls")" -eq 4 ] \
     && ! grep -q '^compose build' <<<"$calls" && ! api_called cl-default; } || RC=76
 expect "install-cloud.sh default (no switch): the release of the checkout's tag — checkout and images verified, pinned, nothing built" 0 \
     "Release mode: the images are verified with cosign.*Source verified: $TAG is commit $commit" "$(printf '%s' "$OUT" | tr '\n' ' ')" "not signature-verified"
@@ -1061,7 +1142,7 @@ LEGACY="$LEGACY_ENV"'collect_config >/dev/null; write_env'
 OUT="$(cloud cl-stale "$P_ALL" RETICORA_BUILD_FROM_SOURCE=1 RETICORA_FRONTEND_IMAGE=evil/frontend:latest -- "$LEGACY")"; RC=$?
 env_file="$(case_dir cl-stale)/.env"
 { [ "$(grep -c '^RETICORA_SERVER_IMAGE=$' "$env_file")" -eq 1 ] && grep -qx 'RETICORA_FRONTEND_IMAGE=' "$env_file" \
-    && grep -qx 'RETICORA_POSTGRES_IMAGE=' "$env_file" && ! grep -q 'sha256:\|evil' "$env_file"; } || RC=85
+    && grep -qx 'RETICORA_POSTGRES_IMAGE=' "$env_file" && grep -qx 'RETICORA_KEYCLOAK_DB_IMAGE=' "$env_file" && ! grep -q 'sha256:\|evil' "$env_file"; } || RC=85
 expect "install-cloud.sh: write_env drops image pins of an earlier run and from the environment (source build)" 0 "" "$OUT"
 
 # ─── The hint of every message leads to the troubleshooting section ─────────
@@ -1135,12 +1216,30 @@ else
     mkdir -p "$REAL"
     OUT="$(vm real-pin "$P_NOCOSIGN" FAKE_COSIGN_DOWNLOAD="$RETICORA_TEST_COSIGN" -- \
         'ensure_cosign; "$COSIGN_BIN" version 2>&1 | grep -E "GitVersion"')"; RC=$?
-    expect "real cosign: the pinned sha256 of cosign v2.4.1 linux-$ARCH matches the release binary" 0 "GitVersion: +v2\.4\.1" "$OUT"
+    expect "real cosign: the pinned sha256 of cosign v3.1.4 linux-$ARCH matches the release binary" 0 "GitVersion: +v3\.1\.4" "$OUT"
+    # A blob signed with a key and without a transparency log (cosign v3: a
+    # signing config without services), no Fulcio certificate.
     printf 'payload\n' > "$REAL/blob"
+    printf '{"mediaType":"application/vnd.dev.sigstore.signingconfig.v0.2+json"}\n' > "$REAL/signing-config.json"
     (cd "$REAL" && COSIGN_PASSWORD="" "$RETICORA_TEST_COSIGN" generate-key-pair >/dev/null 2>&1 \
-        && COSIGN_PASSWORD="" "$RETICORA_TEST_COSIGN" sign-blob --yes --key cosign.key --tlog-upload=false \
+        && COSIGN_PASSWORD="" "$RETICORA_TEST_COSIGN" sign-blob --yes --key cosign.key --signing-config signing-config.json \
             --bundle blob.sigstore.json blob >/dev/null 2>&1)
+    [ -s "$REAL/blob.sigstore.json" ] || fail "real cosign: a key-signed test bundle is written" "$(ls -la "$REAL")"
     ln -sf "$RETICORA_TEST_COSIGN" "$REAL/cosign"
+    OUT="$(vm real-version "$REAL:$P_NOCOSIGN" -- 'ensure_cosign; printf "%s\n" "$COSIGN_BIN"')"; RC=$?
+    expect "real cosign: the installed cosign v3.1.4 passes the minimum and is used" 0 "^$REAL/cosign\$" "$OUT" "is older than"
+    # E-258: the legacy bundle (cosign v2.4.1) of the published release
+    # v1.0.0-rc.1 stays verifiable with cosign v3 for exactly its tag.
+    LEGACY="$REPO_ROOT/edgecore/update/testdata/legacy-release-v1.0.0-rc.1"
+    OUT="$(vm real-legacy "$REAL:$P_NOCOSIGN" -- "cosign_verify_blob '$LEGACY/SHA256SUMS' '$LEGACY/SHA256SUMS.sigstore.json' v1.0.0-rc.1 && echo LEGACY-VERIFIED")"; RC=$?
+    expect "real cosign: the legacy bundle of the published release v1.0.0-rc.1 passes the installers' verify-blob" 0 \
+        "^LEGACY-VERIFIED$" "$OUT" "Signature check failed"
+    OUT="$(vm real-legacy-tag "$REAL:$P_NOCOSIGN" -- "cosign_verify_blob '$LEGACY/SHA256SUMS' '$LEGACY/SHA256SUMS.sigstore.json' $TAG")"; RC=$?
+    expect "real cosign: the legacy bundle of v1.0.0-rc.1 does not pass as $TAG" 1 \
+        "none of the expected identities matched.*Signature check failed: SHA256SUMS is not signed" "$(printf '%s' "$OUT" | tr '\n' ' ')"
+    OUT="$(vm real-legacy-foreign "$REAL:$P_NOCOSIGN" -- "cosign_verify_blob '$LEGACY/SHA256SUMS' '$LEGACY/SOURCE_COMMIT.sigstore.json' v1.0.0-rc.1")"; RC=$?
+    expect "real cosign: the legacy bundle of another file of v1.0.0-rc.1 is refused" 1 \
+        "Signature check failed: SHA256SUMS is not signed" "$OUT"
     OUT="$(vm real-blob "$REAL:$P_NOCOSIGN" -- "cosign_verify_blob '$REAL/blob' '$REAL/blob.sigstore.json' $TAG")"; RC=$?
     expect "real cosign: the installers' verify-blob rejects a bundle not signed by the release workflow" 1 \
         "Signature check failed: blob is not signed" "$OUT" "unknown (flag|shorthand)|required flag"

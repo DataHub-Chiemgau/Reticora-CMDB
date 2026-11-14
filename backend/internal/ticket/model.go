@@ -134,17 +134,21 @@ type FilterParams struct {
 }
 
 // Entity types of a ticket link (WP-764): the targets of ticket_link
-// besides the primary object (related_ci_id, related_asset_id).
+// besides the primary object (related_ci_id, related_asset_id). incident
+// and alarm (WP-1039) link a ticket to an incident of the monitoring and
+// to an alarm (the root alarm of the ticket dedupe, WP-1040).
 const (
 	LinkCI         = "ci"
 	LinkAsset      = "asset"
 	LinkLocation   = "location"
 	LinkContract   = "contract"
 	LinkReviewItem = "review_item"
+	LinkIncident   = "incident"
+	LinkAlarm      = "alarm"
 )
 
 // LinkEntityTypes are the entity types of a ticket link, sorted.
-var LinkEntityTypes = []string{LinkAsset, LinkCI, LinkContract, LinkLocation, LinkReviewItem}
+var LinkEntityTypes = []string{LinkAlarm, LinkAsset, LinkCI, LinkContract, LinkIncident, LinkLocation, LinkReviewItem}
 
 // Link is an object linked to a ticket (ticket_link, WP-764).
 type Link struct {

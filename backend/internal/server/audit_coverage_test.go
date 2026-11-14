@@ -523,21 +523,33 @@ var auditRouteRequests = map[string]struct{ path, body string }{
 	"PUT /api/v1/cis/{id}/fields/{name}/override":            {"/api/v1/cis/<id:/api/v1/cis>/fields/description/override", `{"value":"a5","reason":"a5 override"}`},
 	"DELETE /api/v1/cis/{id}/fields/{name}/override":         {"/api/v1/cis/<id:/api/v1/cis>/fields/description/override", ""},
 	"DELETE /api/v1/users/{id}":                              {"/api/v1/users/<user3>", ""},
-	"POST /api/v1/teams/{id}/members":                        {"", `{"user_id":"<id:/api/v1/users>"}`},
-	"POST /api/v1/tickets/{id}/comments":                     {"", `{"content":"a5 comment"}`},
-	"POST /api/v1/orders/{id}/items":                         {"", `{"description":"a5 item","quantity":1}`},
-	"POST /api/v1/consumables/{id}/movements":                {"", `{"direction":"in","quantity":1}`},
-	"POST /api/v1/documents/{id}/links":                      {"", `{"entity_type":"ci","entity_id":"<id:/api/v1/cis>"}`},
-	"POST /api/v1/stocktakes/{id}/scans":                     {"", `{"scan_result":"found","asset_id":"<id:/api/v1/assets>"}`},
-	"POST /api/v1/agents/{id}/site":                          {"", `{"site_id":"<id:/api/v1/sites>"}`},
+	// The own mobile number (WP-1140): the entry names only its surrogate.
+	"PATCH /api/v1/me":                        {"", `{"mobile":"+49 151 1234 5689"}`},
+	"POST /api/v1/teams/{id}/members":         {"", `{"user_id":"<id:/api/v1/users>"}`},
+	"POST /api/v1/tickets/{id}/comments":      {"", `{"content":"a5 comment"}`},
+	"POST /api/v1/orders/{id}/items":          {"", `{"description":"a5 item","quantity":1}`},
+	"POST /api/v1/consumables/{id}/movements": {"", `{"direction":"in","quantity":1}`},
+	"POST /api/v1/documents/{id}/links":       {"", `{"entity_type":"ci","entity_id":"<id:/api/v1/cis>"}`},
+	"POST /api/v1/stocktakes/{id}/scans":      {"", `{"scan_result":"found","asset_id":"<id:/api/v1/assets>"}`},
+	"POST /api/v1/agents/{id}/site":           {"", `{"site_id":"<id:/api/v1/sites>"}`},
 	// Assignment through the asset (WP-746): <asset3> is assigned and
 	// returned, <asset4> held by <user> is transferred.
-	"POST /api/v1/assets/{id}/assign":                  {"/api/v1/assets/<asset3>/assign", `{"assigned_user_id":"<user2>"}`},
-	"POST /api/v1/assets/{id}/return":                  {"/api/v1/assets/<asset3>/return", `{"expected_holder":"<user2>"}`},
-	"POST /api/v1/assets/{id}/transfer":                {"/api/v1/assets/<asset4>/transfer", `{"expected_holder":"<user>","assigned_user_id":"<user2>"}`},
-	"PATCH /api/v1/org":                                {"", `{}`},
-	"PUT /api/v1/clients/{id}/hidden-ci-types":         {"/api/v1/clients/<id:/api/v1/clients>/hidden-ci-types", `{"ci_type_ids":["<id:/api/v1/ci-types>"]}`}, // WP-858
-	"PUT /api/v1/documents/{id}/content":               {"", `a5 content`},
+	"POST /api/v1/assets/{id}/assign":   {"/api/v1/assets/<asset3>/assign", `{"assigned_user_id":"<user2>"}`},
+	"POST /api/v1/assets/{id}/return":   {"/api/v1/assets/<asset3>/return", `{"expected_holder":"<user2>"}`},
+	"POST /api/v1/assets/{id}/transfer": {"/api/v1/assets/<asset4>/transfer", `{"expected_holder":"<user>","assigned_user_id":"<user2>"}`},
+	"PATCH /api/v1/org":                 {"", `{}`},
+	// The deletion request of the organization (WP-1152) with its slug as
+	// confirmation; the cancel runs with the deletes.
+	"POST /api/v1/org/deletion": {"", `{"confirm_slug":"scopetest-a5-a"}`},
+	// The report and the pseudonymization of a contact (WP-1158) start
+	// their jobs.
+	"POST /api/v1/privacy/subjects/report":     {"", `{"contact_id":"<id:/api/v1/contacts>"}`},
+	"POST /api/v1/privacy/subjects/erase":      {"", `{"contact_id":"<id:/api/v1/contacts>","mode":"pseudonymize"}`},
+	"PUT /api/v1/clients/{id}/hidden-ci-types": {"/api/v1/clients/<id:/api/v1/clients>/hidden-ci-types", `{"ci_type_ids":["<id:/api/v1/ci-types>"]}`}, // WP-858
+	"PUT /api/v1/documents/{id}/content":       {"", `a5 content`},
+	// Ack and un-ack of the open alarm (WP-983).
+	"POST /api/v1/monitoring/alarms/{id}/ack":          {"/api/v1/monitoring/alarms/<alarm>/ack", `{"comment":"a5 ack"}`},
+	"POST /api/v1/monitoring/alarms/{id}/unack":        {"/api/v1/monitoring/alarms/<alarm>/unack", `{}`},
 	"DELETE /api/v1/ci-fields/global/{name}":           {"/api/v1/ci-fields/global/a5_global", ""},
 	"DELETE /api/v1/ci-types/{id}/fields/{name}":       {"/api/v1/ci-types/<id:/api/v1/ci-types>/fields/a5_field", ""},
 	"DELETE /api/v1/cis/{id}/field-definitions/{name}": {"/api/v1/cis/<id:/api/v1/cis>/field-definitions/a5_ci_field", ""},
@@ -732,6 +744,14 @@ func TestEveryWriteRouteAuditedOnPostgreSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixed["<publish_draft>"] = publishDraft
+	// An open alarm for POST /monitoring/alarms/{id}/ack and /unack
+	// (WP-983); the un-ack follows the ack in the order of the table.
+	var openAlarm string
+	if err = f.Admin.QueryRow(bg, `INSERT INTO alarm (organization_id, client_id, source_kind, source_id, severity, state, opened_at)
+		VALUES ($1, $2, 'collector', gen_random_uuid(), 'warning', 'open', now()) RETURNING id::text`, f.OrgA, f.Client1).Scan(&openAlarm); err != nil {
+		t.Fatal(err)
+	}
+	fixed["<alarm>"] = openAlarm
 	ids := map[string]string{}
 	fill := func(s string) string {
 		for k, v := range fixed {
@@ -788,7 +808,9 @@ func TestEveryWriteRouteAuditedOnPostgreSQL(t *testing.T) {
 		method, _, _ := strings.Cut(key, " ")
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		p := identity.Principal{Subject: user, OrganizationID: f.OrgA, Type: identity.PrincipalTypeUser,
+		// The session has a second factor: the deletion of the
+		// organization requires one (WP-1152).
+		p := identity.Principal{Subject: user, OrganizationID: f.OrgA, Type: identity.PrincipalTypeUser, MFA: true,
 			Scope:       &identity.Scope{Clients: identity.ScopeSet{All: true}, Sites: identity.ScopeSet{All: true}, Teams: identity.ScopeSet{All: true}},
 			Permissions: identity.AllPermissions(), Credential: "audit-a5"}
 		ctx := identity.WithPermissions(identity.WithPrincipal(req.Context(), p), p.Permissions)
@@ -962,7 +984,7 @@ func TestEveryWriteRouteAuditedOnPostgreSQL(t *testing.T) {
 	// (CH16, WP-505): the webhook secret, the credential, the e-mail
 	// addresses of the contact, the user and the invitation.
 	for _, plain := range []string{"a5-secret-a5-secret-a5", `"community"`, "a5-contact@example.com", "a5-user@example.com",
-		"a5-invite@example.com", "a5-scim@example.com"} {
+		"a5-invite@example.com", "a5-scim@example.com", "4915112345689"} {
 		if n := countRows(t, f, `SELECT count(*) FROM audit_log WHERE organization_id = $1 AND changes ? 'route'
 			AND strpos(changes::text, $2) > 0`, f.OrgA, plain); n != 0 {
 			t.Errorf("%d route entries hold %s", n, plain)

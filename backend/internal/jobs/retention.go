@@ -33,7 +33,14 @@ type RetentionPolicy struct {
 	History       time.Duration
 	SoftDeleted   time.Duration
 	ReviewItems   time.Duration
+	// WorkflowRuns is how long an ended workflow run is kept after
+	// finished_at (WFL-02, E-241 option 2: 400 days, WP-1093).
+	WorkflowRuns time.Duration
 }
+
+// DefaultWorkflowRunRetention is the retention of ended workflow runs
+// (E-241, RETICORA_RETENTION_WORKFLOW_RUN_DAYS).
+const DefaultWorkflowRunRetention = 400 * 24 * time.Hour
 
 // RetentionFromDays builds a policy from configured periods.
 func RetentionFromDays(auditYears, historyDays, softDeleteDays, reviewItemDays int) RetentionPolicy {
@@ -41,6 +48,7 @@ func RetentionFromDays(auditYears, historyDays, softDeleteDays, reviewItemDays i
 	return RetentionPolicy{
 		AuditLogYears: auditYears, History: time.Duration(historyDays) * day,
 		SoftDeleted: time.Duration(softDeleteDays) * day, ReviewItems: time.Duration(reviewItemDays) * day,
+		WorkflowRuns: DefaultWorkflowRunRetention,
 	}
 }
 
@@ -58,6 +66,21 @@ const (
 	// BulkChangeSetRetention is how long the change set of a bulk job is
 	// kept (WP-135): a fixed period, far beyond the revert window of 24 h.
 	BulkChangeSetRetention = 30 * 24 * time.Hour
+	// RetentionConfigSnapshot ends the versions of the device
+	// configurations (ALR-07, WP-1052).
+	RetentionConfigSnapshot = "retention.config_snapshot"
+	// ConfigSnapshotRetention is how long a configuration version is kept
+	// (ALR-07, E-207: 400 days); the latest version of a CI always stays.
+	ConfigSnapshotRetention = 400 * 24 * time.Hour
+	// ConfigSnapshotBatch is the largest portion of versions one statement
+	// deletes.
+	ConfigSnapshotBatch = 10000
+	// RetentionWorkflowRuns ends the ended workflow runs with their steps
+	// (WFL-02, E-241, WP-1093).
+	RetentionWorkflowRuns = "retention.workflow_runs"
+	// WorkflowRunBatch is the largest portion of runs one statement
+	// deletes.
+	WorkflowRunBatch = 5000
 )
 
 // Retention deletes expired data.
@@ -68,6 +91,28 @@ type Retention struct {
 	// blobs holds the document content (WithBlobs); nil keeps every
 	// soft-deleted document with stored content.
 	blobs blob.Store
+	// configAlarms resolves the configuration alarms without a further
+	// change in retention.config_snapshot (WP-1054); nil resolves none.
+	configAlarms ConfigAlarms
+}
+
+// ConfigAlarms resolves the configuration alarms (source config) of an
+// organization whose last change lies before before, in the transaction
+// of ctx (configsnap.StableAlarms, WP-1054); it returns their number.
+type ConfigAlarms interface {
+	ClearStable(ctx context.Context, orgID string, before time.Time) (int, error)
+}
+
+// ConfigAlarmStable is how long a configuration alarm stays open without a
+// further change before retention.config_snapshot resolves it (ALR-07,
+// WP-1054).
+const ConfigAlarmStable = 24 * time.Hour
+
+// WithConfigAlarms makes retention.config_snapshot resolve the stable
+// configuration alarms with c.
+func (r *Retention) WithConfigAlarms(c ConfigAlarms) *Retention {
+	r.configAlarms = c
+	return r
 }
 
 // documentBucket is the bucket of the document content (document.Handler).
@@ -106,6 +151,8 @@ func (r *Retention) Schedules() []Schedule {
 		{Kind: RetentionReviewItems, Spec: "47 3 * * *", MaxCatchUp: 1, Timeout: time.Hour, Run: r.RunReviewItems},
 		{Kind: RetentionMergeSnapshots, Spec: "57 3 * * *", MaxCatchUp: 1, Timeout: time.Hour, Run: r.RunMergeSnapshots},
 		{Kind: RetentionBulkChangeSet, Spec: "7 4 * * *", MaxCatchUp: 1, Timeout: time.Hour, Run: r.RunBulkChangeSet},
+		{Kind: RetentionConfigSnapshot, Spec: "17 4 * * *", MaxCatchUp: 1, Timeout: time.Hour, Run: r.RunConfigSnapshot},
+		{Kind: RetentionWorkflowRuns, Spec: "17 4 * * *", MaxCatchUp: 1, Timeout: time.Hour, Run: r.RunWorkflowRuns},
 	}
 }
 
@@ -155,6 +202,8 @@ var historyRetention = []string{
 			WHEN 'asset' THEN e.created_at <= ` + assetHistoryAnchor("e.entity_id") + `
 			ELSE true END`,
 	`DELETE FROM location_change WHERE organization_id = $1 AND changed_at < $2`,
+	// The IPAM history (IPM-08, WP-908): the same period, no anchor.
+	`DELETE FROM ipam_change WHERE organization_id = $1 AND changed_at < $2`,
 	`DELETE FROM relationship_change c WHERE c.organization_id = $1 AND c.created_at < $2
 		AND NOT EXISTS (SELECT 1 FROM (VALUES (c.source_ci_id), (c.target_ci_id),
 				(CASE WHEN c.change_kind = 'rewired' THEN (c.before->>'source_ci_id')::uuid END),
@@ -164,8 +213,8 @@ var historyRetention = []string{
 	`DELETE FROM asset_snapshot s WHERE s.organization_id = $1 AND s.taken_at < ` + assetHistoryAnchor("s.asset_id"),
 }
 
-// RunHistory removes CI, entity, location and relationship history
-// (relationship_change, WP-771) and CI and asset snapshots older than the
+// RunHistory removes CI, entity, location, relationship and IPAM history
+// (relationship_change, WP-771; ipam_change, WP-908) and CI and asset snapshots older than the
 // history period, keeping per CI and asset its anchor snapshot and the
 // rows after it (historyRetention, WP-793, WP-795).
 func (r *Retention) RunHistory(ctx context.Context) error {
@@ -397,6 +446,74 @@ func (r *Retention) RunBulkChangeSet(ctx context.Context) error {
 			return 0, fmt.Errorf("delete bulk change sets: %w", err)
 		}
 		return int(tag.RowsAffected()), nil
+	})
+}
+
+// RunWorkflowRuns deletes the workflow runs that ended (succeeded, failed,
+// cancelled) more than WorkflowRuns ago, in portions of WorkflowRunBatch;
+// their steps go with them (ON DELETE CASCADE), an IGA access request that
+// names one keeps NULL (ON DELETE SET NULL). Pending, running and waiting
+// runs stay whatever their age. The audit entries of their status changes
+// stay under the audit retention (E-241, WP-1093).
+func (r *Retention) RunWorkflowRuns(ctx context.Context) error {
+	period := r.policy.WorkflowRuns
+	if period <= 0 {
+		period = DefaultWorkflowRunRetention
+	}
+	cutoff := r.now().Add(-period)
+	return r.eachOrganization(ctx, RetentionWorkflowRuns, true, func(ctx context.Context, tx pgx.Tx, orgID string) (int, error) {
+		total := 0
+		for {
+			tag, err := tx.Exec(ctx, `DELETE FROM workflow_run WHERE id IN (
+				SELECT w.id FROM workflow_run w
+				 WHERE w.organization_id = $1 AND w.finished_at < $2
+				   AND w.status IN ('succeeded', 'failed', 'cancelled')
+				 LIMIT $3)`, orgID, cutoff, WorkflowRunBatch)
+			if err != nil {
+				return total, fmt.Errorf("delete workflow runs: %w", err)
+			}
+			total += int(tag.RowsAffected())
+			if tag.RowsAffected() < WorkflowRunBatch {
+				return total, nil
+			}
+		}
+	})
+}
+
+// RunConfigSnapshot deletes the configuration versions (config_snapshot,
+// WP-1052) collected more than ConfigSnapshotRetention ago, in portions of
+// at most ConfigSnapshotBatch, except the latest version of each CI, which
+// a later collection compares against (ALR-07). With WithConfigAlarms it
+// first resolves the configuration alarms without change for 24 h
+// (WP-1054).
+func (r *Retention) RunConfigSnapshot(ctx context.Context) error {
+	now := r.now()
+	cutoff := now.Add(-ConfigSnapshotRetention)
+	return r.eachOrganization(ctx, RetentionConfigSnapshot, true, func(ctx context.Context, tx pgx.Tx, orgID string) (int, error) {
+		total := 0
+		// The configuration alarms unchanged for 24 h end (config_stable,
+		// WP-1054); they are no deleted rows.
+		if r.configAlarms != nil {
+			if _, err := r.configAlarms.ClearStable(database.ContextWithTx(ctx, tx), orgID, now.Add(-ConfigAlarmStable)); err != nil {
+				return total, fmt.Errorf("resolve stable configuration alarms: %w", err)
+			}
+		}
+		for {
+			tag, err := tx.Exec(ctx, `DELETE FROM config_snapshot WHERE id IN (
+				SELECT s.id FROM config_snapshot s
+				 WHERE s.organization_id = $1 AND s.collected_at < $2
+				   AND EXISTS (SELECT 1 FROM config_snapshot n
+				                WHERE n.organization_id = s.organization_id AND n.ci_id = s.ci_id
+				                  AND n.collected_at > s.collected_at)
+				 LIMIT $3)`, orgID, cutoff, ConfigSnapshotBatch)
+			if err != nil {
+				return total, fmt.Errorf("delete configuration versions: %w", err)
+			}
+			total += int(tag.RowsAffected())
+			if tag.RowsAffected() < ConfigSnapshotBatch {
+				return total, nil
+			}
+		}
 	})
 }
 

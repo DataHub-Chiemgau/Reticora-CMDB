@@ -798,6 +798,14 @@ var linkTargets = map[string]linkTarget{
 	LinkReviewItem: {"review_item_id", func(id string) string {
 		return "EXISTS (SELECT 1 FROM review_item WHERE review_item.id = " + id + " AND " + reviewItemVisible + ")"
 	}},
+	// The incident and the alarm of the monitoring (WP-1039): visible under
+	// their row level security (client and site of the incident or alarm).
+	LinkIncident: {"incident_id", func(id string) string {
+		return "EXISTS (SELECT 1 FROM incident WHERE incident.id = " + id + ")"
+	}},
+	LinkAlarm: {"alarm_id", func(id string) string {
+		return "EXISTS (SELECT 1 FROM alarm WHERE alarm.id = " + id + ")"
+	}},
 }
 
 // linkVisible is the SQL condition "the row of ticket_link belongs to a
@@ -817,7 +825,7 @@ var linkVisible = func() string {
 
 // linkSelectColumns are the columns scanLink reads.
 const linkSelectColumns = `id::text, organization_id::text, ticket_id::text, entity_type,
-	COALESCE(ci_id, asset_id, location_id, contract_id, review_item_id)::text, created_at`
+	COALESCE(ci_id, asset_id, location_id, contract_id, review_item_id, incident_id, alarm_id)::text, created_at`
 
 func scanLink(row scanner) (*Link, error) {
 	l := &Link{}
@@ -904,8 +912,11 @@ func (r *PGRepository) CreateLink(ctx context.Context, link *Link) error {
 		return &api.FieldError{Field: "entity_type", Status: http.StatusUnprocessableEntity,
 			Message: "must be one of " + strings.Join(LinkEntityTypes, ", ")}
 	}
-	if !api.IsUUID(link.TicketID) || !api.IsUUID(link.EntityID) {
+	if !api.IsUUID(link.TicketID) {
 		return ErrNotFound
+	}
+	if !api.IsUUID(link.EntityID) {
+		return ErrLinkTargetNotFound
 	}
 	return database.WithRequestTenant(ctx, r.pool, link.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		clientID, siteID, err := visibleTicketScope(ctx, tx, link.OrganizationID, link.TicketID)
@@ -917,7 +928,7 @@ func (r *PGRepository) CreateLink(ctx context.Context, link *Link) error {
 			return fmt.Errorf("check link target: %w", err)
 		}
 		if !visible {
-			return ErrNotFound
+			return ErrLinkTargetNotFound
 		}
 		err = tx.QueryRow(ctx, `INSERT INTO ticket_link (organization_id, ticket_id, entity_type, `+target.column+`)
 			VALUES ($1, $2, $3, $4)
@@ -950,7 +961,7 @@ func (r *PGRepository) DeleteLink(ctx context.Context, orgID, ticketID, linkID s
 		}
 		ev := &ticketEvent{ID: ticketID, ClientID: clientID, SiteID: siteID, Change: changeUnlink, LinkID: linkID}
 		err = tx.QueryRow(ctx, `DELETE FROM ticket_link WHERE id = $1 AND ticket_id = $2 AND organization_id = $3 AND `+linkVisible+`
-			RETURNING entity_type, COALESCE(ci_id, asset_id, location_id, contract_id, review_item_id)::text`,
+			RETURNING entity_type, COALESCE(ci_id, asset_id, location_id, contract_id, review_item_id, incident_id, alarm_id)::text`,
 			linkID, ticketID, orgID).Scan(&ev.EntityType, &ev.EntityID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound

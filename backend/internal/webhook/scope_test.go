@@ -122,6 +122,53 @@ func TestEventScopeResolution(t *testing.T) {
 		{"document.scanned", `{"id":"d"}`, result{objects: shared}},
 		{"import.completed", `{"id":"i"}`, result{objects: shared}},
 		{"import.completed", `{}`, unknown},
+		// Monitoring of phase 3 (WP-867): client_id/site_id of the payload.
+		{"probe.state_changed", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"alarm.opened", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"alarm.acknowledged", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"alarm.escalated", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"alarm.severity_changed", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"alarm.resolved", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"incident.opened", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"incident.updated", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"incident.resolved", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"collector_group.unreachable", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"collector_group.reachable", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"collector_group.failover", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"collector.clock_skew", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"config.changed", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"ci.config_changed", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"capacity.forecast_exceeded", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"sla.violated", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"monitoring.suspension_changed", `{"id":"o","feature_key":"monitoring_network"}`, result{objects: shared}},
+		// Modules of phase 3 (WP-868).
+		{"maintenance.scheduled", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"maintenance.started", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"maintenance.ended", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"workflow.run_started", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"workflow.run_succeeded", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"workflow.run_failed", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"workflow.run_cancelled", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"workflow.approval_requested", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"workflow.approval_decided", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"workflow.webhook", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"finding.created", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"finding.changed", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"finding.resolved", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"notification.escalated", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"notification.acknowledged", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"entitlement.changed", `{"id":"o"}`, result{objects: shared}},
+		{"org.export_completed", `{"id":"o"}`, result{objects: shared}},
+		{"org.deletion_requested", `{"id":"o"}`, result{objects: shared}},
+		{"org.deletion_cancelled", `{"id":"o"}`, result{objects: shared}},
+		// Network domain of phase 3 (WP-870).
+		{"ipam.subnet.changed", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"ipam.address.state_changed", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"asn.changed", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"credential.rotated", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"credential.rotation_due", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"credential.resolution_failed", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
+		{"admp.connection.refreshed", `{"id":"x","client_id":"c1"}`, result{objects: []ObjectScope{{ClientID: "c1"}}}},
 		// Payloads that are no JSON object.
 		{"ci.created", `["` + ci1 + `"]`, unknown},
 		{"ci_type.created", `null`, unknown},
@@ -367,7 +414,9 @@ func TestP2EventsReachBoundSubscriptionsInScope(t *testing.T) {
 	objects := fakeResolver{ci1: {ClientID: "c1"}, ci2: {ClientID: "c2"}, asset1: {ClientID: "c1"}, asset2: {ClientID: "c2"},
 		item1: {ClientID: "c1", SiteID: "s1"}, item2: {ClientID: "c2", SiteID: "s2"}}
 	access := fakeAccess{}
-	for _, p := range []string{"ci:read", "asset:read", "stock:read", "contract:read", "ticket:read", "document:read", "import:run", "reservation:read"} {
+	for _, p := range []string{"ci:read", "asset:read", "stock:read", "contract:read", "ticket:read", "document:read", "import:run", "reservation:read", "monitoring:read",
+		"maintenance:read", "workflow:read", "finding:read", "escalation:manage", "entitlement:read", "org:export",
+		"ipam:read", "credential:read", "admp:read"} {
 		access["sa-c1|"+p+"|c1"], access["sa-c1|"+p+"|"] = true, true
 	}
 	byClient := func(client string) map[string]map[string]any {
@@ -398,7 +447,25 @@ func TestP2EventsReachBoundSubscriptionsInScope(t *testing.T) {
 			"ticket.sla_breached":     frame,
 		}
 	}
-	organizational := map[string]bool{"metamodel.published": true, "document.scanned": true, "import.completed": true}
+	organizational := map[string]bool{"metamodel.published": true, "document.scanned": true, "import.completed": true,
+		"monitoring.suspension_changed": true, "entitlement.changed": true, "org.export_completed": true,
+		"org.deletion_requested": true, "org.deletion_cancelled": true}
+	// The monitoring types of phase 3 (WP-867) carry the client of their
+	// object, the CI types also name it as ci_id.
+	withMonitoring := byClient
+	byClient = func(client string) map[string]map[string]any {
+		m := withMonitoring(client)
+		ci := ci1
+		if client == "c2" {
+			ci = ci2
+		}
+		for _, typ := range events.Phase3Types {
+			if !organizational[typ] {
+				m[typ] = map[string]any{"id": "x", "ci_id": ci, "client_id": client}
+			}
+		}
+		return m
+	}
 	in, out := byClient("c1"), byClient("c2")
 	for typ := range events.Payloads {
 		subs := []Subscription{
@@ -425,6 +492,59 @@ func TestP2EventsReachBoundSubscriptionsInScope(t *testing.T) {
 		}
 		if got := deliverOnce(t, subs, opts, nil, typ, out[typ]); len(got["unbound"]) != 1 || len(got["client1"]) != 0 {
 			t.Errorf("%s about client 2 %v: delivered %v, want the unbound subscription only", typ, out[typ], got)
+		}
+	}
+}
+
+// TestMonitoringEventScopes covers WP-867 (EVT-03 [P3], E-161, RBA-08):
+// every monitoring type has a scope rule; probes and alarms resolve by their
+// CI or by client/site of the payload, collector groups by client/site, the
+// suspension of monitoring functions only org-wide; the device configuration
+// ci.config_changed needs monitoring:read, never ci:read.
+func TestMonitoringEventScopes(t *testing.T) {
+	const ci1 = "11111111-1111-4111-8111-111111111111"
+	for _, typ := range events.Phase3Types {
+		if _, ok := scopeRules[typ]; !ok {
+			t.Errorf("%s has no scope rule", typ)
+		}
+		if EventReadPermission(typ) == "" {
+			t.Errorf("EventReadPermission(%s) is empty", typ)
+		}
+	}
+	for _, c := range []struct {
+		event, payload string
+		objects        []ObjectScope
+		refs           []ObjectRef
+	}{
+		{"probe.state_changed", `{"id":"p","client_id":"c1","site_id":"s1","from":"up","to":"down"}`, []ObjectScope{{ClientID: "c1", SiteID: "s1"}}, nil},
+		{"alarm.opened", `{"id":"a","ci_id":"` + ci1 + `","severity":"critical"}`, nil, []ObjectRef{{Kind: ObjectCI, ID: ci1}}},
+		{"collector_group.unreachable", `{"id":"g","client_id":"c1"}`, []ObjectScope{{ClientID: "c1"}}, nil},
+		{"ci.config_changed", `{"id":"v","ci_id":"` + ci1 + `","hash":"h"}`, nil, []ObjectRef{{Kind: ObjectCI, ID: ci1}}},
+		{"monitoring.suspension_changed", `{"id":"o","feature_key":"monitoring_network","suspended":true}`, []ObjectScope{{}}, nil},
+	} {
+		objects, refs := payloadObjects(c.event, []byte(c.payload))
+		if !reflect.DeepEqual(objects, c.objects) || !reflect.DeepEqual(refs, c.refs) {
+			t.Errorf("%s %s: objects %v refs %v, want %v %v", c.event, c.payload, objects, refs, c.objects, c.refs)
+		}
+	}
+	if got := EventReadPermission(events.CIConfigChanged); got == "ci:read" {
+		t.Error("ci.config_changed must not be readable with ci:read")
+	}
+}
+
+// TestOrganizationEventsReachOrgWideSubscriptionsOnly covers WP-868 (RBA-08):
+// entitlement.changed and org.deletion_requested concern the whole
+// organization; a client-bound subscription does not receive them, an
+// org-wide one of an account with the read permission does.
+func TestOrganizationEventsReachOrgWideSubscriptionsOnly(t *testing.T) {
+	for typ, perm := range map[string]string{events.EntitlementChanged: "entitlement:read", events.OrgDeletionRequested: "org:export"} {
+		access := fakeAccess{"sa|" + perm + "|": true, "sa|" + perm + "|c1": true, "sa|" + perm + "|*": true}
+		got := deliverOnce(t, []Subscription{
+			{Name: "orgwide", Events: []string{typ}, ServiceAccountID: "sa"},
+			{Name: "client1", Events: []string{typ}, ServiceAccountID: "sa", Scope: &Scope{Clients: []string{"c1"}}},
+		}, DispatcherOptions{Access: access, Objects: fakeResolver{}}, nil, typ, map[string]any{"id": "o"})
+		if len(got["orgwide"]) != 1 || len(got["client1"]) != 0 {
+			t.Errorf("%s: delivered %v, want the org-wide subscription only", typ, got)
 		}
 	}
 }

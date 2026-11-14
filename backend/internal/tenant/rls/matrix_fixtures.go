@@ -102,6 +102,27 @@ var Channels = []Channel{
 	{Name: "label-lookup", Read: "GET /api/v1/labels/lookup?code=… (inventory number, barcode, URN)"},
 	{Name: "search-p2", Read: "GET /api/v1/search?q=<inventory number>"},
 	{Name: "datev-export", Read: "POST /api/v1/exports {format: datev} (file of the own export), GET /api/v1/exports/{id}"},
+	// SR-63 (WP-875): disposal records, SLAs with their breaches, business
+	// calendars, ticket attachments and label batches; rows and scenario
+	// in channel_matrix_sr63_integration_test.go.
+	{Name: "disposal", Read: "GET /api/v1/disposal-records?limit=200, GET /api/v1/disposal-records/{id}",
+		Write: "POST /api/v1/disposal-records (asset of every side)"},
+	{Name: "sla", Read: "GET /api/v1/slas?limit=200, GET /api/v1/slas/{id}, GET /api/v1/slas/breaches?status=breached",
+		Write: "POST /api/v1/slas (client of every side)"},
+	{Name: "business-calendar", Read: "GET /api/v1/business-calendars?limit=200, GET /api/v1/business-calendars/{id}",
+		Write: "POST /api/v1/business-calendars (client of every side)"},
+	{Name: "ticket-attachment", Read: "GET /api/v1/tickets/{id}/attachments"},
+	{Name: "label-batch", Read: "GET /api/v1/labels/batch/{job_id}/download (batches of a client, a site and the other organization)",
+		Write: "POST /api/v1/labels/batch (assets of every side)"},
+	// IPM-10 (WP-910, E-214): the rights per IPAM section. A section with
+	// entries is read by the principals of a team with an entry and
+	// written by those of a team with level write; a section whose last
+	// team was deleted stays restricted until it is released explicitly
+	// (E-256), and a released one is read and written again; rows and
+	// scenario in channel_matrix_p2_integration_test.go.
+	{Name: "ipam-section", Read: "GET /api/v1/subnets, /subnets/{id}, /subnets/{id}/addresses, /ips, /ips/{id}, /search?q=<cidr>, " +
+		"POST /bff/graphql { searchEverything(q: <cidr>) }, GET /api/v1/topology?root_ci_id={id}&include=network",
+		Write: "PATCH /api/v1/subnets/{id}, DELETE /api/v1/subnets/{id}, POST /api/v1/ips"},
 	// MET-05 (WP-858): the CI types hidden per client and the type list
 	// filtered by them.
 	{Name: "client-hidden-ci-types", Read: "GET /api/v1/clients/{id}/hidden-ci-types, GET /api/v1/ci-types (with and without client_id)",

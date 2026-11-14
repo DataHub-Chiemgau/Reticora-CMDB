@@ -151,6 +151,10 @@ func (q *queryResolver) Cis(ctx context.Context, first *int, after *string, filt
 	if n := len(conn.Edges); n > 0 {
 		conn.PageInfo.EndCursor = &conn.Edges[n-1].Cursor
 	}
+	// The P3 fields of the page read for all its CIs at once (WP-1136).
+	if l := loaderFrom(ctx); l != nil {
+		l.registerSiblings(conn.Nodes)
+	}
 	return conn, nil
 }
 
@@ -228,9 +232,16 @@ func decodeCursor(cursor string) (int, error) {
 }
 
 // prime loads the CIs a list hands out in one batch; nested CI fields then
-// read the cache. A failed batch is retried by the field loads.
+// read the cache. A failed batch is retried by the field loads. The ids
+// are one level of the answer: a P3 field of one of these CIs reads the
+// field for all of them in one batch (WP-1136 AK4).
 func (r *Resolver) prime(ctx context.Context, ids []string) {
-	if l := loaderFrom(ctx); l != nil && r.mayReadCIs(ctx) {
+	l := loaderFrom(ctx)
+	if l == nil {
+		return
+	}
+	l.registerLevel(ids)
+	if r.mayReadCIs(ctx) {
 		_ = l.Prime(ctx, ids)
 	}
 }

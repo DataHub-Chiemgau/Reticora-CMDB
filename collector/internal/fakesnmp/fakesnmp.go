@@ -17,6 +17,11 @@
 // report usmStatsWrongDigests (another user: usmStatsUnknownUserNames,
 // RFC 3414 3.2); a request with the user's keys gets the authPriv
 // response.
+//
+// For the probe types (WP-992, PRT-21) the agent serves walk fixtures
+// (LoadWalk, every snmpwalk -On type) and changes its variables while it
+// serves: Set, Delete and Apply switch states, Advance moves counters and
+// sysUpTime on (wrap modulo 2^32 and 2^64).
 package fakesnmp
 
 import (
@@ -110,7 +115,13 @@ type Request struct {
 type Agent struct {
 	cfg  Config
 	conn *net.UDPConn
-	mib  []gosnmp.SnmpPDU // sorted by OID
+	// mibMu guards mib: Set, Delete, Apply and Advance change it while
+	// lookup, next and bulk read it (WP-992).
+	mibMu sync.RWMutex
+	mib   []gosnmp.SnmpPDU // sorted by OID, each OID once
+	// getError is the error-status GET responses carry (SetGetError);
+	// gosnmp.NoError answers normally.
+	getError gosnmp.SNMPError
 	// usm holds the keys of the V3 user; nil without the SNMPv3 mode.
 	usm *gosnmp.UsmSecurityParameters
 
@@ -158,13 +169,156 @@ func listen(addr string, cfg *Config, usm *gosnmp.UsmSecurityParameters, extra [
 	if err != nil {
 		return nil, err
 	}
-	mib := append([]gosnmp.SnmpPDU{
-		{Name: OIDSysDescr, Type: gosnmp.OctetString, Value: []byte(cfg.SysDescr)},
-		{Name: OIDSysObjectID, Type: gosnmp.ObjectIdentifier, Value: cfg.SysObjectID},
-		{Name: OIDSysName, Type: gosnmp.OctetString, Value: []byte(cfg.SysName)},
-	}, extra...)
-	slices.SortFunc(mib, func(a, b gosnmp.SnmpPDU) int { return compareOID(a.Name, b.Name) })
-	return &Agent{cfg: *cfg, conn: conn, mib: mib, usm: usm}, nil
+	a := &Agent{cfg: *cfg, conn: conn, usm: usm}
+	a.mib = upsert(nil, a.system()...)
+	a.mib = upsert(a.mib, extra...)
+	return a, nil
+}
+
+// system returns the system group of the configuration.
+func (a *Agent) system() []gosnmp.SnmpPDU {
+	return []gosnmp.SnmpPDU{
+		{Name: OIDSysDescr, Type: gosnmp.OctetString, Value: []byte(a.cfg.SysDescr)},
+		{Name: OIDSysObjectID, Type: gosnmp.ObjectIdentifier, Value: a.cfg.SysObjectID},
+		{Name: OIDSysName, Type: gosnmp.OctetString, Value: []byte(a.cfg.SysName)},
+	}
+}
+
+// OIDSysUpTime is sysUpTime.0 (TimeTicks); Advance moves it on when the
+// agent serves it.
+const OIDSysUpTime = ".1.3.6.1.2.1.1.3.0"
+
+// Set adds or replaces variables while the agent serves (WP-992); a later
+// request sees the new values. Numeric values are normalised to the Go
+// types of LoadWalk (uint32 for Counter32, Gauge32 and TimeTicks, uint64 for
+// Counter64, int for Integer).
+func (a *Agent) Set(pdus ...gosnmp.SnmpPDU) {
+	a.mibMu.Lock()
+	defer a.mibMu.Unlock()
+	a.mib = upsert(a.mib, pdus...)
+}
+
+// SetGetError makes the agent answer every GET with the error-status
+// status (RFC 3416 4.2.1), e.g. gosnmp.TooBig with an empty variable list
+// or gosnmp.GenErr with the requested variables as Null and error-index 1;
+// gosnmp.NoError restores normal answers. GETNEXT and GETBULK stay
+// unaffected.
+func (a *Agent) SetGetError(status gosnmp.SNMPError) {
+	a.mibMu.Lock()
+	defer a.mibMu.Unlock()
+	a.getError = status
+}
+
+// Delete removes the variable oid; a later GET answers noSuchObject.
+func (a *Agent) Delete(oid string) {
+	a.mibMu.Lock()
+	defer a.mibMu.Unlock()
+	if i, found := a.find(oid); found {
+		a.mib = slices.Delete(a.mib, i, i+1)
+	}
+}
+
+// Apply makes walk the variables of the agent: the variables of walk are
+// set, every other variable apart from the configured system group
+// (sysDescr, sysObjectID, sysName) is removed. It switches a device to
+// another state in one step, e.g. from a walk with an interface up to one
+// with the interface down.
+func (a *Agent) Apply(walk []gosnmp.SnmpPDU) {
+	a.mibMu.Lock()
+	defer a.mibMu.Unlock()
+	a.mib = upsert(upsert(nil, a.system()...), walk...)
+}
+
+// Advance moves every Counter32 on by delta modulo 2^32 and every Counter64
+// by delta modulo 2^64; sysUpTime, if the agent serves it, moves on by
+// delta hundredths of a second modulo 2^32. With it a test drives counter
+// rates and the wrap.
+func (a *Agent) Advance(delta uint64) {
+	a.mibMu.Lock()
+	defer a.mibMu.Unlock()
+	for i := range a.mib {
+		v := &a.mib[i]
+		n, ok := toUint64(v.Value)
+		switch {
+		case !ok:
+		case v.Type == gosnmp.Counter32, v.Type == gosnmp.TimeTicks && v.Name == OIDSysUpTime:
+			v.Value = uint32(n + delta) //nolint:gosec // the wrap modulo 2^32 is the point
+		case v.Type == gosnmp.Counter64:
+			v.Value = n + delta
+		}
+	}
+}
+
+// Variables returns a copy of the variables the agent serves, in OID order.
+func (a *Agent) Variables() []gosnmp.SnmpPDU {
+	a.mibMu.RLock()
+	defer a.mibMu.RUnlock()
+	return slices.Clone(a.mib)
+}
+
+// find returns the position of oid in the sorted mib (or where it would
+// be) and whether it is there. The caller holds mibMu.
+func (a *Agent) find(oid string) (int, bool) {
+	return slices.BinarySearchFunc(a.mib, oid, func(v gosnmp.SnmpPDU, name string) int { return compareOID(v.Name, name) })
+}
+
+// upsert adds or replaces pdus in the sorted mib and returns it.
+func upsert(mib []gosnmp.SnmpPDU, pdus ...gosnmp.SnmpPDU) []gosnmp.SnmpPDU {
+	for _, p := range pdus {
+		p.Name = "." + strings.TrimPrefix(p.Name, ".")
+		p.Value = normalize(p.Type, p.Value)
+		i, found := slices.BinarySearchFunc(mib, p.Name, func(v gosnmp.SnmpPDU, name string) int { return compareOID(v.Name, name) })
+		if found {
+			mib[i] = p
+		} else {
+			mib = slices.Insert(mib, i, p)
+		}
+	}
+	return mib
+}
+
+// normalize converts a numeric value to the Go type of its SNMP type.
+func normalize(typ gosnmp.Asn1BER, v any) any {
+	switch typ {
+	case gosnmp.Counter32, gosnmp.Gauge32, gosnmp.TimeTicks, gosnmp.Uinteger32:
+		if n, ok := toUint64(v); ok {
+			return uint32(n) //nolint:gosec // SNMP 32-bit values
+		}
+	case gosnmp.Counter64:
+		if n, ok := toUint64(v); ok {
+			return n
+		}
+	case gosnmp.Integer:
+		switch n := v.(type) {
+		case int32:
+			return int(n)
+		case int64:
+			return int(n)
+		case uint32:
+			return int(n)
+		case uint:
+			return int(n) //nolint:gosec // test values
+		}
+	}
+	return v
+}
+
+func toUint64(v any) (uint64, bool) {
+	switch n := v.(type) {
+	case uint64:
+		return n, true
+	case uint32:
+		return uint64(n), true
+	case uint:
+		return uint64(n), true
+	case int:
+		return uint64(n), true //nolint:gosec // test values
+	case int64:
+		return uint64(n), true //nolint:gosec // test values
+	case int32:
+		return uint64(n), true //nolint:gosec // test values
+	}
+	return 0, false
 }
 
 // Addr is the address the agent listens on.
@@ -253,6 +407,7 @@ func (a *Agent) handle(raw []byte) ([]byte, Request) {
 		Version: gosnmp.Version2c, Community: pkt.Community, PDUType: gosnmp.GetResponse,
 		RequestID: pkt.RequestID, Variables: vars, Logger: gosnmp.NewLogger(nil),
 	}
+	a.applyGetError(pkt, resp)
 	out, err := resp.MarshalMsg()
 	if err != nil {
 		return nil, req
@@ -278,6 +433,28 @@ func (a *Agent) answer(pkt *gosnmp.SnmpPacket) (vars []gosnmp.SnmpPDU, ok bool) 
 		return nil, false
 	}
 	return vars, true
+}
+
+// applyGetError sets the error-status of SetGetError on the response to a
+// GET: tooBig with an empty variable list, any other status with the
+// requested variables as Null and error-index 1.
+func (a *Agent) applyGetError(req, resp *gosnmp.SnmpPacket) {
+	a.mibMu.RLock()
+	status := a.getError
+	a.mibMu.RUnlock()
+	if status == gosnmp.NoError || req.PDUType != gosnmp.GetRequest {
+		return
+	}
+	resp.Error = status
+	if status == gosnmp.TooBig {
+		resp.Variables = nil
+		return
+	}
+	resp.ErrorIndex = 1
+	resp.Variables = make([]gosnmp.SnmpPDU, len(req.Variables))
+	for i, v := range req.Variables {
+		resp.Variables[i] = gosnmp.SnmpPDU{Name: v.Name, Type: gosnmp.Null}
+	}
 }
 
 // handleV3 answers an SNMPv3 message after RFC 3414 3.2: the engine
@@ -325,6 +502,7 @@ func (a *Agent) handleV3(raw []byte, req *Request) []byte {
 		PDUType: gosnmp.GetResponse, ContextEngineID: engineID, ContextName: pkt.ContextName, Variables: vars,
 		Logger: gosnmp.NewLogger(nil),
 	}
+	a.applyGetError(pkt, resp)
 	if err = sp.InitPacket(resp); err != nil {
 		return nil
 	}
@@ -362,20 +540,29 @@ func report(hdr *gosnmp.SnmpPacket, req *Request, oid string) []byte {
 
 // lookup returns the value of name, or noSuchObject.
 func (a *Agent) lookup(name string) gosnmp.SnmpPDU {
-	for _, v := range a.mib {
-		if compareOID(v.Name, name) == 0 {
-			return v
-		}
+	a.mibMu.RLock()
+	defer a.mibMu.RUnlock()
+	if i, found := a.find(name); found {
+		return a.mib[i]
 	}
 	return gosnmp.SnmpPDU{Name: name, Type: gosnmp.NoSuchObject}
 }
 
 // next returns the first value after name in OID order, or endOfMibView.
 func (a *Agent) next(name string) gosnmp.SnmpPDU {
-	for _, v := range a.mib {
-		if compareOID(name, v.Name) < 0 {
-			return v
-		}
+	a.mibMu.RLock()
+	defer a.mibMu.RUnlock()
+	return a.nextLocked(name)
+}
+
+// nextLocked is next with mibMu held.
+func (a *Agent) nextLocked(name string) gosnmp.SnmpPDU {
+	i, found := a.find(name)
+	if found {
+		i++
+	}
+	if i < len(a.mib) {
+		return a.mib[i]
 	}
 	return gosnmp.SnmpPDU{Name: name, Type: gosnmp.EndOfMibView}
 }
@@ -383,10 +570,13 @@ func (a *Agent) next(name string) gosnmp.SnmpPDU {
 // bulk answers GETBULK (RFC 3416 4.2.3): the first nonRepeaters variables
 // once, the others up to maxRepetitions times, interleaved.
 func (a *Agent) bulk(vars []gosnmp.SnmpPDU, nonRepeaters, maxRepetitions int) []gosnmp.SnmpPDU {
+	// One read lock for the whole answer: a GETBULK sees one state.
+	a.mibMu.RLock()
+	defer a.mibMu.RUnlock()
 	nonRepeaters = min(max(nonRepeaters, 0), len(vars))
 	var out []gosnmp.SnmpPDU
 	for _, v := range vars[:nonRepeaters] {
-		out = append(out, a.next(v.Name))
+		out = append(out, a.nextLocked(v.Name))
 	}
 	cursor := make([]string, 0, len(vars)-nonRepeaters)
 	for _, v := range vars[nonRepeaters:] {
@@ -395,7 +585,7 @@ func (a *Agent) bulk(vars []gosnmp.SnmpPDU, nonRepeaters, maxRepetitions int) []
 	for range max(maxRepetitions, 0) {
 		ended := true
 		for i, name := range cursor {
-			v := a.next(name)
+			v := a.nextLocked(name)
 			out = append(out, v)
 			if v.Type != gosnmp.EndOfMibView {
 				cursor[i], ended = v.Name, false

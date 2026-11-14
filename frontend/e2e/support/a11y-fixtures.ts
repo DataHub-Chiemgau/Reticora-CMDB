@@ -18,6 +18,11 @@ const COLLECTOR = 'c1000000-0000-4000-8000-000000000001';
 const ASSET = 'a5000000-0000-4000-8000-000000000001';
 const ROLE = 'e0000000-0000-4000-8000-000000000001';
 const SERVER_TYPE = CI_TYPES[0]!.id;
+const IPAM_SECTION = 'a5000000-0000-4000-8000-000000000001';
+const IPAM_SUBNET = 'a5000000-0000-4000-8000-000000000002';
+const IPAM_VRF = 'a5000000-0000-4000-8000-000000000003';
+/** The subnet of the subnet detail route (WP-916). */
+export const IPAM_DETAIL = 'a5000000-0000-4000-8000-000000000004';
 const AT = '2026-10-14T08:00:00Z';
 const LATER = '2026-12-31T08:00:00Z';
 
@@ -69,9 +74,14 @@ export const A11Y_MARKERS = {
   conversation: 'a11y-conversation',
   webhook: 'a11y-webhook-erp',
   alert: 'a11y-alert-cpu',
+  alarm: 'a11y-alarm-cpu',
+  incident: 'a11y-incident-core',
   audit: 'ci.update',
   quantityItem: 'a11y-cable',
   notification: 'a11y-notification',
+  ipamSection: 'a11y-section-core',
+  ipamSubnet: '10.20.0.0/16',
+  ipamDetail: '10.20.1.0/24',
 } as const;
 
 const M = A11Y_MARKERS;
@@ -819,6 +829,10 @@ export const A11Y_HANDLERS: Handler[] = [
         'user:read',
         'webhook:manage',
         'webhook:read',
+        // WP-916: the allocation, reservation and edit actions of the
+        // subnet detail.
+        'ipam:read',
+        'ipam:write',
       ],
     }),
   },
@@ -1126,6 +1140,133 @@ export const A11Y_HANDLERS: Handler[] = [
   { path: '/jobs', reply: fixed(list([job])) },
   { path: '/credentials', reply: fixed(list([])) },
   { path: '/vrfs', reply: fixed(list([])) },
+  // IPAM (/ipam, WP-915): one section with a pool subnet and its usage.
+  {
+    path: '/ipam-sections',
+    reply: fixed(
+      list([
+        {
+          id: IPAM_SECTION,
+          organization_id: ORG,
+          name: M.ipamSection,
+          strict_mode: true,
+          show_vlan: true,
+          show_vrf: true,
+          is_default: true,
+          acl_enabled: false,
+          ptr_mode: 'off',
+          vrf_ids: [],
+          created_at: AT,
+          updated_at: AT,
+        },
+      ]),
+    ),
+  },
+  {
+    path: /^\/subnets\/[^/]+\/usage$/,
+    reply: fixed({
+      subnet_id: IPAM_SUBNET,
+      cidr: M.ipamSubnet,
+      is_pool: true,
+      total: 65536,
+      used: 0,
+      covered: 512,
+      percent: 0.8,
+    }),
+  },
+  // The subnet detail (/ipam/subnets/:id, WP-916): the /24 below the pool
+  // with its address map, two addresses and the VRF with its RD.
+  {
+    path: /^\/subnets\/[^/]+$/,
+    reply: fixed({
+      id: IPAM_DETAIL,
+      organization_id: ORG,
+      cidr: M.ipamDetail,
+      vrf_id: IPAM_VRF,
+      section_id: IPAM_SECTION,
+      name: 'a11y-office',
+      gateway: '10.20.1.1',
+      effective_dns_servers: ['10.20.0.53'],
+      is_management: false,
+      is_pool: false,
+      child_count: 0,
+      created_at: AT,
+      updated_at: AT,
+    }),
+  },
+  {
+    path: /^\/subnets\/[^/]+\/addresses$/,
+    reply: fixed(
+      list([
+        {
+          id: 'a5000000-0000-4000-8000-000000000011',
+          organization_id: ORG,
+          subnet_id: IPAM_DETAIL,
+          address: '10.20.1.1',
+          vrf_id: IPAM_VRF,
+          type: 'static',
+          role: 'primary',
+          origin: 'manual',
+          pinned: false,
+          state: 'active',
+          is_gateway: true,
+          created_at: AT,
+          updated_at: AT,
+        },
+        {
+          id: 'a5000000-0000-4000-8000-000000000012',
+          organization_id: ORG,
+          subnet_id: IPAM_DETAIL,
+          address: '10.20.1.20',
+          vrf_id: IPAM_VRF,
+          type: 'reserved',
+          role: 'primary',
+          origin: 'manual',
+          pinned: false,
+          state: 'unknown',
+          created_at: AT,
+          updated_at: AT,
+        },
+      ]),
+    ),
+  },
+  {
+    path: /^\/vrfs\/[^/]+$/,
+    reply: fixed({
+      id: IPAM_VRF,
+      organization_id: ORG,
+      name: 'a11y-vrf',
+      is_default: false,
+      route_distinguisher: '65000:20',
+      import_targets: [],
+      export_targets: [],
+      section_ids: [],
+      created_at: AT,
+      updated_at: AT,
+    }),
+  },
+  {
+    path: '/subnets',
+    reply: (_request, url) =>
+      url.searchParams.get('parent_id') === 'root'
+        ? {
+            body: list([
+              {
+                id: IPAM_SUBNET,
+                organization_id: ORG,
+                cidr: M.ipamSubnet,
+                vrf_id: IPAM_VRF,
+                section_id: IPAM_SECTION,
+                name: 'a11y-core',
+                is_pool: true,
+                child_count: 2,
+                created_at: AT,
+                updated_at: AT,
+              },
+            ]),
+          }
+        : { body: list([]) },
+  },
   // Assets and the modules around them.
   { path: '/assets', reply: fixed(list([asset])) },
   {
@@ -1955,6 +2096,73 @@ export const A11Y_HANDLERS: Handler[] = [
           severity: 'critical',
           enabled: true,
           last_fired_at: AT,
+        },
+      ]),
+    ),
+  },
+  {
+    // The alarm list (WP-991): one open alarm.
+    path: '/monitoring/alarms',
+    reply: fixed(
+      list([
+        {
+          id: 'f6100000-0000-4000-8000-000000000001',
+          organization_id: ORG,
+          client_id: null,
+          site_id: null,
+          ci_id: null,
+          source_kind: 'rule',
+          source_id: 'f6000000-0000-4000-8000-000000000001',
+          series_key: 's',
+          labels: {},
+          dedup_key: 'rule:f6000000-0000-4000-8000-000000000001:s',
+          severity: 'critical',
+          state: 'open',
+          suppressed_reason: null,
+          incident_id: null,
+          occurrence_count: 2,
+          first_seen_at: AT,
+          last_seen_at: AT,
+          opened_at: AT,
+          acknowledged_at: null,
+          acknowledged_by: null,
+          resolved_at: null,
+          summary: M.alarm,
+          details: {},
+          updated_at: AT,
+        },
+      ]),
+    ),
+  },
+  {
+    // The incident list (WP-1045): one open incident with its root.
+    path: '/monitoring/incidents',
+    reply: fixed(
+      list([
+        {
+          id: 'f6200000-0000-4000-8000-000000000001',
+          organization_id: ORG,
+          client_id: null,
+          site_id: null,
+          root_alarm_id: 'f6100000-0000-4000-8000-000000000001',
+          root_ci_id: 'f6300000-0000-4000-8000-000000000001',
+          cause_class: 'topology',
+          confidence: 80,
+          reasons: [],
+          state: 'open',
+          opened_at: AT,
+          acknowledged_at: null,
+          acknowledged_by: null,
+          resolved_at: null,
+          manual_root: false,
+          affected_counts: { connections: 3, services: 1 },
+          updated_at: AT,
+          root: {
+            alarm_id: 'f6100000-0000-4000-8000-000000000001',
+            ci_id: 'f6300000-0000-4000-8000-000000000001',
+            ci_name: M.incident,
+          },
+          symptom_count: 2,
         },
       ]),
     ),

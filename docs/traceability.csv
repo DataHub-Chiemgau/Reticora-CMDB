@@ -1597,3 +1597,392 @@ GATE-01;[Q];G1;tests/rep01-structure.test.sh;WP-600
 GATE-02;[Q];G1;tests/rep01-structure.test.sh;WP-600
 GATE-05;[Q];G1;tests/rep01-structure.test.sh;WP-600
 SEQ-01;[Q];G1;tests/rep01-structure.test.sh;WP-600
+GLO-11;[Q];G3;backend/internal/traceability/traceability_test.go;WP-860
+DOD-01;[Q];G3;backend/internal/traceability/traceability_test.go;WP-860
+GLO-11;[Q];G3;tests/rep01-structure.test.sh;WP-861
+DOD-01;[Q];G3;tests/rep01-structure.test.sh;WP-861
+ENT-06;(V), [B–P4], [A];G3;backend/internal/entitlement/entitlement_test.go;WP-862
+PKG-08;[P3];G3;backend/internal/entitlement/entitlement_test.go;WP-862
+API-06;[P2]/[P3]/[P4]/[A];G3;backend/internal/server/parity_test.go;WP-863
+OPS-02;[B], [P3], [A];G3;backend/internal/server/modules_test.go;WP-863
+API-06;[P2]/[P3]/[P4]/[A];G3;backend/internal/server/openapi_contract_test.go;WP-864
+PKG-08;[P3];G3;backend/internal/entitlement/enforce_integration_test.go;WP-865
+ENT-06;(V), [B–P4], [A];G3;backend/internal/entitlement/enforce_integration_test.go;WP-865
+ENT-05;[B];G3;backend/internal/entitlement/enforce_integration_test.go;WP-865
+ALR-09;[P3];G3;backend/internal/entitlement/entitlement_test.go;WP-865
+RBA-05;[P2–P4], [A];G3;backend/internal/permission/role_matrix_integration_test.go;WP-866
+EVT-03;[P2–P3];G3;backend/internal/events/types_test.go;WP-867
+NTF-05;[B], Zusätze [P2], [P3];G3;backend/internal/webhook/scope_test.go;WP-867
+MON-04;[P3];G3;backend/internal/webhook/scope_test.go;WP-867
+ALR-02;[P3];G3;backend/internal/events/types_test.go;WP-867
+EVT-03;[P2–P3];G3;backend/internal/events/types_test.go;WP-868
+NTF-05;[B], Zusätze [P2], [P3];G3;backend/internal/webhook/scope_test.go;WP-868
+MGT-04;[P3];G3;backend/internal/events/types_test.go;WP-868
+OPS-02;[B], [P3], [A];G3;backend/cmd/server/workers_metrics_test.go;WP-869
+RBA-05;[P2–P4], [A];G3;backend/internal/permission/role_matrix_integration_test.go;WP-870
+EVT-03;[P2–P3];G3;backend/internal/webhook/scope_test.go;WP-870
+ENT-06;(V), [B–P4], [A];G3;backend/internal/entitlement/entitlement_test.go;WP-870
+API-06;[P2]/[P3]/[P4]/[A];G3;backend/internal/server/modules_test.go;WP-870
+SEC-11;[Q];G3;tests/ci-config.test.sh;WP-873
+TEN-09;[Q];G3;backend/internal/tenant/rls/channel_matrix_sr63_integration_test.go;WP-875
+TEN-09;[Q];G3;backend/internal/tenant/rls/object_reference_integration_test.go;WP-876
+TEN-09;[Q];G3;backend/internal/tenant/rls/object_reference_integration_test.go;WP-877
+TEN-09;[Q];G3;backend/internal/tenant/rls/foreign_refs_p2_integration_test.go;WP-879
+PKG-01;[P3];G3;backend/internal/entitlement/model_integration_test.go;WP-880
+PKG-04;[P3];G3;backend/internal/entitlement/enforce_integration_test.go;WP-881
+ENT-06;(V), [B–P4], [A];G3;backend/internal/entitlement/entitlement_test.go;WP-881
+ENT-03;[B];G3;backend/internal/entitlement/enforce_integration_test.go;WP-881
+PKG-04;[P3];G3;backend/internal/signup/service_test.go;WP-881
+PKG-02;[P3];G3;backend/internal/operator/plan_integration_test.go;WP-882
+PKG-01;[P3];G3;backend/internal/operator/plan_integration_test.go;WP-882
+ENT-04;[B];G3;backend/internal/operator/plan_integration_test.go;WP-882
+ENT-08;[B];G3;backend/internal/operator/plan_integration_test.go;WP-882
+PKG-03;[P3];G3;backend/internal/operator/addons_test.go;WP-883
+CH14;(S);G3;backend/internal/entitlement/addon_test.go;WP-883
+ENT-07;[B];G3;backend/internal/operator/trial_end_integration_test.go;WP-884
+PKG-05;[P3];G3;backend/internal/entitlement/usage_integration_test.go;WP-885
+PKG-06;[P3];G3;frontend/src/pages/PlanPage.test.tsx;WP-886
+ENT-05;[B];G3;frontend/src/pages/PlanPage.test.tsx;WP-886
+UI-14;[P2–P4, A];G3;frontend/src/pages/PlanPage.test.tsx;WP-886
+PKG-07;[P3];G3;frontend/src/operator/operatorAuth.test.ts;WP-887
+SEC-07;[B];G3;frontend/src/operator/operatorAuth.test.ts;WP-887
+PKG-07;[P3];G3;frontend/e2e/operator.spec.ts;WP-888
+UI-14;[P2–P4, A];G3;frontend/src/operator/OrganizationDetailPage.test.tsx;WP-888
+CRD-05;[P3];G3;backend/internal/credential/handler_test.go;WP-889
+CRD-01;[P3];G3;backend/internal/credential/binding_integration_test.go;WP-890
+CRD-04;[P3];G3;backend/internal/credential/resolve_integration_test.go;WP-891
+CRD-04;[P3];G3;collector/collectorcmd/discovery_credentials_test.go;WP-892
+CRD-03;[P3];G3;backend/internal/credential/vault_connection_integration_test.go;WP-893
+COL-03;[P4];G3;backend/internal/credential/vault_connection_integration_test.go;WP-893
+CRD-02;[P3];G3;backend/internal/credential/vault_ref_integration_test.go;WP-894
+CRD-04;[P3];G3;collector/collectorcmd/vault_test.go;WP-895
+CRD-03;[P3];G3;backend/internal/credential/vault_resolver_test.go;WP-896
+CRD-04;[P3];G3;backend/internal/credential/vault_resolver_test.go;WP-896
+COL-03;[P4];G3;backend/internal/credential/vault_resolver_test.go;WP-896
+CRD-05;[P3];G3;backend/internal/credential/rotation_integration_test.go;WP-897
+CRD-06;[P3];G3;backend/internal/credential/usage_integration_test.go;WP-898
+ADM-01;[P3];G3;backend/internal/admp/account_integration_test.go;WP-925
+ADM-03;[P3];G3;backend/internal/admp/cache_integration_test.go;WP-928
+ADM-07;[P3];G3;backend/internal/admp/cache_integration_test.go;WP-928
+ADM-04;[P3];G3;backend/internal/admp/cache_integration_test.go;WP-928
+IPM-01;[P3];G3;backend/internal/ipam/section_integration_test.go;WP-900
+IPM-04;[P3];G3;backend/internal/ipam/state_integration_test.go;WP-902
+IPM-02;[P3];G3;backend/internal/ipam/hierarchy_integration_test.go;WP-901
+IPM-03;[P3];G3;backend/internal/ipam/space_integration_test.go;WP-903
+CRD-06;[P3];G3;backend/internal/credential/no_plaintext_integration_test.go;WP-899
+COL-02;[B];G3;backend/internal/credential/no_plaintext_integration_test.go;WP-899
+ADM-02;[P3];G3;backend/internal/admp/readonly/transport_test.go;WP-926
+ADM-03;[P3];G3;backend/internal/admp/readonly/client_test.go;WP-926
+ADM-02;[P3];G3;backend/internal/admp/readonly/readonly_test.go;WP-927
+ADM-02;[P3];G3;backend/internal/admp/readonly/readonly_ast_test.go;WP-927
+ADM-02;[P3];G3;backend/internal/admp/readonly/readonly_mock_test.go;WP-927
+ADM-03;[P3];G3;backend/internal/admp/sync_integration_test.go;WP-929
+IPM-03;[P3];G3;backend/internal/ipam/allocate_integration_test.go;WP-904
+IPM-08;[P3];G3;backend/internal/ipam/history_integration_test.go;WP-908
+IPM-20;[P3];G3;backend/internal/ipam/filter_integration_test.go;WP-909
+IPM-05;[P3];G3;backend/internal/ipam/nameserver_integration_test.go;WP-905
+IPM-06;[P3];G3;backend/internal/ipam/vlan_domain_integration_test.go;WP-906
+IPM-07;[P3];G3;backend/internal/ipam/vrf_integration_test.go;WP-907
+PRB-05;[P3];E;edgecore/probewire/probewire_test.go;WP-933
+PRB-07;[P3];E;edgecore/probewire/probewire_test.go;WP-933
+PRB-11;[P3];E;edgecore/probewire/probewire_test.go;WP-933
+PRT-01;[P3];E;edgecore/probewire/types_test.go;WP-934
+PRB-01;[P3];E;edgecore/probewire/types_test.go;WP-934
+PRT-21;[P3];E;edgecore/probewire/types_test.go;WP-934
+PRB-01;[P3];E;backend/internal/probe/schema_integration_test.go;WP-935
+CRD-01;[P3];E;backend/internal/credential/binding_integration_test.go;WP-935
+CRD-04;[P3];E;backend/internal/credential/device_group_integration_test.go;WP-935
+PRB-03;[P3];E;backend/internal/discovery/collector_group_schema_integration_test.go;WP-936
+COL-06;[B], Air-Gapped [O];E;backend/internal/discovery/collector_group_schema_integration_test.go;WP-936
+PRB-11;[P3];E;backend/internal/discovery/collector_group_schema_integration_test.go;WP-936
+ADM-07;[P3];G3;backend/internal/admp/api_integration_test.go;WP-930
+ADM-08;[P3];G3;backend/internal/admp/api_integration_test.go;WP-930
+ADM-08;[P3];G3;backend/internal/admp/impact_integration_test.go;WP-931
+ADM-04;[P3];E;backend/internal/admp/sync_integration_test.go;WP-1073
+ADM-04;[P3];E;backend/internal/admp/readonly/ports_test.go;WP-1073
+ADM-05;[P3];E;backend/internal/admp/sync_integration_test.go;WP-1074
+PRB-01;[P3];E;backend/internal/probe/effective_integration_test.go;WP-937
+PRB-01;[P3];E;backend/internal/server/monitoring_contract_test.go;WP-938
+PRB-03;[P3];E;backend/internal/server/monitoring_contract_test.go;WP-938
+PRB-05;[P3];E;backend/internal/probe/state_schema_integration_test.go;WP-944
+PRB-07;[P3];E;backend/internal/probe/state_schema_integration_test.go;WP-944
+PRB-06;[P3];E;backend/internal/monitoring/probe_storage_spike_integration_test.go;WP-943
+NFR-11;[P3];E;backend/internal/monitoring/probe_storage_spike_integration_test.go;WP-943
+MON-01;[B];E;backend/internal/monitoring/probe_storage_spike_integration_test.go;WP-943
+NFR-06;[B];E;backend/internal/monitoring/probe_storage_spike_integration_test.go;WP-943
+PRT-01;[P3];E;collector/probe/executor_test.go;WP-950
+PRT-22;[P3];E;backend/internal/credential/credential_test.go;WP-967
+COL-02;[B];E;collector/collectorcmd/discovery_credentials_test.go;WP-967
+PRT-21;[P3];E;collector/internal/fakesnmp/walk_test.go;WP-992
+PRT-13;[P3];E;collector/internal/dhcpv4/message_test.go;WP-1011
+PRT-21;[P3];E;collector/internal/fakedhcp/fakedhcp_test.go;WP-1011
+IMP-05;[B];E;backend/internal/topology/analyzer_integration_test.go;WP-1025
+ALR-03;[P3];E;backend/internal/topology/analyzer_test.go;WP-1025
+ALR-08;[P3];E;backend/internal/alarm/forecast/forecast_test.go;WP-1059
+ALR-01;[P3];E;backend/internal/alarm/pg_store_integration_test.go;WP-981
+MON-04;[P3];E;backend/internal/alarm/alarm_scope_integration_test.go;WP-981
+ALR-07;[P3];E;backend/internal/alarm/configsnap/pg_store_integration_test.go;WP-1052
+SEC-02;[P3];F;backend/internal/security/finding_integration_test.go;WP-1116
+EVT-03;[P2–P3];F;backend/internal/server/evt02_producers_integration_test.go;WP-1116
+RBA-05;[P2–P4], [A];F;backend/internal/security/finding_integration_test.go;WP-1116
+API-06;[P2]/[P3]/[P4]/[A];F;backend/internal/security/finding_integration_test.go;WP-1116
+IPM-16;[P3];G3;backend/internal/ipam/asn_integration_test.go;WP-1066
+WFL-02;[P3];F;backend/internal/workflow/version_integration_test.go;WP-1086
+API-06;[P2]/[P3]/[P4]/[A];F;backend/internal/workflow/version_integration_test.go;WP-1086
+WFL-01;[P3];F;backend/internal/form/version_integration_test.go;WP-1100
+API-06;[P2]/[P3]/[P4]/[A];F;backend/internal/form/version_integration_test.go;WP-1100
+REC-04;[P3];F;backend/internal/override/policy_integration_test.go;WP-1105
+IPM-10;[P3];G3;backend/internal/ipam/section_acl_integration_test.go;WP-910
+IPM-13;[P3];G3;backend/internal/ipam/device_binding_integration_test.go;WP-911
+IPM-14;[P3];G3;backend/internal/ipam/auto_subnet_integration_test.go;WP-912
+IPM-13;[P3];G3;backend/internal/ipam/management_integration_test.go;WP-913
+TLC-05;[P3];F;backend/internal/export/orgexport_integration_test.go;WP-1149
+TLC-06;[P3];F;backend/internal/tenantapi/deletion_integration_test.go;WP-1152
+SEC-05;[B];F;backend/internal/privacy/subject_integration_test.go;WP-1158
+PRB-01;[P3];E;backend/internal/probe/probe_scope_integration_test.go;WP-939
+PRT-01;[P3];E;backend/internal/probe/handler_test.go;WP-939
+PRB-03;[P3];E;backend/internal/discovery/collector_group_integration_test.go;WP-947
+COL-06;[B], Air-Gapped [O];E;backend/internal/discovery/collector_group_integration_test.go;WP-947
+PRB-06;[P3];E;backend/internal/probe/result_schema_integration_test.go;WP-945
+MON-01;[B];E;backend/internal/probe/result_schema_integration_test.go;WP-945
+PRB-07;[P3];E;backend/internal/probe/result_schema_integration_test.go;WP-945
+PRB-04;[P3];E;collector/probe/scheduler_test.go;WP-951
+PRT-01;[P3];E;collector/probe/limits_test.go;WP-951
+PRB-05;[P3];E;collector/probe/state_test.go;WP-952
+PRB-09;[P3];E;collector/probe/seq_test.go;WP-952
+PRT-03;[P3];E;collector/probe/tcp_test.go;WP-970
+PRT-12;[P3];E;collector/probe/dns_test.go;WP-1010
+PRT-21;[P3];E;collector/probe/dns_test.go;WP-1010
+PRB-05;[P3];E;backend/internal/probe/edge_test.go;WP-959
+PRB-07;[P3];E;backend/internal/probe/edge_test.go;WP-959
+NFR-11;[P3];E;backend/internal/probe/edge_test.go;WP-959
+PRT-07;[P3];E;collector/plugins/snmp/table_test.go;WP-993
+PRT-11;[P3];E;collector/plugins/snmp/table_test.go;WP-993
+PRT-16;[P3];E;collector/probe/gnmi/client_test.go;WP-1015
+PRT-21;[P3];E;collector/internal/fakegnmi/fakegnmi_test.go;WP-1015
+ALR-01;[P3];E;backend/internal/alarm/lifecycle_integration_test.go;WP-982
+ALR-03;[P3];E;backend/internal/alarm/incident_integration_test.go;WP-1027
+ALR-09;[P3];E;backend/internal/alarm/incident_test.go;WP-1027
+ALR-09;[P3];E;backend/internal/topology/impact_integration_test.go;WP-1026
+ALR-03;[P3];E;backend/internal/topology/redundancy_test.go;WP-1026
+MGT-04;[P3];E;backend/internal/maintenance/recipients_integration_test.go;WP-1034
+NTF-05;[B], Zusätze [P2], [P3];E;backend/internal/maintenance/recipients_integration_test.go;WP-1034
+ADM-07;[P3];E;backend/internal/admp/api_integration_test.go;WP-1075
+ADM-07;[P3];E;backend/internal/admp/sync_integration_test.go;WP-1075
+ADM-06;[P3];E;backend/internal/admp/holder_integration_test.go;WP-1076
+SEC-05;[B];E;backend/internal/admp/holder_integration_test.go;WP-1076
+IPM-16;[P3];G3;backend/internal/ipam/asn_integration_test.go;WP-1067
+WFL-02;[P3];F;backend/internal/workflow/conditions_test.go;WP-1087
+WFL-02;[P3];F;backend/internal/workflow/worker_integration_test.go;WP-1088
+SEC-03;[P3];F;backend/internal/compliance/evaluator_test.go;WP-1125
+CMP-02;[P3];F;backend/internal/compliance/evaluator_test.go;WP-1125
+SEC-02;[P3];F;backend/internal/vulnfeed/repository_integration_test.go;WP-1117
+REC-04;[P3];F;frontend/src/pages/SourceRanksPage.test.tsx;WP-1115
+IPM-14;[P3];G3;backend/internal/ipam/binding_conflict_integration_test.go;WP-914
+IPM-20;[P3];G3;backend/internal/ipam/binding_conflict_integration_test.go;WP-914
+REC-04;[P3];G3;backend/internal/ipam/binding_conflict_integration_test.go;WP-914
+IPM-15;[P3];G3;backend/internal/ipam/nat_integration_test.go;WP-1071
+IPM-17;[P3];G3;backend/internal/ipam/bgp_integration_test.go;WP-1068
+IPM-19;[P3];G3;frontend/src/pages/IpamPage.test.tsx;WP-915
+UI-14;[P2–P4, A];G3;frontend/src/pages/IpamPage.test.tsx;WP-915
+PKG-04;[P3];E;backend/internal/probe/budget_integration_test.go;WP-940
+NFR-11;[P3];E;backend/internal/entitlement/probe_budget_test.go;WP-940
+PRT-01;[P3];E;backend/internal/entitlement/probe_budget_test.go;WP-940
+PRB-03;[P3];E;backend/internal/probe/assign_test.go;WP-941
+PRB-11;[P3];E;backend/internal/probe/assign_integration_test.go;WP-941
+NFR-11;[P3];E;collector/probe/icmp_mux_test.go;WP-953
+PRT-01;[P3];E;collector/probe/icmp_test.go;WP-953
+PRT-02;[P3];E;collector/probe/icmp_test.go;WP-953
+PRT-19;[P3];E;collector/probe/icmp_mux_test.go;WP-953
+PRB-07;[P3];E;collector/probe/outbox_test.go;WP-954
+NFR-04;[B], Teilumfang [P5];E;collector/probe/outbox_test.go;WP-954
+COL-05;[B];E;collector/probe/outbox_test.go;WP-954
+PRB-05;[P3];E;collector/probe/uplink_test.go;WP-955
+PRB-07;[P3];E;collector/probe/uplink_test.go;WP-955
+PRB-11;[P3];E;collector/collectorcmd/probes_test.go;WP-956
+PRB-10;[P3];E;collector/probe/alive_test.go;WP-957
+PRB-09;[P3];E;collector/probe/alive_test.go;WP-957
+PRT-02;[P3];E;collector/probe/icmp_test.go;WP-969
+MON-04;[P3];E;collector/probe/icmp_test.go;WP-969
+PRT-08;[P3];E;collector/probe/bfd_test.go;WP-1003
+PRT-09;[P3];E;collector/probe/optical_test.go;WP-1004
+PRT-09;[P3];E;collector/probe/optical_vendors_test.go;WP-1005
+SEC-02;[P3];F;backend/internal/vulnfeed/csaf_test.go;WP-1118
+SEC-02;[P3];F;backend/internal/vulnfeed/nvd_test.go;WP-1119
+NFR-11;[P3];E;backend/internal/probe/ingest_integration_test.go;WP-960
+PRB-07;[P3];E;backend/internal/probe/ingest_integration_test.go;WP-960
+OPS-02;[B], [P3], [A];E;backend/internal/probe/ingest_test.go;WP-960
+CRD-06;[P3];E;backend/internal/probe/ingest_integration_test.go;WP-960
+ALR-01;[P3];E;backend/internal/alarm/handler_integration_test.go;WP-983
+MON-04;[P3];E;backend/internal/alarm/handler_test.go;WP-983
+MON-04;[P3];E;backend/internal/monitoring/evaluator_series_test.go;WP-984
+ALR-05;[P3];E;backend/internal/monitoring/evaluator_series_integration_test.go;WP-984
+PRT-04;[P3];E;collector/probe/http_test.go;WP-971
+PRB-06;[P3];E;backend/internal/probe/cagg_integration_test.go;WP-972
+NFR-06;[B];E;backend/internal/probe/cagg_integration_test.go;WP-972
+PRB-06;[P3];E;backend/internal/probe/query_integration_test.go;WP-975
+MON-03;[P3];E;backend/internal/probe/query_integration_test.go;WP-975
+PRT-20;[P3];E;collector/profiles/monitor_test.go;WP-1000
+WFL-02;[P3];F;backend/internal/workflow/serial_integration_test.go;WP-1089
+JOB-02;[B], Zusätze [P2], [P3];F;backend/internal/workflow/schedule_integration_test.go;WP-1091
+WFL-02;[P3];F;backend/internal/workflow/schedule_integration_test.go;WP-1091
+WFL-02;[P3];F;backend/internal/workflow/notify_action_integration_test.go;WP-1095
+NTF-05;[B], Zusätze [P2], [P3];F;backend/internal/workflow/notify_action_integration_test.go;WP-1095
+WFL-02;[P3];F;backend/internal/workflow/webhook_action_integration_test.go;WP-1096
+ADM-02;[P3];E;backend/internal/admp/contract_integration_test.go;WP-1077
+ADM-02;[P3];E;backend/internal/admp/readonly/readonly_spec_test.go;WP-1077
+IPM-19;[P3];G3;frontend/src/pages/SubnetDetailPage.test.tsx;WP-916
+UI-14;[P2–P4, A];G3;frontend/src/pages/SubnetDetailPage.test.tsx;WP-916
+IPM-19;[P3];G3;frontend/src/components/ipam/IpamTabs.test.tsx;WP-918
+IPM-09;[P3];G3;backend/internal/importer/ipam_integration_test.go;WP-920
+TLC-05;[P3];F;backend/internal/export/orgexport_documents_test.go;WP-1150
+TLC-06;[P3];F;backend/internal/server/orgstate_integration_test.go;WP-1153
+PRB-01;[P3];E;backend/internal/probe/profile_scope_integration_test.go;WP-946
+PKG-09;[P3];E;backend/internal/probe/suspend_integration_test.go;WP-942
+ENT-08;[B];E;backend/internal/probe/suspend_integration_test.go;WP-942
+MON-02;[B];E;backend/internal/probe/autocreate_integration_test.go;WP-949
+PRB-01;[P3];E;backend/internal/probe/autocreate_integration_test.go;WP-949
+PRB-11;[P3];E;backend/internal/probe/distribution_integration_test.go;WP-948
+PRB-01;[P3];E;backend/internal/probe/distribution_integration_test.go;WP-948
+PRB-05;[P3];E;backend/internal/probe/state_apply_integration_test.go;WP-961
+PRB-07;[P3];E;backend/internal/probe/state_apply_integration_test.go;WP-961
+PRB-11;[P3];E;backend/internal/probe/state_apply_integration_test.go;WP-961
+MON-02;[B];E;backend/internal/probe/metrics_bridge_integration_test.go;WP-976
+MON-03;[P3];E;backend/internal/probe/metrics_bridge_integration_test.go;WP-976
+ALR-05;[P3];E;backend/internal/monitoring/threshold_test.go;WP-985
+MET-45;Phase 1 im Fokus, voller Tag fehlt;E;backend/internal/rules/rules_test.go;WP-985
+MON-04;[P3];E;backend/internal/monitoring/threshold_test.go;WP-985
+NTF-05;[B], Zusätze [P2], [P3];E;backend/internal/notify/alarm_notify_integration_test.go;WP-987
+MON-04;[P3];E;backend/internal/notify/alarm_notify_integration_test.go;WP-987
+ALR-02;[P3];E;backend/internal/notify/alarm_notify_integration_test.go;WP-987
+ALR-01;[P3];E;frontend/src/pages/AlarmsPage.test.tsx;WP-991
+ALR-10;[P3];E;frontend/src/pages/AlarmsPage.test.tsx;WP-991
+ALR-02;[P3];E;backend/internal/alarm/settings_test.go;WP-1030
+ALR-04;[P3];E;backend/internal/alarm/settings_test.go;WP-1030
+ALR-06;[P3];E;backend/internal/alarm/settings_test.go;WP-1030
+ALR-12;[P3];E;backend/internal/alarm/settings_integration_test.go;WP-1030
+ALR-03;[P3];E;backend/internal/alarm/incident_handler_integration_test.go;WP-1036
+ALR-10;[P3];E;backend/internal/alarm/incident_handler_test.go;WP-1036
+ALR-06;[P3];E;backend/internal/sla/availability_test.go;WP-1048
+WFL-02;[P3];F;backend/internal/workflow/run_api_integration_test.go;WP-1092
+API-06;[P2]/[P3]/[P4]/[A];F;backend/internal/workflow/run_api_integration_test.go;WP-1092
+EVT-03;[P2–P3];F;backend/internal/workflow/run_api_integration_test.go;WP-1092
+WFL-01;[P3];F;backend/internal/form/form_scope_integration_test.go;WP-1093
+WFL-02;[P3];F;backend/internal/workflow/workflow_scope_integration_test.go;WP-1093
+WFL-02;[P3];F;backend/internal/workflow/set_ci_field_integration_test.go;WP-1097
+LCY-04;[P3];F;backend/internal/workflow/lifecycle_action_integration_test.go;WP-1097
+WFL-02;[P3];F;backend/internal/workflow/trigger_integration_test.go;WP-1090
+WFL-03;[P3];F;backend/internal/workflow/trigger_integration_test.go;WP-1090
+WFL-08;[P3];F;backend/internal/workflow/quota_integration_test.go;WP-1112
+SEC-03;[P3];F;backend/internal/compliance/eval_job_integration_test.go;WP-1126
+SEC-04;[P3], Rechte-Doku AD/Entra [A];F;backend/internal/compliance/controls_integration_test.go;WP-1128
+IPM-19;[P3];G3;frontend/src/components/ipam/AddressDialog.test.tsx;WP-917
+IPM-13;[P3];G3;frontend/src/components/ipam/AddressDialog.test.tsx;WP-917
+IPM-09;[P3];G3;backend/internal/export/ipam_integration_test.go;WP-921
+TLC-05;[P3];F;backend/internal/export/orgexport_handler_test.go;WP-1151
+TLC-06;[P3];F;backend/internal/tenantapi/purge_integration_test.go;WP-1154
+IPM-11;[P3];G3;backend/internal/ipam/scan_integration_test.go;WP-1062
+MON-04;[P3];E;backend/internal/alarm/actions_test.go;WP-988
+ALR-09;[P3];E;backend/internal/alarm/tickets_integration_test.go;WP-1039
+TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];E;backend/internal/alarm/tickets_integration_test.go;WP-1039
+ALR-10;[P3];E;frontend/src/pages/IncidentsPage.test.tsx;WP-1045
+SEC-03;[P3];F;backend/internal/compliance/score_integration_test.go;WP-1127
+CMP-02;[P3];F;backend/internal/compliance/score_integration_test.go;WP-1127
+SEC-03;[P3];F;backend/internal/compliance/templates_test.go;WP-1130
+WFL-02;[P3];F;backend/internal/workflow/approval_integration_test.go;WP-1098
+RBA-05;[P2–P4], [A];F;backend/internal/workflow/approval_integration_test.go;WP-1098
+NTF-05;[B], Zusätze [P2], [P3];F;backend/internal/workflow/approval_integration_test.go;WP-1098
+WFL-01;[P3];F;backend/internal/form/conditions_test.go;WP-1101
+LCY-04;[P3];F;backend/internal/ci/lifecycle_lock_integration_test.go;WP-1103
+OPS-02;[B], [P3], [A];F;backend/cmd/server/main_test.go;WP-1114
+OPS-02;[B], [P3], [A];F;backend/internal/jobs/queue_test.go;WP-1114
+SEC-02;[P3];F;backend/internal/vulnfeed/bundle_test.go;WP-1120
+SEC-02;[P3];F;backend/internal/security/matcher_integration_test.go;WP-1121
+SEC-02;[P3];F;backend/internal/security/version_test.go;WP-1121
+LCY-06;[P3];F;backend/internal/security/matcher_integration_test.go;WP-1121
+IPM-13;[P3];G3;frontend/src/components/cmdb/NetworkSection.test.tsx;WP-919
+UI-14;[P2–P4, A];G3;frontend/src/components/cmdb/NetworkSection.test.tsx;WP-919
+IPM-09;[P3];G3;frontend/src/components/ipam/IpamImportDialog.test.tsx;WP-922
+UI-14;[P2–P4, A];G3;frontend/src/components/ipam/IpamImportDialog.test.tsx;WP-922
+IPM-11;[P3];G3;backend/internal/ipam/scan_results_integration_test.go;WP-1063
+IPM-12;[P3];G3;backend/internal/ipam/ptr_integration_test.go;WP-1064
+WFL-01;[P3];F;frontend/src/components/form/FormRenderer.test.tsx;WP-1133
+WFL-01;[P3];F;frontend/e2e/forms.spec.ts;WP-1133
+PRT-06;[P3];E;collector/probe/rate/rate_test.go;WP-994
+MON-03;[P3];E;collector/probe/rate/rate_test.go;WP-994
+MON-03;[P3];E;collector/probe/redfish/redfish_test.go;WP-998
+MON-04;[P3];E;collector/probe/redfish/redfish_test.go;WP-998
+PRT-07;[P3];E;collector/probe/routing/ospf_isis_test.go;WP-1002
+PRT-15;[P3];E;collector/probe/tr069/readonly_test.go;WP-1018
+PRT-17;[P3];E;collector/probe/rpki/rtr_test.go;WP-1020
+PRT-21;[P3];E;collector/internal/fakertr/fakertr_test.go;WP-1020
+ALR-07;[P3];E;collector/plugins/config/mask_test.go;WP-1053
+NFR-11;[P3];E;collector/probe/capacity_test.go;WP-958
+PRB-04;[P3];E;collector/probe/capacity_test.go;WP-958
+PRB-09;[P3];E;backend/internal/probe/alive_integration_test.go;WP-962
+PRT-18;[P3];E;backend/internal/discovery/collector_capabilities_integration_test.go;WP-966
+PRT-18;[P3];E;backend/internal/probe/assign_test.go;WP-966
+DIS-06;[P3], Zusatzprotokolle [O];E;collector/collectorcmd/trap_config_test.go;WP-977
+MON-04;[P3];E;frontend/src/components/monitoring/AlertRuleForm.test.tsx;WP-990
+MON-03;[P3];E;frontend/src/pages/MonitoringPage.test.tsx;WP-990
+ALR-05;[P3];E;frontend/src/components/monitoring/AlertRuleForm.test.tsx;WP-990
+WFL-02;[P3];F;backend/internal/workflow/approval_sweep_integration_test.go;WP-1099
+LCY-04;[P3];F;backend/internal/workflow/lifecycle_trigger_integration_test.go;WP-1104
+SEC-02;[P3];F;backend/internal/security/mapping_integration_test.go;WP-1122
+SEC-02;[P3];F;frontend/src/components/findings/ProductMappingPanel.test.tsx;WP-1122
+SEC-04;[P3], Rechte-Doku AD/Entra [A];F;backend/internal/compliance/report_job_integration_test.go;WP-1129
+API-06;[P2]/[P3]/[P4]/[A];F;backend/internal/graphqlbff/p3_test.go;WP-1136
+TLC-06;[P3];F;backend/internal/tenantapi/purge_external_test.go;WP-1155
+SEC-05;[B];F;backend/internal/tenantapi/purge_external_test.go;WP-1155
+PRT-05;[P3];E;collector/probe/snmpstatus/snmpstatus_test.go;WP-995
+PRT-06;[P3];E;collector/probe/snmpif/snmpif_test.go;WP-996
+MON-03;[P3];E;collector/probe/snmpif/snmpif_test.go;WP-996
+MON-04;[P3];E;collector/probe/snmpif/snmpif_test.go;WP-996
+MON-03;[P3];E;collector/probe/snmpcustom/snmpcustom_test.go;WP-997
+PRT-07;[P3];E;collector/probe/routing/bgp_test.go;WP-1001
+PRT-10;[P3];E;collector/probe/bng_test.go;WP-1006
+PRT-11;[P3];E;collector/probe/pon_test.go;WP-1007
+PRT-13;[P3];E;collector/probe/dhcp_test.go;WP-1012
+PRT-14;[P3];E;collector/probe/stamp_test.go;WP-1013
+PRT-21;[P3];E;collector/probe/stamp_test.go;WP-1013
+PRT-16;[P3];E;collector/probe/gnmi_test.go;WP-1016
+PRT-17;[P3];E;collector/probe/rpki/roa_test.go;WP-1021
+DIS-06;[P3], Zusatzprotokolle [O];E;collector/plugins/snmp/trap_v3_test.go;WP-978
+DIS-06;[P3], Zusatzprotokolle [O];E;backend/internal/probe/events_integration_test.go;WP-979
+PRB-03;[P3];E;backend/internal/probe/liveness_integration_test.go;WP-963
+PRB-10;[P3];E;backend/internal/probe/liveness_integration_test.go;WP-963
+PRB-11;[P3];E;backend/internal/probe/liveness_integration_test.go;WP-963
+PRB-03;[P3];E;backend/internal/probe/dependency_integration_test.go;WP-965
+PRB-05;[P3];E;backend/internal/probe/dependency_integration_test.go;WP-965
+ALR-02;[P3];E;backend/internal/alarm/check_consumer_integration_test.go;WP-986
+MON-04;[P3];E;backend/internal/alarm/check_consumer_test.go;WP-986
+ALR-11;[P3];E;backend/internal/alarm/maintenance_test.go;WP-1033
+MGT-04;[P3];E;backend/internal/maintenance/active_integration_test.go;WP-1033
+ALR-07;[P3];E;backend/internal/alarm/configsnap/ingest_integration_test.go;WP-1054
+EVT-03;[P2–P3];E;backend/internal/alarm/configsnap/ingest_integration_test.go;WP-1054
+TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];E;backend/internal/alarm/ticket_create_integration_test.go;WP-1040
+MON-04;[P3];E;backend/internal/alarm/ticket_create_integration_test.go;WP-1040
+WFL-06;[P3];E;backend/internal/alarm/ticket_create_integration_test.go;WP-1040
+NTF-05;[B], Zusätze [P2], [P3];F;backend/internal/notify/categories_integration_test.go;WP-1147
+WFL-01;[P3];F;backend/internal/workflow/form_step_integration_test.go;WP-1102
+WFL-02;[P3];F;backend/internal/workflow/form_step_integration_test.go;WP-1102
+WFL-04;[P3], delegierte Inventur [P4], IGA [A];F;backend/internal/workflow/order_approval_integration_test.go;WP-1108
+WFL-04;[P3], delegierte Inventur [P4], IGA [A];F;backend/internal/workflow/maintenance_notify_integration_test.go;WP-1109
+MGT-04;[P3];F;backend/internal/workflow/maintenance_notify_integration_test.go;WP-1109
+SEC-03;[P3];F;frontend/src/pages/CompliancePage.test.tsx;WP-1135
+SEC-04;[P3], Rechte-Doku AD/Entra [A];F;frontend/src/pages/SecurityPage.test.tsx;WP-1135
+SEC-04;[P3], Rechte-Doku AD/Entra [A];F;frontend/e2e/compliance.spec.ts;WP-1135
+SEC-02;[P3];F;frontend/src/components/cmdb/CIP3Sections.test.tsx;WP-1137
+SEC-03;[P3];F;frontend/src/components/cmdb/CIP3Sections.test.tsx;WP-1137
+CRD-07;[P3];G3;frontend/src/components/cmdb/CredentialBindingSection.test.tsx;WP-923
+UI-14;[P2–P4, A];G3;frontend/src/components/cmdb/CredentialBindingSection.test.tsx;WP-923
+IPM-11;[P3];G3;frontend/src/components/ipam/ScanTab.test.tsx;WP-1065
+IPM-12;[P3];G3;frontend/src/components/ipam/ScanTab.test.tsx;WP-1065
+UI-14;[P2–P4, A];G3;frontend/src/components/ipam/ScanTab.test.tsx;WP-1065
+PRB-01;[P3];E;frontend/src/components/monitoring/ProfileEditor.test.tsx;WP-1080
+NTF-03;[B];F;backend/internal/notify/recipients_integration_test.go;WP-1140
+NTF-02;[P3], Provider [V];F;backend/internal/user/mobile_integration_test.go;WP-1140
+TLC-06;[P3];F;backend/internal/tenantapi/purge_protocol_test.go;WP-1156
+UI-14;[P2–P4, A];F;frontend/src/pages/OrgDataPage.test.tsx;WP-1157
+TLC-06;[P3];F;frontend/src/pages/OrgDataPage.test.tsx;WP-1157
+SEC-05;[B];F;backend/internal/pii/history_redaction_integration_test.go;WP-1159

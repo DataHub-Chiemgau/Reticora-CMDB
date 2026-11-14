@@ -2,7 +2,8 @@ package labels
 
 // Rendering of labels (INV-03, WP-849, E-52): Code128 and QR through
 // github.com/boombuler/barcode as SVG and PNG, PDF labels through
-// github.com/go-pdf/fpdf with three fixed templates. The renderer works on
+// codeberg.org/go-pdf/fpdf (the maintained home of go-pdf/fpdf) with three
+// fixed templates. The renderer works on
 // the neutral Subject; the asset package maps an asset onto it, WP-763
 // renders the batches of inventory areas with it.
 
@@ -20,10 +21,10 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"codeberg.org/go-pdf/fpdf"
 	"github.com/boombuler/barcode"
 	"github.com/boombuler/barcode/code128"
 	"github.com/boombuler/barcode/qr"
-	"github.com/go-pdf/fpdf"
 )
 
 // Subject is what a label shows: the object (Kind, ID), the scanned

@@ -7,7 +7,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useEffect } from 'react';
 import { act, render, waitFor } from '@testing-library/react';
-import { MemoryRouter, useLocation, useNavigate, type NavigateFunction } from 'react-router-dom';
+import { MemoryRouter, useLocation, useNavigate, type NavigateFunction } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 const future = '2999-01-01T00:00:00Z';
@@ -76,7 +76,7 @@ async function renderApp(path: string) {
   const paths: string[] = [];
   let navigate: NavigateFunction = () => undefined;
   render(
-    <MemoryRouter initialEntries={[path]}>
+    <MemoryRouter initialEntries={[path]} useTransitions={false}>
       <QueryClientProvider client={client}>
         <App />
         <RouterProbe onPath={(p) => paths.push(p)} onNavigate={(n) => (navigate = n)} />
@@ -137,7 +137,7 @@ describe('reload after the access token expired (AUT-02)', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
     render(
-      <MemoryRouter initialEntries={['/dashboard']}>
+      <MemoryRouter initialEntries={['/dashboard']} useTransitions={false}>
         <QueryClientProvider client={client}>
           <App />
         </QueryClientProvider>

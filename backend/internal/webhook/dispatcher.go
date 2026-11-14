@@ -162,6 +162,15 @@ func EventReadPermission(event string) string {
 	case events.StockBelowMinimum:
 		// A quantity item, read on the route consumables.
 		return "stock:read"
+	case events.EntitlementChanged:
+		// A change of plan or add-on reads like GET /api/v1/entitlements
+		// (WP-868); entitlement.warning and entitlement.expired notify the
+		// org_admins only and keep no read permission.
+		return "entitlement:read"
+	case events.CIConfigChanged, events.CollectorClockSkew:
+		// The configuration of a device and the clock of a collector are
+		// monitoring data (ALR-07, WP-867), not ci:read or discovery data.
+		return "monitoring:read"
 	}
 	prefix, _, _ := strings.Cut(event, ".")
 	switch prefix {
@@ -188,6 +197,30 @@ func EventReadPermission(event string) string {
 	case "import":
 		// The read right of the route imports (WP-301).
 		return "import:run"
+	case "ipam", "asn":
+		// IPAM and AS numbers read like the IPAM routes (WP-870).
+		return "ipam:read"
+	case "credential":
+		// Never a secret: the metadata of a credential (WP-870).
+		return "credential:read"
+	case "admp":
+		return "admp:read"
+	case "maintenance":
+		return "maintenance:read"
+	case "workflow":
+		return "workflow:read"
+	case "finding":
+		return "finding:read"
+	case "notification":
+		// Escalation chains (NTF-02, WP-868).
+		return "escalation:manage"
+	case "org":
+		// Full export and deletion of the organization (TLC-05, TLC-06).
+		return "org:export"
+	case "probe", "alarm", "incident", "collector_group", "config", "capacity", "sla", "monitoring":
+		// The monitoring of phase 3 reads like GET /api/v1/monitoring/*
+		// (WP-867, E-161).
+		return "monitoring:read"
 	}
 	return ""
 }
@@ -396,14 +429,32 @@ var legacyNames = map[string][]string{
 // delivery persistence is returned, so the publisher keeps the event
 // pending and hands it over again (at least once, F-151); the deliveries
 // are idempotent per event and subscription, a repeated hand-off adds none
-// (WP-506).
+// (WP-506). An alarm.* event whose rule switched the webhooks off
+// (actions.webhook.enabled false, WP-988) reaches no subscription; the
+// outbox and the stream keep it for the other consumers.
 func (d *Dispatcher) Consume(ctx context.Context, env *events.Envelope) error {
+	if webhookDisabled(env) {
+		return nil
+	}
 	aliases := legacyNames[env.Type]
 	var origin *eventOrigin
 	if env.ID != "" {
 		origin = &eventOrigin{id: env.ID, sequence: env.Sequence, entitySeq: env.EntitySeq}
 	}
 	return d.dispatchAs(ctx, env.OrgID, env.Type, aliases, env.Data, origin)
+}
+
+// webhookDisabled reports an alarm.* event with actions.webhook.enabled
+// false. Data that cannot be read keeps the default (delivered).
+func webhookDisabled(env *events.Envelope) bool {
+	if !strings.HasPrefix(env.Type, "alarm.") || len(env.Data) == 0 {
+		return false
+	}
+	var data map[string]any
+	if err := json.Unmarshal(env.Data, &data); err != nil {
+		return false
+	}
+	return !events.AlarmActionsOf(data).Webhook.Enabled
 }
 
 // dispatchAs stores and queues a delivery of the event for every

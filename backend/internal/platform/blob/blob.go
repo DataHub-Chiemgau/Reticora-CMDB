@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -26,9 +27,11 @@ const (
 	s3Algorithm        = "AWS4-HMAC-SHA256"
 	s3Region           = "us-east-1"
 	s3Service          = "s3"
-	s3PresignTTL       = 15 * time.Minute
 	emptyPayloadSHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 )
+
+// PresignTTL is the longest validity of a signed GET URL.
+const PresignTTL = 15 * time.Minute
 
 // ErrForeignKey reports an object key outside the organization's prefix.
 var ErrForeignKey = errors.New("blob: key outside the organization prefix")
@@ -68,6 +71,13 @@ type Store interface {
 	// verified type, or leaves them empty for a nameless
 	// application/octet-stream attachment.
 	PresignedGetURL(ctx context.Context, bucket, key string, dl Download) (string, error)
+	// List returns the keys of the current objects below prefix, a
+	// directory of keys such as OrgPrefix (TLC-06, WP-1155).
+	List(ctx context.Context, bucket, prefix string) ([]string, error)
+	// DeleteAll removes every object below prefix for good, in a versioned
+	// bucket every version and delete marker, and returns how many it
+	// removed; repeated it removes nothing more (WP-1155).
+	DeleteAll(ctx context.Context, bucket, prefix string) (int, error)
 }
 
 // FileStore stores blobs on the local filesystem.
@@ -384,7 +394,7 @@ func (s *S3Store) PresignedGetURL(_ context.Context, bucket, key string, dl Down
 	queryValues.Set("X-Amz-Algorithm", s3Algorithm)
 	queryValues.Set("X-Amz-Credential", s.accessKey+"/"+credentialScope)
 	queryValues.Set("X-Amz-Date", amzDate)
-	queryValues.Set("X-Amz-Expires", strconv.FormatInt(int64(s3PresignTTL/time.Second), 10))
+	queryValues.Set("X-Amz-Expires", strconv.FormatInt(dl.expires(), 10))
 	queryValues.Set("X-Amz-SignedHeaders", "host")
 	queryValues.Set("response-content-disposition", dl.disposition())
 	queryValues.Set("response-content-type", dl.contentType())
@@ -572,4 +582,569 @@ func hmacSHA256(key []byte, data string) []byte {
 	mac := hmac.New(sha256.New, key)
 	_, _ = mac.Write([]byte(data))
 	return mac.Sum(nil)
+}
+
+// ─── Streaming upload (TLC-05, WP-1150) ─────────────────────────────────────
+
+// MultipartPartSize is the size of one part of a streamed upload to S3:
+// PutStream holds at most one part in memory.
+const MultipartPartSize = 16 << 20
+
+// StreamStore is a store that uploads a stream of unknown length without
+// holding it in memory (S3Store: multipart upload, FileStore: file).
+type StreamStore interface {
+	PutStream(ctx context.Context, bucket, key string, reader io.Reader, contentType string) error
+}
+
+// PutStream uploads reader as the object key: through StreamStore when the
+// store has it, else (test doubles) with one Put of the read content. A
+// failed upload leaves no object behind.
+func PutStream(ctx context.Context, s Store, bucket, key string, reader io.Reader, contentType string) error {
+	if ss, ok := s.(StreamStore); ok {
+		return ss.PutStream(ctx, bucket, key, reader, contentType)
+	}
+	payload, err := io.ReadAll(reader)
+	if err != nil {
+		return fmt.Errorf("blob: read upload stream: %w", err)
+	}
+	return s.Put(ctx, bucket, key, bytes.NewReader(payload), int64(len(payload)), contentType)
+}
+
+// PutStream implements StreamStore: the stream goes straight into a file
+// next to the object, renamed to it once complete; a failed stream removes
+// the file, so no partial object remains.
+func (s *FileStore) PutStream(_ context.Context, bucket, key string, reader io.Reader, _ string) error {
+	objectPath, err := s.objectPath(bucket, key)
+	if err != nil {
+		return err
+	}
+	if mkdirErr := os.MkdirAll(filepath.Dir(objectPath), 0o755); mkdirErr != nil {
+		return fmt.Errorf("blob: create directory for %q: %w", objectPath, mkdirErr)
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(objectPath), "."+filepath.Base(objectPath)+".part-*")
+	if err != nil {
+		return fmt.Errorf("blob: create file for %q: %w", objectPath, err)
+	}
+	done := false
+	defer func() {
+		if !done {
+			_ = tmp.Close()
+			_ = os.Remove(tmp.Name())
+		}
+	}()
+	if _, err := io.Copy(tmp, reader); err != nil {
+		return fmt.Errorf("blob: write file %q: %w", objectPath, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("blob: close file %q: %w", objectPath, err)
+	}
+	if err := os.Rename(tmp.Name(), objectPath); err != nil {
+		return fmt.Errorf("blob: store file %q: %w", objectPath, err)
+	}
+	done = true
+	return nil
+}
+
+// PutStream implements StreamStore with a multipart upload in parts of
+// MultipartPartSize: one buffer of one part is reused, each part is sent
+// before the next is read. A stream that fits into the first part is one
+// PUT. Any failure aborts the upload (AbortMultipartUpload), so S3 keeps
+// neither an object nor its parts.
+func (s *S3Store) PutStream(ctx context.Context, bucket, key string, reader io.Reader, contentType string) error {
+	return s.putStream(ctx, bucket, key, reader, contentType, MultipartPartSize)
+}
+
+func (s *S3Store) putStream(ctx context.Context, bucket, key string, reader io.Reader, contentType string, partSize int) error {
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	buf := make([]byte, partSize)
+	n, err := io.ReadFull(reader, buf)
+	if streamFailed(err) {
+		return fmt.Errorf("blob: read upload stream: %w", err)
+	}
+	if n < partSize {
+		// The whole stream fits into one part: a plain PUT.
+		resp, perr := s.doRequest(ctx, http.MethodPut, bucket, key, bytes.NewReader(buf[:n]), contentType, payloadSHA256(buf[:n]), nil)
+		if perr != nil {
+			return perr
+		}
+		return resp.Body.Close()
+	}
+	uploadID, err := s.createMultipart(ctx, bucket, key, contentType)
+	if err != nil {
+		return err
+	}
+	var etags []string
+	fail := func(cause error) error {
+		if aerr := s.abortMultipart(context.WithoutCancel(ctx), bucket, key, uploadID); aerr != nil {
+			return errors.Join(cause, aerr)
+		}
+		return cause
+	}
+	for part := 1; n > 0; part++ {
+		etag, perr := s.uploadPart(ctx, bucket, key, uploadID, part, buf[:n])
+		if perr != nil {
+			return fail(perr)
+		}
+		etags = append(etags, etag)
+		n, err = io.ReadFull(reader, buf)
+		if streamFailed(err) {
+			return fail(fmt.Errorf("blob: read upload stream: %w", err))
+		}
+	}
+	if err := s.completeMultipart(ctx, bucket, key, uploadID, etags); err != nil {
+		return fail(err)
+	}
+	return nil
+}
+
+// streamFailed reports whether io.ReadFull ended with an error of the
+// source rather than at the end of the stream. ReadFull returns io.EOF and
+// io.ErrUnexpectedEOF itself unwrapped; the sentinels are compared by
+// identity, so a source error that wraps one of them (a document body cut
+// off mid-transfer, handed on through CloseWithError) aborts the upload
+// instead of storing a truncated object.
+func streamFailed(err error) bool {
+	//nolint:errorlint // identity on purpose, see above
+	return err != nil && err != io.EOF && err != io.ErrUnexpectedEOF
+}
+
+// UploadAborter is a store that can remove the unfinished multipart uploads
+// of a key, left behind when the process that started them ended (crash,
+// kill) before it could abort them.
+type UploadAborter interface {
+	AbortUploads(ctx context.Context, bucket, key string) error
+}
+
+// AbortUploads removes the unfinished uploads of key when the store keeps
+// any (S3Store); other stores have none and return nil.
+func AbortUploads(ctx context.Context, s Store, bucket, key string) error {
+	if a, ok := s.(UploadAborter); ok {
+		return a.AbortUploads(ctx, bucket, key)
+	}
+	return nil
+}
+
+// listPage is the page size of List and DeleteAll (the S3 maximum).
+const listPage = 1000
+
+// maxListPages bounds the pages of one List or DeleteAll call (10 million
+// objects). A listing still truncated after them is an error
+// (ErrListTruncated): a caller never takes a partial deletion for a
+// complete one; it repeats DeleteAll, which continues with what is left.
+// A variable for the tests.
+var maxListPages = 10000
+
+// ErrListTruncated: List or DeleteAll stopped after maxListPages pages
+// with more keys below the prefix.
+var ErrListTruncated = errors.New("blob: more pages below the prefix than one call reads")
+
+// bucketGet sends a signed GET to the bucket with the query and decodes the
+// XML answer into out.
+func (s *S3Store) bucketGet(ctx context.Context, bucket string, query url.Values, out any) error {
+	scheme := "http"
+	if s.useSSL {
+		scheme = "https"
+	}
+	listURL := &url.URL{Scheme: scheme, Host: s.endpoint, Path: "/" + bucket, RawQuery: canonicalQueryString(query)}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, listURL.String(), http.NoBody)
+	if err != nil {
+		return fmt.Errorf("blob: create list request: %w", err)
+	}
+	if serr := s.signRequest(req, emptyPayloadSHA256); serr != nil {
+		return serr
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("blob: list %s: %w", bucket, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+		return statusError(http.MethodGet, listURL.Path, resp, strings.TrimSpace(string(body)))
+	}
+	if derr := xml.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(out); derr != nil {
+		return fmt.Errorf("blob: list %s: %w", bucket, derr)
+	}
+	return nil
+}
+
+// List returns the keys of the current objects below prefix
+// (ListObjectsV2, pages of listPage); a missing bucket lists nothing.
+func (s *S3Store) List(ctx context.Context, bucket, prefix string) ([]string, error) {
+	if err := checkListPrefix(bucket, prefix); err != nil {
+		return nil, err
+	}
+	keys := []string{}
+	query := url.Values{"list-type": {"2"}, "prefix": {prefix}, "max-keys": {strconv.Itoa(listPage)}}
+	for range maxListPages {
+		var out struct {
+			Contents []struct {
+				Key string `xml:"Key"`
+			} `xml:"Contents"`
+			IsTruncated           bool   `xml:"IsTruncated"`
+			NextContinuationToken string `xml:"NextContinuationToken"`
+		}
+		if err := s.bucketGet(ctx, bucket, query, &out); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				return keys, nil
+			}
+			return nil, err
+		}
+		for _, c := range out.Contents {
+			keys = append(keys, c.Key)
+		}
+		if !out.IsTruncated || out.NextContinuationToken == "" {
+			return keys, nil
+		}
+		query.Set("continuation-token", out.NextContinuationToken)
+	}
+	return nil, fmt.Errorf("blob: list %s/%s: %w", bucket, prefix, ErrListTruncated)
+}
+
+// DeleteAll removes every object below prefix for good (TLC-06, WP-1155):
+// in a versioned bucket a DELETE only adds a delete marker, so it lists the
+// versions (ListObjectVersions, pages of listPage) and deletes each version
+// and each delete marker by its versionId; then it aborts the unfinished
+// multipart uploads below prefix (ListMultipartUploads), whose parts S3
+// keeps until then (a crashed streaming export). It returns how many
+// versions, markers and uploads it removed; a missing bucket deletes
+// nothing. A listing still truncated after maxListPages pages is
+// ErrListTruncated with the count so far.
+func (s *S3Store) DeleteAll(ctx context.Context, bucket, prefix string) (int, error) {
+	if err := checkListPrefix(bucket, prefix); err != nil {
+		return 0, err
+	}
+	deleted, err := s.deleteVersions(ctx, bucket, prefix)
+	if err != nil {
+		return deleted, err
+	}
+	aborted, err := s.abortUploadsBelow(ctx, bucket, prefix)
+	return deleted + aborted, err
+}
+
+// deleteVersions deletes every version and delete marker below prefix.
+func (s *S3Store) deleteVersions(ctx context.Context, bucket, prefix string) (int, error) {
+	deleted := 0
+	query := url.Values{"versions": {""}, "prefix": {prefix}, "max-keys": {strconv.Itoa(listPage)}}
+	for range maxListPages {
+		type entry struct {
+			Key       string `xml:"Key"`
+			VersionID string `xml:"VersionId"`
+		}
+		var out struct {
+			Versions            []entry `xml:"Version"`
+			DeleteMarkers       []entry `xml:"DeleteMarker"`
+			IsTruncated         bool    `xml:"IsTruncated"`
+			NextKeyMarker       string  `xml:"NextKeyMarker"`
+			NextVersionIDMarker string  `xml:"NextVersionIdMarker"`
+		}
+		if err := s.bucketGet(ctx, bucket, query, &out); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				return deleted, nil
+			}
+			return deleted, err
+		}
+		for _, e := range append(out.Versions, out.DeleteMarkers...) {
+			if !strings.HasPrefix(e.Key, prefix) {
+				continue
+			}
+			version := e.VersionID
+			if version == "" {
+				version = "null"
+			}
+			resp, err := s.queryRequest(ctx, http.MethodDelete, bucket, e.Key, url.Values{"versionId": {version}}, nil, "")
+			if err != nil {
+				if errors.Is(err, ErrNotFound) {
+					continue
+				}
+				return deleted, fmt.Errorf("blob: delete %s version %s: %w", e.Key, version, err)
+			}
+			_ = resp.Body.Close()
+			deleted++
+		}
+		if !out.IsTruncated || out.NextKeyMarker == "" {
+			return deleted, nil
+		}
+		query.Set("key-marker", out.NextKeyMarker)
+		query.Set("version-id-marker", out.NextVersionIDMarker)
+	}
+	return deleted, fmt.Errorf("blob: delete %s/%s: %w", bucket, prefix, ErrListTruncated)
+}
+
+// abortUploadsBelow aborts every unfinished multipart upload below prefix
+// (ListMultipartUploads, pages with key and upload id markers).
+func (s *S3Store) abortUploadsBelow(ctx context.Context, bucket, prefix string) (int, error) {
+	aborted := 0
+	query := url.Values{"uploads": {""}, "prefix": {prefix}, "max-uploads": {strconv.Itoa(listPage)}}
+	for range maxListPages {
+		var out struct {
+			Uploads []struct {
+				Key      string `xml:"Key"`
+				UploadID string `xml:"UploadId"`
+			} `xml:"Upload"`
+			IsTruncated        bool   `xml:"IsTruncated"`
+			NextKeyMarker      string `xml:"NextKeyMarker"`
+			NextUploadIDMarker string `xml:"NextUploadIdMarker"`
+		}
+		if err := s.bucketGet(ctx, bucket, query, &out); err != nil {
+			if errors.Is(err, ErrNotFound) {
+				return aborted, nil
+			}
+			return aborted, err
+		}
+		for _, u := range out.Uploads {
+			if !strings.HasPrefix(u.Key, prefix) || u.UploadID == "" {
+				continue
+			}
+			if err := s.abortMultipart(ctx, bucket, u.Key, u.UploadID); err != nil {
+				if errors.Is(err, ErrNotFound) {
+					continue
+				}
+				return aborted, fmt.Errorf("blob: abort upload of %s: %w", u.Key, err)
+			}
+			aborted++
+		}
+		if !out.IsTruncated || out.NextKeyMarker == "" {
+			return aborted, nil
+		}
+		query.Set("key-marker", out.NextKeyMarker)
+		query.Set("upload-id-marker", out.NextUploadIDMarker)
+	}
+	return aborted, fmt.Errorf("blob: abort the uploads below %s/%s: %w", bucket, prefix, ErrListTruncated)
+}
+
+// checkListPrefix refuses an empty bucket and a prefix that is not a
+// directory of keys (a non-empty prefix ending in /, without empty, . or
+// .. segments): DeleteAll never removes a whole bucket.
+func checkListPrefix(bucket, prefix string) error {
+	if strings.TrimSpace(bucket) == "" {
+		return fmt.Errorf("blob: bucket is required")
+	}
+	if !strings.HasSuffix(prefix, "/") || len(prefix) < 2 {
+		return fmt.Errorf("blob: prefix %q must name a directory of keys", prefix)
+	}
+	for _, segment := range strings.Split(strings.TrimSuffix(prefix, "/"), "/") {
+		if segment == "" || segment == "." || segment == ".." || strings.Contains(segment, "\\") {
+			return fmt.Errorf("blob: invalid prefix %q", prefix)
+		}
+	}
+	return nil
+}
+
+// List returns the keys of the files below prefix, sorted.
+func (s *FileStore) List(_ context.Context, bucket, prefix string) ([]string, error) {
+	if err := checkListPrefix(bucket, prefix); err != nil {
+		return nil, err
+	}
+	dir, err := s.objectPath(bucket, strings.TrimSuffix(prefix, "/"))
+	if err != nil {
+		return nil, err
+	}
+	root := filepath.Join(filepath.Clean(s.baseDir), filepath.FromSlash(bucket))
+	keys := []string{}
+	err = filepath.WalkDir(dir, func(path string, d os.DirEntry, werr error) error {
+		if werr != nil {
+			if errors.Is(werr, os.ErrNotExist) {
+				return filepath.SkipDir
+			}
+			return werr
+		}
+		if d.IsDir() {
+			return nil
+		}
+		rel, rerr := filepath.Rel(root, path)
+		if rerr != nil {
+			return rerr
+		}
+		keys = append(keys, filepath.ToSlash(rel))
+		return nil
+	})
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("blob: list %q: %w", prefix, err)
+	}
+	sort.Strings(keys)
+	return keys, nil
+}
+
+// DeleteAll removes the directory of prefix with every file below it and
+// returns the number of files (the file store keeps no versions).
+func (s *FileStore) DeleteAll(ctx context.Context, bucket, prefix string) (int, error) {
+	keys, err := s.List(ctx, bucket, prefix)
+	if err != nil {
+		return 0, err
+	}
+	dir, err := s.objectPath(bucket, strings.TrimSuffix(prefix, "/"))
+	if err != nil {
+		return 0, err
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		return 0, fmt.Errorf("blob: delete %q: %w", prefix, err)
+	}
+	return len(keys), nil
+}
+
+// AbortUploads implements UploadAborter: ListMultipartUploads with the key
+// as prefix, then AbortMultipartUpload for every upload of exactly that key.
+func (s *S3Store) AbortUploads(ctx context.Context, bucket, key string) error {
+	if strings.TrimSpace(bucket) == "" || strings.TrimSpace(key) == "" {
+		return fmt.Errorf("blob: bucket and key are required")
+	}
+	scheme := "http"
+	if s.useSSL {
+		scheme = "https"
+	}
+	query := url.Values{"uploads": {""}, "prefix": {key}}
+	var errs []error
+	// A key has few unfinished uploads; the pages are followed regardless.
+	for range 100 {
+		listURL := &url.URL{Scheme: scheme, Host: s.endpoint, Path: "/" + bucket, RawQuery: canonicalQueryString(query)}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, listURL.String(), http.NoBody)
+		if err != nil {
+			return fmt.Errorf("blob: create list uploads request: %w", err)
+		}
+		if serr := s.signRequest(req, emptyPayloadSHA256); serr != nil {
+			return serr
+		}
+		resp, err := s.client.Do(req)
+		if err != nil {
+			return fmt.Errorf("blob: list uploads of %s: %w", key, err)
+		}
+		var out struct {
+			Uploads []struct {
+				Key      string `xml:"Key"`
+				UploadID string `xml:"UploadId"`
+			} `xml:"Upload"`
+			IsTruncated        bool   `xml:"IsTruncated"`
+			NextKeyMarker      string `xml:"NextKeyMarker"`
+			NextUploadIDMarker string `xml:"NextUploadIdMarker"`
+		}
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+			_ = resp.Body.Close()
+			return statusError(http.MethodGet, listURL.Path, resp, strings.TrimSpace(string(body)))
+		}
+		derr := xml.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&out)
+		_ = resp.Body.Close()
+		if derr != nil {
+			return fmt.Errorf("blob: list uploads of %s: %w", key, derr)
+		}
+		for _, u := range out.Uploads {
+			if u.Key != key || u.UploadID == "" {
+				continue
+			}
+			if aerr := s.abortMultipart(ctx, bucket, key, u.UploadID); aerr != nil && !errors.Is(aerr, ErrNotFound) {
+				errs = append(errs, aerr)
+			}
+		}
+		if !out.IsTruncated || out.NextKeyMarker == "" {
+			return errors.Join(errs...)
+		}
+		query.Set("key-marker", out.NextKeyMarker)
+		query.Set("upload-id-marker", out.NextUploadIDMarker)
+	}
+	return errors.Join(errs...)
+}
+
+// queryRequest sends a signed request to the object with the query.
+func (s *S3Store) queryRequest(ctx context.Context, method, bucket, key string, query url.Values, body []byte, contentType string) (*http.Response, error) {
+	objectURL, err := s.objectURL(bucket, key)
+	if err != nil {
+		return nil, err
+	}
+	objectURL.RawQuery = canonicalQueryString(query)
+	if body == nil {
+		body = []byte{}
+	}
+	req, err := http.NewRequestWithContext(ctx, method, objectURL.String(), bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("blob: create %s request: %w", method, err)
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
+	if serr := s.signRequest(req, payloadSHA256(body)); serr != nil {
+		return nil, serr
+	}
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("blob: %s %s: %w", method, objectURL.Path, err)
+	}
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		return resp, nil
+	}
+	defer resp.Body.Close()
+	bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+	return nil, statusError(method, objectURL.Path, resp, strings.TrimSpace(string(bodyBytes)))
+}
+
+// createMultipart starts a multipart upload and returns its upload id.
+func (s *S3Store) createMultipart(ctx context.Context, bucket, key, contentType string) (string, error) {
+	resp, err := s.queryRequest(ctx, http.MethodPost, bucket, key, url.Values{"uploads": {""}}, nil, contentType)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	var out struct {
+		UploadID string `xml:"UploadId"`
+	}
+	if err := xml.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil || out.UploadID == "" {
+		return "", fmt.Errorf("blob: start multipart upload of %s: no upload id", key)
+	}
+	return out.UploadID, nil
+}
+
+// uploadPart sends one part and returns its ETag.
+func (s *S3Store) uploadPart(ctx context.Context, bucket, key, uploadID string, part int, data []byte) (string, error) {
+	resp, err := s.queryRequest(ctx, http.MethodPut, bucket, key,
+		url.Values{"partNumber": {strconv.Itoa(part)}, "uploadId": {uploadID}}, data, "")
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	etag := resp.Header.Get("ETag")
+	if etag == "" {
+		return "", fmt.Errorf("blob: part %d of %s has no ETag", part, key)
+	}
+	return etag, nil
+}
+
+// completeMultipart joins the parts into the object.
+func (s *S3Store) completeMultipart(ctx context.Context, bucket, key, uploadID string, etags []string) error {
+	type part struct {
+		PartNumber int    `xml:"PartNumber"`
+		ETag       string `xml:"ETag"`
+	}
+	body := struct {
+		XMLName xml.Name `xml:"CompleteMultipartUpload"`
+		Parts   []part   `xml:"Part"`
+	}{}
+	for i, etag := range etags {
+		body.Parts = append(body.Parts, part{PartNumber: i + 1, ETag: etag})
+	}
+	raw, err := xml.Marshal(body)
+	if err != nil {
+		return err
+	}
+	resp, err := s.queryRequest(ctx, http.MethodPost, bucket, key, url.Values{"uploadId": {uploadID}}, raw, "application/xml")
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	// S3 may answer 200 with an error document when the join fails late.
+	payload, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if bytes.Contains(payload, []byte("<Error>")) {
+		return fmt.Errorf("blob: complete multipart upload of %s failed", key)
+	}
+	return nil
+}
+
+// abortMultipart removes an unfinished upload with its parts.
+func (s *S3Store) abortMultipart(ctx context.Context, bucket, key, uploadID string) error {
+	resp, err := s.queryRequest(ctx, http.MethodDelete, bucket, key, url.Values{"uploadId": {uploadID}}, nil, "")
+	if err != nil {
+		return fmt.Errorf("blob: abort multipart upload of %s: %w", key, err)
+	}
+	return resp.Body.Close()
 }

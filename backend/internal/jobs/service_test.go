@@ -143,6 +143,35 @@ func TestJobRetryTimeoutAndCancel(t *testing.T) {
 	}
 }
 
+// TestKindFailedHookOnFinalFailure: Kind.Failed is called once, when the
+// job fails for good, not for an attempt that goes back to the queue
+// (WP-1088: the workflow run of a lost last attempt is closed).
+func TestKindFailedHookOnFinalFailure(t *testing.T) {
+	s, _ := newService()
+	ctx := context.Background()
+	var calls []*Job
+	s.Register(Kind{Name: "hooked", MaxAttempts: 2, Timeout: time.Minute, Backoff: func(int) time.Duration { return 0 },
+		Failed: func(_ context.Context, job *Job) { calls = append(calls, job) }})
+	job, _, err := s.Enqueue(ctx, "org-1", "hooked", nil, EnqueueOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for attempt := 1; attempt <= 2; attempt++ {
+		if _, err = s.Claim(ctx, "org-1", "hooked"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = s.Fail(ctx, "org-1", job.ID, errors.New("worker lost")); err != nil {
+			t.Fatal(err)
+		}
+		if attempt == 1 && len(calls) != 0 {
+			t.Fatalf("hook called for a retried attempt: %+v", calls)
+		}
+	}
+	if len(calls) != 1 || calls[0].ID != job.ID || calls[0].Status != StatusFailed || calls[0].Attempts != 2 {
+		t.Fatalf("hook calls: %+v, want one with the failed job", calls)
+	}
+}
+
 // TestTrackerMirrorsSpecialisedJobs: an export or discovery row registers a
 // generic job and the generic job follows the row's status (adapter).
 func TestTrackerMirrorsSpecialisedJobs(t *testing.T) {
