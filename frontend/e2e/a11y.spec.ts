@@ -1297,7 +1297,12 @@ const ROUTES: A11yRoute[] = [
   { path: '/alarms', url: '/alarms', ready: text(M.alarm) },
   { path: '/incidents', url: '/incidents', ready: text(M.incident) },
   { path: '/audit', url: '/audit', ready: text(M.audit) },
-  { path: '/security', url: '/security', ready: text(M.compliance) },
+  // The JSON preview of the report is a collapsed section since WP-1135.
+  {
+    path: '/security',
+    url: '/security',
+    ready: (page: Page) => page.getByTestId('report-preview'),
+  },
   // Unknown paths fall back to the CI list.
   { path: '*', url: '/a11y-unknown-route', ready: text(M.ci) },
 ];

@@ -1890,7 +1890,72 @@
     },
     "severity": "Schweregrad",
     "ci": "CI",
-    "details": "Details"
+    "details": "Details",
+    "standards": {
+      "iso27001": "ISO 27001",
+      "nis2": "NIS2",
+      "kritis": "KRITIS"
+    },
+    "editor": {
+      "create": "Neue Regel",
+      "createTitle": "Compliance-Regel anlegen",
+      "editTitle": "Compliance-Regel bearbeiten",
+      "viewTitle": "Compliance-Regel ansehen",
+      "description": "Bedingung nach MET-45 über die Eingaben eines CIs, Geltungsbereich und zugeordnete Kontrollen.",
+      "ciType": "CI-Typ",
+      "everyType": "Alle CI-Typen",
+      "active": "Aktiv",
+      "activeYes": "Ja",
+      "activeNo": "Nein",
+      "applies_when": "Gilt wenn (applies_when)",
+      "applies_whenHint": "Optional: Trifft die Bedingung nicht zu, ist das Ergebnis „nicht anwendbar“.",
+      "expression": "Bedingung",
+      "expressionHint": "Trifft die Bedingung zu, ist die Regel bestanden; sonst nicht bestanden.",
+      "expressionRequired": "Die Regel braucht eine Bedingung.",
+      "nameRequired": "Der Name ist erforderlich.",
+      "controls": "Kontrollen",
+      "close": "Schließen",
+      "view": "Ansehen",
+      "editRule": "Regel {{name}} bearbeiten",
+      "viewRule": "Regel {{name}} ansehen"
+    },
+    "templates": {
+      "open": "Aus Vorlage anlegen",
+      "title": "Regelvorlagen",
+      "description": "Die gewählte Vorlage wird als inaktive Regel angelegt; danach öffnet sich der Editor.",
+      "use": "Anlegen",
+      "useNamed": "Vorlage {{name}} anlegen"
+    },
+    "groups": {
+      "title": "Score nach Gruppen",
+      "groupBy": "Gruppieren nach",
+      "empty": "Noch keine Ergebnisse.",
+      "none": "Ohne Zuordnung",
+      "by": {
+        "ci_type": "CI-Typ",
+        "client": "Client",
+        "site": "Standort",
+        "category": "Kategorie",
+        "severity": "Schweregrad"
+      }
+    },
+    "trend": {
+      "title": "Verlauf",
+      "period": "Zeitraum",
+      "days": "{{count}} Tage",
+      "day": "Tag",
+      "table": "Score der letzten {{count}} Tage",
+      "empty": "Für diesen Zeitraum liegen keine Werte vor.",
+      "caption": "Vom {{first}} bis {{last}}, zuletzt {{score}} %"
+    },
+    "coverage": {
+      "title": "Abdeckung der Kontrollen",
+      "gaps": "{{count}} Kontrollen ohne aktive Regel"
+    },
+    "job": {
+      "queued": "Bewertung eingereiht …",
+      "status": "Bewertung: {{status}} ({{progress}} %)"
+    }
   },
   "iga": {
     "loading": "Identity Governance wird geladen",
@@ -2301,7 +2366,26 @@
     "rotateKeys": "Schlüssel jetzt rotieren",
     "keyRotationResult": "Rotation abgeschlossen: Schlüsselversion {{version}}, {{rotated}} Credentials neu verschlüsselt.",
     "keyRotationError": "Die Schlüsselrotation ist fehlgeschlagen",
-    "rule": "Regel"
+    "rule": "Regel",
+    "reports": {
+      "title": "Reports",
+      "create": "Report erzeugen",
+      "scope": "Umfang",
+      "organization": "Organisation",
+      "format": "Format",
+      "empty": "Noch keine Reports.",
+      "download": "Herunterladen",
+      "downloadNamed": "Report {{name}} herunterladen",
+      "jobQueued": "Report eingereiht …",
+      "jobStatus": "Report: {{status}} ({{progress}} %)",
+      "ready": "Der Report ist fertig.",
+      "preview": "Vorschau (JSON-Report)",
+      "created": "Erstellt",
+      "file": "Datei",
+      "scan": "Prüfung",
+      "downloadFailed": "Der Report kann noch nicht heruntergeladen werden.",
+      "scanPending": "Der Report wird auf Schadsoftware geprüft; der Download wird nach erfolgreicher Prüfung freigegeben."
+    }
   },
   "map": {
     "summary": "Standorte auf der Karte. Marker öffnen den Standort.",

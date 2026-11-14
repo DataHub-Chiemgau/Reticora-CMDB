@@ -2620,11 +2620,31 @@ export interface ComplianceRule {
   severity: string;
   category: string;
   expression: JsonRecord;
+  /** MET-45 condition: false is not_applicable; null applies always (WP-1125). */
+  applies_when?: JsonRecord | null;
   remediation_hint?: string;
   active: boolean;
   created_at: string;
   updated_at: string;
 }
+
+/** A rule with the controls assigned to it (GET /compliance/rules/{id}, WP-1128). */
+export type ComplianceRuleDetail = ComplianceRule & { control_ids: string[] };
+export type ComplianceRuleWrite = components['schemas']['CreateComplianceRuleRequest'];
+export type ComplianceRulePatch = components['schemas']['UpdateComplianceRuleRequest'];
+export type ComplianceControl = components['schemas']['ComplianceControl'];
+export type ComplianceStandard = ComplianceControl['standard'];
+export const COMPLIANCE_STANDARDS: readonly ComplianceStandard[] = ['iso27001', 'nis2', 'kritis'];
+export type ComplianceScoreGroup = components['schemas']['ComplianceScoreGroup'];
+export type ComplianceScoreGroupBy = NonNullable<
+  components['schemas']['ComplianceScoreResponse']['group_by']
+>;
+export type ComplianceScoreHistory = components['schemas']['ComplianceScoreHistory'];
+export type ComplianceRuleTemplate = components['schemas']['ComplianceRuleTemplate'];
+export type ComplianceReportRequest = components['schemas']['ComplianceReportRequest'];
+export type ComplianceReportEntry = components['schemas']['ComplianceReportEntry'];
+/** The job a compliance evaluation or report runs as (POST answers 202). */
+export type ComplianceJob = components['schemas']['Job'];
 
 export interface ComplianceResult {
   id: string;
@@ -2729,11 +2749,76 @@ export const complianceApi = {
   score() {
     return fetchAPI<ComplianceEvaluationResponse>('/compliance/score');
   },
+  /** POST /compliance/evaluations queues the job compliance.evaluate (WP-1126). */
   evaluate() {
-    return fetchAPI<ComplianceEvaluationResponse>('/compliance/evaluations', { method: 'POST' });
+    return fetchAPI<ComplianceJob>('/compliance/evaluations', { method: 'POST' });
   },
   report(standard = 'iso27001') {
     return fetchAPI<SecurityReport>(`/compliance/report?standard=${encodeURIComponent(standard)}`);
+  },
+  rule(id: string) {
+    return fetchAPI<ComplianceRuleDetail>(`/compliance/rules/${id}`);
+  },
+  createRule(data: ComplianceRuleWrite) {
+    return fetchAPI<ComplianceRule>('/compliance/rules', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+  updateRule(id: string, data: ComplianceRulePatch) {
+    return fetchAPI<ComplianceRule>(`/compliance/rules/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+  setRuleControls(id: string, controlIds: string[]) {
+    return fetchAPI<{ rule_id: string; control_ids: string[] }>(
+      `/compliance/rules/${id}/controls`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ control_ids: controlIds }),
+      },
+    );
+  },
+  controls(standard: ComplianceStandard) {
+    return fetchAPI<PaginatedResponse<ComplianceControl>>(
+      `/compliance/controls${buildQuery({ standard })}`,
+    );
+  },
+  /** The controls of a standard without an active rule (WP-1128). */
+  coverage(standard: ComplianceStandard) {
+    return fetchAPI<PaginatedResponse<ComplianceControl>>(
+      `/compliance/controls/coverage${buildQuery({ standard })}`,
+    );
+  },
+  scoreBy(groupBy: ComplianceScoreGroupBy) {
+    return fetchAPI<components['schemas']['ComplianceScoreResponse']>(
+      `/compliance/score${buildQuery({ group_by: groupBy })}`,
+    );
+  },
+  scoreHistory(from: string, to: string) {
+    return fetchAPI<ComplianceScoreHistory>(`/compliance/score/history${buildQuery({ from, to })}`);
+  },
+  templates() {
+    return fetchAPI<{ data: ComplianceRuleTemplate[] }>('/compliance/rule-templates');
+  },
+  instantiate(key: string) {
+    return fetchAPI<ComplianceRuleDetail>(
+      `/compliance/rule-templates/${encodeURIComponent(key)}/instantiate`,
+      { method: 'POST' },
+    );
+  },
+  reports(params: ListParams = {}) {
+    return fetchAPI<PaginatedResponse<ComplianceReportEntry>>(
+      `/compliance/reports${buildQuery(params)}`,
+    );
+  },
+  /** POST /compliance/reports queues the job compliance.report (WP-1129). */
+  createReport(data: ComplianceReportRequest) {
+    return fetchAPI<ComplianceJob>('/compliance/reports', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
   },
 };
 

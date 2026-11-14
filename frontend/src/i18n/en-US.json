@@ -1890,7 +1890,72 @@
     },
     "severity": "Severity",
     "ci": "CI",
-    "details": "Details"
+    "details": "Details",
+    "standards": {
+      "iso27001": "ISO 27001",
+      "nis2": "NIS2",
+      "kritis": "KRITIS"
+    },
+    "editor": {
+      "create": "New rule",
+      "createTitle": "Create compliance rule",
+      "editTitle": "Edit compliance rule",
+      "viewTitle": "View compliance rule",
+      "description": "MET-45 condition over the inputs of a CI, scope and assigned controls.",
+      "ciType": "CI type",
+      "everyType": "All CI types",
+      "active": "Active",
+      "activeYes": "Yes",
+      "activeNo": "No",
+      "applies_when": "Applies when (applies_when)",
+      "applies_whenHint": "Optional: when the condition does not hold, the result is not applicable.",
+      "expression": "Condition",
+      "expressionHint": "When the condition holds, the rule passes; otherwise it fails.",
+      "expressionRequired": "The rule needs a condition.",
+      "nameRequired": "The name is required.",
+      "controls": "Controls",
+      "close": "Close",
+      "view": "View",
+      "editRule": "Edit rule {{name}}",
+      "viewRule": "View rule {{name}}"
+    },
+    "templates": {
+      "open": "Create from template",
+      "title": "Rule templates",
+      "description": "The chosen template is created as an inactive rule; then the editor opens.",
+      "use": "Create",
+      "useNamed": "Create template {{name}}"
+    },
+    "groups": {
+      "title": "Score by group",
+      "groupBy": "Group by",
+      "empty": "No results yet.",
+      "none": "Unassigned",
+      "by": {
+        "ci_type": "CI type",
+        "client": "Client",
+        "site": "Site",
+        "category": "Category",
+        "severity": "Severity"
+      }
+    },
+    "trend": {
+      "title": "Trend",
+      "period": "Period",
+      "days": "{{count}} days",
+      "day": "Day",
+      "table": "Score of the last {{count}} days",
+      "empty": "There are no values for this period.",
+      "caption": "From {{first}} to {{last}}, latest {{score}} %"
+    },
+    "coverage": {
+      "title": "Control coverage",
+      "gaps": "{{count}} controls without an active rule"
+    },
+    "job": {
+      "queued": "Evaluation queued …",
+      "status": "Evaluation: {{status}} ({{progress}} %)"
+    }
   },
   "iga": {
     "loading": "Loading identity governance",
@@ -2301,7 +2366,26 @@
     "rotateKeys": "Rotate keys now",
     "keyRotationResult": "Rotation complete: key version {{version}}, {{rotated}} credentials re-encrypted.",
     "keyRotationError": "Key rotation failed",
-    "rule": "Rule"
+    "rule": "Rule",
+    "reports": {
+      "title": "Reports",
+      "create": "Generate report",
+      "scope": "Scope",
+      "organization": "Organization",
+      "format": "Format",
+      "empty": "No reports yet.",
+      "download": "Download",
+      "downloadNamed": "Download report {{name}}",
+      "jobQueued": "Report queued …",
+      "jobStatus": "Report: {{status}} ({{progress}} %)",
+      "ready": "The report is ready.",
+      "preview": "Preview (JSON report)",
+      "created": "Created",
+      "file": "File",
+      "scan": "Scan",
+      "downloadFailed": "The report cannot be downloaded yet.",
+      "scanPending": "The report is being scanned for malware; the download unlocks once the scan is clean."
+    }
   },
   "map": {
     "summary": "Sites on the map. Markers open the site.",

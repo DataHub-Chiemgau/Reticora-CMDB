@@ -58,6 +58,10 @@ import {
   ApiError,
 } from '../api/client';
 import type {
+  ComplianceReportRequest,
+  ComplianceRuleWrite,
+  ComplianceScoreGroupBy,
+  ComplianceStandard,
   BusinessCalendar,
   CreateBusinessCalendarRequest,
   CreateDisposalRecordRequest,
@@ -1896,14 +1900,136 @@ export function useComplianceScore() {
   return useQuery({ queryKey: ['compliance-score'], queryFn: () => complianceApi.score() });
 }
 
+/**
+ * useEvaluateCompliance starts the evaluation job (WP-1126); the page
+ * follows the job and reloads score and results once it ended
+ * (useInvalidateCompliance).
+ */
 export function useEvaluateCompliance() {
+  return useMutation({ mutationFn: () => complianceApi.evaluate() });
+}
+
+/** useInvalidateCompliance reloads rules, results, score and coverage. */
+export function useInvalidateCompliance() {
   const queryClient = useQueryClient();
+  return () => {
+    for (const key of [
+      'compliance-rules',
+      'compliance-results',
+      'compliance-score',
+      'compliance-controls',
+      'compliance-coverage',
+    ]) {
+      void queryClient.invalidateQueries({ queryKey: [key] });
+    }
+  };
+}
+
+export function useComplianceRule(id: string | undefined) {
+  return useQuery({
+    queryKey: ['compliance-rules', 'detail', id],
+    queryFn: () => complianceApi.rule(id as string),
+    enabled: !!id,
+  });
+}
+
+/** useSaveComplianceRule creates or patches a rule and replaces its controls (WP-1135 AK1). */
+export function useSaveComplianceRule() {
+  const invalidate = useInvalidateCompliance();
   return useMutation({
-    mutationFn: () => complianceApi.evaluate(),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['compliance-results'] });
-      queryClient.invalidateQueries({ queryKey: ['compliance-score'] });
+    mutationFn: async ({
+      id,
+      rule,
+      controlIds,
+    }: {
+      id?: string;
+      rule: ComplianceRuleWrite & { active?: boolean };
+      controlIds: string[];
+    }) => {
+      const saved = id
+        ? await complianceApi.updateRule(id, rule)
+        : await complianceApi.createRule(rule);
+      if (!id && rule.active === false && saved.active) {
+        // POST creates active rules; the switch is a PATCH.
+        await complianceApi.updateRule(saved.id, { active: false });
+      }
+      await complianceApi.setRuleControls(saved.id, controlIds);
+      return saved;
     },
+    onSuccess: invalidate,
+  });
+}
+
+export function useComplianceControls(standard: ComplianceStandard) {
+  return useQuery({
+    queryKey: ['compliance-controls', standard],
+    queryFn: () => complianceApi.controls(standard),
+  });
+}
+
+export function useComplianceCoverage(standard: ComplianceStandard) {
+  return useQuery({
+    queryKey: ['compliance-coverage', standard],
+    queryFn: () => complianceApi.coverage(standard),
+  });
+}
+
+export function useComplianceScoreBy(groupBy: ComplianceScoreGroupBy) {
+  return useQuery({
+    queryKey: ['compliance-score', 'group', groupBy],
+    queryFn: () => complianceApi.scoreBy(groupBy),
+  });
+}
+
+/** useComplianceScoreHistory reads the daily score of the last days (up to 400). */
+export function useComplianceScoreHistory(days: number) {
+  return useQuery({
+    queryKey: ['compliance-score', 'history', days],
+    queryFn: () => {
+      const to = new Date();
+      const from = new Date(to.getTime() - (days - 1) * 86_400_000);
+      const day = (d: Date) => d.toISOString().slice(0, 10);
+      return complianceApi.scoreHistory(day(from), day(to));
+    },
+  });
+}
+
+export function useComplianceRuleTemplates(enabled = true) {
+  return useQuery({
+    queryKey: ['compliance-rule-templates'],
+    queryFn: () => complianceApi.templates(),
+    enabled,
+  });
+}
+
+export function useInstantiateComplianceTemplate() {
+  const invalidate = useInvalidateCompliance();
+  return useMutation({
+    mutationFn: (key: string) => complianceApi.instantiate(key),
+    onSuccess: invalidate,
+  });
+}
+
+export function useComplianceReports(enabled = true) {
+  return useQuery({
+    queryKey: ['compliance-reports'],
+    queryFn: () => complianceApi.reports({ limit: 50 }),
+    enabled,
+    // A report whose malware scan is pending is reloaded until the scan
+    // ends, so its download unlocks without a reload of the page.
+    refetchInterval: (query: { state: { data?: { data: { scan_status: string }[] } } }) =>
+      query.state.data?.data.some((r) => r.scan_status === 'pending_scan')
+        ? REPORT_SCAN_POLL_MS
+        : false,
+  });
+}
+
+/** How often the report list is reloaded while a scan is pending. */
+export const REPORT_SCAN_POLL_MS = 5000;
+
+export function useCreateComplianceReport() {
+  return useMutation({
+    mutationFn: (data: ComplianceReportRequest) => complianceApi.createReport(data),
   });
 }
 

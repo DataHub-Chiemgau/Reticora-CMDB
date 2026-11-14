@@ -1969,3 +1969,6 @@ WFL-02;[P3];F;backend/internal/workflow/form_step_integration_test.go;WP-1102
 WFL-04;[P3], delegierte Inventur [P4], IGA [A];F;backend/internal/workflow/order_approval_integration_test.go;WP-1108
 WFL-04;[P3], delegierte Inventur [P4], IGA [A];F;backend/internal/workflow/maintenance_notify_integration_test.go;WP-1109
 MGT-04;[P3];F;backend/internal/workflow/maintenance_notify_integration_test.go;WP-1109
+SEC-03;[P3];F;frontend/src/pages/CompliancePage.test.tsx;WP-1135
+SEC-04;[P3], Rechte-Doku AD/Entra [A];F;frontend/src/pages/SecurityPage.test.tsx;WP-1135
+SEC-04;[P3], Rechte-Doku AD/Entra [A];F;frontend/e2e/compliance.spec.ts;WP-1135
