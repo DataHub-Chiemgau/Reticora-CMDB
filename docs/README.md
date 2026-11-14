@@ -1209,6 +1209,27 @@ pending/fired state is persisted on `alert_rule` (migration 0037), so
 restarts neither re-notify nor lose ongoing durations. Fired alerts are
 logged as structured warnings via the default notifier.
 
+**Notification categories (NTF-05 [P3], WP-1147):** users subscribe to
+notification categories through `PUT /api/v1/notifications/preferences`
+(`subscriptions`, `muted_categories`, `digest`); every category is subscribed
+by default, also for the users of a new organization. The [P3] groups are
+`alarm` (`alarm.*`, `incident.*` and `sla.violated`), `config`
+(`ci.config_changed`, part of the Alerts), `maintenance`
+(`maintenance.scheduled`) and `workflow` (`workflow.run_failed` and the action
+`send_notification`). `workflow.run_failed` reaches the initiator of the run
+and the org_admins with `workflow:read` in its client and site, with the
+definition, the failed step and its error (URLs masked); `sla.violated` the
+contacts of the CI in the roles operations and escalation and the users with
+`monitoring:read` in its scope; `ci.config_changed` only the operations
+contacts of the CI and the users with `monitoring:read` who may read it, with
+the number of changed lines and a link to the diff, never configuration
+content. Approval requests (WP-1098) and escalation steps (WP-1145) are sent
+directly; `escalation` is no subscribable category. Critical alarms: an
+alarm or incident of severity `critical` is never part of a digest and
+reaches the user also with `alarm` muted and during quiet hours, so the
+opt-out of `alarm` applies to non-critical alarms only. A stored earlier
+category name (`maintenance_window`) reads as `maintenance`.
+
 **AI/RAG governance:** `/api/v1/ai/conversations` and `/api/v1/ai/ask` are
 gated by the `ai` add-on entitlement (CH14). If no
 OpenAI-compatible provider is configured, the handler returns HTTP 503 with a

@@ -484,6 +484,7 @@ func (s *PGPreferences) Preference(ctx context.Context, orgID, userID string) (*
 		if start != nil {
 			p.QuietStart, p.QuietEnd = *start, *end
 		}
+		p.renameCategories()
 		out = &p
 		return nil
 	})

@@ -48,6 +48,13 @@ type alarmEnv struct {
 
 func newAlarmEnv(t *testing.T, prefix string) *alarmEnv {
 	t.Helper()
+	return newAlarmEnvWith(t, prefix, false)
+}
+
+// newAlarmEnvWith is newAlarmEnv whose notifier bundles digests when
+// digest is set (WP-1147).
+func newAlarmEnvWith(t *testing.T, prefix string, digest bool) *alarmEnv {
+	t.Helper()
 	f := scopetest.Seed(t, prefix)
 	bg := context.Background()
 	exec := func(sql string, args ...any) {
@@ -114,6 +121,9 @@ func newAlarmEnv(t *testing.T, prefix string) *alarmEnv {
 	e.notifier = notify.NewNotifier(center.Channels, center.Deliveries, center.Preferences, notify.NewSender(map[string]notify.Provider{
 		notify.ProviderCentralSMTP: e.mail, notify.ProviderInApp: notify.NewInAppProvider(center.Inbox),
 	})).WithClock(func() time.Time { return e.now })
+	if digest {
+		e.notifier = e.notifier.WithDigest(notify.NewPGDigestStore(f.App))
+	}
 	consumer := notify.NewEventConsumer(notify.NewPGResolver(f.App, permission.NewPGRepository(f.App)), e.notifier).
 		WithLinkBase("https://cmdb.example/invitations/accept")
 	e.publisher = events.NewPublisher(f.App, nil, consumer)

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
+	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -13,6 +15,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/platform/egress"
+	"gopkg.in/yaml.v3"
 )
 
 // templateData is a payload of each notification event that fills every
@@ -63,6 +66,13 @@ var templateData = map[string]map[string]any{
 	events.IncidentOpened: {"id": "i-1", "root_ci_id": "ci-1", "ci_name": "core-sw-1", "severity": "critical",
 		"cause_class": "network"},
 	events.IncidentResolved: {"id": "i-1", "root_ci_id": "ci-1", "ci_name": "core-sw-1", "severity": "critical"},
+	events.WorkflowRunFailed: {"id": "r-1", "run_id": "r-1", "workflow_id": "w-1", "workflow_name": "Nachtlauf",
+		"failed_step": "2 (send_webhook)", "error": "POST https://hooks.example/T0/secret-token: status 500",
+		"initiated_by": "u-1", "link": "https://cmdb.example/workflows/runs/r-1"},
+	events.SLAViolated: {"id": "sla-1", "name": "Core-Netz", "client_id": "c-1", "period": "2026-10",
+		"target_percent": float64(99.9), "actual_percent": float64(99.512), "link": "https://cmdb.example/slas?tab=availability&target_id=sla-1"},
+	events.CIConfigChanged: {"id": "v-1", "ci_id": "ci-1", "ci_name": "core-sw-1", "hash": "9f2c4e7a", "changed_lines": float64(14),
+		"collected_at": "2026-11-09T10:00:00Z", "link": "https://cmdb.example/cmdb/ci-1?config=v-1&against=v-0"},
 }
 
 // TestAlarmTemplates covers the subscriptions and texts of the alarms and
@@ -684,5 +694,185 @@ func TestWorkflowNotificationTemplateLocales(t *testing.T) {
 	}
 	if !slices.Contains(DirectTemplates, WorkflowNotification) {
 		t.Errorf("direct templates %v, want %s", DirectTemplates, WorkflowNotification)
+	}
+}
+
+// TestP3CategoriesComplete covers NTF-05 [P3] (WP-1147 AK1, AK4): the
+// categories of the [P3] groups are known, escalation is none; every
+// subscribed [P3] event has its subscription in the named category with
+// templates in de-DE and en-US, every direct one names its work package
+// and has no subscription.
+func TestP3CategoriesComplete(t *testing.T) {
+	categories := Categories()
+	for _, c := range []string{CategoryAlarm, CategoryConfig, CategoryMaintenance, CategoryWorkflow} {
+		if !slices.Contains(categories, c) {
+			t.Errorf("Categories() %v lacks %s", categories, c)
+		}
+	}
+	if slices.Contains(categories, "escalation") {
+		t.Errorf("Categories() %v names escalation", categories)
+	}
+	want := []string{events.AlarmOpened, events.AlarmResolved, events.IncidentOpened, events.IncidentResolved,
+		events.MaintenanceScheduled, events.WorkflowRunFailed, events.SLAViolated, events.CIConfigChanged}
+	listed := map[string]P3Event{}
+	for _, e := range NTF05P3Events {
+		listed[e.Type] = e
+	}
+	for _, typ := range want {
+		e, ok := listed[typ]
+		if !ok || e.Direct != "" {
+			t.Errorf("%s: not listed as a subscribed [P3] event: %+v", typ, e)
+			continue
+		}
+		sub, ok := Subscriptions[typ]
+		if !ok || sub.Category != e.Category {
+			t.Errorf("%s: subscription %+v, want category %s", typ, sub, e.Category)
+		}
+		for _, locale := range []string{LocaleDE, LocaleEN} {
+			if _, ok := Templates[typ][locale]; !ok {
+				t.Errorf("%s: no %s template", typ, locale)
+			}
+		}
+	}
+	for _, e := range NTF05P3Events {
+		if e.Direct == "" {
+			if !slices.Contains(want, e.Type) {
+				t.Errorf("%s listed as subscribed, not a [P3] event of NTF-05", e.Type)
+			}
+			continue
+		}
+		if !strings.HasPrefix(e.Direct, "WP-") {
+			t.Errorf("%s: direct without its work package: %q", e.Type, e.Direct)
+		}
+		if _, ok := Subscriptions[e.Type]; ok {
+			t.Errorf("%s: sent directly (%s) but subscribed as well", e.Type, e.Direct)
+		}
+		if e.Category != "" && !slices.Contains(categories, e.Category) {
+			t.Errorf("%s: category %q is unknown", e.Type, e.Category)
+		}
+	}
+	for _, direct := range []string{events.WorkflowApprovalRequested, WorkflowNotification, events.NotificationEscalated} {
+		if listed[direct].Direct == "" {
+			t.Errorf("%s: not listed as a direct [P3] case", direct)
+		}
+	}
+}
+
+// TestOpenAPISubscriptionCategoriesMatch covers WP-1147 AK5: the keys of
+// subscriptions in api/openapi.yaml are Categories(), those of digest
+// DigestCategories(); the descriptions name the rule of critical alarms.
+func TestOpenAPISubscriptionCategoriesMatch(t *testing.T) {
+	raw, err := os.ReadFile("../../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type keyed struct {
+		Description   string `yaml:"description"`
+		PropertyNames struct {
+			Enum []string `yaml:"enum"`
+		} `yaml:"propertyNames"`
+	}
+	var spec struct {
+		Components struct {
+			Schemas struct {
+				NotificationPreference struct {
+					Properties struct {
+						Muted struct {
+							Description string `yaml:"description"`
+						} `yaml:"muted_categories"`
+						Subscriptions keyed `yaml:"subscriptions"`
+						Digest        keyed `yaml:"digest"`
+					} `yaml:"properties"`
+				} `yaml:"NotificationPreference"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err = yaml.Unmarshal(raw, &spec); err != nil {
+		t.Fatal(err)
+	}
+	props := spec.Components.Schemas.NotificationPreference.Properties
+	sorted := func(v []string) []string { v = slices.Clone(v); slices.Sort(v); return v }
+	if got, want := sorted(props.Subscriptions.PropertyNames.Enum), Categories(); !slices.Equal(got, want) {
+		t.Errorf("subscriptions propertyNames %v, want Categories() %v", got, want)
+	}
+	if got, want := sorted(props.Digest.PropertyNames.Enum), DigestCategories(); !slices.Equal(got, want) {
+		t.Errorf("digest propertyNames %v, want DigestCategories() %v", got, want)
+	}
+	for _, c := range []string{CategoryAlarm, CategoryConfig, CategoryMaintenance, CategoryWorkflow} {
+		if !slices.Contains(props.Digest.PropertyNames.Enum, c) {
+			t.Errorf("digest propertyNames lack %s", c)
+		}
+	}
+	for name, desc := range map[string]string{"muted_categories": props.Muted.Description,
+		"subscriptions": props.Subscriptions.Description, "digest": props.Digest.Description} {
+		if !strings.Contains(desc, "critical") || !strings.Contains(desc, "alarm") {
+			t.Errorf("%s: description does not name the rule of critical alarms: %q", name, desc)
+		}
+	}
+}
+
+// TestConfigChangedTemplateHasNoConfigContent covers WP-1147 AK2: the text
+// of ci.config_changed names CI, time, the number of changed lines and the
+// link to the diff, never the configuration (lines, hash) of the event.
+func TestConfigChangedTemplateHasNoConfigContent(t *testing.T) {
+	data := maps.Clone(templateData[events.CIConfigChanged])
+	data["config"] = "hostname core-sw-1\nsnmp-server community s3cret"
+	data["diff"] = "+snmp-server community s3cret"
+	for _, locale := range []string{LocaleDE, LocaleEN} {
+		text := Render(events.CIConfigChanged, locale, data)
+		all := text.Subject + "\n" + text.Body
+		for _, w := range []string{"core-sw-1", "2026-11-09T10:00:00Z", "14", "https://cmdb.example/cmdb/ci-1?config=v-1&against=v-0"} {
+			if !strings.Contains(all, w) {
+				t.Errorf("%s: %q lacks %q", locale, all, w)
+			}
+		}
+		for _, w := range []string{"s3cret", "snmp-server", "9f2c4e7a"} {
+			if strings.Contains(all, w) {
+				t.Errorf("%s: %q names configuration content %q", locale, all, w)
+			}
+		}
+	}
+	sub := Subscriptions[events.CIConfigChanged]
+	want := Audience{Permission: identity.PermMonitoringRead, AllWithPermission: true, ClientID: "c-1", SiteID: "s-1",
+		CIID: "ci-1", ContactRoles: []string{"operations"}}
+	if a := sub.Audience(map[string]any{"id": "v-1", "ci_id": "ci-1", "client_id": "c-1", "site_id": "s-1"}); a == nil ||
+		!reflect.DeepEqual(*a, want) {
+		t.Errorf("audience %+v, want %+v", a, want)
+	}
+	if sub.Category != CategoryConfig || sub.Critical || sub.CriticalIf != nil {
+		t.Errorf("subscription %+v, want the non-critical category config", sub)
+	}
+}
+
+// TestWorkflowRunFailedMasksURLs covers WP-1147 AK2: the text of
+// workflow.run_failed names definition, failed step, the error with every
+// URL masked to scheme and host, and the link; the audience is the
+// initiator and the org_admins with workflow:read in the run's scope.
+func TestWorkflowRunFailedMasksURLs(t *testing.T) {
+	data := templateData[events.WorkflowRunFailed]
+	for _, locale := range []string{LocaleDE, LocaleEN} {
+		text := Render(events.WorkflowRunFailed, locale, data)
+		if strings.Contains(text.Body, "secret-token") || strings.Contains(text.Body, "/T0/") {
+			t.Errorf("%s: the error names the path of the URL: %q", locale, text.Body)
+		}
+		for _, w := range []string{"Nachtlauf", "2 (send_webhook)", "https://hooks.example/********", "status 500",
+			"https://cmdb.example/workflows/runs/r-1"} {
+			if !strings.Contains(text.Subject+text.Body, w) {
+				t.Errorf("%s: %q lacks %q", locale, text.Body, w)
+			}
+		}
+	}
+	if got := runErrorText(strings.Repeat("x", 600)); len([]rune(got)) != maxRunErrorLen+1 {
+		t.Errorf("long error: %d runes", len([]rune(got)))
+	}
+	sub := Subscriptions[events.WorkflowRunFailed]
+	want := Audience{Permission: identity.PermWorkflowRead, Roles: []string{"org_admin"}, ClientID: "c-1", SiteID: "s-1",
+		DirectUserIDs: []string{"u-1"}}
+	if a := sub.Audience(map[string]any{"initiated_by": "u-1", "client_id": "c-1", "site_id": "s-1"}); a == nil ||
+		!reflect.DeepEqual(*a, want) {
+		t.Errorf("audience %+v, want %+v", a, want)
+	}
+	if sub.Category != CategoryWorkflow || sub.Critical {
+		t.Errorf("subscription %+v, want the non-critical category workflow", sub)
 	}
 }

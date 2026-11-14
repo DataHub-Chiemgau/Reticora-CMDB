@@ -13327,10 +13327,10 @@ export interface components {
       quiet_end?: string;
       /** @example Europe/Berlin */
       time_zone: string;
-      /** @description Categories the user unsubscribed; critical notifications reach the user anyway. */
+      /** @description Categories the user unsubscribed; critical notifications reach the user anyway. For alarms (category `alarm`) the opt-out applies to non-critical alarms only: an alarm or incident of severity critical reaches the user also with `alarm` muted, during quiet hours and is never part of a digest (NTF-05 [P3]). A stored earlier category name (`maintenance_window`) reads as its current one (`maintenance`). */
       muted_categories: string[];
       /**
-       * @description Category subscriptions (NTF-03, E-91 option 2): every notification category → subscribed or muted, the view of `muted_categories`. Every category is subscribed by default; a muted one reaches the user only with a critical notification (collector, invitation, certificate, apikey, security and expired licences are critical; alarm notifications of severity critical are). In a PUT the named categories win over `muted_categories`; the response lists every category.
+       * @description Category subscriptions (NTF-03, E-91 option 2): every notification category → subscribed or muted, the view of `muted_categories`. Every category is subscribed by default; a muted one reaches the user only with a critical notification (collector, invitation, certificate, apikey, security and expired licences are critical; alarm notifications of severity critical are, so muting `alarm` opts out of non-critical alarms only). The [P3] groups of NTF-05 are `alarm` (alarm.*, incident.*, sla.violated), `config` (ci.config_changed), `maintenance` (maintenance.scheduled) and `workflow` (workflow.run_failed, send_notification); escalation steps are no category. In a PUT the named categories win over `muted_categories`; the response lists every category.
        * @example {
        *       "review": "muted",
        *       "export": "subscribed"
@@ -13340,7 +13340,7 @@ export interface components {
         [key: string]: 'subscribed' | 'muted';
       };
       /**
-       * @description Categories whose e-mails are bundled into one digest per window (NTF-04): category → hourly (ends at the full hour) or daily (ends at midnight in time_zone). Allowed are the categories with a non-critical event (alarm, contract, entitlement, export, job, maintenance, review, stock, ticket, warranty, webhook) and workflow (send_notification, NTF-05 [P3]); critical notifications, the in-app center and webhooks are never bundled. Omitted: the default `{"review":"hourly"}`; `{}`: every e-mail on its own.
+       * @description Categories whose e-mails are bundled into one digest per window (NTF-04): category → hourly (ends at the full hour) or daily (ends at midnight in time_zone). Allowed are the categories with a non-critical event (alarm for its non-critical alarms only, config, contract, entitlement, export, job, maintenance, review, stock, ticket, warranty, webhook) and workflow (workflow.run_failed, send_notification, NTF-05 [P3]); critical notifications (a critical alarm among them), the in-app center and webhooks are never bundled. Omitted: the default `{"review":"hourly"}`; `{}`: every e-mail on its own.
        * @example {
        *       "review": "hourly"
        *     }

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
@@ -42,9 +43,51 @@ func str(data map[string]any, key string) string {
 	return v
 }
 
-// CategoryAlarm is the category of the alarm and incident notifications
-// (NTF-05 [P3], MON-04, ALR-02, WP-987).
-const CategoryAlarm = "alarm"
+// The categories of the [P3] groups of NTF-05 (WP-1147): Alerts are alarm
+// (alarm.*, incident.*, sla.violated) and config (ci.config_changed);
+// maintenance windows are maintenance (maintenance.scheduled); workflow is
+// workflow.run_failed and the action send_notification (WP-1095). The
+// escalation steps of NTF-02 (WP-1145) are no subscribable category: they
+// address the targets of the policy, never a muted or bundled preference.
+const (
+	// CategoryAlarm is the category of the alarm and incident
+	// notifications (NTF-05 [P3], MON-04, ALR-02, WP-987) and of
+	// sla.violated.
+	CategoryAlarm = "alarm"
+	// CategoryConfig is the category of ci.config_changed (ALR-07).
+	CategoryConfig = "config"
+	// CategoryMaintenance is the category of maintenance.scheduled
+	// (MGT-04, WP-1034).
+	CategoryMaintenance = "maintenance"
+)
+
+// renamedCategories maps an earlier name of a category to its current one
+// (WP-1147 AK1): a stored preference that mutes or bundles the earlier
+// name keeps muting or bundling the category when it is read.
+var renamedCategories = map[string]string{"maintenance_window": CategoryMaintenance}
+
+// renameCategories maps the earlier category names of a stored preference
+// to the current ones, each category once.
+func (p *Preference) renameCategories() {
+	muted := make([]string, 0, len(p.MutedCategories))
+	for _, c := range p.MutedCategories {
+		if to, ok := renamedCategories[c]; ok {
+			c = to
+		}
+		if !slices.Contains(muted, c) {
+			muted = append(muted, c)
+		}
+	}
+	p.MutedCategories = muted
+	for from, to := range renamedCategories {
+		if window, ok := p.Digest[from]; ok {
+			delete(p.Digest, from)
+			if _, kept := p.Digest[to]; !kept {
+				p.Digest[to] = window
+			}
+		}
+	}
+}
 
 // severityCritical makes an alarm or incident of severity critical a
 // critical notification: it ignores quiet hours and muted categories.
@@ -96,6 +139,38 @@ var Subscriptions = map[string]Subscription{
 		Audience: alarmAudience("root_ci_id")},
 	events.IncidentResolved: {Category: CategoryAlarm, CriticalIf: severityCritical,
 		Audience: alarmAudience("root_ci_id")},
+	// An availability target missed (ALR-06, WP-1049) is an alert: the
+	// contacts of its CI in the roles operations and escalation and the
+	// users with monitoring:read in its client and site. Not critical.
+	events.SLAViolated: {Category: CategoryAlarm, Audience: func(d map[string]any) *Audience {
+		a := &Audience{Permission: identity.PermMonitoringRead, AllWithPermission: true,
+			ClientID: str(d, "client_id"), SiteID: str(d, "site_id")}
+		if ci := str(d, "ci_id"); ci != "" {
+			a.CIID, a.ContactRoles = ci, []string{"operations", "escalation"}
+		}
+		return a
+	}},
+	// A new configuration version of a device (ALR-07, WP-1054): only the
+	// operations contacts of the CI and the users with monitoring:read in
+	// its client and site. The text names no configuration content.
+	events.CIConfigChanged: {Category: CategoryConfig, Audience: func(d map[string]any) *Audience {
+		ci := str(d, "ci_id")
+		if ci == "" {
+			return nil
+		}
+		return &Audience{Permission: identity.PermMonitoringRead, AllWithPermission: true,
+			ClientID: str(d, "client_id"), SiteID: str(d, "site_id"), CIID: ci, ContactRoles: []string{"operations"}}
+	}},
+	// A failed workflow run (WFL-02, WP-1092): its initiator and the
+	// org_admins with workflow:read in the client and site of the run.
+	events.WorkflowRunFailed: {Category: CategoryWorkflow, Audience: func(d map[string]any) *Audience {
+		a := &Audience{Permission: identity.PermWorkflowRead, Roles: []string{"org_admin"},
+			ClientID: str(d, "client_id"), SiteID: str(d, "site_id")}
+		if by := str(d, "initiated_by"); by != "" {
+			a.DirectUserIDs = []string{by}
+		}
+		return a
+	}},
 	events.ReviewCreated: {
 		Category: "review",
 		Audience: func(d map[string]any) *Audience {
@@ -302,7 +377,7 @@ var Subscriptions = map[string]Subscription{
 		// and the users with maintenance:read in the client. Never another
 		// client's contacts, never the organization-wide ones. Not
 		// critical: quiet hours and muted categories apply.
-		Category: "maintenance",
+		Category: CategoryMaintenance,
 		Audience: func(d map[string]any) *Audience {
 			client := str(d, "client_id")
 			if client == "" {
@@ -374,21 +449,177 @@ func LinkOrigin(raw string) string {
 	return u.Scheme + "://" + u.Host
 }
 
-// alarmLinks are the paths of the links of the alarm and incident texts.
+// alarmLinks are the paths of the links of the alarm and incident texts
+// and of the other alerts (WP-1147): the target on the availability tab of
+// the SLA page (WP-1051), the configuration diff of a CI (its id follows
+// the path, WP-1058 AK6), the run view of a failed workflow (WP-1132).
 var alarmLinks = map[string]string{
 	events.AlarmOpened: "/alarms?id=", events.AlarmResolved: "/alarms?id=", events.AlarmSeverityChanged: "/alarms?id=",
 	events.IncidentOpened: "/alarms?incident_id=", events.IncidentResolved: "/alarms?incident_id=",
+	events.SLAViolated: "/slas?tab=availability&target_id=", events.CIConfigChanged: "/cmdb/",
+	events.WorkflowRunFailed: "/workflows/runs/",
 }
 
-// enrich adds what the texts of an alarm or incident name beyond the event
-// data: the name of the CI and the link.
+// SLATarget is what the text and the audience of sla.violated name beyond
+// the event data (events.SLAViolatedData): the name of the availability
+// target and its CI (empty for a target of a client).
+type SLATarget struct {
+	Name string
+	CIID string
+}
+
+// ConfigChange is what the text of ci.config_changed names beyond the
+// event data (events.CIConfigChangedData): when the version was collected
+// and how many lines differ from its predecessor. Never the content.
+type ConfigChange struct {
+	CollectedAt  time.Time
+	PreviousID   string
+	ChangedLines int
+	HasPrevious  bool
+}
+
+// AlertDescriber describes the objects of sla.violated and
+// ci.config_changed; the PGResolver is one. found is false for an object
+// that no longer exists.
+type AlertDescriber interface {
+	SLATarget(ctx context.Context, orgID, targetID string) (t SLATarget, found bool, err error)
+	ConfigChange(ctx context.Context, orgID, snapshotID, previousID string) (c ConfigChange, found bool, err error)
+}
+
+// configContentKeys are the keys of ci.config_changed that identify the
+// configuration itself (its hashes, WP-1054 AK3): they leave the consumer
+// in no text, no in-app notification and no webhook payload.
+var configContentKeys = []string{"hash", "sha256", "previous_sha256"}
+
+// describeAlert adds what sla.violated and ci.config_changed name beyond
+// their event contract: the target's name and CI (the audience needs the
+// CI, so it runs before the audience is named), the time of the version
+// and its number of changed lines. It drops the configuration hashes.
+func (c *EventConsumer) describeAlert(ctx context.Context, env *events.Envelope, data map[string]any) error {
+	switch env.Type {
+	case events.SLAViolated:
+		describer, ok := c.resolver.(AlertDescriber)
+		if !ok || str(data, "id") == "" {
+			return nil
+		}
+		t, found, err := describer.SLATarget(ctx, env.OrgID, str(data, "id"))
+		if err != nil || !found {
+			return err
+		}
+		data["name"] = t.Name
+		if str(data, "ci_id") == "" && t.CIID != "" {
+			data["ci_id"] = t.CIID
+		}
+	case events.CIConfigChanged:
+		for _, k := range configContentKeys {
+			delete(data, k)
+		}
+		describer, ok := c.resolver.(AlertDescriber)
+		snapshot := firstOf(str(data, "snapshot_id"), str(data, "id"))
+		if !ok || snapshot == "" {
+			return nil
+		}
+		cc, found, err := describer.ConfigChange(ctx, env.OrgID, snapshot, str(data, "previous_snapshot_id"))
+		if err != nil || !found {
+			return err
+		}
+		if str(data, "collected_at") == "" {
+			data["collected_at"] = cc.CollectedAt.UTC().Format(time.RFC3339)
+		}
+		if cc.HasPrevious {
+			data["changed_lines"] = float64(cc.ChangedLines)
+			if str(data, "previous_snapshot_id") == "" {
+				data["previous_snapshot_id"] = cc.PreviousID
+			}
+		}
+	}
+	return nil
+}
+
+// RunFailure is what the text of workflow.run_failed names beyond the
+// event data: the definition, the failed step and its error, and the
+// initiator of the run (its recipient).
+type RunFailure struct {
+	WorkflowName string
+	InitiatedBy  string
+	StepIndex    int
+	StepAction   string
+	Error        string
+}
+
+// RunDescriber describes a failed workflow run (workflow.run_failed); the
+// PGResolver is one. found is false for a run that no longer exists.
+type RunDescriber interface {
+	RunFailure(ctx context.Context, orgID, runID string) (f RunFailure, found bool, err error)
+}
+
+// maxRunErrorLen bounds the error text of a failed run in a notification.
+const maxRunErrorLen = 500
+
+// describeRun adds the definition name, the failed step, the masked error
+// and the initiator of a failed run to its data; the audience needs the
+// initiator, so it runs before the audience is named.
+func (c *EventConsumer) describeRun(ctx context.Context, env *events.Envelope, data map[string]any) error {
+	describer, ok := c.resolver.(RunDescriber)
+	if !ok || env.Type != events.WorkflowRunFailed {
+		return nil
+	}
+	run := str(data, "run_id")
+	if run == "" {
+		run = str(data, "id")
+	}
+	if run == "" {
+		return nil
+	}
+	f, found, err := describer.RunFailure(ctx, env.OrgID, run)
+	if err != nil || !found {
+		return err
+	}
+	data["workflow_name"], data["initiated_by"] = f.WorkflowName, f.InitiatedBy
+	if f.StepAction != "" {
+		data["failed_step"] = fmt.Sprintf("%d (%s)", f.StepIndex+1, f.StepAction)
+	}
+	data["error"] = runErrorText(f.Error)
+	return nil
+}
+
+// runErrorText is the error of a failed run as a notification names it:
+// one line, every URL masked (a webhook URL carries its token), bounded.
+func runErrorText(raw string) string {
+	text := maskURLs(strings.Join(strings.Fields(raw), " "))
+	if r := []rune(text); len(r) > maxRunErrorLen {
+		text = string(r[:maxRunErrorLen]) + "…"
+	}
+	return text
+}
+
+// enrich adds what the texts of an alarm, an incident or another alert
+// name beyond the event data: the name of the CI and the link.
 func (c *EventConsumer) enrich(ctx context.Context, env *events.Envelope, data map[string]any) error {
 	path, ok := alarmLinks[env.Type]
 	if !ok {
 		return nil
 	}
 	if c.linkBase != "" && str(data, "id") != "" {
-		data["link"] = c.linkBase + path + url.QueryEscape(str(data, "id"))
+		switch env.Type {
+		case events.CIConfigChanged:
+			// The diff of the version against its predecessor (WP-1058 AK6).
+			if ci := str(data, "ci_id"); ci != "" {
+				link := c.linkBase + path + url.PathEscape(ci) + "?config=" +
+					url.QueryEscape(firstOf(str(data, "snapshot_id"), str(data, "id")))
+				if prev := str(data, "previous_snapshot_id"); prev != "" {
+					link += "&against=" + url.QueryEscape(prev)
+				}
+				data["link"] = link
+			}
+		case events.WorkflowRunFailed:
+			data["link"] = c.linkBase + path + url.PathEscape(firstOf(str(data, "run_id"), str(data, "id")))
+		default:
+			data["link"] = c.linkBase + path + url.QueryEscape(str(data, "id"))
+		}
+	}
+	if _, ok := data["occurred_at"]; !ok && env.Type == events.CIConfigChanged && !env.OccurredAt.IsZero() {
+		data["occurred_at"] = env.OccurredAt.UTC().Format(time.RFC3339)
 	}
 	ci := str(data, "ci_id")
 	if ci == "" {
@@ -402,6 +633,15 @@ func (c *EventConsumer) enrich(ctx context.Context, env *events.Envelope, data m
 		data["ci_name"] = name
 	}
 	return nil
+}
+
+func firstOf(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // NewEventConsumer creates the consumer.
@@ -420,6 +660,12 @@ func (c *EventConsumer) Consume(ctx context.Context, env *events.Envelope) error
 		if err := json.Unmarshal(env.Data, &data); err != nil {
 			return fmt.Errorf("decode %s: %w", env.Type, err)
 		}
+	}
+	if err := c.describeRun(ctx, env, data); err != nil {
+		return err
+	}
+	if err := c.describeAlert(ctx, env, data); err != nil {
+		return err
 	}
 	audience := sub.Audience(data)
 	if audience == nil {
@@ -480,6 +726,38 @@ const CategoryWorkflow = "workflow"
 // users mute and bundle them like the others. They are never critical by
 // themselves; a single request may be (Request.Critical).
 var directCategories = []string{CategoryWorkflow}
+
+// P3Event is one event of the [P3] groups of NTF-05 (Alerts, maintenance
+// windows, workflow) and how it is notified: by its subscription in
+// Category, or directly by the application path of the work package Direct
+// names (no subscription, no template of Templates).
+type P3Event struct {
+	Type     string
+	Category string
+	Direct   string
+}
+
+// NTF05P3Events are the [P3] events of NTF-05 (WP-1147 AK4). The
+// subscribed ones each have a subscription with templates in de-DE and
+// en-US; the direct ones name the work package that sends them.
+var NTF05P3Events = []P3Event{
+	{Type: events.AlarmOpened, Category: CategoryAlarm},
+	{Type: events.AlarmResolved, Category: CategoryAlarm},
+	{Type: events.IncidentOpened, Category: CategoryAlarm},
+	{Type: events.IncidentResolved, Category: CategoryAlarm},
+	{Type: events.SLAViolated, Category: CategoryAlarm},
+	{Type: events.CIConfigChanged, Category: CategoryConfig},
+	{Type: events.MaintenanceScheduled, Category: CategoryMaintenance},
+	{Type: events.WorkflowRunFailed, Category: CategoryWorkflow},
+	// The approval request reaches the approvers of the step directly.
+	{Type: events.WorkflowApprovalRequested, Category: CategoryWorkflow, Direct: "WP-1098"},
+	// The action send_notification of a run (template
+	// workflow.notification).
+	{Type: WorkflowNotification, Category: CategoryWorkflow, Direct: "WP-1095"},
+	// The steps of an escalation policy address its targets, outside the
+	// subscriptions and without a category of Categories().
+	{Type: events.NotificationEscalated, Direct: "WP-1145"},
+}
 
 // Categories are the notification categories of Subscriptions and the
 // direct ones (directCategories), sorted.

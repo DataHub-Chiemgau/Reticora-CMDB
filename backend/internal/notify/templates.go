@@ -410,6 +410,53 @@ var Templates = map[string]map[string]render{
 					". It affects " + fmt.Sprint(d["affected_cis"]) + " components and " + fmt.Sprint(d["services"]) + " services."}
 		},
 	},
+	// A failed workflow run (WP-1147): definition, failed step, error with
+	// masked URLs and the link to the run.
+	events.WorkflowRunFailed: {
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Workflow fehlgeschlagen: " + runName(d),
+				"Der Lauf " + str(d, "run_id") + " des Workflows " + runName(d) + " ist fehlgeschlagen." +
+					"\nSchritt: " + orDash(str(d, "failed_step")) + "\nFehler: " + orDash(runErrorText(str(d, "error"))) +
+					linkLine(d, "Lauf")}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Workflow run failed: " + runName(d),
+				"Run " + str(d, "run_id") + " of workflow " + runName(d) + " has failed." +
+					"\nStep: " + orDash(str(d, "failed_step")) + "\nError: " + orDash(runErrorText(str(d, "error"))) +
+					linkLine(d, "Run")}
+		},
+	},
+	// An availability target missed its goal (WP-1147): target, measured
+	// availability, period and the link to the target.
+	events.SLAViolated: {
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Verfügbarkeitsziel verfehlt: " + slaTarget(d),
+				"Das Verfügbarkeitsziel " + slaTarget(d) + " (" + percent(d, "target_percent", LocaleDE) + ") wurde im Zeitraum " +
+					orDash(str(d, "period")) + " verfehlt.\nGemessene Verfügbarkeit: " + percent(d, "actual_percent", LocaleDE) +
+					linkLine(d, "Details")}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Availability target missed: " + slaTarget(d),
+				"The availability target " + slaTarget(d) + " (" + percent(d, "target_percent", LocaleEN) + ") was missed in period " +
+					orDash(str(d, "period")) + ".\nMeasured availability: " + percent(d, "actual_percent", LocaleEN) +
+					linkLine(d, "Details")}
+		},
+	},
+	// A new configuration version of a CI (WP-1147): CI, time, the number
+	// of changed lines and the link to the diff. Never the configuration
+	// itself: no hash, no line of the configuration.
+	events.CIConfigChanged: {
+		LocaleDE: func(d map[string]any) Text {
+			return Text{"Konfiguration geändert: " + alarmSubject(map[string]any{"ci_name": str(d, "ci_name"), "id": str(d, "ci_id")}), //nolint:misspell // German text
+				"Die Konfiguration" + onCI(d, LocaleDE) + " hat sich geändert.\nZeitpunkt: " + orDash(configTime(d)) + //nolint:misspell // German text
+					"\nGeänderte Zeilen: " + changedLines(d) + linkLine(d, "Diff")}
+		},
+		LocaleEN: func(d map[string]any) Text {
+			return Text{"Configuration changed: " + alarmSubject(map[string]any{"ci_name": str(d, "ci_name"), "id": str(d, "ci_id")}),
+				"The configuration" + onCI(d, LocaleEN) + " has changed.\nTime: " + orDash(configTime(d)) +
+					"\nChanged lines: " + changedLines(d) + linkLine(d, "Diff")}
+		},
+	},
 	events.StockBelowMinimum: {
 		// The total stock of a consumable below its minimum level (WP-285,
 		// WP-845): name, SKU, total stock and minimum level with the unit.
@@ -694,4 +741,61 @@ func alarmDuration(d map[string]any) string {
 		return "–"
 	}
 	return resolved.Sub(opened).Round(time.Second).String()
+}
+
+// runName is the name of the workflow of a run, else its id.
+func runName(d map[string]any) string {
+	if n := oneLine(str(d, "workflow_name")); n != "" {
+		return n
+	}
+	return orDash(str(d, "workflow_id"))
+}
+
+// slaTarget names an availability target: its name, else its id.
+func slaTarget(d map[string]any) string {
+	for _, k := range []string{"name", "target_name", "id"} {
+		if v := oneLine(str(d, k)); v != "" {
+			return v
+		}
+	}
+	return "–"
+}
+
+// percent formats a percentage of the data with up to three decimals in
+// the notation of the locale; "–" without one.
+func percent(d map[string]any, key, locale string) string {
+	v, ok := d[key].(float64)
+	if !ok {
+		return "–"
+	}
+	s := strconv.FormatFloat(v, 'f', -1, 64)
+	if i := strings.IndexByte(s, '.'); i >= 0 && len(s)-i-1 > 3 {
+		s = strconv.FormatFloat(v, 'f', 3, 64)
+	}
+	if locale == LocaleDE {
+		s = strings.ReplaceAll(s, ".", ",")
+	}
+	return s + " %"
+}
+
+// configTime is the time of a configuration version: when it was
+// captured, else when the event occurred.
+func configTime(d map[string]any) string {
+	for _, k := range []string{"captured_at", "collected_at", "occurred_at"} {
+		if v := str(d, k); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// changedLines is the number of changed lines of a configuration version;
+// "–" when the event does not name it.
+func changedLines(d map[string]any) string {
+	for _, k := range []string{"changed_lines", "lines_changed"} {
+		if v, ok := d[k].(float64); ok {
+			return strconv.FormatFloat(v, 'f', -1, 64)
+		}
+	}
+	return "–"
 }

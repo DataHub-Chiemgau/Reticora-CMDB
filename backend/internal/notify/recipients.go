@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm/configsnap"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
@@ -330,4 +331,105 @@ func (r *PGResolver) CIName(ctx context.Context, orgID, ciID string) (string, er
 		return nil
 	})
 	return name, err
+}
+
+// RunFailure implements RunDescriber: the definition name, the initiator,
+// the last failed step and the error of a workflow run (workflow.run_failed,
+// WP-1147). The error is the failed step's, else the run's last error.
+func (r *PGResolver) RunFailure(ctx context.Context, orgID, runID string) (RunFailure, bool, error) {
+	var f RunFailure
+	found := false
+	scope := database.OrgWideScope(orgID, "")
+	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		var lastError string
+		err := tx.QueryRow(ctx, `SELECT COALESCE(d.name, ''), COALESCE(wr.initiated_by::text, ''), COALESCE(wr.last_error, '')
+			FROM workflow_run wr LEFT JOIN workflow_def d ON d.organization_id = wr.organization_id AND d.id = wr.workflow_id
+			WHERE wr.organization_id = $1 AND wr.id::text = $2`, orgID, runID).Scan(&f.WorkflowName, &f.InitiatedBy, &lastError)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("failed workflow run: %w", err)
+		}
+		found = true
+		err = tx.QueryRow(ctx, `SELECT step_index, action_type, error FROM workflow_step
+			WHERE organization_id = $1 AND run_id::text = $2 AND status = 'failed' ORDER BY step_index DESC LIMIT 1`, orgID, runID).
+			Scan(&f.StepIndex, &f.StepAction, &f.Error)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("failed workflow step: %w", err)
+		}
+		if f.Error == "" {
+			f.Error = lastError
+		}
+		return nil
+	})
+	return f, found, err
+}
+
+// SLATarget implements AlertDescriber: the name and the CI of an
+// availability target (sla.violated, WP-1147); found is false for a target
+// that no longer exists.
+func (r *PGResolver) SLATarget(ctx context.Context, orgID, targetID string) (SLATarget, bool, error) {
+	var s SLATarget
+	found := false
+	scope := database.OrgWideScope(orgID, "")
+	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `SELECT name, COALESCE(ci_id::text, '') FROM availability_target
+			WHERE organization_id = $1 AND id::text = $2`, orgID, targetID).Scan(&s.Name, &s.CIID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("availability target: %w", err)
+		}
+		found = true
+		return nil
+	})
+	return s, found, err
+}
+
+// ConfigChange implements AlertDescriber: the time of a configuration
+// version, its predecessor and the number of lines changed against it
+// (ci.config_changed, WP-1147). The predecessor is previousID, else the
+// version of the same CI collected last before it. The content is read to
+// count and never leaves this method.
+func (r *PGResolver) ConfigChange(ctx context.Context, orgID, snapshotID, previousID string) (ConfigChange, bool, error) {
+	var c ConfigChange
+	found := false
+	scope := database.OrgWideScope(orgID, "")
+	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		var ciID string
+		var current []byte
+		err := tx.QueryRow(ctx, `SELECT ci_id::text, collected_at, content FROM config_snapshot
+			WHERE organization_id = $1 AND id::text = $2`, orgID, snapshotID).Scan(&ciID, &c.CollectedAt, &current)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("config version: %w", err)
+		}
+		found = true
+		var previous []byte
+		err = tx.QueryRow(ctx, `SELECT p.id::text, p.content FROM config_snapshot p, config_snapshot s
+			WHERE s.organization_id = $1 AND s.id::text = $2 AND p.organization_id = s.organization_id AND p.ci_id = s.ci_id
+			  AND (CASE WHEN $3 <> '' THEN p.id::text = $3 ELSE (p.collected_at, p.id) < (s.collected_at, s.id) END)
+			ORDER BY p.collected_at DESC, p.id DESC LIMIT 1`, orgID, snapshotID, previousID).Scan(&c.PreviousID, &previous)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("previous config version: %w", err)
+		}
+		cur, err := configsnap.Decompress(current)
+		if err != nil {
+			return err
+		}
+		prev, err := configsnap.Decompress(previous)
+		if err != nil {
+			return err
+		}
+		c.ChangedLines, c.HasPrevious = configsnap.ChangedLines(prev, cur), true
+		return nil
+	})
+	return c, found, err
 }
