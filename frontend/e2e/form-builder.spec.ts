@@ -136,6 +136,27 @@ function fieldOrder(page: Page, section: string) {
     .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-field-name')));
 }
 
+/**
+ * afterDndKitTimer waits until a timer of @dnd-kit that was queued with the
+ * last input has run: a timer of the page with the same delay, queued now,
+ * runs after it (timers of equal delay run in their order). @dnd-kit defers
+ * two steps of a drag this way:
+ * - the KeyboardSensor adds its keydown listener only in a setTimeout(0)
+ *   after the pick-up (KeyboardSensor.attach), while the pick-up is already
+ *   announced in the Space keydown. Chrome runs input before timer tasks, so
+ *   an arrow key pressed at once reaches no listener and only scrolls the
+ *   page (mobile-chrome in CI: the uplink stays in place);
+ * - after a pointer drag the PointerSensor stops every click on the document
+ *   for 50 ms (setTimeout(removeAll, 50) in AbstractPointerSensor.detach), so
+ *   the click that ends the drag does not count. A click within that time
+ *   toggles the checkbox in the DOM, but React never hears it (chromium with
+ *   the production build: visible_when stays empty).
+ * A person never acts within these milliseconds; the test does.
+ */
+function afterDndKitTimer(page: Page, delay: number) {
+  return page.evaluate((ms) => new Promise((resolve) => setTimeout(resolve, ms)), delay);
+}
+
 test('arranges the layout with keyboard and mouse and saves it as layout versions', async ({
   page,
 }) => {
@@ -151,6 +172,8 @@ test('arranges the layout with keyboard and mouse and saves it as layout version
   await handle.focus();
   await page.keyboard.press('Space');
   await announced('Uplink aufgenommen, Position 2 von 2.');
+  // The sensor hears the arrow keys only from a timer after the pick-up.
+  await afterDndKitTimer(page, 0);
   await page.keyboard.press('ArrowUp');
   await announced('Uplink auf Position 1 von 2 verschoben.');
   await page.keyboard.press('Space');
@@ -179,6 +202,8 @@ test('arranges the layout with keyboard and mouse and saves it as layout version
   await expect
     .poll(() => fieldOrder(page, 'p2_main'))
     .toEqual(['p2_ports', 'p2_uplink', 'p2_mgmt_vlan']);
+  // The sensor swallows the clicks right after the drop.
+  await afterDndKitTimer(page, 50);
   // Mouse: the width of the ports and the rule that shows the section.
   await page.getByLabel('Breite: Ports').selectOption('4');
   await page.getByRole('checkbox', { name: 'p2_rack_mounted' }).check();

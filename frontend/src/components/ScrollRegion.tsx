@@ -4,6 +4,12 @@
  * takes the focus, so keyboard users reach the columns on the right with the
  * arrow keys and screen readers announce what scrolls (WCAG 2.1.1,
  * axe scrollable-region-focusable).
+ *
+ * The region is positioned (relative): it is the containing block of
+ * absolutely positioned content such as the sr-only label of an actions
+ * column. Without it that content is placed against an ancestor outside the
+ * region, escapes its clipping and widens the page, so a phone zooms the
+ * layout out and dialogs open partly outside the screen.
  */
 import type { ReactNode } from 'react';
 import { cn } from './ui/utils';
@@ -22,7 +28,7 @@ export function ScrollRegion({ label, className, children }: ScrollRegionProps) 
       aria-label={label}
       tabIndex={0}
       className={cn(
-        'overflow-x-auto rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+        'relative overflow-x-auto rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
         className,
       )}
     >
