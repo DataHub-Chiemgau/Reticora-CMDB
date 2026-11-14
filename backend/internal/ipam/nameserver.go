@@ -217,8 +217,17 @@ func (r *PGRepository) UpdateNameserverSet(ctx context.Context, orgID, id string
 	if req.Servers != nil {
 		servers = req.Servers
 	}
+	// New servers change the target of the PTR probes of the scanned
+	// subnets that take their DNS servers from the set (IPM-12, WP-1064 AK2).
+	resync := r.scanProbes != nil && req.Servers != nil
 	var ns *NameserverSet
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		// The probe budget lock first (WP-940 AK3), then the rows.
+		if resync {
+			if err := r.scanProbes.LockProbeBudget(ctx, tx, orgID); err != nil {
+				return err
+			}
+		}
 		var err error
 		ns, err = scanNameserverSet(tx.QueryRow(ctx, `UPDATE nameserver_set SET name = COALESCE($3, name),
 			servers = COALESCE($4::inet[], servers),
@@ -228,7 +237,20 @@ func (r *PGRepository) UpdateNameserverSet(ctx context.Context, orgID, id string
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
-		return nameserverSetError(err)
+		if err != nil || !resync {
+			return nameserverSetError(err)
+		}
+		rows, err := tx.Query(ctx, `SELECT s.id::text FROM subnet s
+			 WHERE s.organization_id = $1 AND s.nameserver_set_id = $2 AND s.scan_enabled
+			   AND COALESCE(cardinality(s.dns_servers), 0) = 0`, orgID, id)
+		if err != nil {
+			return fmt.Errorf("subnets of the nameserver set: %w", err)
+		}
+		ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+		if err != nil || len(ids) == 0 {
+			return err
+		}
+		return r.SyncScanTargets(ctx, tx, orgID, ids)
 	})
 	return ns, err
 }

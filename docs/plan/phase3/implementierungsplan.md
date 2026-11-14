@@ -13877,6 +13877,8 @@ Die zusätzlichen Voraussetzungen haben folgende Gründe:
 - backend/internal/server/testdata/route_permissions.txt
 - docs/traceability.csv
 
+*Nachtrag 2026-11-14 (AK2, AK4, AK5):* Damit „ein Subnetz ohne DNS-Server entfernt die PTR-Probes“ und „`target` = erster effektiver DNS-Server“ auch nach Änderungen am Subnetz gelten, gleicht `PATCH /api/v1/subnets/{id}` mit `dns_servers`, `nameserver_set_id` oder `section_id` die Ziele des gescannten Subnetzes in derselben Transaktion ab (`backend/internal/ipam/pg_repository.go`), und `PATCH /api/v1/nameserver-sets/{id}` mit `servers` die gescannten Subnetze, die ihre Server aus dem Set beziehen (`backend/internal/ipam/nameserver.go`). Veraltete Ergebnisse (alte Epoche, nicht zugewiesene Probe, anderer Collector, PRB-11) erreichen keinen Sink. Als `missing` gelten nur NOERROR ohne Namen und NXDOMAIN; jeder andere RCODE (REFUSED, SERVFAIL, …) ist `error` und lässt `ptr_name` stehen. `000801` führt die Spalte `subnet.scan_sync_failed_at` aus WP-1063 in der Ausschlussliste des Verlaufs mit.
+
 **Migration/RLS:** Migration `<nächste Nr.>_ip_address_ptr`: Spalten an `ip_address` und `ipam_section` nach AK1 sowie der Teilindex. Keine neue Tabelle; die Policies sind unverändert. Die Verlaufsfunktion (WP-908, Fassung aus WP-1063) protokolliert `ptr_checked_at` nicht, `ptr_name` und `ptr_status` dagegen schon. Ist WP-1063 noch nicht gemergt, ergänzt diese Migration die Ausschlussliste um `ptr_checked_at`. Down entfernt Spalten und Index. `TestMigrationsRoundtrip` und `TestSchemaBaselineMatchesMigratedSchema` sind grün.
 
 **Tests:**

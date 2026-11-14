@@ -273,6 +273,7 @@ GET /api/v1/ip-addresses/{id}/history ipam:read
 GET /api/v1/ipam-sections ipam:read
 GET /api/v1/ipam-sections/{id} ipam:read
 GET /api/v1/ipam-sections/{id}/permissions ipam:read
+GET /api/v1/ipam/ptr-mismatches ipam:read
 GET /api/v1/ips ipam:read
 GET /api/v1/ips/{id} ipam:read
 GET /api/v1/ips/{id}/history ipam:read

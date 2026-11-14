@@ -20,7 +20,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 )
 
-// Managed probes (IPM-11, WP-1062): IPAM functions (the subnet scan, later
+// Managed probes (IPM-11, WP-1062): IPAM functions (the subnet scan and
 // the PTR check of WP-1064) keep probes of their own, marked with managed_by
 // and a key managed_key unique per organization and function. They are
 // created, changed and deleted only by SyncManaged, set-based in the
@@ -328,6 +328,29 @@ func (s ScanProbes) SyncScanProbes(ctx context.Context, tx pgx.Tx, orgID, keyPre
 		return nil, err
 	}
 	return st.IDs, nil
+}
+
+// SyncPTRProbes implements ipam.ScanProbes: the dns probes of the reverse
+// check of IPAM (managed_by ipam_ptr, IPM-12, WP-1064), one PTR query per
+// known address to the first effective DNS server of the subnet, with
+// expect_rcode NOERROR and severity degraded.
+func (s ScanProbes) SyncPTRProbes(ctx context.Context, tx pgx.Tx, orgID, keyPrefix string, specs []ipam.PTRProbeSpec) error {
+	in := make([]ManagedSpec, len(specs))
+	for i, sp := range specs {
+		params, err := json.Marshal(map[string]any{"qname": sp.QName, "qtype": "PTR", "expect_rcode": "NOERROR",
+			"severity": "degraded", KeyIntervalS: sp.IntervalS})
+		if err != nil {
+			return err
+		}
+		in[i] = ManagedSpec{Key: sp.Key, ClientID: sp.ClientID, CollectorGroupID: sp.CollectorGroupID, Type: "dns",
+			Target: sp.Target, Params: params}
+	}
+	_, err := s.Repo.SyncManaged(ctx, tx, orgID, ManagedByPTR, keyPrefix, in)
+	var ve *ValidationError
+	if errors.As(err, &ve) && len(ve.Violations) > 0 {
+		return &api.FieldError{Field: "ptr_mode", Message: ve.Violations[0].Message, Status: http.StatusUnprocessableEntity}
+	}
+	return err
 }
 
 var _ ipam.ScanProbes = ScanProbes{}

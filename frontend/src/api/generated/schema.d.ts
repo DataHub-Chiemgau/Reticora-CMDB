@@ -11269,7 +11269,7 @@ export interface paths {
     };
     /**
      * List PTR mismatches
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description IPM-12 (WP-1064): the addresses whose PTR record, resolved by the collector over the managed dns probes of the reverse check, differs from dns_name (status mismatch, the default) or is missing (status missing), ordered by address. A pinned address of a section with ptr_mode adopt keeps its dns_name and stays listed. Client and site scope and the section rights apply through row level security. Requires ipam:read; without PostgreSQL 501.
      */
     get: operations['listPTRMismatches'];
     put?: never;
@@ -21764,6 +21764,7 @@ export interface components {
       readonly is_default: boolean;
       /** @description The section is restricted (IPM-10, E-256): the first permission sets it, and it stays set when the permissions are gone (also through a deleted team), so that the section stays closed to principals without a team permission (fail-closed). Only PATCH with acl_enabled=false opens it again. */
       acl_enabled: boolean;
+      ptr_mode: components['schemas']['IPAMPTRMode'];
       /** @description The VRFs assigned to the section (IPM-07; set by PATCH /vrfs/{id} with section_ids). */
       readonly vrf_ids: string[];
       /** Format: date-time */
@@ -21792,6 +21793,30 @@ export interface components {
       show_vrf?: boolean;
       /** @description false opens a restricted section without permissions (E-256, see the operation); true is 422. */
       acl_enabled?: boolean;
+      ptr_mode?: components['schemas']['IPAMPTRMode'];
+    };
+    /**
+     * @description DNS reverse check of the scanned subnets of the section (IPM-12, WP-1064): off, report (a managed dns probe per known address asks the first effective DNS server for its PTR record; deviations are listed in GET /api/v1/ipam/ptr-mismatches) or adopt (additionally the PTR name becomes dns_name of an address that is not pinned). A change synchronizes the PTR probes of every scanned subnet of the section in the same transaction; another value is 422 ptr_mode.
+     * @enum {string}
+     */
+    IPAMPTRMode: 'off' | 'report' | 'adopt';
+    PTRMismatch: {
+      /** @description Id of the address. */
+      id: string;
+      address: string;
+      subnet_id?: string;
+      subnet_cidr?: string;
+      dns_name?: string;
+      /** @description The first PTR name (lowercase */
+      ptr_name?: string;
+      /** @enum {string} */
+      ptr_status: 'mismatch' | 'missing';
+      /** Format: date-time */
+      ptr_checked_at?: string;
+      pinned: boolean;
+    };
+    PTRMismatchListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['PTRMismatch'][];
     };
     /** @description Nameserver set of the organization (IPM-05): a reusable list of DNS servers that subnets reference (nameserver_set_id). Every principal of the organization reads the sets; only principals without client and site restriction write them (E-09). */
     NameserverSet: {
@@ -51880,6 +51905,9 @@ export interface operations {
   listPTRMismatches: {
     parameters: {
       query?: {
+        section_id?: string;
+        subnet_id?: string;
+        status?: 'mismatch' | 'missing';
         /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
         limit?: components['parameters']['Limit'];
         /**
@@ -51890,6 +51918,11 @@ export interface operations {
          *     combination yields 400.
          */
         cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
       };
       header?: never;
       path?: never;
@@ -51897,17 +51930,20 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description List PTR mismatches. The page follows the cursor contract (API-02); the item schema comes with the implementing work package. */
+      /** @description A page of PTR deviations */
       200: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['PTRMismatchListResponse'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       500: components['responses']['InternalServerError'];
+      501: components['responses']['NotImplemented'];
     };
   };
   listIPAMSections: {

@@ -413,8 +413,11 @@ func overlapWarnings(ctx context.Context, tx pgx.Tx, id string) ([]SubnetWarning
 func (r *PGRepository) UpdateSubnet(ctx context.Context, orgID, id string, req *UpdateSubnetRequest) (*Subnet, error) {
 	var sn *Subnet
 	// A new client or CIDR of a scanned subnet changes the client of its
-	// probes and its host addresses (IPM-11, WP-1062).
-	rescan := r.scanProbes != nil && (req.ClientID != nil || req.CIDR != nil)
+	// probes and its host addresses (IPM-11, WP-1062); new DNS servers, a
+	// new nameserver set or another section (its ptr_mode) change the PTR
+	// probes: their target or whether there are any (IPM-12, WP-1064 AK2).
+	rescan := r.scanProbes != nil && (req.ClientID != nil || req.CIDR != nil ||
+		req.DNSServers != nil || req.NameserverSetID != nil || req.SectionID != nil)
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
 		// The probe budget lock first (WP-940 AK3), then the tree locks
 		// before any row lock (checks and update below).

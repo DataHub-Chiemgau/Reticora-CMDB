@@ -148,6 +148,10 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	// BGP peerings (IPM-17, bgp_handler.go): only with PostgreSQL, else
 	// 501.
 	h.registerBGPRoutes(r)
+
+	// The deviations of the DNS reverse check (IPM-12, ptr.go): only with
+	// PostgreSQL, else 501.
+	h.registerPTRRoutes(r)
 }
 
 func org(w http.ResponseWriter, r *http.Request) (string, bool) {

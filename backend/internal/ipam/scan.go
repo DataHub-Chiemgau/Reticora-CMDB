@@ -59,6 +59,9 @@ type ScanProbes interface {
 	// SyncScanProbes makes the managed scan probes with keyPrefix those of
 	// specs and returns the probe id per key.
 	SyncScanProbes(ctx context.Context, tx pgx.Tx, orgID, keyPrefix string, specs []ScanProbeSpec) (map[string]string, error)
+	// SyncPTRProbes makes the managed dns probes of the reverse check
+	// with keyPrefix those of specs (managed_by ipam_ptr, WP-1064).
+	SyncPTRProbes(ctx context.Context, tx pgx.Tx, orgID, keyPrefix string, specs []PTRProbeSpec) error
 }
 
 // ScanMember is a member of the collector group of the subnet (read only).
@@ -178,6 +181,13 @@ type scanRow struct {
 	cidr        netip.Prefix
 	groupClient *string // the client of the requested group (nil: org-wide)
 	groupFound  bool
+	// ptrMode is the ptr_mode of the section, dnsServer the first effective
+	// DNS server of the subnet (WP-1064).
+	ptrMode   string
+	dnsServer string
+	// ptrProbes: the subnet has managed PTR probes (nothing to remove
+	// without them).
+	ptrProbes bool
 }
 
 // readScan reads the subnet (FOR UPDATE when lock) with the requested
@@ -197,7 +207,13 @@ func readScan(ctx context.Context, tx pgx.Tx, orgID, subnetID, groupID string, l
 	var members, states []byte
 	err := tx.QueryRow(ctx, `WITH cur AS (
 			SELECT s.id, s.client_id, s.cidr, s.vrf_id, s.scan_enabled, s.collector_group_id, s.scan_interval_s, s.discover_new_hosts,
-			       s.offline_after_s, s.scan_synced_at, s.scan_applied_at
+			       s.offline_after_s, s.scan_synced_at, s.scan_applied_at,
+			       COALESCE((SELECT sec.ptr_mode FROM ipam_section sec
+			                  WHERE sec.organization_id = s.organization_id AND sec.id = s.section_id), 'off') AS ptr_mode,
+			       COALESCE((SELECT host(u.dns) FROM unnest(COALESCE(NULLIF(s.dns_servers, '{}'::inet[]),
+			                   (SELECT ns.servers FROM nameserver_set ns
+			                     WHERE ns.id = s.nameserver_set_id AND ns.organization_id = s.organization_id)))
+			                   WITH ORDINALITY AS u(dns, n) ORDER BY u.n LIMIT 1), '') AS dns_server
 			  FROM subnet s WHERE s.organization_id = $1 AND s.id = $2`+forUpdate+`
 		), grp AS (
 			SELECT g.id, g.client_id FROM collector_group g, cur
@@ -223,10 +239,13 @@ func readScan(ctx context.Context, tx pgx.Tx, orgID, subnetID, groupID string, l
 		                                       ORDER BY (a.subnet_id = cur.id) DESC NULLS LAST LIMIT 1) x ON true
 		                  WHERE t.organization_id = $1 AND t.subnet_id = cur.id), '{}'),
 		       (SELECT count(*) FROM ip_address a
-		         WHERE a.organization_id = $1 AND a.subnet_id = cur.id AND a.origin = 'scan' AND a.type = 'discovered')
+		         WHERE a.organization_id = $1 AND a.subnet_id = cur.id AND a.origin = 'scan' AND a.type = 'discovered'),
+		       cur.ptr_mode, cur.dns_server,
+		       EXISTS (SELECT 1 FROM probe p WHERE p.organization_id = $1 AND p.managed_by = 'ipam_ptr'
+		                AND starts_with(p.managed_key, 'ptr:' || cur.id::text || ':'))
 		  FROM cur`, orgID, subnetID, nilIfEmpty(groupID)).Scan(&row.SubnetID, &client, &cidr, &row.ScanEnabled, &group,
 		&row.ScanIntervalS, &row.DiscoverNewHosts, &row.OfflineAfterS, &row.ScanSyncedAt, &row.groupFound, &row.groupClient,
-		&members, &row.Targets, &row.Owned, &row.LastAppliedAt, &states, &row.NewHosts)
+		&members, &row.Targets, &row.Owned, &row.LastAppliedAt, &states, &row.NewHosts, &row.ptrMode, &row.dnsServer, &row.ptrProbes)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -541,7 +560,8 @@ func syncScanTargets(ctx context.Context, tx pgx.Tx, probes ScanProbes, orgID st
 		if _, err := tx.Exec(ctx, `DELETE FROM subnet_scan_target WHERE organization_id = $1 AND subnet_id = $2`, orgID, row.SubnetID); err != nil {
 			return targetCounts{}, fmt.Errorf("delete scan targets: %w", err)
 		}
-		return targetCounts{}, nil
+		// Without the scan the reverse check goes as well (WP-1064 AK2).
+		return targetCounts{}, syncPTRProbes(ctx, tx, probes, orgID, row, nil, "")
 	}
 	// The client of the probes: the subnet's, else the group's. Only an
 	// unmanaged probe of that client is reused: the probe of another client
@@ -556,26 +576,35 @@ func syncScanTargets(ctx context.Context, tx pgx.Tx, probes ScanProbes, orgID st
 		extra = discoverHosts(row.cidr)
 	}
 	rows, err := tx.Query(ctx, `WITH cand AS (
-			SELECT host(a.address) AS addr FROM ip_address a WHERE a.organization_id = $1 AND a.subnet_id = $2
-			UNION
-			SELECT unnest($3::text[])
+			SELECT addr, bool_or(known) AS known FROM (
+				SELECT host(a.address) AS addr, true AS known FROM ip_address a WHERE a.organization_id = $1 AND a.subnet_id = $2
+				UNION ALL
+				SELECT unnest($3::text[]), false) x
+			 GROUP BY addr
 		)
-		SELECT c.addr, COALESCE((SELECT p.id::text FROM probe p
+		SELECT c.addr, c.known, COALESCE((SELECT p.id::text FROM probe p
 		         WHERE p.organization_id = $1 AND p.managed_by IS NULL AND p.type = $4 AND p.target = c.addr
 		           AND p.collector_group_id = $5 AND p.client_id IS NOT DISTINCT FROM $6::uuid ORDER BY p.id LIMIT 1), '')
 		  FROM cand c ORDER BY c.addr`, orgID, row.SubnetID, extra, scanProbeType, row.CollectorGroupID, nilIfEmpty(client))
 	if err != nil {
 		return targetCounts{}, fmt.Errorf("read scan targets: %w", err)
 	}
-	type target struct{ addr, reuse string }
+	type target struct {
+		addr, reuse string
+		known       bool
+	}
 	var targets []target
+	var known []string
 	for rows.Next() {
 		var t target
-		if err = rows.Scan(&t.addr, &t.reuse); err != nil {
+		if err = rows.Scan(&t.addr, &t.known, &t.reuse); err != nil {
 			rows.Close()
 			return targetCounts{}, fmt.Errorf("read scan targets: %w", err)
 		}
 		targets = append(targets, t)
+		if t.known {
+			known = append(known, t.addr)
+		}
 	}
 	rows.Close()
 	if err = rows.Err(); err != nil {
@@ -623,17 +652,21 @@ func syncScanTargets(ctx context.Context, tx pgx.Tx, probes ScanProbes, orgID st
 		orgID, row.SubnetID, addrs, probeIDs, owned); err != nil {
 		return targetCounts{}, fmt.Errorf("write scan targets: %w", err)
 	}
-	return counts, nil
+	// The PTR probes of the known addresses (WP-1064 AK2), in the same call.
+	return counts, syncPTRProbes(ctx, tx, probes, orgID, row, known, client)
 }
 
-// rescanSubnet checks and synchronizes the scan of a subnet whose client
-// or CIDR changed (PATCH /subnets/{id}): the collector group must still be
-// org-wide or of the new client (422 client_id), discover_new_hosts must
-// still fit the new CIDR (422 cidr); the managed probes take the new
-// client and the targets the new host addresses in the same transaction.
+// rescanSubnet checks and synchronizes the scan of a subnet whose client,
+// CIDR, DNS servers, nameserver set or section changed (PATCH
+// /subnets/{id}): the collector group must still be org-wide or of the new
+// client (422 client_id), discover_new_hosts must still fit the new CIDR
+// (422 cidr); the managed probes take the new client, the targets the new
+// host addresses and the PTR probes the first effective DNS server and the
+// section's ptr_mode (none without a server or with ptr_mode off), all in
+// the same transaction.
 func (r *PGRepository) rescanSubnet(ctx context.Context, tx pgx.Tx, orgID, subnetID string, req *UpdateSubnetRequest) error {
 	row, err := readScan(ctx, tx, orgID, subnetID, "", true)
-	if err != nil || (!row.ScanEnabled && row.Targets == 0) {
+	if err != nil || (!row.ScanEnabled && row.Targets == 0 && !row.ptrProbes) {
 		return err
 	}
 	err = r.resyncScan(ctx, tx, orgID, row)

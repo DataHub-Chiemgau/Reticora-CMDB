@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000364_ipam_scan_apply
+Stand: Migration 000365_ip_address_ptr
 
 ## Prüfung
 
@@ -863,6 +863,15 @@ Zielabgleich des Jobs; das Subnetz rückt ans Ende der Reihenfolge).
 `ipam_change_record()` (000302) wird ersetzt und protokolliert zusätzlich
 `scan_applied_at`, `scan_synced_at` und `scan_sync_failed_at` nicht als Feldänderung (`last_seen_at`
 schon seit 000302 nicht). Keine neue Tabelle, RLS unverändert.
+
+Migration `ip_address_ptr` (WP-1064, IPM-12, vorläufige Nummer 000365) gibt
+`ip_address` die Spalten `ptr_name`, `ptr_checked_at` und `ptr_status`
+(`ip_address_ptr_status_check`: match, mismatch, missing, error) mit dem
+Teilindex `idx_ip_address_ptr_deviation` (organization_id, ptr_status) WHERE
+ptr_status IN ('mismatch', 'missing') und `ipam_section` die Spalte `ptr_mode`
+(off, report, adopt; Standard off, `ipam_section_ptr_mode_check`).
+`ipam_change_record()` protokolliert `ptr_checked_at` nicht, `ptr_name` und
+`ptr_status` schon. Keine neue Tabelle, RLS unverändert.
 
 Migration `bgp_peering` (WP-1068, IPM-17, vorläufige Nummer 000337) legt
 `bgp_peering` als Soll-Inventar an: Gerät, VRF, lokale ASN, entfernte

@@ -91,6 +91,7 @@ async function mockIpam(page: Page) {
             show_vrf: true,
             is_default: true,
             acl_enabled: false,
+            ptr_mode: 'off',
             vrf_ids: [],
             created_at: AT,
             updated_at: AT,

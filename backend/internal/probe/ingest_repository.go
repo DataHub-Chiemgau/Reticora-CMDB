@@ -15,6 +15,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/probe/resultsink"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 )
 
@@ -39,7 +40,25 @@ import (
 //     batch forward to its highest sequence number;
 //  4. records the credential use the results report through the labels
 //     credential_id and credential_namespace at the CI of the probe
-//     (credential.RecordUsage, CRD-06).
+//     (credential.RecordUsage, CRD-06);
+//  5. hands the results the insert wrote, without the stale ones, to the result sinks of their
+//     probe type (RegisterResultSink, WP-1064 AK4), each sink once per
+//     batch and type in this transaction; an error of a sink rolls the
+//     batch back.
+
+// ResultSink evaluates the written results of a probe type (WP-1064 AK4).
+type ResultSink = resultsink.Sink
+
+// SinkResult is a written result as a ResultSink sees it.
+type SinkResult = resultsink.Result
+
+// RegisterResultSink registers sink for the results of probeType: the
+// ingest calls it once per batch with the results the insert into
+// probe_result_v really wrote (ON CONFLICT DO NOTHING … RETURNING), so a
+// repeated delivery does not reach it again. Packages register in init()
+// (ipam registers the PTR check for dns, ptr.go); the registry is
+// resultsink, which ipam can import.
+func RegisterResultSink(probeType string, sink ResultSink) { resultsink.Register(probeType, sink) }
 
 // resultCodes numbers the reason codes for probe_result.code (smallint):
 // 0 is no code, 99 another valid code. The numbers are stored; they never
@@ -99,12 +118,14 @@ var _ IngestStore = (*PGIngestStore)(nil)
 
 // ingestProbe is a probe of a batch with its assignment.
 type ingestProbe struct {
-	typ       string
-	ciID      string
-	clientID  string
-	epoch     int64
-	collector string
-	assigned  bool
+	typ        string
+	ciID       string
+	clientID   string
+	managedBy  string
+	managedKey string
+	epoch      int64
+	collector  string
+	assigned   bool
 }
 
 // foreign reports whether a result of the collector with client
@@ -160,6 +181,16 @@ func (s *PGIngestStore) WriteResults(ctx context.Context, orgID string, msgs []R
 			stale  bool
 		}
 		var withValues []bridged
+		// The results of a type with a result sink (WP-1064 AK4).
+		type sunk struct {
+			key, typ string
+			result   SinkResult
+		}
+		var toSinks []sunk
+		sinkTypes := map[string]bool{}
+		for _, t := range resultsink.Types() {
+			sinkTypes[t] = true
+		}
 		for _, m := range msgs {
 			collectorClient, known := collectorClients[m.CollectorID]
 			for i := range m.Results {
@@ -193,6 +224,14 @@ func (s *PGIngestStore) WriteResults(ctx context.Context, orgID string, msgs []R
 				if len(r.Values) > 0 {
 					withValues = append(withValues, bridged{key: resultKey(r.ProbeID, m.CollectorID, seq, r.ObservedAt),
 						probe: BridgeProbe{ID: r.ProbeID, Type: p.typ, CIID: p.ciID}, result: r, stale: stale})
+				}
+				// A stale result (old epoch, unassigned probe, another than
+				// the assigned collector) is stored but reaches no sink: it
+				// must not overwrite what the current check found (PRB-11).
+				if sinkTypes[p.typ] && !stale {
+					toSinks = append(toSinks, sunk{key: resultKey(r.ProbeID, m.CollectorID, seq, r.ObservedAt), typ: p.typ,
+						result: SinkResult{ProbeID: r.ProbeID, CIID: p.ciID, ManagedBy: p.managedBy, ManagedKey: p.managedKey,
+							ObservedAt: r.ObservedAt.UTC(), Status: string(r.Status), Code: r.Code, Values: r.Values, Labels: r.Labels}})
 				}
 				if c, seen := cursor[m.CollectorID]; !seen || seq > c[0] {
 					cursor[m.CollectorID] = [2]int64{seq, r.Epoch}
@@ -235,6 +274,32 @@ func (s *PGIngestStore) WriteResults(ctx context.Context, orgID string, msgs []R
 			inserted.Close()
 			if err = inserted.Err(); err != nil {
 				return fmt.Errorf("write probe results: %w", err)
+			}
+			// The result sinks see only the written results, once each.
+			if len(toSinks) > 0 {
+				left := make(map[string]int, len(written))
+				for k, n := range written {
+					left[k] = n
+				}
+				byType := map[string][]SinkResult{}
+				for i := range toSinks {
+					if left[toSinks[i].key] > 0 {
+						left[toSinks[i].key]--
+						byType[toSinks[i].typ] = append(byType[toSinks[i].typ], toSinks[i].result)
+					}
+				}
+				types := make([]string, 0, len(byType))
+				for t := range byType {
+					types = append(types, t)
+				}
+				sort.Strings(types)
+				for _, t := range types {
+					for _, sink := range resultsink.For(t) {
+						if serr := sink.ApplyResults(ctx, tx, orgID, byType[t]); serr != nil {
+							return fmt.Errorf("result sink of %s: %w", t, serr)
+						}
+					}
+				}
 			}
 			// The values of the written results go to metric_sample in
 			// the same transaction: a repeated delivery writes none, a
@@ -279,7 +344,7 @@ func ingestProbes(ctx context.Context, tx pgx.Tx, orgID string, msgs []ResultsMe
 		return out, nil
 	}
 	rows, err := tx.Query(ctx, `SELECT p.id::text, p.type, COALESCE(p.ci_id::text, ''), COALESCE(p.client_id::text, ''),
-			a.epoch, COALESCE(a.collector_id::text, '')
+			COALESCE(p.managed_by, ''), COALESCE(p.managed_key, ''), a.epoch, COALESCE(a.collector_id::text, '')
 		FROM probe p
 		LEFT JOIN probe_assignment a ON a.organization_id = p.organization_id AND a.probe_id = p.id
 		WHERE p.organization_id = $1 AND p.id = ANY ($2::uuid[])`, orgID, ids)
@@ -291,7 +356,7 @@ func ingestProbes(ctx context.Context, tx pgx.Tx, orgID string, msgs []ResultsMe
 		var id string
 		var p ingestProbe
 		var epoch *int64
-		if err := rows.Scan(&id, &p.typ, &p.ciID, &p.clientID, &epoch, &p.collector); err != nil {
+		if err := rows.Scan(&id, &p.typ, &p.ciID, &p.clientID, &p.managedBy, &p.managedKey, &epoch, &p.collector); err != nil {
 			return nil, fmt.Errorf("read probes of the results: %w", err)
 		}
 		if epoch != nil {

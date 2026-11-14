@@ -40,7 +40,15 @@ const (
 	ValueDNSAnswerCount     = "probe_dns_answer_count"
 	ValueDNSSOASerial       = "probe_dns_soa_serial"
 	LabelDNSMissing         = "missing"
+	// ValueDNSPTR (value 1) carries the first PTR name of a PTR answer in
+	// the label name (IPM-12, WP-1064): lowercase, without the final dot,
+	// at most 253 characters; no such value for NXDOMAIN or an empty answer.
+	ValueDNSPTR  = "probe_dns_ptr"
+	LabelDNSName = "name"
 )
+
+// dnsMaxName is the longest DNS name in presentation form (RFC 1035).
+const dnsMaxName = 253
 
 // dnsTypeCAA is CAA (RFC 8659); dnsmessage has no constant for it.
 const dnsTypeCAA = dnsmessage.Type(257)
@@ -71,8 +79,9 @@ func init() { Register(TypeDNS, &DNSExecutor{}) }
 // content or a missing AD bit with require_ad is answer_mismatch: ok with
 // that warn code (→ degraded, derived by the state machine) for severity
 // degraded, fail for severity down. Values: response time, RCODE, answer
-// count and for SOA the serial; missing contents are named in the label
-// missing.
+// count, for SOA the serial and for PTR the value probe_dns_ptr with the
+// first name in the label name (WP-1064); missing contents are named in
+// the label missing.
 type DNSExecutor struct {
 	// MaxTCPResponse lowers the TCP response limit in tests; 0 uses
 	// DNSMaxTCPResponse.
@@ -161,6 +170,7 @@ func evaluateDNS(answer []byte, p *dnsParams, wantRcode dnsmessage.RCode, elapse
 	}
 	var texts []string
 	var serial *uint32
+	var ptr string
 	count := 0
 	for {
 		rh, err := parser.AnswerHeader()
@@ -178,6 +188,9 @@ func evaluateDNS(answer []byte, p *dnsParams, wantRcode dnsmessage.RCode, elapse
 		if soa != nil && serial == nil {
 			serial = soa
 		}
+		if rh.Type == dnsmessage.TypePTR && ptr == "" {
+			ptr = dnsPTRName(text)
+		}
 		texts = append(texts, strings.ToLower(text))
 	}
 	rtt := float64(elapsed.Microseconds()) / 1000
@@ -192,6 +205,12 @@ func evaluateDNS(answer []byte, p *dnsParams, wantRcode dnsmessage.RCode, elapse
 	}
 	if serial != nil {
 		r.Values[ValueDNSSOASerial] = float64(*serial)
+	}
+	// The PTR name for the reverse check of IPAM (WP-1064 AK3); other
+	// query types stay as they are.
+	if p.QType == "PTR" && ptr != "" && h.RCode == dnsmessage.RCodeSuccess {
+		r.Values[ValueDNSPTR] = 1
+		r.Labels = map[string]string{LabelDNSName: ptr}
 	}
 	var missing []string
 	for _, want := range p.ExpectContains {
@@ -215,12 +234,25 @@ func evaluateDNS(answer []byte, p *dnsParams, wantRcode dnsmessage.RCode, elapse
 	}
 	r.Code = probewire.WarnAnswerMismatch
 	if len(missing) > 0 {
-		r.Labels = map[string]string{LabelDNSMissing: strings.Join(missing, ",")}
+		if r.Labels == nil {
+			r.Labels = map[string]string{}
+		}
+		r.Labels[LabelDNSMissing] = strings.Join(missing, ",")
 	}
 	if p.Severity != "degraded" {
 		r.Status = probewire.StatusFail
 	}
 	return r
+}
+
+// dnsPTRName is the PTR name of the label name: lowercase, without the
+// final dot, cut to dnsMaxName bytes.
+func dnsPTRName(text string) string {
+	name := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(text)), ".")
+	if len(name) > dnsMaxName {
+		name = name[:dnsMaxName]
+	}
+	return name
 }
 
 // dnsRecordText renders an answer record for the expect_contains match;

@@ -26254,20 +26254,43 @@ paths:
   /api/v1/ipam/ptr-mismatches:
     x-phase: P3
     x-feature: ipam
-    x-status: planned
     get:
       operationId: listPTRMismatches
       tags: [IPAM]
       summary: List PTR mismatches
       description: >-
-        Planned (E-160, WP-864). The work package of the Phase-3 plan
-        that implements the path replaces this scaffold.
+        IPM-12 (WP-1064): the addresses whose PTR record, resolved by the
+        collector over the managed dns probes of the reverse check, differs
+        from dns_name (status mismatch, the default) or is missing (status
+        missing), ordered by address. A pinned address of a section with
+        ptr_mode adopt keeps its dns_name and stays listed. Client and site
+        scope and the section rights apply through row level security.
+        Requires ipam:read; without PostgreSQL 501.
       parameters:
+        - name: section_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: subnet_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [mismatch, missing]
+            default: mismatch
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
       responses:
         '200':
-          description: List PTR mismatches. The page follows the cursor contract (API-02); the item schema comes with the implementing work package.
+          description: A page of PTR deviations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PTRMismatchListResponse'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -44337,7 +44360,7 @@ components:
 
     IPAMSection:
       type: object
-      required: [id, organization_id, name, strict_mode, show_vlan, show_vrf, is_default, acl_enabled, vrf_ids, created_at, updated_at]
+      required: [id, organization_id, name, strict_mode, show_vlan, show_vrf, is_default, acl_enabled, ptr_mode, vrf_ids, created_at, updated_at]
       description: >-
         IPAM section (IPM-01, E-209): groups the subnets of the organization
         with settings of its own. Every organization has exactly one org-wide
@@ -44367,6 +44390,8 @@ components:
             through a deleted team), so that the section stays closed to
             principals without a team permission (fail-closed). Only PATCH
             with acl_enabled=false opens it again.
+        ptr_mode:
+          $ref: '#/components/schemas/IPAMPTRMode'
         vrf_ids:
           type: array
           readOnly: true
@@ -44401,6 +44426,47 @@ components:
           description: >-
             false opens a restricted section without permissions (E-256,
             see the operation); true is 422.
+        ptr_mode:
+          $ref: '#/components/schemas/IPAMPTRMode'
+
+    IPAMPTRMode:
+      type: string
+      enum: ['off', report, adopt]
+      description: >-
+        DNS reverse check of the scanned subnets of the section (IPM-12,
+        WP-1064): off, report (a managed dns probe per known address asks the
+        first effective DNS server for its PTR record; deviations are listed
+        in GET /api/v1/ipam/ptr-mismatches) or adopt (additionally the PTR
+        name becomes dns_name of an address that is not pinned). A change
+        synchronizes the PTR probes of every scanned subnet of the section in
+        the same transaction; another value is 422 ptr_mode.
+
+    PTRMismatch:
+      type: object
+      required: [id, address, ptr_status, pinned]
+      properties:
+        id: { type: string, description: Id of the address. }
+        address: { type: string }
+        subnet_id: { type: string }
+        subnet_cidr: { type: string }
+        dns_name: { type: string }
+        ptr_name: { type: string, description: The first PTR name (lowercase, without the final dot); absent for missing. }
+        ptr_status:
+          type: string
+          enum: [mismatch, missing]
+        ptr_checked_at: { type: string, format: date-time }
+        pinned: { type: boolean }
+
+    PTRMismatchListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items:
+                $ref: '#/components/schemas/PTRMismatch'
 
     NameserverSet:
       type: object

@@ -43,6 +43,10 @@ type Section struct {
 	// principals of a team with an entry read and write the section
 	// (fail-closed). Only PATCH with acl_enabled=false opens it again.
 	ACLEnabled bool `json:"acl_enabled"`
+	// PTRMode is the DNS reverse check of the scanned subnets of the
+	// section (IPM-12, WP-1064): off, report (list deviations) or adopt
+	// (take the PTR name as dns_name of an address that is not pinned).
+	PTRMode string `json:"ptr_mode"`
 	// VRFIDs are the VRFs assigned to the section (IPM-07, read-only here;
 	// PATCH /vrfs/{id} with section_ids sets them).
 	VRFIDs    []string  `json:"vrf_ids"`
@@ -76,6 +80,9 @@ type UpdateSectionRequest struct {
 	// without client, site and team restriction); it is the explicit,
 	// audited release of a section whose last team was deleted.
 	ACLEnabled *bool `json:"acl_enabled,omitempty"`
+	// PTRMode changes the reverse check (WP-1064 AK2); the PTR probes of
+	// every scanned subnet of the section follow in the same transaction.
+	PTRMode *string `json:"ptr_mode,omitempty"`
 	// adminRelease is set by the handler for an org-wide administrator:
 	// it may open a section it cannot see or write.
 	adminRelease bool
@@ -186,7 +193,7 @@ func checkSubnetSection(ctx context.Context, tx pgx.Tx, orgID, id string, req *U
 // --- PostgreSQL ---
 
 const sectionCols = `id::text, organization_id::text, COALESCE(client_id::text, ''), name, COALESCE(description, ''),
-	strict_mode, show_vlan, show_vrf, is_default, acl_enabled,
+	strict_mode, show_vlan, show_vrf, is_default, acl_enabled, ptr_mode,
 	ARRAY(SELECT vs.vrf_id::text FROM vrf_section vs
 		WHERE vs.section_id = ipam_section.id AND vs.organization_id = ipam_section.organization_id ORDER BY vs.vrf_id),
 	created_at, updated_at`
@@ -194,7 +201,7 @@ const sectionCols = `id::text, organization_id::text, COALESCE(client_id::text, 
 func scanSection(s scanner) (*Section, error) {
 	sec := &Section{}
 	if err := s.Scan(&sec.ID, &sec.OrganizationID, &sec.ClientID, &sec.Name, &sec.Description, &sec.StrictMode,
-		&sec.ShowVLAN, &sec.ShowVRF, &sec.IsDefault, &sec.ACLEnabled, &sec.VRFIDs, &sec.CreatedAt, &sec.UpdatedAt); err != nil {
+		&sec.ShowVLAN, &sec.ShowVRF, &sec.IsDefault, &sec.ACLEnabled, &sec.PTRMode, &sec.VRFIDs, &sec.CreatedAt, &sec.UpdatedAt); err != nil {
 		return nil, err
 	}
 	if sec.VRFIDs == nil {
@@ -278,6 +285,14 @@ func (r *PGRepository) UpdateSection(ctx context.Context, orgID, id string, req 
 	}
 	var sec *Section
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		// A new ptr_mode synchronizes the PTR probes of the section: the
+		// probe budget lock comes first (WP-940 AK3, the order of the scan).
+		resync := req.PTRMode != nil && r.scanProbes != nil
+		if resync {
+			if err := r.scanProbes.LockProbeBudget(ctx, tx, orgID); err != nil {
+				return err
+			}
+		}
 		var previous []*string
 		if req.ACLEnabled != nil {
 			var err error
@@ -289,9 +304,9 @@ func (r *PGRepository) UpdateSection(ctx context.Context, orgID, id string, req 
 		sec, err = scanSection(tx.QueryRow(ctx, `UPDATE ipam_section SET name = COALESCE($3, name),
 			description = CASE WHEN $4::text IS NULL THEN description ELSE NULLIF($4, '') END,
 			strict_mode = COALESCE($5, strict_mode), show_vlan = COALESCE($6, show_vlan), show_vrf = COALESCE($7, show_vrf),
-			acl_enabled = COALESCE($8, acl_enabled)
+			acl_enabled = COALESCE($8, acl_enabled), ptr_mode = COALESCE($9, ptr_mode)
 			WHERE organization_id = $1 AND id = $2 RETURNING `+sectionCols,
-			orgID, id, req.Name, req.Description, req.StrictMode, req.ShowVLAN, req.ShowVRF, req.ACLEnabled))
+			orgID, id, req.Name, req.Description, req.StrictMode, req.ShowVLAN, req.ShowVRF, req.ACLEnabled, req.PTRMode))
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -303,9 +318,31 @@ func (r *PGRepository) UpdateSection(ctx context.Context, orgID, id string, req 
 				return fmt.Errorf("restore scope: %w", err)
 			}
 		}
-		return nil
+		if !resync {
+			return nil
+		}
+		ids, err := scannedSubnetsOfSection(ctx, tx, orgID, id)
+		if err != nil || len(ids) == 0 {
+			return err
+		}
+		return r.SyncScanTargets(ctx, tx, orgID, ids)
 	})
 	return sec, err
+}
+
+// scannedSubnetsOfSection returns the subnets with scan_enabled of a
+// section the caller sees.
+func scannedSubnetsOfSection(ctx context.Context, tx pgx.Tx, orgID, sectionID string) ([]string, error) {
+	rows, err := tx.Query(ctx, `SELECT id::text FROM subnet WHERE organization_id = $1 AND section_id = $2 AND scan_enabled ORDER BY id`,
+		orgID, sectionID)
+	if err != nil {
+		return nil, fmt.Errorf("read scanned subnets: %w", err)
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("read scanned subnets: %w", err)
+	}
+	return ids, nil
 }
 
 // sectionACLWritable checks a change of acl_enabled (E-256) in the writing
@@ -381,7 +418,8 @@ func (r *MemoryRepository) defaultSection(orgID string) *Section {
 	r.seq++
 	now := time.Now().UTC()
 	s := &Section{ID: fmt.Sprintf("section-%d", r.seq), OrganizationID: orgID, Name: "default",
-		Description: "Default section", ShowVLAN: true, ShowVRF: true, IsDefault: true, CreatedAt: now, UpdatedAt: now}
+		Description: "Default section", ShowVLAN: true, ShowVRF: true, IsDefault: true, PTRMode: PTRModeOff,
+		CreatedAt: now, UpdatedAt: now}
 	r.sections[s.ID] = s
 	return s
 }
@@ -461,6 +499,9 @@ func (r *MemoryRepository) CreateSection(_ context.Context, s *Section) error {
 	now := time.Now().UTC()
 	s.ID, s.IsDefault, s.CreatedAt, s.UpdatedAt = fmt.Sprintf("section-%d", r.seq), false, now, now
 	s.VRFIDs = []string{}
+	if s.PTRMode == "" {
+		s.PTRMode = PTRModeOff
+	}
 	stored := *s
 	r.sections[s.ID] = &stored
 	return nil
@@ -494,6 +535,9 @@ func (r *MemoryRepository) UpdateSection(_ context.Context, orgID, id string, re
 	}
 	if req.ACLEnabled != nil {
 		s.ACLEnabled = *req.ACLEnabled
+	}
+	if req.PTRMode != nil {
+		s.PTRMode = *req.PTRMode
 	}
 	s.UpdatedAt = time.Now().UTC()
 	cp := *s
@@ -611,6 +655,11 @@ func (h *Handler) UpdateSection(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		req.Name = &name
+	}
+	if req.PTRMode != nil && !ValidPTRMode(*req.PTRMode) {
+		api.WriteFieldError(w, &api.FieldError{Field: "ptr_mode", Message: "ptr_mode must be off, report or adopt",
+			Status: http.StatusUnprocessableEntity})
+		return
 	}
 	if req.ACLEnabled != nil {
 		// The first permission restricts a section; PATCH only opens it

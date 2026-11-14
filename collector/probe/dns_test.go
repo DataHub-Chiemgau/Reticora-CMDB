@@ -342,3 +342,39 @@ func TestDNSLimits(t *testing.T) {
 		}
 	}
 }
+
+// TestPTRAnswerReportedAsLabel covers WP-1064 AK3 (IPM-12): a PTR answer
+// reports probe_dns_ptr = 1 with the first name in the label name,
+// lowercase and without the final dot; other qtypes carry no such value.
+func TestPTRAnswerReportedAsLabel(t *testing.T) {
+	s := startDNS(t)
+	s.AddPTR("5.0.63.10.in-addr.arpa", "Host-5.Example.NET")
+	s.AddA("www.example.net", "192.0.2.80")
+	r := runDNS(t, dnsSpec(s, map[string]any{"qname": "5.0.63.10.in-addr.arpa", "qtype": "PTR", "expect_rcode": "NOERROR", "severity": "degraded"}))
+	if r.Status != probewire.StatusOK || r.Values[ValueDNSPTR] != 1 || r.Labels[LabelDNSName] != "host-5.example.net" {
+		t.Errorf("PTR result %+v, want ok with probe_dns_ptr 1 and name host-5.example.net", r)
+	}
+	a := runDNS(t, dnsSpec(s, map[string]any{"qname": "www.example.net", "qtype": "A"}))
+	if _, ok := a.Values[ValueDNSPTR]; ok || a.Labels[LabelDNSName] != "" {
+		t.Errorf("A result %+v carries a PTR value", a)
+	}
+}
+
+// TestNXDOMAINHasNoPTRValue covers WP-1064 AK3: NXDOMAIN (and an empty
+// answer) report no probe_dns_ptr.
+func TestNXDOMAINHasNoPTRValue(t *testing.T) {
+	s := startDNS(t)
+	r := runDNS(t, dnsSpec(s, map[string]any{"qname": "9.0.63.10.in-addr.arpa", "qtype": "PTR", "expect_rcode": "NOERROR", "severity": "degraded"}))
+	if _, ok := r.Values[ValueDNSPTR]; ok || r.Labels[LabelDNSName] != "" {
+		t.Errorf("NXDOMAIN result %+v carries a PTR value", r)
+	}
+	if r.Values[ValueDNSRcode] != 3 {
+		t.Errorf("rcode %v, want 3 (NXDOMAIN)", r.Values[ValueDNSRcode])
+	}
+	// A known name without PTR records answers NOERROR with no answer.
+	s.AddA("6.0.63.10.in-addr.arpa", "192.0.2.6")
+	empty := runDNS(t, dnsSpec(s, map[string]any{"qname": "6.0.63.10.in-addr.arpa", "qtype": "PTR"}))
+	if _, ok := empty.Values[ValueDNSPTR]; ok {
+		t.Errorf("empty answer %+v carries a PTR value", empty)
+	}
+}
