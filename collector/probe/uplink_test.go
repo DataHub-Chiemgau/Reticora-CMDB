@@ -23,6 +23,7 @@ type edgeCall struct {
 	size   int
 	seqs   []uint64 // the seq of the state change or of every result
 	states []probewire.StateChange
+	events []string // the ids of the events of a result message
 }
 
 // fakeEdge answers the probe subjects like the server (WP-959): 202 with
@@ -65,6 +66,9 @@ func (f *fakeEdge) send(_ context.Context, kind string, data []byte) ([]byte, er
 		}
 		for i := range batch.Results {
 			c.seqs = append(c.seqs, batch.Results[i].Seq)
+		}
+		for i := range batch.Events {
+			c.events = append(c.events, batch.Events[i].ID)
 		}
 	}
 	f.mu.Lock()

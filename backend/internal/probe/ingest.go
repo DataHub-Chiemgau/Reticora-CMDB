@@ -52,8 +52,11 @@ const (
 const (
 	DiscardUnknownProbe     = "unknown_probe"
 	DiscardForeignCollector = "foreign_collector"
-	DeadLetterDecode        = "undecodable"
-	DeadLetterMaxDelive     = "max_deliver"
+	// DiscardInvalidEvent counts monitoring events (traps, WP-979) that
+	// fail probewire.Event.Validate or that the database refuses.
+	DiscardInvalidEvent = "invalid_event"
+	DeadLetterDecode    = "undecodable"
+	DeadLetterMaxDelive = "max_deliver"
 )
 
 var (
@@ -81,6 +84,8 @@ func RegisterMetrics(reg prometheus.Registerer) {
 type ResultsMessage struct {
 	CollectorID string
 	Results     []probewire.Result
+	// Events are the monitoring events of the batch (traps, WP-979).
+	Events []probewire.Event
 }
 
 // IngestOutcome counts what a write did.
@@ -97,6 +102,8 @@ type IngestOutcome struct {
 	Stale int
 	// Samples are the metric samples the bridge wrote (WP-976).
 	Samples int
+	// Events are the monitoring events written (WP-979).
+	Events int
 }
 
 // IngestStore writes the result batches of one organization in one
@@ -267,7 +274,7 @@ func (i *Ingester) groupByOrganization(msgs []ingestDelivery) (groups []*orgBatc
 			byOrg[org] = g
 			groups = append(groups, g)
 		}
-		g.msgs = append(g.msgs, ResultsMessage{CollectorID: strings.ToLower(collector), Results: rb.Results})
+		g.msgs = append(g.msgs, ResultsMessage{CollectorID: strings.ToLower(collector), Results: rb.Results, Events: rb.Events})
 		g.deliveries = append(g.deliveries, d)
 	}
 	return groups, bad

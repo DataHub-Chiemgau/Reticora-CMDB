@@ -434,6 +434,7 @@ type bundleOf struct {
 	seqTo   uint64
 	created time.Time
 	results []probewire.Result
+	events  []probewire.Event
 }
 
 // round sends at most one result message: when the state queue is empty
@@ -477,7 +478,8 @@ func (s *resultsSender) round(ctx context.Context) time.Duration {
 		if !ok && len(batch.Results) > 0 {
 			to = batch.Results[len(batch.Results)-1].Seq
 		}
-		bundles = append(bundles, bundleOf{id: msgs[i].ID, seqTo: to, created: msgs[i].CreatedAt, results: batch.Results})
+		bundles = append(bundles, bundleOf{id: msgs[i].ID, seqTo: to, created: msgs[i].CreatedAt, results: batch.Results,
+			events: batch.Events})
 		total += len(batch.Results)
 	}
 	interval := durationOr(u.ResultsInterval, DefaultResultsInterval)
@@ -511,8 +513,11 @@ func (s *resultsSender) gap() time.Duration {
 func (s *resultsSender) send(ctx context.Context, bundles []bundleOf) time.Duration {
 	u := s.u
 	n, count := 0, 0
-	for n < len(bundles) && count+len(bundles[n].results) <= probewire.MaxBatchResults {
+	nEvents := 0
+	for n < len(bundles) && count+len(bundles[n].results) <= probewire.MaxBatchResults &&
+		(n == 0 || nEvents+len(bundles[n].events) <= probewire.MaxBatchEvents) {
 		count += len(bundles[n].results)
+		nEvents += len(bundles[n].events)
 		n++
 	}
 	if n == 0 {
@@ -523,10 +528,12 @@ func (s *resultsSender) send(ctx context.Context, bundles []bundleOf) time.Durat
 	}
 	for {
 		var results []probewire.Result
+		var events []probewire.Event
 		for i := range bundles[:n] {
 			results = append(results, bundles[i].results...)
+			events = append(events, bundles[i].events...)
 		}
-		data, err := encodeResults(results)
+		data, err := encodeResults(results, events...)
 		if err != nil {
 			u.quarantine(ctx, u.Outbox.Results(), KindResults, UplinkReply{Error: "unencodable bundle"}, bundles[0].id)
 			return 0
@@ -592,21 +599,43 @@ func (s *resultsSender) deliver(ctx context.Context, bundles []bundleOf, data []
 }
 
 // sendInParts sends a bundle that does not fit into one message in parts
-// of decreasing size; the bundle is acknowledged after its last part.
+// of decreasing size; the bundle is acknowledged after its last part. The
+// events of the bundle are spread over the parts as they fit; events left
+// after the last result go with that result once more (the server ignores
+// the repeated result by its idempotency key and an event by its id).
 func (s *resultsSender) sendInParts(ctx context.Context, b *bundleOf) time.Duration {
 	u := s.u
 	poll := durationOr(u.Poll, uplinkPoll)
-	rest := b.results
+	rest, events := b.results, b.events
 	size := min(len(rest), probewire.MaxBatchResults)
-	for len(rest) > 0 {
-		part := rest[:min(size, len(rest))]
-		data, err := encodeResults(part)
-		if err != nil || (len(data) > MaxUplinkMessageBytes && len(part) == 1) {
+	evN := len(events)
+	for len(rest) > 0 || len(events) > 0 {
+		repeat := len(rest) == 0
+		var part []probewire.Result
+		if repeat {
+			if len(b.results) == 0 {
+				break
+			}
+			part = b.results[len(b.results)-1:]
+		} else {
+			part = rest[:min(size, len(rest))]
+		}
+		evN = min(evN, len(events))
+		data, err := encodeResults(part, events[:evN]...)
+		if err != nil {
 			u.quarantine(ctx, u.Outbox.Results(), KindResults, UplinkReply{Error: "result larger than a message"}, b.id)
 			return 0
 		}
 		if len(data) > MaxUplinkMessageBytes {
-			size = max(len(part)/2, 1)
+			switch {
+			case len(part) > 1:
+				size = max(len(part)/2, 1)
+			case evN > 1 || (evN == 1 && !repeat):
+				evN /= 2 // the rest of the events goes with the next parts
+			default:
+				u.quarantine(ctx, u.Outbox.Results(), KindResults, UplinkReply{Error: "result larger than a message"}, b.id)
+				return 0
+			}
 			continue
 		}
 		if wait := s.gap() - time.Since(s.lastSent); !s.lastSent.IsZero() && wait > 0 {
@@ -623,8 +652,12 @@ func (s *resultsSender) sendInParts(ctx context.Context, b *bundleOf) time.Durat
 		case sentOK:
 			s.bo.reset()
 			u.resultMessages.Add(1)
-			u.resultsSent.Add(uint64(len(part)))
-			rest = rest[len(part):]
+			if !repeat {
+				u.resultsSent.Add(uint64(len(part)))
+				rest = rest[len(part):]
+			}
+			events = events[evN:]
+			evN = len(events)
 		case sentRefused, sentTooLarge:
 			u.quarantine(ctx, u.Outbox.Results(), KindResults, reply, b.id)
 			return 0
@@ -646,8 +679,8 @@ func (s *resultsSender) sendInParts(ctx context.Context, b *bundleOf) time.Durat
 }
 
 // encodeResults encodes results as a probewire.ResultBatch.
-func encodeResults(results []probewire.Result) ([]byte, error) {
-	data, err := probewire.Encode(&probewire.ResultBatch{Results: results})
+func encodeResults(results []probewire.Result, events ...probewire.Event) ([]byte, error) {
+	data, err := probewire.Encode(&probewire.ResultBatch{Results: results, Events: events})
 	if err != nil {
 		return nil, fmt.Errorf("probe: encode result message: %w", err)
 	}

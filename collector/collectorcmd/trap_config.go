@@ -2,13 +2,18 @@ package collectorcmd
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
+	"encoding/hex"
 	"log/slog"
 	"maps"
 	"net"
+	"net/netip"
 	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/snmp"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
@@ -35,6 +40,12 @@ import (
 // are counted by reason (security_level, unknown_user, auth, decrypt,
 // not_in_time_window) next to community.
 //
+// Monitoring mode (WP-979): with a set carrying trap_config every accepted
+// trap becomes a probewire.Event of the probe engine (Engine.OnTrap): it
+// goes with the next result batch to the server, and a linkDown, linkUp,
+// coldStart or warmStart checks the probes of the sender at once. In the
+// fallback mode the metric path (snmp_trap_received) stays.
+//
 // Fallback: until a set with trap_config arrives (a collector without
 // group, a server without the configuration, before the first set)
 // RETICORA_SNMP_TRAP_LISTEN starts the receiver with the community of the
@@ -46,8 +57,12 @@ type trapReceiverRun func(ctx context.Context, r *snmp.TrapReceiver) error
 
 // trapManager owns the trap receiver of the collector.
 type trapManager struct {
-	// sink uploads an accepted trap (uploader.uploadTrapEvent).
+	// sink uploads an accepted trap (uploader.uploadTrapEvent); the
+	// fallback mode.
 	sink func(ctx context.Context, ev snmp.TrapEvent)
+	// monitor takes an accepted trap of the monitoring mode as an event
+	// (Engine.OnTrap, WP-979); nil keeps the metric path.
+	monitor func(ev probewire.Event)
 	// communities returns the communities of the credentials of ids from
 	// the credential bundle (bundleCache.trapCommunities).
 	communities func(ids []string) []string
@@ -231,7 +246,7 @@ func (m *trapManager) handle(ctx context.Context, ev snmp.TrapEvent) { //nolint:
 	m.mu.Lock()
 	server, ids := m.server, m.config.CredentialIDs
 	communities := m.communities
-	sink := m.sink
+	sink, monitor := m.sink, m.monitor
 	m.mu.Unlock()
 	// A v3 trap (User set) was authenticated against the configured users
 	// by the receiver; v1/v2c need a configured community.
@@ -240,9 +255,60 @@ func (m *trapManager) handle(ctx context.Context, ev snmp.TrapEvent) { //nolint:
 		slog.Debug("snmp trap dropped: community of no configured credential", "source", ev.SourceIP)
 		return
 	}
+	if server && monitor != nil {
+		monitor(trapToEvent(&ev))
+		return
+	}
 	if sink != nil {
 		sink(ctx, ev)
 	}
+}
+
+// setMonitor attaches the probe engine (Engine.OnTrap).
+func (m *trapManager) setMonitor(f func(ev probewire.Event)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.monitor = f
+}
+
+// trapToEvent maps an accepted trap to a monitoring event (WP-979 AK1,
+// AK2): a new UUIDv7, the kind from snmpTrapOID.0 or the generic v1 trap
+// type, the varbinds within the limits of the wire contract.
+func trapToEvent(ev *snmp.TrapEvent) probewire.Event {
+	varbinds, cut := probewire.LimitVarbinds(ev.Variables)
+	observed := ev.Received
+	if observed.IsZero() {
+		observed = time.Now().UTC()
+	}
+	// The server refuses a zone in the source and an invalid trap OID;
+	// the event must stay valid so it never costs the batch.
+	source := ev.SourceIP
+	if a, err := netip.ParseAddr(source); err == nil {
+		source = a.WithZone("").Unmap().String()
+	}
+	oid := ev.TrapOID
+	if len(oid) > probewire.MaxEventTrapOIDBytes || !probewire.ValidEventText(oid) {
+		oid, cut = "", true
+	}
+	return probewire.Event{
+		ID: uuidV7(observed), Kind: probewire.EventKindOfTrap(ev.TrapOID, ev.Variables["generic_trap"]),
+		SourceIP: source, TrapOID: oid, Varbinds: varbinds, Truncated: cut, ObservedAt: observed.UTC(),
+	}
+}
+
+// uuidV7 returns a UUID version 7 (RFC 9562): 48 bits Unix milliseconds,
+// then random bits.
+func uuidV7(t time.Time) string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	ms := uint64(t.UnixMilli()) //nolint:gosec // after 1970
+	var ts [8]byte
+	binary.BigEndian.PutUint64(ts[:], ms)
+	copy(b[:6], ts[2:])
+	b[6] = b[6]&0x0f | 0x70 // version 7
+	b[8] = b[8]&0x3f | 0x80 // variant RFC 9562
+	h := hex.EncodeToString(b[:])
+	return h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]
 }
 
 // dropReceived counts a trap the receiver itself dropped (SNMPv3 USM,

@@ -119,6 +119,9 @@ type Outbox struct {
 	mu           sync.Mutex
 	pending      []probewire.Result
 	pendingState map[uint64]bool
+	// events wait for the next result bundle (WP-979 AK2), at most
+	// outboxEventCap; the oldest leave first (lost: events).
+	events []probewire.Event
 	// checkEvery bounds how often a flush reads the size of the result
 	// queue for the compaction (a directory scan); lastCheck is the last.
 	checkEvery time.Duration
@@ -325,7 +328,8 @@ func (o *Outbox) flushLocked(ctx context.Context) error {
 	for len(o.pending) > 0 {
 		n := min(len(o.pending), OutboxBundleResults)
 		chunk := o.pending[:n]
-		msg, err := o.bundle(chunk, o.pendingState, false)
+		events := o.takeEvents()
+		msg, err := o.bundle(chunk, o.pendingState, false, events...)
 		if err == nil {
 			_, err = o.results.Enqueue(ctx, msg)
 		}
@@ -339,8 +343,10 @@ func (o *Outbox) flushLocked(ctx context.Context) error {
 		switch {
 		case errors.Is(err, buffer.ErrSpoolFull):
 			o.count(OutboxLossMaxBytes, int64(n))
+			o.requeueEvents(events) // they go with the next bundle
 			refused = err
 		case err != nil:
+			o.requeueEvents(events) // kept for the next bundle
 			if over := len(o.pending) - outboxPendingCap; over > 0 {
 				o.count(OutboxLossMaxBytes, int64(over))
 				o.dropPending(over)
@@ -352,6 +358,78 @@ func (o *Outbox) flushLocked(ctx context.Context) error {
 	return refused
 }
 
+// outboxEventCap bounds the events waiting for a result bundle.
+const outboxEventCap = 10 * probewire.MaxBatchEvents
+
+// OutboxLossEvents counts the events dropped at outboxEventCap.
+const OutboxLossEvents = "events"
+
+// AddEvent queues a monitoring event for the next result bundle.
+func (o *Outbox) AddEvent(ev *probewire.Event) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.events = append(o.events, *ev)
+	if over := len(o.events) - outboxEventCap; over > 0 {
+		o.count(OutboxLossEvents, int64(over))
+		o.events = append(o.events[:0:0], o.events[over:]...)
+	}
+}
+
+// outboxEventBytes bounds the encoded events of one bundle: half a
+// message, so that a bundle with at least one result always fits into
+// MaxUplinkMessageBytes.
+const outboxEventBytes = MaxUplinkMessageBytes / 2
+
+// eventBytes is the encoded size of an event in a message.
+func eventBytes(ev *probewire.Event) int {
+	b, err := json.Marshal(ev)
+	if err != nil {
+		return outboxEventBytes
+	}
+	return len(b) + 1
+}
+
+// eventGroup returns how many of the first events form one bundle: at most
+// MaxBatchEvents and outboxEventBytes, at least one.
+func eventGroup(events []probewire.Event) int {
+	n, size := 0, 0
+	for n < len(events) && n < probewire.MaxBatchEvents {
+		sz := eventBytes(&events[n])
+		if n > 0 && size+sz > outboxEventBytes {
+			break
+		}
+		size += sz
+		n++
+	}
+	return n
+}
+
+// takeEvents removes and returns the queued events of one bundle
+// (eventGroup).
+func (o *Outbox) takeEvents() []probewire.Event {
+	n := eventGroup(o.events)
+	if n == 0 {
+		return nil
+	}
+	out := append([]probewire.Event(nil), o.events[:n]...)
+	o.events = append(o.events[:0:0], o.events[n:]...)
+	return out
+}
+
+// requeueEvents puts events taken for a bundle that was not stored back in
+// front of the queue; beyond outboxEventCap the oldest leave (lost:
+// events).
+func (o *Outbox) requeueEvents(events []probewire.Event) {
+	if len(events) == 0 {
+		return
+	}
+	o.events = append(append([]probewire.Event(nil), events...), o.events...)
+	if over := len(o.events) - outboxEventCap; over > 0 {
+		o.count(OutboxLossEvents, int64(over))
+		o.events = append(o.events[:0:0], o.events[over:]...)
+	}
+}
+
 // dropPending removes the first n pending results.
 func (o *Outbox) dropPending(n int) {
 	for i := range o.pending[:n] {
@@ -361,10 +439,11 @@ func (o *Outbox) dropPending(n int) {
 }
 
 // bundle encodes results as a result bundle entry.
-func (o *Outbox) bundle(results []probewire.Result, stateRelated map[uint64]bool, compacted bool) (*buffer.Message, error) {
+func (o *Outbox) bundle(results []probewire.Result, stateRelated map[uint64]bool, compacted bool, events ...probewire.Event) (*buffer.Message, error) {
 	var buf bytes.Buffer
 	zw := gzip.NewWriter(&buf)
-	batch := probewire.ResultBatch{Header: probewire.Header{SchemaVersion: probewire.SchemaVersion}, Results: results}
+	batch := probewire.ResultBatch{Header: probewire.Header{SchemaVersion: probewire.SchemaVersion}, Results: results,
+		Events: events}
 	if err := json.NewEncoder(zw).Encode(&batch); err != nil {
 		return nil, fmt.Errorf("probe: encode result bundle: %w", err)
 	}
@@ -457,6 +536,7 @@ func (o *Outbox) compactOnce(ctx context.Context) (bool, error) {
 		return false, nil
 	}
 	var all []probewire.Result
+	var events []probewire.Event
 	related := map[uint64]bool{}
 	for i := range run {
 		batch, rel, derr := DecodeBundle(&run[i])
@@ -468,6 +548,7 @@ func (o *Outbox) compactOnce(ctx context.Context) (bool, error) {
 			return true, nil
 		}
 		all = append(all, batch.Results...)
+		events = append(events, batch.Events...)
 		for s := range rel {
 			related[s] = true
 		}
@@ -484,14 +565,36 @@ func (o *Outbox) compactOnce(ctx context.Context) (bool, error) {
 		o.compacted = last
 		return true, nil
 	}
+	// The events of the window are never thinned out: they are grouped as
+	// for a bundle (eventGroup), and the results are cut into at least as
+	// many parts as there are groups, one group per part. Only when fewer
+	// results than groups are kept do the remaining events count as lost.
+	var groups [][]probewire.Event
+	for len(events) > 0 {
+		n := eventGroup(events)
+		groups = append(groups, events[:n])
+		events = events[n:]
+	}
+	partSize := OutboxBundleResults
+	if g := len(groups); g > 0 && len(kept) > 0 && (len(kept)+partSize-1)/partSize < g {
+		partSize = max(1, (len(kept)+g-1)/g)
+	}
 	var parts []buffer.Message
-	for i := 0; i < len(kept); i += OutboxBundleResults {
-		part, berr := o.bundle(kept[i:min(i+OutboxBundleResults, len(kept))], related, true)
+	for i := 0; i < len(kept); i += partSize {
+		var take []probewire.Event
+		if len(parts) < len(groups) {
+			take = groups[len(parts)]
+		}
+		part, berr := o.bundle(kept[i:min(i+partSize, len(kept))], related, true, take...)
 		if berr != nil {
 			return false, berr
 		}
 		part.ID = "" // Replace names the parts after the bundle they replace
 		parts = append(parts, *part)
+	}
+	lostEvents := 0
+	for _, g := range groups[min(len(parts), len(groups)):] {
+		lostEvents += len(g)
 	}
 	// The parts take the place of the last bundle of the window: after
 	// every older entry and before every younger one, so the delivery
@@ -508,6 +611,9 @@ func (o *Outbox) compactOnce(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	o.count(OutboxLossCompacted, int64(dropped))
+	if lostEvents > 0 {
+		o.count(OutboxLossEvents, int64(lostEvents))
+	}
 	if len(ids) > 1 {
 		o.compacted = ids[len(ids)-2]
 	}

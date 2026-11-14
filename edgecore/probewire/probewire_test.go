@@ -497,3 +497,38 @@ func TestNoBackendOrCollectorImports(t *testing.T) {
 		}
 	}
 }
+
+// TestEventValidateRefusesWhatTheServerCannotStore covers WP-979 AK1:
+// NUL and control characters, invalid UTF-8, a source with zone and
+// varbinds whose escaped JSON text exceeds the column check are refused;
+// LimitVarbinds keeps an event within both limits.
+func TestEventValidateRefusesWhatTheServerCannotStore(t *testing.T) {
+	base := Event{ID: "0193f1a2-7b3c-7d4e-8f50-0123456789ab", Kind: EventLinkDown, SourceIP: "192.0.2.1",
+		TrapOID: "1.3.6.1.6.3.1.1.5.3", Varbinds: map[string]string{"1.3.6.1.2.1.2.2.1.2.7": "ge-0/0/7"}, ObservedAt: observed}
+	if err := base.Validate(); err != nil {
+		t.Fatalf("valid event refused: %v", err)
+	}
+	half := strings.Repeat(`"`, MaxEventVarbindBytes/2-1)
+	for name, mutate := range map[string]func(e *Event){
+		"NUL in value":      func(e *Event) { e.Varbinds = map[string]string{"1.3.6.1": "a\x00b"} },
+		"NUL in name":       func(e *Event) { e.Varbinds = map[string]string{"1.3\x00.6": "a"} },
+		"control in value":  func(e *Event) { e.Varbinds = map[string]string{"1.3.6.1": "a\x1bb"} },
+		"invalid UTF-8":     func(e *Event) { e.Varbinds = map[string]string{"1.3.6.1": "\xff\xfe"} },
+		"empty name":        func(e *Event) { e.Varbinds = map[string]string{"": "a"} },
+		"NUL in trap_oid":   func(e *Event) { e.TrapOID = "1.3.6\x00" },
+		"source with zone":  func(e *Event) { e.SourceIP = "fe80::1%eth0" },
+		"escaped too large": func(e *Event) { e.Varbinds = map[string]string{"1": half, "2": half} },
+	} {
+		ev := base
+		mutate(&ev)
+		if err := ev.Validate(); !errors.Is(err, ErrInvalidResult) {
+			t.Errorf("%s: %v, want ErrInvalidResult", name, err)
+		}
+	}
+	vb, cut := LimitVarbinds(map[string]string{"1": half, "2": half, "3": "ok", "4": "a\x00"})
+	ev := base
+	ev.Varbinds = vb
+	if !cut || ev.Validate() != nil || vb["3"] != "ok" || len(vb) != 2 {
+		t.Fatalf("LimitVarbinds = %d varbinds, cut %v, valid %v", len(vb), cut, ev.Validate())
+	}
+}

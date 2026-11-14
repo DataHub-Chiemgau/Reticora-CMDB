@@ -349,3 +349,55 @@ func TestTrapV3UsersFromCredentials(t *testing.T) {
 		t.Fatalf("event = %+v", ev)
 	}
 }
+
+// TestFallbackModeKeepsMetricPath covers WP-979 AK2: in the monitoring
+// mode (a set with trap_config) an accepted trap becomes an event of the
+// engine with a UUIDv7 and the kind link_down; in the fallback mode
+// without server configuration the metric path (sink) stays.
+func TestFallbackModeKeepsMetricPath(t *testing.T) {
+	m, s, _ := newTrapManager(t, map[string]string{"cred-a": "alpha"})
+	var mu sync.Mutex
+	var events []probewire.Event
+	m.setMonitor(func(ev probewire.Event) { mu.Lock(); events = append(events, ev); mu.Unlock() })
+	port := freePort(t)
+	m.start(context.Background(), &collectorConfig{TrapListenAddr: "127.0.0.1:" + strconv.Itoa(port)}, nil)
+	boundPort(t, m)
+	sendTrap(t, port, "")
+	trapWaitFor(t, "the fallback trap on the metric path", func() bool { return s.count() == 1 })
+	mu.Lock()
+	if len(events) != 0 {
+		t.Fatalf("fallback mode produced events %+v", events)
+	}
+	mu.Unlock()
+
+	p2 := freePort(t)
+	m.apply(&probewire.TrapConfig{Enabled: true, Port: p2, CredentialIDs: []string{"cred-a"}})
+	boundPort(t, m)
+	sendTrap(t, p2, "alpha")
+	trapWaitFor(t, "the event of the monitoring mode", func() bool { mu.Lock(); defer mu.Unlock(); return len(events) == 1 })
+	mu.Lock()
+	defer mu.Unlock()
+	ev := events[0]
+	if s.count() != 1 || ev.Kind != probewire.EventLinkDown || ev.SourceIP != "127.0.0.1" || ev.Validate() != nil || ev.ID[14] != '7' {
+		t.Fatalf("event %+v (valid: %v), metric path %d", ev, ev.Validate(), s.count())
+	}
+}
+
+// TestTrapToEventAlwaysValid covers WP-979 AK2: a trap with a zoned
+// IPv6 source, an invalid trap OID and a varbind the server cannot store
+// still gives a valid event (the zone and the bad parts left out), so it
+// never costs the result batch at the edge.
+func TestTrapToEventAlwaysValid(t *testing.T) {
+	ev := trapToEvent(&snmp.TrapEvent{SourceIP: "fe80::1%eth0", TrapOID: "1.3.6.1.6.3.1.1.5.3\x00",
+		Variables: map[string]string{"1.3.6.1.2.1.2.2.1.1.7": "7", "1.3.6.1.2.1.2.2.1.2.7": "a\x00b"}, Received: time.Now()})
+	if err := ev.Validate(); err != nil {
+		t.Fatalf("event %+v: %v", ev, err)
+	}
+	if ev.SourceIP != "fe80::1" || ev.TrapOID != "" || !ev.Truncated || len(ev.Varbinds) != 1 {
+		t.Fatalf("event = %+v", ev)
+	}
+	v4 := trapToEvent(&snmp.TrapEvent{SourceIP: "::ffff:192.0.2.1", TrapOID: "1.3.6.1.6.3.1.1.5.4", Received: time.Now()})
+	if v4.SourceIP != "192.0.2.1" || v4.Kind != probewire.EventLinkUp {
+		t.Fatalf("event = %+v", v4)
+	}
+}

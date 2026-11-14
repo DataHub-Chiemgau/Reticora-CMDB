@@ -145,6 +145,14 @@ func (e *Edge) ProbeResults(ctx context.Context, orgID, collectorID string, data
 	if len(batch.Results) == 0 || len(batch.Results) > probewire.MaxBatchResults {
 		return invalid("results")
 	}
+	if len(batch.Events) > probewire.MaxBatchEvents {
+		return invalid("events")
+	}
+	for i := range batch.Events {
+		if batch.Events[i].Validate() != nil {
+			return invalid("events[" + strconv.Itoa(i) + "]")
+		}
+	}
 	var epoch int64
 	from, to := batch.Results[0].Seq, batch.Results[0].Seq
 	for i := range batch.Results {

@@ -32,9 +32,12 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/netip"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // SchemaVersion is the version every message carries (<major>.<minor>).
@@ -370,10 +373,215 @@ func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
 // CollectorID is informational only: the server takes the sender from the
 // authenticated edge identity and rejects a batch whose CollectorID differs
 // from it (see the package comment).
+//
+// Events are the monitoring events (SNMP traps, DIS-06, WP-979) the
+// collector received since the previous batch; they ride with the results
+// (E-173) and are stored by the ingest worker in the same transaction.
 type ResultBatch struct {
 	Header
 	CollectorID string   `json:"collector_id"`
 	Results     []Result `json:"results"`
+	Events      []Event  `json:"events,omitempty"`
+}
+
+// Limits of events (WP-979 AK1, AK2).
+const (
+	// MaxBatchEvents is the maximum number of events in one ResultBatch.
+	MaxBatchEvents = 200
+	// MaxEventVarbinds and MaxEventVarbindBytes bound the varbinds of an
+	// event (names and values together); the rest is cut and the event
+	// marked Truncated.
+	MaxEventVarbinds     = 64
+	MaxEventVarbindBytes = 16 << 10
+	// MaxEventVarbindTextBytes bounds the varbinds as the server stores
+	// them: the JSON text of the jsonb column (CHECK
+	// chk_monitoring_event_varbinds, octet_length(varbinds::text)), with
+	// quotes and backslashes escaped.
+	MaxEventVarbindTextBytes = 32 << 10
+	// MaxEventTrapOIDBytes bounds trap_oid.
+	MaxEventTrapOIDBytes = 256
+)
+
+// Kinds of an Event, derived from snmpTrapOID.0 (1.3.6.1.6.3.1.1.5.1–5)
+// or the generic trap type of SNMPv1 (0–4).
+const (
+	EventColdStart   = "cold_start"
+	EventWarmStart   = "warm_start"
+	EventLinkDown    = "link_down"
+	EventLinkUp      = "link_up"
+	EventAuthFailure = "auth_failure"
+	EventOther       = "other"
+)
+
+var eventKinds = map[string]bool{EventColdStart: true, EventWarmStart: true, EventLinkDown: true,
+	EventLinkUp: true, EventAuthFailure: true, EventOther: true}
+
+// snmpGenericTraps are the standard traps by their last arc (RFC 3418)
+// resp. the generic trap type of SNMPv1 plus one.
+var snmpGenericTraps = map[string]string{"1": EventColdStart, "2": EventWarmStart, "3": EventLinkDown,
+	"4": EventLinkUp, "5": EventAuthFailure}
+
+// EventKindOfTrap derives the kind of a trap: snmpTrapOID.0 below
+// 1.3.6.1.6.3.1.1.5 or, for SNMPv1, the generic trap type 0–4 (6 is
+// enterprise specific: other).
+func EventKindOfTrap(trapOID, genericTrap string) string {
+	oid := strings.TrimPrefix(strings.TrimSpace(trapOID), ".")
+	if last, ok := strings.CutPrefix(oid, "1.3.6.1.6.3.1.1.5."); ok {
+		if k, known := snmpGenericTraps[last]; known {
+			return k
+		}
+	}
+	if n, err := strconv.Atoi(strings.TrimSpace(genericTrap)); err == nil && n >= 0 && n <= 4 {
+		return snmpGenericTraps[strconv.Itoa(n+1)]
+	}
+	return EventOther
+}
+
+// RecheckKind reports whether an event of the kind triggers an immediate
+// check of the probes of its source (link down/up, cold/warm start).
+func RecheckKind(kind string) bool {
+	switch kind {
+	case EventLinkDown, EventLinkUp, EventColdStart, EventWarmStart:
+		return true
+	}
+	return false
+}
+
+// Event is a monitoring event of the collector: an SNMP trap received in
+// the monitoring mode (WP-979). ID is a UUIDv7 the collector assigns, so a
+// repeated delivery is detected; SourceIP is the sender of the trap.
+type Event struct {
+	ID         string            `json:"id"`
+	Kind       string            `json:"kind"`
+	SourceIP   string            `json:"source_ip"`
+	TrapOID    string            `json:"trap_oid,omitempty"`
+	Varbinds   map[string]string `json:"varbinds,omitempty"`
+	Truncated  bool              `json:"truncated,omitempty"`
+	ObservedAt time.Time         `json:"observed_at"`
+}
+
+// Validate checks an event: a UUID, a known kind, an IP address without
+// zone as source, at most MaxEventVarbinds varbinds of at most
+// MaxEventVarbindBytes (and MaxEventVarbindTextBytes as stored), names,
+// values and trap_oid valid UTF-8 without control characters (text and
+// jsonb cannot hold NUL).
+func (e *Event) Validate() error {
+	if !isUUID(e.ID) {
+		return fmt.Errorf("%w: event id is no UUID", ErrInvalidResult)
+	}
+	if !eventKinds[e.Kind] {
+		return fmt.Errorf("%w: event kind %q", ErrInvalidResult, e.Kind)
+	}
+	if a, err := netip.ParseAddr(e.SourceIP); err != nil || a.Zone() != "" {
+		return fmt.Errorf("%w: event source_ip", ErrInvalidResult)
+	}
+	if e.ObservedAt.IsZero() {
+		return fmt.Errorf("%w: event observed_at", ErrInvalidResult)
+	}
+	if len(e.Varbinds) > MaxEventVarbinds || varbindBytes(e.Varbinds) > MaxEventVarbindBytes ||
+		varbindTextBytes(e.Varbinds) > MaxEventVarbindTextBytes || len(e.TrapOID) > MaxEventTrapOIDBytes {
+		return fmt.Errorf("%w: event varbinds above the limit", ErrInvalidResult)
+	}
+	if !ValidEventText(e.TrapOID) {
+		return fmt.Errorf("%w: event trap_oid", ErrInvalidResult)
+	}
+	for k, v := range e.Varbinds {
+		if k == "" || !ValidEventText(k) || !ValidEventText(v) {
+			return fmt.Errorf("%w: event varbind", ErrInvalidResult)
+		}
+	}
+	return nil
+}
+
+// ValidEventText reports whether s is valid UTF-8 without control
+// characters (C0, DEL, C1), as an event stores it.
+func ValidEventText(s string) bool {
+	if !utf8.ValidString(s) {
+		return false
+	}
+	for _, r := range s {
+		if r < 0x20 || (r >= 0x7f && r < 0xa0) {
+			return false
+		}
+	}
+	return true
+}
+
+func varbindBytes(v map[string]string) int {
+	n := 0
+	for k, x := range v {
+		n += len(k) + len(x)
+	}
+	return n
+}
+
+// varbindTextBytes is an upper bound of the JSON text of the varbinds as
+// PostgreSQL renders jsonb: braces, per entry two quoted strings, ": "
+// and ", ", quotes and backslashes escaped (control characters are not
+// allowed).
+func varbindTextBytes(v map[string]string) int {
+	n := 2
+	for k, x := range v {
+		n += varbindEntryText(k, x)
+	}
+	return n
+}
+
+func varbindEntryText(k, v string) int {
+	return escapedLen(k) + escapedLen(v) + 8
+}
+
+func escapedLen(s string) int {
+	return len(s) + strings.Count(s, `"`) + strings.Count(s, `\`)
+}
+
+// LimitVarbinds returns at most MaxEventVarbinds varbinds of at most
+// MaxEventVarbindBytes and MaxEventVarbindTextBytes (in the order of the
+// names) and whether some were cut; a varbind whose name or value is no
+// valid event text (ValidEventText) is left out as well.
+func LimitVarbinds(v map[string]string) (map[string]string, bool) {
+	names := make([]string, 0, len(v))
+	for k := range v {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	out := map[string]string{}
+	size, text, cut := 0, 2, false
+	for _, k := range names {
+		if k == "" || !ValidEventText(k) || !ValidEventText(v[k]) {
+			cut = true
+			continue
+		}
+		if len(out) >= MaxEventVarbinds || size+len(k)+len(v[k]) > MaxEventVarbindBytes ||
+			text+varbindEntryText(k, v[k]) > MaxEventVarbindTextBytes {
+			cut = true
+			continue
+		}
+		out[k] = v[k]
+		size += len(k) + len(v[k])
+		text += varbindEntryText(k, v[k])
+	}
+	return out, cut
+}
+
+func isUUID(s string) bool {
+	if len(s) != 36 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch i {
+		case 8, 13, 18, 23:
+			if c != '-' {
+				return false
+			}
+		default:
+			if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // MaxBatchResults is the maximum number of results in one ResultBatch.

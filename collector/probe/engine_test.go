@@ -187,3 +187,100 @@ func TestEngineRemoveDuringObserveLeavesNoCounters(t *testing.T) {
 		}
 	}
 }
+
+func trapEvent(kind, source string, at time.Time) probewire.Event {
+	return probewire.Event{ID: "0193f1a2-7b3c-7d4e-8f50-0123456789ab", Kind: kind, SourceIP: source,
+		TrapOID: "1.3.6.1.6.3.1.1.5.3", Varbinds: map[string]string{"1.3.6.1.2.1.2.2.1.1.7": "7"}, ObservedAt: at}
+}
+
+// TestLinkDownTrapRechecksWithinTwoSeconds covers WP-979 AK4 and AK5: a
+// linkDown trap checks the probe of its sender at once; with the simulated
+// clock the result lies at most 2 s after the receipt of the trap.
+func TestLinkDownTrapRechecksWithinTwoSeconds(t *testing.T) {
+	clock := newFakeClock(time.Date(2026, 11, 14, 8, 0, 0, 0, time.UTC))
+	var mu sync.Mutex
+	var observed []time.Time
+	run := func(_ context.Context, spec *probewire.ProbeSpec, _ map[string]string) probewire.Result {
+		return probewire.Result{ProbeID: spec.ID, Epoch: spec.Epoch, ObservedAt: clock.Now(), Status: probewire.StatusOK}
+	}
+	e, err := NewEngine(&EngineConfig{SpoolDir: t.TempDir(), Send: trapNoEdge, Run: run})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Scheduler.Clock = clock
+	e.Scheduler.Go = inline
+	e.Scheduler.Limits = unlimited()
+	sink := e.Scheduler.Sink
+	e.Scheduler.Sink = func(r probewire.Result) {
+		mu.Lock()
+		observed = append(observed, r.ObservedAt)
+		mu.Unlock()
+		sink(r)
+	}
+	e.Upsert(probewire.ProbeSpec{ID: "p-trap", Type: TypeTCP, Target: "192.0.2.20", IntervalMS: 300_000, TimeoutMS: 1000,
+		DownCount: 3, UpCount: 1, Epoch: 1, Params: []byte(`{"port":22}`)})
+	e.Scheduler.Advance(clock.Now())
+	mu.Lock()
+	observed = nil
+	mu.Unlock()
+	received := clock.Now().Add(30 * time.Second)
+	clock.Set(received)
+	e.OnTrap(trapEvent(probewire.EventLinkDown, "192.0.2.20", received))
+	mu.Lock()
+	defer mu.Unlock()
+	if len(observed) != 1 || observed[0].Sub(received) > 2*time.Second || observed[0].Before(received) {
+		t.Fatalf("results after the trap at %v: %v", received, observed)
+	}
+	// An authenticationFailure trap triggers nothing.
+	clock.Set(received.Add(time.Minute))
+	mu.Unlock()
+	e.OnTrap(trapEvent(probewire.EventAuthFailure, "192.0.2.20", clock.Now()))
+	mu.Lock()
+	if len(observed) != 1 {
+		t.Fatalf("authFailure triggered a check: %v", observed)
+	}
+}
+
+// TestTrapEventQueuedWithResults covers WP-979 AK2: the event goes with the
+// next result bundle; an invalid event is dropped.
+func TestTrapEventQueuedWithResults(t *testing.T) {
+	e, err := NewEngine(&EngineConfig{SpoolDir: t.TempDir(), Send: trapNoEdge})
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 11, 14, 8, 0, 0, 0, time.UTC)
+	e.OnTrap(trapEvent(probewire.EventLinkUp, "192.0.2.30", at))
+	bad := trapEvent(probewire.EventLinkUp, "not-an-ip", at)
+	e.OnTrap(bad)
+	ctx := context.Background()
+	r := probewire.Result{ProbeID: "p-1", Seq: 1, ObservedAt: at, Status: probewire.StatusOK}
+	if aerr := e.Outbox.AddResult(ctx, &r, false); aerr != nil {
+		t.Fatal(aerr)
+	}
+	if ferr := e.Outbox.Flush(ctx); ferr != nil {
+		t.Fatal(ferr)
+	}
+	msgs, err := e.Outbox.Results().PeekBatch(ctx, 10)
+	if err != nil || len(msgs) != 1 {
+		t.Fatalf("bundles %d, %v", len(msgs), err)
+	}
+	batch, _, err := DecodeBundle(&msgs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch.Results) != 1 || len(batch.Events) != 1 || batch.Events[0].Kind != probewire.EventLinkUp ||
+		batch.Events[0].SourceIP != "192.0.2.30" {
+		t.Fatalf("batch = %+v", batch)
+	}
+	// The encoded uplink message carries the events.
+	data, err := encodeResults(batch.Results, batch.Events...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sent probewire.ResultBatch
+	if err := probewire.Decode(data, &sent); err != nil || len(sent.Events) != 1 {
+		t.Fatalf("uplink message %+v, %v", sent, err)
+	}
+}
+
+func trapNoEdge(context.Context, string, []byte) ([]byte, error) { return nil, ErrNoEdge }

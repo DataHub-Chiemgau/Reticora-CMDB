@@ -349,6 +349,9 @@ func startProbeEngine(cfg *collectorConfig, up *uploader) *probe.Engine {
 	// the trap counters (WP-977).
 	engine.Capabilities = &up.capabilities
 	engine.TrapStats = collectorTraps.stats
+	// Traps of the monitoring mode become events of the engine and check
+	// the probes of their sender at once (WP-979).
+	collectorTraps.setMonitor(engine.OnTrap)
 	return engine
 }
 

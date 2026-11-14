@@ -631,3 +631,117 @@ func TestSchedulerRateStoreLimitFromExecutor(t *testing.T) {
 		t.Fatalf("series beyond the limit admitted: %+v", st.Stats())
 	}
 }
+
+// triggerScheduler is a scheduler with a fake clock, inline checks and
+// the recorder; probes p-a (target 192.0.2.10) and p-b (other target).
+func triggerScheduler(t *testing.T, limits *Limits) (*Scheduler, *fakeClock, *startRecorder) {
+	t.Helper()
+	clock := newFakeClock(time.Date(2026, 11, 14, 8, 0, 0, 0, time.UTC))
+	rec := newStartRecorder(clock)
+	s := &Scheduler{Clock: clock, Run: rec.run, Go: inline, Limits: limits}
+	a := schedSpec("p-a", 60_000)
+	a.Target = "192.0.2.10"
+	b := schedSpec("p-b", 60_000)
+	b.Target = "192.0.2.11"
+	s.Upsert(a)
+	s.Upsert(b)
+	s.Advance(clock.Now())
+	return s, clock, rec
+}
+
+// TestTriggerNowRunsOutsidePhase covers WP-979 AK4: the probes of the
+// target start at once, others not.
+func TestTriggerNowRunsOutsidePhase(t *testing.T) {
+	s, clock, rec := triggerScheduler(t, unlimited())
+	before := len(rec.startsOf("p-a"))
+	if n := s.TriggerNow("192.0.2.10"); n != 1 {
+		t.Fatalf("started %d checks, want 1", n)
+	}
+	starts := rec.startsOf("p-a")
+	if len(starts) != before+1 || !starts[len(starts)-1].Equal(clock.Now()) {
+		t.Fatalf("starts of p-a = %v", starts)
+	}
+	if len(rec.startsOf("p-b")) != 0 {
+		t.Fatal("a probe of another target was triggered")
+	}
+	if s.TriggerNow("not-an-address") != 0 {
+		t.Fatal("a malformed target triggered a check")
+	}
+}
+
+// TestTriggerNowRespectsTypeBudget covers WP-979 AK4: without budget the
+// check is skipped and counted, nothing is queued.
+func TestTriggerNowRespectsTypeBudget(t *testing.T) {
+	none := &Limits{Lookup: func(string) TypeLimits { return TypeLimits{ParallelPerCollector: 1} }}
+	var results []probewire.Result
+	s, _, rec := triggerScheduler(t, none)
+	s.Sink = func(r probewire.Result) { results = append(results, r) }
+	// Hold the only slot of the type.
+	release, ok := none.Acquire(TypeTCP, "198.51.100.1", time.Now())
+	if !ok {
+		t.Fatal("no first slot")
+	}
+	defer release()
+	skipped := s.Stats().Skipped
+	if n := s.TriggerNow("192.0.2.10"); n != 0 {
+		t.Fatalf("started %d checks without budget", n)
+	}
+	if s.Stats().Skipped != skipped+1 || len(rec.startsOf("p-a")) != 0 {
+		t.Fatalf("skipped %d, starts %v", s.Stats().Skipped, rec.startsOf("p-a"))
+	}
+	if len(results) != 1 || results[0].Code != probewire.ReasonLimitExceeded {
+		t.Fatalf("results = %+v", results)
+	}
+}
+
+// TestTriggerNowDebounced covers WP-979 AK4: at most one trigger per probe
+// in 10 s, and a running check is not started twice.
+func TestTriggerNowDebounced(t *testing.T) {
+	s, clock, rec := triggerScheduler(t, unlimited())
+	s.TriggerNow("192.0.2.10")
+	clock.Set(clock.Now().Add(9 * time.Second))
+	if s.TriggerNow("192.0.2.10") != 0 {
+		t.Fatal("second trigger within 10 s")
+	}
+	clock.Set(clock.Now().Add(1 * time.Second))
+	if s.TriggerNow("192.0.2.10") != 1 {
+		t.Fatal("no trigger after 10 s")
+	}
+	if got := len(rec.startsOf("p-a")); got != 2 {
+		t.Fatalf("%d starts, want 2", got)
+	}
+	// A running check: no second start.
+	block := make(chan struct{})
+	rec.mu.Lock()
+	rec.block["p-a"] = block
+	rec.mu.Unlock()
+	s.Go = func(f func()) { go f() }
+	clock.Set(clock.Now().Add(11 * time.Second))
+	if s.TriggerNow("192.0.2.10") != 1 {
+		t.Fatal("no trigger")
+	}
+	for len(rec.startsOf("p-a")) != 3 {
+		time.Sleep(time.Millisecond)
+	}
+	clock.Set(clock.Now().Add(11 * time.Second))
+	if s.TriggerNow("192.0.2.10") != 0 {
+		t.Fatal("a running check was started twice")
+	}
+	close(block)
+	s.Wait()
+}
+
+// TestTriggerNowKeepsPhase covers WP-979 AK4: the next regular start stays
+// at the hash phase.
+func TestTriggerNowKeepsPhase(t *testing.T) {
+	s, _, _ := triggerScheduler(t, unlimited())
+	next, _ := s.Next("p-a")
+	s.TriggerNow("192.0.2.10")
+	after, _ := s.Next("p-a")
+	if !after.Equal(next) {
+		t.Fatalf("next start moved from %v to %v", next, after)
+	}
+	if want := Phase("p-a", 60_000); after.UnixMilli()%60_000 != want {
+		t.Fatalf("next start %v off the phase %d", after, want)
+	}
+}

@@ -349,6 +349,13 @@ func (s *PGIngestStore) WriteResults(ctx context.Context, orgID string, msgs []R
 			}
 			out.Samples = n
 		}
+		// The monitoring events of the batches (traps, WP-979 AK3) in the
+		// same transaction; a repeated delivery writes no second row.
+		nEvents, werr := writeEvents(ctx, tx, orgID, msgs, collectorClients)
+		if werr != nil {
+			return werr
+		}
+		out.Events = nEvents
 		if err := advanceCursors(ctx, tx, orgID, cursor); err != nil {
 			return err
 		}

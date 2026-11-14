@@ -37,6 +37,8 @@ type MemoryRepository struct {
 	profiles map[string]*MonitoringProfile
 	mgroups  map[string]*MonitoringGroup
 	members  map[memMember]*MonitoringGroupMember
+	// events are the monitoring events of AddEvents (WP-979).
+	events []memEvent
 	// suppressed are the (organization, CI, type) of deleted auto probes
 	// (WP-949).
 	suppressed map[[3]string]bool

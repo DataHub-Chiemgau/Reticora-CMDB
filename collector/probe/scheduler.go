@@ -3,6 +3,9 @@ package probe
 import (
 	"context"
 	"hash/fnv"
+	"net"
+	"net/netip"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -118,6 +121,7 @@ type Scheduler struct {
 	entries  map[string]*schedEntry
 	running  map[string]*runningCheck
 	stores   map[string]*rate.Store
+	triggers map[string]time.Time // last TriggerNow per probe
 	slots    [wheelSlots][]wheelRef
 	lastTick int64
 	started  bool
@@ -157,6 +161,7 @@ func (s *Scheduler) init() {
 		s.entries = map[string]*schedEntry{}
 		s.running = map[string]*runningCheck{}
 		s.stores = map[string]*rate.Store{}
+		s.triggers = map[string]time.Time{}
 	}
 	if s.Limits == nil {
 		s.Limits = NewLimits()
@@ -274,6 +279,7 @@ func (s *Scheduler) Remove(id string) {
 	defer s.mu.Unlock()
 	delete(s.entries, id)
 	delete(s.stores, id)
+	delete(s.triggers, id)
 	if rc := s.running[id]; rc != nil {
 		rc.removed = true
 		rc.cancel()
@@ -457,6 +463,80 @@ func (s *Scheduler) Advance(now time.Time) {
 	for i := range start {
 		s.start(start[i].ctx, start[i].spec, releases[i], runs[i])
 	}
+}
+
+// TriggerDebounce is the shortest time between two immediate checks of a
+// probe by TriggerNow (protection against trap storms, WP-979 AK4).
+const TriggerDebounce = 10 * time.Second
+
+// TriggerNow starts an immediate check, outside its phase, of every probe
+// whose target is the address target (WP-979 AK4: after a linkDown,
+// linkUp, coldStart or warmStart trap). The check runs under the
+// parallelism and rate budget of its type; without budget it is skipped
+// and counted (limit_exceeded), nothing is queued. A probe is triggered at
+// most once in TriggerDebounce, a check still running is not started a
+// second time, and the phase of the probe stays as it is. It returns the
+// number of checks started.
+func (s *Scheduler) TriggerNow(target string) int {
+	addr, err := netip.ParseAddr(strings.TrimSpace(target))
+	if err != nil {
+		return 0
+	}
+	addr = addr.Unmap()
+	now := s.now()
+	s.mu.Lock()
+	s.init()
+	var start []dueCheck
+	var releases []func()
+	var runs []*runningCheck
+	var skipped []probewire.Result
+	ctx := s.ctx
+	for id, e := range s.entries {
+		if !sameTargetAddr(e.spec.Target, addr) {
+			continue
+		}
+		if last, ok := s.triggers[id]; ok && now.Sub(last) < TriggerDebounce {
+			continue
+		}
+		if s.running[id] != nil {
+			continue
+		}
+		s.triggers[id] = now
+		release, ok := s.Limits.Acquire(e.spec.Type, e.spec.Target, now)
+		if !ok {
+			s.nSkipped.Add(1)
+			skipped = append(skipped, probewire.Result{ProbeID: id, Epoch: e.spec.Epoch, ObservedAt: now.UTC(),
+				Status: probewire.StatusError, Code: probewire.ReasonLimitExceeded})
+			continue
+		}
+		rctx, cancel := context.WithCancel(rate.WithStore(ctx, s.stores[id]))
+		rc := &runningCheck{cancel: cancel}
+		s.running[id] = rc
+		start = append(start, dueCheck{spec: e.spec, ctx: rctx})
+		releases = append(releases, release)
+		runs = append(runs, rc)
+	}
+	s.mu.Unlock()
+	if s.Sink != nil {
+		for i := range skipped {
+			s.Sink(skipped[i])
+		}
+	}
+	for i := range start {
+		s.start(start[i].ctx, start[i].spec, releases[i], runs[i])
+	}
+	return len(start)
+}
+
+// sameTargetAddr reports whether the target of a probe (an address,
+// optionally with a port) is addr.
+func sameTargetAddr(target string, addr netip.Addr) bool {
+	host := strings.TrimSpace(target)
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	a, err := netip.ParseAddr(strings.Trim(host, "[]"))
+	return err == nil && a.Unmap() == addr
 }
 
 func (s *Scheduler) start(ctx context.Context, spec probewire.ProbeSpec, release func(), rc *runningCheck) { //nolint:gocritic // the spec is copied into the job on purpose

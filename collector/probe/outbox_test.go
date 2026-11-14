@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -429,5 +430,170 @@ func TestOutboxCompactionReadsBehindItsCursor(t *testing.T) {
 	// Behind the cursor only the last part waits for the bundles to come.
 	if rest, err := o.results.PeekAfter(ctx, cursor, 10); err != nil || len(rest) > 1 {
 		t.Errorf("%d bundles after the cursor %s (%v), want at most the last part", len(rest), cursor, err)
+	}
+}
+
+// bigEvent is a valid trap event with about size bytes of varbinds.
+func bigEvent(i, size int) probewire.Event {
+	return probewire.Event{ID: fmt.Sprintf("0193f1a2-7b3c-7d4e-8f50-%012x", i), Kind: probewire.EventLinkDown, SourceIP: "192.0.2.7",
+		TrapOID: "1.3.6.1.6.3.1.1.5.3", Varbinds: map[string]string{"1.3.6.1.2.1.2.2.1.2.7": strings.Repeat("x", size)},
+		ObservedAt: compactBase}
+}
+
+// eventsOf returns the event ids of every bundle in the spool and the
+// largest encoded size of the events of one bundle.
+func eventsOf(t *testing.T, o *Outbox) (ids map[string]int, maxBytes int) {
+	t.Helper()
+	msgs, err := o.Results().PeekBatch(context.Background(), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids = map[string]int{}
+	for i := range msgs {
+		batch, _, err := DecodeBundle(&msgs[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+		size := 0
+		for j := range batch.Events {
+			ids[batch.Events[j].ID]++
+			size += eventBytes(&batch.Events[j])
+		}
+		maxBytes = max(maxBytes, size)
+	}
+	return ids, maxBytes
+}
+
+// TestOutboxEventsBoundedByBytes covers WP-979 AK2: a trap storm of 200
+// events of 1.5 KiB (more than one message) is spread over bundles of at
+// most half a message, and the uplink delivers every event without a
+// quarantine.
+func TestOutboxEventsBoundedByBytes(t *testing.T) {
+	ctx := context.Background()
+	o := openOutbox(t, t.TempDir(), 0)
+	for i := range probewire.MaxBatchEvents {
+		ev := bigEvent(i, 1536)
+		o.AddEvent(&ev)
+	}
+	rng := rand.New(rand.NewPCG(21, 22))
+	for seq := uint64(1); seq <= 4; seq++ {
+		r := icmpResultAt(1, seq, compactBase.Add(time.Duration(seq)*time.Second), rng)
+		if err := o.AddResult(ctx, &r, false); err != nil {
+			t.Fatal(err)
+		}
+		if err := o.Flush(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ids, maxBytes := eventsOf(t, o)
+	if len(ids) != probewire.MaxBatchEvents || maxBytes > outboxEventBytes {
+		t.Fatalf("%d events in the bundles, at most %d bytes per bundle (limit %d)", len(ids), maxBytes, outboxEventBytes)
+	}
+	f := newFakeEdge()
+	u := startUplink(t, o, f, nil)
+	calls := f.waitFor(t, 10*time.Second, func(c []edgeCall) bool { return countResults(c) >= 4 })
+	got := map[string]bool{}
+	for _, c := range calls {
+		if c.size > MaxUplinkMessageBytes {
+			t.Errorf("message of %d bytes", c.size)
+		}
+		for _, id := range c.events {
+			got[id] = true
+		}
+	}
+	if len(got) != probewire.MaxBatchEvents || u.Stats().Quarantined != 0 {
+		t.Fatalf("%d events delivered, %d quarantined", len(got), u.Stats().Quarantined)
+	}
+}
+
+// TestUplinkSpreadsEventsOverParts covers WP-979 AK2: a stored bundle whose
+// events alone exceed a message (one result, 200 events of 1.5 KiB) is
+// sent in parts; the events go over the parts, the last ones with the
+// result once more, nothing is quarantined.
+func TestUplinkSpreadsEventsOverParts(t *testing.T) {
+	ctx := context.Background()
+	o := openOutbox(t, t.TempDir(), 0)
+	events := make([]probewire.Event, probewire.MaxBatchEvents)
+	for i := range events {
+		events[i] = bigEvent(i, 1536)
+	}
+	r := icmpResultAt(1, 1, compactBase, rand.New(rand.NewPCG(23, 24)))
+	msg, err := o.bundle([]probewire.Result{r}, nil, false, events...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := o.results.Enqueue(ctx, msg); err != nil {
+		t.Fatal(err)
+	}
+	f := newFakeEdge()
+	u := startUplink(t, o, f, nil)
+	got := map[string]bool{}
+	f.waitFor(t, 10*time.Second, func(calls []edgeCall) bool {
+		clear(got)
+		for _, c := range calls {
+			for _, id := range c.events {
+				got[id] = true
+			}
+		}
+		return len(got) == probewire.MaxBatchEvents
+	})
+	if q := u.Stats().Quarantined; q != 0 {
+		t.Fatalf("%d quarantined", q)
+	}
+	for _, c := range f.accepted() {
+		if c.size > MaxUplinkMessageBytes {
+			t.Errorf("message of %d bytes", c.size)
+		}
+	}
+}
+
+// TestOutboxCompactionKeepsEvents covers WP-979 AK2: a window of 10
+// bundles with 200 events each, compacted to fewer results than parts of
+// 1,000, keeps every event (one group of events per part).
+func TestOutboxCompactionKeepsEvents(t *testing.T) {
+	ctx := context.Background()
+	o := openOutbox(t, t.TempDir(), 0)
+	rng := rand.New(rand.NewPCG(25, 26))
+	seq, id := uint64(0), 0
+	at := compactBase
+	for range 10 {
+		for range probewire.MaxBatchEvents {
+			ev := bigEvent(id, 16)
+			id++
+			o.AddEvent(&ev)
+		}
+		at = at.Add(time.Second)
+		for p := range 20 {
+			seq++
+			r := icmpResultAt(p, seq, at, rng)
+			r.ProbeID = fmt.Sprintf("probe-%d", p)
+			if err := o.AddResult(ctx, &r, false); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := o.Flush(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	o.mu.Lock()
+	progressed, err := o.compactOnce(ctx)
+	o.mu.Unlock()
+	if err != nil || !progressed {
+		t.Fatalf("compaction: %v, %v", progressed, err)
+	}
+	st, _ := o.Stats(ctx)
+	if st.Losses[OutboxLossCompacted] == 0 {
+		t.Fatalf("losses %v, want compacted results", st.Losses)
+	}
+	ids, _ := eventsOf(t, o)
+	if len(ids) != id || st.Losses[OutboxLossEvents] != 0 {
+		t.Fatalf("%d of %d events after the compaction, lost %d", len(ids), id, st.Losses[OutboxLossEvents])
+	}
+	msgs, _ := o.Results().PeekBatch(ctx, 1<<20)
+	for i := range msgs {
+		batch, _, _ := DecodeBundle(&msgs[i])
+		if len(batch.Results) == 0 || len(batch.Events) > probewire.MaxBatchEvents {
+			t.Fatalf("part %d: %d results, %d events", i, len(batch.Results), len(batch.Events))
+		}
 	}
 }

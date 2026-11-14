@@ -1948,3 +1948,4 @@ PRT-21;[P3];E;collector/probe/stamp_test.go;WP-1013
 PRT-16;[P3];E;collector/probe/gnmi_test.go;WP-1016
 PRT-17;[P3];E;collector/probe/rpki/roa_test.go;WP-1021
 DIS-06;[P3], Zusatzprotokolle [O];E;collector/plugins/snmp/trap_v3_test.go;WP-978
+DIS-06;[P3], Zusatzprotokolle [O];E;backend/internal/probe/events_integration_test.go;WP-979

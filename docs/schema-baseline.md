@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000369_document_link_report
+Stand: Migration 000370_monitoring_event
 
 ## Prüfung
 
@@ -645,6 +645,31 @@ kennzeichnet eine nie konfigurierte Gruppe: Ihr Zuweisungssatz trägt kein
 PATCH speichert die vollständige Konfiguration mit Port. RLS, Policies und
 Truncate-Guard von `collector_group` bleiben unverändert. Down entfernt die
 Spalte.
+
+### Monitoring-Ereignisse (WP-979)
+
+Migration `monitoring_event` (WP-979, DIS-06, vorläufige Nummer 000370)
+legt die Mandantentabelle `monitoring_event` an: SNMP-Traps des
+Monitoring-Modus mit `id` (UUIDv7 des Collectors, Primärschlüssel),
+`organization_id`, abgeleitetem `client_id`/`site_id`, `collector_id`,
+`ci_id NULL`, `probe_id NULL`, `source_ip inet`, `kind` (`link_down`,
+`link_up`, `cold_start`, `warm_start`, `auth_failure`, `other`),
+`trap_oid`, `varbinds jsonb` (höchstens 64 Einträge und 16 KiB, markiert
+über `truncated`), `observed_at`, `received_at`. Fremdschlüssel nach
+Konvention 19: `(ci_id, organization_id) → ci ON DELETE CASCADE`,
+`(probe_id, organization_id) → probe ON DELETE SET NULL (probe_id)`,
+`(collector_id, organization_id) → collector ON DELETE CASCADE`; die
+abgeleiteten Scope-Spalten bleiben ohne Fremdschlüssel. Der
+BEFORE-INSERT/UPDATE-Trigger `monitoring_event_scope` übernimmt
+`client_id`/`site_id` aus dem CI, ohne CI aus dem Collector. ENABLE und
+FORCE ROW LEVEL SECURITY mit `monitoring_event_isolation` sowie den
+restriktiven `_scoped_update` (mit WITH CHECK) und `_scoped_delete` nach
+Konvention 5 (Muster 000307), `reticora_truncate_guard`. Indizes
+`(organization_id, observed_at DESC)`, `(ci_id, observed_at DESC) WHERE
+ci_id IS NOT NULL`, `(probe_id, observed_at DESC) WHERE probe_id IS NOT
+NULL` und `(collector_id, organization_id)`. Aufbewahrung 30 Tage
+(`probe.PurgeEvents`, Portionen von höchstens 10.000). Down entfernt
+Tabelle und Funktion.
 
 ## Indizes unter RLS (SR-04, K22, WP-836)
 
@@ -2294,6 +2319,7 @@ SECURITY`), Policies mit ihrem Kommando.
 | `metamodel_rule` | ja | ja | metamodel_rule_isolation_delete (DELETE), metamodel_rule_isolation_insert (INSERT), metamodel_rule_isolation_select (SELECT), metamodel_rule_isolation_update (UPDATE) |
 | `metric_sample` | nein | nein | – |
 | `migration_quarantine` | ja | ja | migration_quarantine_isolation (ALL) |
+| `monitoring_event` | ja | ja | monitoring_event_isolation (ALL), monitoring_event_scoped_delete (DELETE), monitoring_event_scoped_update (UPDATE) |
 | `monitoring_group` | ja | ja | monitoring_group_isolation (ALL), monitoring_group_scoped_delete (DELETE), monitoring_group_scoped_update (UPDATE) |
 | `monitoring_group_member` | ja | ja | monitoring_group_member_isolation (ALL), monitoring_group_member_scoped_delete (DELETE), monitoring_group_member_scoped_update (UPDATE) |
 | `monitoring_profile` | ja | ja | monitoring_profile_isolation (ALL), monitoring_profile_scoped_delete (DELETE), monitoring_profile_scoped_update (UPDATE) |

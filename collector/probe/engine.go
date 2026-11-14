@@ -268,6 +268,22 @@ func (e *Engine) observe(r probewire.Result) { //nolint:gocritic // Sink signatu
 	}
 }
 
+// OnTrap takes a monitoring event of the trap receiver in the monitoring
+// mode (WP-979 AK2, AK4): the event goes into the result queue and is
+// transmitted with the next result batch; a linkDown, linkUp, coldStart
+// or warmStart triggers an immediate check of every probe whose target is
+// the sender (Scheduler.TriggerNow). An invalid event is dropped.
+func (e *Engine) OnTrap(ev probewire.Event) { //nolint:gocritic // the event is copied into the queue on purpose
+	if err := ev.Validate(); err != nil {
+		slog.Warn("probe engine: invalid monitoring event dropped", "kind", ev.Kind, "error", err)
+		return
+	}
+	e.Outbox.AddEvent(&ev)
+	if probewire.RecheckKind(ev.Kind) {
+		e.Scheduler.TriggerNow(ev.SourceIP)
+	}
+}
+
 // aliveSnapshot returns the figures of the alive message (WP-957 AK1):
 // configuration version, probes, results per second over 60 s, the
 // entries of both spools, the losses per reason, the skipped and overrun
