@@ -17,6 +17,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/go-chi/chi/v5"
 )
@@ -512,6 +513,86 @@ type Handler struct {
 	// alarms resolves the alarms of a rule that is disabled or deleted
 	// (WP-984); nil leaves them to nobody (handlers without alarms).
 	alarms AlarmSink
+	// reporters checks the reporter of the ticket action (WP-1040); nil
+	// accepts every reporter.
+	reporters TicketReporterCheck
+}
+
+// TicketReporterCheck checks the reporter of the ticket action of a rule
+// (WP-1040 AK1): an active user of the organization with ticket:write.
+type TicketReporterCheck interface {
+	CheckTicketReporter(ctx context.Context, orgID, userID string) (bool, error)
+}
+
+// WithTicketReporters sets the check of the reporter of the ticket action.
+func (h *Handler) WithTicketReporters(c TicketReporterCheck) *Handler {
+	h.reporters = c
+	return h
+}
+
+// errTicketReporter refuses a reporter that is not an active user with
+// ticket:write.
+var errTicketReporter = &api.FieldError{Field: "actions.ticket.reporter_id", Status: http.StatusUnprocessableEntity,
+	Message: "must be an active user of the organization with the permission ticket:write"}
+
+// errTicketReporterForeign refuses a reporter that is neither the saving
+// user nor the reporter the rule has already.
+var errTicketReporterForeign = &api.FieldError{Field: "actions.ticket.reporter_id", Status: http.StatusUnprocessableEntity,
+	Message: "must be the saving user or the reporter the rule has already"}
+
+// checkTicketAction completes and checks the ticket action of a rule that
+// is saved (WP-1040 AK1, Konvention 46): the reporter is the saving user;
+// without reporter_id the saving user becomes the reporter, another
+// reporter_id is accepted only when it is the one the stored rule has
+// already (keep, empty for a new rule), so nobody saves a rule whose
+// tickets carry another user's name. The reporter must be an active user
+// with ticket:write, otherwise 422 on actions.ticket.reporter_id.
+func (h *Handler) checkTicketAction(r *http.Request, orgID string, a *events.AlarmActions, keep string) error {
+	if a == nil || a.Ticket == nil {
+		return nil
+	}
+	saver := ""
+	if p, ok := identity.PrincipalFromContext(r.Context()); ok && api.IsUUID(p.Subject) {
+		saver = p.Subject
+	} else if id := tenant.FromContext(r.Context()).UserID; api.IsUUID(id) {
+		saver = id
+	}
+	switch {
+	case a.Ticket.ReporterID == "":
+		a.Ticket.ReporterID = saver
+	case strings.EqualFold(a.Ticket.ReporterID, saver), keep != "" && strings.EqualFold(a.Ticket.ReporterID, keep):
+	default:
+		return errTicketReporterForeign
+	}
+	if a.Ticket.ReporterID == "" {
+		return errTicketReporter
+	}
+	if h.reporters == nil {
+		return nil
+	}
+	ok, err := h.reporters.CheckTicketReporter(r.Context(), orgID, a.Ticket.ReporterID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errTicketReporter
+	}
+	return nil
+}
+
+// storedTicketReporter returns the reporter of the ticket action of the
+// stored rule ("" for none or an unknown rule).
+func (h *Handler) storedTicketReporter(r *http.Request, orgID, id string) (string, error) {
+	rules, err := h.alerts.ListRules(r.Context(), orgID)
+	if err != nil {
+		return "", err
+	}
+	for i := range rules {
+		if strings.EqualFold(rules[i].ID, id) && rules[i].Actions != nil && rules[i].Actions.Ticket != nil {
+			return rules[i].Actions.Ticket.ReporterID, nil
+		}
+	}
+	return "", nil
 }
 
 // WithRuleAlarms makes the rule routes resolve the alarms of a rule that is
@@ -736,6 +817,12 @@ func (h *Handler) CreateAlert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rule.OrgID = orgID
+	if err := h.checkTicketAction(r, orgID, rule.Actions, ""); err != nil {
+		if !api.WriteFieldError(w, err) {
+			writeAlertError(w, r, err)
+		}
+		return
+	}
 
 	created, err := h.alerts.CreateRule(r.Context(), &rule)
 	if err != nil {
@@ -796,6 +883,20 @@ func (h *Handler) UpdateAlert(w http.ResponseWriter, r *http.Request) {
 		actions, err := events.ParseAlarmActions(req.Actions)
 		if err != nil {
 			api.WriteFieldError(w, err)
+			return
+		}
+		keep := ""
+		if actions.Ticket != nil && actions.Ticket.ReporterID != "" {
+			var kerr error
+			if keep, kerr = h.storedTicketReporter(r, orgID, chi.URLParam(r, "id")); kerr != nil {
+				writeAlertError(w, r, kerr)
+				return
+			}
+		}
+		if err := h.checkTicketAction(r, orgID, &actions, keep); err != nil {
+			if !api.WriteFieldError(w, err) {
+				writeAlertError(w, r, err)
+			}
 			return
 		}
 		req.ParsedActions = &actions

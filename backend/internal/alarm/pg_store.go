@@ -115,6 +115,16 @@ func (s *PGStore) LockOpenByKey(ctx context.Context, orgID, dedupKey string) (*A
 	return out, err
 }
 
+// TicketUse implements Store.
+func (s *PGStore) TicketUse(ctx context.Context, orgID, ticketID, exceptID string) (others int, opened bool, err error) {
+	err = database.WithRequestTenant(ctx, s.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE state <> 'resolved' AND id::text <> $3),
+				COALESCE(bool_or(details->>'ticket_existing' = 'false'), false)
+			  FROM alarm WHERE organization_id = $1 AND details->>'ticket_id' = $2`, orgID, ticketID, exceptID).Scan(&others, &opened)
+	})
+	return others, opened, err
+}
+
 // sqlArgs collects the arguments of a statement.
 type sqlArgs struct{ values []any }
 

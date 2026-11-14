@@ -177,6 +177,9 @@ type Service struct {
 	// maintenance suppresses the alarms of CIs in active maintenance
 	// windows (WP-1033); nil suppresses nothing.
 	maintenance MaintenanceChecker
+	// tickets opens the tickets of the ticket action (WP-1040); nil opens
+	// none.
+	tickets TicketWriter
 	// memMu serializes the operations without a database: the memory
 	// store has no row locks.
 	memMu sync.Mutex
@@ -278,6 +281,7 @@ func (s *Service) Raise(ctx context.Context, orgID string, in *RaiseInput) (*Ala
 				}
 			}
 			out = a
+			s.afterOpen(ctx, a)
 			return s.record(ctx, a, &Transition{ToState: StateOpen, ToSeverity: &a.Severity, At: a.FirstSeenAt,
 				Reason: ReasonRaised}, events.AlarmOpened)
 		}
@@ -298,6 +302,9 @@ func (s *Service) Raise(ctx context.Context, orgID string, in *RaiseInput) (*Ala
 			}
 			keepMaintenanceWindow(a, u)
 			out, err = s.move(ctx, a, u, &Transition{At: at, Reason: ReasonRaised}, events.AlarmOpened)
+			if err == nil {
+				s.afterOpen(ctx, out)
+			}
 			return err
 		case (a.State == StateOpen || a.State == StateAcknowledged) && severityRank(in.Severity) > severityRank(a.Severity):
 			u := stateOf(a)
@@ -338,6 +345,9 @@ func (s *Service) Clear(ctx context.Context, orgID, dedupKey string, at time.Tim
 			eventType = ""
 		}
 		out, err = s.move(ctx, a, u, &Transition{At: at, Reason: reason}, eventType)
+		if err == nil && eventType != "" {
+			s.afterResolve(ctx, out)
+		}
 		return err
 	})
 	return out, err

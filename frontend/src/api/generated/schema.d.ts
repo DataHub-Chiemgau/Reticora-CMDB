@@ -10857,7 +10857,7 @@ export interface paths {
     put?: never;
     /**
      * Open a ticket for an incident
-     * @description Planned (E-160, WP-864). The work package of the Phase-3 plan that implements the path replaces this scaffold.
+     * @description Opens a ticket for the incident (TKT-01 Monitoring [P3], WFL-06, WP-1040) with the caller as reporter: title and description default from the root, the cause class and the number of affected CIs, the priority from the severity of the root alarm. The ticket is linked to the incident (the dedupe key, under its advisory lock), the root CI and the root alarm. Needs ticket:write, reads the incident with monitoring:read (404 without); without the feature ticketing_essential 403 feature-not-entitled. The fields set in the body (priority, team_id, assignee_id) follow the field rights of the caller like any ticket creation (403 naming the fields). An open ticket of the incident is 409 naming it (ticket_id, ticket_number).
      */
     post: operations['createIncidentTicket'];
     delete?: never;
@@ -15576,6 +15576,31 @@ export interface components {
       transitions: components['schemas']['AlarmTransition'][];
       /** @description True when the alarm has more than 500 transitions. */
       transitions_truncated: boolean;
+      /** @description The tickets linked to the alarm (link type alarm) and, for an alarm of an incident, to its incident (WP-1040), by ticket number; empty without ticket:read or without the feature ticketing_essential. */
+      tickets?: components['schemas']['IncidentTicketRef'][];
+    };
+    /** @description The manual ticket of an incident (WP-1040); every field is optional. */
+    IncidentTicketRequest: {
+      title?: string;
+      description?: string;
+      /** @enum {string} */
+      priority?: 'low' | 'medium' | 'high' | 'critical';
+      /** Format: uuid */
+      team_id?: string;
+      /** Format: uuid */
+      assignee_id?: string;
+    };
+    IncidentTicketCreated: {
+      /** Format: uuid */
+      ticket_id: string;
+      ticket_number: number;
+      /** Format: uuid */
+      incident_id: string;
+    };
+    IncidentTicketConflict: components['schemas']['ProblemDetail'] & {
+      /** Format: uuid */
+      ticket_id: string;
+      ticket_number: number;
     };
     AlarmActionRequest: {
       comment?: string;
@@ -21209,10 +21234,23 @@ export interface components {
       /** @description Replaces the actions object as a whole (WP-988): a key it does not name returns to its default (on); null is the defaults. */
       actions?: components['schemas']['AlertRuleActions'] | null;
     };
-    /** @description Follow-up actions of the alarms of an alert rule (MON-04, WP-988). A missing key is on. notify.enabled false: the alarm.* events of the rule notify nobody; webhook.enabled false: they reach no webhook subscription. The events stay in the outbox and the stream (audit, workflow, correlation). The alarm carries the actions in details.actions. The keys ticket (WP-1040) and workflow (WP-1110) are reserved: 422 with field actions.ticket or actions.workflow; another key is 422 too. */
+    /** @description Follow-up actions of the alarms of an alert rule (MON-04, WP-988). A missing key is on. notify.enabled false: the alarm.* events of the rule notify nobody; webhook.enabled false: they reach no webhook subscription. The events stay in the outbox and the stream (audit, workflow, correlation). The alarm carries the actions in details.actions. ticket (WP-1040, off by default) opens a ticket for an alarm of the rule without a second one for the same root cause. The key workflow (WP-1110) is reserved: 422 with field actions.workflow; another key is 422 too. */
     AlertRuleActions: {
       notify?: components['schemas']['AlertRuleAction'];
       webhook?: components['schemas']['AlertRuleAction'];
+      ticket?: components['schemas']['AlertRuleTicketAction'];
+    };
+    /** @description The ticket action of an alert rule (TKT-01 Monitoring [P3], MON-04, WFL-06, WP-1040, E-205). An alarm the rule opens gets a ticket after the commit: deduplicated by the root cause (the incident of a root alarm, else the CI of the alarm) under the advisory lock of that target; an open ticket there is linked and gets a system comment instead; a symptom of an incident is linked to the incident's ticket; when the correlation forms an incident later, the root's ticket is linked to it and the symptoms join it. An alarm suppressed in a maintenance window opens its ticket when the window releases it. The reporter is the user who saves the rule (reporter_id may be omitted, or name that user or the reporter the rule has already), who must be active and have ticket:write (422 actions.ticket.reporter_id). The priority follows the severity (critical → critical, warning → medium, info → low) unless set. The resolution of the alarm writes a system comment; with close_on_resolve a ticket the monitoring opened is resolved, when its state machine allows it, once no other alarm on it is active and its incident (if any) is resolved; the resolution of an incident comments its tickets as well. Without the feature ticketing_essential no ticket is opened. */
+    AlertRuleTicketAction: {
+      /** @default false */
+      enabled: boolean;
+      /** @enum {string} */
+      priority?: 'low' | 'medium' | 'high' | 'critical';
+      category?: string;
+      /** Format: uuid */
+      reporter_id?: string;
+      /** @default false */
+      close_on_resolve: boolean;
     };
     AlertRuleAction: {
       /** @default true */
@@ -51330,20 +51368,35 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody?: {
+      content: {
+        'application/json': components['schemas']['IncidentTicketRequest'];
+      };
+    };
     responses: {
-      /** @description Open a ticket for an incident. The schema comes with the implementing work package. */
-      200: {
+      /** @description The ticket of the incident */
+      201: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          'application/json': components['schemas']['IncidentTicketCreated'];
+        };
       };
       400: components['responses']['BadRequest'];
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      409: components['responses']['Conflict'];
+      /** @description An open ticket is linked to the incident already. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['IncidentTicketConflict'];
+        };
+      };
+      422: components['responses']['UnprocessableEntity'];
       500: components['responses']['InternalServerError'];
     };
   };

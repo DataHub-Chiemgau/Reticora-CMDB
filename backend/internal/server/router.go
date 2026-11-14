@@ -909,7 +909,8 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	// Disabling or deleting a rule resolves its alarms (WP-984).
 	monitoringHandler := monitoring.NewHandler(repos.Metrics, alertStoreFor(repos.Metrics)).
 		WithCIResolver(monitoring.CIAddressResolver{CIs: repos.CI}).
-		WithRuleAlarms(alarm.NewRuleSink(alarmService(&repos)))
+		WithRuleAlarms(alarm.NewRuleSink(alarmService(&repos))).
+		WithTicketReporters(NewTicketReporters(repos.User, repos.Permission))
 	var monitoringFeatures discovery.FeatureStatus
 	if opts.Entitlements != nil {
 		monitoringFeatures = opts.Entitlements
@@ -1468,6 +1469,150 @@ func (a incidentTickets) LinkIncident(ctx context.Context, orgID, ticketID strin
 	return err
 }
 
+// alarmTickets is the writing ticket side of the alarms and incidents
+// (TKT-01 Monitoring [P3], WFL-06, WP-1040): it opens, links, comments and
+// resolves tickets through ticket.Service in the tenant scope of the
+// context, without a principal (the rule's reporter or the caller is the
+// reporter of a new ticket).
+type alarmTickets struct {
+	svc      *ticket.Service
+	features *entitlement.Service
+}
+
+// NewAlarmTickets returns the ticket writer of the alarms over svc (tests
+// of package alarm wire the router's adapter with it).
+func NewAlarmTickets(svc *ticket.Service, features *entitlement.Service) alarm.TicketWriter {
+	return alarmTickets{svc: svc, features: features}
+}
+
+var _ alarm.TicketWriter = alarmTickets{}
+
+// Entitled implements alarm.TicketWriter: ticketing_essential.
+func (a alarmTickets) Entitled(ctx context.Context, orgID string) bool {
+	return a.features == nil || a.features.IsEnabled(ctx, orgID, entitlement.FeatureTicketingEssential)
+}
+
+// Linked implements alarm.TicketWriter.
+func (a alarmTickets) Linked(ctx context.Context, orgID, linkType string, ids []string) (map[string][]alarm.TicketRef, error) {
+	linked, err := a.svc.LinkedTickets(ctx, orgID, linkType, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string][]alarm.TicketRef, len(linked))
+	for id, list := range linked {
+		refs := make([]alarm.TicketRef, len(list))
+		for i := range list {
+			refs[i] = alarm.TicketRef{TicketID: list[i].ID, TicketNumber: list[i].TicketNumber, Status: list[i].Status}
+		}
+		out[id] = refs
+	}
+	return out, nil
+}
+
+// CreateTicket implements alarm.TicketWriter over ticket.Service.Create
+// with Exclusive and Origin.
+func (a alarmTickets) CreateTicket(ctx context.Context, orgID string, req *alarm.TicketRequest) (*alarm.TicketRef, error) {
+	// The manual ticket of an incident follows the field rights of the
+	// caller like reviewTickets.CreateTicket (WP-1040 AK4).
+	if req.CheckFieldRights {
+		policy, err := permission.PolicyFrom(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if err := permission.CheckWrite(policy, permission.KindTicket, "", permission.ObjectRef{TeamID: req.TeamID},
+			req.RequestFields); err != nil {
+			return nil, err
+		}
+	}
+	t := &ticket.Ticket{OrganizationID: orgID, Title: req.Title, Description: req.Description, Priority: req.Priority,
+		Category: req.Category, ReporterID: req.ReporterID, TeamID: req.TeamID, AssigneeID: req.AssigneeID, RelatedCIID: req.RelatedCIID}
+	links := make([]ticket.Link, 0, len(req.Links))
+	for _, l := range req.Links {
+		links = append(links, ticket.Link{EntityType: l.Type, EntityID: l.ID})
+	}
+	var opts ticket.CreateOptions
+	if req.Exclusive != nil {
+		opts.Exclusive = &ticket.Target{EntityType: req.Exclusive.Type, EntityID: req.Exclusive.ID}
+	}
+	if req.Origin != nil {
+		opts.Origin = &ticket.Target{EntityType: req.Origin.Type, EntityID: req.Origin.ID}
+	}
+	err := a.svc.Create(ctx, t, links, opts)
+	var exists *ticket.ErrOpenTicketExists
+	switch {
+	case errors.As(err, &exists):
+		return nil, &alarm.TicketExistsError{TicketID: exists.ID, TicketNumber: exists.TicketNumber}
+	case err != nil:
+		return nil, err
+	}
+	return &alarm.TicketRef{TicketID: t.ID, TicketNumber: t.TicketNumber, Status: t.Status}, nil
+}
+
+// LinkAndComment implements alarm.TicketWriter: an existing link is kept.
+func (a alarmTickets) LinkAndComment(ctx context.Context, orgID, ticketID string, targets []alarm.TicketTarget, comment string) error {
+	for _, target := range targets {
+		err := a.svc.CreateLink(ctx, &ticket.Link{OrganizationID: orgID, TicketID: ticketID, EntityType: target.Type, EntityID: target.ID})
+		if err != nil && !errors.Is(err, ticket.ErrLinkExists) {
+			return err
+		}
+	}
+	_, err := a.svc.AddSystemComment(ctx, orgID, ticketID, comment)
+	return err
+}
+
+// ResolveTicket implements alarm.TicketWriter: the comment, then resolved
+// when the state machine allows it (a closed or resolved ticket keeps its
+// state).
+func (a alarmTickets) ResolveTicket(ctx context.Context, orgID, ticketID, comment string, resolve bool) error {
+	if _, err := a.svc.AddSystemComment(ctx, orgID, ticketID, comment); err != nil {
+		return err
+	}
+	if !resolve {
+		return nil
+	}
+	t, err := a.svc.Repository().GetByID(ctx, orgID, ticketID)
+	if err != nil {
+		return err
+	}
+	if !ticket.CanTransition(t.Status, ticket.StatusResolved) {
+		return nil
+	}
+	status := ticket.StatusResolved
+	_, err = a.svc.Update(ctx, orgID, ticketID, &ticket.UpdateRequest{Status: &status})
+	return err
+}
+
+// ticketReporters checks the reporter of the ticket action of an alert
+// rule (WP-1040 AK1): an active user of the organization with ticket:write.
+type ticketReporters struct {
+	users user.Repository
+	perms permission.Repository
+}
+
+// CheckTicketReporter implements monitoring.TicketReporterCheck.
+func (c ticketReporters) CheckTicketReporter(ctx context.Context, orgID, userID string) (bool, error) {
+	if c.users == nil || c.perms == nil {
+		return true, nil
+	}
+	u, err := c.users.GetUser(ctx, orgID, userID)
+	if err != nil {
+		if errors.Is(err, api.ErrNotFound) || errors.Is(err, user.ErrNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	if u.Status != "" && u.Status != "active" {
+		return false, nil
+	}
+	return c.perms.HasPermission(ctx, orgID, userID, string(identity.PermTicketWrite))
+}
+
+// NewTicketReporters returns the reporter check of the ticket action over
+// the users and their permissions (tests of package alarm wire it).
+func NewTicketReporters(users user.Repository, perms permission.Repository) monitoring.TicketReporterCheck {
+	return ticketReporters{users: users, perms: perms}
+}
+
 // accessRequestRuns is the executor that starts the workflow run of an IGA
 // access request (WFL-04): none while the workflows module is off (E-03),
 // so a switched-off module executes no workflow action.
@@ -1599,6 +1744,8 @@ func metricsHandler(version string, includeTenantLabel bool) (handler http.Handl
 	probe.RegisterMetrics(registry)
 	// The alarms of the probe states (WP-986): lag and dead letters.
 	alarm.RegisterCheckMetrics(registry)
+	// The tickets of the alarms (WP-1040): errors and skipped actions.
+	alarm.RegisterTicketMetrics(registry)
 	rack.RegisterMetrics(registry)
 	iga.RegisterMetrics(registry)
 	ipam.RegisterMetrics(registry)
@@ -1991,7 +2138,11 @@ func alarmHandler(repos *Repositories, tickets *ticket.Service, opts *Options) *
 	if opts.Entitlements != nil {
 		features = opts.Entitlements
 	}
-	return h.WithTickets(incidentTickets{svc: tickets, features: opts.Entitlements}, features)
+	// The ticket action of the rules and the manual ticket of an incident
+	// (WP-1040) open tickets through the same service.
+	writer := alarmTickets{svc: tickets, features: opts.Entitlements}
+	alarmService(repos).WithTicketWriter(writer)
+	return h.WithTickets(incidentTickets{svc: tickets, features: opts.Entitlements}, features).WithTicketWriter(writer)
 }
 
 func alarmService(repos *Repositories) *alarm.Service {

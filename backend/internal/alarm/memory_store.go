@@ -77,6 +77,24 @@ func (m *MemoryStore) LockOpenByKey(_ context.Context, orgID, dedupKey string) (
 	return nil, ErrNotFound
 }
 
+// TicketUse implements Store.
+func (m *MemoryStore) TicketUse(_ context.Context, orgID, ticketID, exceptID string) (others int, opened bool, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, a := range m.alarms {
+		if a.OrganizationID != orgID || fmt.Sprint(a.Details[DetailsTicketID]) != ticketID {
+			continue
+		}
+		if existing, ok := a.Details[DetailsTicketExisting].(bool); ok && !existing {
+			opened = true
+		}
+		if a.State != StateResolved && a.ID != exceptID {
+			others++
+		}
+	}
+	return others, opened, nil
+}
+
 // matches reports whether a passes the filter (without cursor and limit).
 func matches(a *Alarm, f *ListFilter) bool {
 	eq := func(p *string, v string) bool { return v == "" || (p != nil && *p == v) }

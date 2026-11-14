@@ -351,6 +351,9 @@ var routeRules = []routeRule{
 	// system comment (WP-1039, pattern review-items/*/ticket); the handler
 	// also requires monitoring:read, because it answers the incident.
 	{http.MethodPost, "monitoring/incidents/*/tickets/*", identity.PermTicketWrite},
+	// The manual ticket of an incident (WP-1040): ticket:write; the
+	// incident is read with monitoring:read in the handler.
+	{http.MethodPost, "monitoring/incidents/*/ticket", identity.PermTicketWrite},
 	{http.MethodPost, "notification-escalations/*/acknowledge", identity.PermAlertAcknowledge},
 	// Deleting a CI is its own right; ci:write does not delete. Restoring
 	// undoes a deletion and needs the same right (CI-05).

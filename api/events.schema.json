@@ -2756,6 +2756,18 @@
               "additionalProperties": false,
               "required": ["enabled"],
               "properties": { "enabled": { "type": "boolean" } }
+            },
+            "ticket": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The ticket action of the rule (WP-1040); absent is off.",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "priority": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+                "category": { "type": "string", "maxLength": 100 },
+                "reporter_id": { "type": "string", "format": "uuid" },
+                "close_on_resolve": { "type": "boolean" }
+              }
             }
           }
         }
@@ -2871,6 +2883,18 @@
               "additionalProperties": false,
               "required": ["enabled"],
               "properties": { "enabled": { "type": "boolean" } }
+            },
+            "ticket": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The ticket action of the rule (WP-1040); absent is off.",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "priority": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+                "category": { "type": "string", "maxLength": 100 },
+                "reporter_id": { "type": "string", "format": "uuid" },
+                "close_on_resolve": { "type": "boolean" }
+              }
             }
           }
         }
@@ -2981,6 +3005,18 @@
               "additionalProperties": false,
               "required": ["enabled"],
               "properties": { "enabled": { "type": "boolean" } }
+            },
+            "ticket": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The ticket action of the rule (WP-1040); absent is off.",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "priority": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+                "category": { "type": "string", "maxLength": 100 },
+                "reporter_id": { "type": "string", "format": "uuid" },
+                "close_on_resolve": { "type": "boolean" }
+              }
             }
           }
         }
@@ -3091,6 +3127,18 @@
               "additionalProperties": false,
               "required": ["enabled"],
               "properties": { "enabled": { "type": "boolean" } }
+            },
+            "ticket": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The ticket action of the rule (WP-1040); absent is off.",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "priority": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+                "category": { "type": "string", "maxLength": 100 },
+                "reporter_id": { "type": "string", "format": "uuid" },
+                "close_on_resolve": { "type": "boolean" }
+              }
             }
           }
         }
@@ -3201,6 +3249,18 @@
               "additionalProperties": false,
               "required": ["enabled"],
               "properties": { "enabled": { "type": "boolean" } }
+            },
+            "ticket": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The ticket action of the rule (WP-1040); absent is off.",
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "priority": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+                "category": { "type": "string", "maxLength": 100 },
+                "reporter_id": { "type": "string", "format": "uuid" },
+                "close_on_resolve": { "type": "boolean" }
+              }
             }
           }
         }

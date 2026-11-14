@@ -442,6 +442,9 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	// ticket and the incident.
 	m["POST "+v1+"monitoring/incidents/{id}/tickets/{ticket_id}"] = RouteSnapshot{Table: "ticket_link",
 		Keys: []SnapshotKey{{"ticket_id", "ticket_id"}, {"incident_id", "id"}}}
+	// The manual ticket of an incident (WP-1040): the ticket created, by
+	// the id of the answer.
+	m["POST "+v1+"monitoring/incidents/{id}/ticket"] = RouteSnapshot{Table: "ticket", Keys: []SnapshotKey{{"id", "@ticket_id"}}}
 	// Collector groups (PRB-03, WP-947): the group row; adding or moving a
 	// member shows the members of the group, removing one the member row.
 	crud(m, v1+"collector-groups", "collector_group", all...)

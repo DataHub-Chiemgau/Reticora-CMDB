@@ -190,6 +190,10 @@ func (s *Service) releaseMaintenance(ctx context.Context, orgID string, match fu
 				return err
 			}
 			released++
+			if updated.State != StatePending {
+				// The ticket action waited for the window (WP-1040).
+				s.afterOpen(ctx, updated)
+			}
 			if !settings.NotifyAfterMaintenance || updated.State == StatePending || s.sink == nil {
 				continue
 			}

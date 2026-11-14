@@ -76,6 +76,11 @@ var DetailKeys = []string{
 	"metric_name", "aggregation", "window", "duration",
 	"rule_id", "rule_name", "probe_id", "probe_type", "check", "status", "rtt_ms",
 	"collector_id", "collector_group_id",
+	// The check alarms (WP-986), the maintenance suppression (WP-1033) and
+	// the ticket of the alarm (WP-1040).
+	"target", "reason", "interval_s", "timeout_s", "down_count", "up_count", "thresholds",
+	"maintenance_window_id", "maintenance_heuristic", "ticket_id", "ticket_existing",
+	"snapshot_id", "previous_snapshot_id", "platform",
 }
 
 // View is an alarm as the list and the user actions answer it.
@@ -89,6 +94,9 @@ type DetailView struct {
 	Alarm
 	Transitions          []Transition `json:"transitions"`
 	TransitionsTruncated bool         `json:"transitions_truncated"`
+	// Tickets are the tickets of the alarm and of its incident (WP-1040);
+	// empty without ticket:read or ticketing_essential.
+	Tickets []TicketRef `json:"tickets"`
 }
 
 // viewOf filters an alarm for an answer: details keeps only DetailKeys.
@@ -115,6 +123,9 @@ type Handler struct {
 	// features gates linking a ticket on ticketing_essential; nil checks
 	// none.
 	features entitlement.Checker
+	// writer opens the manual ticket of an incident (WP-1040); nil: the
+	// route answers 404.
+	writer TicketWriter
 }
 
 // NewHandler returns the handler on svc. With a database the user actions
@@ -329,6 +340,31 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 			trs = trs[:MaxTransitions]
 		}
 		view.Transitions = api.NonNilSlice(trs)
+		view.Tickets = []TicketRef{}
+		if h.tickets == nil {
+			return nil
+		}
+		byAlarm, err := h.tickets.LinkedTickets(ctx, org, TicketLinkAlarm, []string{a.ID})
+		if err != nil {
+			return err
+		}
+		seen := map[string]bool{}
+		for _, t := range byAlarm[a.ID] {
+			seen[t.TicketID] = true
+			view.Tickets = append(view.Tickets, t)
+		}
+		if a.IncidentID != nil {
+			byIncident, err := h.tickets.LinkedTickets(ctx, org, TicketLinkIncident, []string{*a.IncidentID})
+			if err != nil {
+				return err
+			}
+			for _, t := range byIncident[*a.IncidentID] {
+				if !seen[t.TicketID] {
+					view.Tickets = append(view.Tickets, t)
+				}
+			}
+		}
+		slices.SortFunc(view.Tickets, func(x, y TicketRef) int { return x.TicketNumber - y.TicketNumber })
 		return nil
 	})
 	if err != nil {

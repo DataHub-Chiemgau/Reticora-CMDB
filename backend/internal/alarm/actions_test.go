@@ -52,13 +52,39 @@ func wantField(t *testing.T, raw, field string) {
 }
 
 func TestActionsRejectReservedKeys(t *testing.T) {
-	wantField(t, `{"ticket":{"enabled":true}}`, "actions.ticket")
 	wantField(t, `{"workflow":{"workflow_id":"x"}}`, "actions.workflow")
 	wantField(t, `{"notify":{"enabled":true},"workflow":{}}`, "actions.workflow")
-	_, err := alarm.ParseActions(json.RawMessage(`{"ticket":{}}`))
+	_, err := alarm.ParseActions(json.RawMessage(`{"workflow":{}}`))
 	var fe *api.FieldError
 	if errors.As(err, &fe) && fe.Message == "" {
 		t.Error("reserved key without hint")
+	}
+}
+
+// TestActionsTicket covers WP-1040 AK1: the ticket action is off by
+// default, takes priority, category, reporter_id and close_on_resolve and
+// refuses unknown keys and invalid values with the field.
+func TestActionsTicket(t *testing.T) {
+	a, err := alarm.ParseActions(json.RawMessage(`{"ticket":{"enabled":true,"priority":"high","category":"network",
+		"reporter_id":"11111111-1111-4111-8111-111111111111","close_on_resolve":true}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Ticket == nil || !a.Ticket.Enabled || a.Ticket.Priority != "high" || a.Ticket.Category != "network" ||
+		a.Ticket.ReporterID != "11111111-1111-4111-8111-111111111111" || !a.Ticket.CloseOnResolve || !a.Notify.Enabled {
+		t.Errorf("ticket action %+v", a.Ticket)
+	}
+	if d := alarm.DefaultActions(); d.Ticket != nil {
+		t.Error("the ticket action is on by default")
+	}
+	wantField(t, `{"ticket":{"enabled":"yes"}}`, "actions.ticket.enabled")
+	wantField(t, `{"ticket":{"priority":"urgent"}}`, "actions.ticket.priority")
+	wantField(t, `{"ticket":{"reporter_id":"me"}}`, "actions.ticket.reporter_id")
+	wantField(t, `{"ticket":{"team":"x"}}`, "actions.ticket.team")
+	wantField(t, `{"ticket":true}`, "actions.ticket")
+	stored := events.ParseStoredAlarmActions(json.RawMessage(`{"ticket":{"enabled":true,"priority":"low","close_on_resolve":true}}`))
+	if stored.Ticket == nil || !stored.Ticket.Enabled || stored.Ticket.Priority != "low" || !stored.Ticket.CloseOnResolve {
+		t.Errorf("stored ticket action %+v", stored.Ticket)
 	}
 }
 
@@ -78,7 +104,7 @@ func TestActionsRejectUnknownKey(t *testing.T) {
 // leniently, so a reserved or unknown key (a newer release, a manual fix)
 // keeps the defaults instead of failing the scan of every rule.
 func TestStoredActionsAreLenient(t *testing.T) {
-	got := events.ParseStoredAlarmActions(json.RawMessage(`{"ticket":{"enabled":true},"notify":{"enabled":false},"x":1}`))
+	got := events.ParseStoredAlarmActions(json.RawMessage(`{"workflow":{"enabled":true},"notify":{"enabled":false},"x":1}`))
 	if got.Notify.Enabled || !got.Webhook.Enabled {
 		t.Errorf("stored = %+v, want notify off and webhook on", got)
 	}

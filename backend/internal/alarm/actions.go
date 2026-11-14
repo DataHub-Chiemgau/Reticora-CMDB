@@ -24,8 +24,9 @@ const DetailsActions = "actions"
 func DefaultActions() Actions { return events.DefaultAlarmActions() }
 
 // ParseActions reads the actions object of a rule (events.ParseAlarmActions):
-// absent, null and {} are the defaults; the reserved keys ticket (WP-1040)
-// and workflow (WP-1110) and every unknown key are 422 with the field.
+// absent, null and {} are the defaults; ticket is the ticket action
+// (WP-1040); the reserved key workflow (WP-1110) and every unknown key are
+// 422 with the field.
 func ParseActions(raw json.RawMessage) (Actions, error) { return events.ParseAlarmActions(raw) }
 
 // actionsOf reads the actions from the details of an alarm: they come back

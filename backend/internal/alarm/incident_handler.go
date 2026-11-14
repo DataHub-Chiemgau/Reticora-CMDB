@@ -2,11 +2,14 @@ package alarm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
@@ -116,6 +119,7 @@ func (h *Handler) registerIncidentRoutes(r interface {
 	r.Post(incidentPath+"/ack", h.ackIncident)
 	r.Post(incidentPath+"/root", h.setIncidentRoot)
 	r.Post(incidentPath+"/tickets/{ticket_id}", h.linkIncidentTicket)
+	r.Post(incidentPath+"/ticket", h.createIncidentTicket)
 }
 
 // parseIncidentFilter reads the filters of the list.
@@ -504,7 +508,7 @@ func (h *Handler) setIncidentRoot(w http.ResponseWriter, r *http.Request) {
 	actor := actorOf(r)
 	var out *IncidentDetailView
 	err := h.svc.InTx(r.Context(), org, func(ctx context.Context) error {
-		inc, serr := h.svc.Store().SetRootManual(ctx, org, id, strings.ToLower(req.AlarmID), actor, req.Reason)
+		inc, serr := h.svc.SetRootManual(ctx, org, id, strings.ToLower(req.AlarmID), actor, req.Reason)
 		if serr != nil {
 			return serr
 		}
@@ -589,4 +593,202 @@ func (h *Handler) linkIncidentTicket(w http.ResponseWriter, r *http.Request) {
 	default:
 		api.WriteJSON(w, http.StatusCreated, out)
 	}
+}
+
+// IncidentTicketRequest is the body of POST
+// /monitoring/incidents/{id}/ticket (WP-1040): every field is optional,
+// title and description default from the incident (root, cause class,
+// affected CIs), priority from its severity.
+type IncidentTicketRequest struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Priority    string `json:"priority"`
+	TeamID      string `json:"team_id"`
+	AssigneeID  string `json:"assignee_id"`
+}
+
+// IncidentTicketView is the answer of POST /monitoring/incidents/{id}/ticket.
+type IncidentTicketView struct {
+	TicketID     string `json:"ticket_id"`
+	TicketNumber int    `json:"ticket_number"`
+	IncidentID   string `json:"incident_id"`
+}
+
+// incidentTicketConflict is the 409 of a second ticket for an incident:
+// the problem names the open ticket.
+type incidentTicketConflict struct {
+	Type         string `json:"type"`
+	Title        string `json:"title"`
+	Status       int    `json:"status"`
+	Detail       string `json:"detail"`
+	TicketID     string `json:"ticket_id"`
+	TicketNumber int    `json:"ticket_number"`
+}
+
+// WithTicketWriter sets the writing ticket side of the incidents (manual
+// ticket per incident, WP-1040).
+func (h *Handler) WithTicketWriter(w TicketWriter) *Handler {
+	h.writer = w
+	return h
+}
+
+// createIncidentTicket handles POST /monitoring/incidents/{id}/ticket: a
+// ticket for the incident with the caller as reporter (ticket:write by
+// the route rule, the incident read with monitoring:read), 403
+// feature-not-entitled without ticketing_essential, 409 naming the open
+// ticket of the incident.
+func (h *Handler) createIncidentTicket(w http.ResponseWriter, r *http.Request) {
+	org, ok := requireOrg(w, r)
+	if !ok {
+		return
+	}
+	p, found := identity.PrincipalFromContext(r.Context())
+	if !found || !p.Has(identity.PermMonitoringRead) {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "incident not found")
+		return
+	}
+	id, ok := incidentID(w, r)
+	if !ok {
+		return
+	}
+	var req IncidentTicketRequest
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&req); err != nil {
+			api.WriteError(w, http.StatusBadRequest, "Bad Request", "invalid ticket request")
+			return
+		}
+	}
+	if err := req.validate(); err != nil {
+		api.WriteFieldError(w, err)
+		return
+	}
+	if h.features != nil && !h.features.IsEnabled(r.Context(), org, entitlement.FeatureTicketingEssential) {
+		api.WriteEntitlementError(w, &entitlement.FeatureNotEntitledError{FeatureKey: entitlement.FeatureTicketingEssential})
+		return
+	}
+	if h.writer == nil {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "incident not found")
+		return
+	}
+	var out *TicketRef
+	err := h.svc.InTx(r.Context(), org, func(ctx context.Context) error {
+		inc, gerr := h.svc.Store().GetIncident(ctx, org, id)
+		if gerr != nil {
+			return gerr
+		}
+		var rootName string
+		if inc.RootCIID != nil {
+			names, nerr := h.svc.Store().CINames(ctx, org, []string{*inc.RootCIID})
+			if nerr != nil {
+				return nerr
+			}
+			rootName = names[*inc.RootCIID]
+		}
+		severity := SeverityWarning
+		if inc.RootAlarmID != nil {
+			if a, aerr := h.svc.Store().Get(ctx, org, *inc.RootAlarmID); aerr == nil {
+				severity = a.Severity
+			}
+		}
+		target := TicketTarget{Type: TicketLinkIncident, ID: inc.ID}
+		treq := &TicketRequest{Title: req.Title, Description: req.Description, Priority: ticketPriority(severity, req.Priority),
+			ReporterID: p.Subject, TeamID: req.TeamID, AssigneeID: req.AssigneeID, Exclusive: &target, Origin: &target,
+			CheckFieldRights: true, RequestFields: req.fields()}
+		if treq.Title == "" {
+			treq.Title = incidentTicketTitle(inc, rootName)
+		}
+		if treq.Description == "" {
+			treq.Description = incidentTicketDescription(inc, rootName)
+		}
+		if inc.RootCIID != nil {
+			treq.RelatedCIID = *inc.RootCIID
+			treq.Links = append(treq.Links, TicketTarget{Type: TicketLinkCI, ID: *inc.RootCIID})
+		}
+		if inc.RootAlarmID != nil {
+			treq.Links = append(treq.Links, TicketTarget{Type: TicketLinkAlarm, ID: *inc.RootAlarmID})
+		}
+		var cerr error
+		out, cerr = h.writer.CreateTicket(ctx, org, treq)
+		return cerr
+	})
+	var exists *TicketExistsError
+	switch {
+	case errors.As(err, &exists):
+		api.WriteProblemBody(w, http.StatusConflict, incidentTicketConflict{Type: "about:blank", Title: "Conflict", Status: http.StatusConflict,
+			Detail:   fmt.Sprintf("an open ticket is already linked to the incident: #%d (%s)", exists.TicketNumber, exists.TicketID),
+			TicketID: exists.TicketID, TicketNumber: exists.TicketNumber})
+	case api.WriteFieldError(w, err):
+	case err != nil:
+		writeIncidentError(w, err)
+	default:
+		api.WriteJSON(w, http.StatusCreated, IncidentTicketView{TicketID: out.TicketID, TicketNumber: out.TicketNumber, IncidentID: id})
+	}
+}
+
+// fields are the ticket fields the request body set, for the field rights
+// (like reviews.TicketRequest).
+func (r *IncidentTicketRequest) fields() []string {
+	var out []string
+	for _, f := range []struct{ name, value string }{
+		{"priority", r.Priority}, {"assignee_id", r.AssigneeID}, {"team_id", r.TeamID},
+	} {
+		if f.value != "" {
+			out = append(out, f.name)
+		}
+	}
+	return out
+}
+
+// validate checks the fields of a manual incident ticket (422 on field).
+func (r *IncidentTicketRequest) validate() error {
+	switch {
+	case r.Priority != "" && !slices.Contains(events.TicketPriorities, r.Priority):
+		return &api.FieldError{Field: "priority", Status: http.StatusUnprocessableEntity, Message: "must be one of low, medium, high, critical"}
+	case utf8.RuneCountInString(r.Title) > 200:
+		return &api.FieldError{Field: "title", Status: http.StatusUnprocessableEntity, Message: "must be at most 200 characters"}
+	case utf8.RuneCountInString(r.Description) > 10000:
+		return &api.FieldError{Field: "description", Status: http.StatusUnprocessableEntity, Message: "must be at most 10000 characters"}
+	case r.TeamID != "" && !api.IsUUID(r.TeamID):
+		return &api.FieldError{Field: "team_id", Status: http.StatusUnprocessableEntity, Message: "must be a team id"}
+	case r.AssigneeID != "" && !api.IsUUID(r.AssigneeID):
+		return &api.FieldError{Field: "assignee_id", Status: http.StatusUnprocessableEntity, Message: "must be a user id"}
+	}
+	for field, v := range map[string]string{"title": r.Title, "description": r.Description} {
+		if err := api.RejectNUL(field, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// incidentTicketTitle is the default title of an incident ticket.
+func incidentTicketTitle(inc *Incident, rootName string) string {
+	root := rootName
+	if root == "" && inc.RootCIID != nil {
+		root = *inc.RootCIID
+	}
+	title := "Monitoring incident: " + causeOrUnknown(inc.CauseClass)
+	if root != "" {
+		title += " at " + root
+	}
+	return truncateRunes(title, 200)
+}
+
+// incidentTicketDescription is the default description: root, cause
+// class and the number of affected CIs.
+func incidentTicketDescription(inc *Incident, rootName string) string {
+	affected := 0
+	for _, n := range inc.AffectedCounts {
+		affected += n
+	}
+	var b strings.Builder
+	b.WriteString("Monitoring incident " + inc.ID + ", cause class " + causeOrUnknown(inc.CauseClass))
+	switch {
+	case rootName != "" && inc.RootCIID != nil:
+		b.WriteString(", root " + rootName + " (" + *inc.RootCIID + ")")
+	case inc.RootCIID != nil:
+		b.WriteString(", root CI " + *inc.RootCIID)
+	}
+	fmt.Fprintf(&b, ", %d affected CIs.", affected)
+	return b.String()
 }

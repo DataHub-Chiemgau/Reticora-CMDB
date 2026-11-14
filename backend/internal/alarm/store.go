@@ -91,6 +91,11 @@ type Store interface {
 	// CountIncidents counts the incidents of the filter (without its
 	// cursor), at most limit when limit > 0.
 	CountIncidents(ctx context.Context, orgID string, f *IncidentFilter, limit int) (int, error)
+	// TicketUse reports for a ticket how many alarms other than exceptID
+	// that are not resolved name it in details.ticket_id, and whether an
+	// alarm opened it (details.ticket_existing false): the resolution of a
+	// shared ticket waits for the last of its alarms (WP-1040 AK5).
+	TicketUse(ctx context.Context, orgID, ticketID, exceptID string) (others int, opened bool, err error)
 	// CINames returns the names of the CIs visible in the caller's scope
 	// by id (the root of an incident).
 	CINames(ctx context.Context, orgID string, ids []string) (map[string]string, error)

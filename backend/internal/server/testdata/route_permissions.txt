@@ -689,6 +689,7 @@ POST /api/v1/monitoring/groups monitoring:write
 POST /api/v1/monitoring/groups/{id}/members monitoring:write
 POST /api/v1/monitoring/incidents/{id}/ack alert:acknowledge
 POST /api/v1/monitoring/incidents/{id}/root monitoring:write
+POST /api/v1/monitoring/incidents/{id}/ticket ticket:write
 POST /api/v1/monitoring/incidents/{id}/tickets/{ticket_id} ticket:write
 POST /api/v1/monitoring/metrics monitoring:write
 POST /api/v1/monitoring/probes monitoring:write

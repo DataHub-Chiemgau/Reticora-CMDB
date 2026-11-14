@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"slices"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 )
@@ -17,14 +18,35 @@ import (
 // alarm) and the consumers notify and webhook all read it; alarm.Actions
 // names it in the alarm domain.
 //
-// The keys ticket (WP-1040) and workflow (WP-1110) are reserved: alarms
-// as workflow triggers bind at the workflow definition (WP-1090/WP-1110),
-// not at the rule, so a second path rule → workflow would start the same
-// runs twice.
+// ticket (WP-1040, E-205 option 2) opens a ticket for an alarm of the rule
+// (off by default). The key workflow (WP-1110) is reserved: alarms as
+// workflow triggers bind at the workflow definition (WP-1090/WP-1110), not
+// at the rule, so a second path rule → workflow would start the same runs
+// twice.
 type AlarmActions struct {
 	Notify  AlarmAction `json:"notify"`
 	Webhook AlarmAction `json:"webhook"`
+	// Ticket is the ticket action; nil is off.
+	Ticket *AlarmTicketAction `json:"ticket,omitempty"`
 }
+
+// AlarmTicketAction opens a ticket for an alarm of the rule (WP-1040):
+// priority (low, medium, high, critical; empty: from the severity),
+// category, the reporter (the user who saved the rule; Konvention 46) and
+// whether the resolution of the alarm resolves the ticket.
+type AlarmTicketAction struct {
+	Enabled        bool   `json:"enabled"`
+	Priority       string `json:"priority,omitempty"`
+	Category       string `json:"category,omitempty"`
+	ReporterID     string `json:"reporter_id,omitempty"`
+	CloseOnResolve bool   `json:"close_on_resolve"`
+}
+
+// TicketPriorities are the priorities of a ticket action (ticket.Priorities).
+var TicketPriorities = []string{"low", "medium", "high", "critical"}
+
+// maxTicketCategory bounds the category of a ticket action.
+const maxTicketCategory = 100
 
 // AlarmAction switches one follow-up action.
 type AlarmAction struct {
@@ -49,13 +71,13 @@ const (
 // reservedAlarmActions are the keys that later work packages fill, with
 // the hint of the 422.
 var reservedAlarmActions = map[string]string{
-	AlarmActionTicket:   "reserved: ticket creation from alarms follows in a later release (WP-1040)",
 	AlarmActionWorkflow: "reserved: alarms start workflows through an event trigger of the workflow definition (WP-1110)",
 }
 
 // ParseAlarmActions reads an actions object: absent, null and {} are the
-// defaults, a missing key keeps its default. ticket and workflow are 422
-// with the field actions.ticket or actions.workflow and a hint, another
+// defaults, a missing key keeps its default. ticket is the ticket action
+// (parseTicketAction); workflow is 422 with the field actions.workflow and
+// a hint, another
 // key, a value that is no object, an unknown key in an action and an
 // enabled that is no boolean are 422 with the field.
 // validation: fixed texts naming the field.
@@ -69,16 +91,21 @@ func ParseAlarmActions(raw json.RawMessage) (AlarmActions, error) {
 	if trimmed[0] != '{' || json.Unmarshal(trimmed, &keys) != nil {
 		return out, actionsField("actions", "must be an object")
 	}
-	// The reserved keys first, in a fixed order, then the unknown ones.
-	for _, key := range []string{AlarmActionTicket, AlarmActionWorkflow} {
-		if _, ok := keys[key]; ok {
-			return out, actionsField("actions."+key, reservedAlarmActions[key])
-		}
+	// The reserved key first, then the unknown ones.
+	if _, ok := keys[AlarmActionWorkflow]; ok {
+		return out, actionsField("actions."+AlarmActionWorkflow, reservedAlarmActions[AlarmActionWorkflow])
 	}
 	for key := range keys {
-		if key != AlarmActionNotify && key != AlarmActionWebhook {
-			return out, actionsField("actions."+key, "unknown action; known are notify and webhook")
+		if key != AlarmActionNotify && key != AlarmActionWebhook && key != AlarmActionTicket {
+			return out, actionsField("actions."+key, "unknown action; known are notify, webhook and ticket")
 		}
+	}
+	if raw, ok := keys[AlarmActionTicket]; ok {
+		t, err := parseTicketAction(raw)
+		if err != nil {
+			return out, err
+		}
+		out.Ticket = t
 	}
 	for key, target := range map[string]*AlarmAction{AlarmActionNotify: &out.Notify, AlarmActionWebhook: &out.Webhook} {
 		value, ok := keys[key]
@@ -118,6 +145,64 @@ func parseAlarmAction(field string, raw json.RawMessage, target *AlarmAction) er
 	return nil
 }
 
+// parseTicketAction reads {"enabled", "priority", "category",
+// "reporter_id", "close_on_resolve"}; null is off.
+func parseTicketAction(raw json.RawMessage) (*AlarmTicketAction, error) {
+	const field = "actions.ticket"
+	trimmed := bytes.TrimSpace(raw)
+	if bytes.Equal(trimmed, []byte("null")) {
+		return nil, nil
+	}
+	var keys map[string]json.RawMessage
+	if len(trimmed) == 0 || trimmed[0] != '{' || json.Unmarshal(trimmed, &keys) != nil {
+		return nil, actionsField(field, "must be an object such as {\"enabled\": true}")
+	}
+	out := &AlarmTicketAction{}
+	for key, value := range keys {
+		value = bytes.TrimSpace(value)
+		switch key {
+		case "enabled", "close_on_resolve":
+			var b bool
+			if bytes.Equal(value, []byte("null")) || json.Unmarshal(value, &b) != nil {
+				return nil, actionsField(field+"."+key, "must be a boolean")
+			}
+			if key == "enabled" {
+				out.Enabled = b
+			} else {
+				out.CloseOnResolve = b
+			}
+		case "priority", "category", "reporter_id":
+			var v string
+			if bytes.Equal(value, []byte("null")) {
+				continue
+			}
+			if json.Unmarshal(value, &v) != nil {
+				return nil, actionsField(field+"."+key, "must be a string")
+			}
+			switch key {
+			case "priority":
+				if v != "" && !slices.Contains(TicketPriorities, v) {
+					return nil, actionsField(field+".priority", "must be one of low, medium, high, critical")
+				}
+				out.Priority = v
+			case "category":
+				if len(v) > maxTicketCategory {
+					return nil, actionsField(field+".category", "must be at most 100 characters")
+				}
+				out.Category = v
+			default:
+				if v != "" && !api.IsUUID(v) {
+					return nil, actionsField(field+".reporter_id", "must be a user id")
+				}
+				out.ReporterID = v
+			}
+		default:
+			return nil, actionsField(field+"."+key, "unknown key; known are enabled, priority, category, reporter_id and close_on_resolve")
+		}
+	}
+	return out, nil
+}
+
 func actionsField(field, message string) error {
 	return &api.FieldError{Field: field, Message: message, Status: http.StatusUnprocessableEntity}
 }
@@ -150,6 +235,19 @@ func AlarmActionsOf(data map[string]any) AlarmActions {
 				target.Enabled = enabled
 			}
 		}
+	}
+	if t, ok := actions[AlarmActionTicket].(map[string]any); ok {
+		ta := &AlarmTicketAction{}
+		ta.Enabled, _ = t["enabled"].(bool)
+		ta.CloseOnResolve, _ = t["close_on_resolve"].(bool)
+		if v, ok := t["priority"].(string); ok && slices.Contains(TicketPriorities, v) {
+			ta.Priority = v
+		}
+		ta.Category, _ = t["category"].(string)
+		if v, ok := t["reporter_id"].(string); ok && api.IsUUID(v) {
+			ta.ReporterID = v
+		}
+		out.Ticket = ta
 	}
 	return out
 }
