@@ -61,7 +61,7 @@ func TestRegistryComplete(t *testing.T) {
 			t.Errorf("%s params schema: %v", key, err)
 		}
 		wantStatus := TypePlanned
-		if key == "icmp" || key == "tcp" || key == "dns" || key == "http" || key == "bfd" || key == "optical" || key == "redfish" {
+		if key == "icmp" || key == "tcp" || key == "dns" || key == "http" || key == "bfd" || key == "optical" || key == "redfish" || key == "ospf" || key == "isis" {
 			wantStatus = TypeAvailable
 		}
 		if typ.Status != wantStatus {
@@ -581,7 +581,7 @@ func TestHTTPLimits(t *testing.T) {
 // MetricNames returns a copy.
 func TestTypesDeclareMetricNames(t *testing.T) {
 	for typ, name := range map[string]string{"icmp": "jitter_ms", "http": "ttfb_ms", "dns": "probe_dns_rcode",
-		"redfish": "probe_redfish_temperature_celsius"} {
+		"redfish": "probe_redfish_temperature_celsius", "ospf": "probe_ospf_neighbor_state", "isis": "probe_isis_adjacency_state"} {
 		if !DeclaresMetric(typ, name) || !slices.Contains(MetricNames(typ), name) {
 			t.Errorf("%s does not declare %s", typ, name)
 		}

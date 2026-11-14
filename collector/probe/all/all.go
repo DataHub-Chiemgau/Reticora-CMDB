@@ -10,4 +10,6 @@ package all
 import (
 	// redfish: health, temperatures, fans and power supplies (WP-998).
 	_ "github.com/DataHub-Chiemgau/Reticora-CMDB/collector/probe/redfish"
+	// ospf and isis over the standard MIBs (WP-1002).
+	_ "github.com/DataHub-Chiemgau/Reticora-CMDB/collector/probe/routing"
 )

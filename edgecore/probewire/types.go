@@ -3,6 +3,7 @@ package probewire
 import (
 	"bytes"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -239,6 +240,10 @@ var typeMetrics = map[string][]string{
 	"dns":  {"probe_dns_response_seconds", "probe_dns_rcode", "probe_dns_answer_count", "probe_dns_soa_serial"},
 	"redfish": {"probe_redfish_health", "probe_redfish_temperature_celsius", "probe_redfish_fan_rpm",
 		"probe_redfish_psu_input_watts", "probe_redfish_psu_state", "probe_redfish_truncated"},
+	"ospf": {"probe_ospf_neighbor_state", "probe_ospf_neighbor_events_total", "probe_ospf_neighbors",
+		"probe_ospf_neighbors_full", "probe_ospf_truncated", "probe_ospf_neighbors_unseen"},
+	"isis": {"probe_isis_adjacency_state", "probe_isis_adjacencies", "probe_isis_adjacencies_up",
+		"probe_isis_truncated", "probe_isis_adjacencies_unseen"},
 }
 
 // MetricNames returns the value names the type declares (none for an
@@ -339,6 +344,8 @@ var paramChecks = map[string]func(spec *ProbeSpec, params map[string]any) []Fiel
 	"bfd":     checkBFDParams,
 	"optical": checkOpticalParams,
 	"redfish": checkRedfishParams,
+	"ospf":    func(_ *ProbeSpec, params map[string]any) []FieldError { return checkOSPFParams(params) },
+	"isis":    func(_ *ProbeSpec, params map[string]any) []FieldError { return checkISISParams(params) },
 	"tcp":     func(_ *ProbeSpec, params map[string]any) []FieldError { return checkTCPParams(params) },
 	"dns":     func(_ *ProbeSpec, params map[string]any) []FieldError { return checkDNSParams(params) },
 	"http":    func(_ *ProbeSpec, params map[string]any) []FieldError { return checkHTTPParams(params) },
@@ -406,6 +413,61 @@ func checkRedfishParams(spec *ProbeSpec, params map[string]any) []FieldError {
 		errs = append(errs, FieldError{Field: critField, Message: "temp_crit must be above temp_warn"})
 	}
 	return errs
+}
+
+// checkOSPFParams checks the ospf parameters (PRT-07, WP-1002 AK1): every
+// neighbors[i].router_id is a router ID in dotted IPv4 form and
+// min_neighbors does not exceed max_neighbors.
+func checkOSPFParams(params map[string]any) []FieldError {
+	errs := checkEntries(params, "neighbors", "router_id", "must be a router ID in dotted IPv4 form", func(s string) bool {
+		a, err := netip.ParseAddr(strings.TrimSpace(s))
+		return err == nil && a.Is4()
+	})
+	return append(errs, checkMinMax(params, "min_neighbors", "max_neighbors")...)
+}
+
+// checkISISParams checks the isis parameters (PRT-07, WP-1002 AK2): every
+// adjacencies[i].system_id is a system ID of six octets (hex digits,
+// optionally separated by '.', ':' or '-') and min_adjacencies does not
+// exceed max_adjacencies.
+func checkISISParams(params map[string]any) []FieldError {
+	errs := checkEntries(params, "adjacencies", "system_id", "must be a system ID of six octets (e.g. 1921.6800.1001)", func(s string) bool {
+		digits := strings.NewReplacer(".", "", ":", "", "-", "").Replace(strings.TrimSpace(s))
+		raw, err := hex.DecodeString(digits)
+		return err == nil && len(raw) == 6
+	})
+	return append(errs, checkMinMax(params, "min_adjacencies", "max_adjacencies")...)
+}
+
+// checkEntries checks the string field of every object of the array
+// parameter list.
+func checkEntries(params map[string]any, list, field, message string, valid func(string) bool) []FieldError {
+	items, _ := params[list].([]any)
+	var errs []FieldError
+	for i, item := range items {
+		obj, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if s, ok := obj[field].(string); ok && !valid(s) {
+			errs = append(errs, FieldError{Field: fmt.Sprintf("params.%s[%d].%s", list, i, field), Message: message})
+		}
+	}
+	return errs
+}
+
+// checkMinMax reports a minimum above the maximum (an absent maximum is
+// its schema default, the row limit of the type).
+func checkMinMax(params map[string]any, minName, maxName string) []FieldError {
+	lo, ok := numberOf(params[minName])
+	if !ok {
+		return nil
+	}
+	hi, ok := numberOf(params[maxName])
+	if ok && lo > hi {
+		return []FieldError{{Field: "params." + minName, Message: minName + " must not exceed " + maxName}}
+	}
+	return nil
 }
 
 // redfishID reports whether id is a plain Redfish resource Id, the same

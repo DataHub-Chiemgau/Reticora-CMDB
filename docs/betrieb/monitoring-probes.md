@@ -318,6 +318,58 @@ Werte: `probe_redfish_health` (0 OK, 1 Warning, 2 Critical),
 (0/1/2); Namen als `<Chassis-Id>/<Sensor>`. Die `ci_id` setzt die
 Metrik-Brücke aus der Probe (WP-976).
 
+## OSPF-Nachbarn (`ospf`) und IS-IS-Adjazenzen (`isis`)
+
+Standard nach PRT-07: Intervall 60 s (60 s–24 h), Timeout 10 s (1–30 s),
+Down-Count 3, Up-Count 1, höchstens 1000 Zeilen je Prüfung, Zugangsdaten
+aus dem Namespace `snmp`. Beide Typen liegen im Unterpaket
+`collector/probe/routing`.
+
+`ospf` liest `ospfNbrTable` der OSPF-MIB (RFC 4750, `1.3.6.1.2.1.14.10.1`:
+`ospfNbrRtrId`, `ospfNbrState`, `ospfNbrEvents`) und `ospfv3NbrTable` der
+OSPFV3-MIB (RFC 5643, `1.3.6.1.2.1.191.1.9.1`: `ospfv3NbrState`,
+`ospfv3NbrEvents`; die Router-ID ist der letzte Teil des Index).
+Parameter: `neighbors` (höchstens 1000 Einträge `{router_id, version}`,
+Router-ID in IPv4-Schreibweise, `version` 2 oder 3, ohne Angabe beide),
+`min_neighbors` und `max_neighbors` (Standard und Höchstwert 1000;
+`min_neighbors` ≤ `max_neighbors`). Beide Angaben sind kombinierbar; ohne
+beide meldet die Probe nur Werte. Ein erwarteter Nachbar, der fehlt oder
+nicht `full` (8) ist, ergibt `fail` mit `check_failed` und Label
+`router_id`; weniger `full`-Nachbarn als `min_neighbors` ergeben `ok` mit
+`check_failed` (`degraded`). Mehrere Zeilen eines Nachbarn (je Interface)
+zählen mit der schlechtesten. Auf Broadcast-Segmenten bleiben Nachbarn,
+die weder DR noch BDR sind, regulär in `twoWay`; sie gehören nur in
+`neighbors`, wenn sie `full` sein müssen. Werte je Nachbar (Labels
+`router_id`, `version`): `probe_ospf_neighbor_state` (Rohwert 1–8) und
+`probe_ospf_neighbor_events_total` (Zählerstand `ospfNbrEvents`, ohne
+Einfluss auf den Zustand); dazu `probe_ospf_neighbors` und
+`probe_ospf_neighbors_full`.
+
+`isis` liest `isisISAdjTable` der ISIS-MIB (RFC 4444,
+`1.3.6.1.2.1.138.1.6.1.1`: `isisISAdjState` mit `up` = 3,
+`isisISAdjNeighSysID`, `isisISAdjUsage`). Parameter: `adjacencies`
+(höchstens 1000 Einträge `{system_id, level}`, System-ID aus sechs
+Oktetten wie `1921.6800.1001`, `level` 1 oder 2; eine L1L2-Adjazenz dient
+beiden), `min_adjacencies`, `max_adjacencies` (wie bei `ospf`). Eine
+erwartete Adjazenz, die fehlt oder nicht `up` ist, ergibt `fail` mit
+`check_failed` und Label `system_id`; weniger Adjazenzen `up` als
+`min_adjacencies` ergeben `ok` mit `check_failed`. Werte:
+`probe_isis_adjacency_state{system_id,level}` (Level `L1`, `L2`, `L1L2`),
+`probe_isis_adjacencies`, `probe_isis_adjacencies_up`.
+
+Mehr Zeilen als `max_neighbors` bzw. `max_adjacencies` brechen den Walk ab
+(`probe_ospf_truncated` bzw. `probe_isis_truncated` = 1): erwartete
+Einträge dahinter erzeugen keinen Zustand (`…_unseen`), die
+Mindestanzahl wird dann nicht bewertet; liegt kein erwarteter Eintrag in
+den gelesenen Zeilen, ist das Ergebnis `error`/`response_too_large`.
+Herstellerabweichungen beschreibt der Profilabschnitt `monitor.ospf`
+(Tabellen `neighbors` und `neighbors_v3`, Spalten `router_id`, `state`,
+`events`, Enum `state` auf `full` oder `up`) bzw. `monitor.isis` (Tabelle
+`adjacencies`, Spalten `state`, `sys_id`, `usage`, Enum `state` auf
+`up`); eine leere Profiltabelle fällt auf die Standard-MIB zurück. Ein
+SNMP-Timeout ergibt `fail`/`timeout`, ein abgewiesener SNMPv3-Zugang
+`error`/`auth_failed`.
+
 ## Typtabelle
 
 Zeiten in Sekunden, Rate in Prüfungen je Sekunde. Die Werte sind Startwerte
@@ -334,8 +386,8 @@ nach E-154; WP-1023 misst die Raten nach.
 | `snmp_custom` | planned | 300 / 60 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 100 | 8 | 65536 | 256 | snmp | – |
 | `redfish` | available | 300 / 60 / 86400 | 15 / 1 / 60 | 3 / 1 | 1 | 8 | 20 | 2 | 1048576 | 256 | redfish | – |
 | `bgp` | planned | 60 / 30 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 4096 | snmp, gnmi | – |
-| `ospf` | planned | 60 / 30 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 1024 | snmp, gnmi | – |
-| `isis` | planned | 60 / 30 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 1024 | snmp, gnmi | – |
+| `ospf` | available | 60 / 60 / 86400 | 10 / 1 / 30 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 1000 | snmp | – |
+| `isis` | available | 60 / 60 / 86400 | 10 / 1 / 30 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 1000 | snmp | – |
 | `bfd` | available | 60 / 30 / 86400 | 5 / 1 / 30 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 1000 | snmp | – |
 | `optical` | available | 300 / 60 / 86400 | 15 / 1 / 60 | 3 / 1 | 1 | 8 | 20 | 2 | 1048576 | 512 | snmp | – |
 | `bng` | planned | 60 / 30 / 86400 | 10 / 1 / 30 | 3 / 1 | 1 | 8 | 20 | 2 | 1048576 | 1024 | snmp | – |

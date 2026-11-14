@@ -100,6 +100,34 @@ func snmpMonitor(s *snmp.Session, probeType string) (profiles.MonitorSpec, bool,
 	return spec, ok, nil
 }
 
+// Exported SNMP helpers for the probe types in subpackages (E-183; ospf
+// and isis in collector/probe/routing, WP-1002). They are the functions
+// the flat SNMP types (bfd, optical) use.
+
+// OpenSNMP opens the SNMP session of a probe (see openSNMP).
+func OpenSNMP(ctx context.Context, spec *probewire.ProbeSpec, creds map[string]string) (*snmp.Session, error) {
+	return openSNMP(ctx, spec, creds)
+}
+
+// SNMPFailure maps an SNMP failure to a result (see snmpFailure).
+func SNMPFailure(err error) probewire.Result { return snmpFailure(err) }
+
+// SNMPMonitor returns the monitor section of probeType of the profile that
+// matches the target (see snmpMonitor).
+func SNMPMonitor(s *snmp.Session, probeType string) (profiles.MonitorSpec, bool, error) {
+	return snmpMonitor(s, probeType)
+}
+
+// PDUInt returns the value of an integer variable.
+func PDUInt(p gosnmp.SnmpPDU) (int64, bool) { return pduInt(p) } //nolint:gocritic // a PDU as gosnmp hands it out
+
+// PDUBytes returns the octets of an OctetString or IpAddress variable.
+func PDUBytes(p gosnmp.SnmpPDU) []byte { return pduBytes(p) } //nolint:gocritic // a PDU as gosnmp hands it out
+
+// ConfigResult is the result of a probe whose configuration is invalid:
+// error/config with the field and the message in the labels.
+func ConfigResult(field, msg string) probewire.Result { return configResult(field, msg) }
+
 // pduString returns the value of a string variable.
 func pduString(p gosnmp.SnmpPDU) string {
 	switch v := p.Value.(type) {

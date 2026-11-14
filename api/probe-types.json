@@ -648,13 +648,13 @@
       }
     },
     "ospf": {
-      "status": "planned",
-      "min_interval_s": 30,
+      "status": "available",
+      "min_interval_s": 60,
       "default_interval_s": 60,
       "max_interval_s": 86400,
       "min_timeout_s": 1,
       "default_timeout_s": 10,
-      "max_timeout_s": 60,
+      "max_timeout_s": 30,
       "default_down_count": 3,
       "default_up_count": 1,
       "max_parallel_per_target": 1,
@@ -662,44 +662,65 @@
       "max_rate_per_collector": 50,
       "max_probes_per_target": 2,
       "max_payload_bytes": 1048576,
-      "max_rows": 1024,
+      "max_rows": 1000,
       "credential_namespaces": [
-        "snmp",
-        "gnmi"
+        "snmp"
       ],
       "capabilities": [],
       "params": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "expected_neighbors": {
+          "neighbors": {
             "type": "array",
             "items": {
-              "type": "string",
-              "maxLength": 64
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "router_id"
+              ],
+              "properties": {
+                "router_id": {
+                  "type": "string",
+                  "minLength": 7,
+                  "maxLength": 15,
+                  "description": "Router ID of the neighbor in dotted IPv4 form."
+                },
+                "version": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 3,
+                  "description": "OSPF version 2 or 3; absent matches either."
+                }
+              }
             },
-            "maxItems": 256
+            "maxItems": 1000,
+            "description": "Expected neighbors; each must be present and full, else the probe is down."
           },
-          "source": {
-            "type": "string",
-            "enum": [
-              "snmp",
-              "gnmi"
-            ],
-            "default": "snmp",
-            "description": "Data source (SNMP MIB or gNMI/OpenConfig)."
+          "min_neighbors": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "Fewer neighbors in state full is degraded."
+          },
+          "max_neighbors": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 1000,
+            "description": "Rows read per check; more truncate the walk."
           }
         }
       }
     },
     "isis": {
-      "status": "planned",
-      "min_interval_s": 30,
+      "status": "available",
+      "min_interval_s": 60,
       "default_interval_s": 60,
       "max_interval_s": 86400,
       "min_timeout_s": 1,
       "default_timeout_s": 10,
-      "max_timeout_s": 60,
+      "max_timeout_s": 30,
       "default_down_count": 3,
       "default_up_count": 1,
       "max_parallel_per_target": 1,
@@ -707,32 +728,53 @@
       "max_rate_per_collector": 50,
       "max_probes_per_target": 2,
       "max_payload_bytes": 1048576,
-      "max_rows": 1024,
+      "max_rows": 1000,
       "credential_namespaces": [
-        "snmp",
-        "gnmi"
+        "snmp"
       ],
       "capabilities": [],
       "params": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "expected_adjacencies": {
+          "adjacencies": {
             "type": "array",
             "items": {
-              "type": "string",
-              "maxLength": 64
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "system_id"
+              ],
+              "properties": {
+                "system_id": {
+                  "type": "string",
+                  "minLength": 12,
+                  "maxLength": 17,
+                  "description": "System ID of the neighbor, six octets (e.g. 1921.6800.1001)."
+                },
+                "level": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2,
+                  "description": "IS-IS level 1 or 2; an L1L2 adjacency serves both, absent matches any."
+                }
+              }
             },
-            "maxItems": 256
+            "maxItems": 1000,
+            "description": "Expected adjacencies; each must be present and up, else the probe is down."
           },
-          "source": {
-            "type": "string",
-            "enum": [
-              "snmp",
-              "gnmi"
-            ],
-            "default": "snmp",
-            "description": "Data source (SNMP MIB or gNMI/OpenConfig)."
+          "min_adjacencies": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "Fewer adjacencies up is degraded."
+          },
+          "max_adjacencies": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "default": 1000,
+            "description": "Rows read per check; more truncate the walk."
           }
         }
       }
