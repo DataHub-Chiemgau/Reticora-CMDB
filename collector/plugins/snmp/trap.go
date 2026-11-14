@@ -2,6 +2,7 @@ package snmp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -16,16 +17,22 @@ import (
 type TrapEvent struct {
 	SourceIP  string
 	Community string
+	// User is the USM user of an SNMPv3 trap (WP-978); empty for v1/v2c,
+	// which carry Community instead.
+	User string
 	// TrapOID is the snmpTrapOID.0 value when present, else the enterprise OID.
 	TrapOID   string
 	Variables map[string]string
 	Received  time.Time
 }
 
-// TrapReceiver listens for SNMPv1/v2c traps on a UDP socket, parses them with
-// a tolerant BER decoder and hands each event to the configured sink. Traps
-// whose community does not match the configured one are dropped silently —
-// accepting every datagram would let any network neighbor inject events.
+// TrapReceiver listens for SNMPv1/v2c and SNMPv3 traps on a UDP socket,
+// parses v1/v2c with a tolerant BER decoder and v3 with the user-based
+// security model (USM, WP-978) and hands each event to the configured sink.
+// Traps whose community does not match the configured one are dropped
+// silently — accepting every datagram would let any network neighbor inject
+// events. A v3 trap needs a configured user (USM); without one it is
+// dropped with the reason unknown_user.
 type TrapReceiver struct {
 	// Address to listen on, e.g. ":162". Port 162 requires root/CAP_NET_BIND_SERVICE.
 	ListenAddr string
@@ -33,6 +40,10 @@ type TrapReceiver struct {
 	Community string
 	// Sink receives each parsed event. It must be safe for concurrent use.
 	Sink func(ctx context.Context, ev TrapEvent)
+	// USM holds the SNMPv3 users (nil: no v3 trap is accepted).
+	USM *TrapUSM
+	// OnDrop counts a dropped trap by reason (TrapDrop*); nil counts none.
+	OnDrop func(reason string)
 
 	conn     atomic.Pointer[net.PacketConn]
 	inFlight atomic.Int64
@@ -109,23 +120,32 @@ func (r *TrapReceiver) handle(ctx context.Context, pkt []byte, src net.Addr) {
 	if addr, ok := src.(*net.UDPAddr); ok {
 		srcIP = addr.IP.String()
 	}
-	ev, err := parseTrap(pkt)
+	ev, err := parseTrap(pkt, r.USM)
+	var drop *TrapDropError
+	if errors.As(err, &drop) {
+		logV3Drop(srcIP, drop.Reason)
+		if r.OnDrop != nil {
+			r.OnDrop(drop.Reason)
+		}
+		return
+	}
 	if err != nil {
 		slog.Debug("snmp trap ignored (unparseable)", "source", srcIP, "error", err)
 		return
 	}
 	ev.SourceIP = srcIP
-	if r.Community != "" && ev.Community != r.Community {
+	if ev.User == "" && r.Community != "" && ev.Community != r.Community {
 		slog.Debug("snmp trap ignored (community mismatch)", "source", srcIP)
 		return
 	}
 	r.Sink(ctx, *ev)
 }
 
-// parseTrap decodes an SNMPv1-Trap-PDU or SNMPv2-Trap-PDU into a TrapEvent.
-// The decoder is deliberately tolerant: unknown or malformed varbinds are
-// skipped instead of rejecting the whole trap.
-func parseTrap(data []byte) (*TrapEvent, error) {
+// parseTrap decodes an SNMPv1-Trap-PDU or SNMPv2-Trap-PDU into a TrapEvent
+// and hands an SNMPv3 message (version 3) to parseV3Trap with the users of
+// usm (WP-978 AK1). The v1/v2c decoder is deliberately tolerant: unknown or
+// malformed varbinds are skipped instead of rejecting the whole trap.
+func parseTrap(data []byte, usm *TrapUSM) (*TrapEvent, error) {
 	if len(data) < 2 || data[0] != 0x30 {
 		return nil, fmt.Errorf("not an ASN.1 sequence")
 	}
@@ -135,9 +155,15 @@ func parseTrap(data []byte) (*TrapEvent, error) {
 		return nil, err
 	}
 	p := &berParser{data: message}
-	// version
-	if _, versionErr := p.readTLV(); versionErr != nil {
+	version, versionErr := p.readTLV()
+	if versionErr != nil {
 		return nil, versionErr
+	}
+	if len(version) == 1 && version[0] == 3 {
+		if usm == nil {
+			return nil, dropErr(TrapDropUnknownUser)
+		}
+		return parseV3Trap(data, usm)
 	}
 	community, err := p.readTLV()
 	if err != nil {

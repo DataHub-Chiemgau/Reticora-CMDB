@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gosnmp/gosnmp"
+
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/snmp"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 )
@@ -263,5 +265,87 @@ func TestServerConfigDisablingEnvReceiverWarns(t *testing.T) {
 	unbound(t, m)
 	if !strings.Contains(logs.String(), "the collector group disables the trap receiver") {
 		t.Fatalf("log lacks the warning:\n%s", logs.String())
+	}
+}
+
+// v3Trap builds an SNMPv3 linkDown trap (SHA-256/AES-128) of user with
+// gosnmp as the sender.
+func v3Trap(t *testing.T, user, authPass, privPass string) []byte {
+	t.Helper()
+	ln, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("no UDP socket: %v", err)
+	}
+	defer func() { _ = ln.Close() }()
+	g := &gosnmp.GoSNMP{
+		Target: "127.0.0.1", Port: uint16(ln.LocalAddr().(*net.UDPAddr).Port), Transport: "udp", //nolint:gosec // a port
+		Version: gosnmp.Version3, SecurityModel: gosnmp.UserSecurityModel, MsgFlags: gosnmp.AuthPriv, Timeout: time.Second,
+		SecurityParameters: &gosnmp.UsmSecurityParameters{UserName: user, AuthoritativeEngineID: "\x80\x00\x1f\x88\x80collectorcmd",
+			AuthoritativeEngineBoots: 1, AuthoritativeEngineTime: 100,
+			AuthenticationProtocol: gosnmp.SHA256, AuthenticationPassphrase: authPass,
+			PrivacyProtocol: gosnmp.AES, PrivacyPassphrase: privPass},
+	}
+	if cerr := g.Connect(); cerr != nil {
+		t.Fatal(cerr)
+	}
+	defer func() { _ = g.Conn.Close() }()
+	if _, serr := g.SendTrap(gosnmp.SnmpTrap{Variables: []gosnmp.SnmpPDU{
+		{Name: ".1.3.6.1.6.3.1.1.4.1.0", Type: gosnmp.ObjectIdentifier, Value: ".1.3.6.1.6.3.1.1.5.3"},
+	}}); serr != nil {
+		t.Fatal(serr)
+	}
+	buf := make([]byte, 4096)
+	_ = ln.SetReadDeadline(time.Now().Add(2 * time.Second))
+	n, _, err := ln.ReadFrom(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return append([]byte(nil), buf[:n]...)
+}
+
+// TestTrapV3UsersFromCredentials covers WP-978 AK1, AK3 and AK4: the
+// snmp_v3 credentials of trap_config are the USM users; a valid v3 trap is
+// handed on with the user name, a wrong key and an unknown user are
+// dropped and counted next to community.
+func TestTrapV3UsersFromCredentials(t *testing.T) {
+	m, s, _ := newTrapManager(t, map[string]string{"cred-a": "alpha"})
+	m.v3Users = func(ids []string) []map[string]string {
+		var out []map[string]string
+		for _, id := range ids {
+			if id == "cred-v3" {
+				out = append(out, map[string]string{"username": "monitor", "auth_protocol": "sha256",
+					"auth_password": "auth-secret-978", "priv_protocol": "aes", "priv_password": "priv-secret-978"})
+			}
+		}
+		return out
+	}
+	m.start(context.Background(), &collectorConfig{}, nil)
+	port := freePort(t)
+	m.apply(&probewire.TrapConfig{Enabled: true, Port: port, CredentialIDs: []string{"cred-a", "cred-v3"}})
+	boundPort(t, m)
+	c, err := net.Dial("udp", "127.0.0.1:"+strconv.Itoa(port))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Close() }()
+	for _, pkt := range [][]byte{
+		v3Trap(t, "monitor", "auth-secret-978", "priv-secret-978"),
+		v3Trap(t, "monitor", "wrong-secret-978", "priv-secret-978"),
+		v3Trap(t, "stranger", "auth-secret-978", "priv-secret-978"),
+	} {
+		if _, err := c.Write(pkt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	trapWaitFor(t, "three v3 traps", func() bool { r, _ := m.stats(); return r == 3 })
+	received, dropped := m.stats()
+	if s.count() != 1 || received != 3 || dropped[snmp.TrapDropAuth] != 1 || dropped[snmp.TrapDropUnknownUser] != 1 {
+		t.Fatalf("handed on %d, received %d, dropped %v", s.count(), received, dropped)
+	}
+	s.mu.Lock()
+	ev := s.got[0]
+	s.mu.Unlock()
+	if ev.User != "monitor" || ev.TrapOID != "1.3.6.1.6.3.1.1.5.3" || ev.Community != "" {
+		t.Fatalf("event = %+v", ev)
 	}
 }

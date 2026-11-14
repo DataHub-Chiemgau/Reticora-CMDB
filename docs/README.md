@@ -1093,10 +1093,28 @@ profile; `TestEmbeddedProfileData` validates the set in CI. Shipped profiles
 cover Cisco, Juniper, Arista, Fortinet, HPE, Dell, MikroTik, Ubiquiti,
 Synology, NetApp, APC, Supermicro and Lenovo plus generic SNMP/SSH fallbacks.
 
-**SNMP trap reception:** when `RETICORA_SNMP_TRAP_LISTEN` is set (e.g.
-`:162`), the collector runs a tolerant SNMPv1/v2c trap receiver
-(`collector/plugins/snmp/trap.go`). Traps carrying a different community than
-`RETICORA_SNMP_COMMUNITY` are dropped; every accepted trap is normalized into
+**SNMP trap reception:** the server configures the trap receiver per
+collector group (`collector_group.trap_config`: enabled, UDP port, default
+162, and `credential_ids`) and hands the configuration over with every
+assignment set; the collector starts, stops or rebinds the receiver without
+a restart (DIS-06, WP-977). The credentials decide what is accepted:
+SNMPv1/v2c traps need the community of a `snmp_v2c` credential, SNMPv3
+traps (WP-978, `collector/plugins/snmp/trap_v3.go`) a user of a `snmp_v3`
+credential with the field names of polling (`username`, `auth_protocol`,
+`auth_password`, `priv_protocol`, `priv_password`). SNMPv3 is accepted at
+authNoPriv (no `priv_password`) and authPriv with SHA or SHA-224/256/384/512
+and AES-128/192/256; MD5, DES and noAuthNoPriv are refused. The sender is
+the authoritative engine: keys are localized per user and
+`msgAuthoritativeEngineID` (RFC 3414) and cached (at most 1,024, least
+recently used out), and a trap whose engine boots/time lie outside the
+150-second window of RFC 3414 §3.2 is dropped as a replay. Every dropped
+trap is counted by reason in the monitoring alive message
+(`traps_received`, `traps_dropped{reason=community|security_level|
+unknown_user|auth|decrypt|not_in_time_window}`); no key material is logged.
+Fallback: until an assignment set with `trap_config` arrives,
+`RETICORA_SNMP_TRAP_LISTEN` (e.g. `:162`) starts a v1/v2c receiver as before.
+Traps carrying a different community than `RETICORA_SNMP_COMMUNITY` are
+dropped there, and v3 traps are not accepted. Every accepted trap is normalized into
 a `snmp_trap_received` metric sample (labels: source IP, trap OID, up to 16
 varbinds) and posted to `POST /api/v1/monitoring/metrics`, so the standard
 alert rules can fire on traps. Trap delivery is fire-and-forget — a burst

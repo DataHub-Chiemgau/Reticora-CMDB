@@ -28,6 +28,13 @@ import (
 // the alive message); without a snmp_v2c credential every v1/v2c trap is
 // dropped.
 //
+// SNMPv3 (WP-978): the snmp_v3 credentials of the same credential_ids are
+// the USM users of the receiver (authNoPriv or authPriv, snmp.TrapUSM);
+// their keys are localized per sender engine and kept across rebinds. A v3
+// trap is accepted only from a configured user with a valid digest; drops
+// are counted by reason (security_level, unknown_user, auth, decrypt,
+// not_in_time_window) next to community.
+//
 // Fallback: until a set with trap_config arrives (a collector without
 // group, a server without the configuration, before the first set)
 // RETICORA_SNMP_TRAP_LISTEN starts the receiver with the community of the
@@ -44,8 +51,14 @@ type trapManager struct {
 	// communities returns the communities of the credentials of ids from
 	// the credential bundle (bundleCache.trapCommunities).
 	communities func(ids []string) []string
-	run         trapReceiverRun
-	logger      *slog.Logger
+	// v3Users returns the snmp_v3 credentials of ids from the bundle
+	// (bundleCache.trapV3Users).
+	v3Users func(ids []string) []map[string]string
+	// usm holds the SNMPv3 users, keys and engine times of the server
+	// mode; it outlives a rebind.
+	usm    *snmp.TrapUSM
+	run    trapReceiverRun
+	logger *slog.Logger
 
 	mu       sync.Mutex
 	ctx      context.Context
@@ -96,7 +109,27 @@ func (m *trapManager) start(ctx context.Context, cfg *collectorConfig, up *uploa
 	if m.communities == nil {
 		m.communities = collectorBundle.trapCommunities
 	}
+	if m.v3Users == nil {
+		m.v3Users = collectorBundle.trapV3Users
+	}
 	m.reconcileLocked()
+}
+
+// trapUSM returns the USM of the server mode, created on first use; the
+// users are the snmp_v3 credentials of the current configuration.
+func (m *trapManager) trapUSMLocked() *snmp.TrapUSM {
+	if m.usm == nil {
+		m.usm = &snmp.TrapUSM{Users: func() []map[string]string {
+			m.mu.Lock()
+			ids, users := slices.Clone(m.config.CredentialIDs), m.v3Users
+			m.mu.Unlock()
+			if users == nil {
+				return nil
+			}
+			return users(ids)
+		}}
+	}
+	return m.usm
 }
 
 // apply takes the trap configuration of an assignment set (nil: the set
@@ -159,11 +192,12 @@ func (m *trapManager) reconcileLocked() {
 	// The environment receiver checks the local community as before
 	// (newTrapReceiver); the server mode checks the configured credentials
 	// in handle.
-	recv := &snmp.TrapReceiver{ListenAddr: want}
+	recv := &snmp.TrapReceiver{ListenAddr: want, USM: m.trapUSMLocked()}
 	if !m.server {
 		recv = newTrapReceiver(m.envCfg, nil)
 	}
 	recv.Sink = m.handle
+	recv.OnDrop = m.dropReceived
 	ctx, cancel := context.WithCancel(m.ctx)
 	a := &runningTrapReceiver{addr: want, server: m.server, recv: recv, cancel: cancel, done: make(chan struct{})}
 	m.active = a
@@ -199,7 +233,9 @@ func (m *trapManager) handle(ctx context.Context, ev snmp.TrapEvent) { //nolint:
 	communities := m.communities
 	sink := m.sink
 	m.mu.Unlock()
-	if server && (communities == nil || !slices.Contains(communities(ids), ev.Community)) {
+	// A v3 trap (User set) was authenticated against the configured users
+	// by the receiver; v1/v2c need a configured community.
+	if server && ev.User == "" && (communities == nil || !slices.Contains(communities(ids), ev.Community)) {
 		m.drop(probewire.TrapDropCommunity)
 		slog.Debug("snmp trap dropped: community of no configured credential", "source", ev.SourceIP)
 		return
@@ -207,6 +243,13 @@ func (m *trapManager) handle(ctx context.Context, ev snmp.TrapEvent) { //nolint:
 	if sink != nil {
 		sink(ctx, ev)
 	}
+}
+
+// dropReceived counts a trap the receiver itself dropped (SNMPv3 USM,
+// WP-978): it was received and is dropped by reason.
+func (m *trapManager) dropReceived(reason string) {
+	m.received.Add(1)
+	m.drop(reason)
 }
 
 func (m *trapManager) drop(reason string) {
@@ -244,6 +287,31 @@ func (m *trapManager) stop() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.stopLocked()
+}
+
+// trapV3Users returns the secrets of the snmp_v3 credentials of ids the
+// bundle holds (WP-978): username, auth_protocol, auth_password,
+// priv_protocol, priv_password.
+func (c *bundleCache) trapV3Users(ids []string) []map[string]string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	var out []map[string]string
+	for _, id := range ids {
+		cred, ok := c.creds[id]
+		if !ok || cred.Kind != "snmp_v3" {
+			continue
+		}
+		user := map[string]string{}
+		for k, v := range cred.Secret {
+			if s, isString := v.(string); isString {
+				user[k] = s
+			}
+		}
+		if len(user) > 0 {
+			out = append(out, user)
+		}
+	}
+	return out
 }
 
 // trapCommunities returns the communities of the snmp_v2c credentials of
