@@ -77,6 +77,11 @@ const CI_DETAIL_PANELS: Unused[] = [
   { method: 'GET', path: /^\/cis\/[^/]+\/interfaces$/, why: DETAIL_PANEL },
   { method: 'GET', path: /^\/cis\/[^/]+\/addresses$/, why: DETAIL_PANEL },
   { method: 'GET', path: '/vrfs', why: DETAIL_PANEL },
+  // The credential section: bindings, effective credentials and the
+  // credentials the binding dialog offers (WP-923).
+  { method: 'GET', path: /^\/cis\/[^/]+\/credentials$/, why: DETAIL_PANEL },
+  { method: 'GET', path: /^\/cis\/[^/]+\/credentials\/effective$/, why: DETAIL_PANEL },
+  { method: 'GET', path: '/credentials', why: DETAIL_PANEL },
 ];
 
 export const UNUSED: Record<string, Unused[]> = {

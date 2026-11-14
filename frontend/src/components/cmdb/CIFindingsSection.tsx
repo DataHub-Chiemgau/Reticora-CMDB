@@ -81,7 +81,9 @@ export function CIP3Section({
         {ci && !failed && summary ? summary(ci) : null}
       </summary>
       <div className="border-t border-line px-4 py-4">
-        {!opened || detail.isLoading ? (
+        {/* Nothing while closed: a skeleton there would pulse unseen and
+            keep the page from ever settling (its animation runs forever). */}
+        {!opened ? null : detail.isLoading ? (
           <SkeletonList rows={2} label={t('ciP3.loading')} />
         ) : failed ? (
           <div className="flex flex-wrap items-center gap-3" role="alert">
