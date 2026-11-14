@@ -36,6 +36,9 @@ import {
   type IPAddressCreate,
   type IPAddressUpdate,
   type IPAddressRole,
+  ipamScanApi,
+  type PTRStatus,
+  type SubnetScanUpdate,
 } from './cmdb';
 import { fetchAllReviewItems, type ReviewItem } from '../hooks/useReviews';
 
@@ -646,5 +649,80 @@ export function useAddressReviews(
       );
     },
     enabled: enabled && !!address,
+  });
+}
+
+// ─── Subnet scan and PTR check (IPM-11, IPM-12, WP-1065) ────────────────────
+
+/** The scan settings, last run and counters of a subnet; held back while enabled is false. */
+export function useSubnetScan(subnetId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['ipam', 'subnet', subnetId, 'scan'],
+    queryFn: () => ipamScanApi.getScan(subnetId),
+    enabled,
+    retry: false,
+  });
+}
+
+/** The collector groups the scan of a subnet may use. */
+export function useCollectorGroups(enabled = true) {
+  return useQuery({
+    queryKey: ['collector-groups', 'all'],
+    queryFn: () => ipamScanApi.collectorGroups(),
+    enabled,
+    retry: false,
+    staleTime: 60_000,
+  });
+}
+
+/** The hosts the scan of a subnet found (origin scan, type discovered). */
+export function useScanNewHosts(subnetId: string, enabled = true) {
+  return useQuery({
+    queryKey: ['ipam', 'subnet', subnetId, 'scan', 'new-hosts'],
+    queryFn: () => ipamScanApi.newHosts(subnetId),
+    enabled,
+    retry: false,
+  });
+}
+
+/** Saving the scan settings (PATCH /subnets/{id}/scan, ipam:write). */
+export function useUpdateSubnetScan(subnetId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: SubnetScanUpdate) => ipamScanApi.updateScan(subnetId, data),
+    onSuccess: (scan) => {
+      qc.setQueryData(['ipam', 'subnet', subnetId, 'scan'], scan);
+      void qc.invalidateQueries({ queryKey: ['ipam', 'subnet', subnetId, 'scan', 'new-hosts'] });
+    },
+  });
+}
+
+/**
+ * Adopting a found host: type static and pinned (PATCH /ips/{id}); it
+ * leaves the list "Neu gefunden".
+ */
+export function useAdoptScanHost(subnetId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => ipamApi.updateIPAddress(id, { type: 'static', pinned: true }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['ipam', 'subnet', subnetId] });
+    },
+  });
+}
+
+/** The PTR deviations of the filter, page by page over next_cursor (API-02). */
+export function usePtrMismatches(
+  filter: { section_id?: string; subnet_id?: string; status: PTRStatus },
+  enabled = true,
+) {
+  return useInfiniteQuery({
+    queryKey: ['ipam', 'ptr-mismatches', filter],
+    queryFn: ({ pageParam }) =>
+      ipamScanApi.ptrMismatches({ ...filter, cursor: pageParam || undefined }),
+    initialPageParam: '',
+    getNextPageParam: (page) => page.next_cursor || undefined,
+    enabled,
+    retry: false,
   });
 }

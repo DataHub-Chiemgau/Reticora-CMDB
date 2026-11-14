@@ -5572,7 +5572,8 @@
       "subnets": "Subnetze",
       "vlans": "VLANs",
       "vrfs": "VRFs",
-      "nameservers": "Nameserver-Sets"
+      "nameservers": "Nameserver-Sets",
+      "ptr": "PTR-Abweichungen"
     },
     "vlans": {
       "title": "VLANs",
@@ -5793,6 +5794,102 @@
       "forbidden": "Für diese Aktion fehlt das Recht (z. B. ipam:read).",
       "badRequest": "Die Anfrage wurde abgelehnt: {{detail}}",
       "failed": "Die Aktion ist fehlgeschlagen."
+    },
+    "scan": {
+      "tabs": "Bereiche des Subnetzes",
+      "tab": {
+        "addresses": "Adressen",
+        "scan": "Scan"
+      },
+      "title": "Subnetz-Scan",
+      "intro": "Der Scan prüft die Adressen des Subnetzes per ICMP über die Collector-Gruppe und setzt Zustand und zuletzt gesehen; ohne Antwort nach der Frist gilt eine Adresse als offline.",
+      "enabled": "Scan aktiv",
+      "collectorGroup": "Collector-Gruppe",
+      "noGroup": "Keine Gruppe",
+      "currentGroup": "Gespeicherte Gruppe ({{id}})",
+      "groupsUnavailable": "Die Collector-Gruppen sind nicht ladbar (Recht monitoring:read fehlt oder Fehler).",
+      "orgWideGroup": "{{name}} (organisationsweit)",
+      "interval": "Intervall in Sekunden",
+      "intervalDefault": "Standard (30 s)",
+      "offlineAfter": "Offline nach Sekunden",
+      "discoverNewHosts": "Neue Hosts erkennen (unbekannte antwortende Adressen anlegen)",
+      "discoverBlocked": {
+        "ipv6": "Bei IPv6-Netzen nicht möglich: Der Adressraum ist zu groß für einen vollständigen Scan.",
+        "wide": "Nur für IPv4-Netze bis /22 möglich; dieses Netz ist größer."
+      },
+      "members": "Mitglieder der Collector-Gruppe",
+      "noMembers": "Keine Gruppe gewählt oder die Gruppe hat keine Mitglieder.",
+      "priority": "Priorität {{priority}}",
+      "memberStatuses": {
+        "healthy": "gesund",
+        "degraded": "eingeschränkt",
+        "down": "ausgefallen"
+      },
+      "integerRequired": "Geben Sie eine ganze Zahl an.",
+      "invalid": "Der Wert ist ungültig.",
+      "forbidden": "Dafür fehlt Ihnen das Recht (ipam:write) oder das Kontingent der Probes ist erschöpft.",
+      "saveFailed": "Die Scan-Einstellungen konnten nicht gespeichert werden.",
+      "saved": "Die Scan-Einstellungen wurden gespeichert.",
+      "save": "Scan-Einstellungen speichern",
+      "loadFailed": "Die Scan-Einstellungen konnten nicht geladen werden.",
+      "lastRun": "Letzter Lauf",
+      "lastRunAt": "Zuletzt angewendet: {{at}}",
+      "neverRun": "Der Scan ist noch nicht gelaufen.",
+      "targets": "Ziele",
+      "targetStates": {
+        "active": "Aktiv",
+        "offline": "Offline",
+        "unknown": "Unbekannt",
+        "none": "Ohne Zustand"
+      },
+      "newHosts": "Neu gefunden",
+      "noNewHosts": "Der Scan hat keine neuen Hosts gefunden.",
+      "newHostsFailed": "Die neu gefundenen Adressen konnten nicht geladen werden.",
+      "columns": {
+        "address": "Adresse",
+        "state": "Zustand",
+        "lastSeen": "Zuletzt gesehen"
+      },
+      "adopt": "Übernehmen",
+      "adoptNamed": "{{address}} übernehmen",
+      "adoptFailed": "Die Adresse konnte nicht übernommen werden."
+    },
+    "ptr": {
+      "title": "PTR-Abweichungen",
+      "intro": "Adressen, deren PTR-Eintrag vom DNS-Namen abweicht oder fehlt. Geprüft wird bei gescannten Subnetzen von Sections mit PTR-Abgleich.",
+      "filters": "Filter der PTR-Abweichungen",
+      "section": "Section",
+      "subnet": "Subnetz",
+      "status": "Status",
+      "statuses": {
+        "mismatch": "Abweichung",
+        "missing": "PTR fehlt"
+      },
+      "columns": {
+        "address": "Adresse",
+        "dnsName": "DNS-Name",
+        "ptrName": "PTR-Name",
+        "checkedAt": "Geprüft am",
+        "pinned": "Gepinnt"
+      },
+      "pinnedYes": "ja",
+      "pinnedNo": "nein",
+      "none": "Keine Abweichungen gefunden.",
+      "loadFailed": "Die PTR-Abweichungen konnten nicht geladen werden.",
+      "more": "Weitere laden",
+      "mode": "PTR-Abgleich",
+      "modeLabel": "Modus",
+      "modes": {
+        "off": "Aus",
+        "report": "Melden",
+        "adopt": "Übernehmen"
+      },
+      "modeHints": {
+        "off": "Kein Abgleich der PTR-Einträge.",
+        "report": "Der Collector löst den PTR-Eintrag jeder bekannten Adresse auf; Abweichungen vom DNS-Namen erscheinen in der Liste PTR-Abweichungen.",
+        "adopt": "Wie Melden; zusätzlich wird der PTR-Name als DNS-Name einer nicht gepinnten Adresse übernommen."
+      },
+      "locked": "Der PTR-Abgleich gehört zum Monitoring. {{hint}}"
     }
   },
   "alarms": {

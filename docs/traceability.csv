@@ -1976,3 +1976,6 @@ SEC-02;[P3];F;frontend/src/components/cmdb/CIP3Sections.test.tsx;WP-1137
 SEC-03;[P3];F;frontend/src/components/cmdb/CIP3Sections.test.tsx;WP-1137
 CRD-07;[P3];G3;frontend/src/components/cmdb/CredentialBindingSection.test.tsx;WP-923
 UI-14;[P2–P4, A];G3;frontend/src/components/cmdb/CredentialBindingSection.test.tsx;WP-923
+IPM-11;[P3];G3;frontend/src/components/ipam/ScanTab.test.tsx;WP-1065
+IPM-12;[P3];G3;frontend/src/components/ipam/ScanTab.test.tsx;WP-1065
+UI-14;[P2–P4, A];G3;frontend/src/components/ipam/ScanTab.test.tsx;WP-1065

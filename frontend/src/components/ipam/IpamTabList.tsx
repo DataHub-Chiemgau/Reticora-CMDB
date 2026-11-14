@@ -1,13 +1,13 @@
 /**
  * IpamTabList is the tab bar of the IPAM page (WP-918): subnets, VLANs,
- * VRFs and nameserver sets. The arrow keys move between the tabs (roving
+ * VRFs, nameserver sets and the PTR deviations (WP-1065). The arrow keys move between the tabs (roving
  * tabindex); the panels carry the ids ipam-panel-<tab>.
  */
 import { useRef, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../ui/utils';
 
-export const IPAM_TABS = ['subnets', 'vlans', 'vrfs', 'nameservers'] as const;
+export const IPAM_TABS = ['subnets', 'vlans', 'vrfs', 'nameservers', 'ptr'] as const;
 export type IpamTab = (typeof IPAM_TABS)[number];
 
 export function IpamTabList({ tab, onChange }: { tab: IpamTab; onChange: (tab: IpamTab) => void }) {
@@ -26,7 +26,7 @@ export function IpamTabList({ tab, onChange }: { tab: IpamTab; onChange: (tab: I
     <div
       role="tablist"
       aria-label={t('ipam.tabs.label')}
-      className="flex gap-1 border-b border-line"
+      className="flex gap-1 overflow-x-auto border-b border-line"
     >
       {IPAM_TABS.map((id, index) => (
         <button
@@ -43,7 +43,7 @@ export function IpamTabList({ tab, onChange }: { tab: IpamTab; onChange: (tab: I
           onClick={() => onChange(id)}
           onKeyDown={(event) => onKeyDown(event, index)}
           className={cn(
-            '-mb-px border-b-2 px-3 py-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent',
+            '-mb-px shrink-0 whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent',
             tab === id ? 'border-accent text-fg' : 'border-transparent text-fg-muted hover:text-fg',
           )}
         >

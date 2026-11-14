@@ -18,7 +18,7 @@
  * card History shows GET /subnets/{id}/history on demand (HistoryList).
  */
 import { History, Pencil, Plus, Sparkles } from 'lucide-react';
-import { useMemo, useState, type FormEvent } from 'react';
+import { useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { API_MAX_LIMIT, ApiError } from '../api/client';
@@ -48,6 +48,7 @@ import { AddressDialog } from '../components/ipam/AddressDialog';
 import { AddressMap, mapSupported, type MapCell } from '../components/ipam/AddressMap';
 import { HistoryList } from '../components/ipam/HistoryList';
 import { SubnetFormModal } from '../components/ipam/SubnetFormModal';
+import { ScanTab } from '../components/ipam/ScanTab';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 import { Card } from '../components/ui/Card';
@@ -79,6 +80,19 @@ function SubnetDetail({ id }: { id: string }) {
   // The address of the reservation form; a free cell of the map fills it.
   const [reserveAddress, setReserveAddress] = useState('');
   const canWrite = useHasPermission('ipam:write') === true;
+  // The tab stays in the query (?tab=scan), so a reload keeps it.
+  const [params, setParams] = useSearchParams();
+  const tab: SubnetTab = params.get('tab') === 'scan' ? 'scan' : 'addresses';
+  const chooseTab = (next: SubnetTab) =>
+    setParams(
+      (current) => {
+        const copy = new URLSearchParams(current);
+        if (next === 'addresses') copy.delete('tab');
+        else copy.set('tab', next);
+        return copy;
+      },
+      { replace: true },
+    );
 
   if (subnet.isError) {
     const missing = subnet.error instanceof ApiError && subnet.error.status === 404;
@@ -96,11 +110,25 @@ function SubnetDetail({ id }: { id: string }) {
   return (
     <div className="space-y-6">
       <SubnetHead subnet={s} canWrite={canWrite} onEdit={() => setEditing(true)} />
-      {canWrite && (
-        <SubnetActions subnet={s} address={reserveAddress} setAddress={setReserveAddress} />
+      <SubnetTabList tab={tab} onChange={chooseTab} />
+      {tab === 'scan' ? (
+        <div role="tabpanel" id="subnet-panel-scan" aria-labelledby="subnet-tab-scan">
+          <ScanTab subnet={s} canWrite={canWrite} />
+        </div>
+      ) : (
+        <div
+          role="tabpanel"
+          id="subnet-panel-addresses"
+          aria-labelledby="subnet-tab-addresses"
+          className="space-y-6"
+        >
+          {canWrite && (
+            <SubnetActions subnet={s} address={reserveAddress} setAddress={setReserveAddress} />
+          )}
+          <Addresses subnet={s} canWrite={canWrite} onPickFree={setReserveAddress} />
+          <SubnetHistory subnet={s} />
+        </div>
       )}
-      <Addresses subnet={s} canWrite={canWrite} onPickFree={setReserveAddress} />
-      <SubnetHistory subnet={s} />
       {editing && (
         <SubnetFormModal
           open
@@ -109,6 +137,54 @@ function SubnetDetail({ id }: { id: string }) {
           onDeleted={() => navigate('/ipam')}
         />
       )}
+    </div>
+  );
+}
+
+const SUBNET_TABS = ['addresses', 'scan'] as const;
+type SubnetTab = (typeof SUBNET_TABS)[number];
+
+/** SubnetTabList switches between the addresses and the scan (WP-1065); arrow keys move. */
+function SubnetTabList({ tab, onChange }: { tab: SubnetTab; onChange: (tab: SubnetTab) => void }) {
+  const { t } = useTranslation();
+  const refs = useRef<Partial<Record<SubnetTab, HTMLButtonElement | null>>>({});
+  const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+    if (step === 0) return;
+    event.preventDefault();
+    const next = SUBNET_TABS[(index + step + SUBNET_TABS.length) % SUBNET_TABS.length];
+    if (!next) return;
+    onChange(next);
+    refs.current[next]?.focus();
+  };
+  return (
+    <div
+      role="tablist"
+      aria-label={t('ipam.scan.tabs')}
+      className="flex gap-1 border-b border-line"
+    >
+      {SUBNET_TABS.map((id, index) => (
+        <button
+          key={id}
+          ref={(node) => {
+            refs.current[id] = node;
+          }}
+          type="button"
+          role="tab"
+          id={`subnet-tab-${id}`}
+          aria-selected={tab === id}
+          aria-controls={`subnet-panel-${id}`}
+          tabIndex={tab === id ? 0 : -1}
+          onClick={() => onChange(id)}
+          onKeyDown={(event) => onKeyDown(event, index)}
+          className={cn(
+            '-mb-px border-b-2 px-3 py-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent',
+            tab === id ? 'border-accent text-fg' : 'border-transparent text-fg-muted hover:text-fg',
+          )}
+        >
+          {t(`ipam.scan.tab.${id}`)}
+        </button>
+      ))}
     </div>
   );
 }

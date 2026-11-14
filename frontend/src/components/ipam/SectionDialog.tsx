@@ -8,12 +8,22 @@
  * write; teams are chosen with the UserTeamPicker (teams only). Without
  * ipam:write every write action is hidden. The server lets only principals
  * without client and site restriction write the rights; a 403 says so.
+ * WP-1065: editing a section sets ptr_mode (off, report, adopt, IPM-12)
+ * with an explaining text; without the feature monitoring the setting is
+ * locked and shows the hint of WP-857.
  */
-import { Trash2 } from 'lucide-react';
+import { Lock, Trash2 } from 'lucide-react';
 import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ApiError } from '../../api/client';
-import type { IPAMSection, IPAMSectionLevel } from '../../api/cmdb';
+import {
+  PTR_MODES,
+  type IPAMPTRMode,
+  type IPAMSection,
+  type IPAMSectionLevel,
+} from '../../api/cmdb';
+import { useEntitlements } from '../../hooks/useEntitlements';
+import { lockedHint } from '../shell/navigation';
 import { useClients } from '../../api/cmdbHooks';
 import {
   useCreateIPAMSection,
@@ -158,6 +168,10 @@ function GeneralTab({
   const [strictMode, setStrictMode] = useState(section?.strict_mode ?? false);
   const [showVLAN, setShowVLAN] = useState(section?.show_vlan ?? true);
   const [showVRF, setShowVRF] = useState(section?.show_vrf ?? true);
+  const [ptrMode, setPtrMode] = useState<IPAMPTRMode>(section?.ptr_mode ?? 'off');
+  const [ptrError, setPtrError] = useState<string>();
+  const { isEnabled, plan } = useEntitlements();
+  const ptrAvailable = isEnabled('monitoring');
   const [error, setError] = useState<string>();
   const [nameError, setNameError] = useState<string>();
   const clients = useClients(!section && canWrite);
@@ -167,6 +181,10 @@ function GeneralTab({
   const readOnly = !canWrite;
 
   const failed = (err: unknown) => {
+    if (err instanceof ApiError && err.field === 'ptr_mode') {
+      setPtrError(err.detail ?? t('ipam.section.saveFailed'));
+      return;
+    }
     if (err instanceof ApiError && err.field === 'name') {
       setNameError(
         err.status === 409
@@ -186,6 +204,7 @@ function GeneralTab({
     event.preventDefault();
     setError(undefined);
     setNameError(undefined);
+    setPtrError(undefined);
     if (!name.trim()) {
       setNameError(t('ipam.section.nameRequired'));
       return;
@@ -198,7 +217,13 @@ function GeneralTab({
       show_vrf: showVRF,
     };
     if (section) {
-      update.mutate({ id: section.id, data }, { onSuccess: () => onDone(), onError: failed });
+      // ptr_mode only with the feature monitoring and only when it changed:
+      // a change synchronizes the PTR probes of the section (WP-1064).
+      const ptr = ptrAvailable && ptrMode !== section.ptr_mode ? { ptr_mode: ptrMode } : {};
+      update.mutate(
+        { id: section.id, data: { ...data, ...ptr } },
+        { onSuccess: () => onDone(), onError: failed },
+      );
     } else {
       create.mutate(
         { ...data, ...(clientId ? { client_id: clientId } : {}) },
@@ -273,6 +298,38 @@ function GeneralTab({
         {checkbox('ipam-section-vlan', showVLAN, setShowVLAN, t('ipam.section.showVlan'))}
         {checkbox('ipam-section-vrf', showVRF, setShowVRF, t('ipam.section.showVrf'))}
       </fieldset>
+      {section ? (
+        <fieldset className="space-y-2" aria-describedby="ipam-section-ptr-hint">
+          <legend className="mb-1 text-sm font-medium text-fg">{t('ipam.ptr.mode')}</legend>
+          {ptrAvailable ? (
+            <>
+              <Select
+                label={t('ipam.ptr.modeLabel')}
+                value={ptrMode}
+                disabled={readOnly}
+                error={ptrError}
+                onChange={(event) => setPtrMode(event.target.value as IPAMPTRMode)}
+                options={PTR_MODES.map((mode) => ({
+                  value: mode,
+                  label: t(`ipam.ptr.modes.${mode}`),
+                }))}
+              />
+              <p id="ipam-section-ptr-hint" className="text-xs text-fg-muted">
+                {t(`ipam.ptr.modeHints.${ptrMode}`)}
+              </p>
+            </>
+          ) : (
+            <p
+              id="ipam-section-ptr-hint"
+              className="flex items-center gap-2 text-sm text-fg-muted"
+              data-testid="ptr-mode-locked"
+            >
+              <Lock className="h-4 w-4" aria-hidden />
+              {t('ipam.ptr.locked', { hint: lockedHint(t, plan) })}
+            </p>
+          )}
+        </fieldset>
+      ) : null}
       {error && (
         <p role="alert" className="text-sm text-red-700 dark:text-red-300">
           {error}

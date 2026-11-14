@@ -2056,6 +2056,57 @@ export const IPAM_CHANGE_SOURCES = [
 /** PROBLEM_SUBNET_EXHAUSTED is the problem type of a full subnet (IPM-03). */
 export const PROBLEM_SUBNET_EXHAUSTED = 'urn:reticora:problem:subnet-exhausted';
 
+// ─── Subnet scan and PTR check (IPM-11, IPM-12, WP-1065) ────────────────────
+
+export type SubnetScan = components['schemas']['SubnetScan'];
+export type SubnetScanUpdate = components['schemas']['SubnetScanUpdate'];
+export type CollectorGroup = components['schemas']['CollectorGroup'];
+export type PTRMismatch = components['schemas']['PTRMismatch'];
+export type IPAMPTRMode = components['schemas']['IPAMPTRMode'];
+export type PTRStatus = PTRMismatch['ptr_status'];
+
+/** PTR_MODES are the DNS reverse check modes of a section (IPM-12), labels ipam.ptr.modes.*. */
+export const PTR_MODES = ['off', 'report', 'adopt'] as const satisfies readonly IPAMPTRMode[];
+/** PTR_STATUSES are the kinds of a PTR deviation (IPM-12), labels ipam.ptr.statuses.*. */
+export const PTR_STATUSES = ['mismatch', 'missing'] as const satisfies readonly PTRStatus[];
+/** SCAN_TARGET_STATES are the target counters of a scan run, labels ipam.scan.targetStates.*. */
+export const SCAN_TARGET_STATES = [
+  'active',
+  'offline',
+  'unknown',
+  'none',
+] as const satisfies readonly (keyof SubnetScan['target_states'])[];
+
+/** The scan of a subnet, its collector groups and the PTR deviations (Konvention 27). */
+export const ipamScanApi = {
+  getScan(subnetId: string): Promise<SubnetScan> {
+    return fetchAPI(`/subnets/${subnetId}/scan`);
+  },
+  updateScan(subnetId: string, data: SubnetScanUpdate): Promise<SubnetScan> {
+    return fetchAPI(`/subnets/${subnetId}/scan`, { method: 'PATCH', body: JSON.stringify(data) });
+  },
+  /** Every collector group in the caller's scope (monitoring:read, WP-947). */
+  collectorGroups(): Promise<CollectorGroup[]> {
+    return fetchAllPages<CollectorGroup>('/collector-groups');
+  },
+  /** The hosts the scan found (origin scan, type discovered) of a subnet, one page. */
+  newHosts(subnetId: string): Promise<PaginatedResponse<IPAddress>> {
+    return fetchAPI(
+      `/ips${qs({ subnet_id: subnetId, origin: 'scan', type: 'discovered', limit: API_MAX_LIMIT })}`,
+    );
+  },
+  /** One page of the PTR deviations (cursor pages, API-02). */
+  ptrMismatches(params: {
+    section_id?: string;
+    subnet_id?: string;
+    status?: PTRStatus;
+    cursor?: string;
+    limit?: number;
+  }): Promise<PaginatedResponse<PTRMismatch>> {
+    return fetchAPI(`/ipam/ptr-mismatches${qs({ limit: 50, ...params })}`);
+  },
+};
+
 // ─── Credentials at the CI (CRD-01, CRD-04, CRD-06, CRD-07, WP-923) ─────────
 
 export type CredentialBinding = components['schemas']['CredentialBinding'];

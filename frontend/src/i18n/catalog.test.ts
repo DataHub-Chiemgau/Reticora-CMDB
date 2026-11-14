@@ -43,6 +43,9 @@ import {
   IP_ADDRESS_ROLES,
   IP_ADDRESS_STATES,
   IP_ADDRESS_TYPES,
+  PTR_MODES,
+  PTR_STATUSES,
+  SCAN_TARGET_STATES,
 } from '../api/cmdb';
 import { REVIEW_KINDS } from '../hooks/useReviews';
 import {
@@ -492,6 +495,11 @@ const enumerations: Array<[string, readonly string[]]> = [
   ['ipam.origins', specEnum('IPAddressOrigin')],
   ['ipam.history.sources', IPAM_CHANGE_SOURCES],
   ['ipam.history.sources', specEnum('IPAMChange', 'source')],
+  ['ipam.ptr.modes', PTR_MODES],
+  ['ipam.ptr.modes', specEnum('IPAMPTRMode')],
+  ['ipam.ptr.statuses', PTR_STATUSES],
+  ['ipam.ptr.statuses', specEnum('PTRMismatch', 'ptr_status')],
+  ['ipam.scan.targetStates', SCAN_TARGET_STATES],
   ['ipam.history.changeTypes', specEnum('IPAMChange', 'change_type')],
   ['reviews.kinds', REVIEW_KINDS],
   ...Object.values(IMPORT_TARGETS).map((targets): [string, readonly string[]] => [

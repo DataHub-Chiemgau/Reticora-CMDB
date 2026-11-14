@@ -10,7 +10,8 @@
  * Beside the subnet tree the tabs VLANs (with domains), VRFs (RD/RT) and
  * nameserver sets (WP-918); the tab stays in the query parameter tab.
  * The action Import/Export (WP-922) opens IpamImportDialog with the current
- * filters of the page.
+ * filters of the page. WP-1065: the tab "PTR-Abweichungen" lists the
+ * addresses whose PTR record differs from dns_name (PtrMismatchList).
  */
 import { ArrowDownUp, Network, Plus, Settings2 } from 'lucide-react';
 import { useMemo, useState, type FormEvent } from 'react';
@@ -23,6 +24,7 @@ import { useIPAMSections, useOrgWideWriter, useSubnetChain, useVrfs } from '../a
 import { IpamImportDialog, useIpamIORights } from '../components/ipam/IpamImportDialog';
 import { IpamTabList, IPAM_TABS, type IpamTab } from '../components/ipam/IpamTabList';
 import { NameserverTab } from '../components/ipam/NameserverTab';
+import { PtrMismatchList } from '../components/ipam/PtrMismatchList';
 import { VlanTab } from '../components/ipam/VlanTab';
 import { VrfTab } from '../components/ipam/VrfTab';
 import { SectionDialog } from '../components/ipam/SectionDialog';
@@ -144,6 +146,12 @@ export function IpamPage() {
       {tab === 'nameservers' && (
         <div role="tabpanel" id="ipam-panel-nameservers" aria-labelledby="ipam-tab-nameservers">
           <NameserverTab canWrite={canWrite && orgWide} />
+        </div>
+      )}
+
+      {tab === 'ptr' && (
+        <div role="tabpanel" id="ipam-panel-ptr" aria-labelledby="ipam-tab-ptr">
+          <PtrMismatchList sections={list} />
         </div>
       )}
 

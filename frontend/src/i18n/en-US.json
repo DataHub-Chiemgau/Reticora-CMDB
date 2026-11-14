@@ -5572,7 +5572,8 @@
       "subnets": "Subnets",
       "vlans": "VLANs",
       "vrfs": "VRFs",
-      "nameservers": "Nameserver sets"
+      "nameservers": "Nameserver sets",
+      "ptr": "PTR deviations"
     },
     "vlans": {
       "title": "VLANs",
@@ -5793,6 +5794,102 @@
       "forbidden": "The right for this action is missing (e.g. ipam:read).",
       "badRequest": "The request was refused: {{detail}}",
       "failed": "The action failed."
+    },
+    "scan": {
+      "tabs": "Areas of the subnet",
+      "tab": {
+        "addresses": "Addresses",
+        "scan": "Scan"
+      },
+      "title": "Subnet scan",
+      "intro": "The scan checks the addresses of the subnet by ICMP through the collector group and sets state and last seen; without an answer after the period an address counts as offline.",
+      "enabled": "Scan enabled",
+      "collectorGroup": "Collector group",
+      "noGroup": "No group",
+      "currentGroup": "Stored group ({{id}})",
+      "groupsUnavailable": "The collector groups cannot be loaded (permission monitoring:read missing or error).",
+      "orgWideGroup": "{{name}} (organization-wide)",
+      "interval": "Interval in seconds",
+      "intervalDefault": "Default (30 s)",
+      "offlineAfter": "Offline after seconds",
+      "discoverNewHosts": "Discover new hosts (create unknown answering addresses)",
+      "discoverBlocked": {
+        "ipv6": "Not possible for IPv6 subnets: the address space is too large for a full scan.",
+        "wide": "Only possible for IPv4 subnets up to /22; this subnet is larger."
+      },
+      "members": "Members of the collector group",
+      "noMembers": "No group chosen or the group has no members.",
+      "priority": "Priority {{priority}}",
+      "memberStatuses": {
+        "healthy": "healthy",
+        "degraded": "degraded",
+        "down": "down"
+      },
+      "integerRequired": "Enter a whole number.",
+      "invalid": "The value is invalid.",
+      "forbidden": "You lack the right (ipam:write) or the probe quota is exhausted.",
+      "saveFailed": "The scan settings could not be saved.",
+      "saved": "The scan settings were saved.",
+      "save": "Save scan settings",
+      "loadFailed": "The scan settings could not be loaded.",
+      "lastRun": "Last run",
+      "lastRunAt": "Last applied: {{at}}",
+      "neverRun": "The scan has not run yet.",
+      "targets": "Targets",
+      "targetStates": {
+        "active": "Active",
+        "offline": "Offline",
+        "unknown": "Unknown",
+        "none": "Without state"
+      },
+      "newHosts": "Newly found",
+      "noNewHosts": "The scan has found no new hosts.",
+      "newHostsFailed": "The newly found addresses could not be loaded.",
+      "columns": {
+        "address": "Address",
+        "state": "State",
+        "lastSeen": "Last seen"
+      },
+      "adopt": "Adopt",
+      "adoptNamed": "Adopt {{address}}",
+      "adoptFailed": "The address could not be adopted."
+    },
+    "ptr": {
+      "title": "PTR deviations",
+      "intro": "Addresses whose PTR record differs from the DNS name or is missing. Scanned subnets of sections with PTR check are checked.",
+      "filters": "Filters of the PTR deviations",
+      "section": "Section",
+      "subnet": "Subnet",
+      "status": "Status",
+      "statuses": {
+        "mismatch": "Mismatch",
+        "missing": "PTR missing"
+      },
+      "columns": {
+        "address": "Address",
+        "dnsName": "DNS name",
+        "ptrName": "PTR name",
+        "checkedAt": "Checked at",
+        "pinned": "Pinned"
+      },
+      "pinnedYes": "yes",
+      "pinnedNo": "no",
+      "none": "No deviations found.",
+      "loadFailed": "The PTR deviations could not be loaded.",
+      "more": "Load more",
+      "mode": "PTR check",
+      "modeLabel": "Mode",
+      "modes": {
+        "off": "Off",
+        "report": "Report",
+        "adopt": "Adopt"
+      },
+      "modeHints": {
+        "off": "No check of the PTR records.",
+        "report": "The collector resolves the PTR record of every known address; deviations from the DNS name appear in the list PTR deviations.",
+        "adopt": "Like report; additionally the PTR name becomes the DNS name of an address that is not pinned."
+      },
+      "locked": "The PTR check is part of monitoring. {{hint}}"
     }
   },
   "alarms": {

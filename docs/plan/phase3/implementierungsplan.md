@@ -13959,7 +13959,7 @@ Gesperrte Paketfunktionen zeigt seit WP-857 eine Hinweisseite (`frontend/src/pag
 - [ ] **AK4:** Ohne `monitoring` ist der Reiter „Scan“ gesperrt und zeigt den Hinweis nach dem Muster WP-857, ebenso die PTR-Einstellung. Die IPAM-Seite selbst hängt weiter nur an `ipam`. Ohne `ipam:write` sind alle Schreibaktionen ausgeblendet.
 - [ ] **AK5:** Fetch-Funktionen in `frontend/src/api/cmdb.ts`, Hooks in `frontend/src/api/ipamHooks.ts` (Konvention 27). Texte unter `ipam.scan.*` und `ipam.ptr.*` in beiden Sprachdateien. Enum-Werte (`ptr_mode`, `ptr_status`, Adresszustand) erscheinen nur über den Katalog (GLO-10).
 
-**Dateien (11 Einträge):**
+**Dateien (13 Einträge):**
 
 - frontend/src/components/ipam/ScanTab.tsx (neu)
 - frontend/src/components/ipam/ScanTab.test.tsx (neu)
@@ -13969,6 +13969,8 @@ Gesperrte Paketfunktionen zeigt seit WP-857 eine Hinweisseite (`frontend/src/pag
 - frontend/src/pages/SubnetDetailPage.tsx (aus WP-916)
 - frontend/src/components/ipam/SectionDialog.tsx (aus WP-915)
 - frontend/src/pages/IpamPage.tsx (aus WP-915)
+- frontend/src/components/ipam/IpamTabList.tsx (aus WP-915; Reiter `ptr` und scrollbare Reiterleiste)
+- frontend/src/i18n/catalog.test.ts (Katalogpflicht GLO-10 für ptr_mode, ptr_status und den Zielzustand des Scans)
 - frontend/src/i18n/de-DE.json
 - frontend/src/i18n/en-US.json
 - docs/traceability.csv
