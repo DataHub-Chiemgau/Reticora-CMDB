@@ -289,9 +289,10 @@ func Main() {
 	// The collector's mTLS channel to the NATS endpoint (COL-08); a
 	// collector enrolled after its start takes the identity over from it.
 	go runNATS(ctx, collectorCfg, uploader.adoptIdentity)
-	if collectorCfg.TrapListenAddr != "" {
-		go runTrapReceiver(ctx, collectorCfg, uploader)
-	}
+	// The SNMP trap receiver: configured by the server per collector group
+	// with every assignment set, RETICORA_SNMP_TRAP_LISTEN until then
+	// (DIS-06, WP-977).
+	collectorTraps.start(ctx, &collectorCfg, uploader)
 	if collectorCfg.MetricsInterval > 0 {
 		go runMetricsLoop(ctx, collectorCfg, uploader)
 	}
@@ -342,8 +343,10 @@ func startProbeEngine(cfg *collectorConfig, up *uploader) *probe.Engine {
 	}
 	engine.Uplink.OnNotLicensed = func() { up.monitoringNotLicensed(time.Now()) }
 	engine.Uplink.OnLicensed = up.monitoringLicensed
-	// The alive message carries the report of the heartbeat (WP-966).
+	// The alive message carries the report of the heartbeat (WP-966) and
+	// the trap counters (WP-977).
 	engine.Capabilities = &up.capabilities
+	engine.TrapStats = collectorTraps.stats
 	return engine
 }
 
@@ -1677,18 +1680,11 @@ func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig
 	return resp.Header.Get(LicenseStatusHeader), true
 }
 
-// runTrapReceiver receives SNMP traps and forwards them as metric events to
-// the monitoring ingest, so the existing alert rules can fire on traps (e.g.
-// "any linkDown trap → critical alert"). Without the edge a trap waits in
-// the bounded metric buffer; it is not spooled to disk like discovery
-// results, which would delay alerts past the point where they are useful.
-func runTrapReceiver(ctx context.Context, cfg collectorConfig, up *uploader) {
-	if err := newTrapReceiver(cfg, up).Run(ctx); err != nil {
-		slog.Error("snmp trap receiver stopped", "error", err)
-	}
-}
-
-// newTrapReceiver builds the trap receiver. Traps arrive from any device,
+// newTrapReceiver builds the trap receiver of RETICORA_SNMP_TRAP_LISTEN
+// (the fallback of trapManager, WP-977). It forwards the traps as metric
+// events to the monitoring ingest, so the existing alert rules can fire on
+// traps (e.g. "any linkDown trap → critical alert"); without the edge a
+// trap waits in the bounded metric buffer. Traps arrive from any device,
 // so only the locally configured community applies, never one of a server
 // scope (COL-02).
 func newTrapReceiver(cfg collectorConfig, up *uploader) *snmp.TrapReceiver {

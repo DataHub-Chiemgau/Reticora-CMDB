@@ -214,19 +214,31 @@ func (d *Distributor) page(ctx context.Context, orgID, collectorID string, req *
 	var (
 		out     any
 		version int64
+		trap    *probewire.TrapConfig
 	)
 	scope := database.OrgWideScope(orgID, "")
 	err := database.WithTenant(ctx, d.repo.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `SELECT config_version FROM collector_group_member WHERE organization_id = $1 AND collector_id = $2`,
-			orgID, collectorID).Scan(&version)
+		// The version and the trap receiver of the collector's group
+		// (DIS-06, WP-977) in one statement; a change of the trap
+		// configuration raises the version.
+		// A group whose trap receiver was never configured sends none:
+		// the collector keeps RETICORA_SNMP_TRAP_LISTEN (AK5).
+		err := tx.QueryRow(ctx, `SELECT m.config_version, CASE WHEN `+discovery.TrapConfiguredSQL+` THEN g.trap_config END
+			  FROM collector_group_member m
+			LEFT JOIN collector_group g ON g.organization_id = m.organization_id AND g.id = m.group_id
+			WHERE m.organization_id = $1 AND m.collector_id = $2`,
+			orgID, collectorID).Scan(&version, &trap)
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("read config version: %w", err)
+		}
+		if trap != nil && trap.Port == 0 {
+			trap.Port = probewire.DefaultTrapPort
 		}
 		out, err = respond(collectorID, version, req, func() ([]probewire.AssignmentSet, error) {
 			if pages := d.cached(orgID, collectorID, version); pages != nil {
 				return pages, nil
 			}
-			pages, berr := d.build(ctx, tx, orgID, collectorID, version)
+			pages, berr := d.build(ctx, tx, orgID, collectorID, version, trap)
 			if berr == nil {
 				d.store(orgID, collectorID, version, pages)
 			}
@@ -289,7 +301,8 @@ func (d *Distributor) store(orgID, collectorID string, version int64, pages []pr
 // when it meets discovery.ProbeCredentialInBundle (the bundle holds every
 // such credential of its assigned probes); only for another one the bundle
 // itself is read (BundleCredentials), in the same transaction.
-func (d *Distributor) build(ctx context.Context, tx pgx.Tx, orgID, collectorID string, version int64) ([]probewire.AssignmentSet, error) {
+func (d *Distributor) build(ctx context.Context, tx pgx.Tx, orgID, collectorID string, version int64,
+	trap *probewire.TrapConfig) ([]probewire.AssignmentSet, error) {
 	rows, err := tx.Query(ctx, `SELECT `+probeColumns+`, a.epoch,
 			COALESCE((SELECT array_agg(b.credential_id::text ORDER BY b.priority, b.credential_id) FROM credential_binding b
 				WHERE b.organization_id = p.organization_id AND b.probe_id = p.id), '{}'),
@@ -357,6 +370,11 @@ func (d *Distributor) build(ctx context.Context, tx pgx.Tx, orgID, collectorID s
 	}
 	if len(skipped) > 0 {
 		pages[0].Skipped = skipped
+	}
+	// The trap receiver of the collector's group (DIS-06, WP-977): ids
+	// only, the credentials reach the collector in its bundle.
+	for i := range pages {
+		pages[i].TrapConfig = trap
 	}
 	return pages, nil
 }

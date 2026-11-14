@@ -305,6 +305,50 @@ func TestCredentialBindingChangeRaisesVersion(t *testing.T) {
 	}
 }
 
+// TestAssignmentSetCarriesTrapConfig covers WP-977 AK3: the set carries
+// the trap configuration of the collector's group with the credential ids
+// only, never a secret; the credentials enter the collector's bundle (an
+// org-wide snmp_v2c credential while enabled), a credential of another kind
+// does not.
+func TestAssignmentSetCarriesTrapConfig(t *testing.T) {
+	e := newDistEnv(t)
+	const canary = "wp977-canary-community"
+	cred, other := e.f.ID(), e.f.ID()
+	e.exec(`INSERT INTO credential (id, organization_id, name, kind, ciphertext) VALUES ($1, $2, 'wp977', 'snmp_v2c', convert_to($3, 'UTF8'))`,
+		cred, e.f.OrgA, canary)
+	e.exec(`INSERT INTO credential (id, organization_id, name, kind, ciphertext) VALUES ($1, $2, 'wp977-ssh', 'ssh_password', '\x00')`,
+		other, e.f.OrgA)
+	gate := discovery.NewBundleGate(e.f.App, nil)
+	ids, err := gate.CredentialIDs(context.Background(), e.f.OrgA, e.collector)
+	if err != nil || len(ids) != 0 {
+		t.Fatalf("bundle credentials %v (%v) with the receiver off, want none", ids, err)
+	}
+	got := e.dist.Answer(context.Background(), e.f.OrgA, e.collector, nil)
+	set, ok := got.(probewire.AssignmentSet)
+	if !ok || set.TrapConfig != nil {
+		t.Fatalf("set of a group never configured (column default): %#v, want no trap_config (AK5)", got)
+	}
+	e.exec(`UPDATE collector_group SET trap_config = jsonb_build_object('enabled', true, 'port', 1162, 'credential_ids', jsonb_build_array($2::text, $3::text))
+		WHERE id = $1`, e.group, cred, other)
+	e.exec(`UPDATE collector_group_member SET config_version = config_version + 1 WHERE group_id = $1`, e.group)
+	got = e.dist.Answer(context.Background(), e.f.OrgA, e.collector, nil)
+	raw, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), canary) || strings.Contains(string(raw), "ciphertext") || strings.Contains(string(raw), "secret") {
+		t.Fatalf("the set carries a secret: %s", raw)
+	}
+	set = got.(probewire.AssignmentSet)
+	if tc := set.TrapConfig; tc == nil || !tc.Enabled || tc.Port != 1162 || len(tc.CredentialIDs) != 2 {
+		t.Fatalf("trap_config %+v", set.TrapConfig)
+	}
+	ids, err = gate.CredentialIDs(context.Background(), e.f.OrgA, e.collector)
+	if err != nil || len(ids) != 1 || ids[0] != cred {
+		t.Fatalf("bundle credentials %v (%v), want the snmp_v2c credential of the trap receiver only", ids, err)
+	}
+}
+
 func TestDistributionOmitsDisabledAndUnassignedProbes(t *testing.T) {
 	e := newDistEnv(t)
 	on := e.scalar(`INSERT INTO probe (organization_id, client_id, collector_group_id, type, target) VALUES ($1, $2, $3, 'icmp', '10.99.1.1')

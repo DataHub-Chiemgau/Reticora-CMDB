@@ -69,6 +69,8 @@ func goldenMessages() map[string]struct {
 				Version:     42,
 				Page:        1,
 				NextPage:    2,
+				TrapConfig: &TrapConfig{Enabled: true, Port: 1162,
+					CredentialIDs: []string{"9d1c2a4e-0b7d-4c3e-9a51-000000000001"}},
 				Probes: []ProbeSpec{
 					{
 						ID: "8f1c2a4e-0b7d-4c3e-9a51-000000000000", Type: "icmp", Target: "192.0.2.10",
@@ -129,6 +131,8 @@ func goldenMessages() map[string]struct {
 					ICMP4: CapabilityRaw, ICMP6: CapabilityUnprivileged, UDP67: false, UDP68: true,
 					TimeSync: TimeSynchronized, ProbeTypes: []string{"icmp", "tcp"}, DetectedAt: observed.Add(-time.Minute),
 				},
+				TrapsReceived: 12,
+				TrapsDropped:  map[string]int64{TrapDropCommunity: 3},
 			},
 			empty: func() Message { return &Alive{} },
 		},

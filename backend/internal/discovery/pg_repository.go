@@ -3,6 +3,7 @@ package discovery
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,6 +16,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/audit"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/credential"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
@@ -1651,13 +1653,51 @@ var _ CollectorGroupRepository = (*PGRepository)(nil)
 
 const collectorGroupColumns = `g.id::text, g.organization_id::text, COALESCE(g.client_id::text, ''), COALESCE(g.site_id::text, ''),
 	g.name, g.mode, extract(epoch FROM g.liveness_timeout)::int, COALESCE(g.anchor_probe_id::text, ''), g.status,
-	g.status_changed_at, g.created_at, g.updated_at`
+	g.status_changed_at, g.created_at, g.updated_at, g.trap_config`
 
 func scanCollectorGroup(row pgx.Row) (*CollectorGroup, error) {
 	g := &CollectorGroup{Members: []CollectorGroupMember{}}
 	err := row.Scan(&g.ID, &g.OrganizationID, &g.ClientID, &g.SiteID, &g.Name, &g.Mode, &g.LivenessTimeoutS, &g.AnchorProbeID,
-		&g.Status, &g.StatusChangedAt, &g.CreatedAt, &g.UpdatedAt)
+		&g.Status, &g.StatusChangedAt, &g.CreatedAt, &g.UpdatedAt, &g.TrapConfig)
+	normalizeTrapConfig(&g.TrapConfig)
 	return g, err
+}
+
+// checkTrapCredentials accepts the credentials of a trap configuration
+// only when every one is visible in the organization, of kind snmp_v2c or
+// snmp_v3 and org-wide or of the group's client (WP-977 AK2).
+func checkTrapCredentials(ctx context.Context, tx pgx.Tx, orgID, groupClient string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	var ok int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM credential c
+		WHERE c.organization_id = $1 AND c.id = ANY ($2::uuid[]) AND c.kind = ANY ($3::text[])
+		  AND (c.client_id IS NULL OR c.client_id::text = $4)`, orgID, ids, trapCredentialKinds, groupClient).Scan(&ok); err != nil {
+		return fmt.Errorf("read trap credentials: %w", err)
+	}
+	if ok != len(ids) {
+		return errTrapCredentials
+	}
+	return nil
+}
+
+// TrapBundleCredentials returns the credentials of the collector's bundle
+// that come from the trap configuration of its group (WP-977): the
+// credentials of an enabled trap_config of kind snmp_v2c or snmp_v3,
+// org-wide or of the group's client; one statement in tx, sorted.
+func TrapBundleCredentials(ctx context.Context, tx pgx.Tx, orgID, collectorID string) ([]string, error) {
+	rows, err := tx.Query(ctx, `SELECT DISTINCT c.id::text FROM collector_group_member m
+		JOIN collector_group g ON g.organization_id = m.organization_id AND g.id = m.group_id
+		CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(g.trap_config->'credential_ids', '[]'::jsonb)) AS x (id)
+		JOIN credential c ON c.organization_id = m.organization_id AND c.id::text = x.id
+		WHERE m.organization_id = $1 AND m.collector_id = $2 AND COALESCE((g.trap_config->>'enabled')::boolean, false)
+		  AND c.kind = ANY ($3::text[]) AND (c.client_id IS NULL OR c.client_id = g.client_id)
+		ORDER BY 1`, orgID, collectorID, trapCredentialKinds)
+	if err != nil {
+		return nil, fmt.Errorf("read trap bundle credentials: %w", err)
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
 // collectorGroupWriteError maps the constraints of collector_group and
@@ -1881,19 +1921,110 @@ func (r *PGRepository) UpdateCollectorGroup(ctx context.Context, orgID, id strin
 				return werr
 			}
 		}
+		storedTrap, configured, err := storedTrapConfig(ctx, tx, orgID, id)
+		if err != nil {
+			return err
+		}
+		// The first configuration of a group also changes the set, even
+		// when it equals the default: the set then carries trap_config,
+		// which replaces RETICORA_SNMP_TRAP_LISTEN (AK5).
+		trapChanged := u.TrapConfig != nil && (!configured || !sameTrapConfig(&storedTrap, u.TrapConfig))
+		if trapChanged {
+			if werr := checkTrapCredentials(ctx, tx, orgID, g.ClientID, u.TrapConfig.CredentialIDs); werr != nil {
+				return werr
+			}
+		}
 		tag, err := tx.Exec(ctx, `UPDATE collector_group SET name = $3, mode = $4, liveness_timeout = make_interval(secs => $5),
-				anchor_probe_id = $6 WHERE organization_id = $1 AND id = $2`,
-			orgID, id, g.Name, g.Mode, g.LivenessTimeoutS, nilIfEmpty(g.AnchorProbeID))
+				anchor_probe_id = $6, trap_config = COALESCE($7, trap_config) WHERE organization_id = $1 AND id = $2`,
+			orgID, id, g.Name, g.Mode, g.LivenessTimeoutS, nilIfEmpty(g.AnchorProbeID), u.TrapConfig)
 		if err != nil {
 			return collectorGroupWriteError(err)
 		}
 		if tag.RowsAffected() == 0 {
 			return ErrCollectorGroupNotFound
 		}
+		if trapChanged {
+			if werr := r.raiseGroupConfig(ctx, tx, orgID, id); werr != nil {
+				return werr
+			}
+		}
 		out, err = readCollectorGroup(ctx, tx, orgID, id)
 		return err
 	})
 	return out, err
+}
+
+// storedTrapConfig reads the stored trap configuration of a group and
+// whether it was ever configured (TrapConfigured).
+func storedTrapConfig(ctx context.Context, tx pgx.Tx, orgID, id string) (probewire.TrapConfig, bool, error) {
+	var c probewire.TrapConfig
+	var configured bool
+	if err := tx.QueryRow(ctx, `SELECT trap_config, `+TrapConfiguredSQL+` FROM collector_group g WHERE g.organization_id = $1 AND g.id = $2`,
+		orgID, id).Scan(&c, &configured); err != nil {
+		return c, false, fmt.Errorf("read trap configuration: %w", err)
+	}
+	normalizeTrapConfig(&c)
+	return c, configured, nil
+}
+
+// raiseGroupConfig raises the config_version of every member of the group
+// (a changed trap configuration, WP-977 AK2) and, once committed, tells
+// each member on the internal NATS: .probes.changed with its new version
+// (the assignment set carries the configuration) and .bundle.changed (its
+// bundle holds the trap credentials). Without the bus the members learn it
+// on their next periodic fetch.
+func (r *PGRepository) raiseGroupConfig(ctx context.Context, tx pgx.Tx, orgID, groupID string) error {
+	return r.raiseConfigVersions(ctx, tx, orgID, `UPDATE collector_group_member SET config_version = config_version + 1
+		WHERE organization_id = $1 AND group_id = $2 RETURNING collector_id::text, config_version`, groupID)
+}
+
+// raiseMemberConfig is raiseGroupConfig for one collector that joined a
+// group or moved into another (WP-977): the trap configuration of its new
+// group reaches it with a new version, and the distribution's cache of the
+// former version (built with the former group's configuration) is not
+// served again.
+func (r *PGRepository) raiseMemberConfig(ctx context.Context, tx pgx.Tx, orgID, collectorID string) error {
+	return r.raiseConfigVersions(ctx, tx, orgID, `UPDATE collector_group_member SET config_version = config_version + 1
+		WHERE organization_id = $1 AND collector_id = $2 RETURNING collector_id::text, config_version`, collectorID)
+}
+
+// raiseConfigVersions runs query (an UPDATE of collector_group_member
+// returning collector id and new version) and sends the notices once
+// committed.
+func (r *PGRepository) raiseConfigVersions(ctx context.Context, tx pgx.Tx, orgID, query, arg string) error {
+	rows, err := tx.Query(ctx, query, orgID, arg)
+	if err != nil {
+		return fmt.Errorf("raise config versions: %w", err)
+	}
+	type version struct {
+		collector string
+		version   int64
+	}
+	raised, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (version, error) {
+		var v version
+		scanErr := row.Scan(&v.collector, &v.version)
+		return v, scanErr
+	})
+	if err != nil {
+		return fmt.Errorf("raise config versions: %w", err)
+	}
+	if r.bus == nil || len(raised) == 0 {
+		return nil
+	}
+	bus := r.bus
+	database.AfterCommit(database.ContextWithTx(ctx, tx), func(context.Context) {
+		for _, v := range raised {
+			subject := "collector." + orgID + "." + v.collector
+			raw, _ := json.Marshal(probewire.ProbesChanged{Version: v.version})
+			if perr := bus.Publish(subject+ProbesChangedSuffix, raw); perr != nil {
+				slog.Warn("probes changed notice failed", "organization_id", orgID, "collector_id", v.collector, "error", perr)
+			}
+			if perr := bus.Publish(subject+credential.BundleChangedSuffix, []byte(`{}`)); perr != nil {
+				slog.Warn("bundle changed notice failed", "organization_id", orgID, "collector_id", v.collector, "error", perr)
+			}
+		}
+	})
+	return nil
 }
 
 // groupProbeCount counts every probe of the group, also those outside the
@@ -2046,6 +2177,13 @@ func (r *PGRepository) AddCollectorGroupMember(ctx context.Context, orgID, group
 			if tag.RowsAffected() == 0 {
 				// The membership lies outside the caller's write scope.
 				return errCollectorOfOtherClient
+			}
+		}
+		if current != groupID {
+			// Joined or moved: the configuration of the new group (trap
+			// receiver) applies to the collector.
+			if werr := r.raiseMemberConfig(ctx, tx, orgID, in.CollectorID); werr != nil {
+				return werr
 			}
 		}
 		out, err = readCollectorGroup(ctx, tx, orgID, groupID)

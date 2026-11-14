@@ -15278,6 +15278,7 @@ export interface components {
       liveness_timeout_s: number;
       /** Format: uuid */
       anchor_probe_id?: string;
+      trap_config?: components['schemas']['CollectorGroupTrapConfig'];
       /** @enum {string} */
       status: 'reachable' | 'unreachable';
       /** Format: date-time */
@@ -15314,6 +15315,15 @@ export interface components {
        * @description null removes the anchor probe.
        */
       anchor_probe_id?: string | null;
+      trap_config?: components['schemas']['CollectorGroupTrapConfig'];
+    };
+    /** @description SNMP trap receiver of the group's members (DIS-06, WP-977); replaced as a whole by a PATCH. Credentials of kind snmp_v2c give the accepted communities, those of kind snmp_v3 the USM users (from WP-978); each must belong to the organization and be org-wide or of the group's client (else 422 trap_config.credential_ids). The response names only the credential ids, never a secret. A change raises the config_version of every member; the collectors take it with their next assignment set without a restart, a v1/v2c trap with another community is dropped and counted (traps_dropped in the alive message). */
+    CollectorGroupTrapConfig: {
+      /** @default false */
+      enabled: boolean;
+      /** @default 162 */
+      port: number;
+      credential_ids?: string[];
     };
     CollectorGroupMemberRequest: {
       /** Format: uuid */

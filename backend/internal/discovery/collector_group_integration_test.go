@@ -16,8 +16,10 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/discovery"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/probe"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 )
 
 // Retest (WP-947, PRB-03, COL-06):
@@ -365,5 +367,212 @@ func TestCollectorGroupMemberStatusAndProbeCount(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("group missing from the list: %s", list.Body)
+	}
+}
+
+// trapCredential inserts a credential of the kind and client (empty: org
+// wide) in the organization.
+func (e *cgAPIEnv) trapCredential(org, clientID, kind, name string) string {
+	e.t.Helper()
+	var client any
+	if clientID != "" {
+		client = clientID
+	}
+	return e.scalar(`INSERT INTO credential (organization_id, client_id, name, kind, ciphertext) VALUES ($1, $2, $3, $4, '\x00')
+		RETURNING id::text`, org, client, name, kind)
+}
+
+// TestCollectorGroupTrapConfigPatch covers WP-977 AK1 and AK2: a new group
+// has the trap receiver off with port 162; PATCH trap_config stores
+// enabled, port and the credentials (ids only, no secret) and is audited
+// over the route; an invalid port is 422 trap_config.port.
+func TestCollectorGroupTrapConfigPatch(t *testing.T) {
+	e := newCGAPIEnv(t)
+	f := e.f
+	r := e.admin(http.MethodPost, "/api/v1/collector-groups", `{"name":"wp977-traps","client_id":"`+f.Client1+`"}`)
+	cgWant(t, "create", r, http.StatusCreated, "")
+	group := r.Group.ID
+	if tc := r.Group.TrapConfig; tc.Enabled || tc.Port != 162 || len(tc.CredentialIDs) != 0 {
+		t.Fatalf("trap_config of a new group %+v, want off with port 162", tc)
+	}
+	v2c := e.trapCredential(f.OrgA, f.Client1, "snmp_v2c", "wp977-v2c")
+	v3 := e.trapCredential(f.OrgA, "", "snmp_v3", "wp977-v3")
+	r = e.admin(http.MethodPatch, "/api/v1/collector-groups/"+group,
+		`{"trap_config":{"enabled":true,"port":1162,"credential_ids":["`+v2c+`","`+v3+`"]}}`)
+	cgWant(t, "patch trap_config", r, http.StatusOK, "")
+	tc := r.Group.TrapConfig
+	if !tc.Enabled || tc.Port != 1162 || len(tc.CredentialIDs) != 2 {
+		t.Fatalf("trap_config %+v", tc)
+	}
+	if strings.Contains(r.Body, "community") || strings.Contains(r.Body, "ciphertext") {
+		t.Fatalf("response carries a secret: %s", r.Body)
+	}
+	got := e.admin(http.MethodGet, "/api/v1/collector-groups/"+group, "")
+	cgWant(t, "get", got, http.StatusOK, "")
+	if g := got.Group.TrapConfig; !g.Enabled || g.Port != 1162 || len(g.CredentialIDs) != 2 {
+		t.Fatalf("stored trap_config %+v", g)
+	}
+	if n := e.scalar(`SELECT count(*)::text FROM audit_log WHERE organization_id = $1 AND resource_id = $2::uuid
+		AND changes->>'route' = 'PATCH /api/v1/collector-groups/{id}'`, f.OrgA, group); n != "1" {
+		t.Errorf("%s audit entries of the patch, want 1", n)
+	}
+	for _, body := range []string{`{"trap_config":{"enabled":true,"port":0}}`, `{"trap_config":{"enabled":true,"port":70000}}`} {
+		cgWant(t, body, e.admin(http.MethodPatch, "/api/v1/collector-groups/"+group, body), http.StatusUnprocessableEntity, "trap_config.port")
+	}
+	cgWant(t, "unknown field", e.admin(http.MethodPatch, "/api/v1/collector-groups/"+group, `{"trap_config":{"community":"x"}}`),
+		http.StatusUnprocessableEntity, "trap_config")
+	// Off again: no credentials needed.
+	r = e.admin(http.MethodPatch, "/api/v1/collector-groups/"+group, `{"trap_config":{"enabled":false}}`)
+	cgWant(t, "off", r, http.StatusOK, "")
+	if tc := r.Group.TrapConfig; tc.Enabled || tc.Port != 162 || len(tc.CredentialIDs) != 0 {
+		t.Fatalf("trap_config after off %+v", tc)
+	}
+}
+
+// TestCollectorGroupTrapConfigRejectsForeignCredential covers WP-977 AK2: a
+// credential of another organization, of another client or of another kind
+// (and an unknown one) is 422 trap_config.credential_ids; nothing changes.
+func TestCollectorGroupTrapConfigRejectsForeignCredential(t *testing.T) {
+	e := newCGAPIEnv(t)
+	f := e.f
+	r := e.admin(http.MethodPost, "/api/v1/collector-groups", `{"name":"wp977-foreign","client_id":"`+f.Client1+`"}`)
+	cgWant(t, "create", r, http.StatusCreated, "")
+	group := r.Group.ID
+	for name, id := range map[string]string{
+		"other organization": e.trapCredential(f.OrgB, "", "snmp_v2c", "wp977-org-b"),
+		"other client":       e.trapCredential(f.OrgA, f.Client2, "snmp_v2c", "wp977-client-2"),
+		"other kind":         e.trapCredential(f.OrgA, f.Client1, "ssh_password", "wp977-ssh"),
+		"unknown":            f.ID(),
+	} {
+		cgWant(t, name, e.admin(http.MethodPatch, "/api/v1/collector-groups/"+group,
+			`{"trap_config":{"enabled":true,"credential_ids":["`+id+`"]}}`), http.StatusUnprocessableEntity, "trap_config.credential_ids")
+	}
+	cgWant(t, "not a uuid", e.admin(http.MethodPatch, "/api/v1/collector-groups/"+group,
+		`{"trap_config":{"enabled":true,"credential_ids":["x"]}}`), http.StatusUnprocessableEntity, "trap_config.credential_ids")
+	if got := e.scalar(`SELECT trap_config->>'enabled' FROM collector_group WHERE id = $1`, group); got != "false" {
+		t.Fatalf("trap_config changed by a refused patch: enabled %s", got)
+	}
+}
+
+// TestCollectorGroupTrapConfigBumpsConfigVersion covers WP-977 AK2: a
+// changed trap configuration raises the config_version of every member, an
+// unchanged one or another field does not.
+func TestCollectorGroupTrapConfigBumpsConfigVersion(t *testing.T) {
+	e := newCGAPIEnv(t)
+	f := e.f
+	r := e.admin(http.MethodPost, "/api/v1/collector-groups", `{"name":"wp977-bump","client_id":"`+f.Client1+`"}`)
+	cgWant(t, "create", r, http.StatusCreated, "")
+	group := r.Group.ID
+	a, _ := e.collector(f.Client1, "wp977-a")
+	b, _ := e.collector(f.Client1, "wp977-b")
+	for _, c := range []string{a, b} {
+		cgWant(t, "member", e.admin(http.MethodPost, "/api/v1/collector-groups/"+group+"/members", `{"collector_id":"`+c+`"}`),
+			http.StatusOK, "")
+	}
+	versions := func() string {
+		return e.scalar(`SELECT string_agg(config_version::text, ',' ORDER BY collector_id) FROM collector_group_member WHERE group_id = $1`, group)
+	}
+	before := versions()
+	v2c := e.trapCredential(f.OrgA, "", "snmp_v2c", "wp977-bump-v2c")
+	body := `{"trap_config":{"enabled":true,"port":1162,"credential_ids":["` + v2c + `"]}}`
+	cgWant(t, "patch", e.admin(http.MethodPatch, "/api/v1/collector-groups/"+group, body), http.StatusOK, "")
+	after := versions()
+	if before == after {
+		t.Fatalf("config versions %s unchanged after a changed trap_config", after)
+	}
+	for _, x := range strings.Split(after, ",") {
+		if x == "0" {
+			t.Fatalf("config versions %s: every member must be raised", after)
+		}
+	}
+	cgWant(t, "same again", e.admin(http.MethodPatch, "/api/v1/collector-groups/"+group, body), http.StatusOK, "")
+	cgWant(t, "rename", e.admin(http.MethodPatch, "/api/v1/collector-groups/"+group, `{"name":"wp977-bump-2"}`), http.StatusOK, "")
+	if again := versions(); again != after {
+		t.Fatalf("config versions %s after an unchanged trap_config and a rename, want %s", again, after)
+	}
+}
+
+// TestCollectorGroupMemberMoveCarriesTrapConfig covers WP-977 AK2/AK4 for
+// a move: the configuration follows the group. A collector moved from a
+// group with the receiver on (port 1162) into one with it off gets a new
+// version, and its next set (also one fetched without if_none_match, from
+// the distribution's cache) carries the new group's trap_config.
+func TestCollectorGroupMemberMoveCarriesTrapConfig(t *testing.T) {
+	e := newCGAPIEnv(t)
+	f := e.f
+	group := func(name string) string {
+		r := e.admin(http.MethodPost, "/api/v1/collector-groups", `{"name":"`+name+`","client_id":"`+f.Client1+`"}`)
+		cgWant(t, "create "+name, r, http.StatusCreated, "")
+		return r.Group.ID
+	}
+	on, off := group("wp977-move-on"), group("wp977-move-off")
+	v2c := e.trapCredential(f.OrgA, "", "snmp_v2c", "wp977-move-v2c")
+	cgWant(t, "on", e.admin(http.MethodPatch, "/api/v1/collector-groups/"+on,
+		`{"trap_config":{"enabled":true,"port":1162,"credential_ids":["`+v2c+`"]}}`), http.StatusOK, "")
+	cgWant(t, "off", e.admin(http.MethodPatch, "/api/v1/collector-groups/"+off, `{"trap_config":{"enabled":false}}`), http.StatusOK, "")
+	c, _ := e.collector(f.Client1, "wp977-move")
+	cgWant(t, "join", e.admin(http.MethodPost, "/api/v1/collector-groups/"+on+"/members", `{"collector_id":"`+c+`"}`), http.StatusOK, "")
+	dist := probe.NewDistributor(probe.NewPGRepository(f.App), discovery.NewHandler(discovery.NewPGRepository(f.App), nil).CheckCollectorChannel)
+	set := func() *probewire.AssignmentSet {
+		t.Helper()
+		got, ok := dist.Answer(context.Background(), f.OrgA, c, nil).(probewire.AssignmentSet)
+		if !ok {
+			t.Fatalf("answer %#v, want a set", got)
+		}
+		return &got
+	}
+	before := set()
+	if tc := before.TrapConfig; tc == nil || !tc.Enabled || tc.Port != 1162 {
+		t.Fatalf("set in the group with the receiver on: trap_config %+v", tc)
+	}
+	cgWant(t, "move", e.admin(http.MethodPost, "/api/v1/collector-groups/"+off+"/members", `{"collector_id":"`+c+`"}`), http.StatusOK, "")
+	after := set()
+	if after.Version <= before.Version {
+		t.Fatalf("version %d after the move, want above %d", after.Version, before.Version)
+	}
+	if tc := after.TrapConfig; tc == nil || tc.Enabled || len(tc.CredentialIDs) != 0 {
+		t.Fatalf("set after the move: trap_config %+v, want the receiver off", tc)
+	}
+	req, _ := json.Marshal(probewire.AssignmentRequest{IfNoneMatch: before.Version})
+	if _, nm := dist.Answer(context.Background(), f.OrgA, c, req).(probewire.NotModified); nm {
+		t.Fatalf("if_none_match of the former version answered not_modified after the move")
+	}
+}
+
+// TestCollectorGroupTrapConfigDefaultKeepsEnvReceiver covers WP-977 AK5
+// on the server: a group whose receiver was never configured (the column
+// default, every group of an upgraded installation) sends no trap_config,
+// so the collector keeps RETICORA_SNMP_TRAP_LISTEN; a rename does not
+// configure it, the first PATCH of trap_config does and raises the version.
+func TestCollectorGroupTrapConfigDefaultKeepsEnvReceiver(t *testing.T) {
+	e := newCGAPIEnv(t)
+	f := e.f
+	r := e.admin(http.MethodPost, "/api/v1/collector-groups", `{"name":"wp977-default","client_id":"`+f.Client1+`"}`)
+	cgWant(t, "create", r, http.StatusCreated, "")
+	g := r.Group.ID
+	c, _ := e.collector(f.Client1, "wp977-default")
+	cgWant(t, "join", e.admin(http.MethodPost, "/api/v1/collector-groups/"+g+"/members", `{"collector_id":"`+c+`"}`), http.StatusOK, "")
+	dist := probe.NewDistributor(probe.NewPGRepository(f.App), discovery.NewHandler(discovery.NewPGRepository(f.App), nil).CheckCollectorChannel)
+	answer := func() probewire.AssignmentSet {
+		t.Helper()
+		got, ok := dist.Answer(context.Background(), f.OrgA, c, nil).(probewire.AssignmentSet)
+		if !ok {
+			t.Fatalf("answer %#v, want a set", got)
+		}
+		return got
+	}
+	if set := answer(); set.TrapConfig != nil {
+		t.Fatalf("set of a group never configured carries trap_config %+v", set.TrapConfig)
+	}
+	cgWant(t, "rename", e.admin(http.MethodPatch, "/api/v1/collector-groups/"+g, `{"name":"wp977-default-2"}`), http.StatusOK, "")
+	before := answer()
+	if before.TrapConfig != nil {
+		t.Fatalf("set after a rename carries trap_config %+v", before.TrapConfig)
+	}
+	cgWant(t, "off explicitly", e.admin(http.MethodPatch, "/api/v1/collector-groups/"+g, `{"trap_config":{"enabled":false}}`), http.StatusOK, "")
+	after := answer()
+	if after.Version <= before.Version || after.TrapConfig == nil || after.TrapConfig.Enabled {
+		t.Fatalf("set after the first configuration: version %d (was %d), trap_config %+v; want a new version with the receiver off",
+			after.Version, before.Version, after.TrapConfig)
 	}
 }

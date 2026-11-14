@@ -1481,7 +1481,8 @@ func (g *BundleGate) VerifyBundleTarget(ctx context.Context, orgID, collectorID,
 // in tx (the organization-wide system scope): the union of the effective
 // credentials of the collector's enabled scopes (DIS-09, COL-02, E-67), the
 // credentials bound to the probes assigned to it (target kind probe,
-// WP-948, ProbeBundleCredentials) and, format 2 (CRD-04, WP-891), the
+// WP-948, ProbeBundleCredentials), the credentials of its group's trap
+// receiver (WP-977, TrapBundleCredentials) and, format 2 (CRD-04, WP-891), the
 // credentials of single CIs from a level above the scope; a client
 // credential only for CIs of its client. VerifyBundleTarget,
 // CollectorsWithCredentials and CredentialIDs compute the bundle with it,
@@ -1504,7 +1505,12 @@ func (g *BundleGate) collectorBundle(ctx context.Context, tx pgx.Tx, target *cre
 	if err != nil {
 		return err
 	}
-	for _, cid := range probeIDs {
+	// The communities and USM users of the group's trap receiver (WP-977).
+	trapIDs, err := TrapBundleCredentials(ctx, tx, target.OrganizationID, target.CollectorID)
+	if err != nil {
+		return err
+	}
+	for _, cid := range append(probeIDs, trapIDs...) {
 		if !slices.Contains(ids, cid) {
 			ids = append(ids, cid)
 		}

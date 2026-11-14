@@ -53,11 +53,15 @@ type probeAssignment struct {
 	active      *probewire.AssignmentSet
 	deprecation *envPollDeprecation
 	logger      *slog.Logger
+	// traps takes the trap configuration of every applied set (WP-977).
+	traps interface {
+		apply(cfg *probewire.TrapConfig)
+	}
 }
 
 // collectorProbes is the assignment set of the running collector; run
 // attaches the probe engine before the NATS session starts.
-var collectorProbes = &probeAssignment{}
+var collectorProbes = &probeAssignment{traps: collectorTraps}
 
 func (a *probeAssignment) log() *slog.Logger {
 	if a.logger != nil {
@@ -154,6 +158,11 @@ func (a *probeAssignment) adopt(set *probewire.AssignmentSet) {
 
 func (a *probeAssignment) applyLocked(set *probewire.AssignmentSet) {
 	a.active = set
+	if a.traps != nil {
+		// The trap receiver follows every set without a restart (DIS-06,
+		// WP-977); a set without trap_config keeps the environment.
+		a.traps.apply(set.TrapConfig)
+	}
 	if a.engine == nil {
 		return
 	}

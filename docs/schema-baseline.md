@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000367_collector_probe_capabilities
+Stand: Migration 000368_collector_group_trap_config
 
 ## Prüfung
 
@@ -614,6 +614,20 @@ Fähigkeitsmeldung aus Heartbeat bzw. `.probe.alive`
 (`probewire.ProbeCapabilities`), nur bei Änderung geschrieben; NULL = noch
 keine Meldung (ältere Collectoren, gelten bei der Zuweisung als fähig). RLS
 und Policies von `collector` bleiben unverändert. Down entfernt die Spalte.
+
+### Trap-Receiver je Collector-Gruppe (WP-977)
+
+Migration `collector_group_trap_config` (WP-977, DIS-06, vorläufige Nummer
+000368) ergänzt `collector_group.trap_config` (`jsonb NOT NULL DEFAULT
+'{"enabled": false}'`, `CONSTRAINT collector_group_trap_config_check CHECK
+(jsonb_typeof(trap_config) = 'object')`) mit `enabled`, `port` (1–65535,
+Standard 162) und `credential_ids` (höchstens 16, Arten `snmp_v2c` und
+`snmp_v3`); die Feldregeln prüft der Handler. Der Standardwert ohne `port`
+kennzeichnet eine nie konfigurierte Gruppe: Ihr Zuweisungssatz trägt kein
+`trap_config`, ihre Collectoren behalten `RETICORA_SNMP_TRAP_LISTEN`. Ein
+PATCH speichert die vollständige Konfiguration mit Port. RLS, Policies und
+Truncate-Guard von `collector_group` bleiben unverändert. Down entfernt die
+Spalte.
 
 ## Indizes unter RLS (SR-04, K22, WP-836)
 

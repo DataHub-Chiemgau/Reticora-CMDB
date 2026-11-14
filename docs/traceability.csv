@@ -1922,3 +1922,4 @@ PRB-04;[P3];E;collector/probe/capacity_test.go;WP-958
 PRB-09;[P3];E;backend/internal/probe/alive_integration_test.go;WP-962
 PRT-18;[P3];E;backend/internal/discovery/collector_capabilities_integration_test.go;WP-966
 PRT-18;[P3];E;backend/internal/probe/assign_test.go;WP-966
+DIS-06;[P3], Zusatzprotokolle [O];E;collector/collectorcmd/trap_config_test.go;WP-977

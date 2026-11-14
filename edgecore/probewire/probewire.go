@@ -148,18 +148,37 @@ const (
 // A collector applies a set only after it fetched every page of one version.
 type AssignmentSet struct {
 	Header
-	CollectorID    string          `json:"collector_id"`
-	Version        int64           `json:"version"`
-	Page           int             `json:"page"`
-	NextPage       int             `json:"next_page,omitempty"`
-	VersionChanged bool            `json:"version_changed,omitempty"`
-	Probes         []ProbeSpec     `json:"probes"`
-	TrapConfig     json.RawMessage `json:"trap_config,omitempty"`
+	CollectorID    string      `json:"collector_id"`
+	Version        int64       `json:"version"`
+	Page           int         `json:"page"`
+	NextPage       int         `json:"next_page,omitempty"`
+	VersionChanged bool        `json:"version_changed,omitempty"`
+	Probes         []ProbeSpec `json:"probes"`
+	// TrapConfig is the trap receiver configuration of the collector's
+	// group (DIS-06, WP-977); absent from a server without it.
+	TrapConfig *TrapConfig `json:"trap_config,omitempty"`
 	// Skipped are the probes assigned to the collector that the set leaves
 	// out, with the reason (WP-948, e.g. SkipCredentialMissing); on the
 	// first page only.
 	Skipped []SkippedProbe `json:"skipped,omitempty"`
 }
+
+// TrapConfig is the SNMP trap receiver of a collector group (DIS-06,
+// WP-977): on or off, the UDP port and the credentials whose communities
+// (kind snmp_v2c) and USM users (kind snmp_v3, from WP-978) the receiver
+// accepts. The credentials reach the collector in its credential bundle;
+// the set names only their ids, never a secret.
+type TrapConfig struct {
+	Enabled       bool     `json:"enabled"`
+	Port          int      `json:"port,omitempty"`
+	CredentialIDs []string `json:"credential_ids,omitempty"`
+}
+
+// DefaultTrapPort is the port of a trap configuration without one.
+const DefaultTrapPort = 162
+
+// MaxTrapCredentials bounds TrapConfig.CredentialIDs.
+const MaxTrapCredentials = 16
 
 // SkippedProbe is a probe of the set the server did not hand out.
 type SkippedProbe struct {
@@ -409,7 +428,19 @@ type Alive struct {
 	ICMPCapabilityV6 string           `json:"icmp_capability_v6,omitempty"`
 	// ProbeCapabilities is the capability report (WP-966).
 	ProbeCapabilities *ProbeCapabilities `json:"probe_capabilities,omitempty"`
+	// TrapsReceived counts the SNMP traps the receiver took since the
+	// start, TrapsDropped the traps it dropped by reason (community,
+	// from WP-978 also the USM reasons); DIS-06, WP-977.
+	TrapsReceived int64            `json:"traps_received"`
+	TrapsDropped  map[string]int64 `json:"traps_dropped,omitempty"`
 }
+
+// Reasons of Alive.TrapsDropped.
+const (
+	// TrapDropCommunity: a v1/v2c trap with a community of no configured
+	// snmp_v2c credential.
+	TrapDropCommunity = "community"
+)
 
 // ProbeCapabilities is what a collector can execute (PRT-18, WP-966): the
 // ICMP socket per address family (CapabilityUnprivileged, CapabilityRaw or

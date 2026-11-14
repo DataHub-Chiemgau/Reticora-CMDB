@@ -46,6 +46,9 @@ type Engine struct {
 	// Capabilities is the capability report every alive message carries
 	// (WP-966); the collector sets it from DetectCapabilities.
 	Capabilities *Capabilities
+	// TrapStats returns the counters of the SNMP trap receiver for the
+	// alive message (WP-977); nil reports none.
+	TrapStats func() (received int64, dropped map[string]int64)
 
 	icmp       *Mux
 	observed   atomic.Uint64 // results evaluated (results_per_s)
@@ -281,6 +284,9 @@ func (e *Engine) aliveSnapshot(ctx context.Context, now time.Time) probewire.Ali
 		ICMPCapability:    e.icmp.Capability(4),
 		ICMPCapabilityV6:  e.icmp.Capability(6),
 		ProbeCapabilities: e.Capabilities.Report(),
+	}
+	if e.TrapStats != nil {
+		a.TrapsReceived, a.TrapsDropped = e.TrapStats()
 	}
 	st, err := e.Outbox.Stats(ctx)
 	if err != nil {

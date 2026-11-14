@@ -7923,6 +7923,11 @@ MON-03;[P3];E;backend/internal/probe/metrics_bridge_integration_test.go;WP-976
 DIS-06;[P3], Zusatzprotokolle [O];E;collector/collectorcmd/trap_config_test.go;WP-977
 ```
 
+**Abweichung (Umsetzung):**
+- AK1/AK5: Der Spaltenstandard `{"enabled": false}` hat kein `port` und kennzeichnet eine nie konfigurierte Gruppe. Das gilt für jede Gruppe vor ihrem ersten PATCH von `trap_config`, auch für die Standardgruppe jedes Collectors und alle Gruppen einer aktualisierten Installation. Ihr Satz trägt kein `trap_config`, der Collector behält `RETICORA_SNMP_TRAP_LISTEN`. Erst ein PATCH speichert die vollständige Konfiguration mit Port, ersetzt den Umgebungs-Receiver und erhöht die Version. GET zeigt den Standard als `enabled: false`, Port 162. Schaltet die Gruppe den Receiver ausdrücklich ab, während ein Umgebungs-Receiver läuft, loggt der Collector eine Warnung.
+- AK2/AK4: Tritt ein Collector einer Gruppe bei oder wechselt er sie (`POST /api/v1/collector-groups/{id}/members`), steigt seine `config_version`, und nach dem Commit gehen `.probes.changed` und `.bundle.changed` hinaus. So erreicht ihn die Trap-Konfiguration der neuen Gruppe.
+- Dateien: Die trapManager-Logik liegt in `collector/collectorcmd/trap_config.go` (neu) statt in `probes.go`/`collectorcmd.go`. Zusätzlich geändert: `backend/internal/discovery/natsedge.go` (Trap-Credentials im Bundle), `collector/probe/engine.go` (Trap-Zähler im `Alive`), `edgecore/probewire/probewire_test.go` sowie die Goldens `edgecore/probewire/testdata/alive.json` und `assignment_set.json`. `TestAssignmentSetCarriesTrapConfig` braucht PostgreSQL und steht deshalb in `backend/internal/probe/distribution_integration_test.go`, nicht in `distribution_test.go`.
+
 **Entscheidungsbedarf:** keiner
 
 **Nicht Bestandteil:**

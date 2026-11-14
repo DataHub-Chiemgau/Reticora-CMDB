@@ -18,6 +18,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 )
 
 // Collector groups (PRB-03, COL-06, WP-947, E-160, E-174, E-176): the
@@ -29,7 +30,7 @@ import (
 //	GET    /api/v1/collector-groups                               list (client_id, site_id)
 //	POST   /api/v1/collector-groups                               create
 //	GET    /api/v1/collector-groups/{id}                          read
-//	PATCH  /api/v1/collector-groups/{id}                          name, mode, liveness_timeout_s, anchor_probe_id
+//	PATCH  /api/v1/collector-groups/{id}                          name, mode, liveness_timeout_s, anchor_probe_id, trap_config
 //	DELETE /api/v1/collector-groups/{id}                          delete (409 while probes run in it)
 //	POST   /api/v1/collector-groups/{id}/members                  add or move a collector
 //	DELETE /api/v1/collector-groups/{id}/members/{collector_id}   remove a collector
@@ -63,19 +64,22 @@ const maxCollectorGroupName = 200
 // CollectorGroup is a collector group with its members as the API returns
 // it.
 type CollectorGroup struct {
-	ID               string                 `json:"id"`
-	OrganizationID   string                 `json:"organization_id"`
-	ClientID         string                 `json:"client_id,omitempty"`
-	SiteID           string                 `json:"site_id,omitempty"`
-	Name             string                 `json:"name"`
-	Mode             string                 `json:"mode"`
-	LivenessTimeoutS int                    `json:"liveness_timeout_s"`
-	AnchorProbeID    string                 `json:"anchor_probe_id,omitempty"`
-	Status           string                 `json:"status"`
-	StatusChangedAt  time.Time              `json:"status_changed_at"`
-	Members          []CollectorGroupMember `json:"members"`
-	CreatedAt        time.Time              `json:"created_at"`
-	UpdatedAt        time.Time              `json:"updated_at"`
+	ID               string `json:"id"`
+	OrganizationID   string `json:"organization_id"`
+	ClientID         string `json:"client_id,omitempty"`
+	SiteID           string `json:"site_id,omitempty"`
+	Name             string `json:"name"`
+	Mode             string `json:"mode"`
+	LivenessTimeoutS int    `json:"liveness_timeout_s"`
+	AnchorProbeID    string `json:"anchor_probe_id,omitempty"`
+	// TrapConfig is the SNMP trap receiver of the members (DIS-06,
+	// WP-977): credential ids only, never a secret.
+	TrapConfig      probewire.TrapConfig   `json:"trap_config"`
+	Status          string                 `json:"status"`
+	StatusChangedAt time.Time              `json:"status_changed_at"`
+	Members         []CollectorGroupMember `json:"members"`
+	CreatedAt       time.Time              `json:"created_at"`
+	UpdatedAt       time.Time              `json:"updated_at"`
 }
 
 // CollectorGroupMember is a collector of a group with its liveness and the
@@ -100,12 +104,90 @@ type CollectorGroupFilter struct {
 }
 
 // CollectorGroupUpdate is a PATCH; nil leaves a field, an empty
-// AnchorProbeID removes the anchor probe.
+// AnchorProbeID removes the anchor probe. TrapConfig replaces the trap
+// configuration as a whole (WP-977).
 type CollectorGroupUpdate struct {
 	Name             *string
 	Mode             *string
 	LivenessTimeoutS *int
 	AnchorProbeID    *string
+	TrapConfig       *probewire.TrapConfig
+}
+
+// Kinds of the credentials of a trap configuration (WP-977): the
+// communities of SNMPv1/v2c and the USM users of SNMPv3 (WP-978).
+var trapCredentialKinds = []string{"snmp_v2c", "snmp_v3"}
+
+// errTrapCredentials refuses credentials of a trap configuration that are
+// unknown, invisible, of another client or of another kind (422).
+var errTrapCredentials = &api.FieldError{Field: "trap_config.credential_ids", Status: http.StatusUnprocessableEntity,
+	Message: "credentials must be snmp_v2c or snmp_v3 credentials of the organization, org-wide or of the group's client"}
+
+// parseTrapConfig reads trap_config of a PATCH (AK1, AK2): enabled, port
+// 1-65535 (default 162) and at most 16 distinct credential ids.
+func parseTrapConfig(raw json.RawMessage) (*probewire.TrapConfig, error) {
+	field := func(name, message string) error {
+		return &api.FieldError{Field: "trap_config" + name, Status: http.StatusUnprocessableEntity, Message: message}
+	}
+	var in struct {
+		Enabled       *bool    `json:"enabled"`
+		Port          *int     `json:"port"`
+		CredentialIDs []string `json:"credential_ids"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil || string(bytes.TrimSpace(raw)) == "null" {
+		return nil, field("", "trap_config must be an object with enabled, port and credential_ids")
+	}
+	cfg := &probewire.TrapConfig{Port: probewire.DefaultTrapPort, CredentialIDs: []string{}}
+	if in.Enabled != nil {
+		cfg.Enabled = *in.Enabled
+	}
+	if in.Port != nil {
+		if *in.Port < 1 || *in.Port > 65535 {
+			return nil, field(".port", "port must be between 1 and 65535")
+		}
+		cfg.Port = *in.Port
+	}
+	if len(in.CredentialIDs) > probewire.MaxTrapCredentials {
+		return nil, field(".credential_ids", "at most 16 credentials")
+	}
+	for _, id := range in.CredentialIDs {
+		if !api.IsUUID(id) {
+			return nil, errTrapCredentials
+		}
+		id = strings.ToLower(id)
+		if !slices.Contains(cfg.CredentialIDs, id) {
+			cfg.CredentialIDs = append(cfg.CredentialIDs, id)
+		}
+	}
+	sort.Strings(cfg.CredentialIDs)
+	return cfg, nil
+}
+
+// TrapConfiguredSQL tells whether the trap configuration of the group g
+// was ever set (WP-977 AK5): the column default '{"enabled": false}' (every
+// group before its first PATCH, also the default group of each collector
+// and every group of an upgraded installation) has no port, a PATCH stores
+// the whole configuration with its port. The assignment set carries
+// trap_config only for a configured group; until then the collector keeps
+// its receiver of RETICORA_SNMP_TRAP_LISTEN, and GET shows the default
+// (enabled false, port 162).
+const TrapConfiguredSQL = `(g.trap_config ? 'port')`
+
+// sameTrapConfig compares two trap configurations.
+func sameTrapConfig(a, b *probewire.TrapConfig) bool {
+	return a.Enabled == b.Enabled && a.Port == b.Port && slices.Equal(a.CredentialIDs, b.CredentialIDs)
+}
+
+// normalizeTrapConfig fills the defaults of a stored configuration.
+func normalizeTrapConfig(c *probewire.TrapConfig) {
+	if c.Port == 0 {
+		c.Port = probewire.DefaultTrapPort
+	}
+	if c.CredentialIDs == nil {
+		c.CredentialIDs = []string{}
+	}
 }
 
 // CollectorGroupMemberInput is the body of POST /{id}/members.
@@ -368,8 +450,14 @@ func parseCollectorGroupUpdate(body map[string]json.RawMessage) (*CollectorGroup
 				}
 			}
 			u.AnchorProbeID = &s
+		case "trap_config":
+			cfg, err := parseTrapConfig(raw)
+			if err != nil {
+				return nil, err
+			}
+			u.TrapConfig = cfg
 		default:
-			return nil, field(name, "only name, mode, liveness_timeout_s and anchor_probe_id can be changed")
+			return nil, field(name, "only name, mode, liveness_timeout_s, anchor_probe_id and trap_config can be changed")
 		}
 	}
 	return u, nil
@@ -388,6 +476,9 @@ func (u *CollectorGroupUpdate) apply(g *CollectorGroup) error {
 	}
 	if u.AnchorProbeID != nil {
 		g.AnchorProbeID = *u.AnchorProbeID
+	}
+	if u.TrapConfig != nil {
+		g.TrapConfig = *u.TrapConfig
 	}
 	return validateCollectorGroup(g.Name, g.Mode, g.LivenessTimeoutS)
 }
@@ -524,6 +615,7 @@ func (r *MemoryRepository) addDefaultCollectorGroup(c *Collector) {
 	g := &CollectorGroup{ID: fmt.Sprintf("c0110000-0000-4000-8000-%012d", s.seq), OrganizationID: c.OrganizationID,
 		ClientID: c.ClientID, SiteID: c.SiteID, Name: name, Mode: CollectorGroupDistributed,
 		LivenessTimeoutS: DefaultLivenessTimeoutS, Status: "reachable", StatusChangedAt: now, CreatedAt: now, UpdatedAt: now}
+	normalizeTrapConfig(&g.TrapConfig)
 	s.groups[g.ID] = g
 	s.mirrorAdd(g)
 	s.members[c.ID] = &CollectorGroupMember{CollectorID: c.ID, GroupID: g.ID, Weight: DefaultMemberWeight, MemberStatus: "healthy"}
@@ -667,6 +759,7 @@ func (r *MemoryRepository) CreateCollectorGroup(ctx context.Context, in *Collect
 	g.ID = fmt.Sprintf("c0120000-0000-4000-8000-%012d", s.seq)
 	g.Status, g.StatusChangedAt, g.CreatedAt, g.UpdatedAt = "reachable", now, now, now
 	g.Members = nil
+	normalizeTrapConfig(&g.TrapConfig)
 	s.groups[g.ID] = &g
 	s.mirrorAdd(&g)
 	out, _ := r.visibleGroup(ctx, g.OrganizationID, g.ID)
@@ -702,6 +795,16 @@ func (r *MemoryRepository) UpdateCollectorGroup(ctx context.Context, orgID, id s
 	if u.AnchorProbeID != nil {
 		if werr := r.memCheckAnchor(ctx, orgID, next.ClientID, next.AnchorProbeID); werr != nil {
 			return nil, werr
+		}
+	}
+	// The memory repository holds no credentials: the trap credentials are
+	// checked on PostgreSQL only. A changed trap configuration raises the
+	// version of every member (WP-977 AK2).
+	if u.TrapConfig != nil && !sameTrapConfig(&stored.TrapConfig, u.TrapConfig) {
+		for _, m := range r.cg().members {
+			if m.GroupID == id {
+				m.ConfigVersion++
+			}
 		}
 	}
 	next.UpdatedAt = time.Now().UTC()
