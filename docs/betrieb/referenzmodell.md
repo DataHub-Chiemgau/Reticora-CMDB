@@ -89,6 +89,11 @@ Datenort und seine Sicherung:
 | Logs und Telemetrie | Anwendungs-, Audit- und Zugriffslogs, OTLP-Export | EU-Region, Standard: Primärregion | Terraform `log_region`; `RETICORA_OTEL_ENDPOINT` darf nur auf EU-Ziele zeigen |
 | Suchindex | OpenSearch (optional, `docs/opensearch.md`) | EU-Region, Standard: Primärregion | Terraform `search_region` |
 | Collector | Offline-Spool im Kundennetz | beim Kunden | Kundeninfrastruktur |
+| Vollexporte (P3) | JSONL-Teile, Dokument-ZIPs und Manifest des Org-Vollexports (WP-1149 bis WP-1151), 24 h abrufbar, danach von `org.export_cleanup` gelöscht | Primärregion (Objektspeicher, Bucket `exports`) | Terraform `region`; signierte URLs höchstens 15 min |
+| ADMP-Cache (P3) | Anschlüsse, Dienste, Ports und Anschlussinhaber aus ADMP (WP-928, WP-1076); Inhaber und Privatadressen nur als Vault-Subjekt | Primärregion (PostgreSQL, `pii_subject` unter dem Org-DEK) | Terraform `region`; TTL-Ablauf `admp.expire` |
+| PII-Vault und Löschprotokoll (P3) | `pii_subject`, `org_dek`; verschlüsselte Adresse des Löschprotokolls in `org_deletion_notice` bis zum Versand (WP-1156) | Primärregion (PostgreSQL) | Terraform `region`; Crypto-Shredding beim Purge (WP-1155) |
+| SMS, Pager, ADMP (P3) | Nachrichten an SMS- und Pager-Provider (WP-1141 bis WP-1143, Kanalumfang nach [E-163](../plan/phase3/entscheidungen.md#e-163)), Abfragen an ADMP | beim Provider des Kunden: kundeneigenes Konto | Zugangsdaten im Secret-Store der Organisation (`credential`, COL-02); Egress-Policy SEC-08 |
+| Tresorverbindungen (P3) | Zugangsdaten aus OpenBao/Vault des Kunden (E-220) | beim Kunden | Auflösung im Collector oder serverseitig nur im Speicher |
 
 `deploy/terraform/variables.tf` lässt für alle vier Variablen nur Regionen
 innerhalb der EU zu. London und Zürich sowie andere Standorte außerhalb der EU
@@ -100,8 +105,40 @@ Eintrag in der Subprozessorenliste.
 „Klartext verlässt nie die EU“ gilt für die SaaS-Serverseite (COL-02). Im
 Collector existieren Zugangsdaten nur im Speicher beim Kunden.
 
+### Datenorte der Phase 3 (SEC-05 [P3], E-242)
+
+Die Regel aus NFR-09 gilt unverändert für die Datenorte der Phase 3
+([E-242](../plan/phase3/entscheidungen.md#e-242), Option 1): Vollexporte, ADMP-Cache,
+Vault und das verschlüsselte Löschprotokoll liegen in der Primärregion und
+damit unter der Terraform-Variablen `region`, die der CI-Job `terraform` auf
+EU-Regionen beschränkt; eine neue Region-Variable ist nicht nötig.
+
+SMS-, Pager- und ADMP-Zugänge sind **kundeneigene Konten**: Die Organisation
+schließt den Vertrag mit dem Provider selbst und hinterlegt die Zugangsdaten
+im Secret-Store ihrer Organisation (verschlüsselte `credential`). Der
+Betreiber setzt dafür keinen eigenen Dienstleister ein; die Provider sind
+deshalb keine Unterauftragsverarbeiter des Betreibers, und die
+Subprozessorenliste bleibt leer, solange der Betreiber keinen Dienstleister
+einsetzt. Provider mit Sitz außerhalb der EU (z. B. Twilio, PagerDuty,
+Opsgenie) erhalten im Provider-Deskriptor das Feld `third_country`, und die
+Kanalkonfiguration zeigt dann einen Drittlandhinweis (geplant, kommt mit
+WP-1142 und WP-1148; bis dahin gibt es weder Feld noch Hinweis). Die Auswahl
+eines solchen Providers ist eine Entscheidung der Organisation als
+Verantwortliche.
+
+Betriebsmodelle nach PRI-11: Im **SaaS-Betrieb** verantwortet der Betreiber
+die Residenz wie oben beschrieben. Bei einer **Dedicated Instance** und im
+**Air-Gapped-Betrieb** verantwortet der Betreiber der Instanz (in der Regel
+der Kunde selbst) Standort, Backups, Logs und Provider-Wahl; die Software
+erzwingt dort keine Region.
+
+Die AVV-Anlage mit den technischen und organisatorischen Maßnahmen steht in
+[`docs/security/avv-tom.md`](../security/avv-tom.md).
+
 ## Subprozessoren
 
 Die Liste steht in [`docs/legal/subprozessoren.md`](../legal/subprozessoren.md).
 Ihren Inhalt liefert der Betreiber (E-35, Aufgabe A-11). Bis zur Lieferung ist
-NFR-09 nur für den technischen Teil (Datenresidenz) erfüllt.
+NFR-09 nur für den technischen Teil (Datenresidenz) erfüllt. Für die Phase 3
+bleibt die Liste leer: SMS-, Pager- und ADMP-Provider sind kundeneigene
+Konten (E-242, siehe oben).

@@ -9,6 +9,17 @@
 > deshalb keine Einträge und erfindet keine Subprozessoren. Die Tabelle unten
 > bleibt die verbindliche Struktur für spätere Einträge.
 
+> **Phase 3 (2026-11-14, WP-1159, [E-242](../plan/phase3/entscheidungen.md#e-242)):**
+> SMS-, Pager- und ADMP-Provider sind kundeneigene Konten: Die Organisation
+> schließt den Vertrag selbst und hinterlegt die Zugangsdaten im Secret-Store
+> ihrer Organisation. Der Betreiber setzt dafür keinen Dienstleister ein; die
+> Provider sind deshalb keine Unterauftragsverarbeiter des Betreibers und
+> stehen nicht in dieser Liste. Für Provider mit Sitz außerhalb der EU ist
+> ein Drittlandhinweis in der Kanalkonfiguration geplant (kommt mit WP-1142
+> und WP-1148; bis dahin ohne Hinweis). Die
+> technischen und organisatorischen Maßnahmen stehen in der AVV-Anlage
+> [`docs/security/avv-tom.md`](../security/avv-tom.md).
+
 ## Anforderungen an jeden Eintrag
 
 - Verarbeitung personenbezogener Daten im Auftrag (Art. 28 DSGVO) mit

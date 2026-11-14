@@ -1985,3 +1985,4 @@ NTF-02;[P3], Provider [V];F;backend/internal/user/mobile_integration_test.go;WP-
 TLC-06;[P3];F;backend/internal/tenantapi/purge_protocol_test.go;WP-1156
 UI-14;[P2–P4, A];F;frontend/src/pages/OrgDataPage.test.tsx;WP-1157
 TLC-06;[P3];F;frontend/src/pages/OrgDataPage.test.tsx;WP-1157
+SEC-05;[B];F;backend/internal/pii/history_redaction_integration_test.go;WP-1159
