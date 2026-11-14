@@ -1126,8 +1126,11 @@ func TestPeekAfterContinuesBehindCursor(t *testing.T) {
 // MaxBytes, and room freed by an Ack is found again by the next scan.
 func TestEnqueueSizeEstimateKeepsTheLimit(t *testing.T) {
 	ctx := testCtx(t)
+	// A fixed time keeps every file the same size: RFC 3339 with nanoseconds
+	// drops trailing zeros, so time.Now() would vary the length.
+	at := time.Date(2026, 1, 2, 3, 4, 5, 123456789, time.UTC)
 	probe := &DiskBuffer{Dir: t.TempDir()}
-	id, err := probe.Enqueue(ctx, &Message{ID: "m0", Topic: "t", Payload: []byte("aaaa")})
+	id, err := probe.Enqueue(ctx, &Message{ID: "m0", Topic: "t", Payload: []byte("aaaa"), CreatedAt: at})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1140,19 +1143,19 @@ func TestEnqueueSizeEstimateKeepsTheLimit(t *testing.T) {
 	b := &DiskBuffer{Dir: t.TempDir(), MaxBytes: 3 * size, MinRetention: time.Hour}
 	var ids []string
 	for i := range 3 {
-		id, err := b.Enqueue(ctx, &Message{ID: fmt.Sprintf("m%d", i), Topic: "t", Payload: []byte("aaaa")})
+		id, err := b.Enqueue(ctx, &Message{ID: fmt.Sprintf("m%d", i), Topic: "t", Payload: []byte("aaaa"), CreatedAt: at})
 		if err != nil {
 			t.Fatalf("message %d: %v", i, err)
 		}
 		ids = append(ids, id)
 	}
-	if _, err := b.Enqueue(ctx, &Message{ID: "m3", Topic: "t", Payload: []byte("aaaa")}); !errors.Is(err, ErrSpoolFull) {
+	if _, err := b.Enqueue(ctx, &Message{ID: "m3", Topic: "t", Payload: []byte("aaaa"), CreatedAt: at}); !errors.Is(err, ErrSpoolFull) {
 		t.Fatalf("fourth message: %v, want ErrSpoolFull", err)
 	}
 	if err := b.Ack(ctx, ids[:1]); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Enqueue(ctx, &Message{ID: "m4", Topic: "t", Payload: []byte("aaaa")}); err != nil {
+	if _, err := b.Enqueue(ctx, &Message{ID: "m4", Topic: "t", Payload: []byte("aaaa"), CreatedAt: at}); err != nil {
 		t.Fatalf("after an Ack: %v, want room for one message", err)
 	}
 	if n, err := b.Len(ctx); err != nil || n != 3 {
