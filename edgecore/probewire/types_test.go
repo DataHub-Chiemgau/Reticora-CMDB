@@ -21,7 +21,7 @@ var registerKeys = []string{
 
 // availableKeys are the types whose work package has set them available.
 var availableKeys = []string{
-	"icmp", "tcp", "dns", "http", "snmp_status", "snmp_if", "snmp_custom", "bgp", "bng", "pon", "bfd", "optical", "redfish", "ospf", "isis", "tr069", "rpki_rtr", "dhcp", "stamp",
+	"icmp", "tcp", "dns", "http", "snmp_status", "snmp_if", "snmp_custom", "bgp", "bng", "pon", "bfd", "optical", "redfish", "ospf", "isis", "tr069", "rpki_rtr", "dhcp", "stamp", "gnmi",
 }
 
 func repoFile(t *testing.T, rel string) []byte {
@@ -123,7 +123,7 @@ func validSpec(typ Type) ProbeSpec {
 
 // selectionParams are valid params of the types with a selection rule.
 var selectionParams = map[string]string{"bfd": `{"all":true}`, "optical": `{"all":true}`,
-	"tr069": `{"acs_url":"https://acs.example.org:7557","inform_interval_s":300}`}
+	"tr069": `{"acs_url":"https://acs.example.org:7557","inform_interval_s":300}`, "gnmi": `{"template":"if_oper"}`}
 
 // requiredParams returns params with a valid value for every required
 // parameter of the type (nil without required parameters).
@@ -689,6 +689,13 @@ func TestTypesDeclareMetricNames(t *testing.T) {
 		if !DeclaresMetric(typ, name) || !slices.Contains(MetricNames(typ), name) {
 			t.Errorf("%s does not declare %s", typ, name)
 		}
+	}
+	// gnmi declares its configured names by prefix (WP-1016).
+	if !DeclaresMetric("gnmi", "probe_gnmi_if_oper_status") || !DeclaresMetric("gnmi", "probe_gnmi_cpu_1") {
+		t.Error("gnmi does not declare probe_gnmi_<name>")
+	}
+	if DeclaresMetric("gnmi", "probe_gnmi_") || DeclaresMetric("gnmi", "probe_gnmi_Bad-Name") || DeclaresMetric("tcp", "probe_gnmi_x") {
+		t.Error("gnmi prefix accepts a malformed name or another type")
 	}
 	if DeclaresMetric("icmp", "ttfb_ms") || DeclaresMetric("tcp", "rtt_min_ms") || DeclaresMetric("unknown", "jitter_ms") {
 		t.Error("a name is declared for a type that does not produce it")

@@ -64,6 +64,16 @@ var (
 	ErrNoEncoding = errors.New("gnmi: no supported encoding")
 	// ErrPath: a path could not be parsed.
 	ErrPath = errors.New("gnmi: invalid path")
+	// ErrCredential: the credential cannot be used (no PEM certificate in
+	// ca, client_cert/client_key not a key pair).
+	ErrCredential = errors.New("gnmi: unusable credential")
+	// ErrPathNotFound: the device answered NotFound, at least one
+	// requested path does not exist there (gNMI specification 3.3.4).
+	ErrPathNotFound = errors.New("gnmi: path not found")
+	// ErrRejected: the device answered the call with another gRPC error
+	// (e.g. InvalidArgument, FailedPrecondition, Internal); it is
+	// reachable but did not deliver values.
+	ErrRejected = errors.New("gnmi: request rejected by the device")
 )
 
 // Mode selects how values are read (E-193 option 1).
@@ -90,6 +100,13 @@ type Config struct {
 	Timeout time.Duration
 	// Mode is get (default) or once.
 	Mode Mode
+	// Encoding, when set ("json_ietf" or "proto"), is the only encoding
+	// the client uses; a device without it fails with ErrNoEncoding.
+	// Empty chooses JSON_IETF, otherwise PROTO, otherwise JSON.
+	Encoding string
+	// Origin is set on every requested path (e.g. "openconfig"); empty
+	// sends none.
+	Origin string
 }
 
 // Client is a gNMI connection to one device. It is safe for concurrent use.
@@ -98,6 +115,10 @@ type Client struct {
 	gnmi    gpb.GNMIClient
 	creds   *recordingCreds
 	timeout time.Duration
+
+	prefer gpb.Encoding
+	strict bool // prefer is the only encoding allowed
+	origin string
 
 	mu       sync.Mutex
 	mode     Mode
@@ -108,7 +129,7 @@ type Client struct {
 // Dial prepares a client; the connection is made with the first call. TLS
 // is mandatory: the trust anchor is the CA of the credential, otherwise the
 // TLS scope of the target's network, otherwise the system roots.
-func Dial(cfg Config) (*Client, error) {
+func Dial(cfg *Config) (*Client, error) {
 	tlsCfg, err := tlsConfig(cfg)
 	if err != nil {
 		return nil, err
@@ -134,19 +155,30 @@ func Dial(cfg Config) (*Client, error) {
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
-	return &Client{conn: conn, gnmi: gpb.NewGNMIClient(conn), creds: rc, timeout: timeout, mode: mode}, nil
+	c := &Client{conn: conn, gnmi: gpb.NewGNMIClient(conn), creds: rc, timeout: timeout, mode: mode, origin: cfg.Origin}
+	switch strings.ToLower(cfg.Encoding) {
+	case "":
+	case "json_ietf":
+		c.prefer, c.strict = gpb.Encoding_JSON_IETF, true
+	case "proto":
+		c.prefer, c.strict = gpb.Encoding_PROTO, true
+	default:
+		_ = conn.Close()
+		return nil, fmt.Errorf("%w: %q", ErrNoEncoding, cfg.Encoding)
+	}
+	return c, nil
 }
 
 // Close closes the connection.
 func (c *Client) Close() error { return c.conn.Close() }
 
 // tlsConfig builds the TLS verification of cfg (AK2).
-func tlsConfig(cfg Config) (*tls.Config, error) {
+func tlsConfig(cfg *Config) (*tls.Config, error) {
 	var tlsCfg *tls.Config
 	if ca := cfg.Credentials["ca"]; strings.TrimSpace(ca) != "" {
 		pool := x509.NewCertPool()
 		if !pool.AppendCertsFromPEM([]byte(ca)) {
-			return nil, errors.New("gnmi: credential ca holds no PEM certificate")
+			return nil, fmt.Errorf("%w: ca holds no PEM certificate", ErrCredential)
 		}
 		tlsCfg = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool}
 	} else {
@@ -156,7 +188,7 @@ func tlsConfig(cfg Config) (*tls.Config, error) {
 	if certPEM != "" || keyPEM != "" {
 		cert, err := tls.X509KeyPair([]byte(certPEM), []byte(keyPEM))
 		if err != nil {
-			return nil, errors.New("gnmi: credential client_cert/client_key is not a valid key pair")
+			return nil, fmt.Errorf("%w: client_cert/client_key is not a valid key pair", ErrCredential)
 		}
 		tlsCfg.Certificates = []tls.Certificate{cert}
 	}
@@ -214,7 +246,8 @@ func (r *recordingCreds) handshakeErr() error {
 // mapErr maps a failed call (AK3): untrusted certificate →
 // plugins.ErrTLSUntrusted, another handshake failure → ErrTLSHandshake,
 // Unauthenticated/PermissionDenied → plugins.ErrAuthFailed, a too large
-// answer → ErrMessageTooLarge, not reachable → plugins.ErrUnreachable.
+// answer → ErrMessageTooLarge, not reachable → plugins.ErrUnreachable,
+// NotFound → ErrPathNotFound, every other code → ErrRejected.
 func (c *Client) mapErr(err error) error {
 	if err == nil {
 		return nil
@@ -243,8 +276,12 @@ func (c *Client) mapErr(err error) error {
 		return fmt.Errorf("gnmi: %w: %s", plugins.ErrUnreachable, st.Message())
 	case codes.DeadlineExceeded:
 		return fmt.Errorf("gnmi: %w", context.DeadlineExceeded)
+	case codes.Canceled:
+		return fmt.Errorf("gnmi: %w", context.Canceled)
+	case codes.NotFound:
+		return fmt.Errorf("%w: %s", ErrPathNotFound, st.Message())
 	}
-	return fmt.Errorf("gnmi: %s: %s", st.Code(), st.Message())
+	return fmt.Errorf("%w: %s: %s", ErrRejected, st.Code(), st.Message())
 }
 
 // Capabilities is the answer of the device to Capabilities.
@@ -271,6 +308,9 @@ func (c *Client) Capabilities(ctx context.Context) (Capabilities, error) {
 		out.Models = append(out.Models, m.GetName())
 	}
 	enc, ok := chooseEncoding(out.Encodings)
+	if c.strict {
+		enc, ok = c.prefer, slices.Contains(out.Encodings, c.prefer)
+	}
 	if !ok {
 		return out, ErrNoEncoding
 	}
@@ -354,6 +394,7 @@ func (c *Client) Get(ctx context.Context, paths []string) (Result, error) {
 		if parsed[i], err = ParsePath(p); err != nil {
 			return Result{}, err
 		}
+		parsed[i].Origin = c.origin
 	}
 	c.mu.Lock()
 	known, mode := c.known, c.mode

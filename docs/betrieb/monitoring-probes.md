@@ -220,6 +220,49 @@ Messwerte in `values`: `probe_stamp_rtt_seconds{stat=min|avg|max}`,
 `probe_stamp_reordered`, `probe_stamp_duplicates` und gegebenenfalls
 `probe_stamp_oneway_seconds{direction=forward|backward}`.
 
+## gNMI/OpenConfig (`gnmi`)
+
+Standard nach PRT-16 und E-154: Intervall 60 s (10 s–24 h), Timeout 10 s
+(1–60 s), Parallelität 1 je Ziel, 50 Prüfungen/s je Collector, Nachrichten
+bis 4 MiB, höchstens 10.000 Updates je Antwort, Zugangsdaten aus dem
+Namespace `gnmi` (`username`/`password` und/oder `client_cert`/
+`client_key`, optional `ca`). TLS ist Pflicht, einen Rückfall auf
+Klartext gibt es nicht. Der Collector liest nur: Get bzw. Subscribe ONCE
+(E-193), nie Set, kein Subscribe STREAM/POLL.
+
+Parameter: `port` (Standard 9339; Herstellerports wie 57400 oder 6030
+werden konfiguriert), `origin` (Standard `openconfig`, leer sendet
+keinen), `encoding` (`json_ietf|proto`; ohne Angabe wählt der Collector
+JSON_IETF, sonst PROTO, sonst JSON), `mode` (`get|once`, Standard `get`;
+ein Gerät ohne Get wird automatisch mit Subscribe ONCE gelesen),
+`template` (`if_oper`: `oper-status` als Zustand, UP → `up`, DOWN und
+LOWER_LAYER_DOWN → `down`, `in-octets`/`out-octets` als Zähler) und
+`paths[]` (zusammen mit der Vorlage höchstens 32) mit `path` (Blattpfad;
+ein Element ohne Schlüssel passt auf jeden Listeneintrag), `name`
+(`[a-z][a-z0-9_]*`), `kind` (`gauge|counter|state`, Standard `gauge`),
+`enum` (Wert → `up|degraded|down`), `warn`, `crit`, `direction`
+(`above|below`, Standard `above`) und `unit`.
+
+Abbildung: Jeder Pfad ergibt den Wert `probe_gnmi_<name>`; die Schlüssel
+der Pfadelemente werden Labels (`interface[name=et-0/0/1]` →
+`name="et-0/0/1"`, ein doppelt genutzter Schlüsselname erhält den
+Elementnamen als Präfix). Zähler werden über den Vorwertspeicher zu Raten
+je Sekunde (64-Bit-Wrap berücksichtigt); die erste Prüfung liefert keine
+Rate. Ein Zustand hat den Wert 0 (`up`), 1 (`degraded`) oder 2 (`down`).
+
+| Ergebnis | Bedeutung | Zustand |
+|---|---|---|
+| `ok` | alle Pfade gelesen, keine Schwelle verletzt | `up` |
+| `ok`/`threshold_exceeded` | Warnschwelle oder Zustand `degraded` | `degraded` |
+| `fail`/`threshold_exceeded` | kritische Schwelle oder Zustand `down` | zählt auf `down` |
+| `ok`/`truncated` | Antwort nach 10.000 Updates gekappt (Label `truncated=true`) | `degraded` |
+| `ok`/`path_missing` | konfigurierter Pfad ohne Update (Label `path`) | `degraded` |
+| `fail`/`unreachable`, `fail`/`timeout` | Gerät nicht erreichbar, Frist abgelaufen | zählt auf `down` |
+| `error`/`tls` | Zertifikat nicht vertrauenswürdig oder Handshake gescheitert | `unknown` |
+| `error`/`auth_failed` | Zugangsdaten abgewiesen | `unknown` |
+| `error`/`payload_limit` | Antwort über 4 MiB | `unknown` |
+| `error`/`unsupported` | Gerät bietet die gewählte Kodierung nicht an | `unknown` |
+
 ## HTTP/HTTPS (`http`)
 
 Standard nach PRT-04: Intervall 60 s (30 s–24 h), Timeout 10 s (1–60 s, je
@@ -849,7 +892,7 @@ nach E-154; WP-1023 misst die Raten nach.
 | `dhcp` | available | 300 / 60 / 86400 | 5 / 1 / 10 | 3 / 1 | 1 | 1 | 1 | 1 | 1500 | 1 | – | privileged_udp_ports |
 | `stamp` | available | 60 / 30 / 86400 | 5 / 1 / 10 | 3 / 1 | 1 | 16 | 20 | 4 | 1472 | 1 | – | – |
 | `twamp_control` | planned | 60 / 10 / 86400 | 5 / 1 / 30 | 3 / 1 | 1 | 16 | 20 | 4 | 1472 | 1 | – | – |
-| `gnmi` | planned | 60 / 10 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 50 | 4 | 4194304 | 10000 | gnmi | – |
+| `gnmi` | available | 60 / 10 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 50 | 4 | 4194304 | 10000 | gnmi | – |
 | `tr069` | available | 900 / 300 / 86400 | 30 / 1 / 60 | 3 / 1 | 1 | 4 | 5 | 1 | 1048576 | 10000 | acs | – |
 | `usp` | planned | 900 / 300 / 86400 | 30 / 1 / 60 | 3 / 1 | 1 | 4 | 5 | 1 | 1048576 | 256 | acs | – |
 | `rpki_rtr` | available | 300 / 60 / 86400 | 30 / 1 / 120 | 3 / 1 | 1 | 4 | 1 | 1 | 67108864 | 2000000 | – | – |

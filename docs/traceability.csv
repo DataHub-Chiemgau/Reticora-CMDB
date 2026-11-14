@@ -1945,3 +1945,4 @@ PRT-11;[P3];E;collector/probe/pon_test.go;WP-1007
 PRT-13;[P3];E;collector/probe/dhcp_test.go;WP-1012
 PRT-14;[P3];E;collector/probe/stamp_test.go;WP-1013
 PRT-21;[P3];E;collector/probe/stamp_test.go;WP-1013
+PRT-16;[P3];E;collector/probe/gnmi_test.go;WP-1016

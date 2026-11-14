@@ -65,6 +65,9 @@ const (
 	// VRPs (rpki_rtr, WP-1020, PRT-17); the incomplete state is discarded,
 	// the previous table stays. An error (→ unknown).
 	ReasonVRPLimit = "vrp_limit"
+	// ReasonPayloadLimit: an answer exceeded the message limit of the type
+	// (gnmi: 4 MiB, WP-1016); an error (→ unknown), the target answered.
+	ReasonPayloadLimit = "payload_limit"
 
 	// WarnThresholdExceeded: the check succeeded but a threshold (RTT,
 	// loss, value) was violated.
@@ -101,6 +104,13 @@ const (
 	// WarnSubnetMismatch: the DHCP server offered an address outside
 	// expect_subnet (dhcp, WP-1012); ok → degraded.
 	WarnSubnetMismatch = "subnet_mismatch"
+	// WarnPathMissing: a configured gNMI path got no update (gnmi,
+	// WP-1016); ok → degraded, the paths in the label path.
+	WarnPathMissing = "path_missing"
+	// WarnTruncated: an answer held more updates or rows than the type
+	// evaluates and was cut (gnmi: 10,000 updates, WP-1016); ok → degraded
+	// at least, label truncated=true.
+	WarnTruncated = "truncated"
 )
 
 // WarnCodes are the codes of a successful check with a warning; a result
@@ -116,6 +126,8 @@ var WarnCodes = map[string]bool{
 	WarnNoDevices:         true,
 	WarnRPKIStale:         true,
 	WarnSubnetMismatch:    true,
+	WarnPathMissing:       true,
+	WarnTruncated:         true,
 }
 
 // reasons lists every valid reason code apart from the warn codes.
@@ -140,6 +152,7 @@ var reasons = map[string]bool{
 	ReasonSessionDown:          true,
 	ReasonLOS:                  true,
 	ReasonVRPLimit:             true,
+	ReasonPayloadLimit:         true,
 }
 
 // ValidReason reports whether code is a known reason or warn code.

@@ -42,7 +42,7 @@ func dial(t *testing.T, cfg gnmi.Config) *gnmi.Client {
 	if cfg.Timeout == 0 {
 		cfg.Timeout = 5 * time.Second
 	}
-	c, err := gnmi.Dial(cfg)
+	c, err := gnmi.Dial(&cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +218,7 @@ func TestGNMIClientClientCertificate(t *testing.T) {
 	if _, err = without.Get(context.Background(), []string{"/interfaces"}); err == nil {
 		t.Error("server requiring a client certificate answered without one")
 	}
-	if _, err = gnmi.Dial(gnmi.Config{Target: s.Addr(), Credentials: map[string]string{"client_cert": string(certPEM), "client_key": "garbage"}}); err == nil {
+	if _, err = gnmi.Dial(&gnmi.Config{Target: s.Addr(), Credentials: map[string]string{"client_cert": string(certPEM), "client_key": "garbage"}}); err == nil {
 		t.Error("invalid key pair accepted")
 	}
 }

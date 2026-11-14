@@ -67,6 +67,12 @@ type Config struct {
 	// Plaintext serves without TLS (to prove the client does not fall back
 	// to plaintext).
 	Plaintext bool
+	// StrictPaths answers NotFound when a requested path covers no leaf,
+	// as the gNMI specification asks of a real device.
+	StrictPaths bool
+	// FailCode, when set, answers every Get and Subscribe with this gRPC
+	// code.
+	FailCode codes.Code
 }
 
 // Server is a running fake gNMI server.
@@ -176,6 +182,20 @@ func (s *Server) SetEncodings(enc ...gpb.Encoding) {
 func (s *Server) SetRejectGet(reject bool) {
 	s.mu.Lock()
 	s.cfg.RejectGet = reject
+	s.mu.Unlock()
+}
+
+// SetStrictPaths and SetFailCode change Config.StrictPaths and
+// Config.FailCode while the server runs.
+func (s *Server) SetStrictPaths(strict bool) {
+	s.mu.Lock()
+	s.cfg.StrictPaths = strict
+	s.mu.Unlock()
+}
+
+func (s *Server) SetFailCode(c codes.Code) {
+	s.mu.Lock()
+	s.cfg.FailCode = c
 	s.mu.Unlock()
 }
 
@@ -371,14 +391,31 @@ func (s *Server) Subscribe(stream gpb.GNMI_SubscribeServer) error {
 func (s *Server) notification(paths []*gpb.Path, enc gpb.Encoding) (*gpb.Notification, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	if s.cfg.FailCode != codes.OK {
+		return nil, status.Error(s.cfg.FailCode, "fakegnmi: configured failure")
+	}
 	n := &gpb.Notification{Timestamp: time.Now().UnixNano()}
 	var leaves []string
+	found := make([]bool, len(paths))
 	for leaf := range s.tree {
-		for _, p := range paths {
-			prefix := pathString(p)
-			if prefix == "/" || leaf == prefix || strings.HasPrefix(leaf, prefix+"/") {
-				leaves = append(leaves, leaf)
-				break
+		lp, err := parse(leaf)
+		if err != nil {
+			continue
+		}
+		hit := false
+		for i, p := range paths {
+			if covers(p, lp) {
+				found[i], hit = true, true
+			}
+		}
+		if hit {
+			leaves = append(leaves, leaf)
+		}
+	}
+	if s.cfg.StrictPaths {
+		for i, ok := range found {
+			if !ok {
+				return nil, status.Errorf(codes.NotFound, "path %s not found", pathString(paths[i]))
 			}
 		}
 	}
@@ -397,6 +434,28 @@ func (s *Server) notification(paths []*gpb.Path, enc gpb.Encoding) (*gpb.Notific
 			StringVal: strings.Repeat("x", s.cfg.ResponseBytes)}}})
 	}
 	return n, nil
+}
+
+// covers reports whether the requested path p covers the leaf: every
+// element of p names the element of the leaf at the same depth, and every
+// key of p (except the wildcard "*") has the leaf's value; an element of
+// p without keys matches every list entry (gNMI wildcards).
+func covers(p, leaf *gpb.Path) bool {
+	if len(p.GetElem()) > len(leaf.GetElem()) {
+		return false
+	}
+	for i, e := range p.GetElem() {
+		l := leaf.GetElem()[i]
+		if e.GetName() != l.GetName() {
+			return false
+		}
+		for k, v := range e.GetKey() {
+			if v != "*" && l.GetKey()[k] != v {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // typed encodes a value: JSON_IETF and JSON as JSON, PROTO as a scalar.

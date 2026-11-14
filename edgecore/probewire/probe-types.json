@@ -1531,7 +1531,7 @@
       }
     },
     "gnmi": {
-      "status": "planned",
+      "status": "available",
       "min_interval_s": 10,
       "default_interval_s": 60,
       "max_interval_s": 86400,
@@ -1554,13 +1554,26 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "paths": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "maxLength": 512
-            },
-            "maxItems": 32
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "default": 9339,
+            "description": "gNMI port (IANA 9339; vendor ports such as 57400 or 6030 are configured)."
+          },
+          "origin": {
+            "type": "string",
+            "maxLength": 64,
+            "default": "openconfig",
+            "description": "Origin of the paths; empty sends none."
+          },
+          "encoding": {
+            "type": "string",
+            "enum": [
+              "json_ietf",
+              "proto"
+            ],
+            "description": "Encoding of the values; without it JSON_IETF, otherwise PROTO, otherwise JSON as the device offers."
           },
           "mode": {
             "type": "string",
@@ -1568,7 +1581,78 @@
               "get",
               "once"
             ],
-            "default": "get"
+            "default": "get",
+            "description": "Get (falls back to Subscribe ONCE on Unimplemented) or Subscribe ONCE. Reading only: never Set."
+          },
+          "template": {
+            "type": "string",
+            "enum": [
+              "if_oper"
+            ],
+            "description": "Predefined paths: if_oper maps oper-status as state (UP up, DOWN and LOWER_LAYER_DOWN down) and in-octets/out-octets as counters."
+          },
+          "paths": {
+            "type": "array",
+            "maxItems": 32,
+            "description": "Leaf paths mapped to values probe_gnmi_<name>; at most 32 including the template.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path",
+                "name"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 512,
+                  "description": "gNMI path of a leaf; an element without keys matches every list entry."
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "description": "Value name suffix: probe_gnmi_<name>."
+                },
+                "kind": {
+                  "type": "string",
+                  "enum": [
+                    "gauge",
+                    "counter",
+                    "state"
+                  ],
+                  "default": "gauge",
+                  "description": "gauge: the value; counter: rate per second; state: the text mapped by enum."
+                },
+                "enum": {
+                  "type": "object",
+                  "description": "State: value text to up, degraded or down."
+                },
+                "warn": {
+                  "type": "number",
+                  "description": "Warn threshold (degraded) of a gauge or counter rate."
+                },
+                "crit": {
+                  "type": "number",
+                  "description": "Critical threshold (down) of a gauge or counter rate."
+                },
+                "direction": {
+                  "type": "string",
+                  "enum": [
+                    "above",
+                    "below"
+                  ],
+                  "default": "above",
+                  "description": "Whether values above or below the thresholds violate them."
+                },
+                "unit": {
+                  "type": "string",
+                  "maxLength": 32,
+                  "description": "Unit of the value (for display)."
+                }
+              }
+            }
           }
         }
       }

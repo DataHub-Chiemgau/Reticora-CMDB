@@ -274,6 +274,13 @@ var typeMetrics = map[string][]string{
 		"probe_optical_interfaces", "probe_optical_interfaces_not_found"},
 }
 
+// typeMetricPrefixes are the value name prefixes of types whose value names
+// are configured per probe (gnmi: probe_gnmi_<name>, WP-1016); a name with
+// the prefix and a suffix of [a-z0-9_] is declared.
+var typeMetricPrefixes = map[string]string{
+	"gnmi": "probe_gnmi_",
+}
+
 // MetricNames returns the value names the type declares (none for an
 // unknown type).
 func MetricNames(typeKey string) []string {
@@ -282,7 +289,27 @@ func MetricNames(typeKey string) []string {
 
 // DeclaresMetric reports whether the type declares the value name.
 func DeclaresMetric(typeKey, name string) bool {
+	if prefix, ok := typeMetricPrefixes[typeKey]; ok {
+		if suffix, found := strings.CutPrefix(name, prefix); found && validValueSuffix(suffix) {
+			return true
+		}
+	}
 	return slices.Contains(typeMetrics[typeKey], name)
+}
+
+// validValueSuffix reports whether s is 1 to 64 characters of [a-z0-9_]
+// starting with a letter.
+func validValueSuffix(s string) bool {
+	if s == "" || len(s) > 64 || s[0] < 'a' || s[0] > 'z' {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 // FieldError names the field a validation error refers to (type,
@@ -384,6 +411,7 @@ var paramChecks = map[string]func(spec *ProbeSpec, params map[string]any) []Fiel
 	"dns":         func(_ *ProbeSpec, params map[string]any) []FieldError { return checkDNSParams(params) },
 	"dhcp":        func(_ *ProbeSpec, params map[string]any) []FieldError { return checkDHCPParams(params) },
 	"stamp":       checkSTAMPParams,
+	"gnmi":        func(_ *ProbeSpec, params map[string]any) []FieldError { return checkGNMIParams(params) },
 	"http":        func(_ *ProbeSpec, params map[string]any) []FieldError { return checkHTTPParams(params) },
 }
 
@@ -949,6 +977,69 @@ func ValidDNSName(name string) bool {
 		}
 	}
 	return true
+}
+
+// gnmiTemplateNames are the value names of the paths each gnmi template
+// adds (collector/probe/gnmi.go); a configured path must not reuse them.
+var gnmiTemplateNames = map[string][]string{"if_oper": {"if_oper_status", "if_in_octets", "if_out_octets"}}
+
+// gnmiMaxPaths is the largest number of paths of a gnmi probe including
+// its template (PRT-16).
+const gnmiMaxPaths = 32
+
+// checkGNMIParams checks the paths of the gnmi type (PRT-16, WP-1016
+// AK1): a template or at least one path, at most 32 paths including the
+// template, every path starting with "/", names as value names
+// ([a-z][a-z0-9_]*, unique), enum states up, degraded or down, warn not
+// beyond crit.
+func checkGNMIParams(params map[string]any) []FieldError {
+	var errs []FieldError
+	list, _ := params["paths"].([]any)
+	template, _ := params["template"].(string)
+	total := len(list) + len(gnmiTemplateNames[template])
+	switch {
+	case total == 0:
+		errs = append(errs, FieldError{Field: "params.paths", Message: "at least one path or a template is required"})
+	case total > gnmiMaxPaths:
+		errs = append(errs, FieldError{Field: "params.paths", Message: fmt.Sprintf("at most %d paths including the template", gnmiMaxPaths)})
+	}
+	names := map[string]bool{}
+	for _, name := range gnmiTemplateNames[template] {
+		names[name] = true
+	}
+	for i, item := range list {
+		entry, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		field := fmt.Sprintf("params.paths[%d]", i)
+		if path, ok := entry["path"].(string); ok && !strings.HasPrefix(strings.TrimSpace(path), "/") {
+			errs = append(errs, FieldError{Field: field + ".path", Message: "must be a gNMI path starting with /"})
+		}
+		if name, ok := entry["name"].(string); ok {
+			switch {
+			case !validValueSuffix(name):
+				errs = append(errs, FieldError{Field: field + ".name", Message: "must be 1 to 64 characters of [a-z0-9_] starting with a letter"})
+			case names[name]:
+				errs = append(errs, FieldError{Field: field + ".name", Message: "is used twice"})
+			}
+			names[name] = true
+		}
+		if enum, ok := entry["enum"].(map[string]any); ok {
+			for k, v := range enum {
+				if s, _ := v.(string); s != "up" && s != "degraded" && s != "down" {
+					errs = append(errs, FieldError{Field: field + ".enum." + k, Message: "must be up, degraded or down"})
+				}
+			}
+		}
+		w, okW := numberOf(entry["warn"])
+		c, okC := numberOf(entry["crit"])
+		below, _ := entry["direction"].(string)
+		if okW && okC && ((below == "below" && w < c) || (below != "below" && w > c)) {
+			errs = append(errs, FieldError{Field: field + ".crit", Message: "must not be less severe than warn"})
+		}
+	}
+	return errs
 }
 
 // Defaults of the stamp parameters count and spacing_ms
