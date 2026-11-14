@@ -105,7 +105,7 @@ jobs:
           RETICORA_VULNFEED_NVD_API_KEY: ${{ secrets.RETICORA_VULNFEED_NVD_API_KEY }}
         run: |
           set -euo pipefail
-          if [ -z "${VULNBUNDLE_SIGNING_KEY}" ]; then
+          if [ -z "${VULNBUNDLE_SIGNING_KEY:-}" ]; then
             echo "::warning::VULNBUNDLE_SIGNING_KEY is not set: no vulnerability catalog bundle in this release"
             exit 0
           fi
