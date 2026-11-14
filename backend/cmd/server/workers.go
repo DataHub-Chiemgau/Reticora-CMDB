@@ -659,8 +659,19 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 			if d.jobQueue != nil {
 				sweepRuns.WithQueue(d.jobQueue)
 			}
+			// The approver circles and the notices of the approval sweep
+			// (WP-1098, WP-1099) and send_notification of a run executed
+			// here (WP-1095) resolve their recipients in the database.
+			resolver := notify.NewPGResolver(pool, permission.NewPGRepository(pool))
+			sweepRuns.WithApprovers(resolver)
+			if d.notifier != nil {
+				sweepRuns.WithNotifier(d.notifier, resolver)
+			}
 			orgs := func(ctx context.Context) ([]string, error) { return database.OrganizationIDs(ctx, pool) }
 			systemJobs = append(systemJobs, workflow.NewSerialSweep(sweepRuns, orgs).Schedule())
+			// Deadlines, reminders and escalation of approval steps
+			// (WFL-02, WP-1099, E-230): every minute on one instance.
+			systemJobs = append(systemJobs, workflow.NewApprovalSweep(sweepRuns, orgs).Schedule())
 			// Schedule triggers of workflows (JOB-02 [P3], WP-1091): every
 			// minute on one instance the due slot of each active schedule
 			// definition of the organizations with the feature workflows,

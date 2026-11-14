@@ -676,11 +676,14 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 		t.Errorf("%s is registered with %s=false", probe.AssignKind, config.WorkerEnvKey(config.WorkerProbeAssign))
 	}
 
-	// The serial sweep of the workflow runs (WFL-02, EVT-01, WP-1089):
-	// workflow.serial_sweep every minute with the module workflows and the
-	// database; without the module or the database not.
-	if registered[workflow.SerialSweepKind] {
-		t.Errorf("without the module workflows %s is registered", workflow.SerialSweepKind)
+	// The serial sweep of the workflow runs (WFL-02, EVT-01, WP-1089) and
+	// the approval sweep (WFL-02, WP-1099): workflow.serial_sweep and
+	// workflow.approval_sweep every minute with the module workflows and
+	// the database; without the module or the database not.
+	for _, kind := range []string{workflow.SerialSweepKind, workflow.ApprovalSweepKind} {
+		if registered[kind] {
+			t.Errorf("without the module workflows %s is registered", kind)
+		}
 	}
 	workflowModules, err := server.ParseModules("workflows")
 	if err != nil {
@@ -690,13 +693,14 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 		deps := systemJobTestDeps(t, cfg, withDB)
 		deps.modules = workflowModules
 		kinds := registeredSystemJobs(t, deps)
-		for _, kind := range []string{workflow.SerialSweepKind, workflow.ScheduleKind} {
+		for _, kind := range []string{workflow.SerialSweepKind, workflow.ScheduleKind, workflow.ApprovalSweepKind} {
 			if kinds[kind] != withDB {
 				t.Errorf("JOB-02 %s (database %v): registered %v", kind, withDB, kinds[kind])
 			}
 		}
 		for _, job := range systemJobs(deps) {
-			if (job.Kind == workflow.SerialSweepKind || job.Kind == workflow.ScheduleKind) && (job.Spec != "* * * * *" || job.MaxCatchUp != 1) {
+			if (job.Kind == workflow.SerialSweepKind || job.Kind == workflow.ScheduleKind || job.Kind == workflow.ApprovalSweepKind) &&
+				(job.Spec != "* * * * *" || job.MaxCatchUp != 1) {
 				t.Errorf("%s: spec %q, max catch-up %d; want every minute and 1", job.Kind, job.Spec, job.MaxCatchUp)
 			}
 			if job.Kind == workflow.ScheduleKind && job.Timeout != time.Minute {

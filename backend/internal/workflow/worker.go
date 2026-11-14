@@ -69,6 +69,8 @@ var serialWait = prometheus.NewHistogram(prometheus.HistogramOpts{
 // RegisterMetrics registers the workflow metrics on reg.
 func RegisterMetrics(reg prometheus.Registerer) {
 	reg.MustRegister(serialWait, scheduleSkipped, triggerDead, triggerLoop, runsDelayed)
+	// The approval deadlines (WP-1099 AK5).
+	reg.MustRegister(approvalSweepCollectors()...)
 }
 
 // idempotentActions may be executed again when an attempt ended while

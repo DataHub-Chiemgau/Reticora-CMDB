@@ -40,7 +40,8 @@ import (
 // every decision. Each decision is a row of workflow_approval; quorum
 // approvals continue the run, one rejection cancels it. Several stages are
 // several require_approval steps. Deadline, reminder and escalation are
-// evaluated by the system job of WP-1099.
+// evaluated by the system job workflow.approval_sweep (approval_sweep.go,
+// WP-1099).
 
 const approvalActionType = "require_approval"
 
@@ -50,8 +51,8 @@ const (
 	maxApprovalDeadline = 30 * 24 * time.Hour
 )
 
-// Decisions of an approver; expired is the decision of an expired deadline
-// (WP-1099).
+// Decisions of an approver; DecisionExpired (approval_sweep.go) is the
+// decision of an expired deadline (WP-1099).
 const (
 	DecisionApproved = "approved"
 	DecisionRejected = "rejected"
@@ -431,18 +432,27 @@ func (e *Executor) notifyApprovers(ctx context.Context, orgID string, run *Run, 
 		slog.WarnContext(ctx, "workflow: approvers not notified", "run_id", run.ID, "error", err)
 		return
 	}
-	if len(members) == 0 {
-		slog.WarnContext(ctx, "workflow: approval step without approver", "run_id", run.ID, "step_index", stepIndex)
+	e.sendApprovalNotice(ctx, orgID, run, stepIndex, sortedMembers(members, nil), kind, &approvalNotice{
+		subjectDE: "Genehmigung erforderlich: ", subjectEN: "Approval required: ", body: spec.Message,
+	})
+}
+
+// sendApprovalNotice notifies the users ids about the approval step of run
+// in the category workflow, under the dedup key <run_id>:<step_index>:
+// <kind> (WP-1098, WP-1099); the subjects end with the workflow name.
+// Failures are logged.
+func (e *Executor) sendApprovalNotice(ctx context.Context, orgID string, run *Run, stepIndex int, ids []string, kind string, notice *approvalNotice) {
+	resolver := e.noticeResolver()
+	if e.notifier == nil || resolver == nil {
 		return
 	}
-	ids := make([]string, 0, len(members))
-	for id := range members {
-		ids = append(ids, id)
+	if len(ids) == 0 {
+		slog.WarnContext(ctx, "workflow: approval notice without recipient", "run_id", run.ID, "step_index", stepIndex, "kind", kind)
+		return
 	}
-	slices.Sort(ids)
-	recipients, err := e.approvers.Resolve(ctx, orgID, &notify.Audience{DirectUserIDs: ids})
+	recipients, err := resolver.Resolve(ctx, orgID, &notify.Audience{DirectUserIDs: ids})
 	if err != nil {
-		slog.WarnContext(ctx, "workflow: approvers not notified", "run_id", run.ID, "error", err)
+		slog.WarnContext(ctx, "workflow: approval notice not sent", "run_id", run.ID, "kind", kind, "error", err)
 		return
 	}
 	name := ""
@@ -450,7 +460,7 @@ func (e *Executor) notifyApprovers(ctx context.Context, orgID string, run *Run, 
 		name = def.Name
 	}
 	var brand *notify.Branding
-	if source, ok := e.approvers.(notify.BrandingSource); ok {
+	if source, ok := resolver.(notify.BrandingSource); ok {
 		if brand, err = source.Branding(ctx, orgID); err != nil {
 			slog.WarnContext(ctx, "workflow: branding of the approval notification", "error", err)
 		}
@@ -460,18 +470,18 @@ func (e *Executor) notifyApprovers(ctx context.Context, orgID string, run *Run, 
 		orgLocale = brand.Locale
 	}
 	orgTemplate := notify.TemplateLocale("", orgLocale)
-	subjects := map[string]string{notify.LocaleDE: "Genehmigung erforderlich: " + name, notify.LocaleEN: "Approval required: " + name}
+	subjects := map[string]string{notify.LocaleDE: notice.subjectDE + name, notify.LocaleEN: notice.subjectEN + name}
 	texts := map[string]notify.Text{}
 	for _, locale := range []string{notify.LocaleDE, notify.LocaleEN} {
 		texts[locale] = notify.Render(notify.WorkflowNotification, locale, map[string]any{
-			"subject": oneLine(subjects[locale]), "body": spec.Message, "workflow_name": name, "run_id": run.ID,
+			"subject": oneLine(subjects[locale]), "body": notice.body, "workflow_name": name, "run_id": run.ID,
 		})
 	}
 	if _, err := e.notifier.Notify(ctx, orgID, &notify.Request{Category: notify.CategoryWorkflow, Personal: true,
 		Subject: texts[orgTemplate].Subject, Body: texts[orgTemplate].Body, Texts: texts, Branding: brand,
 		Data:     map[string]any{"run_id": run.ID, "workflow_id": run.WorkflowID, "step_index": stepIndex},
 		DedupKey: run.ID + ":" + strconv.Itoa(stepIndex) + ":" + kind, Recipients: recipients}); err != nil {
-		slog.WarnContext(ctx, "workflow: approvers not notified", "run_id", run.ID, "error", err)
+		slog.WarnContext(ctx, "workflow: approval notice not sent", "run_id", run.ID, "kind", kind, "error", err)
 	}
 }
 

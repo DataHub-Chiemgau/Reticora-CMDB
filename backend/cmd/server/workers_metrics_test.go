@@ -32,6 +32,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/probe"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/server"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
 )
 
 // scheduledWorkers are the registered workers that run as a system job of
@@ -140,6 +141,55 @@ func TestEveryWorkerExportsRunAndErrorMetrics(t *testing.T) {
 			if after[name].errors <= before[name].errors {
 				t.Errorf("%s: reticora_worker_errors_total %v (before %v), want the forced failure counted", name, after[name].errors, before[name].errors)
 			}
+		}
+	})
+
+	// The system job workflow.approval_sweep (WP-1099 AK5) exports its
+	// runs and errors: on the database that never answers its run fails
+	// and both counters grow.
+	t.Run("approval sweep", func(t *testing.T) {
+		d := systemJobTestDeps(t, env.cfg, true)
+		d.pool = env.pool
+		modules, err := server.ParseModules("workflows")
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.modules = modules
+		var sweep *jobs.Schedule
+		all := systemJobs(d)
+		for i := range all {
+			if all[i].Kind == workflow.ApprovalSweepKind {
+				sweep = &all[i]
+			}
+		}
+		if sweep == nil {
+			t.Fatalf("%s is not a system job with the module workflows", workflow.ApprovalSweepKind)
+		}
+		scrape := func(metric string) float64 {
+			t.Helper()
+			w := cs.do(http.MethodGet, "/metrics", "", "", "", "")
+			for _, line := range strings.Split(w.Body.String(), "\n") {
+				if v, ok := strings.CutPrefix(line, metric+" "); ok {
+					f, perr := strconv.ParseFloat(strings.TrimSpace(v), 64)
+					if perr == nil {
+						return f
+					}
+				}
+			}
+			t.Fatalf("%s not exported", metric)
+			return 0
+		}
+		runs, errs := scrape("reticora_workflow_approval_sweep_runs_total"), scrape("reticora_workflow_approval_sweep_errors_total")
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := sweep.Run(ctx); err == nil {
+			t.Fatal("approval sweep on a database that does not answer: no error")
+		}
+		if got := scrape("reticora_workflow_approval_sweep_runs_total"); got != runs+1 {
+			t.Errorf("reticora_workflow_approval_sweep_runs_total %v -> %v, want one run more", runs, got)
+		}
+		if got := scrape("reticora_workflow_approval_sweep_errors_total"); got != errs+1 {
+			t.Errorf("reticora_workflow_approval_sweep_errors_total %v -> %v, want one error more", errs, got)
 		}
 	})
 

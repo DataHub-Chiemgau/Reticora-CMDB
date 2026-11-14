@@ -14043,7 +14043,12 @@ paths:
         teams and roles of the action, without the initiator unless
         exclude_initiator is false), otherwise 403. A second decision of the
         same user on the same step is 409, a run without a waiting approval
-        400. A rejection cancels step and run; once the approvals reach the
+        400. After its deadline a step stays open until the system job
+        workflow.approval_sweep (every minute, WP-1099) handles it: until
+        then, and after an escalation, decisions are accepted; once the
+        sweep has rejected the step (on_timeout reject or the second expiry
+        of an escalated step) a decision is 400. A rejection cancels
+        step and run; once the approvals reach the
         quorum the run continues (queued as workflow.run), otherwise it keeps
         waiting. The answer names approvals and quorum of the step. Writes
         workflow.approval_decided in the transaction of the decision.
@@ -41424,6 +41429,16 @@ components:
             workflow:approve in client and site of the run among those named
             (none named: every holder), without the initiator unless
             exclude_initiator is false; one rejection cancels the run.
+            Deadlines are evaluated every minute by the system job
+            workflow.approval_sweep (WP-1099): after the deadline reject
+            cancels step and run (error "approval deadline expired",
+            workflow.approval_decided with decision expired, the initiator
+            is notified); escalate adds escalate_to to the circle once
+            (escalated_at and escalated_to in the step output), moves due_at
+            by the deadline and notifies the extended circle, approvals so
+            far keep counting, and a second expiry rejects. With
+            remind_before the approvers without a decision are reminded
+            once (reminded_at).
             Several stages are several require_approval steps. An invalid
             value is 422 on actions[i].<field>. set_ci_field (WP-1097):
             {"type": "set_ci_field", "ci_id": <CI, default the run's CI>,
@@ -41499,6 +41514,16 @@ components:
             workflow:approve in client and site of the run among those named
             (none named: every holder), without the initiator unless
             exclude_initiator is false; one rejection cancels the run.
+            Deadlines are evaluated every minute by the system job
+            workflow.approval_sweep (WP-1099): after the deadline reject
+            cancels step and run (error "approval deadline expired",
+            workflow.approval_decided with decision expired, the initiator
+            is notified); escalate adds escalate_to to the circle once
+            (escalated_at and escalated_to in the step output), moves due_at
+            by the deadline and notifies the extended circle, approvals so
+            far keep counting, and a second expiry rejects. With
+            remind_before the approvers without a decision are reminded
+            once (reminded_at).
             Several stages are several require_approval steps. An invalid
             value is 422 on actions[i].<field>. set_ci_field (WP-1097):
             {"type": "set_ci_field", "ci_id": <CI, default the run's CI>,
@@ -41587,6 +41612,16 @@ components:
             workflow:approve in client and site of the run among those named
             (none named: every holder), without the initiator unless
             exclude_initiator is false; one rejection cancels the run.
+            Deadlines are evaluated every minute by the system job
+            workflow.approval_sweep (WP-1099): after the deadline reject
+            cancels step and run (error "approval deadline expired",
+            workflow.approval_decided with decision expired, the initiator
+            is notified); escalate adds escalate_to to the circle once
+            (escalated_at and escalated_to in the step output), moves due_at
+            by the deadline and notifies the extended circle, approvals so
+            far keep counting, and a second expiry rejects. With
+            remind_before the approvers without a decision are reminded
+            once (reminded_at).
             Several stages are several require_approval steps. An invalid
             value is 422 on actions[i].<field>. set_ci_field (WP-1097):
             {"type": "set_ci_field", "ci_id": <CI, default the run's CI>,
@@ -41673,6 +41708,16 @@ components:
             workflow:approve in client and site of the run among those named
             (none named: every holder), without the initiator unless
             exclude_initiator is false; one rejection cancels the run.
+            Deadlines are evaluated every minute by the system job
+            workflow.approval_sweep (WP-1099): after the deadline reject
+            cancels step and run (error "approval deadline expired",
+            workflow.approval_decided with decision expired, the initiator
+            is notified); escalate adds escalate_to to the circle once
+            (escalated_at and escalated_to in the step output), moves due_at
+            by the deadline and notifies the extended circle, approvals so
+            far keep counting, and a second expiry rejects. With
+            remind_before the approvers without a decision are reminded
+            once (reminded_at).
             Several stages are several require_approval steps. An invalid
             value is 422 on actions[i].<field>. set_ci_field (WP-1097):
             {"type": "set_ci_field", "ci_id": <CI, default the run's CI>,

@@ -1926,3 +1926,4 @@ DIS-06;[P3], Zusatzprotokolle [O];E;collector/collectorcmd/trap_config_test.go;W
 MON-04;[P3];E;frontend/src/components/monitoring/AlertRuleForm.test.tsx;WP-990
 MON-03;[P3];E;frontend/src/pages/MonitoringPage.test.tsx;WP-990
 ALR-05;[P3];E;frontend/src/components/monitoring/AlertRuleForm.test.tsx;WP-990
+WFL-02;[P3];F;backend/internal/workflow/approval_sweep_integration_test.go;WP-1099
