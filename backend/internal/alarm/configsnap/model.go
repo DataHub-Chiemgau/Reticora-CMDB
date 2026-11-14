@@ -12,11 +12,13 @@ import (
 	"context"
 	"errors"
 	"time"
+
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm/configsnap/configtext"
 )
 
 // MaxSize is the largest configuration a version takes, uncompressed and
 // compressed (2 MiB).
-const MaxSize = 2 << 20
+const MaxSize = configtext.MaxSize
 
 // Sources of a configuration.
 const (
@@ -40,7 +42,7 @@ var (
 	// caller's scope.
 	ErrCINotFound = errors.New("ci not found")
 	// ErrTooLarge: the configuration exceeds MaxSize.
-	ErrTooLarge = errors.New("configuration larger than 2 MiB")
+	ErrTooLarge = configtext.ErrTooLarge
 	// ErrHashMismatch: the given SHA-256 is not the hash of the content.
 	ErrHashMismatch = errors.New("sha256 does not match the content")
 	// ErrInvalid: a field is outside its value set (source, trigger,

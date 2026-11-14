@@ -1,10 +1,42 @@
-package configsnap
+// Package configtext holds the text helpers of stored configuration
+// versions (config_snapshot.content): decompression and the count of
+// changed lines. It imports nothing of the backend, so a consumer such as
+// notify can use it without the import of configsnap (whose ingest needs
+// alarm and, through probe and discovery, notify itself).
+package configtext
 
-import "bytes"
+import (
+	"bytes"
+	"compress/gzip"
+	"errors"
+	"fmt"
+	"io"
+)
+
+// MaxSize is the largest configuration a version takes, uncompressed
+// (configsnap.MaxSize).
+const MaxSize = 2 << 20
+
+// ErrTooLarge: the configuration exceeds MaxSize (configsnap.ErrTooLarge).
+var ErrTooLarge = errors.New("configuration larger than 2 MiB")
 
 // Decompress returns the text of a stored version (the content column of
 // config_snapshot), at most MaxSize bytes.
-func Decompress(content []byte) ([]byte, error) { return decompress(content) }
+func Decompress(content []byte) ([]byte, error) {
+	zr, err := gzip.NewReader(bytes.NewReader(content))
+	if err != nil {
+		return nil, fmt.Errorf("configsnap: decompress: %w", err)
+	}
+	defer func() { _ = zr.Close() }()
+	out, err := io.ReadAll(io.LimitReader(zr, MaxSize+1))
+	if err != nil {
+		return nil, fmt.Errorf("configsnap: decompress: %w", err)
+	}
+	if len(out) > MaxSize {
+		return nil, ErrTooLarge
+	}
+	return out, nil
+}
 
 // ChangedLines counts the lines of a configuration version that its
 // predecessor lacks plus the lines of the predecessor it lacks, each line

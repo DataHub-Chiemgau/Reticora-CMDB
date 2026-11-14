@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"regexp"
 	"time"
 
@@ -16,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm/configsnap/configtext"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 )
 
@@ -92,23 +92,6 @@ func prepare(snap *Snapshot) ([]byte, error) {
 		return nil, ErrTooLarge
 	}
 	return buf.Bytes(), nil
-}
-
-// decompress returns the text of a stored version, at most MaxSize bytes.
-func decompress(content []byte) ([]byte, error) {
-	zr, err := gzip.NewReader(bytes.NewReader(content))
-	if err != nil {
-		return nil, fmt.Errorf("configsnap: decompress: %w", err)
-	}
-	defer func() { _ = zr.Close() }()
-	out, err := io.ReadAll(io.LimitReader(zr, MaxSize+1))
-	if err != nil {
-		return nil, fmt.Errorf("configsnap: decompress: %w", err)
-	}
-	if len(out) > MaxSize {
-		return nil, ErrTooLarge
-	}
-	return out, nil
 }
 
 // InsertIfChanged implements Store.
@@ -239,7 +222,7 @@ func (s *PGStore) Get(ctx context.Context, orgID, id string) (*Snapshot, error) 
 	if err != nil {
 		return nil, err
 	}
-	if out.Content, err = decompress(content); err != nil {
+	if out.Content, err = configtext.Decompress(content); err != nil {
 		return nil, err
 	}
 	return out, nil

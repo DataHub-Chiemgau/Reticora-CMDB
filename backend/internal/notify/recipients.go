@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm/configsnap"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/alarm/configsnap/configtext"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
@@ -420,15 +420,15 @@ func (r *PGResolver) ConfigChange(ctx context.Context, orgID, snapshotID, previo
 		if err != nil {
 			return fmt.Errorf("previous config version: %w", err)
 		}
-		cur, err := configsnap.Decompress(current)
+		cur, err := configtext.Decompress(current)
 		if err != nil {
 			return err
 		}
-		prev, err := configsnap.Decompress(previous)
+		prev, err := configtext.Decompress(previous)
 		if err != nil {
 			return err
 		}
-		c.ChangedLines, c.HasPrevious = configsnap.ChangedLines(prev, cur), true
+		c.ChangedLines, c.HasPrevious = configtext.ChangedLines(prev, cur), true
 		return nil
 	})
 	return c, found, err
