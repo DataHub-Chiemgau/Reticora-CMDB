@@ -248,6 +248,9 @@ var typeMetrics = map[string][]string{
 		"probe_if_util_ratio", "probe_if_errors_per_s", "probe_if_discards_per_s", "probe_if_truncated",
 		"probe_if_interfaces", "probe_if_critical_unseen"},
 	"snmp_custom": {"probe_snmp_custom", "probe_snmp_custom_truncated"},
+	"bgp": {"probe_bgp_peer_state", "probe_bgp_established_seconds", "probe_bgp_prefixes_received",
+		"probe_bgp_updates_in_total", "probe_bgp_updates_out_total", "probe_bgp_truncated", "probe_bgp_peers", "probe_bgp_peers_established",
+		"probe_bgp_peers_unseen", "probe_bgp_session_resets"},
 	"ospf": {"probe_ospf_neighbor_state", "probe_ospf_neighbor_events_total", "probe_ospf_neighbors",
 		"probe_ospf_neighbors_full", "probe_ospf_truncated", "probe_ospf_neighbors_unseen"},
 	"isis": {"probe_isis_adjacency_state", "probe_isis_adjacencies", "probe_isis_adjacencies_up",
@@ -365,6 +368,7 @@ var paramChecks = map[string]func(spec *ProbeSpec, params map[string]any) []Fiel
 	"bfd":         checkBFDParams,
 	"optical":     checkOpticalParams,
 	"redfish":     checkRedfishParams,
+	"bgp":         func(_ *ProbeSpec, params map[string]any) []FieldError { return checkBGPParams(params) },
 	"ospf":        func(_ *ProbeSpec, params map[string]any) []FieldError { return checkOSPFParams(params) },
 	"isis":        func(_ *ProbeSpec, params map[string]any) []FieldError { return checkISISParams(params) },
 	"tr069":       func(_ *ProbeSpec, params map[string]any) []FieldError { return checkTR069Params(params) },
@@ -570,6 +574,35 @@ func checkRedfishParams(spec *ProbeSpec, params map[string]any) []FieldError {
 	crit, critField, hasCrit := level("temp_crit")
 	if hasWarn && hasCrit && crit <= warn {
 		errs = append(errs, FieldError{Field: critField, Message: "temp_crit must be above temp_warn"})
+	}
+	return errs
+}
+
+// checkBGPParams checks the bgp parameters (PRT-07, WP-1001 AK3): every
+// peers[i].address is an IPv4 or IPv6 address, listed once.
+func checkBGPParams(params map[string]any) []FieldError {
+	items, _ := params["peers"].([]any)
+	var errs []FieldError
+	seen := map[netip.Addr]bool{}
+	for i, item := range items {
+		obj, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		s, ok := obj["address"].(string)
+		if !ok {
+			continue
+		}
+		field := fmt.Sprintf("params.peers[%d].address", i)
+		addr, err := netip.ParseAddr(strings.TrimSpace(s))
+		switch {
+		case err != nil:
+			errs = append(errs, FieldError{Field: field, Message: "must be an IPv4 or IPv6 address"})
+		case seen[addr.WithZone("").Unmap()]:
+			errs = append(errs, FieldError{Field: field, Message: "is listed twice"})
+		default:
+			seen[addr.WithZone("").Unmap()] = true
+		}
 	}
 	return errs
 }

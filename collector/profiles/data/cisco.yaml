@@ -38,6 +38,41 @@
   # BFD-STD-MIB (bfd, WP-1003), and the optical levels in
   # CISCO-ENTITY-SENSOR-MIB (optical, WP-1004).
   monitor:
+    # BGP (PRT-07, WP-1001): CISCO-BGP4-MIB (1.3.6.1.4.1.9.9.187) with
+    # IPv4 and IPv6 peers. cbgpPeer2Entry 1.3.6.1.4.1.9.9.187.1.2.5.1,
+    # index cbgpPeer2Type + cbgpPeer2RemoteAddr (InetAddress):
+    # cbgpPeer2State (3), cbgpPeer2AdminStatus (4, stop(1), start(2)),
+    # cbgpPeer2RemoteAs (11), cbgpPeer2InUpdates (13),
+    # cbgpPeer2FsmEstablishedTransitions (18),
+    # cbgpPeer2FsmEstablishedTime (19). Prefixes:
+    # cbgpPeer2AddrFamilyPrefixEntry 1.3.6.1.4.1.9.9.187.1.2.8.1,
+    # cbgpPeer2AcceptedPrefixes (1), index peer + AFI + SAFI.
+    bgp:
+      tables:
+        peers:
+          index: inet
+          columns:
+            state: 1.3.6.1.4.1.9.9.187.1.2.5.1.3
+            admin_status: 1.3.6.1.4.1.9.9.187.1.2.5.1.4
+            remote_as: 1.3.6.1.4.1.9.9.187.1.2.5.1.11
+            in_updates: 1.3.6.1.4.1.9.9.187.1.2.5.1.13
+            established_transitions: 1.3.6.1.4.1.9.9.187.1.2.5.1.18
+            established_time: 1.3.6.1.4.1.9.9.187.1.2.5.1.19
+          enums:
+            state:
+              '1': idle
+              '2': connect
+              '3': active
+              '4': openSent
+              '5': openConfirm
+              '6': established
+            admin_status:
+              '1': down
+              '2': up
+        prefixes:
+          index: composite:[inet,int,int]
+          columns:
+            prefixes: 1.3.6.1.4.1.9.9.187.1.2.8.1.1
     bfd:
       tables:
         sessions:

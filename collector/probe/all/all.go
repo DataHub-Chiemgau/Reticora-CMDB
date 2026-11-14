@@ -16,7 +16,8 @@ import (
 	_ "github.com/DataHub-Chiemgau/Reticora-CMDB/collector/probe/snmpif"
 	// snmp_custom: configured OIDs with kind, scale and thresholds (WP-997).
 	_ "github.com/DataHub-Chiemgau/Reticora-CMDB/collector/probe/snmpcustom"
-	// ospf and isis over the standard MIBs (WP-1002).
+	// ospf and isis over the standard MIBs (WP-1002), bgp over BGP4-MIB and
+	// the BGP4-V2 profiles (WP-1001).
 	_ "github.com/DataHub-Chiemgau/Reticora-CMDB/collector/probe/routing"
 	// tr069: read-only ACS adapter, GenieACS NBI (WP-1018).
 	_ "github.com/DataHub-Chiemgau/Reticora-CMDB/collector/probe/tr069"

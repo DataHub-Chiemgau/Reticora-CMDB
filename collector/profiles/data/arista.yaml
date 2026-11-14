@@ -38,6 +38,48 @@
   # aristaEntSensorThresholdHighWarning (3),
   # aristaEntSensorThresholdHighCritical (4).
   monitor:
+    # BGP (PRT-07, WP-1001): ARISTA-BGP4V2-MIB (aristaBgp4V2,
+    # 1.3.6.1.4.1.30065.4.1). aristaBgp4V2PeerEntry
+    # 1.3.6.1.4.1.30065.4.1.1.2.1, index instance + remote InetAddress:
+    # RemoteAs (10), AdminStatus (12, halted(1), running(2)), State (13).
+    # aristaBgp4V2PeerEventTimesEntry 1.3.6.1.4.1.30065.4.1.1.4.1:
+    # FsmEstablishedTime (1); aristaBgp4V2PeerCountersEntry
+    # 1.3.6.1.4.1.30065.4.1.1.7.1: InUpdates (1),
+    # FsmEstablishedTransitions (5); aristaBgp4V2PrefixGaugesEntry
+    # 1.3.6.1.4.1.30065.4.1.1.8.1: PrefixInPrefixesAccepted (4), index
+    # peer + AFI + SAFI.
+    bgp:
+      tables:
+        peers:
+          index: composite:[int,inet]
+          columns:
+            remote_as: 1.3.6.1.4.1.30065.4.1.1.2.1.10
+            admin_status: 1.3.6.1.4.1.30065.4.1.1.2.1.12
+            state: 1.3.6.1.4.1.30065.4.1.1.2.1.13
+          enums:
+            state:
+              '1': idle
+              '2': connect
+              '3': active
+              '4': openSent
+              '5': openConfirm
+              '6': established
+            admin_status:
+              '1': down
+              '2': up
+        counters:
+          index: composite:[int,inet]
+          columns:
+            in_updates: 1.3.6.1.4.1.30065.4.1.1.7.1.1
+            established_transitions: 1.3.6.1.4.1.30065.4.1.1.7.1.5
+        event_times:
+          index: composite:[int,inet]
+          columns:
+            established_time: 1.3.6.1.4.1.30065.4.1.1.4.1.1
+        prefixes:
+          index: composite:[int,inet,int,int]
+          columns:
+            prefixes: 1.3.6.1.4.1.30065.4.1.1.8.1.4
     optical:
       tables:
         sensor_thresholds:

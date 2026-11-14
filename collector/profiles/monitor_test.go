@@ -266,8 +266,10 @@ func TestMonitorOverrideFromDir(t *testing.T) {
 		shipped = r.List()[0]
 	}
 	dir := t.TempDir()
-	if _, has := shipped.Monitor["bgp"]; has {
-		t.Fatalf("shipped profile %s has a bgp section already", shipped.Name)
+	// The shipped bgp section (WP-1001) has a prefix table; the override
+	// replaces the section by its single peers table.
+	if len(shipped.Monitor["bgp"].Tables) == 1 {
+		t.Fatalf("shipped profile %s: bgp section %+v, want more than the override's one table", shipped.Name, shipped.Monitor["bgp"])
 	}
 	override := `
 - name: ` + shipped.Name + `
@@ -293,7 +295,7 @@ func TestMonitorOverrideFromDir(t *testing.T) {
 		t.Fatalf("LoadDir: %v", err)
 	}
 	got, _ := r.Get(shipped.Name)
-	if got.Monitor["bgp"].Tables["peers"].Index != IndexInet {
+	if peers := got.Monitor["bgp"].Tables["peers"]; peers.Index != IndexInet || len(peers.Columns) != 1 || len(got.Monitor["bgp"].Tables) != 1 {
 		t.Fatalf("monitor section of %s after LoadDir: %+v", shipped.Name, got.Monitor)
 	}
 	if len(shipped.SysObjectIDs) > 0 {

@@ -1,5 +1,6 @@
 // Package routing holds the routing protocol probe types of the collector
-// (PRT-07, E-183): ospf and isis over the standard MIBs (WP-1002). Each
+// (PRT-07, E-183): ospf and isis over the standard MIBs (WP-1002) and bgp
+// over BGP4-MIB with the BGP4-V2 tables of the profiles (WP-1001). Each
 // type registers its executor in init(); the collector links the package
 // in through collector/probe/all.
 //

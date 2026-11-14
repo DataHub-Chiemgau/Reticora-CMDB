@@ -451,6 +451,66 @@ Werte: `probe_redfish_health` (0 OK, 1 Warning, 2 Critical),
 (0/1/2); Namen als `<Chassis-Id>/<Sensor>`. Die `ci_id` setzt die
 Metrik-Brücke aus der Probe (WP-976).
 
+## BGP-Peers (`bgp`)
+
+Standard nach PRT-07: Intervall 60 s (60 s–24 h), Timeout 10 s (1–30 s),
+Down-Count 3, Up-Count 1, höchstens 2000 Peers je Prüfung, Zugangsdaten
+aus dem Namespace `snmp` (gNMI als Quelle folgt mit WP-1017). Der Typ
+liegt im Unterpaket `collector/probe/routing`. Kern ist `bgpPeerTable`
+der BGP4-MIB (RFC 4273, `1.3.6.1.2.1.15.3.1`: `bgpPeerState` mit
+`established` = 6, `bgpPeerAdminStatus`, `bgpPeerRemoteAs`,
+`bgpPeerInUpdates`, `bgpPeerOutUpdates`,
+`bgpPeerFsmEstablishedTransitions`, `bgpPeerFsmEstablishedTime`; nur
+IPv4-Peers, keine Prefix-Zähler). Hat das Profil des Ziels
+`monitor.bgp`, liest die Probe dessen Tabellen: `peers` (Spalten
+`state`, `admin_status`, `remote_as`, optional `remote_addr_type`,
+`remote_addr`, `peer_index`, Zähler), `counters` und `event_times`
+(gleicher Schlüssel wie der Peer: `peer_index` oder sein Zeilenindex) und
+`prefixes` (Schlüssel + AFI + SAFI). Mitgeliefert sind `cisco-ios-snmp`
+(CISCO-BGP4-MIB `cbgpPeer2Table`, `cbgpPeer2AddrFamilyPrefixTable`),
+`juniper-junos-snmp` (BGP4-V2-MIB-JUNIPER `jnxBgpM2PeerTable`,
+`jnxBgpM2PrefixCountersTable`) und `arista-eos-snmp` (ARISTA-BGP4V2-MIB
+`aristaBgp4V2PeerTable`, `aristaBgp4V2PrefixGaugesTable`), alle mit
+`inet`-Index und IPv6-Peers.
+
+Parameter: `peers[]` (`{address, remote_as, min_prefixes}`, je Adresse
+einmal), `all_peers` (Standard `false`; dann gelten alle Peers mit
+Admin-Status start als erwartet) und `max_peers` (Standard und Höchstwert
+2000). Ein erwarteter Peer, der fehlt oder nicht `established` ist,
+ergibt `fail` mit `check_failed` (Label `peer`). Eine abweichende
+`remote_as`, weniger angenommene Prefixe als `min_prefixes` (nur mit
+Prefix-Zählern des Profils) oder ein Session-Reset seit dem Vorlauf
+(`FsmEstablishedTransitions` gestiegen oder `FsmEstablishedTime` kleiner
+als der Vorwert im Vorwertspeicher) ergeben `ok` mit `check_failed`
+(`degraded`). Admin-gestoppte Peers gehen nicht in die Bewertung ein.
+Meldet die 2-Byte-Spalte `bgpPeerRemoteAs` der BGP4-MIB AS_TRANS (23456)
+für einen erwarteten 4-Byte-AS (über 65535), ist das keine Abweichung.
+Steht dieselbe Peer-Adresse in mehreren Routing-Instanzen (VRFs), gilt sie
+als ein erwarteter Peer, die schlechteste Zeile entscheidet; die
+Vorwerte für die Reset-Erkennung liegen je Zeile (`peer_index` bzw.
+Zeilenindex), nicht je Adresse.
+
+Werte je Peer (Labels `peer`, `remote_as`; bei mehrfach vorkommender
+Adresse zusätzlich `instance`): `probe_bgp_peer_state`
+(Rohwert 1–6), `probe_bgp_established_seconds`,
+`probe_bgp_updates_in_total` und `probe_bgp_updates_out_total`
+(Zählerstände `bgpPeerInUpdates`/`bgpPeerOutUpdates`, keine Rate) und
+`probe_bgp_prefixes_received` (zusätzlich Label `afi`: `ipv4`, `ipv6`,
+sonst `<afi>.<safi>`);
+dazu `probe_bgp_peers`, `probe_bgp_peers_established` und
+`probe_bgp_session_resets`. Mehr Zeilen als `max_peers` brechen den Walk
+ab (`probe_bgp_truncated` = 1); erwartete Peers dahinter erzeugen keinen
+Zustand (`probe_bgp_peers_unseen`), liegen alle dahinter, ist das Ergebnis
+`error`/`response_too_large`. Die Zusatztabellen des Profils (`counters`,
+`event_times`, `prefixes`) liest die Probe unabhängig von `max_peers` bis
+2000 Zeilen (Prefixe: 8 Adressfamilien je Peer). Bricht der Prefix-Walk
+ab, meldet sie `probe_bgp_truncated` = 1; ein erwarteter Peer mit
+`min_prefixes` ohne Prefix-Zeilen zählt dann zu `probe_bgp_peers_unseen`
+statt still als erfüllt. Passen die Werte nicht mehr in eine
+Uplink-Nachricht (Budget 192 KiB), entfallen die Werte weiterer Peers
+(`probe_bgp_truncated` = 1); der Zustand bewertet weiter alle Zeilen. SNMP-Timeout → `fail`/`timeout`,
+abgewiesener SNMPv3-Zugang → `error`/`auth_failed`.
+
 ## OSPF-Nachbarn (`ospf`) und IS-IS-Adjazenzen (`isis`)
 
 Standard nach PRT-07: Intervall 60 s (60 s–24 h), Timeout 10 s (1–30 s),
@@ -614,7 +674,7 @@ nach E-154; WP-1023 misst die Raten nach.
 | `snmp_if` | available | 300 / 60 / 86400 | 10 / 1 / 30 | 3 / 1 | 1 | 16 | 50 | 4 | 1048576 | 1024 | snmp | – |
 | `snmp_custom` | available | 300 / 30 / 86400 | 10 / 1 / 15 | 3 / 1 | 1 | 16 | 100 | 8 | 65536 | 256 | snmp | – |
 | `redfish` | available | 300 / 60 / 86400 | 15 / 1 / 60 | 3 / 1 | 1 | 8 | 20 | 2 | 1048576 | 256 | redfish | – |
-| `bgp` | planned | 60 / 30 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 4096 | snmp, gnmi | – |
+| `bgp` | available | 60 / 60 / 86400 | 10 / 1 / 30 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 2000 | snmp | – |
 | `ospf` | available | 60 / 60 / 86400 | 10 / 1 / 30 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 1000 | snmp | – |
 | `isis` | available | 60 / 60 / 86400 | 10 / 1 / 30 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 1000 | snmp | – |
 | `bfd` | available | 60 / 30 / 86400 | 5 / 1 / 30 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 1000 | snmp | – |

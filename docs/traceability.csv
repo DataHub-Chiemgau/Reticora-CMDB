@@ -1939,3 +1939,4 @@ PRT-06;[P3];E;collector/probe/snmpif/snmpif_test.go;WP-996
 MON-03;[P3];E;collector/probe/snmpif/snmpif_test.go;WP-996
 MON-04;[P3];E;collector/probe/snmpif/snmpif_test.go;WP-996
 MON-03;[P3];E;collector/probe/snmpcustom/snmpcustom_test.go;WP-997
+PRT-07;[P3];E;collector/probe/routing/bgp_test.go;WP-1001

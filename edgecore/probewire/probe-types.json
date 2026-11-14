@@ -784,13 +784,13 @@
       }
     },
     "bgp": {
-      "status": "planned",
-      "min_interval_s": 30,
+      "status": "available",
+      "min_interval_s": 60,
       "default_interval_s": 60,
       "max_interval_s": 86400,
       "min_timeout_s": 1,
       "default_timeout_s": 10,
-      "max_timeout_s": 60,
+      "max_timeout_s": 30,
       "default_down_count": 3,
       "default_up_count": 1,
       "max_parallel_per_target": 1,
@@ -798,32 +798,57 @@
       "max_rate_per_collector": 50,
       "max_probes_per_target": 2,
       "max_payload_bytes": 1048576,
-      "max_rows": 4096,
+      "max_rows": 2000,
       "credential_namespaces": [
-        "snmp",
-        "gnmi"
+        "snmp"
       ],
       "capabilities": [],
       "params": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "expected_peers": {
+          "peers": {
             "type": "array",
+            "maxItems": 2000,
+            "description": "Expected peers; each must be present and established, else the probe is down.",
             "items": {
-              "type": "string",
-              "maxLength": 64
-            },
-            "maxItems": 256
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "address"
+              ],
+              "properties": {
+                "address": {
+                  "type": "string",
+                  "minLength": 2,
+                  "maxLength": 45,
+                  "description": "Peer address (IPv4 or IPv6)."
+                },
+                "remote_as": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295,
+                  "description": "Expected AS of the peer; another is degraded."
+                },
+                "min_prefixes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "Fewer received prefixes (profiles with prefix counters) is degraded."
+                }
+              }
+            }
           },
-          "source": {
-            "type": "string",
-            "enum": [
-              "snmp",
-              "gnmi"
-            ],
-            "default": "snmp",
-            "description": "Data source (SNMP MIB or gNMI/OpenConfig)."
+          "all_peers": {
+            "type": "boolean",
+            "default": false,
+            "description": "Every peer with admin status start is expected."
+          },
+          "max_peers": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2000,
+            "default": 2000,
+            "description": "Peer rows read per check; more truncate the walk."
           }
         }
       }
