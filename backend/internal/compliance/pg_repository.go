@@ -646,6 +646,82 @@ var historyKeys = map[string]struct{ dimension, key, label string }{
 	GroupSite:     {GroupOverall, `COALESCE(site_id::text, '')`, scoreGroupKeys[GroupSite].label},
 }
 
+// CIResult is a result of a rule on a CI with the name and severity of the
+// rule (the BFF, WP-1136).
+type CIResult struct {
+	CIID            string
+	RuleID          string
+	RuleName        string
+	Severity        string
+	Status          string
+	EvaluatedAt     time.Time
+	StatusChangedAt time.Time
+}
+
+// ResultsByCIs returns, for the BFF (GQL-02, WP-1136), up to perCI results
+// of each CI of ciIDs with status (empty: every status), the failing ones
+// first and then by rule name, in one statement (row_number per ci_id)
+// under row level security and the scope of ctx.
+func (r *PGRepository) ResultsByCIs(ctx context.Context, orgID string, ciIDs []string, status string, perCI int) ([]CIResult, error) {
+	out := []CIResult{}
+	if len(ciIDs) == 0 {
+		return out, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT ci_id, rule_id, name, severity, status, evaluated_at, status_changed_at FROM (
+				SELECT r.ci_id::text AS ci_id, r.rule_id::text AS rule_id, ru.name, ru.severity, r.status, r.evaluated_at, r.status_changed_at,
+					row_number() OVER (PARTITION BY r.ci_id ORDER BY (r.status = 'fail') DESC, ru.name, r.rule_id) AS rn
+				FROM compliance_result r JOIN compliance_rule ru ON ru.id = r.rule_id AND ru.organization_id = r.organization_id
+				WHERE r.organization_id = $1 AND r.ci_id = ANY ($2::uuid[]) AND ($3 = '' OR r.status = $3)
+				  AND `+strings.ReplaceAll(resultVisible, "compliance_result.", "r.")+`
+			) x WHERE rn <= $4 ORDER BY ci_id, rn`, orgID, ciIDs, status, perCI)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var c CIResult
+			if err := rows.Scan(&c.CIID, &c.RuleID, &c.RuleName, &c.Severity, &c.Status, &c.EvaluatedAt, &c.StatusChangedAt); err != nil {
+				return err
+			}
+			out = append(out, c)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// ScoresByCIs returns, for the BFF (WP-1136), the weighted score of each CI
+// of ciIDs that has a result (group_by=ci of WP-1127 for these CIs only),
+// in one statement under row level security and the scope of ctx.
+func (r *PGRepository) ScoresByCIs(ctx context.Context, orgID string, ciIDs []string) (map[string]ScoreGroup, error) {
+	out := map[string]ScoreGroup{}
+	if len(ciIDs) == 0 {
+		return out, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `WITH `+scoreWeights+`
+			SELECT r.ci_id::text, `+scoreSums+`
+			FROM compliance_result r JOIN compliance_rule ru ON ru.id = r.rule_id CROSS JOIN w
+			WHERE r.organization_id = $1 AND r.ci_id = ANY ($3::uuid[]) AND `+strings.ReplaceAll(resultVisible, "compliance_result.", "r.")+`
+			GROUP BY r.ci_id`, orgID, weightsJSON(DefaultWeights()), ciIDs)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			var s Sums
+			if err := rows.Scan(&id, &s.Passed, &s.Failed, &s.NotApplicable, &s.PassedWeight, &s.FailedWeight); err != nil {
+				return err
+			}
+			out[id] = groupOf(id, "", &s)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 // ScoreHistory implements ScoreStore: the snapshot rows the caller sees
 // (their client and site under row level security) summed per day and
 // key; the score follows from the sums.

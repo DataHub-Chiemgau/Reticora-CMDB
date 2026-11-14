@@ -233,6 +233,57 @@ func (r *PGRepository) DeleteDefinition(ctx context.Context, orgID, id string) e
 	})
 }
 
+// CIRun is a run on a CI with the name of its definition and the number of
+// its definition version, without the steps (the BFF, WP-1136).
+type CIRun struct {
+	ID           string
+	CIID         string
+	WorkflowID   string
+	WorkflowName string
+	Version      int
+	Status       string
+	Trigger      string
+	StartedAt    *time.Time
+	FinishedAt   *time.Time
+	CreatedAt    time.Time
+}
+
+// RunsByCIs returns, for the BFF (GQL-02, WP-1136), up to perCI runs of
+// each CI of ciIDs with status (empty: every status), newest first per CI,
+// in one statement (row_number per ci_id) under row level security and the
+// scope of ctx; neither context nor steps are read.
+func (r *PGRepository) RunsByCIs(ctx context.Context, orgID string, ciIDs []string, status string, perCI int) ([]CIRun, error) {
+	out := []CIRun{}
+	if len(ciIDs) == 0 {
+		return out, nil
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT id, ci_id, workflow_id, name, version, status, trigger, started_at, finished_at, created_at FROM (
+				SELECT r.id::text AS id, r.ci_id::text AS ci_id, r.workflow_id::text AS workflow_id, COALESCE(d.name, '') AS name,
+					COALESCE(v.version, 0) AS version, r.status, r.trigger, r.started_at, r.finished_at, r.created_at,
+					row_number() OVER (PARTITION BY r.ci_id ORDER BY r.created_at DESC, r.id DESC) AS rn
+				FROM workflow_run r
+				LEFT JOIN workflow_def d ON d.id = r.workflow_id AND d.organization_id = r.organization_id
+				LEFT JOIN workflow_def_version v ON v.id = r.definition_version_id AND v.organization_id = r.organization_id
+				WHERE r.organization_id = $1 AND r.ci_id = ANY ($2::uuid[]) AND ($3 = '' OR r.status = $3)
+			) x WHERE rn <= $4 ORDER BY ci_id, rn`, orgID, ciIDs, status, perCI)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var c CIRun
+			if err := rows.Scan(&c.ID, &c.CIID, &c.WorkflowID, &c.WorkflowName, &c.Version, &c.Status, &c.Trigger, &c.StartedAt,
+				&c.FinishedAt, &c.CreatedAt); err != nil {
+				return err
+			}
+			out = append(out, c)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 // ListRuns implements Repository: the visible runs that match f, newest
 // first on (created_at, id) with the keyset of api.NewestFirstSQL (WP-1092
 // AK3), with their steps.

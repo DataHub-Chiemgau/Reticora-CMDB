@@ -3,6 +3,7 @@ package graphqlbff
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
+	compliancepkg "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/compliance"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database/scopetest"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/document"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/entitlement"
@@ -18,7 +21,9 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/relationship"
+	securitypkg "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/security"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
+	workflowpkg "github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/workflow"
 )
 
 // TestAssetAggregateQueryBudget covers ABN-02 for the asset detail
@@ -175,4 +180,213 @@ func TestAssetAggregateQueryBudget(t *testing.T) {
 		_, err := aggregate(large)
 		return err
 	})
+}
+
+// TestCIP3FieldsQueryBudget covers WP-1136 AK4/AK6 against PostgreSQL in a
+// database of its own: cis(first: 100) with findings, complianceResults,
+// complianceScore and workflowRuns of 10 and of 100 CIs (three findings,
+// results and runs each) costs the same statements, apart from the one
+// count of the full page of CIs the cis resolver reads (a page that is not
+// full needs none): each field reads its rows for all CIs of the page in
+// one statement (row_number per CI). A user restricted to client 1 sees
+// only the CIs of client 1 and only their findings, and the batch sources
+// return nothing for CIs of client 2 even when asked for them.
+//
+// Retest (locally without TimescaleDB with scopetest.MigrationsDirEnv):
+//
+//	cd backend && go test -count=1 -run TestCIP3FieldsQueryBudget ./internal/graphqlbff/
+func TestCIP3FieldsQueryBudget(t *testing.T) {
+	scopetest.BudgetDatabase(t)
+	f := scopetest.Seed(t, "31")
+	bg := context.Background()
+	var types []string
+	rows, err := f.Admin.Query(bg, `SELECT id::text FROM ci_type WHERE organization_id IS NULL ORDER BY key LIMIT 3`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		types = append(types, id)
+	}
+	rows.Close()
+	if len(types) != 3 {
+		t.Fatalf("system CI types %v, want three", types)
+	}
+	scope := database.OrgWideScope(f.OrgA, f.User)
+	orgCtx := tenant.WithTenant(database.ContextWithTenantScope(bg, &scope), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User})
+	compliance := compliancepkg.NewPGRepository(f.App)
+	var rules []string
+	for i := range 3 {
+		r := &compliancepkg.Rule{OrganizationID: f.OrgA, Name: fmt.Sprintf("wp1136-rule-%d", i), Severity: "high", Category: "hardening",
+			Expression: compliancepkg.JSONMap{"op": "not_empty", "field": "name"}, Active: true}
+		if err := compliance.CreateRule(orgCtx, r); err != nil {
+			t.Fatal(err)
+		}
+		rules = append(rules, r.ID)
+	}
+	runs := workflowpkg.NewPGRepository(f.App)
+	def := &workflowpkg.Definition{OrganizationID: f.OrgA, Name: "wp1136-retire", Trigger: workflowpkg.JSONMap{"type": "manual"},
+		Actions: []workflowpkg.JSONMap{{"type": "noop"}}, Active: true}
+	if err := runs.CreateDefinition(orgCtx, def); err != nil {
+		t.Fatal(err)
+	}
+	// seed inserts n CIs of client of the type with three findings, three
+	// results and three runs each.
+	seed := func(prefix, client, typeID string, n int) {
+		t.Helper()
+		for _, stmt := range []struct {
+			what string
+			sql  string
+			args []any
+		}{
+			{"CIs", `INSERT INTO ci (organization_id, client_id, ci_type_id, name, status)
+				SELECT $1, $2, $3, $4 || '-' || i, 'active' FROM generate_series(1, $5::int) AS i`, []any{f.OrgA, client, typeID, prefix, n}},
+			{"findings", `INSERT INTO security_finding (organization_id, ci_id, kind, severity, title, fingerprint, last_seen_at)
+				SELECT $1, c.id, 'vulnerability', 'high', 'CVE-2026-' || i, c.id::text || '-' || i, now()
+				FROM ci c CROSS JOIN generate_series(1, 3) AS i WHERE c.organization_id = $1 AND c.name LIKE $2 || '-%'`, []any{f.OrgA, prefix}},
+			{"results", `INSERT INTO compliance_result (organization_id, rule_id, ci_id, ci_type_id, status)
+				SELECT $1, r.id, c.id, c.ci_type_id, 'fail' FROM ci c CROSS JOIN unnest($3::uuid[]) AS r(id)
+				WHERE c.organization_id = $1 AND c.name LIKE $2 || '-%'`, []any{f.OrgA, prefix, rules}},
+			{"runs", `INSERT INTO workflow_run (organization_id, workflow_id, definition_version_id, status, trigger, context, ci_id)
+				SELECT $1, $3, $4, 'succeeded', 'manual', '{}'::jsonb, c.id FROM ci c CROSS JOIN generate_series(1, 3)
+				WHERE c.organization_id = $1 AND c.name LIKE $2 || '-%'`, []any{f.OrgA, prefix, def.ID, def.CurrentVersionID}},
+		} {
+			if _, err := f.Admin.Exec(bg, stmt.sql, stmt.args...); err != nil {
+				t.Fatalf("seed %s of %s: %v", stmt.what, prefix, err)
+			}
+		}
+	}
+	seed("wp1136-small", f.Client1, types[0], 10)
+	seed("wp1136-large", f.Client1, types[1], maxPage)
+	seed("wp1136-other", f.Client2, types[2], 5)
+	if _, err := f.Admin.Exec(bg, `ANALYZE ci, security_finding, compliance_result, workflow_run`); err != nil {
+		t.Fatal(err)
+	}
+
+	trace := scopetest.NewQueryTrace(t, f.App)
+	perms := []identity.Permission{identity.PermCIRead, identity.PermFindingRead, identity.PermComplianceRead, identity.PermWorkflowRead}
+	h := NewHandler(ci.NewPGRepository(trace.Pool), relationship.NewPGRepository(trace.Pool)).
+		WithEntitlements(entitled{FeatureCMDBCore: true, entitlement.FeatureComplianceFindings: true, entitlement.FeatureWorkflows: true}).
+		WithSources(&Sources{Findings: securitypkg.NewPGRepository(trace.Pool), Compliance: compliancepkg.NewPGRepository(trace.Pool),
+			WorkflowRuns: workflowpkg.NewPGRepository(trace.Pool)}).
+		WithModules(modules{ModuleFindings: true, ModuleCompliance: true, ModuleWorkflows: true})
+	query := func(ctx context.Context, typeID string) assetResponse {
+		t.Helper()
+		q := `{ cis(first: ` + itoa(maxPage) + `, filter: {typeId: "` + typeID + `"}) { nodes { id clientId findings(first: 3) { id ciId }
+			complianceResults(first: 3) { ruleId } complianceScore { failed } workflowRuns(first: 3) { id version } } } }`
+		req := httptest.NewRequest(http.MethodPost, Path, strings.NewReader(gql(q)))
+		req.Header.Set("Content-Type", "application/json")
+		ctx = identity.WithPrincipal(ctx, identity.Principal{Subject: f.User, OrganizationID: f.OrgA, Permissions: perms, Type: identity.PrincipalTypeUser})
+		ctx = permission.WithPolicy(ctx, permission.UnrestrictedPolicy(perms))
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req.WithContext(ctx))
+		var out assetResponse
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &out) != nil || len(out.Errors) != 0 {
+			t.Fatalf("POST %s: %d %s", Path, w.Code, w.Body.String())
+		}
+		return out
+	}
+	nodesOf := func(resp assetResponse) []map[string]any {
+		conn, _ := resp.Data["cis"].(map[string]any)
+		raw, _ := conn["nodes"].([]any)
+		out := make([]map[string]any, 0, len(raw))
+		for _, n := range raw {
+			m, _ := n.(map[string]any)
+			out = append(out, m)
+		}
+		return out
+	}
+	statements := func(typeID string, n int) (all, counts int) {
+		t.Helper()
+		var resp assetResponse
+		stmts := trace.Run(t, func() error {
+			resp = query(orgCtx, typeID)
+			return nil
+		})
+		nodes := nodesOf(resp)
+		if len(nodes) != n {
+			t.Fatalf("type %s: %d CIs, want %d", typeID, len(nodes), n)
+		}
+		for _, node := range nodes {
+			findings, _ := node["findings"].([]any)
+			results, _ := node["complianceResults"].([]any)
+			runList, _ := node["workflowRuns"].([]any)
+			score, _ := node["complianceScore"].(map[string]any)
+			if len(findings) != 3 || len(results) != 3 || len(runList) != 3 || score["failed"] != 3.0 {
+				t.Fatalf("CI %v: %d findings, %d results, %d runs, score %v; want three each", node["id"], len(findings), len(results), len(runList), score)
+			}
+		}
+		for _, s := range stmts {
+			if strings.HasPrefix(s.SQL, "SELECT COUNT(*) FROM ci WHERE") {
+				counts++
+			}
+		}
+		return len(stmts), counts
+	}
+	statements(types[0], 10) // warm the pool
+	ten, tenCounts := statements(types[0], 10)
+	hundred, counts := statements(types[1], maxPage)
+	if tenCounts != 0 || counts != 1 || ten != hundred-counts {
+		t.Errorf("P3 fields: %d statements for 10 CIs (%d counts), %d for %d of which %d count the full page; want equal apart from one count (N+1)",
+			ten, tenCounts, hundred, maxPage, counts)
+	}
+	t.Logf("P3 fields: %d statements for 10 CIs, %d for %d", ten, hundred, maxPage)
+
+	// A user of client 1 sees the CIs of client 1 and only their findings.
+	bound := database.OrgWideScope(f.OrgA, f.User)
+	bound.Clients = database.ScopeIDs(f.Client1)
+	clientCtx := tenant.WithTenant(database.ContextWithTenantScope(bg, &bound), tenant.TenantInfo{OrganizationID: f.OrgA, UserID: f.User, ClientID: f.Client1})
+	// The batch sources themselves filter on the CIs the scope sees: asked
+	// for the CIs of client 2 they return nothing (the seeded rows carry no
+	// client of their own, which the policies show every client).
+	var others []string
+	orows, oerr := f.Admin.Query(bg, `SELECT id::text FROM ci WHERE organization_id = $1 AND name LIKE 'wp1136-other-%'`, f.OrgA)
+	if oerr != nil {
+		t.Fatal(oerr)
+	}
+	for orows.Next() {
+		var id string
+		if err := orows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		others = append(others, id)
+	}
+	orows.Close()
+	if len(others) != 5 {
+		t.Fatalf("CIs of client 2: %v", others)
+	}
+	if got, err := securitypkg.NewPGRepository(f.App).FindingsByCIs(clientCtx, f.OrgA, others, nil, 3); err != nil || len(got) != 0 {
+		t.Errorf("findings of the CIs of client 2 for client 1: %d %v, want none", len(got), err)
+	}
+	if got, err := compliance.ResultsByCIs(clientCtx, f.OrgA, others, "", 3); err != nil || len(got) != 0 {
+		t.Errorf("results of the CIs of client 2 for client 1: %d %v, want none", len(got), err)
+	}
+	if got, err := compliance.ScoresByCIs(clientCtx, f.OrgA, others); err != nil || len(got) != 0 {
+		t.Errorf("scores of the CIs of client 2 for client 1: %d %v, want none", len(got), err)
+	}
+	if got, err := runs.RunsByCIs(clientCtx, f.OrgA, others, "", 3); err != nil || len(got) != 0 {
+		t.Errorf("runs of the CIs of client 2 for client 1: %d %v, want none", len(got), err)
+	}
+	nodes := nodesOf(query(clientCtx, types[0]))
+	if len(nodes) != 10 {
+		t.Fatalf("client 1 sees %d CIs of the type, want its 10", len(nodes))
+	}
+	mine := map[string]bool{}
+	for _, node := range nodes {
+		if node["clientId"] != f.Client1 {
+			t.Errorf("client 1 sees CI %v of client %v", node["id"], node["clientId"])
+		}
+		mine[node["id"].(string)] = true
+	}
+	for _, node := range nodes {
+		findings, _ := node["findings"].([]any)
+		for _, raw := range findings {
+			if ciID, _ := raw.(map[string]any)["ciId"].(string); !mine[ciID] {
+				t.Errorf("client 1 sees a finding of CI %s", ciID)
+			}
+		}
+	}
 }

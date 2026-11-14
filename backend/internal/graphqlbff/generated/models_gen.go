@@ -3,6 +3,8 @@
 package generated
 
 import (
+	"time"
+
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/history"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/movement"
@@ -28,6 +30,47 @@ type CIFilter struct {
 	ClientID *string `json:"clientId,omitempty"`
 	SiteID   *string `json:"siteId,omitempty"`
 	Search   *string `json:"search,omitempty"`
+}
+
+// The result of a compliance rule on a CI (WP-1126).
+type ComplianceResult struct {
+	RuleID          string    `json:"ruleId"`
+	RuleName        string    `json:"ruleName"`
+	Status          string    `json:"status"`
+	Severity        string    `json:"severity"`
+	EvaluatedAt     time.Time `json:"evaluatedAt"`
+	StatusChangedAt time.Time `json:"statusChangedAt"`
+}
+
+// The weighted compliance score of a CI (WP-1127).
+type ComplianceScore struct {
+	Score         float64 `json:"score"`
+	Passed        int     `json:"passed"`
+	Failed        int     `json:"failed"`
+	NotApplicable int     `json:"notApplicable"`
+}
+
+// A security finding of a CI (security.Finding, WP-1116).
+type Finding struct {
+	ID               string     `json:"id"`
+	CiID             *string    `json:"ciId,omitempty"`
+	Kind             string     `json:"kind"`
+	Severity         string     `json:"severity"`
+	Title            string     `json:"title"`
+	Status           string     `json:"status"`
+	StatusReason     *string    `json:"statusReason,omitempty"`
+	Source           string     `json:"source"`
+	CveIds           []string   `json:"cveIds"`
+	CvssScore        *float64   `json:"cvssScore,omitempty"`
+	Kev              bool       `json:"kev"`
+	AdvisoryID       *string    `json:"advisoryId,omitempty"`
+	PackageName      *string    `json:"packageName,omitempty"`
+	InstalledVersion *string    `json:"installedVersion,omitempty"`
+	FixedVersion     *string    `json:"fixedVersion,omitempty"`
+	Reference        *string    `json:"reference,omitempty"`
+	DetectedAt       time.Time  `json:"detectedAt"`
+	LastSeenAt       time.Time  `json:"lastSeenAt"`
+	ResolvedAt       *time.Time `json:"resolvedAt,omitempty"`
 }
 
 type HistoryConnection struct {
@@ -66,4 +109,18 @@ type User struct {
 	ID             string  `json:"id"`
 	OrganizationID string  `json:"organizationId"`
 	ClientID       *string `json:"clientId,omitempty"`
+}
+
+// A workflow run on a CI (WP-1092) without its context and step payloads.
+type WorkflowRun struct {
+	ID           string `json:"id"`
+	WorkflowID   string `json:"workflowId"`
+	WorkflowName string `json:"workflowName"`
+	// The number of the definition version the run executes.
+	Version    int        `json:"version"`
+	Status     string     `json:"status"`
+	Trigger    string     `json:"trigger"`
+	StartedAt  *time.Time `json:"startedAt,omitempty"`
+	FinishedAt *time.Time `json:"finishedAt,omitempty"`
+	CreatedAt  time.Time  `json:"createdAt"`
 }

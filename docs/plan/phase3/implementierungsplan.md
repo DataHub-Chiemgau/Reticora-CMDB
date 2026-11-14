@@ -19235,7 +19235,7 @@ Die Features der REST-Routen sind `compliance` für `/api/v1/security` und `/api
   - `TestP3FieldsUseTheLoader`: `cis` mit 50 CIs ruft jede Batch-Quelle genau einmal auf.
   - `TestP3Complexity`: Die Anfrage aus AK5 wird abgelehnt, die Detailanfrage angenommen.
   - `TestP3NoStepPayload`: Das Schema von `WorkflowRun` hat keine Felder für Eingaben oder Ausgaben.
-- `backend/internal/graphqlbff/querybudget_integration_test.go`: `TestCIP3FieldsQueryBudget` (PostgreSQL). 10 und 100 CIs mit je drei Findings, Ergebnissen und Runs ergeben dieselbe Zahl Statements. Ein Nutzer mit Client-Scope sieht nur Findings der CIs seines Clients.
+- `backend/internal/graphqlbff/querybudget_integration_test.go`: `TestCIP3FieldsQueryBudget` (PostgreSQL). 10 und 100 CIs mit je drei Findings, Ergebnissen und Runs ergeben dieselbe Zahl Statements. Ein Nutzer mit Client-Scope sieht nur Findings der CIs seines Clients. Zulässige Differenz (Nachtrag 2026-11-14): Die volle Seite von 100 CIs liest im bestehenden `cis`-Resolver genau eine zusätzliche `COUNT`-Abfrage (eine nicht volle Seite keine); ohne sie ist die Zahl gleich.
 - Bestehende Tests bleiben grün: `TestLimits`, `TestMutationsAreRefused`, `TestResolversCheckEntitlement` sowie `modules_test.go` (die neuen Modulkonstanten sind Schlüssel von `server.LateModules`).
 
 **Traceability (`docs/traceability.csv`):**

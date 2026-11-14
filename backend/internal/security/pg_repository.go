@@ -257,6 +257,41 @@ func (r *PGRepository) Update(ctx context.Context, orgID, id string, req UpdateF
 	return f, nil
 }
 
+// FindingsByCIs returns, for the BFF (GQL-02, WP-1136), up to perCI
+// findings of each CI of ciIDs whose status is one of statuses (empty:
+// every status), newest first per CI, in one statement (row_number per
+// ci_id) under row level security and the scope of ctx.
+func (r *PGRepository) FindingsByCIs(ctx context.Context, orgID string, ciIDs, statuses []string, perCI int) ([]Finding, error) {
+	out := []Finding{}
+	if len(ciIDs) == 0 {
+		return out, nil
+	}
+	if statuses == nil {
+		statuses = []string{}
+	}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `SELECT `+findingCols+` FROM (
+				SELECT security_finding.*, row_number() OVER (PARTITION BY ci_id ORDER BY detected_at DESC, id DESC) AS rn
+				FROM security_finding
+				WHERE organization_id = $1 AND ci_id = ANY ($2::uuid[]) AND (cardinality($3::text[]) = 0 OR status = ANY ($3::text[]))
+				  AND `+visibleCI+`
+			) security_finding WHERE rn <= $4 ORDER BY ci_id, rn`, orgID, ciIDs, statuses, perCI)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			f, err := scanFinding(rows)
+			if err != nil {
+				return err
+			}
+			out = append(out, *f)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 func (r *PGRepository) Summary(ctx context.Context, orgID string) (map[string]int, error) {
 	out := map[string]int{}
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {

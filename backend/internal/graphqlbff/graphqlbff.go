@@ -73,7 +73,7 @@ const (
 
 // ModuleKeys are the module keys the BFF uses (modules_test.go checks them
 // against server.LateModules).
-var ModuleKeys = []string{ModuleInventory, ModuleDocuments}
+var ModuleKeys = []string{ModuleInventory, ModuleDocuments, ModuleFindings, ModuleCompliance, ModuleWorkflows}
 
 // Sources are the read models of the queries beyond CIs and relationships
 // (GQL-02, GQL-03); a missing source answers its query with an error.
@@ -90,6 +90,12 @@ type Sources struct {
 	History HistorySource
 	Metrics MetricSource
 	Forms   FormSource
+	// The P3 read views at the CI (WP-1136): batch reads of the
+	// PostgreSQL repositories; without one (--no-db) the field is
+	// UNAVAILABLE.
+	Findings     FindingBatchSource
+	Compliance   ComplianceBatchSource
+	WorkflowRuns WorkflowRunBatchSource
 }
 
 // HistorySource reads the timeline of a CI with its relationship changes
@@ -205,6 +211,12 @@ func NewHandler(ciRepo ci.Repository, relRepo relationship.Repository) *Handler 
 	cfg.Complexity.Query.CiMetrics = func(child int, _ string, _ *string, _ *time.Time, _ *time.Time, _ *string) int {
 		return saturatingMul(child, maxPage)
 	}
+	// The P3 fields at the CI (WP-1136): each list its selection per
+	// entry of the page, the score its selection.
+	cfg.Complexity.CI.Findings = func(child int, first *int, _ []string) int { return listCost(child, first) }
+	cfg.Complexity.CI.ComplianceResults = func(child int, first *int, _ *string) int { return listCost(child, first) }
+	cfg.Complexity.CI.ComplianceScore = func(child int) int { return child }
+	cfg.Complexity.CI.WorkflowRuns = func(child int, first *int, _ *string) int { return listCost(child, first) }
 	srv := handler.New(generated.NewExecutableSchema(cfg))
 	// POST only: no GET queries (no CSRF-able reads), no subscriptions.
 	srv.AddTransport(transport.POST{})
