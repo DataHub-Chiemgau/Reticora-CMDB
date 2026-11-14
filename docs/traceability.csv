@@ -1920,3 +1920,5 @@ ALR-07;[P3];E;collector/plugins/config/mask_test.go;WP-1053
 NFR-11;[P3];E;collector/probe/capacity_test.go;WP-958
 PRB-04;[P3];E;collector/probe/capacity_test.go;WP-958
 PRB-09;[P3];E;backend/internal/probe/alive_integration_test.go;WP-962
+PRT-18;[P3];E;backend/internal/discovery/collector_capabilities_integration_test.go;WP-966
+PRT-18;[P3];E;backend/internal/probe/assign_test.go;WP-966

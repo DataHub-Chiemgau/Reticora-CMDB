@@ -20,6 +20,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -39,6 +40,7 @@ const collectorSelectColumns = `
 	COALESCE(cert_fingerprint, ''),
 	cert_not_after,
 	config,
+	probe_capabilities,
 	created_at,
 	updated_at
 `
@@ -229,6 +231,37 @@ func (r *PGRepository) Heartbeat(ctx context.Context, orgID, collectorID string)
 	return status, err
 }
 
+// StoreProbeCapabilities implements ProbeCapabilityStore: the report is
+// written only when it differs from the stored one in anything but its
+// detection time.
+func (r *PGRepository) StoreProbeCapabilities(ctx context.Context, orgID, collectorID string, caps *probewire.ProbeCapabilities) (bool, error) {
+	if !audit.IsUUID(collectorID) {
+		return false, api.ErrNotFound
+	}
+	changed := false
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		var stored *probewire.ProbeCapabilities
+		err := tx.QueryRow(ctx, `SELECT probe_capabilities FROM collector WHERE id = $1 AND organization_id = $2 FOR UPDATE`,
+			collectorID, orgID).Scan(&stored)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return api.ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("read probe capabilities: %w", err)
+		}
+		if stored.Equal(caps) {
+			return nil
+		}
+		if _, err := tx.Exec(ctx, `UPDATE collector SET probe_capabilities = $3 WHERE id = $1 AND organization_id = $2`,
+			collectorID, orgID, caps); err != nil {
+			return fmt.Errorf("write probe capabilities: %w", err)
+		}
+		changed = true
+		return nil
+	})
+	return changed, err
+}
+
 // CollectorStatus implements Repository.
 func (r *PGRepository) CollectorStatus(ctx context.Context, orgID, collectorID string) (string, error) {
 	if !audit.IsUUID(collectorID) {
@@ -348,6 +381,7 @@ func scanCollector(scanner collectorScanner) (*Collector, error) {
 		&item.CertFingerprint,
 		&certNotAfter,
 		&item.Config,
+		&item.ProbeCapabilities,
 		&createdAt,
 		&updatedAt,
 	); err != nil {

@@ -11140,6 +11140,27 @@ paths:
   /api/v1/collectors/{id}:
     parameters:
       - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getCollector
+      tags: [Collectors]
+      summary: Get a collector
+      description: >-
+        Requires discovery:read. Returns the collector with its last capability
+        report probe_capabilities (PRT-18). A collector outside the caller's
+        client or site scope is 404 like an unknown one.
+      responses:
+        '200':
+          description: Collector
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Collector'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
     patch:
       operationId: updateCollector
       tags: [Collectors]
@@ -31744,6 +31765,44 @@ components:
           $ref: '#/components/schemas/CollectorSpoolReport'
         vault:
           $ref: '#/components/schemas/CollectorVaultReport'
+        probe_capabilities:
+          $ref: '#/components/schemas/ProbeCapabilities'
+    ProbeCapabilities:
+      type: object
+      additionalProperties: false
+      required: [icmp4, icmp6, udp_67, udp_68, time_sync, probe_types, detected_at]
+      description: >-
+        Capability report of a collector (PRT-18, WP-966), detected at its start and every 15 minutes
+        and sent with every heartbeat and monitoring alive message. The server stores it only when it
+        changes (a heartbeat without it keeps the stored report) and assigns a probe only to a group
+        member that implements its type and has the capability it needs (ICMP of the target's address
+        family, the UDP ports 67 and 68 for dhcp); a member without report counts as capable.
+      properties:
+        icmp4:
+          type: string
+          enum: [unprivileged, raw, none]
+          description: ICMP socket for IPv4 (unprivileged datagram socket, raw socket or none).
+        icmp6:
+          type: string
+          enum: [unprivileged, raw, none]
+          description: ICMPv6 socket.
+        udp_67:
+          type: boolean
+          description: The privileged UDP port 67 can be bound.
+        udp_68:
+          type: boolean
+          description: The privileged UDP port 68 can be bound.
+        time_sync:
+          type: string
+          enum: [synchronized, unsynchronized, unknown]
+          description: Synchronization of the system clock (Linux adjtimex STA_UNSYNC; unknown elsewhere).
+        probe_types:
+          type: array
+          items: { type: string }
+          description: Probe types the executor register of the collector implements.
+        detected_at:
+          type: string
+          format: date-time
     CollectorVaultReport:
       type: object
       additionalProperties: false
@@ -45513,6 +45572,8 @@ components:
         config:
           type: object
           additionalProperties: true
+        probe_capabilities:
+          $ref: '#/components/schemas/ProbeCapabilities'
         created_at:
           type: string
           format: date-time

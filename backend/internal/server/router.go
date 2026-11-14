@@ -878,6 +878,11 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		monitoringFeatures = opts.Entitlements
 	}
 	discoveryHandler.WithEdgeMetrics(monitoringHandler, monitoringFeatures)
+	// A changed capability report assigns the collector's group again
+	// (PRT-18, WP-966 AK5).
+	if pg, ok := repos.Probes.(*probe.PGRepository); ok {
+		discoveryHandler.WithCapabilityChanged(pg.CollectorChanged)
+	}
 	// The probe state changes, results and alive messages arrive on the
 	// edge as well and go into the stream RETICORA_PROBE on the ingest
 	// queue's connection (E-173, WP-959); the stream is created at start.
@@ -892,6 +897,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		if opts.AuditPool != nil {
 			probeEdge.OnAlive(probe.NewClockSkew(opts.AuditPool).Hook())
 		}
+		// The capability report of an alive message is stored like the
+		// one of the heartbeat (PRT-18, WP-966).
+		probeEdge.OnAlive(discoveryHandler.RecordAliveProbeCapabilities)
 		discoveryHandler.WithEdgeProbes(probeEdge)
 	}
 	// The location tree is core; its rack nodes are written only with

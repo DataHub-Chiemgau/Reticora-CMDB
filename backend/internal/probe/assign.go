@@ -7,8 +7,11 @@ import (
 	"hash/fnv"
 	"log/slog"
 	"math"
+	"net"
+	"net/netip"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -16,6 +19,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 )
 
 // The assignment engine (PRB-03, PRB-11, E-174, WP-941): every active probe
@@ -53,17 +57,87 @@ const AssignSpec = "@every 10s"
 const assignTimeout = 30 * time.Second
 
 // Candidate is a member of a collector group as the assignment sees it.
+// Capabilities is the capability report of its collector (PRT-18, WP-966);
+// nil (no report yet, an older collector) counts as capable of everything.
 type Candidate struct {
-	CollectorID string
-	Priority    int
-	Weight      int
-	Healthy     bool
+	CollectorID  string
+	Priority     int
+	Weight       int
+	Healthy      bool
+	Capabilities *probewire.ProbeCapabilities
+}
+
+// Capable reports whether the member can execute a probe of type typ on
+// target (WP-966 AK5): the type is in its list of implemented types, a
+// type that needs ICMP has an ICMP socket of the target's address family
+// (either family for a host name), a type that needs the privileged UDP
+// ports can bind 67 and 68. A member without report is capable.
+func (c *Candidate) Capable(typ, target string) bool {
+	caps := c.Capabilities
+	if caps == nil {
+		return true
+	}
+	if !caps.Implements(typ) {
+		return false
+	}
+	t, ok := probewire.Lookup(typ)
+	if !ok {
+		return true
+	}
+	for _, need := range t.Capabilities {
+		switch need {
+		case probewire.NeedICMP:
+			family := targetFamily(target)
+			switch family {
+			case 4, 6:
+				if caps.ICMP(family) == probewire.CapabilityNone {
+					return false
+				}
+			default:
+				if caps.ICMP4 == probewire.CapabilityNone && caps.ICMP6 == probewire.CapabilityNone {
+					return false
+				}
+			}
+		case probewire.NeedPrivilegedUDPPorts:
+			if !caps.UDP67 || !caps.UDP68 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// targetFamily returns the address family of an address literal in target
+// (an address, host:port or [v6]:port): 4, 6 or 0 for a host name.
+func targetFamily(target string) int {
+	host := target
+	if h, _, err := net.SplitHostPort(target); err == nil {
+		host = h
+	}
+	host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+	if i := strings.IndexByte(host, '%'); i >= 0 {
+		host = host[:i] // zone of a link-local address
+	}
+	ip, err := netip.ParseAddr(host)
+	if err != nil {
+		return 0
+	}
+	if ip.Unmap().Is4() {
+		return 4
+	}
+	return 6
 }
 
 // Assign computes the assignment of the active probes of group over its
 // members: one entry per enabled probe with the collector that runs it
 // (the epoch is left to the store). Without a healthy member it returns
 // nil: the stored assignments stay unchanged.
+//
+// A probe goes only to a healthy member that can execute it (Capable,
+// PRT-18, WP-966); the minimal movement of the rendezvous hashing and the
+// failover priority hold among those. Without a capable healthy member it
+// is assigned by the rule before, among all healthy members, and reports
+// unknown with reason unsupported there, never down.
 func Assign(group *CollectorGroup, members []Candidate, probes []Probe) []Assignment {
 	healthy := make([]Candidate, 0, len(members))
 	for _, m := range members {
@@ -75,26 +149,36 @@ func Assign(group *CollectorGroup, members []Candidate, probes []Probe) []Assign
 		return nil
 	}
 	sort.Slice(healthy, func(i, j int) bool { return healthy[i].CollectorID < healthy[j].CollectorID })
-	var failover string
-	if group.Mode == ModeFailover {
-		best := healthy[0]
-		for _, m := range healthy[1:] {
-			if m.Priority > best.Priority {
-				best = m
+	pick := func(id string, among []Candidate) string {
+		if group.Mode == ModeFailover {
+			best := among[0]
+			for _, m := range among[1:] {
+				if m.Priority > best.Priority {
+					best = m
+				}
 			}
+			return best.CollectorID
 		}
-		failover = best.CollectorID
+		return rendezvous(id, among)
 	}
+	capable := make([]Candidate, 0, len(healthy))
 	out := make([]Assignment, 0, len(probes))
 	for i := range probes {
 		p := &probes[i]
 		if !p.Enabled {
 			continue
 		}
-		collector := failover
-		if collector == "" {
-			collector = rendezvous(p.ID, healthy)
+		capable = capable[:0]
+		for j := range healthy {
+			if healthy[j].Capable(p.Type, p.Target) {
+				capable = append(capable, healthy[j])
+			}
 		}
+		among := healthy
+		if len(capable) > 0 {
+			among = capable
+		}
+		collector := pick(p.ID, among)
 		out = append(out, Assignment{ProbeID: p.ID, OrganizationID: p.OrganizationID, ClientID: p.ClientID, SiteID: p.SiteID,
 			CollectorID: collector})
 	}
@@ -365,30 +449,19 @@ func assignGroup(ctx context.Context, tx pgx.Tx, orgID, groupID string) ([]Colle
 	if err != nil {
 		return nil, fmt.Errorf("read collector group: %w", err)
 	}
-	rows, err := tx.Query(ctx, `SELECT m.collector_id::text, m.priority, m.weight, c.status = 'active'
-		FROM collector_group_member m
-		JOIN collector c ON c.organization_id = m.organization_id AND c.id = m.collector_id
-		WHERE m.organization_id = $1 AND m.group_id = $2`, orgID, groupID)
+	members, err := groupCandidates(ctx, tx, orgID, groupID)
 	if err != nil {
-		return nil, fmt.Errorf("read collector group members: %w", err)
-	}
-	members, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Candidate, error) {
-		var c Candidate
-		scanErr := row.Scan(&c.CollectorID, &c.Priority, &c.Weight, &c.Healthy)
-		return c, scanErr
-	})
-	if err != nil {
-		return nil, fmt.Errorf("read collector group members: %w", err)
+		return nil, err
 	}
 	// A suspended probe (WP-942) runs nowhere: it counts as disabled.
-	rows, err = tx.Query(ctx, `SELECT p.id::text, p.enabled AND p.suspended_reason IS NULL FROM probe p
+	rows, err := tx.Query(ctx, `SELECT p.id::text, p.enabled AND p.suspended_reason IS NULL, p.type, p.target FROM probe p
 		WHERE p.organization_id = $1 AND p.collector_group_id = $2 ORDER BY p.id`, orgID, groupID)
 	if err != nil {
 		return nil, fmt.Errorf("read probes: %w", err)
 	}
 	probes, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Probe, error) {
 		p := Probe{OrganizationID: orgID}
-		scanErr := row.Scan(&p.ID, &p.Enabled)
+		scanErr := row.Scan(&p.ID, &p.Enabled, &p.Type, &p.Target)
 		return p, scanErr
 	})
 	if err != nil {

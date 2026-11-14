@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/probe"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 )
 
 // Retest (WP-941, PRB-03):
@@ -172,5 +173,96 @@ func TestAssignWithoutHealthyMemberKeepsState(t *testing.T) {
 	plan := probe.PlanAssignments(current, probe.Assign(distributed, []probe.Candidate{member("a", 100, 0, true)}, probes))
 	if len(plan.Upserts) != 0 || len(plan.Removes) != 1 || plan.Removes[0] != probes[3].ID {
 		t.Errorf("plan after a disable: %+v", plan)
+	}
+}
+
+// capsOf is a capability report with ICMP per family and the types.
+func capsOf(icmp4, icmp6 string, types ...string) *probewire.ProbeCapabilities {
+	return &probewire.ProbeCapabilities{ICMP4: icmp4, ICMP6: icmp6, TimeSync: probewire.TimeUnknown, ProbeTypes: types}
+}
+
+// TestAssignHonorsCapabilities covers WP-966 AK5 (PRT-18): a member without
+// ICMPv6 gets no IPv6 ping probe, a member without the type in its list
+// gets no probe of that type, a member without report counts as capable;
+// without a capable member the rule before applies; the minimal movement
+// holds among the capable members.
+func TestAssignHonorsCapabilities(t *testing.T) {
+	const ok, none = probewire.CapabilityUnprivileged, probewire.CapabilityNone
+	v6, v4, tcp, dhcp := probesN(40), probesN(40), probesN(40), probesN(5)
+	for i := range v6 {
+		v6[i].ID, v6[i].Type, v6[i].Target = fmt.Sprintf("00000000-0000-4000-8001-%012x", i), "icmp", fmt.Sprintf("2001:db8::%x", i+1)
+		v4[i].ID, v4[i].Type, v4[i].Target = fmt.Sprintf("00000000-0000-4000-8002-%012x", i), "icmp", fmt.Sprintf("192.0.2.%d", i+1)
+		tcp[i].ID, tcp[i].Type, tcp[i].Target = fmt.Sprintf("00000000-0000-4000-8003-%012x", i), "tcp", fmt.Sprintf("[2001:db8::%x]:443", i+1)
+	}
+	for i := range dhcp {
+		dhcp[i].ID, dhcp[i].Type, dhcp[i].Target = fmt.Sprintf("00000000-0000-4000-8004-%012x", i), "dhcp", "192.0.2.250"
+	}
+	a := member("a", 100, 0, true)
+	a.Capabilities = capsOf(ok, none, "icmp") // no ICMPv6, no tcp
+	b := member("b", 100, 0, true)
+	b.Capabilities = capsOf(ok, ok, "icmp", "tcp")
+	c := member("c", 100, 0, true) // no report: capable
+	members := []probe.Candidate{a, b, c}
+	var all []probe.Probe
+	for _, set := range [][]probe.Probe{v6, v4, tcp, dhcp} {
+		all = append(all, set...)
+	}
+	got := byProbe(probe.Assign(distributed, members, all))
+	if len(got) != len(all) {
+		t.Fatalf("%d of %d probes assigned", len(got), len(all))
+	}
+	for _, p := range v6 {
+		if got[p.ID] == "a" {
+			t.Errorf("IPv6 ping probe %s on a, which has no ICMPv6", p.Target)
+		}
+	}
+	for _, p := range tcp {
+		if got[p.ID] == "a" {
+			t.Errorf("tcp probe %s on a, which does not list tcp", p.Target)
+		}
+	}
+	onA := 0
+	for _, p := range v4 {
+		if got[p.ID] == "a" {
+			onA++
+		}
+	}
+	if onA == 0 {
+		t.Errorf("no IPv4 ping probe on a, which has ICMPv4")
+	}
+	// dhcp needs the privileged UDP ports: only c (no report) is capable.
+	for _, p := range dhcp {
+		if got[p.ID] != "c" {
+			t.Errorf("dhcp probe on %s, want c (the only member without report)", got[p.ID])
+		}
+	}
+
+	// No capable member: the rule before, among all healthy members.
+	d := member("d", 100, 0, true)
+	d.Capabilities = capsOf(ok, none, "icmp")
+	fallback := byProbe(probe.Assign(distributed, []probe.Candidate{a, d}, v6))
+	before := byProbe(probe.Assign(distributed, []probe.Candidate{member("a", 100, 0, true), member("d", 100, 0, true)}, v6))
+	if fmt.Sprint(fallback) != fmt.Sprint(before) {
+		t.Errorf("without a capable member the assignment differs from the rule before")
+	}
+	failover := &probe.CollectorGroup{ID: "g", Mode: probe.ModeFailover}
+	fa, fb := member("a", 100, 10, true), member("b", 100, 5, true)
+	fa.Capabilities = capsOf(ok, none, "icmp")
+	fb.Capabilities = capsOf(ok, ok, "icmp")
+	for _, x := range probe.Assign(failover, []probe.Candidate{fa, fb}, v6[:3]) {
+		if x.CollectorID != "b" {
+			t.Errorf("failover: IPv6 probe on %s, want b (the capable member with the highest priority)", x.CollectorID)
+		}
+	}
+
+	// Minimal movement among the capable members: a new capable member
+	// takes only probes to itself.
+	e := member("e", 100, 0, true)
+	e.Capabilities = capsOf(ok, ok, "icmp", "tcp")
+	after := byProbe(probe.Assign(distributed, []probe.Candidate{a, b, c, e}, all))
+	for id, was := range got {
+		if now := after[id]; now != was && now != "e" {
+			t.Errorf("probe %s moved from %s to %s, not to the new member", id, was, now)
+		}
 	}
 }

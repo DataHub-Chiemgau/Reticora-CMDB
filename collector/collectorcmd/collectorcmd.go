@@ -45,6 +45,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/profiles"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/buffer"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/keystore"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/transport"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/update"
 )
@@ -273,6 +274,11 @@ func Main() {
 	// uplink over the edge (WP-955). The engine starts with the saved
 	// assignment set and takes the sets of the NATS session (WP-956), so
 	// it is attached before the session starts.
+	// The capability report (PRT-18, WP-966): at the start and every
+	// 15 min, sent with every heartbeat and alive message.
+	go probe.RunCapabilityRefresh(ctx, &probe.CapabilityDetector{}, func(r probewire.ProbeCapabilities) {
+		uploader.capabilities.Set(&r)
+	})
 	engineDone := make(chan struct{})
 	if engine := startProbeEngine(&collectorCfg, uploader); engine != nil {
 		collectorProbes.attach(engine, collectorCfg.SpoolDir, newEnvPollDeprecation(&collectorCfg, nil))
@@ -336,6 +342,8 @@ func startProbeEngine(cfg *collectorConfig, up *uploader) *probe.Engine {
 	}
 	engine.Uplink.OnNotLicensed = func() { up.monitoringNotLicensed(time.Now()) }
 	engine.Uplink.OnLicensed = up.monitoringLicensed
+	// The alive message carries the report of the heartbeat (WP-966).
+	engine.Capabilities = &up.capabilities
 	return engine
 }
 
@@ -365,6 +373,9 @@ type uploader struct {
 	// droppedSamples counts the metric samples and traps dropped since the
 	// last heartbeat the server accepted (E-79: counted, not spooled).
 	droppedSamples atomic.Int64
+	// capabilities is the capability report the heartbeat and the alive
+	// message of the probe engine carry (PRT-18, WP-966).
+	capabilities probe.Capabilities
 	// monitoringRefusedAt is the time (Unix nanoseconds) the server last
 	// refused metric samples because monitoring is not licensed; 0 while
 	// they are sent (edge.go monitoringPaused).
@@ -1518,7 +1529,8 @@ func runHeartbeatLoop(ctx context.Context, cfg collectorConfig, up *uploader, on
 func (u *uploader) heartbeat(ctx context.Context, cfg collectorConfig) (status string, ok bool) {
 	report := u.spoolReport(ctx)
 	vaultChanges := currentVaultReport()
-	status, ok = postHeartbeat(ctx, u.client, cfg, report, vaultChanges)
+	status, ok = postHeartbeat(ctx, u.client, cfg, &heartbeatBody{Spool: report, Vault: vaultChanges,
+		ProbeCapabilities: u.capabilities.Report()})
 	if ok {
 		u.ackLoss(ctx, report)
 		vaultChanges.ack()
@@ -1562,6 +1574,9 @@ type heartbeatBody struct {
 	// Vault carries the vault version changes (WP-897); omitted while
 	// there are none.
 	Vault *vaultReport `json:"vault,omitempty"`
+	// ProbeCapabilities is the capability report of the collector
+	// (PRT-18, WP-966); omitted before the first detection.
+	ProbeCapabilities *probewire.ProbeCapabilities `json:"probe_capabilities,omitempty"`
 }
 
 func (u *uploader) spoolReport(ctx context.Context) *spoolReport {
@@ -1606,8 +1621,8 @@ var heartbeatSkipLogged atomic.Bool
 // edge takes organization and collector from the certificate; the HTTP
 // path needs them in cfg. A refused heartbeat is an error with the reason
 // (collector.heartbeat.refused): the server does not see the collector.
-func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig, spool *spoolReport, vaultChanges *vaultReport) (status string, ok bool) {
-	body, err := json.Marshal(heartbeatBody{Spool: spool, Vault: vaultChanges})
+func postHeartbeat(ctx context.Context, client *http.Client, cfg collectorConfig, hb *heartbeatBody) (status string, ok bool) {
+	body, err := json.Marshal(hb)
 	if err != nil {
 		slog.Error("encode heartbeat failed", "error", err)
 		return "", false

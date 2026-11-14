@@ -187,6 +187,7 @@ GET /api/v1/collector-groups monitoring:read
 GET /api/v1/collector-groups/{id} monitoring:read
 GET /api/v1/collectors discovery:read
 GET /api/v1/collectors/pki discovery:read
+GET /api/v1/collectors/{id} discovery:read
 GET /api/v1/compliance/controls compliance:read
 GET /api/v1/compliance/controls/coverage compliance:read
 GET /api/v1/compliance/report compliance:read

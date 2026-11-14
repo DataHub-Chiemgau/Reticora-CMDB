@@ -125,6 +125,10 @@ func goldenMessages() map[string]struct {
 				Overrun:          1,
 				ICMPCapability:   ICMPRaw,
 				ICMPCapabilityV6: ICMPUnprivileged,
+				ProbeCapabilities: &ProbeCapabilities{
+					ICMP4: CapabilityRaw, ICMP6: CapabilityUnprivileged, UDP67: false, UDP68: true,
+					TimeSync: TimeSynchronized, ProbeTypes: []string{"icmp", "tcp"}, DetectedAt: observed.Add(-time.Minute),
+				},
 			},
 			empty: func() Message { return &Alive{} },
 		},

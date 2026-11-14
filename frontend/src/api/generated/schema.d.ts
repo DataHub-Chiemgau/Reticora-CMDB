@@ -4753,7 +4753,11 @@ export interface paths {
       };
       cookie?: never;
     };
-    get?: never;
+    /**
+     * Get a collector
+     * @description Requires discovery:read. Returns the collector with its last capability report probe_capabilities (PRT-18). A collector outside the caller's client or site scope is 404 like an unknown one.
+     */
+    get: operations['getCollector'];
     put?: never;
     post?: never;
     delete?: never;
@@ -14037,6 +14041,33 @@ export interface components {
     CollectorHeartbeatRequest: {
       spool?: components['schemas']['CollectorSpoolReport'];
       vault?: components['schemas']['CollectorVaultReport'];
+      probe_capabilities?: components['schemas']['ProbeCapabilities'];
+    };
+    /** @description Capability report of a collector (PRT-18, WP-966), detected at its start and every 15 minutes and sent with every heartbeat and monitoring alive message. The server stores it only when it changes (a heartbeat without it keeps the stored report) and assigns a probe only to a group member that implements its type and has the capability it needs (ICMP of the target's address family, the UDP ports 67 and 68 for dhcp); a member without report counts as capable. */
+    ProbeCapabilities: {
+      /**
+       * @description ICMP socket for IPv4 (unprivileged datagram socket, raw socket or none).
+       * @enum {string}
+       */
+      icmp4: 'unprivileged' | 'raw' | 'none';
+      /**
+       * @description ICMPv6 socket.
+       * @enum {string}
+       */
+      icmp6: 'unprivileged' | 'raw' | 'none';
+      /** @description The privileged UDP port 67 can be bound. */
+      udp_67: boolean;
+      /** @description The privileged UDP port 68 can be bound. */
+      udp_68: boolean;
+      /**
+       * @description Synchronization of the system clock (Linux adjtimex STA_UNSYNC; unknown elsewhere).
+       * @enum {string}
+       */
+      time_sync: 'synchronized' | 'unsynchronized' | 'unknown';
+      /** @description Probe types the executor register of the collector implements. */
+      probe_types: string[];
+      /** Format: date-time */
+      detected_at: string;
     };
     /** @description Vault version changes of a collector (CRD-05, WP-897): reads of a vault entry without a fixed version that returned a new version, not yet acknowledged; the collector reduces the count by the reported amount once the heartbeat was answered with 204. Reported changes raise reticora_collector_vault_version_changes_total. */
     CollectorVaultReport: {
@@ -22502,6 +22533,7 @@ export interface components {
       config: {
         [key: string]: unknown;
       };
+      probe_capabilities?: components['schemas']['ProbeCapabilities'];
       /** Format: date-time */
       created_at: string;
       /** Format: date-time */
@@ -35287,6 +35319,32 @@ export interface operations {
         content?: never;
       };
       400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+    };
+  };
+  getCollector: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Collector */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['Collector'];
+        };
+      };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];

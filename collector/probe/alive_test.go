@@ -336,3 +336,29 @@ func TestAliveAfterRestartNoOverflowFromOldLosses(t *testing.T) {
 		t.Fatalf("queue state %q after a new loss, want overflow", got[1].QueueState)
 	}
 }
+
+// TestAliveCarriesProbeCapabilities covers WP-966 AK2 (edge): every alive
+// message carries the capability report with its detection time; before
+// the first detection the field is left out.
+func TestAliveCarriesProbeCapabilities(t *testing.T) {
+	clock := newFakeClock(aliveStart)
+	edge := &aliveEdge{clock: clock}
+	e := aliveEngine(t, edge)
+	e.Alive.SendOnce(context.Background())
+	caps := probewire.ProbeCapabilities{ICMP4: probewire.CapabilityUnprivileged, ICMP6: probewire.CapabilityNone,
+		UDP67: true, UDP68: true, TimeSync: probewire.TimeSynchronized, ProbeTypes: []string{"icmp", "tcp"},
+		DetectedAt: aliveStart.Add(-time.Minute).UTC()}
+	e.Capabilities.Set(&caps)
+	e.Alive.SendOnce(context.Background())
+	got := edge.messages()
+	if len(got) != 2 {
+		t.Fatalf("%d alive messages, want 2", len(got))
+	}
+	if got[0].ProbeCapabilities != nil {
+		t.Fatalf("before the detection: %+v, want no report", got[0].ProbeCapabilities)
+	}
+	r := got[1].ProbeCapabilities
+	if r == nil || !r.Equal(&caps) || !r.DetectedAt.Equal(caps.DetectedAt) {
+		t.Fatalf("report %+v, want %+v", r, caps)
+	}
+}

@@ -390,6 +390,8 @@ type StateChange struct {
 // out for lack of budget (limit_exceeded), Overrun the starts left out
 // because the previous check of the probe was still running (WP-951).
 // ICMPCapability is the ICMP socket of IPv4, ICMPCapabilityV6 that of IPv6.
+// ProbeCapabilities is the capability report of the collector (PRT-18,
+// WP-966); a collector without it leaves the stored report unchanged.
 type Alive struct {
 	Header
 	CollectorTime    time.Time        `json:"collector_time"`
@@ -405,6 +407,84 @@ type Alive struct {
 	Overrun          int64            `json:"overrun"`
 	ICMPCapability   string           `json:"icmp_capability"`
 	ICMPCapabilityV6 string           `json:"icmp_capability_v6,omitempty"`
+	// ProbeCapabilities is the capability report (WP-966).
+	ProbeCapabilities *ProbeCapabilities `json:"probe_capabilities,omitempty"`
+}
+
+// ProbeCapabilities is what a collector can execute (PRT-18, WP-966): the
+// ICMP socket per address family (CapabilityUnprivileged, CapabilityRaw or
+// CapabilityNone), whether it may bind the privileged UDP ports 67 and 68
+// (DHCP), whether its system clock is synchronized (TimeSynchronized,
+// TimeUnsynchronized or TimeUnknown) and the probe types its executor
+// register implements, as detected at DetectedAt. The collector sends it
+// with every heartbeat and alive message; the server stores it at the
+// collector and assigns a probe only to a member that can execute it.
+type ProbeCapabilities struct {
+	ICMP4      string    `json:"icmp4"`
+	ICMP6      string    `json:"icmp6"`
+	UDP67      bool      `json:"udp_67"`
+	UDP68      bool      `json:"udp_68"`
+	TimeSync   string    `json:"time_sync"`
+	ProbeTypes []string  `json:"probe_types"`
+	DetectedAt time.Time `json:"detected_at"`
+}
+
+// Values of ProbeCapabilities.ICMP4 and ICMP6.
+const (
+	CapabilityUnprivileged = "unprivileged"
+	CapabilityRaw          = "raw"
+	CapabilityNone         = "none"
+)
+
+// Values of ProbeCapabilities.TimeSync.
+const (
+	TimeSynchronized   = "synchronized"
+	TimeUnsynchronized = "unsynchronized"
+	TimeUnknown        = "unknown"
+)
+
+// Capability keys of the type register (TypeDef.Capabilities, PRT-18).
+const (
+	NeedICMP               = "icmp"
+	NeedIPv6               = "ipv6"
+	NeedPrivilegedUDPPorts = "privileged_udp_ports"
+	NeedTimeSync           = "time_sync"
+)
+
+// Implements reports whether the report lists the probe type.
+func (c *ProbeCapabilities) Implements(typ string) bool {
+	for _, t := range c.ProbeTypes {
+		if t == typ {
+			return true
+		}
+	}
+	return false
+}
+
+// ICMP returns the ICMP capability of an address family (4 or 6).
+func (c *ProbeCapabilities) ICMP(family int) string {
+	if family == 6 {
+		return c.ICMP6
+	}
+	return c.ICMP4
+}
+
+// Equal reports whether two reports name the same capabilities; the
+// detection time is not compared.
+func (c *ProbeCapabilities) Equal(o *ProbeCapabilities) bool {
+	if c == nil || o == nil {
+		return c == o
+	}
+	if c.ICMP4 != o.ICMP4 || c.ICMP6 != o.ICMP6 || c.UDP67 != o.UDP67 || c.UDP68 != o.UDP68 ||
+		c.TimeSync != o.TimeSync || len(c.ProbeTypes) != len(o.ProbeTypes) {
+		return false
+	}
+	for i := range c.ProbeTypes {
+		if c.ProbeTypes[i] != o.ProbeTypes[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // AliveReply is the server's answer to an alive message: ServerTime is

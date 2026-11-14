@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000366_probe_clock_offset
+Stand: Migration 000367_collector_probe_capabilities
 
 ## Prüfung
 
@@ -605,6 +605,15 @@ CHECK 0–6) und `clock_corrected_at timestamptz NULL` (letztes Lebenszeichen
 als `degraded`; bis 24 h danach prüft der Ingest erneute Zustellungen auf
 eine andere Korrektur). Keine neue Tabelle, RLS und Policies unverändert.
 Down entfernt die Spalten und stellt die View aus 000325 wieder her.
+
+### Fähigkeitsmeldung des Collectors (WP-966)
+
+Migration `collector_probe_capabilities` (WP-966, PRT-18, vorläufige Nummer
+000367) ergänzt `collector.probe_capabilities jsonb NULL`: die letzte
+Fähigkeitsmeldung aus Heartbeat bzw. `.probe.alive`
+(`probewire.ProbeCapabilities`), nur bei Änderung geschrieben; NULL = noch
+keine Meldung (ältere Collectoren, gelten bei der Zuweisung als fähig). RLS
+und Policies von `collector` bleiben unverändert. Down entfernt die Spalte.
 
 ## Indizes unter RLS (SR-04, K22, WP-836)
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"slices"
 	"strings"
@@ -36,6 +37,52 @@ type PGRepository struct {
 // SetAssignTrigger makes every committed write run the assignment of its
 // collector groups (WP-941 AK4).
 func (r *PGRepository) SetAssignTrigger(t AssignTrigger) { r.assign = t }
+
+// groupCandidates loads the members of a collector group with the
+// capability report of their collector (WP-966): healthy is the COL-05
+// status active (until WP-963).
+func groupCandidates(ctx context.Context, tx pgx.Tx, orgID, groupID string) ([]Candidate, error) {
+	rows, err := tx.Query(ctx, `SELECT m.collector_id::text, m.priority, m.weight, c.status = 'active', c.probe_capabilities
+		FROM collector_group_member m
+		JOIN collector c ON c.organization_id = m.organization_id AND c.id = m.collector_id
+		WHERE m.organization_id = $1 AND m.group_id = $2`, orgID, groupID)
+	if err != nil {
+		return nil, fmt.Errorf("read collector group members: %w", err)
+	}
+	members, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (Candidate, error) {
+		var c Candidate
+		scanErr := row.Scan(&c.CollectorID, &c.Priority, &c.Weight, &c.Healthy, &c.Capabilities)
+		return c, scanErr
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read collector group members: %w", err)
+	}
+	return members, nil
+}
+
+// CollectorChanged runs the assignment of the collector's group at once
+// after its capability report changed (WP-966 AK5); without a trigger the
+// next tick of probe.assign takes it.
+func (r *PGRepository) CollectorChanged(ctx context.Context, orgID, collectorID string) {
+	if r.assign == nil {
+		return
+	}
+	var group string
+	scope := database.OrgWideScope(orgID, "")
+	err := database.WithTenant(ctx, r.pool, &scope, func(ctx context.Context, tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT group_id::text FROM collector_group_member WHERE organization_id = $1 AND collector_id = $2`,
+			orgID, collectorID).Scan(&group)
+	})
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return
+	case err != nil:
+		slog.Warn("probe assignment after a capability change not started", "organization_id", orgID,
+			"collector_id", collectorID, "error", err)
+		return
+	}
+	r.assign.ProbesChanged(ctx, orgID, []string{group}, nil)
+}
 
 // afterWrite registers the assignment of groups (and the notice of the
 // collectors the write raised itself) for after the commit; a rollback

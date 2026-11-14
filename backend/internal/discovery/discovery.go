@@ -33,6 +33,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/reviews"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenant"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/wire"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/probewire"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -54,8 +55,11 @@ type Collector struct {
 	CertFingerprint string         `json:"cert_fingerprint,omitempty"`
 	CertNotAfter    string         `json:"cert_not_after,omitempty"`
 	Config          map[string]any `json:"config"`
-	CreatedAt       string         `json:"created_at"`
-	UpdatedAt       string         `json:"updated_at"`
+	// ProbeCapabilities is the last capability report of the collector
+	// (PRT-18, WP-966); absent before the first one.
+	ProbeCapabilities *probewire.ProbeCapabilities `json:"probe_capabilities,omitempty"`
+	CreatedAt         string                       `json:"created_at"`
+	UpdatedAt         string                       `json:"updated_at"`
 }
 
 // BulkIngestRequest is the deprecated collector_id/items ingest payload; new
@@ -440,6 +444,23 @@ func (r *MemoryRepository) Heartbeat(_ context.Context, orgID, collectorID strin
 	return c.Status, nil
 }
 
+// StoreProbeCapabilities implements ProbeCapabilityStore.
+func (r *MemoryRepository) StoreProbeCapabilities(_ context.Context, orgID, collectorID string, caps *probewire.ProbeCapabilities) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.collectors[collectorID]
+	if !ok || c.OrganizationID != orgID {
+		return false, api.ErrNotFound
+	}
+	if c.ProbeCapabilities.Equal(caps) {
+		return false, nil
+	}
+	cp := *caps
+	cp.ProbeTypes = append([]string{}, caps.ProbeTypes...)
+	c.ProbeCapabilities = &cp
+	return true, nil
+}
+
 // EnrollmentCode is a short-lived, single-use secret a collector presents to
 // enroll. Only the SHA-256 hash is persisted; the raw code is carried on the
 // struct only transiently between creation and hashing.
@@ -528,6 +549,9 @@ type Handler struct {
 	// merger carries out the resolution merge of probable_duplicate items
 	// as the CI-12 merge (WithMerger).
 	merger CIMerger
+	// capabilitiesChanged runs after a collector's capability report
+	// changed (WithCapabilityChanged, WP-966).
+	capabilitiesChanged func(ctx context.Context, orgID, collectorID string)
 	// tx runs the frame of a batch and each record in one transaction
 	// (NFR-03); without one every repository call is its own transaction.
 	tx TxRunner
@@ -927,6 +951,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/collectors", h.ListCollectors)
 	r.Post("/api/v1/collectors", h.RegisterCollector)
 	r.Post("/api/v1/collectors/{id}/heartbeat", h.Heartbeat)
+	r.Get("/api/v1/collectors/{id}", h.GetCollector)
 	r.Patch("/api/v1/collectors/{id}", h.UpdateCollector)
 	r.Get("/api/v1/collectors/pki", h.PKI)
 	// Zero-config onboarding: an operator mints a short-lived enrollment code;
@@ -976,6 +1001,29 @@ func (h *Handler) ListCollectors(w http.ResponseWriter, r *http.Request) {
 		Offset:  page.Offset,
 		HasMore: page.Offset+page.Limit < total,
 	})
+}
+
+// GetCollector handles GET /api/v1/collectors/{id}: one collector of the
+// organization with its stored capability report (PRT-18, WP-966). A
+// collector outside the caller's client or site scope is 404 like an
+// unknown one (row level security).
+func (h *Handler) GetCollector(w http.ResponseWriter, r *http.Request) {
+	t := tenant.FromContext(r.Context())
+	if t.OrganizationID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "Unauthorized", "missing tenant context")
+		return
+	}
+	repo, ok := h.repo.(ScopeRepository)
+	if !ok {
+		api.WriteError(w, http.StatusNotFound, "Not Found", "collector not found")
+		return
+	}
+	c, err := repo.ScopeCollector(r.Context(), t.OrganizationID, chi.URLParam(r, "id"))
+	if err != nil {
+		api.WriteRepoError(w, err)
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, c)
 }
 
 // RegisterCollector handles POST /api/v1/collectors
@@ -1207,9 +1255,62 @@ type CollectorVaultReport struct {
 }
 
 // CollectorHeartbeatRequest is the optional body of a collector heartbeat.
+// ProbeCapabilities is the capability report (PRT-18, WP-966); a heartbeat
+// without it leaves the stored report unchanged (older collectors).
 type CollectorHeartbeatRequest struct {
-	Spool *CollectorSpoolReport `json:"spool,omitempty"`
-	Vault *CollectorVaultReport `json:"vault,omitempty"`
+	Spool             *CollectorSpoolReport        `json:"spool,omitempty"`
+	Vault             *CollectorVaultReport        `json:"vault,omitempty"`
+	ProbeCapabilities *probewire.ProbeCapabilities `json:"probe_capabilities,omitempty"`
+}
+
+// ProbeCapabilityStore stores the capability report of a collector
+// (PRT-18, WP-966): only a changed report is written; changed tells the
+// caller to assign the collector's group again.
+type ProbeCapabilityStore interface {
+	StoreProbeCapabilities(ctx context.Context, orgID, collectorID string, caps *probewire.ProbeCapabilities) (changed bool, err error)
+}
+
+// WithCapabilityChanged sets what runs after a collector's capability
+// report changed: the assignment of its group (probe.Assigner,
+// WP-966 AK5).
+func (h *Handler) WithCapabilityChanged(fn func(ctx context.Context, orgID, collectorID string)) *Handler {
+	h.capabilitiesChanged = fn
+	return h
+}
+
+// RecordProbeCapabilities stores the capability report of a heartbeat or a
+// monitoring alive message (.probe.alive, WP-959 OnAlive) when it changed
+// and then triggers the assignment of the collector's group. A nil report
+// or a repository without ProbeCapabilityStore changes nothing; an error
+// is logged, the heartbeat stays accepted.
+func (h *Handler) RecordProbeCapabilities(ctx context.Context, orgID, collectorID string, caps *probewire.ProbeCapabilities) {
+	store, ok := h.repo.(ProbeCapabilityStore)
+	if caps == nil || !ok {
+		return
+	}
+	changed, err := store.StoreProbeCapabilities(ctx, orgID, collectorID, caps)
+	if err != nil {
+		slog.Warn("collector probe capabilities not stored", "organization_id", orgID, "collector_id", collectorID, "error", err)
+		return
+	}
+	if changed && h.capabilitiesChanged != nil {
+		h.capabilitiesChanged(ctx, orgID, collectorID)
+	}
+}
+
+// RecordAliveProbeCapabilities is the hook OnAlive of the probe edge
+// (probe.AliveHook, WP-966): it stores the capability report of a
+// .probe.alive message. The edge delivers it outside any request, so the
+// hook opens its own org-wide scope of the collector's organization like
+// the other edge consumers; the repository fails closed without one.
+func (h *Handler) RecordAliveProbeCapabilities(orgID, collectorID string, alive probewire.Alive, _ time.Time) { //nolint:gocritic // signature of probe.AliveHook
+	if alive.ProbeCapabilities == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	scope := database.OrgWideScope(orgID, "")
+	h.RecordProbeCapabilities(database.ContextWithTenantScope(ctx, &scope), orgID, collectorID, alive.ProbeCapabilities)
 }
 
 // Heartbeat handles POST /api/v1/collectors/{id}/heartbeat. The body is
@@ -1244,6 +1345,7 @@ func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set(CollectorStatusHeader, status)
 	recordSpoolReport(r.Context(), t.OrganizationID, id, req.Spool)
 	recordVaultReport(req.Vault)
+	h.RecordProbeCapabilities(r.Context(), t.OrganizationID, id, req.ProbeCapabilities)
 
 	w.WriteHeader(http.StatusNoContent)
 }

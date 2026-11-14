@@ -43,6 +43,9 @@ type Engine struct {
 
 	// Alive sends the monitoring alive message (WP-957).
 	Alive *AliveSender
+	// Capabilities is the capability report every alive message carries
+	// (WP-966); the collector sets it from DetectCapabilities.
+	Capabilities *Capabilities
 
 	icmp       *Mux
 	observed   atomic.Uint64 // results evaluated (results_per_s)
@@ -108,6 +111,7 @@ func NewEngine(cfg *EngineConfig) (*Engine, error) {
 		e.icmp = DefaultMux()
 	}
 	e.Alive = &AliveSender{Send: cfg.Send, Snapshot: e.aliveSnapshot}
+	e.Capabilities = &Capabilities{}
 	return e, nil
 }
 
@@ -264,18 +268,19 @@ func (e *Engine) observe(r probewire.Result) { //nolint:gocritic // Sink signatu
 // aliveSnapshot returns the figures of the alive message (WP-957 AK1):
 // configuration version, probes, results per second over 60 s, the
 // entries of both spools, the losses per reason, the skipped and overrun
-// checks and the ICMP socket per family.
+// checks, the ICMP socket per family and the capability report (WP-966).
 func (e *Engine) aliveSnapshot(ctx context.Context, now time.Time) probewire.Alive {
 	sched := e.Scheduler.Stats()
 	a := probewire.Alive{
-		ConfigVersion:    e.ConfigVersion(),
-		Probes:           e.Probes(),
-		ResultsPerS:      e.rate.observe(now, e.observed.Load()),
-		QueueState:       probewire.QueueOK,
-		Skipped:          int64(sched.Skipped), //nolint:gosec // a counter of checks, far below 2^63
-		Overrun:          int64(sched.Overrun), //nolint:gosec // a counter of checks, far below 2^63
-		ICMPCapability:   e.icmp.Capability(4),
-		ICMPCapabilityV6: e.icmp.Capability(6),
+		ConfigVersion:     e.ConfigVersion(),
+		Probes:            e.Probes(),
+		ResultsPerS:       e.rate.observe(now, e.observed.Load()),
+		QueueState:        probewire.QueueOK,
+		Skipped:           int64(sched.Skipped), //nolint:gosec // a counter of checks, far below 2^63
+		Overrun:           int64(sched.Overrun), //nolint:gosec // a counter of checks, far below 2^63
+		ICMPCapability:    e.icmp.Capability(4),
+		ICMPCapabilityV6:  e.icmp.Capability(6),
+		ProbeCapabilities: e.Capabilities.Report(),
 	}
 	st, err := e.Outbox.Stats(ctx)
 	if err != nil {
