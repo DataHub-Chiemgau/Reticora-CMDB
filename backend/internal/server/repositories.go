@@ -59,6 +59,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/stocktake"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/tenantapi"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ticket"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/topology"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/training"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/user"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/webhook"
@@ -310,6 +311,19 @@ func PostgresRepositories(pool *pgxpool.Pool, recorder audit.TxRecorder) Reposit
 		LifecycleGuards:   lifecycle.NewPGGuards(pool),
 		Availability:      reservation.NewPGAvailability(pool),
 	}
+}
+
+// WireMaintenanceSuppression makes an alarm of a CI in an active
+// maintenance window open suppressed (ALR-11, WP-1033): the window CIs and
+// the CIs their graph impact certainly affects. Only with the module
+// maintenance: its system job maintenance.boundaries releases the alarms
+// again, without it nothing would.
+func (r *Repositories) WireMaintenanceSuppression() {
+	if r.Alarms == nil || r.Maintenance == nil {
+		return
+	}
+	r.Alarms.WithMaintenance(maintenance.NewActive(r.Maintenance,
+		topology.NewAnalyzer(r.CI, r.Relationship).WithRelationshipTypes(r.RelationshipType).WithCITypes(r.CIType)))
 }
 
 // memoryLabelPage is the page the memory label sources list with: every

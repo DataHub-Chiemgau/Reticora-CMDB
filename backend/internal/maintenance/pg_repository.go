@@ -114,6 +114,51 @@ func (r *PGRepository) List(ctx context.Context, orgID string, filter FilterPara
 	return out, total, err
 }
 
+// ActiveWindows implements Repository.
+func (r *PGRepository) ActiveWindows(ctx context.Context, orgID string, at time.Time) ([]Window, error) {
+	return r.between(ctx, orgID, at, at.Add(time.Microsecond))
+}
+
+// WindowsBetween implements Repository.
+func (r *PGRepository) WindowsBetween(ctx context.Context, orgID string, from, to time.Time) ([]Window, error) {
+	return r.between(ctx, orgID, from, to)
+}
+
+// between reads the windows that are not cancelled and overlap [from, to)
+// in the scope of the context (the system job: org-wide, so it sees every
+// window of the organization).
+func (r *PGRepository) between(ctx context.Context, orgID string, from, to time.Time) ([]Window, error) {
+	out := []Window{}
+	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {
+		out = out[:0]
+		rows, err := tx.Query(ctx, "SELECT "+windowCols+" FROM maintenance_window WHERE "+windowVisible+
+			" AND organization_id = $1 AND status <> 'cancelled' AND starts_at < $3 AND ends_at > $2 ORDER BY starts_at, id",
+			orgID, from.UTC(), to.UTC())
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			w, serr := scanWindow(rows)
+			if serr != nil {
+				rows.Close()
+				return serr
+			}
+			out = append(out, *w)
+		}
+		rows.Close()
+		if rerr := rows.Err(); rerr != nil {
+			return rerr
+		}
+		for i := range out {
+			if out[i].CIIDs, err = r.ciIDsTx(ctx, tx, orgID, out[i].ID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return out, err
+}
+
 func (r *PGRepository) GetByID(ctx context.Context, orgID, id string) (*Window, error) {
 	var w *Window
 	err := database.WithRequestTenant(ctx, r.pool, orgID, func(ctx context.Context, tx pgx.Tx) error {

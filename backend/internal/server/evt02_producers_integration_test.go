@@ -65,6 +65,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/identity"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/maintenance"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/operator"
@@ -282,6 +283,7 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 		ackAlarm, sevAlarm, resAlarm       *alarm.Alarm
 		updIncident                        *alarm.Incident
 		maintWindow, maintCI               string
+		startedWindow, endedWindow         string
 		allocParent                        string
 		hookServer                         *httptest.Server
 		hookSubscription, hookDelivery     string
@@ -1336,6 +1338,43 @@ func TestEveryEVT02TypeHasAProducer(t *testing.T) {
 					t.Errorf("maintenance.scheduled data %v", data)
 				}
 			}},
+		{typ: events.MaintenanceStarted,
+			// The system job maintenance.boundaries (WP-1033): a window
+			// that began ten minutes ago.
+			setup: func(t *testing.T) {
+				c := f.CI(t, f.OrgA, f.Client1, "evt02-started-ci")
+				startedWindow = scalar(t, `INSERT INTO maintenance_window (organization_id, title, starts_at, ends_at)
+					VALUES ($1, 'evt02 started', now() - interval '10 minutes', now() + interval '20 hours') RETURNING id::text`, f.OrgA)
+				exec(t, `INSERT INTO maintenance_window_ci (organization_id, maintenance_window_id, ci_id) VALUES ($1, $2, $3)`,
+					f.OrgA, startedWindow, c)
+			},
+			act: func(t *testing.T, refused bool) string {
+				_, err := maintenance.NewBoundaries(f.App, maintenance.NewPGRepository(f.App), nil).RunOrg(context.Background(), f.OrgA)
+				failed(t, "maintenance boundaries", err, refused)
+				return startedWindow
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["ci_count"] != 1.0 || data["starts_at"] == nil || data["ends_at"] == nil {
+					t.Errorf("maintenance.started data %v", data)
+				}
+			}},
+		{typ: events.MaintenanceEnded,
+			// The system job maintenance.boundaries (WP-1033): a window
+			// that ended an hour ago (its start lies before the horizon).
+			setup: func(t *testing.T) {
+				endedWindow = scalar(t, `INSERT INTO maintenance_window (organization_id, title, starts_at, ends_at)
+					VALUES ($1, 'evt02 ended', now() - interval '30 hours', now() - interval '1 hour') RETURNING id::text`, f.OrgA)
+			},
+			act: func(t *testing.T, refused bool) string {
+				_, err := maintenance.NewBoundaries(f.App, maintenance.NewPGRepository(f.App), alarms).RunOrg(context.Background(), f.OrgA)
+				failed(t, "maintenance boundaries", err, refused)
+				return endedWindow
+			},
+			data: func(t *testing.T, entity string, data map[string]any) {
+				if data["id"] != entity || data["ci_count"] != 0.0 || data["ends_at"] == nil {
+					t.Errorf("maintenance.ended data %v", data)
+				}
+			}},
 		{typ: events.AlarmOpened,
 			// The lifecycle opens a new alarm of a rule series (WP-982).
 			act: func(t *testing.T, refused bool) string {
@@ -2051,8 +2090,6 @@ var plannedProducers = map[string]string{
 	"ci.config_changed":           "WP-1054",
 	"capacity.forecast_exceeded":  "WP-1060",
 	"sla.violated":                "WP-1049",
-	"maintenance.started":         "WP-1033",
-	"maintenance.ended":           "WP-1033",
 	"notification.escalated":      "WP-1146",
 	"notification.acknowledged":   "WP-1146",
 }

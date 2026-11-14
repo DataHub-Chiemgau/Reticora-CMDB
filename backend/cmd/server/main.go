@@ -504,6 +504,11 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("late modules", "enabled", modules.EnabledKeys())
+	// The suppression of alarms in maintenance windows needs the job that
+	// releases them, which runs only with the module maintenance (WP-1033).
+	if modules.Enabled("maintenance") {
+		repos.WireMaintenanceSuppression()
+	}
 	// Reference targets of switched-off modules (asset: inventory, file:
 	// documents) are not available to attribute definitions and writes
 	// (E-03, WP-254).

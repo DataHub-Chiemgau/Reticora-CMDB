@@ -446,18 +446,21 @@ type ProbeStateChangedData struct {
 // notify.enabled false notifies nobody, webhook.enabled false reaches no
 // webhook subscription; absent is both on.
 type AlarmData struct {
-	ID               string        `json:"id"`
-	AlarmID          string        `json:"alarm_id"`
-	DedupKey         string        `json:"dedup_key"`
-	CIID             string        `json:"ci_id,omitempty"`
-	ClientID         string        `json:"client_id,omitempty"`
-	SiteID           string        `json:"site_id,omitempty"`
-	Severity         string        `json:"severity"`
-	IncidentID       string        `json:"incident_id,omitempty"`
-	SourceKind       string        `json:"source_kind,omitempty"`
-	Summary          string        `json:"summary,omitempty"`
-	Value            *float64      `json:"value,omitempty"`
-	SuppressedReason string        `json:"suppressed_reason,omitempty"`
+	ID               string   `json:"id"`
+	AlarmID          string   `json:"alarm_id"`
+	DedupKey         string   `json:"dedup_key"`
+	CIID             string   `json:"ci_id,omitempty"`
+	ClientID         string   `json:"client_id,omitempty"`
+	SiteID           string   `json:"site_id,omitempty"`
+	Severity         string   `json:"severity"`
+	IncidentID       string   `json:"incident_id,omitempty"`
+	SourceKind       string   `json:"source_kind,omitempty"`
+	Summary          string   `json:"summary,omitempty"`
+	Value            *float64 `json:"value,omitempty"`
+	SuppressedReason string   `json:"suppressed_reason,omitempty"`
+	// AfterMaintenance marks the alarm.opened of an alarm still open at
+	// the end of the window that suppressed it (WP-1033).
+	AfterMaintenance bool          `json:"after_maintenance,omitempty"`
 	OpenedAt         *time.Time    `json:"opened_at,omitempty"`
 	ResolvedAt       *time.Time    `json:"resolved_at,omitempty"`
 	Actions          *AlarmActions `json:"actions,omitempty"`

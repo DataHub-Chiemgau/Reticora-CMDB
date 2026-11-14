@@ -40,6 +40,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/maintenance"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
@@ -546,6 +547,25 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The boundaries of the maintenance windows (ALR-11, MGT-04, WP-1033):
+	// every minute with the module maintenance and the database.
+	maintenanceModules, err := server.ParseModules("maintenance")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, withDB := range []bool{true, false} {
+		deps := systemJobTestDeps(t, cfg, withDB)
+		deps.modules = maintenanceModules
+		if kinds := registeredSystemJobs(t, deps); kinds[maintenance.BoundariesKind] != withDB {
+			t.Errorf("JOB-02 maintenance boundaries (ALR-11) with the module maintenance (database %v): registered %v",
+				withDB, kinds[maintenance.BoundariesKind])
+		}
+		for _, job := range systemJobs(deps) {
+			if job.Kind == maintenance.BoundariesKind && (job.Spec != "@every 1m" || job.MaxCatchUp != 1) {
+				t.Errorf("%s: spec %q, max catch-up %d; want @every 1m and 1", job.Kind, job.Spec, job.MaxCatchUp)
+			}
+		}
+	}
 	for _, withDB := range []bool{true, false} {
 		deps := systemJobTestDeps(t, cfg, withDB)
 		deps.modules = monitoringModules
@@ -567,6 +587,11 @@ func TestSystemJobsCoverJOB02(t *testing.T) {
 		if kinds[probe.AssignKind] != withDB {
 			t.Errorf("JOB-02 probe assignment (PRB-03) with the module monitoring (database %v): registered %v",
 				withDB, kinds[probe.AssignKind])
+		}
+		// The boundaries of the maintenance windows (ALR-11, WP-1033) need
+		// the module maintenance: not with monitoring alone.
+		if kinds[maintenance.BoundariesKind] {
+			t.Errorf("JOB-02 %s is registered without the module maintenance", maintenance.BoundariesKind)
 		}
 		// The results of the subnet scan (IPM-11, WP-1063) need the module
 		// ipam: not with monitoring alone.

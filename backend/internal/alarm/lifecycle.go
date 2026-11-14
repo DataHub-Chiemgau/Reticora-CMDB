@@ -174,6 +174,9 @@ type Service struct {
 	pool  *pgxpool.Pool
 	sink  EventSink
 	clock func() time.Time
+	// maintenance suppresses the alarms of CIs in active maintenance
+	// windows (WP-1033); nil suppresses nothing.
+	maintenance MaintenanceChecker
 	// memMu serializes the operations without a database: the memory
 	// store has no row locks.
 	memMu sync.Mutex
@@ -255,11 +258,25 @@ func (s *Service) Raise(ctx context.Context, orgID string, in *RaiseInput) (*Ala
 	var out *Alarm
 	err := s.inTx(ctx, orgID, func(ctx context.Context) error {
 		at := s.observed(in)
+		// An alarm of a CI in an active maintenance window opens
+		// suppressed (WP-1033).
+		suppress, err := s.maintenanceOf(ctx, orgID, in, at)
+		if err != nil {
+			return err
+		}
 		a, created, err := s.store.UpsertOpen(ctx, orgID, upsertOf(in, StateOpen, at))
 		if err != nil {
 			return err
 		}
 		if created {
+			if suppress && a.SuppressedReason == nil {
+				u := stateOf(a)
+				reason := SuppressedMaintenance
+				u.SuppressedReason = &reason
+				if a, err = s.store.UpdateState(ctx, orgID, a.ID, u); err != nil {
+					return err
+				}
+			}
 			out = a
 			return s.record(ctx, a, &Transition{ToState: StateOpen, ToSeverity: &a.Severity, At: a.FirstSeenAt,
 				Reason: ReasonRaised}, events.AlarmOpened)
@@ -275,11 +292,17 @@ func (s *Service) Raise(ctx context.Context, orgID string, in *RaiseInput) (*Ala
 			// The observation that opens the alarm, not the first one of
 			// the pending phase, is its value (WP-987, AK4).
 			u.State, u.Severity, u.OpenedAt, u.Details = StateOpen, sev, &at, in.Details
+			if suppress && u.SuppressedReason == nil {
+				reason := SuppressedMaintenance
+				u.SuppressedReason = &reason
+			}
+			keepMaintenanceWindow(a, u)
 			out, err = s.move(ctx, a, u, &Transition{At: at, Reason: ReasonRaised}, events.AlarmOpened)
 			return err
 		case (a.State == StateOpen || a.State == StateAcknowledged) && severityRank(in.Severity) > severityRank(a.Severity):
 			u := stateOf(a)
 			u.State, u.Severity, u.AcknowledgedAt, u.AcknowledgedBy, u.Details = StateOpen, in.Severity, nil, nil, in.Details
+			keepMaintenanceWindow(a, u)
 			out, err = s.move(ctx, a, u, &Transition{At: at, Reason: ReasonSeverityChanged}, events.AlarmSeverityChanged)
 			return err
 		}

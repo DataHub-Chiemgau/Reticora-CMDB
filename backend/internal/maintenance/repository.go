@@ -28,6 +28,12 @@ type Repository interface {
 	// the clients.
 	NotifyClients(ctx context.Context, orgID, windowID string, plan *NotifyPlan) ([]Notification, error)
 	ListNotifications(ctx context.Context, orgID, windowID string) ([]Notification, error)
+	// ActiveWindows returns the windows active at at: starts_at <= at <
+	// ends_at and not cancelled (ALR-11, WP-1033), with their CIs.
+	ActiveWindows(ctx context.Context, orgID string, at time.Time) ([]Window, error)
+	// WindowsBetween returns the windows that are not cancelled and
+	// overlap [from, to), with their CIs, ordered by starts_at.
+	WindowsBetween(ctx context.Context, orgID string, from, to time.Time) ([]Window, error)
 }
 
 // MemoryRepository is the in-memory implementation (tests, --no-db).
@@ -89,6 +95,32 @@ func (r *MemoryRepository) GetByID(_ context.Context, orgID, id string) (*Window
 	}
 	cp := *w
 	return &cp, nil
+}
+
+// ActiveWindows implements Repository.
+func (r *MemoryRepository) ActiveWindows(_ context.Context, orgID string, at time.Time) ([]Window, error) {
+	return r.between(orgID, at, at.Add(time.Nanosecond)), nil
+}
+
+// WindowsBetween implements Repository.
+func (r *MemoryRepository) WindowsBetween(_ context.Context, orgID string, from, to time.Time) ([]Window, error) {
+	return r.between(orgID, from, to), nil
+}
+
+func (r *MemoryRepository) between(orgID string, from, to time.Time) []Window {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := []Window{}
+	for _, w := range r.wins {
+		if w.OrganizationID != orgID || w.Status == "cancelled" || !w.StartsAt.Before(to) || !w.EndsAt.After(from) {
+			continue
+		}
+		cp := *w
+		cp.CIIDs = slices.Clone(w.CIIDs)
+		out = append(out, cp)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].StartsAt.Before(out[j].StartsAt) })
+	return out
 }
 
 func (r *MemoryRepository) Create(_ context.Context, w *Window) error {

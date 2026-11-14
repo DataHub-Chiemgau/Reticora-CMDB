@@ -2726,6 +2726,10 @@
           "enum": ["maintenance", "symptom", "flapping"],
           "description": "Why the alarm is suppressed; a suppressed alarm notifies nobody (WP-987). Absent when it is not suppressed."
         },
+        "after_maintenance": {
+          "type": "boolean",
+          "description": "true on the alarm.opened of an alarm still open at the end of the maintenance window that suppressed it (notify_after_maintenance, WP-1033); absent otherwise."
+        },
         "opened_at": {
           "type": "string",
           "format": "date-time",
@@ -2837,6 +2841,10 @@
           "enum": ["maintenance", "symptom", "flapping"],
           "description": "Why the alarm is suppressed; a suppressed alarm notifies nobody (WP-987). Absent when it is not suppressed."
         },
+        "after_maintenance": {
+          "type": "boolean",
+          "description": "true on the alarm.opened of an alarm still open at the end of the maintenance window that suppressed it (notify_after_maintenance, WP-1033); absent otherwise."
+        },
         "opened_at": {
           "type": "string",
           "format": "date-time",
@@ -2942,6 +2950,10 @@
           "type": "string",
           "enum": ["maintenance", "symptom", "flapping"],
           "description": "Why the alarm is suppressed; a suppressed alarm notifies nobody (WP-987). Absent when it is not suppressed."
+        },
+        "after_maintenance": {
+          "type": "boolean",
+          "description": "true on the alarm.opened of an alarm still open at the end of the maintenance window that suppressed it (notify_after_maintenance, WP-1033); absent otherwise."
         },
         "opened_at": {
           "type": "string",
@@ -3049,6 +3061,10 @@
           "enum": ["maintenance", "symptom", "flapping"],
           "description": "Why the alarm is suppressed; a suppressed alarm notifies nobody (WP-987). Absent when it is not suppressed."
         },
+        "after_maintenance": {
+          "type": "boolean",
+          "description": "true on the alarm.opened of an alarm still open at the end of the maintenance window that suppressed it (notify_after_maintenance, WP-1033); absent otherwise."
+        },
         "opened_at": {
           "type": "string",
           "format": "date-time",
@@ -3154,6 +3170,10 @@
           "type": "string",
           "enum": ["maintenance", "symptom", "flapping"],
           "description": "Why the alarm is suppressed; a suppressed alarm notifies nobody (WP-987). Absent when it is not suppressed."
+        },
+        "after_maintenance": {
+          "type": "boolean",
+          "description": "true on the alarm.opened of an alarm still open at the end of the maintenance window that suppressed it (notify_after_maintenance, WP-1033); absent otherwise."
         },
         "opened_at": {
           "type": "string",

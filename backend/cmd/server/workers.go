@@ -33,6 +33,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ipam"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/jobs"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/lifecycle"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/maintenance"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/middleware"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/monitoring"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
@@ -779,6 +780,17 @@ func systemJobs(d *systemJobDeps) []jobs.Schedule {
 			systemJobs = append(systemJobs, compliance.NewSnapshot(d.repos.Compliance, orgs, func(ctx context.Context, orgID string) bool {
 				return ents != nil && ents.IsEnabled(ctx, orgID, entitlement.FeatureComplianceFindings)
 			}).Schedule())
+		}
+		// The boundaries of the maintenance windows (ALR-11, MGT-04,
+		// WP-1033): every minute per organization one maintenance.started
+		// or maintenance.ended per transition; at the end the alarms the
+		// window suppressed are released (notify_after_maintenance).
+		if d.modules.Enabled("maintenance") {
+			var releaser maintenance.AlarmReleaser
+			if d.repos.Alarms != nil {
+				releaser = d.repos.Alarms
+			}
+			systemJobs = append(systemJobs, maintenance.NewBoundaries(pool, d.repos.Maintenance, releaser).Schedule())
 		}
 		// Alarm retention (ALR-01, WP-981): daily the resolved alarms
 		// older than 400 days with their transitions, with the module
