@@ -237,6 +237,8 @@ var typeMetrics = map[string][]string{
 	"icmp": {"rtt_min_ms", "rtt_max_ms", "jitter_ms"},
 	"http": {"dns_ms", "connect_ms", "tls_ms", "ttfb_ms", "status_code", "cert_expiry_s"},
 	"dns":  {"probe_dns_response_seconds", "probe_dns_rcode", "probe_dns_answer_count", "probe_dns_soa_serial"},
+	"redfish": {"probe_redfish_health", "probe_redfish_temperature_celsius", "probe_redfish_fan_rpm",
+		"probe_redfish_psu_input_watts", "probe_redfish_psu_state", "probe_redfish_truncated"},
 }
 
 // MetricNames returns the value names the type declares (none for an
@@ -336,6 +338,7 @@ var paramChecks = map[string]func(spec *ProbeSpec, params map[string]any) []Fiel
 	"icmp":    checkICMPParams,
 	"bfd":     checkBFDParams,
 	"optical": checkOpticalParams,
+	"redfish": checkRedfishParams,
 	"tcp":     func(_ *ProbeSpec, params map[string]any) []FieldError { return checkTCPParams(params) },
 	"dns":     func(_ *ProbeSpec, params map[string]any) []FieldError { return checkDNSParams(params) },
 	"http":    func(_ *ProbeSpec, params map[string]any) []FieldError { return checkHTTPParams(params) },
@@ -365,6 +368,60 @@ func checkBFDParams(_ *ProbeSpec, params map[string]any) []FieldError {
 		}
 	}
 	return errs
+}
+
+// checkRedfishParams checks the parameters of the redfish type (MON-03,
+// WP-998 AK5): system_id and every chassis_ids entry is a plain Redfish
+// resource Id (letters, digits, '.', '_', '-', not "." or ".."), and a
+// critical temperature lies above its warning temperature. The levels are
+// merged like the executor reads them (thresholds before params).
+func checkRedfishParams(spec *ProbeSpec, params map[string]any) []FieldError {
+	var errs []FieldError
+	if id, ok := params["system_id"].(string); ok && !redfishID(id) {
+		errs = append(errs, FieldError{Field: "params.system_id", Message: "must be a Redfish resource Id (letters, digits, '.', '_', '-')"})
+	}
+	if ids, ok := params["chassis_ids"].([]any); ok {
+		for i, item := range ids {
+			if id, ok := item.(string); ok && !redfishID(id) {
+				errs = append(errs, FieldError{Field: fmt.Sprintf("params.chassis_ids[%d]", i), Message: "must be a Redfish resource Id (letters, digits, '.', '_', '-')"})
+			}
+		}
+	}
+	var thresholds map[string]any
+	if spec != nil {
+		thresholds, _ = decodeObject(spec.Thresholds)
+	}
+	level := func(name string) (float64, string, bool) {
+		if v, ok := numberOf(thresholds[name]); ok {
+			return v, "thresholds." + name, true
+		}
+		if v, ok := numberOf(params[name]); ok {
+			return v, "params." + name, true
+		}
+		return 0, "", false
+	}
+	warn, _, hasWarn := level("temp_warn")
+	crit, critField, hasCrit := level("temp_crit")
+	if hasWarn && hasCrit && crit <= warn {
+		errs = append(errs, FieldError{Field: critField, Message: "temp_crit must be above temp_warn"})
+	}
+	return errs
+}
+
+// redfishID reports whether id is a plain Redfish resource Id, the same
+// rule as the collector's redfish.ValidID.
+func redfishID(id string) bool {
+	if id == "" || len(id) > 64 || id == "." || id == ".." {
+		return false
+	}
+	for _, c := range id {
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9', c == '.', c == '_', c == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // Defaults of the optical Rx thresholds (E-186, api/probe-types.json).

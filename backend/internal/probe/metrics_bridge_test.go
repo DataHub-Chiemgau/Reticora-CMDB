@@ -69,3 +69,40 @@ func TestBridgeSkipsStaleEpoch(t *testing.T) {
 		t.Errorf("stale epoch: %+v", got)
 	}
 }
+
+// TestBridgeRedfishSensorsCarryCIID covers WP-998 AK3 and AK6: the
+// labeled sensor values of a redfish result become samples of the probe's
+// CI under the plain value name with the labels sensor and psu.
+func TestBridgeRedfishSensorsCarryCIID(t *testing.T) {
+	temp := probewire.ValueKey("probe_redfish_temperature_celsius", map[string]string{"sensor": "1/CPU1"})
+	psu := probewire.ValueKey("probe_redfish_psu_input_watts", map[string]string{"psu": "1/PSU1"})
+	r := bridgeResult(map[string]float64{temp: 61, psu: 240, "probe_redfish_health": 0}, nil)
+	got := probe.MetricsBridge{}.Samples("org", &probe.BridgeProbe{ID: "p1", Type: "redfish", CIID: "ci1"}, r, false)
+	if len(got) != 3 {
+		t.Fatalf("%d samples, want 3: %+v", len(got), got)
+	}
+	want := map[string]struct {
+		value         float64
+		label, lvalue string
+	}{
+		"probe_redfish_temperature_celsius": {61, "sensor", "1/CPU1"},
+		"probe_redfish_psu_input_watts":     {240, "psu", "1/PSU1"},
+		"probe_redfish_health":              {0, "", ""},
+	}
+	for _, m := range got {
+		w, ok := want[m.Name]
+		if !ok || m.Value != w.value || m.CIID != "ci1" || m.Labels[probe.LabelProbeID] != "p1" {
+			t.Errorf("sample %+v", m)
+			continue
+		}
+		if w.label != "" && m.Labels[w.label] != w.lvalue {
+			t.Errorf("%s: labels %v, want %s=%s", m.Name, m.Labels, w.label, w.lvalue)
+		}
+	}
+	before := testutil.ToFloat64(probe.BridgeDiscarded(probe.BridgeUnknownMetric))
+	got = probe.MetricsBridge{}.Samples("org", &probe.BridgeProbe{ID: "p1", Type: "redfish", CIID: "ci1"},
+		bridgeResult(map[string]float64{`probe_redfish_bogus{sensor="x"}`: 1, `probe_redfish_fan_rpm{fan=`: 2}, nil), false)
+	if len(got) != 0 || testutil.ToFloat64(probe.BridgeDiscarded(probe.BridgeUnknownMetric))-before != 2 {
+		t.Errorf("undeclared or malformed labeled keys: %+v", got)
+	}
+}

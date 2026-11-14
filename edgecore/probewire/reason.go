@@ -73,6 +73,12 @@ const (
 	// degraded it is a warn code (ok → degraded), with severity down the
 	// code of a failed check.
 	WarnAnswerMismatch = "answer_mismatch"
+	// WarnCheckFailed: a check of the target's own state failed (redfish:
+	// health or power supply Warning/Critical, WP-998; snmp_status and
+	// snmp_if: a violated OID check or an oper-down interface, WP-995,
+	// WP-996). With severity degraded it is a warn code (ok → degraded),
+	// with severity down the code of a failed check.
+	WarnCheckFailed = "check_failed"
 )
 
 // WarnCodes are the codes of a successful check with a warning; a result
@@ -82,6 +88,7 @@ var WarnCodes = map[string]bool{
 	WarnThresholdExceeded: true,
 	WarnCertExpiring:      true,
 	WarnAnswerMismatch:    true,
+	WarnCheckFailed:       true,
 }
 
 // reasons lists every valid reason code apart from the warn codes.

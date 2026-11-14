@@ -274,6 +274,50 @@ Werte mit Labels tragen die Labels im Schlüssel von `Result.values` in der
 Form des Prometheus-Formats (`name{label="wert",…}`, Labels sortiert;
 `probewire.ValueKey`/`ParseValueKey`).
 
+## Redfish (`redfish`)
+
+Standard nach MON-03: Intervall 300 s (60 s–24 h), Timeout 15 s (1–60 s),
+Down-Count 3, Up-Count 1, Zugangsdaten (Basic-Auth) aus dem Namespace
+`redfish`. Parameter: `port` (443), `system_id` (leer: erstes Mitglied von
+`Systems`), `chassis_ids` (höchstens 8; leer: alle Chassis), `temp_warn`
+und `temp_crit` in °C. Ids sind reine Redfish-Ids (Buchstaben, Ziffern,
+`.`, `_`, `-`), sonst Feldfehler `params.system_id` bzw.
+`params.chassis_ids[i]`; `temp_crit` muss über `temp_warn` liegen.
+
+Der Collector sendet nur GET-Anfragen: Service-Root, `Systems/{id}`
+(`Status.Health`, `PowerState`) und je Chassis zuerst die Netzteile, dann
+Temperaturen und Lüfter. Verlinkt das Chassis die älteren Ressourcen
+`Power` und `Thermal`, werden diese gelesen (je ein Abruf, nur `Thermal`
+trägt die Geräteschwellen), sonst `PowerSubsystem/PowerSupplies` und
+`ThermalSubsystem` (`ThermalMetrics`, `Fans`). Je Prüfung höchstens 20
+Ressourcenabrufe (darüber `probe_redfish_truncated` = 1 und mindestens `ok`
+mit Warncode `check_failed`, Label `truncated`; ausgewertet wird das
+Gelesene), je
+Ressource höchstens 1 MiB (größere Antworten werden verworfen, nie
+teilweise gelesen: `error`/`response_too_large`). Die TLS-Prüfung ist die
+der Discovery: Systemwurzeln oder die Ausnahmen aus
+`RETICORA_REDFISH_TLS_SCOPES`; ein nicht vertrauenswürdiges Zertifikat
+ergibt `error`/`tls_untrusted`, die Zugangsdaten werden nicht gesendet.
+Links des Geräts werden nur als Pfad auf demselben Ziel verfolgt; ein
+Link auf ein anderes Ziel ergibt `error`/`unsupported`.
+
+Ergebnis: Health oder ein Netzteil `Critical` → `fail` mit
+`check_failed`, `Warning` → `ok` mit `check_failed` (`degraded`). Ein
+Temperaturwert über `UpperThresholdCritical` des Geräts → `fail` mit
+`threshold_exceeded`, über `UpperThresholdNonCritical` → `ok` mit
+`threshold_exceeded`; `temp_warn`/`temp_crit` ersetzen die jeweilige
+Geräteschwelle (`thresholds` vor `params`, E-186). `ThermalMetrics` führt
+keine Geräteschwellen; dort gelten nur die Parameter. 401/403 ergeben
+`error`/`auth_failed` (`unknown`, nie `down`), ein Timeout
+`fail`/`timeout`, ein anderer HTTP-Status `fail`/`status_mismatch`. Das
+Label `sensor` bzw. `psu` am Ergebnis nennt den auslösenden Sensor.
+
+Werte: `probe_redfish_health` (0 OK, 1 Warning, 2 Critical),
+`probe_redfish_temperature_celsius{sensor}`, `probe_redfish_fan_rpm{fan}`,
+`probe_redfish_psu_input_watts{psu}` und `probe_redfish_psu_state{psu}`
+(0/1/2); Namen als `<Chassis-Id>/<Sensor>`. Die `ci_id` setzt die
+Metrik-Brücke aus der Probe (WP-976).
+
 ## Typtabelle
 
 Zeiten in Sekunden, Rate in Prüfungen je Sekunde. Die Werte sind Startwerte
@@ -288,7 +332,7 @@ nach E-154; WP-1023 misst die Raten nach.
 | `snmp_status` | planned | 60 / 30 / 86400 | 5 / 1 / 15 | 3 / 1 | 1 | 32 | 200 | 4 | 65536 | 20 | snmp | – |
 | `snmp_if` | planned | 300 / 60 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 50 | 4 | 1048576 | 1024 | snmp | – |
 | `snmp_custom` | planned | 300 / 60 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 100 | 8 | 65536 | 256 | snmp | – |
-| `redfish` | planned | 300 / 60 / 86400 | 15 / 1 / 60 | 3 / 1 | 1 | 8 | 20 | 2 | 1048576 | 256 | redfish | – |
+| `redfish` | available | 300 / 60 / 86400 | 15 / 1 / 60 | 3 / 1 | 1 | 8 | 20 | 2 | 1048576 | 256 | redfish | – |
 | `bgp` | planned | 60 / 30 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 4096 | snmp, gnmi | – |
 | `ospf` | planned | 60 / 30 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 1024 | snmp, gnmi | – |
 | `isis` | planned | 60 / 30 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 50 | 2 | 1048576 | 1024 | snmp, gnmi | – |

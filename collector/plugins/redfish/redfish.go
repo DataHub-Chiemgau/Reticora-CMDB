@@ -360,6 +360,15 @@ func (p *Plugin) collect(ctx context.Context, target string, creds map[string]st
 	return result, nil
 }
 
+// StatusError is an answer of the Redfish service with a status other than
+// 200, 401 and 403; Body holds at most 1 KiB of the error body.
+type StatusError struct {
+	Code int
+	Body string
+}
+
+func (e *StatusError) Error() string { return fmt.Sprintf("HTTP %d: %s", e.Code, e.Body) }
+
 func (p *Plugin) redfishGet(ctx context.Context, client *http.Client, url, username, password string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
@@ -376,15 +385,30 @@ func (p *Plugin) redfishGet(ctx context.Context, client *http.Client, url, usern
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		// A refused credential (WP-998 AK2); the error body is not kept,
+		// it may echo parts of the request.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("HTTP %d: %w", resp.StatusCode, plugins.ErrAuthFailed)
+	}
 	if resp.StatusCode != http.StatusOK {
 		body, rerr := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		if rerr != nil {
 			return fmt.Errorf("HTTP %d (error body unreadable: %v)", resp.StatusCode, rerr)
 		}
-		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return &StatusError{Code: resp.StatusCode, Body: strings.TrimSpace(string(body))}
 	}
 
-	return json.NewDecoder(resp.Body).Decode(out)
+	// At most MaxBodyBytes per resource; a larger body is discarded as a
+	// whole instead of decoding a part of it.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, MaxBodyBytes+1))
+	if err != nil {
+		return err
+	}
+	if len(body) > MaxBodyBytes {
+		return ErrBodyTooLarge
+	}
+	return json.Unmarshal(body, out)
 }
 
 // isUUID reports whether s has the 8-4-4-4-12 hex form.

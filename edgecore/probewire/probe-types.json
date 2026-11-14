@@ -541,7 +541,7 @@
       }
     },
     "redfish": {
-      "status": "planned",
+      "status": "available",
       "min_interval_s": 60,
       "default_interval_s": 300,
       "max_interval_s": 86400,
@@ -564,17 +564,40 @@
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "resources": {
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535,
+            "default": 443,
+            "description": "HTTPS port of the Redfish service."
+          },
+          "system_id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "Id of the computer system (letters, digits, '.', '_', '-'); empty reads the first member of Systems."
+          },
+          "chassis_ids": {
             "type": "array",
             "items": {
               "type": "string",
-              "maxLength": 256
+              "minLength": 1,
+              "maxLength": 64
             },
-            "maxItems": 16
+            "maxItems": 8,
+            "description": "Ids of the chassis to read; empty reads every chassis within the limit of 20 resource requests per check."
           },
-          "tls_verify": {
-            "type": "boolean",
-            "default": true
+          "temp_warn": {
+            "type": "number",
+            "minimum": -50,
+            "maximum": 200,
+            "description": "Temperature in degrees Celsius above which the probe is degraded; overrides UpperThresholdNonCritical of the device."
+          },
+          "temp_crit": {
+            "type": "number",
+            "minimum": -50,
+            "maximum": 200,
+            "description": "Temperature in degrees Celsius above which the probe is down; overrides UpperThresholdCritical of the device."
           }
         }
       }

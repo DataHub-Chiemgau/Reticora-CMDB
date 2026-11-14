@@ -6,3 +6,8 @@
 // added later is registered without a change there. Simple types live flat
 // in collector/probe and need no entry.
 package all
+
+import (
+	// redfish: health, temperatures, fans and power supplies (WP-998).
+	_ "github.com/DataHub-Chiemgau/Reticora-CMDB/collector/probe/redfish"
+)

@@ -76,13 +76,41 @@ func (MetricsBridge) Samples(orgID string, p *BridgeProbe, r *probewire.Result, 
 	sort.Strings(names)
 	labels := bridgeLabels(p.ID, r.Labels)
 	out := make([]monitoring.Metric, 0, len(names))
-	for _, name := range names {
-		if !probewire.DeclaresMetric(p.Type, name) {
+	for _, key := range names {
+		name, keyLabels, err := probewire.ParseValueKey(key)
+		if err != nil || !probewire.DeclaresMetric(p.Type, name) {
 			bridgeDiscarded.WithLabelValues(BridgeUnknownMetric).Inc()
 			continue
 		}
-		out = append(out, monitoring.Metric{OrgID: orgID, CIID: p.CIID, Name: name, Value: r.Values[name], Labels: labels,
+		ls := labels
+		if len(keyLabels) > 0 {
+			ls = bridgeKeyLabels(p.ID, keyLabels, r.Labels)
+		}
+		out = append(out, monitoring.Metric{OrgID: orgID, CIID: p.CIID, Name: name, Value: r.Values[key], Labels: ls,
 			Timestamp: r.ObservedAt.UTC()})
+	}
+	return out
+}
+
+// bridgeKeyLabels are the labels of a labeled value: kind=probe,
+// probe_id, the labels of the key and then those of the result, at most
+// MaxBridgeLabels in all.
+func bridgeKeyLabels(probeID string, key, extra map[string]string) map[string]string {
+	out := bridgeLabels(probeID, nil)
+	for _, src := range []map[string]string{key, extra} {
+		keys := make([]string, 0, len(src))
+		for k := range src {
+			if _, taken := out[k]; !taken && k != LabelKind && k != LabelProbeID {
+				keys = append(keys, k)
+			}
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			if len(out) >= MaxBridgeLabels {
+				return out
+			}
+			out[k] = src[k]
+		}
 	}
 	return out
 }

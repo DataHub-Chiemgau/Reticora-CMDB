@@ -41,6 +41,7 @@ import (
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/sweep"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/plugins/wmi"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/probe"
+	rfprobe "github.com/DataHub-Chiemgau/Reticora-CMDB/collector/probe/redfish"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/collector/profiles"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/buffer"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/edgecore/keystore"
@@ -188,7 +189,11 @@ func Main() {
 	}
 
 	collectorCfg := loadCollectorConfig()
-	pluginRegistry["redfish"] = redfish.New(redfish.WithTLSScopes(collectorCfg.RedfishTLSScopes...))
+	redfishPlugin := redfish.New(redfish.WithTLSScopes(collectorCfg.RedfishTLSScopes...))
+	pluginRegistry["redfish"] = redfishPlugin
+	// The probe type redfish polls through the same instance, so the TLS
+	// exceptions of the discovery apply to it as well (WP-998 AK3).
+	rfprobe.Configure(redfishPlugin)
 	pluginRegistry["wmi"] = wmi.New(wmi.WithTLSScopes(collectorCfg.WMITLSScopes...))
 	pluginRegistry["nas"] = nas.New(nas.WithTLSScopes(collectorCfg.NASTLSScopes...))
 	pluginRegistry["sweep"] = newSweep(&collectorCfg)
