@@ -1964,3 +1964,5 @@ TKT-01;[P2], Pro [P4], Monitoring/Findings/Automationen [P3];E;backend/internal/
 MON-04;[P3];E;backend/internal/alarm/ticket_create_integration_test.go;WP-1040
 WFL-06;[P3];E;backend/internal/alarm/ticket_create_integration_test.go;WP-1040
 NTF-05;[B], Zusätze [P2], [P3];F;backend/internal/notify/categories_integration_test.go;WP-1147
+WFL-01;[P3];F;backend/internal/workflow/form_step_integration_test.go;WP-1102
+WFL-02;[P3];F;backend/internal/workflow/form_step_integration_test.go;WP-1102

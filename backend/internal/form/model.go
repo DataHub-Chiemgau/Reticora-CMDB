@@ -48,15 +48,18 @@ type Submission struct {
 	FormID         string `json:"form_id"`
 	// FormVersionID is the schema version the values were captured against
 	// (WFL-01); FormVersion is its number.
-	FormVersionID string    `json:"form_version_id"`
-	FormVersion   int       `json:"form_version"`
-	Values        JSONMap   `json:"values"`
-	SubmittedBy   string    `json:"submitted_by,omitempty"`
-	CIID          string    `json:"ci_id,omitempty"`
-	TicketID      string    `json:"ticket_id,omitempty"`
-	Status        string    `json:"status"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	FormVersionID string  `json:"form_version_id"`
+	FormVersion   int     `json:"form_version"`
+	Values        JSONMap `json:"values"`
+	SubmittedBy   string  `json:"submitted_by,omitempty"`
+	CIID          string  `json:"ci_id,omitempty"`
+	TicketID      string  `json:"ticket_id,omitempty"`
+	// RunID is the workflow run in waiting_input this submission continued
+	// (request_form, WP-1102); empty for a submission of its own.
+	RunID     string    `json:"run_id,omitempty"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 	// ExpectedVersionID, when set, is the schema version the caller
 	// validated the values against: CreateSubmission refuses the
 	// submission with ErrVersionChanged when the current version differs.
@@ -91,6 +94,9 @@ type CreateSubmissionRequest struct {
 	CIID     string  `json:"ci_id,omitempty"`
 	TicketID string  `json:"ticket_id,omitempty"`
 	Status   string  `json:"status,omitempty"`
+	// RunID names the workflow run whose request_form step waits for this
+	// form (WP-1102); the submission continues it.
+	RunID string `json:"run_id,omitempty"`
 }
 
 type SubmissionFilter struct {

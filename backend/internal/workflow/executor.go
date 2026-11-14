@@ -368,6 +368,16 @@ func (e *Executor) resume(ctx context.Context, orgID string, run *Run, at attemp
 		} else {
 			output, wait, err = e.executeAction(ctx, orgID, run, i, action)
 		}
+		if wait && err == nil && typ == requestFormActionType {
+			// The form is requested from its recipient (WP-1102); a request
+			// that cannot be stored fails the step.
+			waiting, rerr := e.requestInput(ctx, orgID, run, step, action)
+			if rerr == nil {
+				return waiting, nil
+			}
+			output, err = nil, rerr
+			wait = false
+		}
 		if wait && err == nil && typ == approvalActionType {
 			// The approval is requested with its circle, quorum and
 			// deadline (WP-1098); a request that cannot be stored fails
@@ -425,6 +435,10 @@ func (e *Executor) prepareStep(ctx context.Context, orgID string, run *Run, at a
 	switch prev.Status {
 	case StatusWaitingApproval:
 		r, err := e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusWaitingApproval, nil, run.Context)
+		return nil, true, r, err
+	case StatusWaitingInput:
+		// The step still waits for its form (WP-1102).
+		r, err := e.repo.UpdateRunStatus(ctx, orgID, run.ID, StatusWaitingInput, nil, run.Context)
 		return nil, true, r, err
 	case StatusCancelled:
 		now := time.Now().UTC()
@@ -636,6 +650,9 @@ func (e *Executor) executeAction(ctx context.Context, orgID string, run *Run, in
 		return e.transitionLifecycle(ctx, orgID, run, action)
 	case approvalActionType:
 		return JSONMap{"message": str(action, "message", "Approval required")}, true, nil
+	case requestFormActionType:
+		// Waits for the submission of the form (requestInput, WP-1102).
+		return JSONMap{}, true, nil
 	case "send_notification":
 		out, err := e.sendNotification(ctx, orgID, run, index, action)
 		return out, false, err
@@ -712,6 +729,10 @@ func triggerMatches(trigger JSONMap, event string) bool {
 	typ := str(trigger, "type", "")
 	if typ == "manual" || typ == "schedule" {
 		return event == typ || event == "manual"
+	}
+	if typ == TriggerFormSubmitted {
+		// Started by a submission of its form only (WP-1102).
+		return event == TriggerFormSubmitted
 	}
 	return eventMatches(trigger, event)
 }

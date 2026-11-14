@@ -1150,7 +1150,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		sla.NewHandler(repos.SLA, repos.Ticket),
 		// The availability targets under /api/v1/monitoring/sla (WP-1048).
 		sla.NewAvailabilityHandler(repos.AvailabilityTargets),
-		formHandler(&repos, &opts, workflowQuotas),
+		formHandler(&repos, &opts, workflowQuotas, workflowRuns),
 		workflow.NewHandler(repos.Workflow, workflowRuns).WithQuota(workflowQuotas),
 		compliance.NewHandler(repos.Compliance, complianceEvaluator).WithJobs(complianceJobs).
 			WithReports(compliance.NewReportService(repos.Compliance, reportAuditVerifier(&opts), entitlementLister{svc: opts.Entitlements})),
@@ -2058,10 +2058,20 @@ func exportDATEVGate(opts *Options) *export.DATEVGate {
 // formHandler builds the form routes; signature fields (WP-1101) name
 // documents only with the release module documents, without it a form
 // definition with a signature field is refused with 422.
-func formHandler(repos *Repositories, opts *Options, quotas *workflow.Quotas) *form.Handler {
+func formHandler(repos *Repositories, opts *Options, quotas *workflow.Quotas, runs *workflow.Executor) *form.Handler {
 	h := form.NewHandler(repos.Form)
 	if quotas != nil {
 		h.WithQuota(quotas)
+	}
+	// A submission starts the runs of the trigger form_submitted and
+	// continues the run whose request_form step waits for it (WP-1102),
+	// in its transaction; never while the module workflows is off (E-03).
+	if runs != nil && opts.Modules.Enabled("workflows") {
+		var grants notify.GrantSource
+		if repos.Permission != nil {
+			grants = repos.Permission
+		}
+		h.WithSubmissionHook(workflow.NewFormHook(runs, grants))
 	}
 	if opts.Modules.Enabled(ModuleDocuments) && repos.Document != nil {
 		h.WithDocuments(repos.Document)

@@ -13953,7 +13953,10 @@ paths:
         bound (WFL-01, WP-1101): fields whose visible_when does not hold are
         dropped before they are stored; a missing required_when value
         ("is required") and a changed readonly_when value ("is read-only")
-        are fields of the validation problem.
+        are fields of the validation problem. Every submission starts, in its
+        transaction, a run of each active workflow with the trigger
+        form_submitted of this form whose filter holds (WP-1102); with run_id
+        it continues the run that waits for this form.
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/CreateFormSubmissionRequest' } } }
@@ -13962,8 +13965,9 @@ paths:
         '400': { description: Bad request or validation problem, content: { application/problem+json: { schema: { $ref: '#/components/schemas/ValidationProblem' } } } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { description: The schema of the form changed while the values were validated; submit again., content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
-        '422': { description: "ci_id or ticket_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope (all alike, TEN-04); a signature field names no PNG or JPEG document the submitter may read (values.<field>, WP-1101).", content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
+        '403': { description: "run_id names a run whose form request names another recipient (WP-1102).", content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
+        '409': { description: "The schema of the form changed while the values were validated (submit again), or run_id names a run that is unknown, of another organization, outside the caller's scope, not waiting for this form or already continued (type run-not-waiting, detail run_not_waiting, WP-1102).", content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
+        '422': { description: "ci_id, ticket_id or run_id is no UUID or names an object that is unknown, of another organization or outside the caller's scope (all alike, TEN-04); a signature field names no PNG or JPEG document the submitter may read (values.<field>, WP-1101).", content: { application/problem+json: { schema: { $ref: '#/components/schemas/ProblemDetail' } } } }
   /api/v1/form-submissions:
     x-phase: P3
     x-feature: workflows
@@ -41458,6 +41462,7 @@ components:
         submitted_by: { type: string }
         ci_id: { type: string }
         ticket_id: { type: string }
+        run_id: { type: string, description: The workflow run this submission continued (request_form, WP-1102). }
         status: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
@@ -41469,6 +41474,16 @@ components:
         ci_id: { type: string }
         ticket_id: { type: string }
         status: { type: string }
+        run_id:
+          type: string
+          description: >-
+            The workflow run in waiting_input whose request_form step requests
+            this form (WP-1102). The submission completes the step with
+            {submission_id}, puts the values into the run context under
+            form.<key> and queues the run again; readonly_when compares
+            against the prefill of the request. Only the recipient submits
+            (the user, a member of the team, for a contact a user with
+            form:write in client and site of the run): 403 otherwise.
     FieldProvenance:
       type: object
       required: [id, organization_id, ci_id, field_name, protected, diverged, created_at, updated_at]
@@ -41828,7 +41843,12 @@ components:
             Trigger contract of phase 3 (WFL-02): {"type": "manual"};
             {"type": "event", "event": "<event type>", "filter": <one MET-45
             condition node, optional>, "allow_workflow_origin": <boolean,
-            optional>} (evaluated from WP-1090 on); {"type": "schedule",
+            optional>} (evaluated from WP-1090 on); {"type": "form_submitted",
+            "form_id": "<form id>", "filter": <MET-45, optional>} (WP-1102: every
+            submission of the form starts a run in the transaction of the
+            submission; the context holds form.<key>, submission_id, form_id,
+            form_version_id and ci_id, initiated_by is the submitter; a trigger
+            without a UUID form_id is 422 on trigger.form_id); {"type": "schedule",
             "cron": "<cron expression>", "timezone": "<IANA zone>"} (evaluated
             from WP-1091 on). The filter is checked with the MET-45 condition
             grammar of api/rules.schema.json when the definition is written; a
@@ -41870,7 +41890,15 @@ components:
           description: >-
             Actions executed in order, each {"type": "<action>", ...}: noop,
             create_ticket, set_ci_field, transition_lifecycle, require_approval,
-            submit_form, send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
+            submit_form, request_form (WP-1102: {"type": "request_form", "form_id":
+            <form id>, "recipient": {"type": user | team | contact, "id": <id>},
+            "prefill": <object, ${<path>} like send_webhook>, "deadline":
+            <duration, optional>, "on_timeout": cancel (default) | continue}
+            sets step and run waiting_input and notifies the recipient with a
+            link to the form and the run; POST /forms/{id}/submissions with
+            run_id continues the run, the values under form.<key>; an expired
+            deadline cancels the run or completes the step without values),
+            send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
             "recipients": {"users": [<user id>], "teams": [<team id>],
             "roles": [<role name>], "contact_roles": [owner | escalation |
             operator | responsible | vendor of the run's CI],
@@ -41955,7 +41983,15 @@ components:
           description: >-
             Actions executed in order, each {"type": "<action>", ...}: noop,
             create_ticket, set_ci_field, transition_lifecycle, require_approval,
-            submit_form, send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
+            submit_form, request_form (WP-1102: {"type": "request_form", "form_id":
+            <form id>, "recipient": {"type": user | team | contact, "id": <id>},
+            "prefill": <object, ${<path>} like send_webhook>, "deadline":
+            <duration, optional>, "on_timeout": cancel (default) | continue}
+            sets step and run waiting_input and notifies the recipient with a
+            link to the form and the run; POST /forms/{id}/submissions with
+            run_id continues the run, the values under form.<key>; an expired
+            deadline cancels the run or completes the step without values),
+            send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
             "recipients": {"users": [<user id>], "teams": [<team id>],
             "roles": [<role name>], "contact_roles": [owner | escalation |
             operator | responsible | vendor of the run's CI],
@@ -42037,7 +42073,12 @@ components:
             Trigger contract of phase 3 (WFL-02): {"type": "manual"};
             {"type": "event", "event": "<event type>", "filter": <one MET-45
             condition node, optional>, "allow_workflow_origin": <boolean,
-            optional>} (evaluated from WP-1090 on); {"type": "schedule",
+            optional>} (evaluated from WP-1090 on); {"type": "form_submitted",
+            "form_id": "<form id>", "filter": <MET-45, optional>} (WP-1102: every
+            submission of the form starts a run in the transaction of the
+            submission; the context holds form.<key>, submission_id, form_id,
+            form_version_id and ci_id, initiated_by is the submitter; a trigger
+            without a UUID form_id is 422 on trigger.form_id); {"type": "schedule",
             "cron": "<cron expression>", "timezone": "<IANA zone>"} (evaluated
             from WP-1091 on). The filter is checked with the MET-45 condition
             grammar of api/rules.schema.json when the definition is written; a
@@ -42079,7 +42120,15 @@ components:
           description: >-
             Actions executed in order, each {"type": "<action>", ...}: noop,
             create_ticket, set_ci_field, transition_lifecycle, require_approval,
-            submit_form, send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
+            submit_form, request_form (WP-1102: {"type": "request_form", "form_id":
+            <form id>, "recipient": {"type": user | team | contact, "id": <id>},
+            "prefill": <object, ${<path>} like send_webhook>, "deadline":
+            <duration, optional>, "on_timeout": cancel (default) | continue}
+            sets step and run waiting_input and notifies the recipient with a
+            link to the form and the run; POST /forms/{id}/submissions with
+            run_id continues the run, the values under form.<key>; an expired
+            deadline cancels the run or completes the step without values),
+            send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
             "recipients": {"users": [<user id>], "teams": [<team id>],
             "roles": [<role name>], "contact_roles": [owner | escalation |
             operator | responsible | vendor of the run's CI],
@@ -42154,7 +42203,12 @@ components:
             Trigger contract of phase 3 (WFL-02): {"type": "manual"};
             {"type": "event", "event": "<event type>", "filter": <one MET-45
             condition node, optional>, "allow_workflow_origin": <boolean,
-            optional>} (evaluated from WP-1090 on); {"type": "schedule",
+            optional>} (evaluated from WP-1090 on); {"type": "form_submitted",
+            "form_id": "<form id>", "filter": <MET-45, optional>} (WP-1102: every
+            submission of the form starts a run in the transaction of the
+            submission; the context holds form.<key>, submission_id, form_id,
+            form_version_id and ci_id, initiated_by is the submitter; a trigger
+            without a UUID form_id is 422 on trigger.form_id); {"type": "schedule",
             "cron": "<cron expression>", "timezone": "<IANA zone>"} (evaluated
             from WP-1091 on). The filter is checked with the MET-45 condition
             grammar of api/rules.schema.json when the definition is written; a
@@ -42196,7 +42250,15 @@ components:
           description: >-
             Actions executed in order, each {"type": "<action>", ...}: noop,
             create_ticket, set_ci_field, transition_lifecycle, require_approval,
-            submit_form, send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
+            submit_form, request_form (WP-1102: {"type": "request_form", "form_id":
+            <form id>, "recipient": {"type": user | team | contact, "id": <id>},
+            "prefill": <object, ${<path>} like send_webhook>, "deadline":
+            <duration, optional>, "on_timeout": cancel (default) | continue}
+            sets step and run waiting_input and notifies the recipient with a
+            link to the form and the run; POST /forms/{id}/submissions with
+            run_id continues the run, the values under form.<key>; an expired
+            deadline cancels the run or completes the step without values),
+            send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
             "recipients": {"users": [<user id>], "teams": [<team id>],
             "roles": [<role name>], "contact_roles": [owner | escalation |
             operator | responsible | vendor of the run's CI],

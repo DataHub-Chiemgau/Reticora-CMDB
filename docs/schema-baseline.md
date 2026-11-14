@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000370_monitoring_event
+Stand: Migration 000371_workflow_waiting_input
 
 ## Prüfung
 
@@ -525,6 +525,18 @@ ohne Standardwert: NULL, solange ein eingereihter Run wartet; gesetzt beim
 Start im Request bzw. beim ersten Claim seines Jobs. Der Index
 `idx_workflow_run_org_started (organization_id, started_at)` trägt das
 Stundenfenster von `max_workflow_runs_per_hour` (WFL-08); RLS unverändert.
+Migration 000371 (WP-1102, vorläufige Nummer) nimmt `waiting_input` in
+`workflow_run_status_check` und `workflow_step_status_check` auf (Run und
+Schritt von `request_form` warten auf eine Einreichung) und ergänzt
+`form_submission.run_id` (UUID, NULL-fähig) mit
+`form_submission_run_fkey` (`run_id`, `organization_id`) → `workflow_run`
+(`id`, `organization_id`, Schlüssel `workflow_run_id_organization_key`,
+bedingt im DO-Block) `ON DELETE SET NULL (run_id)`, Index
+`idx_form_submission_run (organization_id, run_id)` (ohne Unique-Index:
+ein Run mit mehreren `request_form`-Schritten nimmt je Schritt eine
+Einreichung; die zweite zum selben Schritt verhindern Sperre und
+Statusprüfung). Down setzt wartende Runs und
+Schritte auf `cancelled`. RLS unverändert.
 `TestRLSCatalog` scheitert für einen Eintrag ohne
 vorhandenen Test und für einen Eintrag, den die Regel nicht meldet.
 

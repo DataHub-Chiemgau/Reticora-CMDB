@@ -43,6 +43,11 @@ type Audience struct {
 	// ClientContacts adds the contacts of the object's client
 	// (contact.client_id = ClientID); never those of another client.
 	ClientContacts *ClientContacts
+	// ContactIDs adds individual contacts of the organization (the
+	// recipient of a form request, WP-1102). With ClientID only those of
+	// that client and the organization-wide ones (without client); never
+	// a contact of another client.
+	ContactIDs []string
 	// DirectUserIDs are users the notification concerns personally (the
 	// initiator of an export): active users, without the permission
 	// check. Direct are addresses outside the organization's users (an
@@ -202,6 +207,20 @@ func (r *PGResolver) Resolve(ctx context.Context, orgID string, a *Audience) ([]
 			found, err := revealContacts(ctx, tx, orgID, rows)
 			if err != nil {
 				return fmt.Errorf("resolve contacts: %w", err)
+			}
+			contacts = append(contacts, found...)
+		}
+		if len(a.ContactIDs) > 0 {
+			rows, err := tx.Query(ctx, `
+				SELECT COALESCE(c.email, ''), COALESCE(c.display_name, ''), COALESCE(c.pii_subject_id::text, '')
+				FROM contact c WHERE c.organization_id = $1 AND c.id::text = ANY($2)
+				  AND ($3 = '' OR c.client_id IS NULL OR c.client_id::text = $3)`, orgID, a.ContactIDs, a.ClientID)
+			if err != nil {
+				return fmt.Errorf("resolve named contacts: %w", err)
+			}
+			found, err := revealContacts(ctx, tx, orgID, rows)
+			if err != nil {
+				return fmt.Errorf("resolve named contacts: %w", err)
 			}
 			contacts = append(contacts, found...)
 		}

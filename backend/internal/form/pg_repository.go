@@ -19,12 +19,20 @@ const definitionColumns = `id::text, organization_id::text, COALESCE(client_id::
 	created_at, updated_at`
 const submissionColumns = `id::text, organization_id::text, form_id::text, form_version_id::text,
 	COALESCE((SELECT v.version FROM form_def_version v WHERE v.id = form_submission.form_version_id), 0),
-	values, COALESCE(submitted_by::text, ''), COALESCE(ci_id::text, ''), COALESCE(ticket_id::text, ''), status, created_at, updated_at`
+	values, COALESCE(submitted_by::text, ''), COALESCE(ci_id::text, ''), COALESCE(ticket_id::text, ''), COALESCE(run_id::text, ''), status,
+	created_at, updated_at`
 const versionColumns = `id::text, organization_id::text, form_id::text, COALESCE(client_id::text, ''), version, schema, ui_hints, COALESCE(created_by::text, ''), created_at`
 
 type PGRepository struct{ pool *pgxpool.Pool }
 
 func NewPGRepository(pool *pgxpool.Pool) *PGRepository { return &PGRepository{pool: pool} }
+
+// RunInTx implements TxRunner: fn runs in one transaction of the context's
+// tenant scope, which every repository call with fn's context joins
+// (database.ContextWithTx).
+func (r *PGRepository) RunInTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {
+	return database.WithRequestTenantTx(ctx, r.pool, orgID, fn)
+}
 
 // submissionVisible restricts submissions to those whose form and ticket are
 // visible under the transaction's tenant scope: their policies filter the
@@ -348,11 +356,11 @@ func (r *PGRepository) CreateSubmission(ctx context.Context, sub *Submission) er
 		}
 		// The current schema version of the form is bound in the same
 		// statement (WFL-01), for the API and the workflow action alike.
-		if err := tx.QueryRow(ctx, `INSERT INTO form_submission (organization_id, form_id, form_version_id, values, submitted_by, ci_id, ticket_id, status)
+		if err := tx.QueryRow(ctx, `INSERT INTO form_submission (organization_id, form_id, form_version_id, values, submitted_by, ci_id, ticket_id, status, run_id)
 			VALUES ($1, $2, (SELECT f.current_version_id FROM form_def f WHERE f.id = $2 AND f.organization_id = $1),
-				$3, NULLIF($4,'')::uuid, NULLIF($5,'')::uuid, NULLIF($6,'')::uuid, $7)
+				$3, NULLIF($4,'')::uuid, NULLIF($5,'')::uuid, NULLIF($6,'')::uuid, $7, NULLIF($8,'')::uuid)
 			RETURNING id::text, form_version_id::text, (SELECT v.version FROM form_def_version v WHERE v.id = form_submission.form_version_id), created_at, updated_at`,
-			sub.OrganizationID, sub.FormID, sub.Values, sub.SubmittedBy, sub.CIID, sub.TicketID, sub.Status).
+			sub.OrganizationID, sub.FormID, sub.Values, sub.SubmittedBy, sub.CIID, sub.TicketID, sub.Status, sub.RunID).
 			Scan(&sub.ID, &sub.FormVersionID, &sub.FormVersion, &sub.CreatedAt, &sub.UpdatedAt); err != nil {
 			return err
 		}
@@ -406,7 +414,7 @@ func scanDefinition(s scanner) (*Definition, error) {
 func scanSubmission(s scanner) (*Submission, error) {
 	sub := &Submission{}
 	var vals []byte
-	if err := s.Scan(&sub.ID, &sub.OrganizationID, &sub.FormID, &sub.FormVersionID, &sub.FormVersion, &vals, &sub.SubmittedBy, &sub.CIID, &sub.TicketID, &sub.Status, &sub.CreatedAt, &sub.UpdatedAt); err != nil {
+	if err := s.Scan(&sub.ID, &sub.OrganizationID, &sub.FormID, &sub.FormVersionID, &sub.FormVersion, &vals, &sub.SubmittedBy, &sub.CIID, &sub.TicketID, &sub.RunID, &sub.Status, &sub.CreatedAt, &sub.UpdatedAt); err != nil {
 		return nil, err
 	}
 	sub.Values = scanMap(vals)

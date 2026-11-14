@@ -20,6 +20,52 @@ type Handler struct {
 	// docs reads the documents of signature fields (WithDocuments,
 	// WP-1101); nil without the module documents.
 	docs DocumentReader
+	// hook connects submissions with workflow runs (WithSubmissionHook,
+	// WP-1102); nil while the module workflows is off.
+	hook SubmissionHook
+}
+
+// SubmissionHook connects the submissions of a form with workflow runs
+// (WFL-01, WFL-02, WP-1102); the router wires the workflow executor. Both
+// calls run in the transaction of the submission (the context carries it):
+// a refused or rolled-back submission leaves no run and continues none.
+type SubmissionHook interface {
+	// PrepareResume locks the run runID and its step that waits for form
+	// formID (FOR UPDATE) and checks that userID is its recipient. It
+	// returns the values the form was requested with (readonly_when
+	// compares against them). A run that is unknown, of another
+	// organization, outside the scope or not waiting for this form is
+	// ErrRunNotWaiting, a caller who is not the recipient
+	// ErrNotFormRecipient.
+	PrepareResume(ctx context.Context, orgID, runID, formID, userID string) (prefill JSONMap, err error)
+	// Submitted is called once the submission is stored: it starts the
+	// runs of the active definitions with the trigger form_submitted of
+	// the form and completes the waiting step of sub.RunID. after, if not
+	// nil, executes or queues the runs once the transaction committed.
+	Submitted(ctx context.Context, sub *Submission) (after func(ctx context.Context), err error)
+}
+
+// TxRunner runs fn in one transaction of the context's tenant scope: the
+// repository calls fn makes with its context join it. The PG repository
+// implements it.
+type TxRunner interface {
+	RunInTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error
+}
+
+// WithSubmissionHook makes POST /forms/{id}/submissions start the runs of
+// form_submitted definitions and continue the run a submission names
+// (run_id) in the transaction of the submission (WP-1102).
+func (h *Handler) WithSubmissionHook(hook SubmissionHook) *Handler {
+	h.hook = hook
+	return h
+}
+
+// inTx runs fn in one transaction when the repository offers one.
+func (h *Handler) inTx(ctx context.Context, orgID string, fn func(ctx context.Context) error) error {
+	if tx, ok := h.repo.(TxRunner); ok {
+		return tx.RunInTx(ctx, orgID, fn)
+	}
+	return fn(ctx)
 }
 
 // DefinitionQuota admits one more form definition of the organization
@@ -102,6 +148,10 @@ func writeFormError(w http.ResponseWriter, r *http.Request, err error) {
 		api.WritePreconditionFailed(w, ErrPreconditionFailed.Error())
 	case errors.Is(err, ErrVersionChanged):
 		api.WriteError(w, http.StatusConflict, "Conflict", ErrVersionChanged.Error())
+	case errors.Is(err, ErrRunNotWaiting):
+		api.WriteProblem(w, http.StatusConflict, ProblemRunNotWaiting, "Conflict", ErrRunNotWaiting.Error())
+	case errors.Is(err, ErrNotFormRecipient):
+		api.WriteError(w, http.StatusForbidden, "Forbidden", ErrNotFormRecipient.Error())
 	case errors.As(err, new(ValidationError)):
 		var ve ValidationError
 		errors.As(err, &ve)
@@ -410,43 +460,71 @@ func (h *Handler) CreateSubmission(w http.ResponseWriter, r *http.Request) {
 	if req.Values == nil {
 		req.Values = JSONMap{}
 	}
-	// Schema and conditional logic of the current version, which the
-	// repository binds (WP-1101 AK2, AK3): hidden fields are dropped, a
-	// signature names a readable PNG or JPEG document.
-	values, err := ValidateSubmission(r.Context(), &SubmissionCheck{OrganizationID: t.OrganizationID, Schema: def.Schema, UIHints: def.UIHints,
-		Values: req.Values, Documents: h.docs})
-	if err != nil {
-		var ve ValidationError
-		if errors.As(err, &ve) {
-			writeValidationProblem(w, ve)
-			return
-		}
-		if !api.WriteFieldError(w, err) {
-			writeFormError(w, r, err)
-		}
-		return
-	}
-	req.Values = values
 	status := req.Status
 	if status == "" {
 		status = "submitted"
 	}
-	if !requireUUIDs(w, http.StatusUnprocessableEntity, "ci_id", req.CIID, "ticket_id", req.TicketID) {
+	if !requireUUIDs(w, http.StatusUnprocessableEntity, "ci_id", req.CIID, "ticket_id", req.TicketID, "run_id", req.RunID) {
+		return
+	}
+	if req.RunID != "" && h.hook == nil {
+		// Without the module workflows no run waits for a form.
+		writeFormError(w, r, ErrRunNotWaiting)
 		return
 	}
 	// The values were validated against the schema of the current version;
 	// the repository binds exactly that version or refuses with 409 when
 	// the schema changed meanwhile (WFL-01).
-	sub := &Submission{OrganizationID: t.OrganizationID, FormID: def.ID, Values: req.Values, SubmittedBy: t.UserID, CIID: req.CIID, TicketID: req.TicketID, Status: status,
-		ExpectedVersionID: def.CurrentVersionID}
-	// A CI or ticket outside the caller's scope is 422 on its field like an
-	// unknown one (TEN-04, F-047).
-	if err := h.repo.CreateSubmission(r.Context(), sub); err != nil {
+	sub := &Submission{OrganizationID: t.OrganizationID, FormID: def.ID, SubmittedBy: t.UserID, CIID: req.CIID, TicketID: req.TicketID, Status: status,
+		RunID: req.RunID, ExpectedVersionID: def.CurrentVersionID}
+	// The submission, the runs it starts and the run it continues are
+	// stored in one transaction (WP-1102): a refused submission leaves no
+	// run, and the waiting step stays locked until the commit.
+	var after func(ctx context.Context)
+	err = h.inTx(r.Context(), t.OrganizationID, func(ctx context.Context) error {
+		var prefill JSONMap
+		if req.RunID != "" {
+			var perr error
+			if prefill, perr = h.hook.PrepareResume(ctx, t.OrganizationID, req.RunID, def.ID, t.UserID); perr != nil {
+				return perr
+			}
+		}
+		// Schema and conditional logic of the current version, which the
+		// repository binds (WP-1101 AK2, AK3): hidden fields are dropped, a
+		// signature names a readable PNG or JPEG document, a readonly_when
+		// field keeps the value the form was requested with.
+		values, verr := ValidateSubmission(ctx, &SubmissionCheck{OrganizationID: t.OrganizationID, Schema: def.Schema, UIHints: def.UIHints,
+			Values: req.Values, Prefill: prefill, Documents: h.docs})
+		if verr != nil {
+			return verr
+		}
+		sub.Values = values
+		// A CI or ticket outside the caller's scope is 422 on its field like
+		// an unknown one (TEN-04, F-047).
+		if cerr := h.repo.CreateSubmission(ctx, sub); cerr != nil {
+			return cerr
+		}
+		if h.hook == nil {
+			return nil
+		}
+		var herr error
+		after, herr = h.hook.Submitted(ctx, sub)
+		return herr
+	})
+	if err != nil {
 		writeFormError(w, r, err)
 		return
 	}
+	if after != nil {
+		// The committed runs execute even when the client goes away.
+		after(context.WithoutCancel(r.Context()))
+	}
 	api.WriteJSON(w, 201, sub)
 }
+
+// ProblemRunNotWaiting is the problem type of a submission to a run that
+// waits for no input of the form (409, WP-1102 AK4).
+const ProblemRunNotWaiting = "https://reticora.io/problems/run-not-waiting"
 
 func writeValidationProblem(w http.ResponseWriter, ve ValidationError) {
 	api.WriteJSON(w, http.StatusBadRequest, struct {

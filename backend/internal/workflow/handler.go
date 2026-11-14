@@ -124,6 +124,10 @@ func validateWrite(trigger JSONMap, conditions, actions []JSONMap) error {
 	if err := validateActions(actions); err != nil {
 		return err
 	}
+	// The trigger form_submitted and request_form (WP-1102).
+	if err := validateFormWrite(trigger, actions); err != nil {
+		return err
+	}
 	return validateApprovalActions(actions)
 }
 

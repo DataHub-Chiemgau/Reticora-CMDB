@@ -120,7 +120,8 @@ func (s *ApprovalSweep) Schedule() jobs.Schedule {
 		Run: func(ctx context.Context) error {
 			res, err := s.Run(ctx)
 			if res.changed() {
-				slog.InfoContext(ctx, "workflow approvals swept", "rejected", res.Rejected, "escalated", res.Escalated, "reminded", res.Reminded)
+				slog.InfoContext(ctx, "workflow approvals swept", "rejected", res.Rejected, "escalated", res.Escalated, "reminded", res.Reminded,
+					"inputs_expired", res.InputsExpired)
 			}
 			return err
 		}}
@@ -129,9 +130,14 @@ func (s *ApprovalSweep) Schedule() jobs.Schedule {
 // ApprovalSweepResult counts what one run of the sweep did.
 type ApprovalSweepResult struct {
 	Rejected, Escalated, Reminded int
+	// InputsExpired counts the request_form steps ended after their
+	// on_timeout (WP-1102).
+	InputsExpired int
 }
 
-func (r ApprovalSweepResult) changed() bool { return r.Rejected+r.Escalated+r.Reminded > 0 }
+func (r ApprovalSweepResult) changed() bool {
+	return r.Rejected+r.Escalated+r.Reminded+r.InputsExpired > 0
+}
 
 // approvalSweepStore is what the sweep needs of the repository; the
 // PostgreSQL repository implements it (the sweep runs with a database only).
@@ -219,6 +225,10 @@ func (s *ApprovalSweep) sweepOrg(ctx context.Context, store approvalSweepStore, 
 			}
 		}
 		if len(batch) < approvalSweepBatch {
+			// The expired form requests (request_form, WP-1102).
+			if ierr := s.sweepInputs(ctx, orgID, now, res); ierr != nil {
+				errs = append(errs, ierr)
+			}
 			return errors.Join(errs...)
 		}
 		last := batch[len(batch)-1]

@@ -14,6 +14,7 @@ import (
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/notify"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/permission"
 )
 
 // The [P3] categories of NTF-05 against PostgreSQL (WP-1147): Alerts
@@ -307,5 +308,41 @@ func TestMaintenanceCategoryRenamedMutedKept(t *testing.T) {
 	}
 	if n := e.deliveries("silent", notify.CategoryMaintenance, "suppressed"); n == 0 {
 		t.Error("the user who muted the earlier name has no suppressed delivery")
+	}
+}
+
+// TestNamedContactsStayInClient covers the contact recipient of
+// request_form (WP-1102): with the client of the run, Resolve names the
+// contacts of that client only, never one of another client.
+func TestNamedContactsStayInClient(t *testing.T) {
+	e := newAlarmEnv(t, "f9")
+	ids := map[string]string{}
+	for _, name := range []string{"op1", "op2"} {
+		var id string
+		if err := e.f.Admin.QueryRow(context.Background(), `SELECT id::text FROM contact WHERE organization_id = $1 AND display_name = $2`,
+			e.f.OrgA, name).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		ids[name] = id
+	}
+	resolver := notify.NewPGResolver(e.f.App, permission.NewPGRepository(e.f.App))
+	emails := func(a *notify.Audience) []string {
+		got, err := resolver.Resolve(context.Background(), e.f.OrgA, a)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, r := range got {
+			out = append(out, r.Email)
+		}
+		slices.Sort(out)
+		return out
+	}
+	both := []string{ids["op1"], ids["op2"]}
+	if got := emails(&notify.Audience{ContactIDs: both, ClientID: e.f.Client1}); !slices.Equal(got, []string{"op1@contacts.invalid"}) {
+		t.Errorf("contacts in the run of client 1: %v, want op1 only", got)
+	}
+	if got := emails(&notify.Audience{ContactIDs: both}); len(got) != 2 {
+		t.Errorf("contacts of an organization-wide run: %v, want both", got)
 	}
 }

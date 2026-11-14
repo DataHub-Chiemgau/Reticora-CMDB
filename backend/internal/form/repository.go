@@ -31,7 +31,15 @@ var (
 	// ErrVersionChanged: the schema of the form changed between the
 	// validation of a submission and its insert (409); the client submits
 	// again against the new schema.
-	ErrVersionChanged = errors.New("the form schema changed while the submission was validated; submit again")
+	// ErrRunNotWaiting: the run a submission names is unknown, of another
+	// organization, outside the caller's scope or waits for no input of
+	// this form, or the step was submitted already (409 run_not_waiting,
+	// WP-1102).
+	ErrRunNotWaiting = errors.New("run_not_waiting: the workflow run waits for no input of this form")
+	// ErrNotFormRecipient: the caller is not the recipient the waiting step
+	// requested the form from (403, WP-1102).
+	ErrNotFormRecipient = errors.New("you are not the recipient of this form request")
+	ErrVersionChanged   = errors.New("the form schema changed while the submission was validated; submit again")
 )
 
 // Repository defines persistence for form definitions and submissions.
