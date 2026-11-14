@@ -79,6 +79,14 @@ const (
 	// WP-996). With severity degraded it is a warn code (ok → degraded),
 	// with severity down the code of a failed check.
 	WarnCheckFailed = "check_failed"
+	// WarnInformStale: the last inform of a TR-069 device is older than
+	// inform_interval_s x stale_factor (tr069, WP-1018). The code of a
+	// failed check when the only or every selected device is stale, a warn
+	// code (ok → degraded) when only some are.
+	WarnInformStale = "inform_stale"
+	// WarnNoDevices: the selector of a tr069 probe found no device in the
+	// ACS (WP-1018); ok → degraded.
+	WarnNoDevices = "no_devices"
 )
 
 // WarnCodes are the codes of a successful check with a warning; a result
@@ -89,6 +97,8 @@ var WarnCodes = map[string]bool{
 	WarnCertExpiring:      true,
 	WarnAnswerMismatch:    true,
 	WarnCheckFailed:       true,
+	WarnInformStale:       true,
+	WarnNoDevices:         true,
 }
 
 // reasons lists every valid reason code apart from the warn codes.

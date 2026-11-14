@@ -12,4 +12,6 @@ import (
 	_ "github.com/DataHub-Chiemgau/Reticora-CMDB/collector/probe/redfish"
 	// ospf and isis over the standard MIBs (WP-1002).
 	_ "github.com/DataHub-Chiemgau/Reticora-CMDB/collector/probe/routing"
+	// tr069: read-only ACS adapter, GenieACS NBI (WP-1018).
+	_ "github.com/DataHub-Chiemgau/Reticora-CMDB/collector/probe/tr069"
 )

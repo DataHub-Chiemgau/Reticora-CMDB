@@ -370,6 +370,59 @@ Herstellerabweichungen beschreibt der Profilabschnitt `monitor.ospf`
 SNMP-Timeout ergibt `fail`/`timeout`, ein abgewiesener SNMPv3-Zugang
 `error`/`auth_failed`.
 
+## TR-069 über den ACS (`tr069`)
+
+Standard nach PRT-15 und E-154: Intervall 900 s (300 s–24 h), Timeout 30 s
+(1–60 s), Parallelität 1 je Ziel, 5 Prüfungen/s je Collector, höchstens
+10.000 Geräte je Prüfung, Zugangsdaten aus dem Namespace `acs`
+(`username`/`password` als Basic-Auth oder `token` als Bearer). Reticora
+ist kein ACS (E-192): Der Collector liest nur aus dem vorhandenen ACS des
+Kunden über dessen Northbound-API; Referenzadapter ist GenieACS-NBI.
+
+Nur lesend: Der HTTP-Client des Adapters entsteht ausschließlich über
+`newReadOnlyClient` (`collector/probe/tr069/acs.go`). Er folgt keinen
+Redirects (Authorization erreicht keine andere URL) und weist jede Methode
+außer `GET` vor dem Netzzugriff mit `ErrWriteMethod` ab; das Interface
+`Reader` hat nur die lesende Methode `ListDevices`. Connection Requests,
+Tasks und Presets gibt es nicht.
+
+Parameter: `acs_url` (Pflicht, http/https ohne Benutzerangabe, Query oder
+Fragment), `selector` (`serial`, `oui`, `product_class`, `tag`; exakte
+Treffer, freie Query-Texte gibt es nicht), `parameters` (höchstens 20
+Einträge `{path, warn, crit, direction}`, `direction` `above` oder
+`below`), `inform_interval_s` (Pflicht, 60 s–7 Tage) und `stale_factor`
+(Standard 3, 1–10). Zugangsdaten gehen nur über HTTPS: Eine `http://`-URL
+mit Zugangsdaten ergibt `error`/`unsupported` mit Label
+`field=params.acs_url`.
+
+Abfrage (GenieACS-NBI): `GET <acs_url>/devices/?query=<JSON>&projection=
+_id,_lastInform,_deviceId,<Parameter>&skip=<n>&limit=100`; die Query
+entsteht mit JSON-Kodierung aus dem Selektor (`_deviceId._SerialNumber`,
+`_deviceId._OUI`, `_deviceId._ProductClass`, `_tags`), Parameterwerte
+liest der Adapter als `<Pfad>._value`. Je Seite höchstens 1 MiB
+(`error`/`response_too_large`). Nach 10.000 Geräten enden die
+Seitenabrufe; war die letzte Seite voll, steht `probe_tr069_truncated` = 1.
+
+Bewertung: Ein Gerät ist veraltet (`inform_stale`), wenn sein letzter
+Inform älter als `inform_interval_s` × `stale_factor` ist oder fehlt.
+Bei genau einem ausgewählten Gerät ergeben veraltet `fail`/`inform_stale`
+und eine `crit`-Schwelle `fail`/`threshold_exceeded`, eine `warn`-Schwelle
+`ok` mit `threshold_exceeded`. Bei mehreren Geräten ergibt „alle
+veraltet“ `fail`/`inform_stale`, ein veraltetes Gerät `ok` mit
+`inform_stale`, eine verletzte Schwelle `ok` mit `threshold_exceeded`. Kein
+Gerät gefunden ergibt `ok` mit `no_devices`. Die Labels `serial` und
+`device_id` (Geräte-ID des ACS; Seriennummern sind nur je OUI und
+Produktklasse eindeutig) nennen das auslösende Gerät. 401/403 ergeben `error`/`auth_failed`, ein nicht
+vertrauenswürdiges Zertifikat `error`/`tls` (beide `unknown`), ein ACS
+außer Reichweite `fail`/`unreachable` bzw. `fail`/`timeout`, ein anderer
+HTTP-Status (auch ein nicht verfolgter Redirect) `fail`/`status_mismatch`.
+
+Werte: `probe_tr069_devices`, `probe_tr069_devices_stale`,
+`probe_tr069_last_inform_age_seconds{device_id,serial}` und die numerischen
+Parameter als `probe_tr069_parameter{device_id,parameter,serial}`.
+
+TR-369/USP ist nicht Teil dieses Typs (WP-1019, bedingt nach A-63).
+
 ## Typtabelle
 
 Zeiten in Sekunden, Rate in Prüfungen je Sekunde. Die Werte sind Startwerte
@@ -397,7 +450,7 @@ nach E-154; WP-1023 misst die Raten nach.
 | `stamp` | planned | 60 / 10 / 86400 | 5 / 1 / 30 | 3 / 1 | 1 | 16 | 20 | 4 | 1472 | 1 | – | – |
 | `twamp_control` | planned | 60 / 10 / 86400 | 5 / 1 / 30 | 3 / 1 | 1 | 16 | 20 | 4 | 1472 | 1 | – | – |
 | `gnmi` | planned | 60 / 10 / 86400 | 10 / 1 / 60 | 3 / 1 | 1 | 16 | 50 | 4 | 4194304 | 10000 | gnmi | – |
-| `tr069` | planned | 900 / 300 / 86400 | 30 / 1 / 60 | 3 / 1 | 1 | 4 | 5 | 1 | 1048576 | 256 | acs | – |
+| `tr069` | available | 900 / 300 / 86400 | 30 / 1 / 60 | 3 / 1 | 1 | 4 | 5 | 1 | 1048576 | 10000 | acs | – |
 | `usp` | planned | 900 / 300 / 86400 | 30 / 1 / 60 | 3 / 1 | 1 | 4 | 5 | 1 | 1048576 | 256 | acs | – |
 | `rpki_rtr` | planned | 300 / 60 / 86400 | 30 / 1 / 120 | 3 / 1 | 1 | 4 | 1 | 1 | 67108864 | 2000000 | – | – |
 | `rpki_roa` | planned | 300 / 60 / 86400 | 1 / 1 / 5 | 3 / 1 | 1 | 64 | 100 | 100 | 65536 | 100 | – | – |

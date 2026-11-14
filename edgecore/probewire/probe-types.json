@@ -1296,7 +1296,7 @@
       }
     },
     "tr069": {
-      "status": "planned",
+      "status": "available",
       "min_interval_s": 300,
       "default_interval_s": 900,
       "max_interval_s": 86400,
@@ -1310,7 +1310,7 @@
       "max_rate_per_collector": 5,
       "max_probes_per_target": 1,
       "max_payload_bytes": 1048576,
-      "max_rows": 256,
+      "max_rows": 10000,
       "credential_namespaces": [
         "acs"
       ],
@@ -1318,21 +1318,92 @@
       "params": {
         "type": "object",
         "additionalProperties": false,
+        "required": [
+          "acs_url",
+          "inform_interval_s"
+        ],
         "properties": {
+          "acs_url": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 2048,
+            "description": "Base URL of the ACS northbound API (GenieACS NBI), http or https; credentials are sent over https only."
+          },
+          "selector": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "serial": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "oui": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 16
+              },
+              "product_class": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "tag": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              }
+            },
+            "description": "Structured device selection (exact matches); free query texts do not exist. Empty selects every device of the ACS (at most 10000)."
+          },
           "parameters": {
             "type": "array",
             "items": {
-              "type": "string",
-              "maxLength": 256
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "path"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "description": "TR-069 parameter path such as Device.DeviceInfo.UpTime."
+                },
+                "warn": {
+                  "type": "number",
+                  "description": "Value beyond which the device is a warning."
+                },
+                "crit": {
+                  "type": "number",
+                  "description": "Value beyond which the device is critical."
+                },
+                "direction": {
+                  "type": "string",
+                  "enum": [
+                    "above",
+                    "below"
+                  ],
+                  "default": "above",
+                  "description": "above: values above warn/crit violate, below: values below."
+                }
+              }
             },
-            "maxItems": 32
+            "maxItems": 20
           },
-          "inform_factor": {
+          "inform_interval_s": {
+            "type": "integer",
+            "minimum": 60,
+            "maximum": 604800,
+            "description": "Periodic inform interval of the devices in seconds."
+          },
+          "stale_factor": {
             "type": "integer",
             "minimum": 1,
             "maximum": 10,
             "default": 3,
-            "description": "Last inform older than inform_factor x inform interval is down."
+            "description": "Last inform older than stale_factor x inform_interval_s is stale."
           }
         }
       }

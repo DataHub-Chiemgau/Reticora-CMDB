@@ -61,7 +61,7 @@ func TestRegistryComplete(t *testing.T) {
 			t.Errorf("%s params schema: %v", key, err)
 		}
 		wantStatus := TypePlanned
-		if key == "icmp" || key == "tcp" || key == "dns" || key == "http" || key == "bfd" || key == "optical" || key == "redfish" || key == "ospf" || key == "isis" {
+		if key == "icmp" || key == "tcp" || key == "dns" || key == "http" || key == "bfd" || key == "optical" || key == "redfish" || key == "ospf" || key == "isis" || key == "tr069" {
 			wantStatus = TypeAvailable
 		}
 		if typ.Status != wantStatus {
@@ -117,7 +117,8 @@ func validSpec(typ Type) ProbeSpec {
 }
 
 // selectionParams are valid params of the types with a selection rule.
-var selectionParams = map[string]string{"bfd": `{"all":true}`, "optical": `{"all":true}`}
+var selectionParams = map[string]string{"bfd": `{"all":true}`, "optical": `{"all":true}`,
+	"tr069": `{"acs_url":"https://acs.example.org:7557","inform_interval_s":300}`}
 
 // requiredParams returns params with a valid value for every required
 // parameter of the type (nil without required parameters).
@@ -581,7 +582,8 @@ func TestHTTPLimits(t *testing.T) {
 // MetricNames returns a copy.
 func TestTypesDeclareMetricNames(t *testing.T) {
 	for typ, name := range map[string]string{"icmp": "jitter_ms", "http": "ttfb_ms", "dns": "probe_dns_rcode",
-		"redfish": "probe_redfish_temperature_celsius", "ospf": "probe_ospf_neighbor_state", "isis": "probe_isis_adjacency_state"} {
+		"redfish": "probe_redfish_temperature_celsius", "ospf": "probe_ospf_neighbor_state", "isis": "probe_isis_adjacency_state",
+		"tr069": "probe_tr069_last_inform_age_seconds"} {
 		if !DeclaresMetric(typ, name) || !slices.Contains(MetricNames(typ), name) {
 			t.Errorf("%s does not declare %s", typ, name)
 		}

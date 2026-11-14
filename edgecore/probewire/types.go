@@ -244,6 +244,8 @@ var typeMetrics = map[string][]string{
 		"probe_ospf_neighbors_full", "probe_ospf_truncated", "probe_ospf_neighbors_unseen"},
 	"isis": {"probe_isis_adjacency_state", "probe_isis_adjacencies", "probe_isis_adjacencies_up",
 		"probe_isis_truncated", "probe_isis_adjacencies_unseen"},
+	"tr069": {"probe_tr069_devices", "probe_tr069_devices_stale", "probe_tr069_last_inform_age_seconds",
+		"probe_tr069_parameter", "probe_tr069_truncated"},
 }
 
 // MetricNames returns the value names the type declares (none for an
@@ -346,6 +348,7 @@ var paramChecks = map[string]func(spec *ProbeSpec, params map[string]any) []Fiel
 	"redfish": checkRedfishParams,
 	"ospf":    func(_ *ProbeSpec, params map[string]any) []FieldError { return checkOSPFParams(params) },
 	"isis":    func(_ *ProbeSpec, params map[string]any) []FieldError { return checkISISParams(params) },
+	"tr069":   func(_ *ProbeSpec, params map[string]any) []FieldError { return checkTR069Params(params) },
 	"tcp":     func(_ *ProbeSpec, params map[string]any) []FieldError { return checkTCPParams(params) },
 	"dns":     func(_ *ProbeSpec, params map[string]any) []FieldError { return checkDNSParams(params) },
 	"http":    func(_ *ProbeSpec, params map[string]any) []FieldError { return checkHTTPParams(params) },
@@ -437,6 +440,53 @@ func checkISISParams(params map[string]any) []FieldError {
 		return err == nil && len(raw) == 6
 	})
 	return append(errs, checkMinMax(params, "min_adjacencies", "max_adjacencies")...)
+}
+
+// tr069Path is a TR-069 parameter path (Device.DeviceInfo.UpTime,
+// InternetGatewayDevice.WANDevice.1.…).
+var tr069Path = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*(\.[A-Za-z0-9_-]+)*$`)
+
+// checkTR069Params checks the tr069 parameters (PRT-15, WP-1018 AK4):
+// acs_url is an http or https URL with a host and without user info,
+// query or fragment; every parameters[i].path is a TR-069 path, given once;
+// a critical value lies beyond its warning value in the direction of the
+// parameter.
+func checkTR069Params(params map[string]any) []FieldError {
+	var errs []FieldError
+	if raw, ok := params["acs_url"].(string); ok {
+		u, err := url.Parse(strings.TrimSpace(raw))
+		switch {
+		case err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "":
+			errs = append(errs, FieldError{Field: "params.acs_url", Message: "must be an http or https URL"})
+		case u.User != nil || u.RawQuery != "" || u.Fragment != "":
+			errs = append(errs, FieldError{Field: "params.acs_url", Message: "must not carry user info, a query or a fragment"})
+		}
+	}
+	items, _ := params["parameters"].([]any)
+	seen := map[string]bool{}
+	for i, item := range items {
+		obj, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		prefix := fmt.Sprintf("params.parameters[%d]", i)
+		if path, ok := obj["path"].(string); ok {
+			switch {
+			case !tr069Path.MatchString(path):
+				errs = append(errs, FieldError{Field: prefix + ".path", Message: "must be a TR-069 parameter path such as Device.DeviceInfo.UpTime"})
+			case seen[path]:
+				errs = append(errs, FieldError{Field: prefix + ".path", Message: "is listed twice"})
+			}
+			seen[path] = true
+		}
+		warn, hasWarn := numberOf(obj["warn"])
+		crit, hasCrit := numberOf(obj["crit"])
+		below := obj["direction"] == "below"
+		if hasWarn && hasCrit && ((below && crit >= warn) || (!below && crit <= warn)) {
+			errs = append(errs, FieldError{Field: prefix + ".crit", Message: "must lie beyond warn in the direction of the parameter"})
+		}
+	}
+	return errs
 }
 
 // checkEntries checks the string field of every object of the array
