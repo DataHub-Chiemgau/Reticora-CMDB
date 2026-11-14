@@ -11,6 +11,7 @@
  *   cd frontend && npx vitest run src/components/cmdb/CredentialBindingSection.test.tsx
  */
 import axe from 'axe-core';
+import { useAuthStore } from '../../auth/authStore';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { renderWithProviders } from '../../test/utils';
@@ -86,11 +87,21 @@ const resolved = (id: string, name: string, kind: string, origin: string, source
 
 interface Options {
   permissions?: string[];
+  /** Whether the plan includes the feature monitoring. */
+  monitoring?: boolean;
+  /** Whether the release serves the module monitoring. */
+  monitoringModule?: boolean;
   ciBindings?: Json[];
   onWrite?: (method: string, path: string, body: Json) => Response | undefined;
 }
 
-function stubApi({ permissions = ALL, ciBindings = [], onWrite }: Options = {}) {
+function stubApi({
+  permissions = ALL,
+  ciBindings = [],
+  onWrite,
+  monitoring = true,
+  monitoringModule = true,
+}: Options = {}) {
   let bindings = [...ciBindings];
   const calls: { method: string; path: string; params: URLSearchParams; body?: Json }[] = [];
   const responses: string[] = [];
@@ -129,6 +140,14 @@ function stubApi({ permissions = ALL, ciBindings = [], onWrite }: Options = {}) 
       return answer({}, 200);
     }
     if (path === '/me/permissions') return json({ user_id: 'u', permissions });
+    if (path === '/modules') {
+      return json({
+        data: [{ key: 'monitoring', phase: 'P3', enabled: monitoringModule, nav: [] }],
+      });
+    }
+    if (path === '/entitlements') {
+      return json(page([{ feature_key: 'monitoring', enabled: monitoring, plan: 'pro' }]));
+    }
     if (path === `/cis/${CI}/credentials/effective`) {
       return answer({
         ci_id: CI,
@@ -246,12 +265,19 @@ async function openSet(namespace: string) {
 }
 
 beforeEach(async () => {
+  // Signed in, so the plan (GET /entitlements) is read as in the app.
+  useAuthStore.setState({
+    token: 'header.payload.signature',
+    expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+    user: { sub: 'user-1' },
+  });
   await i18n.changeLanguage('de-DE');
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  useAuthStore.setState({ token: null, expiresAt: null, user: null });
 });
 
 describe('CredentialBindingSection', () => {
@@ -445,7 +471,33 @@ describe('CredentialBindingSection', () => {
 
     await waitFor(() => expect(calls.some((c) => c.path === '/me/permissions')).toBe(true));
     expect(container).toBeEmptyDOMElement();
-    expect(calls.filter((c) => c.path !== '/me/permissions')).toEqual([]);
+    expect(
+      calls.filter((c) => !['/me/permissions', '/entitlements', '/modules'].includes(c.path)),
+    ).toEqual([]);
+  });
+
+  it('sends no credential request when the plan lacks the feature monitoring', async () => {
+    const { calls } = stubApi({ monitoring: false });
+    const { container } = renderSection();
+
+    await waitFor(() => expect(calls.some((c) => c.path === '/entitlements')).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(container).toBeEmptyDOMElement();
+    expect(
+      calls.filter((c) => !['/me/permissions', '/entitlements', '/modules'].includes(c.path)),
+    ).toEqual([]);
+  });
+
+  it('sends no credential request when the release switches the module monitoring off', async () => {
+    const { calls } = stubApi({ monitoringModule: false });
+    const { container } = renderSection();
+
+    await waitFor(() => expect(calls.some((c) => c.path === '/modules')).toBe(true));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(container).toBeEmptyDOMElement();
+    expect(
+      calls.filter((c) => !['/me/permissions', '/entitlements', '/modules'].includes(c.path)),
+    ).toEqual([]);
   });
 
   it('has no axe findings', async () => {

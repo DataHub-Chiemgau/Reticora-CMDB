@@ -44,6 +44,7 @@ import {
   describeRefusal,
   useClientOptions,
 } from '../discovery/CredentialsSection';
+import { useEntitlements, useModules } from '../../hooks/useEntitlements';
 import { ScrollRegion } from '../ScrollRegion';
 import { Button } from '../ui/Button';
 import { Card } from '../ui/Card';
@@ -95,12 +96,22 @@ export interface CredentialBindingSectionProps {
 }
 
 /**
- * CredentialBindingSection renders nothing without credential:read (and
- * while the rights load), so the CI detail sends no credential request.
+ * CredentialBindingSection renders nothing without credential:read, without
+ * the feature monitoring in the plan or while the release switches the
+ * module monitoring off (the server answers 403 or 404 there), and while
+ * these load, so the CI detail sends no credential request.
  */
 export function CredentialBindingSection(props: CredentialBindingSectionProps) {
   const canRead = useHasPermission('credential:read');
-  if (canRead !== true) return null;
+  const entitlements = useEntitlements();
+  const modules = useModules();
+  const on =
+    canRead === true &&
+    !entitlements.isLoading &&
+    entitlements.isEnabled('monitoring') &&
+    !modules.isLoading &&
+    modules.isModuleEnabled('monitoring');
+  if (!on) return null;
   return <CredentialBindingBody {...props} />;
 }
 
