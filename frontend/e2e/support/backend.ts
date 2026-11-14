@@ -73,6 +73,10 @@ const CI_DETAIL_PANELS: Unused[] = [
   { method: 'GET', path: '/lifecycle-models', why: DETAIL_PANEL },
   // The allowed transitions of the lifecycle section (called from WP-724 on).
   { method: 'GET', path: /^\/cis\/[^/]+\/lifecycle-transitions$/, why: DETAIL_PANEL },
+  // The network section: interfaces, addresses and the VRFs (WP-919).
+  { method: 'GET', path: /^\/cis\/[^/]+\/interfaces$/, why: DETAIL_PANEL },
+  { method: 'GET', path: /^\/cis\/[^/]+\/addresses$/, why: DETAIL_PANEL },
+  { method: 'GET', path: '/vrfs', why: DETAIL_PANEL },
 ];
 
 export const UNUSED: Record<string, Unused[]> = {

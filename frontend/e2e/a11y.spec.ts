@@ -646,6 +646,53 @@ const RELATIONSHIP_TYPES: Handler = {
 };
 
 // WP-817: a system tag and an own tag with a color in the tag catalog.
+// The form of the fixtures in the editor (WP-1133): the definition and its
+// one version.
+const FORM_EDIT_ID = 'ee000000-0000-4000-8000-000000000001';
+const FORM_EDIT_SCHEMA = {
+  type: 'object',
+  properties: { name: { type: 'string', title: 'Name' } },
+  required: ['name'],
+};
+const FORM_EDIT_HANDLERS: Handler[] = [
+  {
+    path: `/forms/${FORM_EDIT_ID}`,
+    reply: () => ({
+      body: {
+        id: FORM_EDIT_ID,
+        organization_id: ORG_ID,
+        name: M.form,
+        description: 'New employee',
+        schema: FORM_EDIT_SCHEMA,
+        ui_hints: { order: ['name'], fields: { name: { label: { de: 'Name', en: 'Name' } } } },
+        active: true,
+        version: 1,
+        schema_version: 1,
+        current_version_id: 'ee000000-0000-4000-8000-0000000000a1',
+        created_at: AT,
+        updated_at: AT,
+      },
+    }),
+  },
+  {
+    path: `/forms/${FORM_EDIT_ID}/versions`,
+    reply: () => ({
+      body: list([
+        {
+          id: 'ee000000-0000-4000-8000-0000000000a1',
+          organization_id: ORG_ID,
+          form_id: FORM_EDIT_ID,
+          version: 1,
+          schema: FORM_EDIT_SCHEMA,
+          ui_hints: { order: ['name'] },
+          created_by: '00000000-0000-0000-0000-000000000001',
+          created_at: AT,
+        },
+      ]),
+    }),
+  },
+];
+
 const TAG_HANDLERS: Handler[] = [
   {
     path: '/tags',
@@ -1208,6 +1255,19 @@ const ROUTES: A11yRoute[] = [
   },
   { path: '/slas', url: '/slas', ready: text(M.sla) },
   { path: '/forms', url: '/forms', ready: text(M.form) },
+  // WP-1133: the form editor, empty and for the form of the fixtures with
+  // its versions.
+  {
+    path: '/forms/new',
+    url: '/forms/new',
+    ready: (page) => page.locator('#main-content').getByRole('heading', { level: 3 }).first(),
+  },
+  {
+    path: '/forms/:id/edit',
+    url: `/forms/${FORM_EDIT_ID}/edit`,
+    handlers: FORM_EDIT_HANDLERS,
+    ready: (page) => page.locator('#main-content').getByRole('group', { name: /\(name\)$/ }),
+  },
   { path: '/workflows', url: '/workflows', ready: text(M.workflow) },
   { path: '/compliance', url: '/compliance', ready: text(M.compliance) },
   { path: '/iga', url: '/iga', ready: text(M.iga) },
