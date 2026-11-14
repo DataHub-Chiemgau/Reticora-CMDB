@@ -41381,6 +41381,27 @@ components:
             from WP-1091 on). The filter is checked with the MET-45 condition
             grammar of api/rules.schema.json when the definition is written; a
             refused filter is 422 on trigger.filter with the path of the error.
+            Lifecycle shorthand (LCY-04, WP-1104): {"type": "event", "event":
+            "lifecycle.changed", "from_state": "<state key>" | [<keys>],
+            "to_state": "<state key>" | [<keys>], "model": "<model key>",
+            "entity_type": "ci" | "asset"} is stored as trigger.filter, an all
+            of eq (one value) or in (a list) over data.from, data.to,
+            data.model_key and data.entity_type; the shorthand together with a
+            filter of its own is 422 on trigger.filter, the former name
+            lifecycle.transitioned as event is 422 on trigger.event. The run
+            context of lifecycle.changed holds entity_type, entity_id, from,
+            to, model_key, reason and the entity as ci (with ci_id, the run is
+            serialized per CI) or asset (serialized per asset; only id, name,
+            status, lifecycle_state, asset_type_id, client_id and site_id, no
+            financial fields, notes or custom_fields). A transition
+            by a workflow run (transition_lifecycle) starts no workflow unless
+            allow_workflow_origin is set. Lifecycle locks apply before the
+            automation: the transition happens first, field changes after it
+            are checked against the new state (WP-1103). Example "deployed →
+            retired: create a ticket for the take-back": {"type": "event",
+            "event": "lifecycle.changed", "from_state": "deployed",
+            "to_state": "retired", "entity_type": "ci"} with the action
+            {"type": "create_ticket", "title": "Take back the device"}.
         conditions:
           type: array
           items: { $ref: '#/components/schemas/JSONValue' }
@@ -41550,6 +41571,11 @@ components:
     CreateWorkflowDefinitionRequest:
       type: object
       required: [name, trigger, actions]
+      example:
+        name: 'deployed → retired: Ticket zur Rücknahme anlegen'
+        trigger: { type: event, event: lifecycle.changed, from_state: deployed, to_state: retired, entity_type: ci }
+        actions:
+          - { type: create_ticket, title: 'Rücknahme des Geräts', description: 'Das Gerät wurde außer Betrieb genommen.' }
       properties:
         name: { type: string }
         description: { type: string }
@@ -41564,6 +41590,27 @@ components:
             from WP-1091 on). The filter is checked with the MET-45 condition
             grammar of api/rules.schema.json when the definition is written; a
             refused filter is 422 on trigger.filter with the path of the error.
+            Lifecycle shorthand (LCY-04, WP-1104): {"type": "event", "event":
+            "lifecycle.changed", "from_state": "<state key>" | [<keys>],
+            "to_state": "<state key>" | [<keys>], "model": "<model key>",
+            "entity_type": "ci" | "asset"} is stored as trigger.filter, an all
+            of eq (one value) or in (a list) over data.from, data.to,
+            data.model_key and data.entity_type; the shorthand together with a
+            filter of its own is 422 on trigger.filter, the former name
+            lifecycle.transitioned as event is 422 on trigger.event. The run
+            context of lifecycle.changed holds entity_type, entity_id, from,
+            to, model_key, reason and the entity as ci (with ci_id, the run is
+            serialized per CI) or asset (serialized per asset; only id, name,
+            status, lifecycle_state, asset_type_id, client_id and site_id, no
+            financial fields, notes or custom_fields). A transition
+            by a workflow run (transition_lifecycle) starts no workflow unless
+            allow_workflow_origin is set. Lifecycle locks apply before the
+            automation: the transition happens first, field changes after it
+            are checked against the new state (WP-1103). Example "deployed →
+            retired: create a ticket for the take-back": {"type": "event",
+            "event": "lifecycle.changed", "from_state": "deployed",
+            "to_state": "retired", "entity_type": "ci"} with the action
+            {"type": "create_ticket", "title": "Take back the device"}.
         conditions:
           type: array
           items: { $ref: '#/components/schemas/JSONValue' }
@@ -41660,6 +41707,27 @@ components:
             from WP-1091 on). The filter is checked with the MET-45 condition
             grammar of api/rules.schema.json when the definition is written; a
             refused filter is 422 on trigger.filter with the path of the error.
+            Lifecycle shorthand (LCY-04, WP-1104): {"type": "event", "event":
+            "lifecycle.changed", "from_state": "<state key>" | [<keys>],
+            "to_state": "<state key>" | [<keys>], "model": "<model key>",
+            "entity_type": "ci" | "asset"} is stored as trigger.filter, an all
+            of eq (one value) or in (a list) over data.from, data.to,
+            data.model_key and data.entity_type; the shorthand together with a
+            filter of its own is 422 on trigger.filter, the former name
+            lifecycle.transitioned as event is 422 on trigger.event. The run
+            context of lifecycle.changed holds entity_type, entity_id, from,
+            to, model_key, reason and the entity as ci (with ci_id, the run is
+            serialized per CI) or asset (serialized per asset; only id, name,
+            status, lifecycle_state, asset_type_id, client_id and site_id, no
+            financial fields, notes or custom_fields). A transition
+            by a workflow run (transition_lifecycle) starts no workflow unless
+            allow_workflow_origin is set. Lifecycle locks apply before the
+            automation: the transition happens first, field changes after it
+            are checked against the new state (WP-1103). Example "deployed →
+            retired: create a ticket for the take-back": {"type": "event",
+            "event": "lifecycle.changed", "from_state": "deployed",
+            "to_state": "retired", "entity_type": "ci"} with the action
+            {"type": "create_ticket", "title": "Take back the device"}.
         conditions:
           type: array
           items: { $ref: '#/components/schemas/JSONValue' }

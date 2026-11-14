@@ -71,6 +71,9 @@ type Executor struct {
 	ciWriter CIWriter
 	// runQuota is max_workflow_runs_per_hour (WithRunQuota, WP-1112).
 	runQuota RunQuota
+	// assets reads the asset of a lifecycle.changed for the run context of
+	// the event triggers (WithAssets, WP-1104).
+	assets AssetReader
 	// afterStep is a test hook called after each succeeded step; an error
 	// ends the attempt there like a worker that dies.
 	afterStep func(index int) error

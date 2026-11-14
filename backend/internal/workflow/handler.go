@@ -171,6 +171,12 @@ func (h *Handler) CreateDefinition(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, 400, "Bad Request", "name, trigger and actions are required")
 		return
 	}
+	// The shorthand of a lifecycle trigger is stored as its filter (WP-1104).
+	var nerr error
+	if req.Trigger, nerr = normalizeTrigger(req.Trigger); nerr != nil {
+		api.WriteFieldError(w, nerr)
+		return
+	}
 	if err := validateWrite(req.Trigger, req.Conditions, req.Actions); err != nil {
 		api.WriteFieldError(w, err)
 		return
@@ -209,6 +215,11 @@ func (h *Handler) UpdateDefinition(w http.ResponseWriter, r *http.Request) {
 	var req UpdateDefinitionRequest
 	if err := api.ReadJSON(r, &req); err != nil {
 		api.WriteError(w, 400, "Bad Request", err.Error())
+		return
+	}
+	var nerr error
+	if req.Trigger, nerr = normalizeTrigger(req.Trigger); nerr != nil {
+		api.WriteFieldError(w, nerr)
 		return
 	}
 	if err := validateWrite(req.Trigger, req.Conditions, req.Actions); err != nil {

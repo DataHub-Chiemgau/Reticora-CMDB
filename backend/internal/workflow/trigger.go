@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +17,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/api"
+	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/asset"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/ci"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/database"
 	"github.com/DataHub-Chiemgau/Reticora-CMDB/backend/internal/events"
@@ -31,7 +34,9 @@ import (
 // (MET-45) holds over the run context. A repeated delivery starts no
 // second run (uq_workflow_run_trigger_event). An event a workflow run wrote
 // (Envelope.Origin) starts runs only of definitions with
-// trigger.allow_workflow_origin, up to triggerMaxDepth.
+// trigger.allow_workflow_origin, up to triggerMaxDepth. lifecycle.changed
+// has a shorthand with state filters (normalizeTrigger, WP-1104) and puts
+// the transition and its CI or asset into the run context.
 
 // TriggerConsumerName is the durable consumer of the event triggers.
 const TriggerConsumerName = "workflow-triggers"
@@ -217,6 +222,16 @@ func (c *TriggerConsumer) Handle(ctx context.Context, env *events.Envelope) erro
 	if err != nil {
 		return err
 	}
+	// A run on a CI serializes per CI (ci:<id>), a run on an asset of a
+	// lifecycle.changed per asset (asset:<id>, WP-1104 AK2).
+	serialKey := serialKeyOf(ciID)
+	if ciID == "" {
+		if a, ok := payload["asset"].(map[string]any); ok {
+			if id, _ := a["id"].(string); id != "" {
+				serialKey = "asset:" + id
+			}
+		}
+	}
 	var errs []error
 	for i := range matching {
 		def := &matching[i]
@@ -238,7 +253,7 @@ func (c *TriggerConsumer) Handle(ctx context.Context, env *events.Envelope) erro
 			continue
 		}
 		run := &Run{OrganizationID: env.OrgID, WorkflowID: def.ID, DefinitionVersionID: def.CurrentVersionID, Status: StatusPending,
-			Trigger: env.Type, Context: payload, CIID: ciID, TriggerEventID: env.ID, TriggerDepth: depth}
+			Trigger: env.Type, Context: payload, CIID: ciID, SerialKey: serialKey, TriggerEventID: env.ID, TriggerDepth: depth}
 		if c.exec.queue == nil {
 			run.StartedAt = time.Now().UTC()
 		}
@@ -293,10 +308,31 @@ func (c *TriggerConsumer) runContext(ctx context.Context, env *events.Envelope) 
 	}
 	payload = JSONMap{"event": event, "data": data}
 	candidate := ""
-	if strings.HasPrefix(env.Type, "ci.") {
+	switch {
+	case env.Type == events.LifecycleChanged:
+		// The transition (WP-1104 AK2): entity, states, model and reason
+		// at the top of the context, the entity as ci or asset.
+		for _, key := range []string{"entity_type", "entity_id", "from", "to", "model_key", "reason"} {
+			if v, ok := data[key]; ok {
+				payload[key] = v
+			}
+		}
+		entityID, _ := data["entity_id"].(string)
+		switch data["entity_type"] {
+		case lifecycleEntityCI:
+			candidate = entityID
+		case lifecycleEntityAsset:
+			if serr := c.assetSnapshot(ctx, env.OrgID, entityID, payload); serr != nil {
+				return nil, "", serr
+			}
+			return payload, "", nil
+		}
+	case strings.HasPrefix(env.Type, "ci."):
 		candidate = env.EntityID
-	} else if s, ok := data["ci_id"].(string); ok {
-		candidate = s
+	default:
+		if s, ok := data["ci_id"].(string); ok {
+			candidate = s
+		}
 	}
 	if candidate == "" || !api.IsUUID(candidate) || c.exec.cis == nil {
 		return payload, "", nil
@@ -399,7 +435,9 @@ func (r *PGRepository) CreateEventRun(ctx context.Context, run *Run) (bool, erro
 	if run.Context == nil {
 		run.Context = JSONMap{}
 	}
-	run.SerialKey = serialKeyOf(run.CIID)
+	if run.SerialKey == "" {
+		run.SerialKey = serialKeyOf(run.CIID)
+	}
 	err := database.WithRequestTenant(ctx, r.pool, run.OrganizationID, func(ctx context.Context, tx pgx.Tx) error {
 		err := tx.QueryRow(ctx, `INSERT INTO workflow_run (organization_id, workflow_id, definition_version_id, status, trigger, context, started_at,
 				ci_id, serial_key, entity_seq, trigger_event_id, trigger_depth)
@@ -482,8 +520,203 @@ func (r *MemoryRepository) CreateEventRun(ctx context.Context, run *Run) (bool, 
 		}
 	}
 	r.mu.RUnlock()
+	key := run.SerialKey
 	if err := r.CreateRun(ctx, run); err != nil {
 		return false, err
 	}
+	if key != "" {
+		// An asset run serializes over asset:<id> (WP-1104).
+		r.mu.Lock()
+		run.SerialKey = key
+		if stored := r.runs[run.ID]; stored != nil {
+			stored.SerialKey = key
+		}
+		r.mu.Unlock()
+	}
 	return true, nil
+}
+
+// ─── lifecycle triggers (LCY-04, WP-1104) ─────────────────────────────────────
+
+// Entity types of lifecycle.changed.
+const (
+	lifecycleEntityCI    = "ci"
+	lifecycleEntityAsset = "asset"
+)
+
+// legacyLifecycleEvent is the former name of lifecycle.changed; webhook
+// subscriptions still receive it (webhook legacyNames), triggers refuse it.
+const legacyLifecycleEvent = "lifecycle.transitioned"
+
+// lifecycleShorthand are the keys of the trigger shorthand of
+// lifecycle.changed and the data field each filters.
+var lifecycleShorthand = []struct{ key, field string }{
+	{"from_state", "data.from"}, {"to_state", "data.to"}, {"model", "data.model_key"}, {"entity_type", "data.entity_type"},
+}
+
+// AssetReader reads the asset of a lifecycle.changed for the run context
+// (WP-1104 AK2); the router and the worker set the asset repository.
+type AssetReader interface {
+	GetByID(ctx context.Context, orgID, id string) (*asset.Asset, error)
+}
+
+// WithAssets sets the reader of the asset snapshot of lifecycle runs; nil
+// puts only the asset id into the context.
+func (e *Executor) WithAssets(assets AssetReader) *Executor {
+	e.assets = assets
+	return e
+}
+
+// assetSnapshot puts the asset id into payload (asset) with a fixed set of
+// identifying fields, like the CI snapshot: id, name, status,
+// lifecycle_state, asset_type_id, client_id and site_id. The run context
+// has no field projection (GET of a run and placeholders of
+// send_notification show it as stored), so financial and contract fields,
+// owners, holders, notes and custom_fields stay out (field policy,
+// convention 11). An unknown or deleted asset puts only its id.
+func (c *TriggerConsumer) assetSnapshot(ctx context.Context, orgID, id string, payload JSONMap) error {
+	if id == "" || !api.IsUUID(id) {
+		return nil
+	}
+	payload["asset"] = map[string]any{"id": id}
+	if c.exec.assets == nil {
+		return nil
+	}
+	item, err := c.exec.assets.GetByID(ctx, orgID, id)
+	if errors.Is(err, asset.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read the asset of the event: %w", err)
+	}
+	snap := map[string]any{"id": id, "name": item.Name, "status": item.Status}
+	for k, v := range map[string]string{"lifecycle_state": item.LifecycleState, "asset_type_id": item.AssetTypeID,
+		"client_id": item.ClientID, "site_id": item.SiteID} {
+		if v != "" {
+			snap[k] = v
+		}
+	}
+	payload["asset"] = snap
+	return nil
+}
+
+// normalizeTrigger turns the shorthand of a lifecycle trigger (AK1)
+//
+//	{"type": "event", "event": "lifecycle.changed", "from_state": "<key>|[…]",
+//	 "to_state": "<key>|[…]", "model": "<key>", "entity_type": "ci|asset"}
+//
+// into trigger.filter, a MET-45 all over data.from, data.to, data.model_key
+// and data.entity_type (eq for a value, in for a list); the shorthand keys
+// are not stored. The shorthand with a filter of its own, on another event
+// or with an invalid value is 422 on trigger.<key>; the former name
+// lifecycle.transitioned as event is 422 on trigger.event. A trigger
+// without shorthand is returned as it is.
+func normalizeTrigger(trigger JSONMap) (JSONMap, error) {
+	if trigger == nil {
+		return nil, nil
+	}
+	if legacyEvent(trigger["event"]) {
+		return nil, triggerFieldError("trigger.event", legacyLifecycleEvent+" is the former name; use "+events.LifecycleChanged)
+	}
+	var present []string
+	for _, sh := range lifecycleShorthand {
+		if _, has := trigger[sh.key]; has {
+			present = append(present, sh.key)
+		}
+	}
+	if len(present) == 0 {
+		return trigger, nil
+	}
+	if ev, _ := trigger["event"].(string); ev != events.LifecycleChanged || str(trigger, "type", "") != TriggerEvent {
+		return nil, triggerFieldError("trigger."+present[0], "is a shorthand of the event trigger "+events.LifecycleChanged)
+	}
+	if f, has := trigger["filter"]; has && f != nil {
+		return nil, triggerFieldError("trigger.filter", "cannot be combined with from_state, to_state, model or entity_type")
+	}
+	out := JSONMap{}
+	for k, v := range trigger {
+		out[k] = v
+	}
+	conds := []any{}
+	for _, sh := range lifecycleShorthand {
+		raw, has := trigger[sh.key]
+		if !has {
+			continue
+		}
+		delete(out, sh.key)
+		values, err := shorthandValues(raw, sh.key == "from_state" || sh.key == "to_state")
+		if err != nil {
+			return nil, triggerFieldError("trigger."+sh.key, err.Error())
+		}
+		if sh.key == "entity_type" && values[0] != lifecycleEntityCI && values[0] != lifecycleEntityAsset {
+			return nil, triggerFieldError("trigger.entity_type", "must be ci or asset")
+		}
+		if len(values) == 1 {
+			conds = append(conds, map[string]any{"op": "eq", "field": sh.field, "value": values[0]})
+			continue
+		}
+		list := make([]any, len(values))
+		for i, v := range values {
+			list[i] = v
+		}
+		conds = append(conds, map[string]any{"op": "in", "field": sh.field, "value": list})
+	}
+	out["filter"] = map[string]any{"op": "all", "rules": conds}
+	return out, nil
+}
+
+// shorthandValues reads a shorthand value: a non-empty string or, where
+// lists are allowed, a non-empty list of distinct non-empty strings.
+// validation: fixed texts about the shorthand value (and the state key the
+// caller sent twice).
+func shorthandValues(raw any, listAllowed bool) ([]string, error) {
+	switch v := raw.(type) {
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return nil, errors.New("must not be empty")
+		}
+		return []string{v}, nil
+	case []any:
+		if !listAllowed {
+			return nil, errors.New("must be a string")
+		}
+		if len(v) == 0 {
+			return nil, errors.New("must name at least one state")
+		}
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			s, ok := item.(string)
+			if !ok || strings.TrimSpace(s) == "" {
+				return nil, errors.New("must be a list of state keys")
+			}
+			if slices.Contains(out, s) {
+				return nil, fmt.Errorf("names %q twice", s)
+			}
+			out = append(out, s)
+		}
+		return out, nil
+	}
+	if listAllowed {
+		return nil, errors.New("must be a state key or a list of state keys")
+	}
+	return nil, errors.New("must be a string")
+}
+
+// legacyEvent reports whether event names lifecycle.transitioned.
+func legacyEvent(event any) bool {
+	switch v := event.(type) {
+	case string:
+		return v == legacyLifecycleEvent
+	case []any:
+		for _, item := range v {
+			if s, _ := item.(string); s == legacyLifecycleEvent {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func triggerFieldError(field, message string) *api.FieldError {
+	return &api.FieldError{Field: field, Message: message, Status: http.StatusUnprocessableEntity}
 }

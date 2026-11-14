@@ -681,6 +681,10 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	if opts.CIService != nil {
 		workflowRuns.WithCIService(opts.CIService)
 	}
+	// The asset of a lifecycle.changed in the run context (LCY-04, WP-1104).
+	if repos.Asset != nil {
+		workflowRuns.WithAssets(repos.Asset)
+	}
 	// submit_form checks signature fields like the form routes: with the
 	// release module documents only (WP-1101).
 	if opts.Modules.Enabled(ModuleDocuments) && repos.Document != nil {

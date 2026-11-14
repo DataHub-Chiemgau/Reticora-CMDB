@@ -116,6 +116,10 @@ func (d *workerDeps) workflowTriggers() *workflow.TriggerConsumer {
 	}
 	exec := workflow.NewExecutor(d.repos.Workflow, d.repos.Ticket, d.repos.CI, d.repos.Form, dispatcher).
 		WithFieldGuard(override.NewGuard(d.repos.Override)).WithQueue(d.jobQueue)
+	// lifecycle.changed of an asset carries the asset (LCY-04, WP-1104).
+	if d.repos.Asset != nil {
+		exec.WithAssets(d.repos.Asset)
+	}
 	if d.repos.EventOutbox {
 		exec.WithEventOutbox()
 	}
