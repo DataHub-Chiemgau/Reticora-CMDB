@@ -73,7 +73,9 @@ function fakeBackend() {
         const to = q.get('to') ? Date.parse(q.get('to')!) : undefined;
         if (from !== undefined && to !== undefined && to <= from)
           return json({ detail: 'to must be after from', field: 'to' }, 422);
-        const resolvedFrom = q.get('resolved_from') ? Date.parse(q.get('resolved_from')!) : undefined;
+        const resolvedFrom = q.get('resolved_from')
+          ? Date.parse(q.get('resolved_from')!)
+          : undefined;
         const state = q.get('state');
         const all =
           state === 'resolved'
@@ -192,7 +194,9 @@ describe('IncidentsPage (WP-1045)', () => {
     const past = new Date(Date.now() - 21 * DAY);
     const day = `${past.getFullYear()}-${String(past.getMonth() + 1).padStart(2, '0')}-${String(past.getDate()).padStart(2, '0')}`;
     renderPage(`/incidents?to=${day}`);
-    await waitFor(() => expect(backend.lists.some((p) => p.get('state') === 'resolved')).toBe(true));
+    await waitFor(() =>
+      expect(backend.lists.some((p) => p.get('state') === 'resolved')).toBe(true),
+    );
     expect(screen.queryByText(i18n.t('app.error'))).not.toBeInTheDocument();
     expect(backend.lists.every((p) => !p.has('from'))).toBe(true);
   });
