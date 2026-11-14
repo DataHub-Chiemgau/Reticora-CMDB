@@ -1130,7 +1130,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		stocktake.NewHandler(repos.Stocktake).WithService(stocktake.NewService(repos.Stocktake, movements)),
 		consumable.NewHandler(repos.Consumable),
 		// The goods receipt books through the movement service (WP-760).
-		order.NewHandler(repos.Order).WithBookings(movements),
+		orderHandler(repos.Order, opts.Modules, workflowRuns).WithBookings(movements),
 		// The recipients of a window follow the graph impact of its CIs
 		// (MGT-04, WP-1034).
 		maintenance.NewHandler(repos.Maintenance).WithAnalyzer(topology.NewAnalyzer(repos.CI, repos.Relationship).
@@ -2053,6 +2053,18 @@ func exportDATEVGate(opts *Options) *export.DATEVGate {
 		entitlements = opts.Entitlements
 	}
 	return export.NewDATEVGate(entitlements, opts.Modules.Enabled(ModuleInventory))
+}
+
+// orderHandler builds the order routes; with the module workflows the
+// submit starts the approval workflow of the trigger order_submitted
+// (WFL-04, WP-1108) and order_decision changes the orders.
+func orderHandler(orders order.Repository, modules *ModuleSet, runs *workflow.Executor) *order.Handler {
+	h := order.NewHandler(orders)
+	if runs != nil && orders != nil && modules.Enabled("workflows") {
+		runs.WithOrders(orders)
+		h.WithRunStarter(workflow.NewOrderStarter(runs))
+	}
+	return h
 }
 
 // formHandler builds the form routes; signature fields (WP-1101) name

@@ -38,6 +38,9 @@ type Repository interface {
 	// (actorID differs from requested_by); approve and reject record the
 	// actor in approved_by.
 	SetStatus(ctx context.Context, orgID, id, status, actorID string) (*Order, error)
+	// SetApprovalRun records the workflow run that decides on the approval
+	// of a submitted order (WP-1108); empty clears it.
+	SetApprovalRun(ctx context.Context, orgID, id, runID string) error
 	// AddItem adds a position to an order in draft; it books nothing.
 	AddItem(ctx context.Context, item *Item) (*Order, error)
 	ListItems(ctx context.Context, orgID, orderID string) ([]Item, error)
@@ -251,6 +254,18 @@ func (r *MemoryRepository) SetStatus(_ context.Context, orgID, id, status, actor
 	}
 	o.UpdatedAt = time.Now().UTC()
 	return r.copyOf(o), nil
+}
+
+// SetApprovalRun implements Repository.
+func (r *MemoryRepository) SetApprovalRun(_ context.Context, orgID, id, runID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	o, err := r.get(orgID, id)
+	if err != nil {
+		return err
+	}
+	o.ApprovalRunID = runID
+	return nil
 }
 
 func (r *MemoryRepository) AddItem(_ context.Context, item *Item) (*Order, error) {

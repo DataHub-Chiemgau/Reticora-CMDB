@@ -5,7 +5,7 @@ Diese Datei beschreibt den Datenbankschema-Stand nach allen Migrationen in
 Migrationen: Jede Änderung an Tabellen, Row Level Security (RLS) oder Policies
 zeigt sich hier als Diff.
 
-Stand: Migration 000371_workflow_waiting_input
+Stand: Migration 000372_order_approval_run
 
 ## Prüfung
 
@@ -537,6 +537,21 @@ ein Run mit mehreren `request_form`-Schritten nimmt je Schritt eine
 Einreichung; die zweite zum selben Schritt verhindern Sperre und
 Statusprüfung). Down setzt wartende Runs und
 Schritte auf `cancelled`. RLS unverändert.
+Migration 000372 (WP-1108, vorläufige Nummer) ergänzt
+`internal_order.approval_run_id` (UUID, NULL-fähig) mit
+`internal_order_approval_run_fkey` (`approval_run_id`, `organization_id`) →
+`workflow_run` (`id`, `organization_id`) `ON DELETE SET NULL
+(approval_run_id)` und dem Teilindex `idx_internal_order_approval_run`
+(`organization_id`, `approval_run_id`) `WHERE approval_run_id IS NOT NULL`;
+`uq_workflow_def_order_submitted` (UNIQUE auf `organization_id` `WHERE
+active AND trigger_type = 'order_submitted'`, über die gespeicherte Spalte
+`workflow_def.trigger_type GENERATED ALWAYS AS (trigger->>'type') STORED`,
+weil ein Index unter RLS keine nicht leakproof Funktion nutzen darf) lässt je Organisation
+höchstens eine aktive Bestellgenehmigung zu. Die Triggerfunktion
+`workflow_run_scope` setzt für einen Run mit Trigger `order_submitted` ohne
+CI den Kunden der Bestellung aus `context.order_id` (Scope erweitert) statt
+des einzigen Kunden des Einreichenden; Down stellt die Fassung aus 000351
+wieder her. RLS unverändert.
 `TestRLSCatalog` scheitert für einen Eintrag ohne
 vorhandenen Test und für einen Eintrag, den die Regel nicht meldet.
 

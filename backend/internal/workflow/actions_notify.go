@@ -218,6 +218,19 @@ func (e *Executor) sendNotification(ctx context.Context, orgID string, run *Run,
 	if err != nil {
 		return nil, err
 	}
+	// A user may be named by a value of the run context ({{requested_by}},
+	// WP-1108); one that expands to nothing names no recipient.
+	ctxValues := EvaluationValues(run.Context)
+	users := make([]string, 0, len(a.users))
+	for _, u := range a.users {
+		if u = strings.TrimSpace(expand(u, ctxValues)); u != "" {
+			users = append(users, u)
+		}
+	}
+	if len(a.users) > 0 && len(users) == 0 {
+		return nil, errNoRecipient
+	}
+	a.users = users
 	base := notify.Audience{Permission: identity.PermWorkflowRead}
 	if run.CIID != "" && e.cis != nil {
 		item, cerr := e.cis.GetByID(ctx, orgID, run.CIID)

@@ -108,7 +108,7 @@ func (e *formEnv) submit(t *testing.T, user, runID string, values map[string]any
 	return rec.Code, out
 }
 
-func (e *formEnv) runOf(t *testing.T, id string) *Run {
+func (e *approvalEnv) runOf(t *testing.T, id string) *Run {
 	t.Helper()
 	run, err := e.repo.GetRun(e.as(e.initiator, formPerms), e.f.OrgA, id)
 	if err != nil {

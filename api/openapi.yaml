@@ -4446,7 +4446,12 @@ paths:
       operationId: submitOrder
       tags: [Orders]
       summary: Submit an order for approval (draft → submitted)
-      description: State machine of STK-05 (WP-286); a transition from another state is 409.
+      description: >-
+        State machine of STK-05 (WP-286); a transition from another state is
+        409. With the module workflows and an active workflow of the trigger
+        order_submitted (at most one per organization) the submit starts its
+        run in the same transaction (WFL-04, WP-1108) and the order names it in
+        approval_run_id; a start that fails leaves the order in draft (500).
       responses:
         '200':
           description: Order submitted
@@ -4476,7 +4481,9 @@ paths:
         Four-eyes rule (STK-05, WP-286): the approver must differ from the
         requester (requested_by), and an order without a requester cannot be
         approved (403). A transition from another state than submitted is 409;
-        of parallel approvals exactly one succeeds.
+        of parallel approvals exactly one succeeds. While the approval workflow
+        of the order (approval_run_id, WP-1108) has not ended, the route is
+        409 with the run id in detail; the workflow decides.
       responses:
         '200':
           description: Order approved
@@ -4502,7 +4509,10 @@ paths:
       operationId: rejectOrder
       tags: [Orders]
       summary: Reject an order (submitted → rejected, records the rejecting user)
-      description: A transition from another state than submitted is 409 (WP-286).
+      description: >-
+        A transition from another state than submitted is 409 (WP-286), as is
+        a rejection while the approval workflow of the order
+        (approval_run_id, WP-1108) has not ended (the run id in detail).
       responses:
         '200':
           description: Order rejected
@@ -39444,6 +39454,7 @@ components:
           deprecated: true
           description: Same as supplier_name; removed with WP-320.
         target_location_id: { type: string, format: uuid, description: Target bin of the goods receipt (WP-847). }
+        approval_run_id: { type: string, format: uuid, description: "The workflow run of the trigger order_submitted that decides on the approval (WFL-04, WP-1108); while it is open, approve and reject are 409." }
         total_cost: { type: number }
         currency: { type: string }
         notes: { type: string }
@@ -41843,7 +41854,11 @@ components:
             Trigger contract of phase 3 (WFL-02): {"type": "manual"};
             {"type": "event", "event": "<event type>", "filter": <one MET-45
             condition node, optional>, "allow_workflow_origin": <boolean,
-            optional>} (evaluated from WP-1090 on); {"type": "form_submitted",
+            optional>} (evaluated from WP-1090 on); {"type": "order_submitted"}
+            (WP-1108: at most one active definition per organization, a second
+            activation is 409; the submit of an order starts the run with
+            order_id, order_number, title, requested_by, total_cost, currency,
+            client_id and items in its context); {"type": "form_submitted",
             "form_id": "<form id>", "filter": <MET-45, optional>} (WP-1102: every
             submission of the form starts a run in the transaction of the
             submission; the context holds form.<key>, submission_id, form_id,
@@ -41888,7 +41903,11 @@ components:
           type: array
           items: { $ref: '#/components/schemas/JSONValue' }
           description: >-
-            Actions executed in order, each {"type": "<action>", ...}: noop,
+            Actions executed in order, each {"type": "<action>", "when": <one
+            MET-45 node over the run context, optional; an action whose
+            condition does not hold is skipped, its step succeeds with
+            {"skipped": true}, a refused node is 422 on actions[i].when,
+            WP-1108>, ...}: noop,
             create_ticket, set_ci_field, transition_lifecycle, require_approval,
             submit_form, request_form (WP-1102: {"type": "request_form", "form_id":
             <form id>, "recipient": {"type": user | team | contact, "id": <id>},
@@ -41898,7 +41917,16 @@ components:
             link to the form and the run; POST /forms/{id}/submissions with
             run_id continues the run, the values under form.<key>; an expired
             deadline cancels the run or completes the step without values),
-            send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
+            order_decision (WP-1108: {"type": "order_decision", "order_id":
+            <optional, else the context's>} applies the decision of the
+            preceding require_approval step to the order with the decisive
+            approver as actor and approved_by; the four-eyes rule fails the
+            step when the approver is the requester; only in the approval run of its order (trigger order_submitted) with an
+            approver who holds order:approve, other triggers are 422 on
+            actions[i].type; a rejection continues the run, order_decision
+            rejects the order with the rejecting approver and sets
+            order_status in the run context for the "when" of the
+            notification of the requester), send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
             "recipients": {"users": [<user id>], "teams": [<team id>],
             "roles": [<role name>], "contact_roles": [owner | escalation |
             operator | responsible | vendor of the run's CI],
@@ -41981,7 +42009,11 @@ components:
           type: array
           items: { $ref: '#/components/schemas/JSONValue' }
           description: >-
-            Actions executed in order, each {"type": "<action>", ...}: noop,
+            Actions executed in order, each {"type": "<action>", "when": <one
+            MET-45 node over the run context, optional; an action whose
+            condition does not hold is skipped, its step succeeds with
+            {"skipped": true}, a refused node is 422 on actions[i].when,
+            WP-1108>, ...}: noop,
             create_ticket, set_ci_field, transition_lifecycle, require_approval,
             submit_form, request_form (WP-1102: {"type": "request_form", "form_id":
             <form id>, "recipient": {"type": user | team | contact, "id": <id>},
@@ -41991,7 +42023,16 @@ components:
             link to the form and the run; POST /forms/{id}/submissions with
             run_id continues the run, the values under form.<key>; an expired
             deadline cancels the run or completes the step without values),
-            send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
+            order_decision (WP-1108: {"type": "order_decision", "order_id":
+            <optional, else the context's>} applies the decision of the
+            preceding require_approval step to the order with the decisive
+            approver as actor and approved_by; the four-eyes rule fails the
+            step when the approver is the requester; only in the approval run of its order (trigger order_submitted) with an
+            approver who holds order:approve, other triggers are 422 on
+            actions[i].type; a rejection continues the run, order_decision
+            rejects the order with the rejecting approver and sets
+            order_status in the run context for the "when" of the
+            notification of the requester), send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
             "recipients": {"users": [<user id>], "teams": [<team id>],
             "roles": [<role name>], "contact_roles": [owner | escalation |
             operator | responsible | vendor of the run's CI],
@@ -42073,7 +42114,11 @@ components:
             Trigger contract of phase 3 (WFL-02): {"type": "manual"};
             {"type": "event", "event": "<event type>", "filter": <one MET-45
             condition node, optional>, "allow_workflow_origin": <boolean,
-            optional>} (evaluated from WP-1090 on); {"type": "form_submitted",
+            optional>} (evaluated from WP-1090 on); {"type": "order_submitted"}
+            (WP-1108: at most one active definition per organization, a second
+            activation is 409; the submit of an order starts the run with
+            order_id, order_number, title, requested_by, total_cost, currency,
+            client_id and items in its context); {"type": "form_submitted",
             "form_id": "<form id>", "filter": <MET-45, optional>} (WP-1102: every
             submission of the form starts a run in the transaction of the
             submission; the context holds form.<key>, submission_id, form_id,
@@ -42118,7 +42163,11 @@ components:
           type: array
           items: { $ref: '#/components/schemas/JSONValue' }
           description: >-
-            Actions executed in order, each {"type": "<action>", ...}: noop,
+            Actions executed in order, each {"type": "<action>", "when": <one
+            MET-45 node over the run context, optional; an action whose
+            condition does not hold is skipped, its step succeeds with
+            {"skipped": true}, a refused node is 422 on actions[i].when,
+            WP-1108>, ...}: noop,
             create_ticket, set_ci_field, transition_lifecycle, require_approval,
             submit_form, request_form (WP-1102: {"type": "request_form", "form_id":
             <form id>, "recipient": {"type": user | team | contact, "id": <id>},
@@ -42128,7 +42177,16 @@ components:
             link to the form and the run; POST /forms/{id}/submissions with
             run_id continues the run, the values under form.<key>; an expired
             deadline cancels the run or completes the step without values),
-            send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
+            order_decision (WP-1108: {"type": "order_decision", "order_id":
+            <optional, else the context's>} applies the decision of the
+            preceding require_approval step to the order with the decisive
+            approver as actor and approved_by; the four-eyes rule fails the
+            step when the approver is the requester; only in the approval run of its order (trigger order_submitted) with an
+            approver who holds order:approve, other triggers are 422 on
+            actions[i].type; a rejection continues the run, order_decision
+            rejects the order with the rejecting approver and sets
+            order_status in the run context for the "when" of the
+            notification of the requester), send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
             "recipients": {"users": [<user id>], "teams": [<team id>],
             "roles": [<role name>], "contact_roles": [owner | escalation |
             operator | responsible | vendor of the run's CI],
@@ -42203,7 +42261,11 @@ components:
             Trigger contract of phase 3 (WFL-02): {"type": "manual"};
             {"type": "event", "event": "<event type>", "filter": <one MET-45
             condition node, optional>, "allow_workflow_origin": <boolean,
-            optional>} (evaluated from WP-1090 on); {"type": "form_submitted",
+            optional>} (evaluated from WP-1090 on); {"type": "order_submitted"}
+            (WP-1108: at most one active definition per organization, a second
+            activation is 409; the submit of an order starts the run with
+            order_id, order_number, title, requested_by, total_cost, currency,
+            client_id and items in its context); {"type": "form_submitted",
             "form_id": "<form id>", "filter": <MET-45, optional>} (WP-1102: every
             submission of the form starts a run in the transaction of the
             submission; the context holds form.<key>, submission_id, form_id,
@@ -42248,7 +42310,11 @@ components:
           type: array
           items: { $ref: '#/components/schemas/JSONValue' }
           description: >-
-            Actions executed in order, each {"type": "<action>", ...}: noop,
+            Actions executed in order, each {"type": "<action>", "when": <one
+            MET-45 node over the run context, optional; an action whose
+            condition does not hold is skipped, its step succeeds with
+            {"skipped": true}, a refused node is 422 on actions[i].when,
+            WP-1108>, ...}: noop,
             create_ticket, set_ci_field, transition_lifecycle, require_approval,
             submit_form, request_form (WP-1102: {"type": "request_form", "form_id":
             <form id>, "recipient": {"type": user | team | contact, "id": <id>},
@@ -42258,7 +42324,16 @@ components:
             link to the form and the run; POST /forms/{id}/submissions with
             run_id continues the run, the values under form.<key>; an expired
             deadline cancels the run or completes the step without values),
-            send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
+            order_decision (WP-1108: {"type": "order_decision", "order_id":
+            <optional, else the context's>} applies the decision of the
+            preceding require_approval step to the order with the decisive
+            approver as actor and approved_by; the four-eyes rule fails the
+            step when the approver is the requester; only in the approval run of its order (trigger order_submitted) with an
+            approver who holds order:approve, other triggers are 422 on
+            actions[i].type; a rejection continues the run, order_decision
+            rejects the order with the rejecting approver and sets
+            order_status in the run context for the "when" of the
+            notification of the requester), send_webhook and send_notification (NTF-05 [P3]): {"type": "send_notification",
             "recipients": {"users": [<user id>], "teams": [<team id>],
             "roles": [<role name>], "contact_roles": [owner | escalation |
             operator | responsible | vendor of the run's CI],

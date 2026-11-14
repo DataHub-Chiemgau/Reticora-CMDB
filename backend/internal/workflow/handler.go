@@ -128,6 +128,14 @@ func validateWrite(trigger JSONMap, conditions, actions []JSONMap) error {
 	if err := validateFormWrite(trigger, actions); err != nil {
 		return err
 	}
+	// The "when" of the actions (WP-1108).
+	if err := validateActionConditions(actions); err != nil {
+		return err
+	}
+	// order_decision only with the trigger order_submitted (WP-1108).
+	if err := validateOrderWrite(trigger, actions); err != nil {
+		return err
+	}
 	return validateApprovalActions(actions)
 }
 

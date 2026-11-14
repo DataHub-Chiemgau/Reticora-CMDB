@@ -259,6 +259,9 @@ type approvalVote struct {
 	Approved bool
 	Comment  string
 	Quorum   int
+	// Proceed continues the run on a rejection (the step succeeds with
+	// decision rejected) instead of cancelling it (WP-1108).
+	Proceed bool
 }
 
 // approvalRequest is the change of a step into waiting_approval.
@@ -520,6 +523,12 @@ func (e *Executor) Decide(ctx context.Context, orgID, runID, decision, comment s
 	if err != nil {
 		return nil, err
 	}
+	if allowed {
+		// The approval of an order needs order:approve as well (WP-1108).
+		if allowed, err = e.mayDecideOrder(ctx, orgID, run, user); err != nil {
+			return nil, err
+		}
+	}
 	if !allowed {
 		return nil, ErrNotApprover
 	}
@@ -527,8 +536,18 @@ func (e *Executor) Decide(ctx context.Context, orgID, runID, decision, comment s
 	if err != nil {
 		return nil, err
 	}
+	// A rejection that an order_decision follows continues the run, which
+	// rejects the order and notifies the requester (WP-1108).
+	proceed := false
+	if decision == DecisionRejected && run.Trigger == TriggerOrderSubmitted {
+		version, verr := e.repo.GetVersionByID(ctx, orgID, run.DefinitionVersionID)
+		if verr != nil {
+			return nil, fmt.Errorf("load workflow definition version: %w", verr)
+		}
+		proceed = orderDecisionFollows(run, version.Actions, step.StepIndex)
+	}
 	res, err := store.decideVote(ctx, orgID, run.ID, &approvalVote{StepID: step.ID, Approver: user, Approved: decision == DecisionApproved,
-		Comment: comment, Quorum: spec.Quorum})
+		Comment: comment, Quorum: spec.Quorum, Proceed: proceed})
 	if err != nil {
 		return nil, err
 	}
@@ -660,6 +679,14 @@ func (r *PGRepository) decideVote(ctx context.Context, orgID, runID string, v *a
 		output["quorum"] = v.Quorum
 		var next *Run
 		switch {
+		case !v.Approved && v.Proceed:
+			output["decision"] = DecisionRejected
+			if _, err = tx.Exec(ctx, `UPDATE workflow_step SET status='succeeded', output=$3, error='', updated_at=now() WHERE organization_id=$1 AND id=$2`,
+				orgID, v.StepID, output); err != nil {
+				return nil, err
+			}
+			next, err = scanRun(tx.QueryRow(ctx, `UPDATE workflow_run SET status='pending', enqueues=enqueues+1, updated_at=now()
+				WHERE organization_id=$1 AND id=$2 RETURNING `+runCols, orgID, runID))
 		case !v.Approved:
 			output["decision"] = DecisionRejected
 			if _, err = tx.Exec(ctx, `UPDATE workflow_step SET status='cancelled', output=$3, error=$4, updated_at=now() WHERE organization_id=$1 AND id=$2`,
@@ -848,6 +875,11 @@ func (r *MemoryRepository) decideVote(_ context.Context, orgID, runID string, v 
 	now := time.Now().UTC()
 	s.Output, s.UpdatedAt = out, now
 	switch {
+	case !v.Approved && v.Proceed:
+		out["decision"] = DecisionRejected
+		s.Status, s.Error = StatusSucceeded, ""
+		run.Status = StatusPending
+		run.Enqueues++
 	case !v.Approved:
 		out["decision"] = DecisionRejected
 		s.Status, s.Error = StatusCancelled, approvalRejectedText

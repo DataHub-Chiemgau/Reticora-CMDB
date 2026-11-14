@@ -74,6 +74,8 @@ type Executor struct {
 	// assets reads the asset of a lifecycle.changed for the run context of
 	// the event triggers (WithAssets, WP-1104).
 	assets AssetReader
+	// orders changes the orders of order_decision (WithOrders, WP-1108).
+	orders OrderStatusSetter
 	// afterStep is a test hook called after each succeeded step; an error
 	// ends the attempt there like a worker that dies.
 	afterStep func(index int) error
@@ -352,11 +354,30 @@ func (e *Executor) resume(ctx context.Context, orgID string, run *Run, at attemp
 			return e.abort(ctx, orgID, run, at, err)
 		}
 		if prev, ok := stored[i]; ok && prev.Status == StatusSucceeded {
+			if typ == orderDecisionActionType {
+				rememberOrderStatus(run, prev.Output)
+			}
 			continue
+		}
+		skip, err := actionSkipped(action, run.Context)
+		if err != nil {
+			return e.abort(ctx, orgID, run, at, err)
+		}
+		if typ == approvalActionType && rejectedBefore(stored, i) {
+			// An earlier approval rejected the order (WP-1108): no further
+			// approval, order_decision rejects it.
+			skip = true
 		}
 		step, end, out, err := e.prepareStep(ctx, orgID, run, at, i, typ, action, stored)
 		if err != nil || end {
 			return out, err
+		}
+		if skip {
+			// The "when" of the action does not hold (WP-1108).
+			if _, uerr := e.repo.UpdateStep(ctx, orgID, step.ID, StatusSucceeded, JSONMap{"skipped": true}, ""); uerr != nil {
+				return e.abort(ctx, orgID, run, at, fmt.Errorf("update workflow step: %w", uerr))
+			}
+			continue
 		}
 		var output JSONMap
 		var wait, completed bool
@@ -406,6 +427,9 @@ func (e *Executor) resume(ctx context.Context, orgID string, run *Run, at attemp
 			if _, err := e.repo.UpdateStep(ctx, orgID, step.ID, StatusSucceeded, output, ""); err != nil {
 				return e.abort(ctx, orgID, run, at, fmt.Errorf("update workflow step: %w", err))
 			}
+		}
+		if typ == orderDecisionActionType {
+			rememberOrderStatus(run, output)
 		}
 		if e.afterStep != nil {
 			// Test hook: the attempt ends after step i like a worker that
@@ -653,6 +677,9 @@ func (e *Executor) executeAction(ctx context.Context, orgID string, run *Run, in
 	case requestFormActionType:
 		// Waits for the submission of the form (requestInput, WP-1102).
 		return JSONMap{}, true, nil
+	case orderDecisionActionType:
+		out, err := e.orderDecision(ctx, orgID, run, index, action)
+		return out, false, err
 	case "send_notification":
 		out, err := e.sendNotification(ctx, orgID, run, index, action)
 		return out, false, err
@@ -730,9 +757,10 @@ func triggerMatches(trigger JSONMap, event string) bool {
 	if typ == "manual" || typ == "schedule" {
 		return event == typ || event == "manual"
 	}
-	if typ == TriggerFormSubmitted {
-		// Started by a submission of its form only (WP-1102).
-		return event == TriggerFormSubmitted
+	if typ == TriggerFormSubmitted || typ == TriggerOrderSubmitted {
+		// Started by a submission of its form (WP-1102) or of an order
+		// (WP-1108) only.
+		return event == typ
 	}
 	return eventMatches(trigger, event)
 }
