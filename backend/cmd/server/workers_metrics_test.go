@@ -99,10 +99,21 @@ func TestEveryWorkerExportsRunAndErrorMetrics(t *testing.T) {
 	}
 
 	t.Run("cycle", func(t *testing.T) {
+		// Without a database dependency in this run the cycle of these
+		// workers succeeds.
+		succeeding := []string{config.WorkerWebhookDispatcher, config.WorkerExport, config.WorkerIngest, config.WorkerMonitoring,
+			config.WorkerHealth, config.WorkerScheduler, config.WorkerJobs, config.WorkerNotifier}
 		before, since := scrapeWorkers(t, cs), float64(time.Now().Unix())
 		after := runWorkers(t, cs, built, offline, func(m map[string]workerSeries) bool {
 			for _, name := range config.WorkerNames {
 				if m[name].runs <= before[name].runs {
+					return false
+				}
+			}
+			// A scrape gathers the run counter and the last-success gauge
+			// separately: wait for the success too.
+			for _, name := range succeeding {
+				if m[name].lastSuccess < since {
 					return false
 				}
 			}
@@ -113,9 +124,7 @@ func TestEveryWorkerExportsRunAndErrorMetrics(t *testing.T) {
 				t.Errorf("%s: reticora_worker_runs_total %v (before %v), want a recorded cycle", name, after[name].runs, before[name].runs)
 			}
 		}
-		// Without a database dependency in this run the cycle succeeds.
-		for _, name := range []string{config.WorkerWebhookDispatcher, config.WorkerExport, config.WorkerIngest, config.WorkerMonitoring,
-			config.WorkerHealth, config.WorkerScheduler, config.WorkerJobs, config.WorkerNotifier} {
+		for _, name := range succeeding {
 			if after[name].errors != before[name].errors || after[name].lastSuccess < since {
 				t.Errorf("%s: errors %v -> %v, last success %v (started %v), want a cycle without error",
 					name, before[name].errors, after[name].errors, after[name].lastSuccess, since)
@@ -207,8 +216,12 @@ func TestEveryWorkerExportsRunAndErrorMetrics(t *testing.T) {
 			return slices.DeleteFunc(all, func(w server.Worker) bool { return !slices.Contains(names, w.Name) })
 		}
 		before, since := scrapeWorkers(t, cs), float64(time.Now().Unix())
+		// A scrape gathers the run counter and the last-success gauge
+		// separately, so it can see a counted run before its success: wait
+		// for both.
 		after := runWorkers(t, cs, pick(env.deps(t, false)), nil, func(m map[string]workerSeries) bool {
-			return m[names[0]].runs > before[names[0]].runs && m[names[1]].runs > before[names[1]].runs
+			return m[names[0]].runs > before[names[0]].runs && m[names[1]].runs > before[names[1]].runs &&
+				m[names[0]].lastSuccess >= since && m[names[1]].lastSuccess >= since
 		})
 		for _, name := range names {
 			if after[name].runs <= before[name].runs || after[name].errors != before[name].errors || after[name].lastSuccess < since {
