@@ -453,6 +453,8 @@ var routeSnapshots = func() map[string]RouteSnapshot {
 	crud(m, v1+"lifecycle-definitions", "lifecycle_definition", "POST", "DELETE")
 	crud(m, v1+"lifecycle-models", "lifecycle_definition", all...)
 	crud(m, v1+"security/findings", "security_finding", "POST", "PATCH")
+	// The product mapping of the version match (SEC-02, WP-1122).
+	crud(m, v1+"security/cpe-mappings", "cpe_mapping", all...)
 	crud(m, v1+"invitations", "user_invitation", "POST", "DELETE")
 	crud(m, v1+"network-interfaces", "network_interface", "PATCH", "DELETE")
 	crud(m, v1+"rack-mounts", "rack_mount", "PATCH", "DELETE")

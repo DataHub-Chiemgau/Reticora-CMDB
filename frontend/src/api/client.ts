@@ -3941,6 +3941,47 @@ export const securityFindingApi = {
   },
 };
 
+/** A product mapping of the version match (SEC-02, WP-1122). */
+export type CPEMapping = components['schemas']['CPEMapping'];
+export type CPEMappingRequest = components['schemas']['CPEMappingRequest'];
+/** A group of CIs without product mapping (manufacturer, model, sys_object_id). */
+export type UnmappedCIGroup = components['schemas']['UnmappedCIGroup'];
+/** A vendor and product of the vulnerability catalog. */
+export type VulnProduct = components['schemas']['VulnProduct'];
+export type CPEVersionScheme = NonNullable<CPEMapping['version_scheme']>;
+export const CPE_VERSION_SCHEMES: readonly CPEVersionScheme[] = [
+  'generic',
+  'cisco_ios',
+  'cisco_ios_xe',
+  'cisco_nxos',
+  'junos',
+];
+
+export const productMappingApi = {
+  list(params: ListParams = {}): Promise<PaginatedResponse<CPEMapping>> {
+    return fetchAPI(`/security/cpe-mappings${buildQuery(params)}`);
+  },
+  create(data: CPEMappingRequest): Promise<CPEMapping> {
+    return fetchAPI('/security/cpe-mappings', { method: 'POST', body: JSON.stringify(data) });
+  },
+  update(id: string, data: CPEMappingRequest): Promise<CPEMapping> {
+    return fetchAPI(`/security/cpe-mappings/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+  /** remove answers match_job_id when the deletion queued a match (200), nothing otherwise (204). */
+  remove(id: string): Promise<{ match_job_id: string } | undefined> {
+    return fetchAPI(`/security/cpe-mappings/${id}`, { method: 'DELETE' });
+  },
+  unmapped(params: ListParams = {}): Promise<PaginatedResponse<UnmappedCIGroup>> {
+    return fetchAPI(`/security/unmapped${buildQuery(params)}`);
+  },
+  products(q: string): Promise<{ data: VulnProduct[] }> {
+    return fetchAPI(`/security/vuln-products${buildQuery({ q })}`);
+  },
+};
+
 /** One stored source rank of the organization (REC-04, WP-1105). */
 export type SourceRankEntry = components['schemas']['SourceRankEntry'];
 /** The effective ranks of one attribute with their origin (type, org, default). */

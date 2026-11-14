@@ -19,6 +19,11 @@ var validStatuses = map[string]bool{StatusOpen: true, StatusAcknowledged: true, 
 // The routes need finding:read and finding:write (authz, WP-866).
 type Handler struct {
 	repo Repository
+	// mappings, products and matcher serve the product mapping (WithMappings,
+	// WP-1122); nil without the database.
+	mappings *MappingStore
+	products ProductSearcher
+	matcher  MatchSubmitter
 }
 
 // NewHandler creates a new security handler.
@@ -33,6 +38,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/api/v1/security/findings/summary", h.Summary)
 	r.Get("/api/v1/security/findings/{id}", h.Get)
 	r.Patch("/api/v1/security/findings/{id}", h.Update)
+	// The product mapping of the version match (SEC-02, WP-1122).
+	h.registerMappingRoutes(r)
 }
 
 // List handles GET /api/v1/security/findings with the filters ci_id,

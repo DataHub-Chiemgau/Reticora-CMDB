@@ -2634,7 +2634,62 @@
     "fixedVersion": "Behoben in",
     "reference": "Referenz",
     "emptyTitle": "Keine Befunde",
-    "emptyHint": "Für diesen Statusfilter liegen keine Sicherheitsbefunde vor."
+    "emptyHint": "Für diesen Statusfilter liegen keine Sicherheitsbefunde vor.",
+    "tabs": {
+      "label": "Ansicht der Sicherheitsbefunde",
+      "findings": "Befunde",
+      "mapping": "Produktzuordnung"
+    },
+    "mapping": {
+      "unmappedTitle": "Ohne Produktzuordnung",
+      "shown": "{{shown}} von {{total}} angezeigt",
+      "loadMore": "Weitere laden",
+      "unmappedEmpty": "Alle CIs mit Hersteller oder sys_object_id sind einem Produkt zugeordnet.",
+      "listTitle": "Zuordnungen",
+      "listEmpty": "Noch keine Zuordnungen der Organisation.",
+      "manufacturer": "Hersteller",
+      "model": "Modell",
+      "sysObjectId": "sys_object_id",
+      "ciCount": "CIs",
+      "map": "Zuordnen",
+      "mapGroup": "{{name}} zuordnen",
+      "create": "Zuordnung anlegen",
+      "pattern": "Muster",
+      "vendor": "Hersteller im Katalog",
+      "products": "Produkte",
+      "productsInput": "Produkte (kommagetrennt)",
+      "priority": "Priorität",
+      "deleteMapping": "Zuordnung {{name}} löschen",
+      "dialogTitle": "Produktzuordnung",
+      "dialogHint": "Ordnet CIs einem Hersteller und Produkt des Schwachstellenkatalogs zu. Nach dem Speichern werden die betroffenen CIs neu abgeglichen.",
+      "matchKind": "Zuordnung über",
+      "kinds": {
+        "manufacturer_model": "Hersteller und Modell",
+        "sys_object_id": "sys_object_id-Präfix"
+      },
+      "manufacturerPattern": "Herstellermuster (* und ?)",
+      "modelPattern": "Modellmuster (optional)",
+      "sysObjectIdPrefix": "sys_object_id-Präfix",
+      "searchCatalog": "Katalog durchsuchen",
+      "suggestions": "Vorschläge aus dem Katalog",
+      "noSuggestion": "Kein Produkt im Katalog gefunden.",
+      "versionField": "Versionsfeld",
+      "versionScheme": "Versionsschema",
+      "fields": {
+        "firmware_version": "Firmware-Version",
+        "os_version": "Betriebssystem-Version"
+      },
+      "schemes": {
+        "generic": "Generisch",
+        "cisco_ios": "Cisco IOS",
+        "cisco_ios_xe": "Cisco IOS-XE",
+        "cisco_nxos": "Cisco NX-OS",
+        "junos": "Juniper Junos"
+      },
+      "saved": "Zuordnung gespeichert.",
+      "matchJob": "Abgleich-Job {{id}} ansehen",
+      "saveFailed": "Die Zuordnung konnte nicht gespeichert werden."
+    }
   },
   "citypes": {
     "create": "Typ anlegen",

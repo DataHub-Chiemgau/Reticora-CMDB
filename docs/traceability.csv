@@ -1928,3 +1928,5 @@ MON-03;[P3];E;frontend/src/pages/MonitoringPage.test.tsx;WP-990
 ALR-05;[P3];E;frontend/src/components/monitoring/AlertRuleForm.test.tsx;WP-990
 WFL-02;[P3];F;backend/internal/workflow/approval_sweep_integration_test.go;WP-1099
 LCY-04;[P3];F;backend/internal/workflow/lifecycle_trigger_integration_test.go;WP-1104
+SEC-02;[P3];F;backend/internal/security/mapping_integration_test.go;WP-1122
+SEC-02;[P3];F;frontend/src/components/findings/ProductMappingPanel.test.tsx;WP-1122

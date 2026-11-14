@@ -406,6 +406,17 @@ func versionMatcher(opts *Options) *security.Matcher {
 	return security.NewMatcher(opts.AuditPool, vulnfeed.NewPGRepository(opts.AuditPool), security.NewPGRepository(opts.AuditPool))
 }
 
+// securityHandler serves the findings and, with the database, the product
+// mapping of the version match (WP-1122): its writes queue vulnfeed.match
+// on matcher.
+func securityHandler(repos *Repositories, opts *Options, matcher *security.Matcher) *security.Handler {
+	h := security.NewHandler(repos.Security)
+	if opts.AuditPool != nil {
+		h.WithMappings(security.NewMappingStore(opts.AuditPool), vulnfeed.NewPGRepository(opts.AuditPool), matcher)
+	}
+	return h
+}
+
 // operatorHandler builds the operator path; organizations are created with
 // the creation chain of the self-signup (TLC-02).
 func operatorHandler(opts *Options) *operator.Handler {
@@ -713,6 +724,9 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 	if opts.AuditPool != nil && repos.Permission != nil {
 		workflowRuns.WithApprovers(notify.NewPGResolver(opts.AuditPool, repos.Permission))
 	}
+	// The version match (WP-1121): its job kind and the product mapping
+	// routes that queue it (WP-1122) share one matcher.
+	vulnMatcher := versionMatcher(&opts)
 	if repos.Jobs != nil {
 		jobService := jobs.NewService(repos.Jobs)
 		jobTracker = jobService
@@ -833,7 +847,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 			export.NewOrgExporter(opts.AuditPool, opts.Blobs, jobService), subjectService, workflowRuns,
 			// The automatic ping probes (WP-949) on the probe store of
 			// PostgreSQL.
-			probeAutocreator(&repos), complianceJobs, !opts.WorkflowWorkerOff, versionMatcher(&opts))
+			probeAutocreator(&repos), complianceJobs, !opts.WorkflowWorkerOff, vulnMatcher)
 	}
 	exportWorker := export.NewJobWorker(repos.ExportJobs, repos.CI, opts.Blobs)
 	exportWorker.Tracker = jobTracker
@@ -1094,7 +1108,7 @@ func NewRouter(repos Repositories, opts Options) (*chi.Mux, func(http.Handler) h
 		desk.NewHandler(repos.Desk),
 		location.NewHandler(repos.Location),
 		agentHandler(&repos, opts.Sessions, conflictReviews),
-		security.NewHandler(repos.Security),
+		securityHandler(&repos, &opts, vulnMatcher),
 		// The attachments of a ticket are its linked documents (WP-765).
 		ticketHandler(tickets, &repos, &opts),
 		userHandler(&repos, &opts),

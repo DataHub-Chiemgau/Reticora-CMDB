@@ -5744,6 +5744,200 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/security/cpe-mappings:
+    x-phase: P3
+    x-feature: compliance_findings
+    get:
+      operationId: listCPEMappings
+      tags: [Security]
+      summary: List the product mappings of the version match
+      description: >-
+        The rows of cpe_mapping of the organization (SEC-02, WP-1122, E-236)
+        by priority: CIs are mapped to a vendor and products of the
+        vulnerability catalog by manufacturer and model (glob patterns with
+        * and ?, case-insensitive) or by a sys_object_id prefix; a row of
+        the organization goes before the system mapping, the lowest priority
+        first. Needs finding:read. Paged by next_cursor (or offset), at most 1,000 rows
+        (total_capped beyond).
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Product mappings
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CPEMappingListResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    post:
+      operationId: createCPEMapping
+      tags: [Security]
+      summary: Create a product mapping
+      description: >-
+        Needs finding:write for the whole organization (a mapping applies to
+        every CI of it); a principal restricted to clients, sites or teams is
+        403. match_kind manufacturer_model needs manufacturer_pattern
+        (model_pattern optional), sys_object_id needs sys_object_id_prefix;
+        vendor and at least one product (at most 20, normalized like the
+        catalog), version_field firmware_version (default, an empty firmware
+        version falls back to os_version) or os_version, version_scheme one
+        of generic, cisco_ios, cisco_ios_xe, cisco_nxos, junos. A violation
+        is 422 with the field. The answer names the job vulnfeed.match
+        (match_job_id) queued for the CIs the pattern applies to (at most
+        10,000 ids, else a full run); none without such a CI.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CPEMappingRequest' }
+      responses:
+        '201':
+          description: Mapping created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CPEMapping' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/v1/security/cpe-mappings/{id}:
+    x-phase: P3
+    x-feature: compliance_findings
+    parameters:
+      - $ref: '#/components/parameters/ResourceID'
+    get:
+      operationId: getCPEMapping
+      tags: [Security]
+      summary: Get a product mapping
+      responses:
+        '200':
+          description: Product mapping
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CPEMapping' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    patch:
+      operationId: updateCPEMapping
+      tags: [Security]
+      summary: Change a product mapping
+      description: >-
+        Changes the fields named and validates the whole mapping again
+        (422 with the field). Changing match_kind drops the pattern of the
+        other kind unless the request sets it. Needs finding:write for the
+        whole organization. The answer names the job vulnfeed.match
+        (match_job_id) for the CIs the pattern before or after applies to.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CPEMappingRequest' }
+      responses:
+        '200':
+          description: Mapping changed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CPEMapping' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    delete:
+      operationId: deleteCPEMapping
+      tags: [Security]
+      summary: Delete a product mapping
+      description: >-
+        Needs finding:write for the whole organization. When the deletion
+        queued the job vulnfeed.match for the CIs the mapping applied to,
+        the answer is 200 with match_job_id (and the job in Location,
+        /api/v1/jobs/{id}); without such a CI it is 204.
+      responses:
+        '200':
+          description: Mapping deleted, match job queued
+          headers:
+            Location:
+              description: The match job, /api/v1/jobs/{id}.
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [match_job_id]
+                properties:
+                  match_job_id: { type: string, format: uuid, description: The queued job vulnfeed.match. }
+        '204':
+          description: Mapping deleted, no CI to match
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/v1/security/vuln-products:
+    x-phase: P3
+    x-feature: compliance_findings
+    get:
+      operationId: searchVulnProducts
+      tags: [Security]
+      summary: Suggest vendor and product from the vulnerability catalog
+      description: >-
+        At most 50 pairs of vendor and product of the catalog whose
+        normalized name contains q, ordered by vendor and product (SEC-02,
+        WP-1122). Needs finding:read. Not paged.
+      parameters:
+        - name: q
+          in: query
+          schema: { type: string, maxLength: 100 }
+      responses:
+        '200':
+          description: Vendor and product pairs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    maxItems: 50
+                    items: { $ref: '#/components/schemas/VulnProduct' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/UnprocessableEntity' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+  /api/v1/security/unmapped:
+    x-phase: P3
+    x-feature: compliance_findings
+    get:
+      operationId: listUnmappedCIGroups
+      tags: [Security]
+      summary: List the CIs without product mapping, grouped
+      description: >-
+        The groups (manufacturer, model, sys_object_id) of the CIs with a
+        manufacturer or a sys_object_id that neither a mapping of the
+        organization nor the system mapping applies to, with the number of
+        CIs and an example CI id (SEC-02, WP-1122, E-236). Counted in the
+        caller's client and site scope (row level security). Needs
+        finding:read. Paged by next_cursor (or offset) over at most 10,000
+        groups (total_capped beyond).
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: Groups without product mapping
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UnmappedCIGroupListResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
   /api/v1/consumables:
     x-phase: P2
     x-feature: stock
@@ -39646,6 +39840,73 @@ components:
             data:
               type: array
               items: { $ref: '#/components/schemas/Agent' }
+
+    CPEMapping:
+      type: object
+      required: [id, match_kind, vendor, products, version_field, version_scheme, priority, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        match_kind: { type: string, enum: [manufacturer_model, sys_object_id] }
+        manufacturer_pattern: { type: string }
+        model_pattern: { type: string }
+        sys_object_id_prefix: { type: string }
+        vendor: { type: string }
+        products: { type: array, items: { type: string }, minItems: 1, maxItems: 20 }
+        version_field: { type: string, enum: [firmware_version, os_version] }
+        version_scheme: { type: string, enum: [generic, cisco_ios, cisco_ios_xe, cisco_nxos, junos] }
+        priority: { type: integer, minimum: 0, maximum: 100000 }
+        created_by: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        match_job_id:
+          type: string
+          format: uuid
+          description: The job vulnfeed.match a write queued (POST, PATCH); absent in a read.
+    CPEMappingRequest:
+      type: object
+      properties:
+        match_kind: { type: string, enum: [manufacturer_model, sys_object_id] }
+        manufacturer_pattern: { type: string }
+        model_pattern: { type: string }
+        sys_object_id_prefix: { type: string }
+        vendor: { type: string }
+        products: { type: array, items: { type: string }, maxItems: 20 }
+        version_field: { type: string, enum: [firmware_version, os_version] }
+        version_scheme: { type: string, enum: [generic, cisco_ios, cisco_ios_xe, cisco_nxos, junos] }
+        priority: { type: integer, minimum: 0, maximum: 100000, description: 'Default 100; the lowest wins.' }
+    CPEMappingListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/CPEMapping' }
+    VulnProduct:
+      type: object
+      required: [vendor, product]
+      properties:
+        vendor: { type: string }
+        product: { type: string }
+    UnmappedCIGroup:
+      type: object
+      required: [manufacturer, model, sys_object_id, ci_count, example_ci_id]
+      properties:
+        manufacturer: { type: string }
+        model: { type: string }
+        sys_object_id: { type: string }
+        ci_count: { type: integer }
+        example_ci_id: { type: string, format: uuid }
+    UnmappedCIGroupListResponse:
+      allOf:
+        - $ref: '#/components/schemas/PaginationEnvelope'
+        - type: object
+          required: [data]
+          properties:
+            data:
+              type: array
+              items: { $ref: '#/components/schemas/UnmappedCIGroup' }
 
     PatchFinding:
       type: object

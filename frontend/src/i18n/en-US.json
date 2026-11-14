@@ -2634,7 +2634,62 @@
     "fixedVersion": "Fixed in",
     "reference": "Reference",
     "emptyTitle": "No findings",
-    "emptyHint": "There are no security findings for this status filter."
+    "emptyHint": "There are no security findings for this status filter.",
+    "tabs": {
+      "label": "Security findings view",
+      "findings": "Findings",
+      "mapping": "Product mapping"
+    },
+    "mapping": {
+      "unmappedTitle": "Without product mapping",
+      "shown": "{{shown}} of {{total}} shown",
+      "loadMore": "Load more",
+      "unmappedEmpty": "Every CI with a manufacturer or sys_object_id is mapped to a product.",
+      "listTitle": "Mappings",
+      "listEmpty": "The organization has no mappings yet.",
+      "manufacturer": "Manufacturer",
+      "model": "Model",
+      "sysObjectId": "sys_object_id",
+      "ciCount": "CIs",
+      "map": "Map",
+      "mapGroup": "Map {{name}}",
+      "create": "Create mapping",
+      "pattern": "Pattern",
+      "vendor": "Catalog vendor",
+      "products": "Products",
+      "productsInput": "Products (comma-separated)",
+      "priority": "Priority",
+      "deleteMapping": "Delete mapping {{name}}",
+      "dialogTitle": "Product mapping",
+      "dialogHint": "Maps CIs to a vendor and product of the vulnerability catalog. After saving, the affected CIs are matched again.",
+      "matchKind": "Map by",
+      "kinds": {
+        "manufacturer_model": "Manufacturer and model",
+        "sys_object_id": "sys_object_id prefix"
+      },
+      "manufacturerPattern": "Manufacturer pattern (* and ?)",
+      "modelPattern": "Model pattern (optional)",
+      "sysObjectIdPrefix": "sys_object_id prefix",
+      "searchCatalog": "Search the catalog",
+      "suggestions": "Suggestions from the catalog",
+      "noSuggestion": "No product found in the catalog.",
+      "versionField": "Version field",
+      "versionScheme": "Version scheme",
+      "fields": {
+        "firmware_version": "Firmware version",
+        "os_version": "OS version"
+      },
+      "schemes": {
+        "generic": "Generic",
+        "cisco_ios": "Cisco IOS",
+        "cisco_ios_xe": "Cisco IOS-XE",
+        "cisco_nxos": "Cisco NX-OS",
+        "junos": "Juniper Junos"
+      },
+      "saved": "Mapping saved.",
+      "matchJob": "View match job {{id}}",
+      "saveFailed": "The mapping could not be saved."
+    }
   },
   "citypes": {
     "create": "Create type",

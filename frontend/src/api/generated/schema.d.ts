@@ -2650,6 +2650,98 @@ export interface paths {
     patch: operations['updateSecurityFinding'];
     trace?: never;
   };
+  '/api/v1/security/cpe-mappings': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the product mappings of the version match
+     * @description The rows of cpe_mapping of the organization (SEC-02, WP-1122, E-236) by priority: CIs are mapped to a vendor and products of the vulnerability catalog by manufacturer and model (glob patterns with * and ?, case-insensitive) or by a sys_object_id prefix; a row of the organization goes before the system mapping, the lowest priority first. Needs finding:read. Paged by next_cursor (or offset), at most 1,000 rows (total_capped beyond).
+     */
+    get: operations['listCPEMappings'];
+    put?: never;
+    /**
+     * Create a product mapping
+     * @description Needs finding:write for the whole organization (a mapping applies to every CI of it); a principal restricted to clients, sites or teams is 403. match_kind manufacturer_model needs manufacturer_pattern (model_pattern optional), sys_object_id needs sys_object_id_prefix; vendor and at least one product (at most 20, normalized like the catalog), version_field firmware_version (default, an empty firmware version falls back to os_version) or os_version, version_scheme one of generic, cisco_ios, cisco_ios_xe, cisco_nxos, junos. A violation is 422 with the field. The answer names the job vulnfeed.match (match_job_id) queued for the CIs the pattern applies to (at most 10,000 ids, else a full run); none without such a CI.
+     */
+    post: operations['createCPEMapping'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/security/cpe-mappings/{id}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    /** Get a product mapping */
+    get: operations['getCPEMapping'];
+    put?: never;
+    post?: never;
+    /**
+     * Delete a product mapping
+     * @description Needs finding:write for the whole organization. When the deletion queued the job vulnfeed.match for the CIs the mapping applied to, the answer is 200 with match_job_id (and the job in Location, /api/v1/jobs/{id}); without such a CI it is 204.
+     */
+    delete: operations['deleteCPEMapping'];
+    options?: never;
+    head?: never;
+    /**
+     * Change a product mapping
+     * @description Changes the fields named and validates the whole mapping again (422 with the field). Changing match_kind drops the pattern of the other kind unless the request sets it. Needs finding:write for the whole organization. The answer names the job vulnfeed.match (match_job_id) for the CIs the pattern before or after applies to.
+     */
+    patch: operations['updateCPEMapping'];
+    trace?: never;
+  };
+  '/api/v1/security/vuln-products': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Suggest vendor and product from the vulnerability catalog
+     * @description At most 50 pairs of vendor and product of the catalog whose normalized name contains q, ordered by vendor and product (SEC-02, WP-1122). Needs finding:read. Not paged.
+     */
+    get: operations['searchVulnProducts'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/v1/security/unmapped': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List the CIs without product mapping, grouped
+     * @description The groups (manufacturer, model, sys_object_id) of the CIs with a manufacturer or a sys_object_id that neither a mapping of the organization nor the system mapping applies to, with the number of CIs and an example CI id (SEC-02, WP-1122, E-236). Counted in the caller's client and site scope (row level security). Needs finding:read. Paged by next_cursor (or offset) over at most 10,000 groups (total_capped beyond).
+     */
+    get: operations['listUnmappedCIGroups'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/api/v1/consumables': {
     parameters: {
       query?: never;
@@ -19139,6 +19231,66 @@ export interface components {
     AgentListResponse: components['schemas']['PaginationEnvelope'] & {
       data: components['schemas']['Agent'][];
     };
+    CPEMapping: {
+      /** Format: uuid */
+      id: string;
+      /** @enum {string} */
+      match_kind: 'manufacturer_model' | 'sys_object_id';
+      manufacturer_pattern?: string;
+      model_pattern?: string;
+      sys_object_id_prefix?: string;
+      vendor: string;
+      products: string[];
+      /** @enum {string} */
+      version_field: 'firmware_version' | 'os_version';
+      /** @enum {string} */
+      version_scheme: 'generic' | 'cisco_ios' | 'cisco_ios_xe' | 'cisco_nxos' | 'junos';
+      priority: number;
+      /** Format: uuid */
+      created_by?: string;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+      /**
+       * Format: uuid
+       * @description The job vulnfeed.match a write queued (POST, PATCH); absent in a read.
+       */
+      match_job_id?: string;
+    };
+    CPEMappingRequest: {
+      /** @enum {string} */
+      match_kind?: 'manufacturer_model' | 'sys_object_id';
+      manufacturer_pattern?: string;
+      model_pattern?: string;
+      sys_object_id_prefix?: string;
+      vendor?: string;
+      products?: string[];
+      /** @enum {string} */
+      version_field?: 'firmware_version' | 'os_version';
+      /** @enum {string} */
+      version_scheme?: 'generic' | 'cisco_ios' | 'cisco_ios_xe' | 'cisco_nxos' | 'junos';
+      /** @description Default 100; the lowest wins. */
+      priority?: number;
+    };
+    CPEMappingListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['CPEMapping'][];
+    };
+    VulnProduct: {
+      vendor: string;
+      product: string;
+    };
+    UnmappedCIGroup: {
+      manufacturer: string;
+      model: string;
+      sys_object_id: string;
+      ci_count: number;
+      /** Format: uuid */
+      example_ci_id: string;
+    };
+    UnmappedCIGroupListResponse: components['schemas']['PaginationEnvelope'] & {
+      data: components['schemas']['UnmappedCIGroup'][];
+    };
     PatchFinding: {
       id: string;
       organization_id: string;
@@ -29626,6 +29778,241 @@ export interface operations {
       401: components['responses']['Unauthorized'];
       404: components['responses']['NotFound'];
       422: components['responses']['UnprocessableEntity'];
+    };
+  };
+  listCPEMappings: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Product mappings */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CPEMappingListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  createCPEMapping: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CPEMappingRequest'];
+      };
+    };
+    responses: {
+      /** @description Mapping created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CPEMapping'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  getCPEMapping: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Product mapping */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CPEMapping'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  deleteCPEMapping: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Mapping deleted, match job queued */
+      200: {
+        headers: {
+          /** @description The match job, /api/v1/jobs/{id}. */
+          Location?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            /**
+             * Format: uuid
+             * @description The queued job vulnfeed.match.
+             */
+            match_job_id: string;
+          };
+        };
+      };
+      /** @description Mapping deleted, no CI to match */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  updateCPEMapping: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Resource identifier. */
+        id: components['parameters']['ResourceID'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CPEMappingRequest'];
+      };
+    };
+    responses: {
+      /** @description Mapping changed */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['CPEMapping'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  searchVulnProducts: {
+    parameters: {
+      query?: {
+        q?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Vendor and product pairs */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            data: components['schemas']['VulnProduct'][];
+          };
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      422: components['responses']['UnprocessableEntity'];
+      503: components['responses']['ServiceUnavailable'];
+    };
+  };
+  listUnmappedCIGroups: {
+    parameters: {
+      query?: {
+        /** @description Maximum number of items to return (API-02); a larger value is capped to 200. */
+        limit?: components['parameters']['Limit'];
+        /**
+         * @description Opaque cursor taken from `next_cursor` of the previous page. Cursors
+         *     are HMAC-signed by the server (API-02); a forged or altered cursor
+         *     yields 400. Keyset cursors are bound to the sort order they were
+         *     issued for; sending one with a different `sort_by`/`sort_dir`
+         *     combination yields 400.
+         */
+        cursor?: components['parameters']['Cursor'];
+        /**
+         * @description Number of items to skip before returning data. Ignored when `cursor` is
+         *     supplied.
+         */
+        offset?: components['parameters']['Offset'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Groups without product mapping */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UnmappedCIGroupListResponse'];
+        };
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthorized'];
+      503: components['responses']['ServiceUnavailable'];
     };
   };
   listConsumables: {

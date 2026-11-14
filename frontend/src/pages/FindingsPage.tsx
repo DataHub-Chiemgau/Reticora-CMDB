@@ -1,5 +1,5 @@
 import { ShieldAlert } from 'lucide-react';
-import { useState } from 'react';
+import { useRef, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { securityFindingApi } from '../api/client';
@@ -24,6 +24,61 @@ import {
 } from '../components/ui/table';
 import { SkeletonList } from '../components/ui/Skeleton';
 import { ErrorState } from '../components/ui/ErrorState';
+import { cn } from '../components/ui/utils';
+import { ProductMappingPanel } from '../components/findings/ProductMappingPanel';
+
+const VIEWS = ['findings', 'mapping'] as const;
+type View = (typeof VIEWS)[number];
+
+/**
+ * ViewTabs switches between the findings and the product mapping (WP-1122);
+ * the arrow keys move between the tabs (roving tabindex).
+ */
+function ViewTabs({ view, onChange }: { view: View; onChange: (view: View) => void }) {
+  const { t } = useTranslation();
+  const refs = useRef<Partial<Record<View, HTMLButtonElement | null>>>({});
+  const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
+    if (step === 0) return;
+    event.preventDefault();
+    const next = VIEWS[(index + step + VIEWS.length) % VIEWS.length];
+    if (!next) return;
+    onChange(next);
+    refs.current[next]?.focus();
+  };
+  return (
+    <div
+      role="tablist"
+      aria-label={t('findings.tabs.label')}
+      className="flex gap-1 border-b border-line"
+    >
+      {VIEWS.map((id, index) => (
+        <button
+          key={id}
+          ref={(node) => {
+            refs.current[id] = node;
+          }}
+          type="button"
+          role="tab"
+          id={`findings-tab-${id}`}
+          aria-selected={view === id}
+          aria-controls={`findings-panel-${id}`}
+          tabIndex={view === id ? 0 : -1}
+          onClick={() => onChange(id)}
+          onKeyDown={(event) => onKeyDown(event, index)}
+          className={cn(
+            '-mb-px border-b-2 px-3 py-2 text-sm font-medium focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-accent',
+            view === id
+              ? 'border-accent text-fg'
+              : 'border-transparent text-fg-muted hover:text-fg',
+          )}
+        >
+          {t(`findings.tabs.${id}`)}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 function severityVariant(sev: string): 'danger' | 'warning' | 'info' | 'neutral' {
   switch (sev) {
@@ -71,6 +126,7 @@ export function FindingsPage() {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState('open');
+  const [view, setView] = useState<View>('findings');
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['security-findings', statusFilter],
@@ -101,139 +157,156 @@ export function FindingsPage() {
         description={t('findings.summary', 'Patch-Posture und Schwachstellen je CI.')}
       />
 
-      {summary.data ? (
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-          {(['critical', 'high', 'medium', 'low'] as const).map((s) => (
-            <MetricCard
-              key={s}
-              label={t(`findings.severities.${s}`, s)}
-              value={sev[s] ?? 0}
-              tone={(sev[s] ?? 0) > 0 ? severityTone[s] : 'default'}
-            />
-          ))}
+      <ViewTabs view={view} onChange={setView} />
+
+      {view === 'mapping' ? (
+        <div role="tabpanel" id="findings-panel-mapping" aria-labelledby="findings-tab-mapping">
+          <ProductMappingPanel />
         </div>
-      ) : null}
+      ) : (
+        <div
+          role="tabpanel"
+          id="findings-panel-findings"
+          aria-labelledby="findings-tab-findings"
+          className="space-y-4"
+        >
+          {summary.data ? (
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              {(['critical', 'high', 'medium', 'low'] as const).map((s) => (
+                <MetricCard
+                  key={s}
+                  label={t(`findings.severities.${s}`, s)}
+                  value={sev[s] ?? 0}
+                  tone={(sev[s] ?? 0) > 0 ? severityTone[s] : 'default'}
+                />
+              ))}
+            </div>
+          ) : null}
 
-      <Toolbar>
-        <Select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          aria-label={t('findings.statusFilter', 'Status')}
-          className="w-48"
-          options={[
-            { value: '', label: t('common.all', 'Alle') },
-            { value: 'open', label: t('findings.open', 'Offen') },
-            { value: 'acknowledged', label: t('findings.acknowledged', 'Bestätigt') },
-            { value: 'resolved', label: t('findings.resolved', 'Gelöst') },
-            { value: 'false_positive', label: t('findings.falsePositive', 'Fehlalarm') },
-          ]}
-        />
-        {data ? (
-          <ToolbarEnd>
-            <span className="text-sm text-fg-muted tabular-nums">
-              {data.total} {t('common.entries')}
-            </span>
-          </ToolbarEnd>
-        ) : null}
-      </Toolbar>
+          <Toolbar>
+            <Select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              aria-label={t('findings.statusFilter', 'Status')}
+              className="w-48"
+              options={[
+                { value: '', label: t('common.all', 'Alle') },
+                { value: 'open', label: t('findings.open', 'Offen') },
+                { value: 'acknowledged', label: t('findings.acknowledged', 'Bestätigt') },
+                { value: 'resolved', label: t('findings.resolved', 'Gelöst') },
+                { value: 'false_positive', label: t('findings.falsePositive', 'Fehlalarm') },
+              ]}
+            />
+            {data ? (
+              <ToolbarEnd>
+                <span className="text-sm text-fg-muted tabular-nums">
+                  {data.total} {t('common.entries')}
+                </span>
+              </ToolbarEnd>
+            ) : null}
+          </Toolbar>
 
-      {isLoading ? <SkeletonList rows={4} label={t('app.loading')} /> : null}
-      {error ? (
-        <ErrorState
-          title={t('app.error')}
-          retryLabel={t('common.retry')}
-          onRetry={() => void refetch()}
-        />
-      ) : null}
-      {data && findings.length === 0 ? (
-        <EmptyState
-          icon={<ShieldAlert />}
-          title={t('findings.emptyTitle')}
-          description={t('findings.emptyHint')}
-        />
-      ) : null}
+          {isLoading ? <SkeletonList rows={4} label={t('app.loading')} /> : null}
+          {error ? (
+            <ErrorState
+              title={t('app.error')}
+              retryLabel={t('common.retry')}
+              onRetry={() => void refetch()}
+            />
+          ) : null}
+          {data && findings.length === 0 ? (
+            <EmptyState
+              icon={<ShieldAlert />}
+              title={t('findings.emptyTitle')}
+              description={t('findings.emptyHint')}
+            />
+          ) : null}
 
-      {findings.length > 0 ? (
-        <Card className="overflow-hidden p-0">
-          <ScrollRegion label={t('nav.findings', 'Sicherheitsbefunde')}>
-            <table className={tableClasses}>
-              <thead className={theadClasses}>
-                <tr>
-                  <th scope="col" className={thClasses}>
-                    {t('ticket.ticketTitle')}
-                  </th>
-                  <th scope="col" className={thClasses}>
-                    {t('compliance.severity')}
-                  </th>
-                  <th scope="col" className={thClasses}>
-                    {t('findings.statusFilter', 'Status')}
-                  </th>
-                  <th scope="col" className={thClasses}>
-                    {t('findings.package')}
-                  </th>
-                  <th scope="col" className={thClasses}>
-                    {t('findings.fixedVersion')}
-                  </th>
-                  <th scope="col" className={thClasses}>
-                    {t('findings.reference')}
-                  </th>
-                  <th scope="col" className={`${thClasses} text-right`}>
-                    {t('common.actions')}
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {findings.map((f: SecurityFinding) => (
-                  <tr key={f.id} className={trClasses}>
-                    <td className={tdPrimaryClasses}>{f.title}</td>
-                    <td className={tdClasses}>
-                      <Badge variant={severityVariant(f.severity)}>
-                        {t(`findings.severities.${f.severity}`, f.severity)}
-                      </Badge>
-                    </td>
-                    <td className={tdClasses}>
-                      <Badge variant={statusVariant(f.status)}>
-                        {statusKeys[f.status] ? t(statusKeys[f.status]!) : f.status}
-                      </Badge>
-                    </td>
-                    <td className={`${tdMonoClasses} whitespace-nowrap`}>
-                      {f.package_name ? `${f.package_name} ${f.installed_version || ''}` : '—'}
-                    </td>
-                    <td className={`${tdMonoClasses} whitespace-nowrap`}>
-                      {f.fixed_version || '—'}
-                    </td>
-                    <td className={tdMonoClasses}>{f.reference || '—'}</td>
-                    <td className={tdClasses}>
-                      {f.status === 'open' ? (
-                        <div className="flex items-center justify-end gap-1.5">
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() =>
-                              updateMutation.mutate({ id: f.id, status: 'acknowledged' })
-                            }
-                          >
-                            {t('findings.acknowledge', 'Bestätigen')}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => updateMutation.mutate({ id: f.id, status: 'resolved' })}
-                          >
-                            {t('findings.resolve', 'Lösen')}
-                          </Button>
-                          {/* "Fehlalarm" needs a status_reason (WP-1116); the action
+          {findings.length > 0 ? (
+            <Card className="overflow-hidden p-0">
+              <ScrollRegion label={t('nav.findings', 'Sicherheitsbefunde')}>
+                <table className={tableClasses}>
+                  <thead className={theadClasses}>
+                    <tr>
+                      <th scope="col" className={thClasses}>
+                        {t('ticket.ticketTitle')}
+                      </th>
+                      <th scope="col" className={thClasses}>
+                        {t('compliance.severity')}
+                      </th>
+                      <th scope="col" className={thClasses}>
+                        {t('findings.statusFilter', 'Status')}
+                      </th>
+                      <th scope="col" className={thClasses}>
+                        {t('findings.package')}
+                      </th>
+                      <th scope="col" className={thClasses}>
+                        {t('findings.fixedVersion')}
+                      </th>
+                      <th scope="col" className={thClasses}>
+                        {t('findings.reference')}
+                      </th>
+                      <th scope="col" className={`${thClasses} text-right`}>
+                        {t('common.actions')}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {findings.map((f: SecurityFinding) => (
+                      <tr key={f.id} className={trClasses}>
+                        <td className={tdPrimaryClasses}>{f.title}</td>
+                        <td className={tdClasses}>
+                          <Badge variant={severityVariant(f.severity)}>
+                            {t(`findings.severities.${f.severity}`, f.severity)}
+                          </Badge>
+                        </td>
+                        <td className={tdClasses}>
+                          <Badge variant={statusVariant(f.status)}>
+                            {statusKeys[f.status] ? t(statusKeys[f.status]!) : f.status}
+                          </Badge>
+                        </td>
+                        <td className={`${tdMonoClasses} whitespace-nowrap`}>
+                          {f.package_name ? `${f.package_name} ${f.installed_version || ''}` : '—'}
+                        </td>
+                        <td className={`${tdMonoClasses} whitespace-nowrap`}>
+                          {f.fixed_version || '—'}
+                        </td>
+                        <td className={tdMonoClasses}>{f.reference || '—'}</td>
+                        <td className={tdClasses}>
+                          {f.status === 'open' ? (
+                            <div className="flex items-center justify-end gap-1.5">
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() =>
+                                  updateMutation.mutate({ id: f.id, status: 'acknowledged' })
+                                }
+                              >
+                                {t('findings.acknowledge', 'Bestätigen')}
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() =>
+                                  updateMutation.mutate({ id: f.id, status: 'resolved' })
+                                }
+                              >
+                                {t('findings.resolve', 'Lösen')}
+                              </Button>
+                              {/* "Fehlalarm" needs a status_reason (WP-1116); the action
                               returns with the reason dialog of WP-1134. */}
-                        </div>
-                      ) : null}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </ScrollRegion>
-        </Card>
-      ) : null}
+                            </div>
+                          ) : null}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </ScrollRegion>
+            </Card>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }
